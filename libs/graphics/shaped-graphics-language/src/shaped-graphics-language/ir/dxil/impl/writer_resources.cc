@@ -180,7 +180,7 @@ void writer::declare_handles()
         }
 
         auto const has_uavs_anyway = _p.stage == check::stage::pixel || _p.stage == check::stage::compute
-                                  || _p.stage == check::stage::mesh || _p.stage == check::stage::task;
+                                  || _p.stage == check::stage::mesh || _p.stage == check::stage::task || is_library();
         _uses.uavs_at_every_stage = _uses.uavs_at_every_stage || (cls == 1 && !has_uavs_anyway);
         auto const id = next_id[cls]++;
         // EMIT-210: an unbounded array is a range the pipeline layout leaves open
@@ -196,6 +196,13 @@ void writer::declare_handles()
                        .cls = cls,
                        .word0 = word0,
                        .word1 = word1};
+        if (is_library())
+        {
+            auto& handle = _handles[g];
+            handle.variable_type = is_array ? _m.array(handle_type(), range == 0xffffffffu ? 0 : range) : handle_type();
+            handle.variable
+                = _m.add_external_constant(_p.name_at(global.name_first, global.name_size), handle.variable_type, 4);
+        }
         if (!is_array)
             _handles[g].annotated = made_handle(_handles[g], ll_value::none, false);
 
@@ -266,6 +273,22 @@ ll_value writer::handle_at(place const& p)
 
 ll_value writer::made_handle(handle_entry const& h, ll_value index, bool is_nonuniform)
 {
+    if (is_library())
+    {
+        auto pointer = h.variable;
+        if (index != ll_value::none)
+        {
+            ll_value const path[] = {_m.constant_i32(0), index};
+            pointer = _m.element_pointer(h.variable_type, h.variable, path, is_nonuniform);
+        }
+        auto const loaded = _m.load(handle_type(), pointer, 4);
+        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::create_handle_for_lib)].number), loaded};
+        auto const library_handle = call(dx_op::create_handle_for_lib, handle_type(), args);
+        ll_value const fields[] = {_m.constant_i32(h.word0), _m.constant_i32(h.word1)};
+        ll_value const annotate[] = {_m.constant_i32(k_dx_ops[isize(dx_op::annotate_handle)].number), library_handle,
+                                     _m.constant_struct(res_props_type(), fields)};
+        return call(dx_op::annotate_handle, _m.void_type(), annotate);
+    }
     ll_value const bind_fields[]
         = {_m.constant_i32(h.lower), _m.constant_i32(h.upper), _m.constant_i32(h.space), _m.constant_i8(h.cls)};
     auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::create_handle_from_binding)].number);

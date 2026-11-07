@@ -106,6 +106,8 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     auto primitive_lowered = 0;
     auto mesh_reached = 0;
     auto mesh_lowered = 0;
+    auto ray_reached = 0;
+    auto ray_lowered = 0;
     auto recording = 0;
     auto guarded = 0;
     for (auto const& file : files)
@@ -130,15 +132,24 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
                                    || stage == sgl::check::stage::tessellation_control
                                    || stage == sgl::check::stage::tessellation_evaluation;
             auto const is_mesh = stage == sgl::check::stage::mesh || stage == sgl::check::stage::task;
-            if (stage != sgl::check::stage::compute && !is_raster && !is_primitive && !is_mesh)
+            auto const is_ray = stage >= sgl::check::stage::raygen;
+            if (stage != sgl::check::stage::compute && !is_raster && !is_primitive && !is_mesh && !is_ray)
                 continue;
-            ++(is_mesh ? mesh_reached : is_primitive ? primitive_reached : is_raster ? raster_reached : reached);
+            ++(is_ray         ? ray_reached
+               : is_mesh      ? mesh_reached
+               : is_primitive ? primitive_reached
+               : is_raster    ? raster_reached
+                              : reached);
             if (e.value().dxil.empty())
             {
                 CC_LOG_INFO("{}: {}: {}", file, entry.entry_point, e.value().native_gap);
                 continue;
             }
-            ++(is_mesh ? mesh_lowered : is_primitive ? primitive_lowered : is_raster ? raster_lowered : lowered);
+            ++(is_ray         ? ray_lowered
+               : is_mesh      ? mesh_lowered
+               : is_primitive ? primitive_lowered
+               : is_raster    ? raster_lowered
+                              : lowered);
             recording += e.value().debug_sites.empty() ? 0 : 1;
             auto const refused = compiler.value().validate(e.value().dxil);
             CHECK(!refused.has_value())
@@ -177,9 +188,11 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
                 "geometry and tessellation ones, and {} of the {} mesh and task ones",
                 lowered, reached, raster_lowered, raster_reached, primitive_lowered, primitive_reached, mesh_lowered,
                 mesh_reached);
+    CC_LOG_INFO("and {} of the {} ray-tracing ones", ray_lowered, ray_reached);
     CC_LOG_INFO("{} of them write debug records, and the robustness profiles lower {} entry points", recording, guarded);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CHECK(lowered >= 100);
+    CHECK(ray_lowered >= 50);
     CHECK(raster_lowered == raster_reached);
     CHECK(raster_lowered >= 80);
     CHECK(primitive_lowered == primitive_reached);

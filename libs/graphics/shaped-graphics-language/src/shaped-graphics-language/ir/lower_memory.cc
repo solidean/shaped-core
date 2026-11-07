@@ -11,7 +11,7 @@ using emit::impl::address_space;
 
 namespace
 {
-constexpr auto k_storage_classes = isize(7);
+constexpr auto k_storage_classes = isize(storage::callable_output) + 1;
 
 /// Whether two descriptions are one type, for what is interned: a scalar, a vector, an array, an image, a sampler.
 [[nodiscard]] bool is_same(ir::type const& a, ir::type const& b)

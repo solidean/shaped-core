@@ -134,6 +134,10 @@ void writer::terminator(ir::block const& b, instruction const& i)
         return emit(_code, spv::EmitMeshTasksEXT,
                     {id_of_raw(operands[0]), id_of_raw(operands[1]), id_of_raw(operands[2]), id_of_raw(operands[3])});
     }
+    case op::ignore_hit:
+        return emit(_code, spv::IgnoreIntersectionKHR, {});
+    case op::accept_and_end_search:
+        return emit(_code, spv::TerminateRayKHR, {});
     case op::return_:
         return emit(_code, spv::Return, {});
     default:

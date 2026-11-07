@@ -187,6 +187,12 @@ ll_value module_builder::constant_null(ll_type t)
     return add_constant({.type = t, .code = constant_code::null_}, {});
 }
 
+ll_value module_builder::constant_bitcast(ll_type t, ll_value value)
+{
+    ll_value const fields[] = {value};
+    return add_constant({.type = t, .code = constant_code::bitcast}, fields);
+}
+
 ll_value module_builder::constant_struct(ll_type t, cc::span<ll_value const> fields)
 {
     return add_constant({.type = t, .code = constant_code::aggregate}, fields);
@@ -244,6 +250,17 @@ ll_value module_builder::add_variable(cc::string_view name, ll_type value, u32 a
                         .pointer = pointer(value, address_space),
                         .address_space = address_space,
                         .alignment = alignment,
+                        .name_first = add_name(name),
+                        .name_size = u32(name.size())});
+    return ll_value(u32(_globals.size() - 1) | k_ll_global_bit);
+}
+
+ll_value module_builder::add_external_constant(cc::string_view name, ll_type value, u32 alignment)
+{
+    _globals.push_back({.type = value,
+                        .pointer = pointer(value),
+                        .alignment = alignment,
+                        .is_constant = true,
                         .name_first = add_name(name),
                         .name_size = u32(name.size())});
     return ll_value(u32(_globals.size() - 1) | k_ll_global_bit);
@@ -311,8 +328,15 @@ ll_value module_builder::push(inst_code code, ll_type type, cc::span<u32 const> 
     return ll_value(u32(_results.size() - 1));
 }
 
+void module_builder::set_arguments(cc::span<ll_type const> types)
+{
+    _arguments = cc::vector<ll_type>::create_copy_of(types);
+}
+
 ll_type module_builder::type_of(ll_value v) const
 {
+    if (ll_is_argument(v))
+        return _arguments[ll_index(v)];
     if (ll_is_constant(v))
         return _constants[ll_index(v)].type;
     if (ll_is_global(v))
@@ -526,7 +550,7 @@ void module_builder::store(ll_value pointer, ll_value value, u32 alignment)
     (void)push(inst_code::store, _void, args, 0, u8(log2_plus_one(alignment)));
 }
 
-ll_value module_builder::element_pointer(ll_type source, ll_value base, cc::span<ll_value const> indices)
+ll_value module_builder::element_pointer(ll_type source, ll_value base, cc::span<ll_value const> indices, bool is_nonuniform)
 {
     auto raw = cc::vector<u32>::create_with_capacity(indices.size() + 2);
     raw.push_back(u32(source));
@@ -545,7 +569,12 @@ ll_value module_builder::element_pointer(ll_type source, ll_value base, cc::span
                     : element_of(element);
     }
     auto const space = u32(_types[isize(type_of(base))].number);
-    return push(inst_code::element_pointer, pointer(element, space), raw);
+    if (is_nonuniform && _nonuniform_node == 0)
+    {
+        u32 const one[] = {md_i32(1)};
+        _nonuniform_node = md_node(one);
+    }
+    return push(inst_code::element_pointer, pointer(element, space), raw, is_nonuniform ? k_ll_nonuniform : u8(0));
 }
 
 ll_value module_builder::atomic_rmw(rmw_op op, ll_value pointer, ll_value value)

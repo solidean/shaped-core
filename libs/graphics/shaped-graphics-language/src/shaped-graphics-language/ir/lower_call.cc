@@ -837,6 +837,16 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         dispatch_mesh(c);
         return value_ref::none;
     }
+    if (record.name == "trace_ray")
+    {
+        trace_ray(c);
+        return value_ref::none;
+    }
+    if (record.name == "call_callable")
+    {
+        call_callable(c);
+        return value_ref::none;
+    }
     auto const result = x.type == checked_module::void_type ? _void : value_type(x.type);
     if (record.is_atomic)
         return atomic(c, x);
@@ -886,6 +896,8 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
 
     if (record.name.starts_with("affine3_") || record.name.ends_with("_affine"))
         return affine_call(record, args, result);
+    if (is_ray_stage() && record.features.has(check::feature::raytracing_pipeline))
+        return ray_stage_call(record, args, result);
 
     auto const position = families_of(registry)[index_of(c.intrinsic)];
     if (position < 0)

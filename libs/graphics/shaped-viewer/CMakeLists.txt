@@ -335,6 +335,7 @@ if(SC_BUILD_TESTS)
             tests/hybrid-test.cc
             tests/studio-test.cc
             tests/auto-exposure-test.cc
+            tests/bloom-view-test.cc
             tests/mode-switch-test.cc
             tests/restart-energy-test.cc
             tests/jitter-accumulation-test.cc

@@ -88,6 +88,28 @@ private:
     void dispatch_mesh(check::flat_call const& c);
     /// The one global a task stage's payload stands in, of the struct `t`.
     [[nodiscard]] value_ref payload_global(check::type_id t);
+
+    // ---- lower_ray.cc: the ray-tracing stages
+    [[nodiscard]] bool is_ray_stage() const;
+    /// The stage element of `system`, declared on its first read, as a value of `type`.
+    [[nodiscard]] value_ref ray_read(built_in system, type_ref type, cc::string_view name);
+    void read_ray_edge();
+    [[nodiscard]] value_ref hit_attribute_global(type_ref type);
+    /// The one global of `space` that hands a value of `type` over.
+    [[nodiscard]] value_ref output_global(type_ref type, storage space);
+    /// The place `id` copied into its global, which `handed_back` copies out of.
+    [[nodiscard]] value_ref handed_over(flat_expr_id id, storage space);
+    void handed_back(flat_expr_id id, value_ref global);
+    void trace_ray(check::flat_call const& c);
+    void call_callable(check::flat_call const& c);
+    /// A read of a ray-tracing stage's launch, ray or hit.
+    [[nodiscard]] value_ref ray_stage_call(builtins::function_record const& record,
+                                           cc::span<value_ref const> args,
+                                           type_ref result);
+    /// An any hit's `return`: its decision ends the stage where it is no acceptance.
+    void decide_hit(value_ref decision);
+    /// An intersection's `return`: where it hit, its attributes and the target's report.
+    void report_intersection(value_ref reported, check::type_id type);
     /// `affine3_of_rows`, `affine3_row` and the three products.
     [[nodiscard]] value_ref affine_call(builtins::function_record const& record,
                                         cc::span<value_ref const> args,
@@ -207,6 +229,14 @@ private:
     cc::vector<block_ref> _continues;
 
     value_ref _payload = value_ref::none;
+    value_ref _hit_attributes = value_ref::none;
+    struct ray_output_global
+    {
+        type_ref type = type_ref::none;
+        storage space = storage::ray_output;
+        value_ref global = value_ref::none;
+    };
+    cc::vector<ray_output_global> _ray_outputs;
 
     /// Parallel to `_m.types`.
     cc::vector<type_ref> _value_types;

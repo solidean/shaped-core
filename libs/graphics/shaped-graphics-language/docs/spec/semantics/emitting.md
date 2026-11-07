@@ -495,6 +495,16 @@ fn main_ps(p: pixel_input) -> target_ {
   An `affine3` is a value of three rows, and no native route holds one in GPU memory yet.
   A query of an entry point that states opacity micromaps is `unsupported`.
   What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
+* **EMIT-244** A ray-tracing stage of a native route is one entry point of its target's own, so a pipeline may take each stage from either route.
+  A payload, a callable's parameter and a hit's attributes are each one variable of the stage, and a trace or a call copies into a variable of the caller's, one per type, and back.
+  An any hit's decision ends the stage: `OpIgnoreIntersectionKHR` or `OpTerminateRayKHR`, `dx.op.ignoreHit` or `dx.op.acceptHitAndEndSearch`.
+  An intersection stores what it reports, then `OpReportIntersectionKHR` or `dx.op.reportHit`, with hit kind 0.
+  On SPIR-V what a stage reads of its launch, ray and hit is a `BuiltIn`, and on DXIL an operation of each.
+  On DXIL a stage is a library of one export under its own name, its payload and attributes parameters by pointer.
+  A resource there is an external handle a function loads, through `createHandleForLib`.
+  The container holds `SFI0`, `RDAT` and `DXIL`, and `RDAT` states what the module implies, since the validator compares the two.
+  An intersection fused with its any hit is metal's alone (EMIT-139), and `unsupported` here, and so is a closest hit of no payload on DXIL.
+  A hit object and a reordering trace are `unsupported`.
 
 ## Lines
 

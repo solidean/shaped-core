@@ -169,6 +169,9 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace reads alike through SGL's binary and 
     auto const takes_dxil = ctx->accepts_shader_format(sg::shader_format::dxil);
     if (!takes_dxil && !ctx->accepts_shader_format(sg::shader_format::spirv))
         SKIP("this context takes neither DXIL nor SPIR-V");
+    // EMIT-184 gives every query of such a device the micromaps, which the routes this package requires do not lower yet
+    if (ctx->supports(sg::feature::opacity_micromap))
+        SKIP("a query on a device with opacity micromaps has no native lowering; see feat-sgl-native-ray-tracing");
 
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
     float const boxes[] = {0, 0, 0, 2, 2, 2, 2, 0, 0, 4, 2, 2};

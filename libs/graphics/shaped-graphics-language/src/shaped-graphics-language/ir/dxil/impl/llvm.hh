@@ -122,12 +122,15 @@ struct ll_attribute
 };
 
 inline constexpr u32 k_attr_noduplicate = 12;
+inline constexpr u32 k_attr_noreturn = 17;
 inline constexpr u32 k_attr_nounwind = 18;
 inline constexpr u32 k_attr_readnone = 20;
 inline constexpr u32 k_attr_readonly = 21;
 
 /// A value's tag, which the writer's numbering and every pass read.
 inline constexpr u32 k_ll_constant_bit = 0x80000000u;
+/// The `sub` of an element pointer that `dx.nonuniform` marks.
+inline constexpr u8 k_ll_nonuniform = 1;
 inline constexpr u32 k_ll_global_bit = 0x40000000u;
 inline constexpr u32 k_ll_index_mask = 0x3fffffffu;
 
@@ -138,6 +141,12 @@ inline constexpr u32 k_ll_index_mask = 0x3fffffffu;
 [[nodiscard]] constexpr bool ll_is_global(ll_value v)
 {
     return v != ll_value::none && (u32(v) & (k_ll_constant_bit | k_ll_global_bit)) == k_ll_global_bit;
+}
+/// A parameter of the module's one function, which carries both bits, so a pass takes it for a constant.
+[[nodiscard]] constexpr bool ll_is_argument(ll_value v)
+{
+    return v != ll_value::none
+        && (u32(v) & (k_ll_constant_bit | k_ll_global_bit)) == (k_ll_constant_bit | k_ll_global_bit);
 }
 [[nodiscard]] constexpr u32 ll_index(ll_value v)
 {
@@ -186,6 +195,8 @@ public:
     [[nodiscard]] ll_value constant_undef(ll_type t);
     [[nodiscard]] ll_value constant_null(ll_type t);
     [[nodiscard]] ll_value constant_struct(ll_type t, cc::span<ll_value const> fields);
+    /// `bitcast (value to t)`, a constant of a global's address.
+    [[nodiscard]] ll_value constant_bitcast(ll_type t, ll_value value);
     /// The bits of a constant int or float, for a pass that folds on sight.
     [[nodiscard]] bool constant_bits(ll_value v, u64& bits) const;
 
@@ -194,6 +205,11 @@ public:
     [[nodiscard]] u32 attributes(cc::span<ll_attribute const> list);
     [[nodiscard]] ll_value add_function(cc::string_view name, ll_type type, u32 attributes, bool is_declaration);
     [[nodiscard]] ll_value add_variable(cc::string_view name, ll_type value, u32 address_space, u32 alignment);
+    /// `external constant`: what a library's resource is until the runtime binds it.
+    [[nodiscard]] ll_value add_external_constant(cc::string_view name, ll_type value, u32 alignment);
+    /// States the parameters of the module's one function, which precede every value of its body.
+    void set_arguments(cc::span<ll_type const> types);
+    [[nodiscard]] ll_value argument(u32 index) const { return ll_value(index | k_ll_constant_bit | k_ll_global_bit); }
 
     // ---- metadata; every id is a position plus one, 0 standing for a null operand
     [[nodiscard]] u32 md_string(cc::string_view text);
@@ -220,7 +236,11 @@ public:
     [[nodiscard]] ll_value alloca_of(ll_type allocated, u32 alignment);
     [[nodiscard]] ll_value load(ll_type t, ll_value pointer, u32 alignment);
     void store(ll_value pointer, ll_value value, u32 alignment);
-    [[nodiscard]] ll_value element_pointer(ll_type source, ll_value base, cc::span<ll_value const> indices);
+    /// `is_nonuniform` attaches `dx.nonuniform`, which a library's index into an array of resources says it differs by.
+    [[nodiscard]] ll_value element_pointer(ll_type source,
+                                           ll_value base,
+                                           cc::span<ll_value const> indices,
+                                           bool is_nonuniform = false);
     [[nodiscard]] ll_value atomic_rmw(rmw_op op, ll_value pointer, ll_value value);
     [[nodiscard]] ll_value atomic_exchange(ll_value pointer, ll_value compare, ll_value desired);
     /// An empty phi of `t`, its incoming edges added once their values exist.
@@ -296,6 +316,7 @@ private:
         null_,
         undefined,
         aggregate,
+        bitcast,
     };
     struct constant_entry
     {
@@ -315,6 +336,7 @@ private:
         bool is_declaration = false;
         u32 address_space = 0;
         u32 alignment = 0;
+        bool is_constant = false;
         u32 attributes = 0;
         u32 name_first = 0;
         u32 name_size = 0;
@@ -405,6 +427,9 @@ private:
     /// An open table of positions in `_constants`, plus one.
     cc::vector<u32> _constant_slots;
     cc::vector<global_entry> _globals;
+    cc::vector<ll_type> _arguments;
+    /// The `!{i32 1}` of `dx.nonuniform`, made on first use.
+    u32 _nonuniform_node = 0;
     cc::vector<ll_attribute> _attribute_items;
     cc::vector<attribute_list> _attribute_lists;
     cc::vector<md_entry> _metadata;

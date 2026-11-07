@@ -50,6 +50,12 @@ constexpr stage_rule k_stages[] = {
     {check::stage::tessellation_evaluation, "ds", 4},
     {check::stage::mesh, "ms", 13},
     {check::stage::task, "as", 14},
+    {check::stage::raygen, "lib", 7},
+    {check::stage::miss, "lib", 11},
+    {check::stage::closest_hit, "lib", 10},
+    {check::stage::any_hit, "lib", 9},
+    {check::stage::intersection, "lib", 8},
+    {check::stage::callable, "lib", 12},
 };
 
 /// What a signature's element is to `dx.sig` and `PSV0`, beside the `D3D_NAME` the packer gives.
@@ -190,6 +196,8 @@ void writer::stage_load(u32 index, instruction const& i)
 {
     auto const element = _p.operands_of(i)[0];
     auto const& e = _p.stage_elements[element];
+    if (is_library())
+        return ray_element(index, e, i);
     if (_p.stage == check::stage::compute || _p.stage == check::stage::task || _p.stage == check::stage::mesh)
         return built_in(index, e, i);
 
@@ -626,11 +634,19 @@ void writer::write_entry_metadata()
         {
             if (b.cls != cls)
                 continue;
-            auto const type = undefined_pointer(cc::format("sgl.resource.{}.{}", cls, b.id));
+            auto type = undefined_pointer(cc::format("sgl.resource.{}.{}", cls, b.id));
+            if (is_library())
+            {
+                ll_type const members[] = {_m.int_type()};
+                auto const pointer = _m.pointer(_m.structure(cc::format("sgl.resource.{}.{}", cls, b.id), members));
+                type = _m.md_value(pointer, _m.constant_bitcast(pointer, _handles[b.global].variable));
+            }
             auto fields = cc::vector<u32>();
             fields.push_back(_m.md_i32(b.id));
             fields.push_back(type);
-            fields.push_back(_m.md_string(""));
+            fields.push_back(
+                _m.md_string(is_library() ? _p.name_at(_p.globals[b.global].name_first, _p.globals[b.global].name_size)
+                                          : cc::string_view("")));
             fields.push_back(_m.md_i32(b.space));
             fields.push_back(_m.md_i32(b.lower));
             fields.push_back(_m.md_i32(b.range));
@@ -700,6 +716,72 @@ void writer::write_entry_metadata()
             metadata_flags |= f.metadata_flag;
             feature_flags |= f.feature_flag;
         }
+
+    if (is_library())
+    {
+        constexpr u32 k_tag_shader_kind = 8;
+        constexpr u32 k_tag_auto_binding_space = 5;
+        constexpr u32 k_tag_ray_payload_size = 6;
+        constexpr u32 k_tag_ray_attribute_size = 7;
+        constexpr u32 k_library_kind = 6;
+        auto properties = cc::vector<u32>();
+        properties.push_back(_m.md_i32(k_tag_shader_kind));
+        properties.push_back(_m.md_i32(rule->kind));
+        if (_p.stage != check::stage::raygen && _p.stage != check::stage::intersection)
+        {
+            properties.push_back(_m.md_i32(k_tag_ray_payload_size));
+            properties.push_back(_m.md_i32(_summary.payload_bytes));
+        }
+        if (_p.stage == check::stage::closest_hit || _p.stage == check::stage::any_hit)
+        {
+            properties.push_back(_m.md_i32(k_tag_ray_attribute_size));
+            properties.push_back(_m.md_i32(_summary.attribute_bytes));
+        }
+        u32 const space[] = {_m.md_i32(0)};
+        properties.push_back(_m.md_i32(k_tag_auto_binding_space));
+        properties.push_back(_m.md_node(space));
+
+        u32 const flags[] = {_m.md_i32(k_tag_shader_flags),
+                             _m.md_value(_m.long_type(), _m.constant_int(_m.long_type(), metadata_flags))};
+        u32 const first[] = {0, _m.md_string(""), 0, resources_node, metadata_flags != 0 ? _m.md_node(flags) : 0};
+        u32 const own[]
+            = {_m.md_value(_m.type_of(_entry), _entry), _m.md_string(_p.entry_name), 0, 0, _m.md_node(properties)};
+        u32 const entries[] = {_m.md_node(first), _m.md_node(own)};
+        u32 const version_node[] = {_m.md_node(version)};
+        u32 const validator_node[] = {_m.md_node(validator)};
+        u32 const model_node[] = {_m.md_node(model)};
+        u32 const resources_list[] = {resources_node};
+        _m.md_named("dx.version", version_node);
+        _m.md_named("dx.valver", validator_node);
+        _m.md_named("dx.shaderModel", model_node);
+        if (has_resources)
+            _m.md_named("dx.resources", resources_list);
+        _m.md_named("dx.entryPoints", entries);
+        _summary.is_library = true;
+        _summary.shader_kind = rule->kind;
+        if (_p.stage == check::stage::intersection)
+            _summary.attribute_bytes = 0;
+        _summary.min_shader_minor = _uses.ray_query ? 5 : 3;
+        _summary.metadata_flags = metadata_flags;
+        _summary.feature_flags = feature_flags;
+        _summary.program_kind = k_library_kind;
+        _summary.program_version = (k_model_major << 4) | model_minor;
+        _summary.dxil_version = 0x100 | model_minor;
+        _summary.entry_name = _p.entry_name;
+        for (auto const cls : {0u, 1u, 2u, 3u})
+            for (auto const& b : _bindings)
+                if (b.cls == cls)
+                    _summary.resources.push_back(
+                        {.psv_type = b.psv_type,
+                         .space = b.space,
+                         .lower = b.lower,
+                         .upper = b.upper,
+                         .kind = b.kind,
+                         .cls = cls,
+                         .id = b.id,
+                         .name = _p.name_at(_p.globals[b.global].name_first, _p.globals[b.global].name_size)});
+        return;
+    }
 
     u32 const threads[]
         = {_m.md_i32(u32(_p.workgroup[0])), _m.md_i32(u32(_p.workgroup[1])), _m.md_i32(u32(_p.workgroup[2]))};
@@ -939,6 +1021,12 @@ ll_value writer::op_function(dx_op op, ll_type overload)
     case dx_class::no_duplicate:
     {
         ll_attribute const list[] = {{.kind = k_attr_noduplicate}, {.kind = k_attr_nounwind}};
+        attributes = _m.attributes(list);
+        break;
+    }
+    case dx_class::no_return:
+    {
+        ll_attribute const list[] = {{.kind = k_attr_noreturn}, {.kind = k_attr_nounwind}};
         attributes = _m.attributes(list);
         break;
     }
