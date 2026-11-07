@@ -134,7 +134,12 @@ type_ref lowering::value_type(type_id t)
     {
         auto const scalar = scalar_type(record->leaf_kind);
         auto const lanes = record->leaf_count;
-        if (record->name.starts_with("mat") && ir::is_valid(scalar))
+        if (record->name == "ray_query")
+            result = intern({.kind = type_kind::ray_query});
+        // three rows, held as the columns of a matrix, so a row is a column and nothing transposes
+        else if (record->name == "affine3")
+            result = intern({.kind = type_kind::matrix, .count = 3, .element = vector_type(_float, 4)});
+        else if (record->name.starts_with("mat") && ir::is_valid(scalar))
         {
             auto const columns = record->name == "mat2" ? 2u : record->name == "mat3" ? 3u : 4u;
             result = intern({.kind = type_kind::matrix, .count = columns, .element = vector_type(scalar, columns)});
@@ -211,8 +216,15 @@ i32 lowering::column_stride(type_id t, address_space space)
 
 type_ref lowering::memory_type(type_id t, address_space space)
 {
-    if (_m.builtin_type_of(t) != nullptr)
+    if (auto const* const record = _m.builtin_type_of(t))
+    {
+        if (record->name == "affine3")
+        {
+            unsupported("an affine3 in GPU memory");
+            return type_ref::none;
+        }
         return value_type(t);
+    }
     auto const& info = _m.at(t);
     if (info.kind == check::type_kind::atomic || info.kind == check::type_kind::enumeration)
         return value_type(t);
@@ -379,6 +391,9 @@ value_ref lowering::bound_resource(i32 index)
     case check::type_kind::sampler:
         pointee = intern({.kind = type_kind::sampler});
         break;
+    case check::type_kind::acceleration_structure:
+        pointee = intern({.kind = type_kind::acceleration_structure});
+        break;
     default:
         unsupported(cc::format("the resource {}", r.host_name));
         return value_ref::none;
@@ -400,6 +415,9 @@ value_ref lowering::bound_resource(i32 index)
         break;
     case check::type_kind::sampler:
         kind = global_kind::sampler;
+        break;
+    case check::type_kind::acceleration_structure:
+        kind = global_kind::acceleration_structure;
         break;
     default:
         break;

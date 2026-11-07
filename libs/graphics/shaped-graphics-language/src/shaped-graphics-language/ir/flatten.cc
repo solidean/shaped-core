@@ -482,7 +482,12 @@ private:
                     kept += 2;
                 }
             }
-            auto const chosen = select_at_end(b, i, condition, yes_value, no_value);
+            // what is undefined may be anything, so it may be the other way's value, which DXIL requires of a select
+            auto const is_undefined
+                = [&](u32 v) { return is_constant(value_ref(v)) && _p.constants[index_of(value_ref(v))].is_undefined; };
+            auto const chosen = is_undefined(no_value)  ? yes_value
+                              : is_undefined(yes_value) ? no_value
+                                                        : select_at_end(b, i, condition, yes_value, no_value);
             _p.operands[first + kept] = chosen;
             _p.operands[first + kept + 1] = u32(b);
             _p.instructions[i].count = kept + 2;

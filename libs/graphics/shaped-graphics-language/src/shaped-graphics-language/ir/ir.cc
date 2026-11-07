@@ -105,6 +105,13 @@ constexpr cc::string_view k_names[] = {
     "end_strip",
     "set_mesh_counts",
     "write_primitive",
+    "ray_query_begin",
+    "ray_query_trace",
+    "ray_query_proceed",
+    "ray_query_commit_triangle",
+    "ray_query_commit_procedural",
+    "ray_query_abort",
+    "ray_query_read",
     "combine_sampler",
     "sample_lod",
     "sample_implicit",
@@ -182,6 +189,12 @@ void append_type(cc::string& out, program const& p, type_ref t)
     case type_kind::sampled_image:
         out += "sampled_image";
         break;
+    case type_kind::acceleration_structure:
+        out += "acceleration_structure";
+        break;
+    case type_kind::ray_query:
+        out += "ray_query";
+        break;
     }
 }
 
@@ -254,7 +267,7 @@ sgl::ir::operand sgl::ir::operand_role(op code, isize at)
 
 bool sgl::ir::has_effect(op code)
 {
-    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::write_primitive))
+    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::ray_query_abort))
         return true;
     if (u16(code) >= u16(op::branch))
         return true;

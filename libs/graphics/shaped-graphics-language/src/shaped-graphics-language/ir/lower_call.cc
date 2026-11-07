@@ -783,6 +783,30 @@ value_ref lowering::subgroup_call(flat_call const& c, builtins::function_record 
     return value_ref::none;
 }
 
+value_ref lowering::affine_call(builtins::function_record const& record, cc::span<value_ref const> args, type_ref result)
+{
+    if (record.name == "affine3_of_rows")
+        return add(op::construct, result, {args[0], args[1], args[2]});
+    auto const four = vector_type(_float, 4);
+    if (record.name == "affine3_row")
+    {
+        if (is_constant(args[1]))
+            return extracted(args[0], four, _out.constants[index_of(args[1])].low);
+        auto const variable = add_local(_out.type_of(args[0]), "affine");
+        add(op::store, type_ref::none, {variable, args[0]});
+        u32 const chain[] = {u32(variable), u32(args[1])};
+        return add(op::load, four, {add(op::access_chain, pointer_type(four, storage::function), chain)});
+    }
+    // `a * v`: each row dotted with `v`, with its w where the call gives none
+    auto v = args[1];
+    if (lanes_of(_out.type_of(v)) == 3)
+        v = add(op::construct, four, {v, float_constant(_float, record.name == "transform_position_affine" ? 1.0 : 0.0)});
+    u32 lanes[3];
+    for (auto row = u32(0); row < 3; ++row)
+        lanes[row] = u32(add(op::dot, _float, {extracted(args[0], four, row), v}));
+    return add(op::construct, result, lanes);
+}
+
 value_ref lowering::call(flat_expr const& x, flat_call const& c)
 {
     if (c.text >= 0)
@@ -822,6 +846,8 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         return texture_call(c, record, result);
     if (record.is_subgroup_operation)
         return subgroup_call(c, record, result);
+    if (record.is_ray_query)
+        return ray_query_call(c, record);
     if (record.is_barrier || record.is_uniform_load)
     {
         auto const kind = record.is_uniform_load || record.name == "workgroup_barrier" ? barrier::workgroup
@@ -857,6 +883,9 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
     auto const& registry = *_m.builtins;
     if (is_constructor(registry, record))
         return constructed(args, result);
+
+    if (record.name.starts_with("affine3_") || record.name.ends_with("_affine"))
+        return affine_call(record, args, result);
 
     auto const position = families_of(registry)[index_of(c.intrinsic)];
     if (position < 0)

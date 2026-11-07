@@ -268,4 +268,34 @@ void module_builder::remove_unused()
     }
     _instructions = cc::move(kept);
     _results = cc::move(kept_results);
+    remove_unused_declarations();
+}
+
+void module_builder::remove_unused_declarations()
+{
+    auto is_called = cc::vector<bool>::create_filled(_globals.size(), false);
+    for (auto const& inst : _instructions)
+        if (inst.code == inst_code::call)
+            is_called[ll_index(ll_value(_args[inst.first]))] = true;
+
+    // the validator refuses an operation declared and never called, which a call the passes removed leaves behind
+    auto moved_to = cc::vector<u32>::create_filled(_globals.size(), 0u);
+    auto kept = cc::vector<global_entry>::create_with_capacity(_globals.size());
+    for (auto g = isize(0); g < _globals.size(); ++g)
+    {
+        moved_to[g] = u32(kept.size());
+        if (!_globals[g].is_declaration || is_called[g])
+            kept.push_back(_globals[g]);
+    }
+    if (kept.size() == _globals.size())
+        return;
+    _globals = cc::move(kept);
+    auto const moved = [&](u32& raw)
+    {
+        auto const v = ll_value(raw);
+        if (ll_is_global(v))
+            raw = moved_to[ll_index(v)] | k_ll_global_bit;
+    };
+    for (auto& inst : _instructions)
+        for_each_value(inst, moved);
 }
