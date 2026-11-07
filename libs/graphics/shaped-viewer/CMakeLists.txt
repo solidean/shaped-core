@@ -382,6 +382,7 @@ if(SC_BUILD_TESTS)
             tests/dx12-entry.cc
             tests/raster-without-raytracing-test.cc
             tests/wavefront-benchmark.cc
+            tests/native-route-benchmark.cc
             tests/raster-benchmark.cc
             tests/hybrid-benchmark.cc
             tests/viewer-window-manual-test.cc
