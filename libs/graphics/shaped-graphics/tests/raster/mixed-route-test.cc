@@ -239,7 +239,7 @@ ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's 
     auto const probe = co_await compiled(*ctx, text::surface_vs);
     if (!probe.has_value())
         SKIP("this build has no DXC");
-    // Workaround: a co_await inside this initializer crashes MSVC 14.44 and 14.51 (C1001).
+    // Workaround: docs/bugs-external/msvc-coroutine-await-in-aggregate-init-crash, so this is awaited first.
     auto const native_vertex = co_await compiled_native(*ctx, takes_dxil, dxil::surface_vs, spirv::surface_vs);
     auto const vertex = routes{.vertex_text = probe, .vertex_native = native_vertex};
 
@@ -418,7 +418,7 @@ ASYNC_INVOCABLE_TEST("sg - geometry and tessellation stages of SGL's binary link
     namespace spirv = sg::test::mixed_spirv::primitive_stages;
 
     // the two routes of one entry point, by its name in all three packages
-    // Workaround: a co_await inside an aggregate's initializer crashes MSVC 14.44 and 14.51 (C1001), so each pair has a name.
+    // Workaround: docs/bugs-external/msvc-coroutine-await-in-aggregate-init-crash, so each pair has a name.
 #define SG_ROUTES(entry) route_pair_of(*ctx, takes_dxil, text::entry, dxil::entry, spirv::entry)
     auto const pixel = co_await SG_ROUTES(primitive_ps);
     if (!pixel.text.has_value())
