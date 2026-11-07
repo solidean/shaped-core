@@ -36,6 +36,10 @@ The time is what its first build cost, from the prebuild query to the fence.
 | vulkan, after `D3D12GetInterface(CLSID_D3D12SDKConfiguration)` and no factory | BLAS | 0.013 s |
 | vulkan, after `LoadLibrary` of the Agility `D3D12Core.dll` and nothing else | BLAS | 0.014 s |
 | vulkan, after `LoadLibrary` of the system `D3D12Core.dll` | BLAS | 0.015 s |
+| AMD Radeon iGPU (RDNA 2, 32.0.21042.62), dx12, system runtime | BLAS | 0.001 s |
+| AMD Radeon iGPU, dx12, Agility runtime | BLAS | 0.001 s |
+
+The two AMD rows are the control, from `run.py --vendor 1002` on the same machine: AMD's driver keeps its cache on the Agility runtime.
 
 So the bug needs exactly two things:
 
@@ -61,11 +65,12 @@ A D3D12 runtime changing what a vulkan device of the same process costs, with no
 
 ## Reproducing it
 
-    uv run run.py [--agility <install>] [--vulkan-sdk <dir>]
+    uv run run.py [--agility <install>] [--vulkan-sdk <dir>] [--vendor <hex PCI id>]
 
 It builds `repro.cc` with clang-cl into one stable directory under the temp folder.
 `--agility` is a directory holding the Agility SDK's `include/` and `bin/`; it defaults to this repository's `extern/agility/.install`.
 The vulkan arms need the Vulkan SDK's headers and are skipped without them; the loader comes from the system.
+`--vendor` runs every arm on the first adapter of one PCI vendor, `1002` for AMD, instead of the high-performance one.
 It exits 1 when the first BLAS costs seconds on the Agility runtime and milliseconds on the system runtime, and 0 when both are fast.
 A run takes about a minute, since the Agility arms pay the compile each time.
 On the machine above it prints, phases trimmed:

@@ -5,7 +5,9 @@
 // The Vulkan arm is compiled only where <vulkan/vulkan.h> is found; the loader is loaded at run time.
 // Every build is one triangle and is waited on with a fence, so each time printed is the driver's alone.
 //
-//     repro.exe [--load <dll>] [--agility <dir>] [--dx12 <op>]... [--vulkan <op>]...
+//     repro.exe [--vendor <hex>] [--load <dll>] [--agility <dir>] [--dx12 <op>]... [--vulkan <op>]...
+//
+// `--vendor <hex>` takes the first adapter of that PCI vendor on both APIs, `1002` for AMD, instead of the high-performance one.
 //
 // `--load <dll>` only LoadLibrary's <dll> before anything else runs, and calls nothing in it.
 // `--modules` prints, at the end, every loaded module whose name starts with `ig` or `d3d12`.
@@ -44,6 +46,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -56,6 +59,9 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
+/// The PCI vendor `--vendor` asked for, 0 where it asked for none.
+unsigned g_vendor = 0;
+
 #define CHECK_HR(expr)                                                                   \
     do                                                                                   \
     {                                                                                    \
@@ -155,7 +161,22 @@ bool create_dx12(dx12& d, char const* agility_dir, bool configuration_only, bool
 {
     ComPtr<IDXGIFactory6> factory;
     CHECK_HR(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)));
-    CHECK_HR(factory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&d.adapter)));
+    if (g_vendor == 0)
+        CHECK_HR(factory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&d.adapter)));
+    else
+        for (UINT i = 0; factory->EnumAdapters1(i, &d.adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+        {
+            auto desc = DXGI_ADAPTER_DESC1{};
+            d.adapter->GetDesc1(&desc);
+            if (desc.VendorId == g_vendor)
+                break;
+            d.adapter = nullptr;
+        }
+    if (!d.adapter)
+    {
+        std::printf("FAILED: no adapter of vendor %04x\n", g_vendor);
+        return false;
+    }
 
     auto const start = clock_type::now();
     if (agility_dir != nullptr)
@@ -385,8 +406,9 @@ bool create_vk(vk& v, std::wstring const& adapter_name)
     {
         auto props = VkPhysicalDeviceProperties{};
         vkGetPhysicalDeviceProperties(p, &props);
-        if (narrow == props.deviceName
-            || (v.physical == VK_NULL_HANDLE && props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU))
+        if (g_vendor != 0 ? props.vendorID == g_vendor && v.physical == VK_NULL_HANDLE
+                          : narrow == props.deviceName
+                                || (v.physical == VK_NULL_HANDLE && props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU))
             v.physical = p;
     }
     if (v.physical == VK_NULL_HANDLE)
@@ -569,6 +591,8 @@ int main(int argc, char** argv)
         }
         else if (flag == "--agility")
             agility_dir = value;
+        else if (flag == "--vendor")
+            g_vendor = unsigned(std::strtoul(value, nullptr, 16));
         else if (flag == "--dx12")
             dx12_ops.emplace_back(value);
         else if (flag == "--vulkan")

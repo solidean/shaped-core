@@ -107,6 +107,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--agility")
     parser.add_argument("--vulkan-sdk")
+    parser.add_argument("--vendor", help="hex PCI vendor of the adapter to run on, 1002 for AMD; the high-performance one otherwise")
     options = parser.parse_args()
     if sys.platform != "win32":
         print("the Agility SDK runs on Windows alone")
@@ -130,7 +131,7 @@ def main() -> int:
             continue
         print(f"{label}:")
         args = [a for arg in args for a in (["--agility", str(agility / "bin") + os.sep] if arg == "AGILITY" else [arg])]
-        results[label] = run(exe, args)
+        results[label] = run(exe, (["--vendor", options.vendor] if options.vendor else []) + args)
     system = results.get("dx12, system runtime")
     agile = results.get("dx12, Agility runtime")
     if system is None or agile is None:
