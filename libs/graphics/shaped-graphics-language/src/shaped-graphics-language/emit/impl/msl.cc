@@ -51,40 +51,8 @@ public:
     bool has_line_directives() const override { return true; }
 
     // a ray-tracing stage is a visible function, which takes no buffer of its own
-    bool writes_debug_in(check::stage s, check::feature_set) const override { return s < check::stage::raygen; }
     // a Metal buffer is a pointer, and emit refuses a length before any text is written (EMIT-195)
     cc::string buffer_length(cc::string_view, bool) const override { return "0u"; }
-    void write_debug_buffer(cc::string& out) const override
-    {
-        out += "struct sg_debug_buffer\n{\n    atomic_uint cursor;\n    uint capacity;\n    atomic_uint dropped;\n"
-               "    uint words[1];\n};\n\n";
-    }
-    cc::string debug_reserve(cc::string_view at, isize count) const override
-    {
-        return cc::format("uint {} = atomic_fetch_add_explicit(&sg_debug.cursor, {}u, memory_order_relaxed);", at, count);
-    }
-    cc::string debug_fits(cc::string_view at, isize count) const override
-    {
-        return cc::format("{} + {}u <= sg_debug.capacity", at, count);
-    }
-    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
-    {
-        return cc::format("sg_debug.words[{} + {}u] = {};", at, i, word);
-    }
-    cc::string debug_drop() const override
-    {
-        return "atomic_fetch_add_explicit(&sg_debug.dropped, 1u, memory_order_relaxed);";
-    }
-    cc::string debug_word(cc::string_view value, cc::string_view family) const override
-    {
-        if (family == "uint")
-            return cc::string(value);
-        if (family == "bool")
-            return cc::format("({} ? 1u : 0u)", value);
-        if (family == "half")
-            return cc::format("as_type<uint>(float({}))", value);
-        return cc::format("as_type<uint>({})", value);
-    }
     /// MSL's is a function; whether it terminates or demotes the pixel is for the metal backend's tests to pin.
     [[nodiscard]] cc::string_view discard_statement() const override { return "discard_fragment();"; }
     [[nodiscard]] bool fences_image_stores() const override { return true; }
@@ -281,6 +249,9 @@ public:
                      planned_constants const* block,
                      cc::span<planned_resource const> buffers) const override
     {
+        // a reserved binding is no group of the argument table, and the function head declares it
+        if (!buffers.empty() && buffers[0].is_reserved)
+            return;
         for (auto const& b : buffers)
             if (b.element_form.has_value())
                 write_form(out, b.element_form.value());
@@ -682,9 +653,10 @@ public:
         // EMIT-133: a static sampler's slot of the argument table is its index, and MSL has one sampler type
         for (auto const& s : p.samplers)
             parameters.push_back(cc::format("sampler {} [[sampler({})]]", s.name, s.index));
-        // EMIT-183: sg's debug buffer
-        if (p.writes_debug)
-            parameters.push_back("device sg_debug_buffer& sg_debug [[buffer(30)]]");
+        // a reserved binding is a parameter at its own slot of the argument table
+        for (auto const& r : p.resources)
+            if (r.is_reserved)
+                parameters.push_back(cc::format("{} {} [[buffer({})]]", resource_text(p, r.type), r.name, r.slot));
         auto list = cc::string();
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
@@ -712,7 +684,8 @@ public:
             out.appendf("    constant auto& {} = *{}.{};\n", block.name, argument_buffer_of(p, block.group).parameter,
                         block.name);
         for (auto const& r : p.resources)
-            out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
+            if (!r.is_reserved)
+                out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
     }
 };
 

@@ -7,6 +7,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
@@ -95,11 +96,8 @@ cc::string reflection_mismatch(sg::compiled_shader const& reflected,
     auto out = cc::string();
     for (auto const& r : reflected.bindings)
     {
-        // sg's debug window, which sg binds itself wherever a shader writes print or assert records (EMIT-183)
-        if (r.name == "sg_debug" && !stated.debug_sites.empty())
-            continue;
-        // what sg binds for an emulated trace, in the reserved group (EMIT-135)
-        if (r.name == "sg_acceleration_pool" || r.name == "sg_acceleration_roots_block")
+        // what sg binds itself, outside the groups SGL declares
+        if (sg::is_reserved_binding_name(r.name))
             continue;
         sg::binding const* match = nullptr;
         for (auto const& d : declared)

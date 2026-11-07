@@ -108,65 +108,6 @@ struct sgl::emit::emitted_layout
     }
 };
 
-/// A line of an SGL source: a position in `checked_module::files`, and the line there, counted from 1.
-struct sgl::emit::source_line
-{
-    /// -1 for no line at all.
-    i32 file = -1;
-    i32 line = 0;
-
-    constexpr bool operator==(source_line const&) const = default;
-};
-
-/// Where one line of the text came from (EMIT-181).
-struct sgl::emit::line_origin
-{
-    /// The line of the text, counted from 1.
-    i32 emitted = 0;
-    /// The innermost source line outside the prelude: a prelude function's body maps to the line that called it.
-    source_line at;
-    /// The calls `at` was inlined through, innermost first, the prelude's left out; empty for the entry point's own body.
-    cc::vector<source_line> inlined_from;
-
-    bool operator==(line_origin const& rhs) const
-    {
-        return emitted == rhs.emitted && at == rhs.at && ast::impl::is_equal(inlined_from, rhs.inlined_from);
-    }
-};
-
-/// One value a debug record holds: its scalar family and its lanes, each lane one 32-bit word.
-struct sgl::emit::debug_value
-{
-    /// `float`, `half`, `int`, `uint` or `bool`; an enum is `int`, and `type` names it.
-    cc::string family;
-    i32 lanes = 1;
-    /// The value's type as the program names it: `float3`, `material_kind`.
-    cc::string type;
-
-    bool operator==(debug_value const&) const = default;
-};
-
-/// One print or assert the text writes into sg's debug buffer (EMIT-183).
-/// Its record is `id`, the record's word count, then each value's lanes in order, one word each.
-struct sgl::emit::debug_site
-{
-    /// What the record starts with, stable for one source line and message wherever the text is written.
-    u32 id = 0;
-    /// An assert's, which writes only where its condition was false.
-    bool is_assert = false;
-    /// The message around its values, one piece more than `values`; empty for a print of one bare value.
-    cc::vector<cc::string> pieces;
-    cc::vector<debug_value> values;
-    /// Where the print or assert stands; empty without the source files (EMIT-181).
-    line_origin origin;
-
-    bool operator==(debug_site const& rhs) const
-    {
-        return id == rhs.id && is_assert == rhs.is_assert && ast::impl::is_equal(pieces, rhs.pieces)
-            && ast::impl::is_equal(values, rhs.values) && origin == rhs.origin;
-    }
-};
-
 /// Whether a target's own binary is written in place of its text.
 enum class sgl::emit::native_route : sgl::u8
 {

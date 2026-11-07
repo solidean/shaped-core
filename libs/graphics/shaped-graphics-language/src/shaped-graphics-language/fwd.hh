@@ -265,6 +265,10 @@ struct ray_trace;
 struct callable_call;
 struct texel_store;
 struct flat_traced_ray;
+struct source_line;
+struct line_origin;
+struct debug_value;
+struct debug_site;
 struct flat_text_type;
 struct call_record;
 struct function_instance;
@@ -368,6 +372,10 @@ class layered;
 template <class K, class V>
 class layered_map;
 enum class ray_trace_kind : u8;
+struct source_lines;
+enum class reserved_use : u8;
+struct reserved_target;
+struct reserved_binding;
 } // namespace sgl::check
 
 namespace sgl::test
@@ -390,10 +398,10 @@ struct emitted_text;
 struct bound_name;
 struct emitted_field;
 struct emitted_layout;
-struct source_line;
-struct line_origin;
-struct debug_value;
-struct debug_site;
+using check::debug_site;
+using check::debug_value;
+using check::line_origin;
+using check::source_line;
 struct options;
 } // namespace sgl::emit
 

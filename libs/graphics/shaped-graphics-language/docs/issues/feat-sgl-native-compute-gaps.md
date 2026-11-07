@@ -6,8 +6,8 @@ parent: epic-sgl-native-ir-targets
 # What a compute entry point still cannot lower
 
 Texel atomics, and the `affine3`, `packed` and `bool32` types.
-A float atomic with no device add, a body in target text, a sample's offset, and prints and asserts through the debug window.
-The workgroup prologue of a robustness profile.
+A float atomic with no device add, a body in target text, and a sample's offset.
+The workgroup prologue of a robustness profile (EMIT-229), which keeps five DXIL entry points from each profile: `sgl_written` and the zeroing are no part of `plan`, and the text writes them by hand.
 Ray queries are their own child.
 
 DXIL lowers 93 of the 112 compute entry points the fixtures hold, and adds these of its own:

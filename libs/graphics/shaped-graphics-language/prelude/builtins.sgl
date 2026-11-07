@@ -3643,6 +3643,12 @@
 // What a weak compare-exchange gives, a struct of fields every target declares as a program's own.
 // The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it stored (EMIT-161).
 
+// What sg binds itself: an entry of `check::k_reserved_bindings`, which legalize alone reaches.
+
+@internal binding sg_debug:
+    words: mut buffer[atomic[uint]]
+
+
 /// What a weak compare-exchange read, and whether it stored `desired`.
 struct exchange_result[T]:
     old: T

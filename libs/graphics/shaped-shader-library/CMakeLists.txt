@@ -16,6 +16,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/binding/binding_groups.cc
     src/shaped-shader-library/binding/wgsl_declarations.cc
     src/shaped-shader-library/compiler/wgsl_compiler.cc
+    src/shaped-shader-library/compiler/reserved_contract.cc
     src/shaped-shader-library/compiler/sgl_compiler.cc
     src/shaped-shader-library/compiler/available_compilers.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
