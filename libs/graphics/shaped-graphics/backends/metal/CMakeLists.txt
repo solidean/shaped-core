@@ -5,7 +5,7 @@ project(shaped-graphics-metal LANGUAGES CXX)
 # The enclosing CMakeLists only adds this subdirectory on APPLE with the metal-cpp target present, so both are
 # guaranteed available here.
 #
-# Everything is plain C++ over metal-cpp rather than Objective-C++, which is what keeps the repo's format, lint and PCH
+# Everything is plain C++ over metal-cpp rather than Objective-C++, which is what keeps the repo's format and lint
 # tooling — all of which speak only ('.cc', '.hh') — working unchanged. See extern/metal-cpp/dependency.yml.
 add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_acceleration_structure.cc
@@ -85,10 +85,6 @@ target_include_directories(shaped-graphics-metal
 
 # metal-cpp carries the headers plus the Metal / Foundation / QuartzCore framework links.
 target_link_libraries(shaped-graphics-metal PUBLIC shaped-graphics metal-cpp)
-
-# SG rather than a metal-specific tier: the SG tier holds no Metal header, and a tier over <Metal/Metal.hpp> would be
-# worth measuring before it is worth having.
-sc_target_pch(shaped-graphics-metal SG)
 
 # Backend-specific test binary: device creation, the floor refusal, epochs and command-list lifetime.
 # Named *-test so the dev.py runner discovers it.

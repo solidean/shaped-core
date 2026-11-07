@@ -1,5 +1,5 @@
 # Puts the macOS SDK on every compile and link line, resolved once per configure, so an SDK change is a command-line change.
-# Without it, Homebrew clang picks the SDK silently through a per-OS config file, and an OS update hands new-SDK headers to TUs whose PCH was built against the old one.
+# Without it, Homebrew clang picks the SDK silently through a per-OS config file, and an OS update hands new-SDK headers to a build whose other objects were compiled against the old one.
 # docs/requirements.md (macOS: deployment target and SDK) has the whole story.
 #
 # The SDK is the one the compiler itself would pick now, read from its `-###` output; the last -isysroot there is the one it uses.
