@@ -136,6 +136,10 @@ ASYNC_INVOCABLE_TEST("sg - a double's maths, bits and fma compute alike through 
         SKIP("this context takes no native route");
     if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
         SKIP("this context takes SGL's binary for every package, so there is no DXC route to compare with");
+    // TEMPORARY(bug-sgl-dxil-double-inverse-sqrt-differs-from-dxc-on-amd): the two routes' shapes round apart there.
+    if (takes_dxil && ctx->metrics.adapter().vendor_id == 0x1002)
+        SKIP("on AMD's dx12 driver a double's inverse_sqrt differs by an ULP between the routes; "
+             "issue: bug-sgl-dxil-double-inverse-sqrt-differs-from-dxc-on-amd");
 
     auto values = double_inputs();
     // (1 + 2^-27)^2 - (1 + 2^-27) is 2^-27 + 2^-54, which a product rounded first loses the last of
@@ -282,8 +286,16 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's double sqrt and rounding are 
         exact(more[0], round_to_even, "round");
         exact(more[2], truncated, "trunc");
         // `.fast` keeps no NaN or infinity through arithmetic, and `fract` is arithmetic on its argument
-        if (given - given == 0.0)
-            exact(more[1], [](f64 x) { return x - tg::floor(x); }, "fract");
+        // Vulkan inherits `fract`'s precision from `x - floor(x)`, a double's no better than a float's there.
+        // AMD's driver answers the largest double below 1 where the subtraction rounds to 1.
+        auto const fract_of = [](f64 x) { return x - tg::floor(x); };
+        if (given - given == 0.0 && !is_vulkan)
+            exact(more[1], fract_of, "fract");
+        else if (given - given == 0.0)
+            CHECK(holds([&](f64 x) { return within(more[1], fract_of(x), float_ulp) || more[1] == fract_of(x); }))
+                .dump("x", given)
+                .dump("fract", more[1])
+                .dump("cpu", fract_of(given));
         auto const length = tg::sqrt(given * given + 1.0);
         if (!is_vulkan)
             CHECK(ulps_apart(more[3], length) <= 1).dump("x", given).dump("gpu", more[3]).dump("cpu", length);

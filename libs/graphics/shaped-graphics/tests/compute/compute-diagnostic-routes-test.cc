@@ -80,6 +80,10 @@ ASYNC_INVOCABLE_TEST("sg - a compute stage's failed assert reads the same throug
     auto const takes_spirv = ctx->accepts_shader_format(sg::shader_format::spirv);
     if (!takes_dxil && !takes_spirv)
         SKIP("this context takes no native route");
+    // TEMPORARY(bug-sg-amd-dx12-assert-branch-clobbers-value): AMD's dx12 driver stores the failing lane's value after it.
+    if (takes_dxil && ctx->metrics.adapter().vendor_id == 0x1002)
+        SKIP("AMD's dx12 driver stores the failing lane's value after a failed assert; "
+             "issue: bug-sg-amd-dx12-assert-branch-clobbers-value");
     nx::expect_error(k_compute_line, nx::exactly(2));
 
     namespace text = sg::test::mixed_text::diagnostic_routes;
