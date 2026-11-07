@@ -454,6 +454,9 @@ uv run dev.py test                       # build + run the whole suite
 //   See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
 //   still just a filter, so the disabled and bucket gates hold — only an exact test NAME opens those.
+// --shard K/N (or `dev.py test --shard K/N`) : run only shard K of N, 0-based. A test's shard is a hash of its name,
+//   the same on every run. A driver an alias names (a backend's context) runs in every shard and shards its children
+//   instead, so the shards partition the leaves — what bisecting a flake across a suite takes.
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,
 //   filter_matches, eligible) plus an "aliases" array, the resolved config (filters, filter_mode, selected_bucket,
 //   allow_cross_bucket_naming, run_disabled_tests) and eligible_count / eligible_alias_count, under the rest of

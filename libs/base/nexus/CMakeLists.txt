@@ -233,6 +233,7 @@ if(SC_BUILD_TESTS)
         tests/test-section-test.cc
         tests/test-invocable-test.cc
         tests/test-alias-test.cc
+        tests/test-shard-test.cc
         tests/test-typed-value-test.cc
         tests/test-watchdog-test.cc
         tests/bench-barriers-test.cc

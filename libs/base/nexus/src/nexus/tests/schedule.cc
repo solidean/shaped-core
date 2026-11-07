@@ -137,6 +137,7 @@ struct cli_state
     cc::vector<cc::string_view> unknown;
     cc::vector<cc::string_view> passthrough;
     cc::string test_args_line;
+    cc::string shard;
     bool help = false;
 };
 
@@ -249,6 +250,10 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
               .metavar = "SECS",
               .validate = nx::arg::at_least(0.0)});
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
+    args.arg({"shard"}, state.shard,
+             {.desc = "run only shard K of N, 0-based, each test placed by a hash of its name; an aliased driver's "
+                      "children are placed one by one",
+              .metavar = "K/N"});
 
     args.group("recording");
     args.arg({"record"}, config.record_all, "bucket every test's cc::rec events, whatever its own config says");
@@ -366,6 +371,25 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         flush();
     }
 
+    // A malformed shard fails the run, since running some other subset than the one asked for is the one wrong answer.
+    if (!state.shard.empty())
+    {
+        auto const text = cc::string_view(state.shard);
+        auto const slash = text.find('/');
+        auto const k = slash < 0 ? -1 : parse_count(text.subview({.offset = 0, .size = slash}));
+        auto const n = slash < 0 ? -1 : parse_count(text.subview({.offset = slash + 1, .size = text.size() - slash - 1}));
+        if (k < 0 || n < 1 || k >= n)
+        {
+            cc::eprintln("nexus: --shard wants K/N with 0 <= K < N, not '{}'", text);
+            config.parse_failed = true;
+        }
+        else
+        {
+            config.shard_index = k;
+            config.shard_count = n;
+        }
+    }
+
     // Everything after -- arrives already split; --test-args carries one string that still needs tokenizing.
     for (auto const& token : state.passthrough)
         config.test_args.push_back(cc::string(token));
@@ -443,6 +467,27 @@ bool nx::test_schedule_config::is_eligible(test_declaration const& decl, bool na
     return true;
 }
 
+bool nx::test_schedule_config::in_shard(cc::string_view key) const
+{
+    if (shard_count <= 1)
+        return true;
+
+    // FNV-1a rather than cc's hash, so no library change ever moves a test to another shard.
+    // Its low bits mix poorly over similar names, and a small modulus reads only those, hence the finalizer.
+    auto h = u64(14695981039346656037ull);
+    for (auto const c : key)
+    {
+        h ^= u64(u8(c));
+        h *= 1099511628211ull;
+    }
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdull;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53ull;
+    h ^= h >> 33;
+    return int(h % u64(shard_count)) == shard_index;
+}
+
 bool nx::test_schedule_config::would_run(test_declaration const& decl) const
 {
     return is_eligible(decl, name_matches_exact(decl)) && filter_matches(decl);
@@ -496,6 +541,17 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
     test_schedule schedule;
     schedule.registry = &registry;
 
+    // Under --shard, a driver some alias names runs in every shard and shards its children, and any other test is placed whole.
+    auto const sharded = config.shard_count > 1;
+    auto const is_aliased_driver = [&](test_declaration const& decl)
+    {
+        for (auto const& alias : registry.aliases)
+            for (auto const& frag : alias.fragments)
+                if (frag.driver == &decl)
+                    return true;
+        return false;
+    };
+
     for (auto const& decl : registry.declarations)
     {
         // Parametrized tests are inert: a sweep never schedules them; they run only via nx::invoke_tests.
@@ -520,9 +576,14 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         if (!config.would_run(decl))
             continue;
 
+        auto const driver = sharded && is_aliased_driver(decl);
+        if (sharded && !driver && !config.in_shard(decl.name))
+            continue;
+
         schedule.instances.push_back(test_instance{
             .declaration = &decl,
             .registry = &registry,
+            .shards_children = driver,
             .args = args_for(decl, config),
         });
     }
@@ -575,6 +636,7 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
             {
                 schedule.instances.push_back(test_instance{.declaration = frag.driver,
                                                            .registry = &registry,
+                                                           .shards_children = sharded,
                                                            .args = args_for(*frag.driver, config)});
                 scoped = &schedule.instances.back();
             }
