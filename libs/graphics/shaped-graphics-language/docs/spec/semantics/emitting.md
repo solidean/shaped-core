@@ -476,7 +476,6 @@ fn main_ps(p: pixel_input) -> target_ {
   EMIT-237's table reaches across patch constants too: every input to every patch constant in a control stage, and every patch constant to every output in an evaluation stage.
 * **EMIT-241** A native route has no `print` of its own: it lowers what LEGAL-70 wrote, so sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
   `DXIL` states `UAVs at every shader stage` wherever a vertex, geometry or tessellation stage declares a UAV.
-  The prologue of EMIT-229 is `unsupported` so far, so a compute stage with workgroup memory lowers under no robustness profile.
 * **EMIT-242** A mesh or task entry point of a native route writes what its text writes, in its target's own operations, so it links against the text route's in either direction.
   `set_counts` is `OpSetMeshOutputsEXT` or `dx.op.setMeshOutputCounts`.
   `vertex` and `primitive` store each element at their index, through `storeVertexOutput` and `storePrimitiveOutput` on DXIL and an access chain on SPIR-V.
@@ -520,6 +519,9 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
   A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.
   One in workgroup memory states the shader flag for 64-bit atomics on group-shared memory, and one on a buffer needs nothing past 64-bit integers.
+* **EMIT-248** A native route writes EMIT-229's prologue as the text does, in shared lowering, so neither writer knows of it.
+  The shadow is one workgroup global `sgl_written` of a `uint` per 32 scalars, and the stride is a loop over the invocation's index in its workgroup, ahead of the body and a workgroup barrier.
+  A read of a word is an atomic load and a mark an atomic `or`, and which bits a range of scalars takes is arithmetic, with a whole word its own case since neither target shifts by 32.
 
 ## Lines
 

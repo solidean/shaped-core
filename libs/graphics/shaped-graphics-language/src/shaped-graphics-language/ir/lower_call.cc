@@ -852,6 +852,8 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
     if ((record.name.starts_with("hit_object_") && !is_hit_stage_read) || record.name.starts_with("trace_hit_ray")
         || record.name.starts_with("trace_ray_reordered") || record.name == "reorder_thread_by_hint")
         return hit_object_call(x, c, record);
+    if (record.name.starts_with("workgroup_written_") || record.name == "workgroup_mark_written")
+        return shadow_call(c, record);
     auto const result = x.type == checked_module::void_type ? _void : value_type(x.type);
     if (record.is_atomic)
         return atomic(c, x);

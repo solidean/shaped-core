@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
@@ -53,6 +54,14 @@ private:
     void unsupported(cc::string_view what);
 
     void declare_stage_inputs();
+    /// EMIT-229: clears the shadow, or zeroes workgroup memory under `define`, each invocation its stride, then waits.
+    void workgroup_prologue();
+    /// `body(i)` for `i = first, first + step, ...` while `i < count`, which `first` may already pass.
+    void strided(value_ref first, u32 count, u32 step, cc::function_ref<void(value_ref)> body);
+    /// LEGAL-69's shadow, one `uint` per 32 scalars of workgroup memory.
+    [[nodiscard]] value_ref written_shadow();
+    /// `workgroup_written_word`, `workgroup_mark_written` and `workgroup_written_bits`, which legalize alone calls.
+    [[nodiscard]] value_ref shadow_call(check::flat_call const& c, builtins::function_record const& record);
     u32 add_stage_element(stage_element e, cc::string_view semantic, cc::string_view name);
     void elements_of_struct(check::type_id t, stage_part part, u32 array_size);
     u32 element_of_input(isize index);
@@ -233,6 +242,7 @@ private:
     cc::vector<block_ref> _breaks;
     cc::vector<block_ref> _continues;
 
+    value_ref _written = value_ref::none;
     value_ref _payload = value_ref::none;
     value_ref _hit_attributes = value_ref::none;
     struct ray_output_global

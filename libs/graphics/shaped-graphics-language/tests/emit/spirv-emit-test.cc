@@ -339,26 +339,30 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
             write_words(module_path, e.value().spirv);
             CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
 
-            // a report writes through the debug buffer, and nothing here runs what it guards
-            auto const profile = sgl::compile_to_text(
-                {.source = source,
-                 .entry_point = entry.entry_point,
-                 .target = sgl::emit::target::hlsl_vulkan,
-                 .diagnostics = true,
-                 .guards_undefined = sgl::check::undefined_guard::report,
-                 .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
-                 .native = sgl::emit::native_route::prefer});
-            if (profile.has_error() || profile.value().spirv.empty())
-                continue;
-            ++guarded;
-            // a process per module, so a default run validates every eighth and --thorough takes them all
-            if (!nx::is_thorough() && guarded % 8 != 0)
-                continue;
-            write_words(module_path, profile.value().spirv);
-            CHECK(std::system(command_text.data()) == 0)
-                .dump("file", file)
-                .dump("entry", entry.entry_point)
-                .dump("guard", "report");
+            // each profile, nothing here running what it guards; a report writes through the debug buffer
+            for (auto const guard : {sgl::check::undefined_guard::abort, sgl::check::undefined_guard::report,
+                                     sgl::check::undefined_guard::define})
+            {
+                auto const profile = sgl::compile_to_text(
+                    {.source = source,
+                     .entry_point = entry.entry_point,
+                     .target = sgl::emit::target::hlsl_vulkan,
+                     .diagnostics = true,
+                     .guards_undefined = guard,
+                     .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                     .native = sgl::emit::native_route::prefer});
+                if (profile.has_error() || profile.value().spirv.empty())
+                    continue;
+                ++guarded;
+                // a process per module, so a default run validates every eighth and --thorough takes them all
+                if (!nx::is_thorough() && guarded % 8 != 0)
+                    continue;
+                write_words(module_path, profile.value().spirv);
+                CHECK(std::system(command_text.data()) == 0)
+                    .dump("file", file)
+                    .dump("entry", entry.entry_point)
+                    .dump("guard", int(guard));
+            }
         }
     }
     // what no fixture prints: every family a record holds, and a vertex stage's
@@ -397,7 +401,7 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
                 "ones, and {} mesh and task ones",
                 lowered, raster_lowered, primitive_lowered, mesh_lowered);
     CC_LOG_INFO("and {} ray-tracing ones", ray_lowered);
-    CC_LOG_INFO("{} of them write debug records, and a robustness report lowers {} entry points", recording, guarded);
+    CC_LOG_INFO("{} of them write debug records, and the robustness profiles lower {} entry points", recording, guarded);
     CHECK(lowered >= 105);
     CHECK(raster_lowered >= 80);
     CHECK(ray_lowered >= 48);

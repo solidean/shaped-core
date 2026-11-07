@@ -4,6 +4,7 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
+#include <shaped-shader-library/shader_asset.hh>
 
 #include <memory>
 
@@ -57,12 +58,15 @@ cc::shared_async<guarded_compute> guarded_compute_of(sg::context& ctx,
                                                 .entry_point = "cs",
                                                 .stage = sg::shader_stage::compute,
                                                 .label = cc::string(label)};
+    // what a host's compile takes of its context (EMIT-245), so a native context runs SGL's own binary
+    slib::add_context_options(desc.options, ctx);
     auto preprocessed = compiler->preprocess(desc, [](cc::string_view) { return cc::optional<cc::string>(); });
     REQUIRE(preprocessed.has_value());
     REQUIRE(preprocessed.value().stated.has_value());
     auto shader = preprocessed.value().stated.value();
 
     desc.source = preprocessed.value().source;
+    desc.bytecode = cc::move(preprocessed.value().bytecode);
     if (!preprocessed.value().entry_point.empty())
         desc.entry_point = preprocessed.value().entry_point;
     auto const compiled = co_await compiler->compile(desc);
@@ -101,6 +105,7 @@ ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its val
                                                 .entry_point = "cs",
                                                 .stage = sg::shader_stage::compute,
                                                 .label = "debug.sgl"};
+    slib::add_context_options(desc.options, ctx);
     auto preprocessed = compiler->preprocess(desc, [](cc::string_view) { return cc::optional<cc::string>(); });
     REQUIRE(preprocessed.has_value());
     REQUIRE(preprocessed.value().stated.has_value());
@@ -108,6 +113,7 @@ ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its val
     CHECK(shader.debug_sites.size() == 2);
 
     desc.source = preprocessed.value().source;
+    desc.bytecode = cc::move(preprocessed.value().bytecode);
     if (!preprocessed.value().entry_point.empty())
         desc.entry_point = preprocessed.value().entry_point;
     auto const compiled = co_await compiler->compile(desc);
@@ -161,12 +167,14 @@ ASYNC_INVOCABLE_TEST("sr - a shader's division by zero is reported as a failed a
                                                     .entry_point = "cs",
                                                     .stage = sg::shader_stage::compute,
                                                     .label = "guard.sgl"};
+        slib::add_context_options(desc.options, ctx);
         auto preprocessed = compiler->preprocess(desc, [](cc::string_view) { return cc::optional<cc::string>(); });
         REQUIRE(preprocessed.has_value());
         REQUIRE(preprocessed.value().stated.has_value());
         auto shader = preprocessed.value().stated.value();
 
         desc.source = preprocessed.value().source;
+        desc.bytecode = cc::move(preprocessed.value().bytecode);
         if (!preprocessed.value().entry_point.empty())
             desc.entry_point = preprocessed.value().entry_point;
         auto const compiled = co_await compiler->compile(desc);
@@ -228,12 +236,14 @@ ASYNC_INVOCABLE_TEST("sr - a read of workgroup memory no invocation stored is re
                                                     .entry_point = "cs",
                                                     .stage = sg::shader_stage::compute,
                                                     .label = "shadow.sgl"};
+        slib::add_context_options(desc.options, ctx);
         auto preprocessed = compiler->preprocess(desc, [](cc::string_view) { return cc::optional<cc::string>(); });
         REQUIRE(preprocessed.has_value());
         REQUIRE(preprocessed.value().stated.has_value());
         auto shader = preprocessed.value().stated.value();
 
         desc.source = preprocessed.value().source;
+        desc.bytecode = cc::move(preprocessed.value().bytecode);
         if (!preprocessed.value().entry_point.empty())
             desc.entry_point = preprocessed.value().entry_point;
         auto const compiled = co_await compiler->compile(desc);
