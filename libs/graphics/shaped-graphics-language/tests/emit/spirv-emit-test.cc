@@ -391,8 +391,8 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
                 "ones, and {} mesh and task ones",
                 lowered, raster_lowered, primitive_lowered, mesh_lowered);
     CC_LOG_INFO("{} of them write debug records, and a robustness report lowers {} entry points", recording, guarded);
-    CHECK(lowered >= 95);
-    CHECK(raster_lowered >= 64);
+    CHECK(lowered >= 105);
+    CHECK(raster_lowered >= 80);
     CHECK(primitive_lowered >= 18);
     CHECK(recording >= 2);
     CHECK(guarded >= 150);

@@ -104,6 +104,10 @@ enum class sgl::ir::type_kind : sgl::u8
     image,
     sampler,
     sampled_image,
+    /// What a trace runs against, which only a resource holds.
+    acceleration_structure,
+    /// One trace in flight, which `op::ray_query_begin` makes and no store or phi ever moves.
+    ray_query,
 };
 
 enum class sgl::ir::storage : sgl::u8
@@ -402,6 +406,22 @@ enum class sgl::ir::op : sgl::u16
     set_mesh_counts,
     /// Operands: the primitive, then the `uint3` or `uint2` of its vertices.
     write_primitive,
+    // ---- ray queries: every step changes what the query answers, so none moves past another
+    /// Operands: the flags every trace of this query states, a constant.
+    ray_query_begin,
+    /// Operands: query, structure, origin, direction, t_min, t_max, flags, mask.
+    ray_query_trace,
+    /// Operands: query; gives whether a candidate waits to be decided.
+    ray_query_proceed,
+    /// Operands: query.
+    ray_query_commit_triangle,
+    /// Operands: query, t.
+    ray_query_commit_procedural,
+    /// Operands: query.
+    ray_query_abort,
+    /// Operands: query; `sub` is a `ray_query_value`, and `aux` 1 reads the committed hit rather than the candidate.
+    /// A dead one goes, but none moves or merges: a read is valid only in the state the query is in where it stands.
+    ray_query_read,
     // ---- textures and images
     combine_sampler,
     /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.
@@ -467,6 +487,29 @@ struct sgl::ir::instruction
     u32 statement = 0xffffffffu;
 };
 
+/// What a `ray_query_read` asks.
+enum class sgl::ir::ray_query_value : sgl::u8
+{
+    /// 0 for nothing, 1 for a triangle, 2 for a procedural primitive: committed only.
+    committed_kind,
+    /// 0 for a triangle, 1 for a procedural primitive: candidate only.
+    candidate_kind,
+    /// Whether the candidate's box is opaque.
+    candidate_box_is_opaque,
+    t,
+    instance_id,
+    instance_index,
+    geometry_index,
+    primitive_index,
+    barycentrics,
+    is_front_face,
+    /// Four columns of three lanes, as SPIR-V hands it over.
+    object_to_world,
+    world_to_object,
+    object_ray_origin,
+    object_ray_direction,
+};
+
 enum class sgl::ir::merge_kind : sgl::u8
 {
     none,
@@ -513,6 +556,7 @@ enum class sgl::ir::global_kind : sgl::u8
     sampler,
     /// A sampler the file declares, which no group holds.
     file_sampler,
+    acceleration_structure,
 };
 
 /// A value the stage hands an entry point, which each target names its own way.

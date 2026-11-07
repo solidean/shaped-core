@@ -91,6 +91,15 @@ enum class dx_class_id : u8
     store_vertex_output,
     store_primitive_output,
     dispatch_mesh,
+    allocate_ray_query,
+    ray_query_trace_inline,
+    ray_query_proceed,
+    ray_query_abort,
+    ray_query_commit_triangle,
+    ray_query_commit_procedural,
+    ray_query_state_scalar,
+    ray_query_state_vector,
+    ray_query_state_matrix,
 };
 
 // clang-format off
@@ -159,6 +168,15 @@ inline constexpr dx_class k_dx_classes[] = {
     {"storeVertexOutput", "v:iiboi"},
     {"storePrimitiveOutput", "v:iiboi"},
     {"dispatchMesh", "v:iiiq"},
+    {"allocateRayQuery", "i:i"},
+    {"rayQuery_TraceRayInline", "v:ihiiffffffff"},
+    {"rayQuery_Proceed", "o:i"},
+    {"rayQuery_Abort", "v:i"},
+    {"rayQuery_CommitNonOpaqueTriangleHit", "v:i"},
+    {"rayQuery_CommitProceduralPrimitiveHit", "v:if"},
+    {"rayQuery_StateScalar", "o:i", dx_class::read_only},
+    {"rayQuery_StateVector", "o:ib", dx_class::read_only},
+    {"rayQuery_StateMatrix", "o:iib", dx_class::read_only},
 };
 // clang-format on
 
@@ -279,6 +297,37 @@ enum class dx_op : u8
     store_vertex_output,
     store_primitive_output,
     dispatch_mesh,
+    allocate_ray_query,
+    ray_query_trace_inline,
+    ray_query_proceed,
+    ray_query_abort,
+    ray_query_commit_triangle,
+    ray_query_commit_procedural,
+    ray_query_committed_status,
+    ray_query_candidate_type,
+    ray_query_candidate_object_to_world,
+    ray_query_candidate_world_to_object,
+    ray_query_committed_object_to_world,
+    ray_query_committed_world_to_object,
+    ray_query_candidate_box_non_opaque,
+    ray_query_candidate_front_face,
+    ray_query_committed_front_face,
+    ray_query_candidate_barycentrics,
+    ray_query_committed_barycentrics,
+    ray_query_candidate_t,
+    ray_query_committed_t,
+    ray_query_candidate_instance_index,
+    ray_query_candidate_instance_id,
+    ray_query_candidate_geometry,
+    ray_query_candidate_primitive,
+    ray_query_candidate_object_origin,
+    ray_query_candidate_object_direction,
+    ray_query_committed_instance_index,
+    ray_query_committed_instance_id,
+    ray_query_committed_geometry,
+    ray_query_committed_primitive,
+    ray_query_committed_object_origin,
+    ray_query_committed_object_direction,
 };
 
 struct dx_op_info
@@ -388,9 +437,42 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {171, dx_class_id::store_vertex_output, k_f16 | k_f32 | k_i16 | k_i32},
     {172, dx_class_id::store_primitive_output, k_f16 | k_f32 | k_i16 | k_i32},
     {173, dx_class_id::dispatch_mesh, k_udt},
+    {178, dx_class_id::allocate_ray_query, k_no_overload},
+    {179, dx_class_id::ray_query_trace_inline, k_no_overload},
+    {180, dx_class_id::ray_query_proceed, k_i1},
+    {181, dx_class_id::ray_query_abort, k_no_overload},
+    {182, dx_class_id::ray_query_commit_triangle, k_no_overload},
+    {183, dx_class_id::ray_query_commit_procedural, k_no_overload},
+    {184, dx_class_id::ray_query_state_scalar, k_i32},
+    {185, dx_class_id::ray_query_state_scalar, k_i32},
+    {186, dx_class_id::ray_query_state_matrix, k_f32},
+    {187, dx_class_id::ray_query_state_matrix, k_f32},
+    {188, dx_class_id::ray_query_state_matrix, k_f32},
+    {189, dx_class_id::ray_query_state_matrix, k_f32},
+    {190, dx_class_id::ray_query_state_scalar, k_i1},
+    {191, dx_class_id::ray_query_state_scalar, k_i1},
+    {192, dx_class_id::ray_query_state_scalar, k_i1},
+    {193, dx_class_id::ray_query_state_vector, k_f32},
+    {194, dx_class_id::ray_query_state_vector, k_f32},
+    {199, dx_class_id::ray_query_state_scalar, k_f32},
+    {200, dx_class_id::ray_query_state_scalar, k_f32},
+    {201, dx_class_id::ray_query_state_scalar, k_i32},
+    {202, dx_class_id::ray_query_state_scalar, k_i32},
+    {203, dx_class_id::ray_query_state_scalar, k_i32},
+    {204, dx_class_id::ray_query_state_scalar, k_i32},
+    {205, dx_class_id::ray_query_state_vector, k_f32},
+    {206, dx_class_id::ray_query_state_vector, k_f32},
+    {207, dx_class_id::ray_query_state_scalar, k_i32},
+    {208, dx_class_id::ray_query_state_scalar, k_i32},
+    {209, dx_class_id::ray_query_state_scalar, k_i32},
+    {210, dx_class_id::ray_query_state_scalar, k_i32},
+    {211, dx_class_id::ray_query_state_vector, k_f32},
+    {212, dx_class_id::ray_query_state_vector, k_f32},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::dispatch_mesh) + 1]));
-static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::dispatch_mesh) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0])
+              == sizeof(char[isize(dx_op::ray_query_committed_object_direction) + 1]));
+static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
+              == sizeof(char[isize(dx_class_id::ray_query_state_matrix) + 1]));
 } // namespace sgl::ir::dxil::impl

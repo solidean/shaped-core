@@ -231,6 +231,14 @@ void writer::write_types()
         case type_kind::sampled_image:
             emit(_declarations, spv::TypeSampledImage, {id, id_of(t.element)});
             break;
+        case type_kind::acceleration_structure:
+            emit(_declarations, spv::TypeAccelerationStructureKHR, {id});
+            break;
+        case type_kind::ray_query:
+            require(spv::CapRayQueryKHR);
+            require_extension("SPV_KHR_ray_query");
+            emit(_declarations, spv::TypeRayQueryKHR, {id});
+            break;
         }
     }
     emit(_declarations, spv::TypeFunction, {_function_type, id_of(_void)});

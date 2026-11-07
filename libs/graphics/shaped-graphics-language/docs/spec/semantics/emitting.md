@@ -487,6 +487,14 @@ fn main_ps(p: pixel_input) -> target_ {
   On SPIR-V the payload is `TaskPayloadWorkgroupEXT` of the struct itself, and a workgroup of more than one invocation has an `OpControlBarrier` ahead of the dispatch, as DXC writes.
   On DXIL it is a struct of the shape DXC gives it, whatever the route: a vector or a matrix is an array of scalars, a `bool` an `i32`, and each lies at its natural alignment with no 16-byte rule.
   So `float` then `float4` takes 20 bytes, the size the entry's metadata and `PSV0` both state, and a mesh stage reads it with `getMeshPayload`.
+* **EMIT-243** An inline trace of a native route holds one query, which its target's text would hold, and reads it by the operations that text compiles to.
+  On SPIR-V the query is an `OpVariable` of `Function` at the top of the body, however deep it begins.
+  On DXIL it is one `dx.op.allocateRayQuery` where it begins, with the flags every trace of it states.
+  A read of a query gives a value and goes where nothing uses it, but it neither moves nor merges, since each is valid only in the state the query is in where it stands.
+  A row of a hit's transform is taken from the whole transform, which SPIR-V hands over by column and DXIL by row and column.
+  An `affine3` is a value of three rows, and no native route holds one in GPU memory yet.
+  A query of an entry point that states opacity micromaps is `unsupported`.
+  What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
 
 ## Lines
 

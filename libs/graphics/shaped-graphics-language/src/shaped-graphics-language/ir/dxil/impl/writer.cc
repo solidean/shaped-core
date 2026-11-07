@@ -51,6 +51,7 @@ enum class rule_kind : u8
     texture,
     image_size,
     subgroup,
+    ray_query,
     phi,
 };
 
@@ -175,6 +176,13 @@ constexpr op_rule k_rules[] = {
     {op::image_levels, rule_kind::image_size},
     {op::image_samples, rule_kind::image_size},
     {op::subgroup, rule_kind::subgroup},
+    {op::ray_query_begin, rule_kind::ray_query},
+    {op::ray_query_trace, rule_kind::ray_query},
+    {op::ray_query_proceed, rule_kind::ray_query},
+    {op::ray_query_commit_triangle, rule_kind::ray_query},
+    {op::ray_query_commit_procedural, rule_kind::ray_query},
+    {op::ray_query_abort, rule_kind::ray_query},
+    {op::ray_query_read, rule_kind::ray_query},
     {op::phi, rule_kind::phi},
 };
 // clang-format on
@@ -408,6 +416,8 @@ void writer::operation(u32 index)
         return image_size(index, i);
     case rule_kind::subgroup:
         return subgroup_op(index, i);
+    case rule_kind::ray_query:
+        return ray_query_op(index, i);
     case rule_kind::phi:
         return phi(index, i);
     }

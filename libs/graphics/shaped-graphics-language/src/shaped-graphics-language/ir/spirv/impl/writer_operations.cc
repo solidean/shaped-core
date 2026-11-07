@@ -52,6 +52,7 @@ enum class rule_kind : u8
     image_write,
     image_size,
     subgroup,
+    ray_query,
     phi,
 };
 
@@ -177,6 +178,13 @@ constexpr op_rule k_rules[] = {
     {op::image_write, rule_kind::image_write, spv::ImageWrite},
     {op::image_size, rule_kind::image_size, 0},
     {op::subgroup, rule_kind::subgroup, 0},
+    {op::ray_query_begin, rule_kind::ray_query, 0},
+    {op::ray_query_trace, rule_kind::ray_query, 0},
+    {op::ray_query_proceed, rule_kind::ray_query, 0},
+    {op::ray_query_commit_triangle, rule_kind::ray_query, 0},
+    {op::ray_query_commit_procedural, rule_kind::ray_query, 0},
+    {op::ray_query_abort, rule_kind::ray_query, 0},
+    {op::ray_query_read, rule_kind::ray_query, 0},
     {op::phi, rule_kind::phi, spv::Phi},
 };
 
@@ -357,6 +365,51 @@ void writer::frag_coord(instruction const& i, u32 id)
     emit(_code, spv::CompositeInsert, {id_of(i.type), id, reciprocal, loaded, 3u});
 }
 
+void writer::ray_query(instruction const& i, u32 id)
+{
+    /// Parallel to `ray_query_value`.
+    constexpr u32 k_reads[] = {
+        spv::RayQueryGetIntersectionTypeKHR,
+        spv::RayQueryGetIntersectionTypeKHR,
+        spv::RayQueryGetIntersectionCandidateAABBOpaqueKHR,
+        spv::RayQueryGetIntersectionTKHR,
+        spv::RayQueryGetIntersectionInstanceCustomIndexKHR,
+        spv::RayQueryGetIntersectionInstanceIdKHR,
+        spv::RayQueryGetIntersectionGeometryIndexKHR,
+        spv::RayQueryGetIntersectionPrimitiveIndexKHR,
+        spv::RayQueryGetIntersectionBarycentricsKHR,
+        spv::RayQueryGetIntersectionFrontFaceKHR,
+        spv::RayQueryGetIntersectionObjectToWorldKHR,
+        spv::RayQueryGetIntersectionWorldToObjectKHR,
+        spv::RayQueryGetIntersectionObjectRayOriginKHR,
+        spv::RayQueryGetIntersectionObjectRayDirectionKHR,
+    };
+    auto const operands = _p.operands_of(i);
+    auto const at = [&](isize k) { return id_of_raw(operands[k]); };
+    switch (i.code)
+    {
+    case op::ray_query_trace:
+        return emit(_code, spv::RayQueryInitializeKHR, {at(0), at(1), at(6), at(7), at(2), at(4), at(3), at(5)});
+    case op::ray_query_proceed:
+        return emit(_code, spv::RayQueryProceedKHR, {id_of(i.type), id, at(0)});
+    case op::ray_query_commit_triangle:
+        return emit(_code, spv::RayQueryConfirmIntersectionKHR, {at(0)});
+    case op::ray_query_commit_procedural:
+        return emit(_code, spv::RayQueryGenerateIntersectionKHR, {at(0), at(1)});
+    case op::ray_query_abort:
+        return emit(_code, spv::RayQueryTerminateKHR, {at(0)});
+    case op::ray_query_read:
+    {
+        auto const opcode = k_reads[i.sub];
+        if (ray_query_value(i.sub) == ray_query_value::candidate_box_is_opaque)
+            return emit(_code, opcode, {id_of(i.type), id, at(0)});
+        return emit(_code, opcode, {id_of(i.type), id, at(0), literal_id(i.aux)});
+    }
+    default:
+        return; // ray_query_begin: the variable `write_function` declared at the top of the body
+    }
+}
+
 void writer::instruction_of(u32 index)
 {
     auto const& i = _p.instructions[index];
@@ -469,6 +522,8 @@ void writer::instruction_of(u32 index)
         return emit(_code, spv::ImageQuerySize, {id_of(i.type), id, id_of_raw(operands[0])});
     case rule_kind::subgroup:
         return group(i, id);
+    case rule_kind::ray_query:
+        return ray_query(i, id);
     case rule_kind::phi:
         head(_code, rule.opcode, 3 + operands.size());
         _code.push_back(id_of(i.type));

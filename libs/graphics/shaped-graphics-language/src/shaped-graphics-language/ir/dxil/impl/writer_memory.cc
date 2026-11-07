@@ -621,7 +621,8 @@ void writer::load(u32 index, instruction const& i)
     {
         auto const& g = _p.globals[index_of(pointer)];
         auto const& target = _p.at(_p.at(g.type).element);
-        if (target.kind == type_kind::image || target.kind == type_kind::sampler)
+        if (target.kind == type_kind::image || target.kind == type_kind::sampler
+            || target.kind == type_kind::acceleration_structure)
             return define_one(index, handle_of(pointer));
     }
     auto const where = place_of(pointer);

@@ -179,8 +179,9 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
                 mesh_reached);
     CC_LOG_INFO("{} of them write debug records, and the robustness profiles lower {} entry points", recording, guarded);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
-    CHECK(lowered >= 90);
-    CHECK(raster_lowered >= 64);
+    CHECK(lowered >= 100);
+    CHECK(raster_lowered == raster_reached);
+    CHECK(raster_lowered >= 80);
     CHECK(primitive_lowered == primitive_reached);
     CHECK(mesh_reached >= 13);
     CHECK(mesh_lowered == mesh_reached);

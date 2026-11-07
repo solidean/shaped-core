@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/builtins/ray_query_calls.hh>
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 
@@ -84,37 +85,6 @@ written write_has(call_context const& ctx)
 }
 
 // ---- how a query is written -----------------------------------------------------------------------------------------
-
-/// What one query record writes, as `data`.
-enum class query_op : u32
-{
-    begin,
-    trace,
-    proceed,
-    candidate_is_triangle,
-    commit_triangle,
-    abort,
-    committed_kind,
-    commit_procedural,
-    candidate_is_opaque_box,
-    // the reads, each once of the candidate and once of the committed hit: `read_base + read * 2 + is_committed`
-    read_base = 16,
-};
-
-enum class query_read : u32
-{
-    t,
-    instance_id,
-    instance_index,
-    geometry_index,
-    primitive_index,
-    barycentrics,
-    is_front_face,
-    object_to_world_row,
-    world_to_object_row,
-    object_ray_origin,
-    object_ray_direction,
-};
 
 struct read_spelling
 {
@@ -952,6 +922,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .evaluate = evaluate,
             .write = query_spelling(op),
             .writes_through = advances ? written_argument::first : written_argument::none,
+            .is_ray_query = true,
             .features = check::feature_set(check::feature::ray_query),
             .declares_only = op == query_op::begin,
             .flags_argument = op == query_op::trace ? 6 : -1,
