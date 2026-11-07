@@ -258,8 +258,8 @@ public:
 
     /// Drops every instruction nothing with an effect reads, a loop of phis among them.
     /// Every `ll_value` of an instruction taken before this is void afterwards, and blocks keep their numbers.
+    /// A declaration nothing calls any more keeps its value, and `write` leaves it out of the module.
     void remove_unused();
-    void remove_unused_declarations();
 
     [[nodiscard]] ll_type type_of(ll_value v) const;
     [[nodiscard]] ll_type element_of(ll_type pointer_or_array) const;
