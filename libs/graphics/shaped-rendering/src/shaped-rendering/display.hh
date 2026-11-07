@@ -26,6 +26,7 @@ struct sr::display_transform
 
     /// Set, the exposure is metered from the image and adapts toward middle gray, and `exposure` is the compensation added to it.
     /// Whoever draws the image meters it, with `sr::exposure_meter_routine`; the transform itself holds no state.
+    /// A viewer adapts toward each reading; a still capture takes the reading of its finished image whole, so the same image gets the same exposure.
     bool automatic = false;
 
     /// `2^exposure`, the factor module `display`'s `transform` takes.

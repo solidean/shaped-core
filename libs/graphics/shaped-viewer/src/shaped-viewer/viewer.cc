@@ -448,6 +448,7 @@ cc::shared_async<cc::unit> viewer::background_work()
 void viewer::install_capture(sr::capture_request req)
 {
     CC_ASSERT(_impl->config.headless, "a capture needs a headless viewer — there is no offscreen target otherwise");
+    _impl->views.set_snaps_auto_exposure(!req.is_sequence());
     _impl->capture = cc::make_unique<sv::impl::capture_session>(cc::move(req));
     _impl->capture->begin();
 }
@@ -1364,6 +1365,15 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
 
     auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
     if (!settled && !session.is_out_of_time())
+        return;
+
+    // A meter lands a frame or two behind its image, so a finished image is still shown at a reading of an earlier one.
+    // Not a hold: a hold that ends counts as owed work drained, and would throw away the image the meter is reading.
+    auto exposure_read = true;
+    if (!session.request().is_sequence())
+        for (auto const& tr : plan.traces)
+            exposure_read = im.views.is_auto_exposure_read(tr.id) && exposure_read;
+    if (!exposure_read && !session.is_out_of_time())
         return;
 
     // The readback is submitted now, before the next frame renders over the offscreen target; the wait and the encode are not waited for here.

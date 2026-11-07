@@ -83,6 +83,15 @@ public:
     /// See `impl::is_accumulation_converged`, which is the rule; false for a view that is not here.
     [[nodiscard]] bool is_accumulation_converged(view_id id, cc::optional<u32> samples = {}) const;
 
+    /// Whether every automatic exposure of the view is a reading of the image as it stands; see `impl::is_auto_exposure_read`.
+    /// True for a view with none, or one never drawn.
+    [[nodiscard]] bool is_auto_exposure_read(view_id id);
+
+    /// Whether automatic exposures take each reading whole rather than adapting toward it, which a still image wants.
+    /// An exposure that adapts holds the history of how fast readings landed, so two runs of one still would differ.
+    [[nodiscard]] bool snaps_auto_exposure() const { return _snaps_auto_exposure; }
+    void set_snaps_auto_exposure(bool snaps) { _snaps_auto_exposure = snaps; }
+
     /// Starts every traced layer of `id` over, as a different image would: its mean, and the denoiser's history with it.
     /// For a change the trace's hash cannot see, such as a texture's contents replaced in place; nothing for a view that is not here.
     void restart_accumulation(view_id id);
@@ -91,5 +100,6 @@ public:
     [[nodiscard]] isize payload_bytes() const { return _entries.payload_bytes(); }
 
 private:
+    bool _snaps_auto_exposure = false;
     impl::keyed_cache<view_id, impl::view_state> _entries;
 };

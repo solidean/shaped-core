@@ -32,6 +32,13 @@ struct auto_exposure_state
 
     /// The partials of the meter last started, which a later frame polls; invalid once read.
     sg::data_future<tg::vec2f> pending;
+
+    /// How many meters have started and landed, in order, one in flight at a time.
+    u32 meters_started = 0;
+    u32 meters_landed = 0;
+
+    /// The meter `is_auto_exposure_read` waits for; 0 while nothing waits, which a restart returns it to.
+    u32 meter_awaited = 0;
 };
 
 /// One temporal resource a view keeps across frames, and how far whatever writes it has run.
@@ -295,4 +302,8 @@ void restart_accumulation(view_state& state);
 /// was already as converged as it gets.
 /// False for a view with no traced layer at all, since nothing there has converged.
 [[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> samples);
+
+/// Whether a meter that started after the first call has landed on every automatic layer of `state`.
+/// Called once the image holds still, that says the exposure is a reading of the finished image.
+[[nodiscard]] bool is_auto_exposure_read(view_state& state);
 } // namespace sv::impl
