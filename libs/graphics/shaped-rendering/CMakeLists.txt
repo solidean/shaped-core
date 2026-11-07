@@ -16,6 +16,7 @@ add_library(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/bloom_routine.cc
     src/shaped-rendering/exposure_meter_routine.cc
     src/shaped-rendering/micromap_bake_routine.cc
     src/shaped-rendering/dlss_rr_routine.cc
@@ -62,6 +63,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/bloom_routine.hh
     src/shaped-rendering/exposure_meter_routine.hh
     src/shaped-rendering/micromap_bake_routine.hh
     src/shaped-rendering/dlss_rr_routine.hh
@@ -298,6 +300,7 @@ sc_add_shader_package(
         nn_io.sgl:*
         slug_quads.sgl:*
         mix.sgl:*
+        bloom.sgl:*
         exposure_meter.sgl:*
         micromap_bake.sgl:*
         atrous_denoise.sgl:*
@@ -338,6 +341,7 @@ if(SC_BUILD_TESTS)
     # These compile in either build: they use only the public API, and guard on SR_HAS_WINDOW the few cases that need a live backend.
     add_executable(shaped-rendering-test
         tests/main.cc
+        tests/bloom-test.cc
         tests/smoke-test.cc
         tests/capture-request-test.cc
         tests/input-test.cc

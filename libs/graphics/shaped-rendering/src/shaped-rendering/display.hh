@@ -16,6 +16,20 @@ enum class sr::display_curve : sr::u8
     neutral = 2,
 };
 
+/// The light that scatters in a lens, which `sr::bloom_routine` applies; docs/bloom.md is the definition.
+struct sr::bloom_settings
+{
+    /// The share of the light above the knee that scatters; 0 is off.
+    f32 strength = 0.0f;
+
+    /// Scales the kernel's radii, which are shares of the image's height.
+    f32 radius_scale = 1.0f;
+
+    /// Where a pixel starts to scatter, as light shown after exposure, so 1 is display white.
+    /// What the display can show stays true; 0 scatters all light, which veils the whole image.
+    f32 knee = 1.0f;
+};
+
 /// What turns a linear image into the values a display shows: an exposure, then a curve.
 struct sr::display_transform
 {
