@@ -31,6 +31,7 @@ struct mipmap_program;                  // one mipmap key's group layout + compu
 // The display transform (see display.hh): exposure and curve, as SGL module `display` applies them.
 enum class display_curve : u8; // none, the clamped sRGB encode, or the neutral roll-off before it
 struct bloom_settings;         // how much light scatters, how wide, and from where
+struct grade_settings;         // a look as numbers: temperature, tint, vignette, contrast and saturation
 struct display_transform;      // an exposure in stops and a curve
 class bloom_routine;           // light scattered in a lens, on a linear image (bloom_routine.hh)
 class exposure_meter_routine;  // an image's mean log luminance, for an automatic exposure (exposure_meter_routine.hh)

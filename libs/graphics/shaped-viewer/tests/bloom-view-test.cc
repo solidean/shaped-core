@@ -11,6 +11,7 @@
 #include <nexus/test.hh>
 #include <shaped-rendering/capture.hh>
 #include <shaped-viewer/all.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::abs
 
 // Bloom on a layer: what `settings.display.bloom` asks for reaches the screen, and asking for it never restarts the trace.
 //
@@ -125,4 +126,47 @@ ASYNC_INVOCABLE_TEST("sv - turning a layer's bloom on and off keeps its accumula
                                            shown.bloom.strength = 0.5f;
                                    });
     CHECK(frames > 8);
+}
+
+ASYNC_INVOCABLE_TEST("sv - a layer's grade changes what it shows, and a neutral one changes nothing",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx))
+        SKIP("no ray tracing or no SGL compiler, so the tracer does not build");
+
+    auto const nothing = [](sv::view_ref const&, sr::display_transform&) {};
+    auto const base = sr::display_transform{.exposure = -5.0f,
+                                            .curve = sr::display_curve::neutral,
+                                            .bloom = {.strength = 0.5f, .knee = 0.0f}};
+    auto const plain = co_await captured_middle(ctx, base, "16", nothing);
+    auto warm = base;
+    warm.grade.temperature = 0.5f;
+    auto const warmer = co_await captured_middle(ctx, warm, "16", nothing);
+    CHECK(warmer > plain + 5.0f).dump("plain", plain).dump("warmer", warmer);
+
+    auto spare = base;
+    spare.dither = false;
+    spare.grade = {};
+    CHECK(tg::abs(co_await captured_middle(ctx, spare, "16", nothing) - plain) <= 0.0f);
+}
+
+ASYNC_INVOCABLE_TEST("sv - dither moves a value by under a step, the same way in every capture",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx))
+        SKIP("no ray tracing or no SGL compiler, so the tracer does not build");
+
+    auto const nothing = [](sv::view_ref const&, sr::display_transform&) {};
+    auto const base = sr::display_transform{.exposure = -5.0f,
+                                            .curve = sr::display_curve::neutral,
+                                            .bloom = {.strength = 0.5f, .knee = 0.0f}};
+    auto const plain = co_await captured_middle(ctx, base, "16", nothing);
+    auto noisy = base;
+    noisy.dither = true;
+    auto const a = co_await captured_middle(ctx, noisy, "16", nothing);
+    auto const b = co_await captured_middle(ctx, noisy, "16", nothing);
+    CHECK(tg::abs(a - plain) <= 1.0f).dump("plain", plain).dump("dithered", a);
+    CHECK(a == b);
 }
