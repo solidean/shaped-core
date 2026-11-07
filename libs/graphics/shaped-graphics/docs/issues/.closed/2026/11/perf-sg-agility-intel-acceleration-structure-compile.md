@@ -3,6 +3,8 @@ created: 2026-11-07
 refs:
   - file: docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_runtime.cc
+closed: 2026-11-07
+resolution: fixed
 ---
 
 # A process on the Agility SDK pays a 20-30 s compile at its first acceleration-structure build on Intel, so the test suite takes 182 s
@@ -10,7 +12,7 @@ refs:
 On Intel's driver 32.0.101.9150, a process that has called the Agility SDK's `CreateDeviceFactory` never reads the driver's acceleration-structure compile back from its cache.
 Its first build, of any kind, costs 20–30 s on dx12 and on vulkan alike; every later build of the process costs nothing.
 Without the Agility SDK the compile is cached per application, and the first build takes about 12 ms.
-[The external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the matrix that isolates the trigger.
+[The external entry](../../../../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the matrix that isolates the trigger.
 Its `run.py` is a standalone reproduction.
 
 ## Measured, 2026-11-07, Arc B580
@@ -41,7 +43,7 @@ Option 1's knob is what an application would reach for there as well.
 
 ## Landed
 
-Option 2, chosen on 2026-11-07, and the workaround is now [debt-sg-intel-tests-keep-off-agility](debt-sg-intel-tests-keep-off-agility.md).
+Option 2, chosen on 2026-11-07, and the workaround is now [debt-sg-intel-tests-keep-off-agility](../../../debt-sg-intel-tests-keep-off-agility.md).
 `dx12::choose_d3d12_runtime` and `SC_DX12_RUNTIME` pick the runtime per process, and on Intel each test binary picks the system one.
 `shaped-graphics-test` takes 23.6 s alone, its Agility process included, against over 175 s.
 The full `dev.py test` run, one binary at a time, takes 101 s, its longest binary `shaped-viewer-test` at 38–45 s.
