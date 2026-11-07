@@ -37,7 +37,7 @@ So each entry carries the answer as something runnable.
 | bug | component | status |
 |---|---|---|
 | [msvc-const-ref-through-type-erased-call](msvc-const-ref-through-type-erased-call/readme.md) | MSVC `cl` 19.51 at `/O2` | filed upstream, quarantined in `function_ref-test.cc` |
-| [msvc-coroutine-await-in-aggregate-init-crash](msvc-coroutine-await-in-aggregate-init-crash/readme.md) | MSVC `cl` 19.29 to 19.51 | not yet filed, compiles on the 19.52 preview, worked around in `mixed-route-test.cc` |
+| [msvc-coroutine-await-in-aggregate-init-crash](msvc-coroutine-await-in-aggregate-init-crash/readme.md) | MSVC `cl` 19.29 to 19.51 | not filed, compiles on the 19.52 preview, held off by the `co-await-in-initializer` lint rule |
 | [vulkan-concurrent-device-lifecycle-deadlock](vulkan-concurrent-device-lifecycle-deadlock/readme.md) | NVIDIA Vulkan driver 591.86 | not yet filed, worked around in shaped-graphics |
 | [nvidia-raytracing-device-lifecycle-cross-api-deadlock](nvidia-raytracing-device-lifecycle-cross-api-deadlock/readme.md) | NVIDIA driver 591.86, Vulkan and D3D12 | not yet filed, worked around in shaped-graphics |
 | [nvidia-device-create-vs-pending-wait-deadlock](nvidia-device-create-vs-pending-wait-deadlock/readme.md) | NVIDIA Vulkan driver, RTX 5070 Ti | not yet filed, worked around in shaped-graphics |
