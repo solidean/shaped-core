@@ -416,7 +416,7 @@ void lowering::read_primitive_edge()
             read_stage_input(input, first);
             continue;
         }
-        // EMIT-241: what a task stage handed on is read through the place it stands in, so an index copies nothing
+        // EMIT-242: what a task stage handed on is read through the place it stands in, so an index copies nothing
         if (_e.entry_stage == stage::mesh)
         {
             _is_variable[i] = true;

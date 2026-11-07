@@ -553,6 +553,7 @@ if(SC_BUILD_TESTS)
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
+                mesh_stages.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -565,6 +566,7 @@ if(SC_BUILD_TESTS)
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
+                mesh_stages.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -577,6 +579,7 @@ if(SC_BUILD_TESTS)
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
+                mesh_stages.sgl:*
         )
 
         sc_add_shader_package(
