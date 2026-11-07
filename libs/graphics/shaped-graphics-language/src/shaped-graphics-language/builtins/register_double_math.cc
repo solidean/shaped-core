@@ -88,6 +88,15 @@ void non_finite_each(leaves in, result& out)
     }
 }
 
+/// EVAL-146: `a * b + c` rounded once.
+void fma(leaves in, result& out)
+{
+    auto const width = in.size() / 3;
+    for (auto i = isize(0); i < width; ++i)
+        out.push_back(
+            scalar::of_double(soft_fma(in[i].as_double(), in[width + i].as_double(), in[2 * width + i].as_double())));
+}
+
 /// `a * (1 - t) + b * t`, exact at both ends, with one `t` for every component.
 void mix(leaves in, result& out)
 {
@@ -447,6 +456,9 @@ void sgl::builtins::register_double_math(registry& r)
                       .msl_names = k_sign},
                      "/// -1, 0 or 1, by the sign of each component.");
         add_function(r, "saturate", {"x", t}, t, unary<saturate_of>, {.hlsl_names = k_saturate});
+        add_function(r, "fma", {"a", t, "b", t, "c", t}, t, fma, {},
+                     "/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product "
+                     "first.");
         add_function(r, "is_nan", {"x", t}, bools, non_finite_each<true>, library_call("is_nan"),
                      "/// Whether each component is a NaN, read from its bits.");
         add_function(r, "is_inf", {"x", t}, bools, non_finite_each<false>, library_call("is_inf"),

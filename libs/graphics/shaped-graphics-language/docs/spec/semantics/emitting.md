@@ -642,6 +642,11 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Each reads and writes a double's bits through `asuint` and `asdouble`, over its arithmetic and `fma`: DXC hands a double to its own `sqrt` or `floor` as a float.
   `sqrt` and `inverse_sqrt` start from the float `rsqrt` of the mantissa brought to 1 to 4, take two Newton steps, and `sqrt` corrects by the residual `fma` gives.
   `sign` and `saturate` are HLSL's own, which take a double.
+* **EMIT-254** `fma` is each target's own: HLSL's `fma` of a double and `mad` of a float or a half, and WGSL's and MSL's `fma`.
+  A native route writes DXIL's `dx.op.fma` of a double and `dx.op.fmad` of the others, and SPIR-V's GLSL.std.450 `Fma`, as DXC writes them.
+  Only a double's on DXIL is stated to round once, as HLSL's documentation of `fma` says, and every other may round the product first.
+  `mad` and `dx.op.fmad` are free to fuse or not, and Vulkan's precision table states `Fma` as a multiply followed by an add, so a vulkan double may round twice too.
+  WGSL states `fma` as `e1 * e2 + e3`, and nothing here relies on MSL's rounding once.
 * **EMIT-225** `hlsl-vulkan` writes a hit object (CHK-434) and every reordering (CHK-433) as `SPV_EXT_shader_invocation_reorder`'s instructions, since DXC lowers none of HLSL's to SPIR-V.
   Each instruction is a function of DXC's inline SPIR-V the text declares ahead of the entry point, and a hit object is `vk::SpirvOpaqueType<5313>`, SPIR-V's `OpTypeHitObjectEXT`.
   An instruction that hands a payload over takes a variable of the ray-payload storage class, one per payload type, which the call fills before and reads back after.

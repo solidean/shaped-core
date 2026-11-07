@@ -2114,6 +2114,8 @@
 @builtin @pure fun step(edge: float, x: float) -> float
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float, high: float, x: float) -> float
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float, b: float, c: float) -> float
 @builtin @pure fun sin(x: float2) -> float2
 @builtin @pure fun cos(x: float2) -> float2
 @builtin @pure fun tan(x: float2) -> float2
@@ -2143,6 +2145,8 @@
 @builtin @pure fun step(edge: float2, x: float2) -> float2
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float2, high: float2, x: float2) -> float2
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float2, b: float2, c: float2) -> float2
 @builtin @pure fun sin(x: float3) -> float3
 @builtin @pure fun cos(x: float3) -> float3
 @builtin @pure fun tan(x: float3) -> float3
@@ -2172,6 +2176,8 @@
 @builtin @pure fun step(edge: float3, x: float3) -> float3
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float3, high: float3, x: float3) -> float3
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float3, b: float3, c: float3) -> float3
 @builtin @pure fun sin(x: float4) -> float4
 @builtin @pure fun cos(x: float4) -> float4
 @builtin @pure fun tan(x: float4) -> float4
@@ -2201,6 +2207,8 @@
 @builtin @pure fun step(edge: float4, x: float4) -> float4
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float4, high: float4, x: float4) -> float4
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float4, b: float4, c: float4) -> float4
 @builtin @pure fun sin(x: half) -> half
 @builtin @pure fun cos(x: half) -> half
 @builtin @pure fun tan(x: half) -> half
@@ -2230,6 +2238,8 @@
 @builtin @pure fun step(edge: half, x: half) -> half
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half, high: half, x: half) -> half
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half, b: half, c: half) -> half
 @builtin @pure fun sin(x: half2) -> half2
 @builtin @pure fun cos(x: half2) -> half2
 @builtin @pure fun tan(x: half2) -> half2
@@ -2259,6 +2269,8 @@
 @builtin @pure fun step(edge: half2, x: half2) -> half2
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half2, high: half2, x: half2) -> half2
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half2, b: half2, c: half2) -> half2
 @builtin @pure fun sin(x: half3) -> half3
 @builtin @pure fun cos(x: half3) -> half3
 @builtin @pure fun tan(x: half3) -> half3
@@ -2288,6 +2300,8 @@
 @builtin @pure fun step(edge: half3, x: half3) -> half3
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half3, high: half3, x: half3) -> half3
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half3, b: half3, c: half3) -> half3
 @builtin @pure fun sin(x: half4) -> half4
 @builtin @pure fun cos(x: half4) -> half4
 @builtin @pure fun tan(x: half4) -> half4
@@ -2317,6 +2331,8 @@
 @builtin @pure fun step(edge: half4, x: half4) -> half4
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half4, high: half4, x: half4) -> half4
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half4, b: half4, c: half4) -> half4
 
 // whether a float or a half is a NaN or an infinity, per component; read from its bits on every
 // target, a half's as the float it widens to, so no target's assumption that neither arises can
@@ -2471,6 +2487,8 @@
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double) -> double
 @builtin @pure fun saturate(x: double) -> double
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double, b: double, c: double) -> double
 /// Whether each component is a NaN, read from its bits.
 @builtin @pure fun is_nan(x: double) -> bool
 /// Whether each component is an infinity, of either sign, read from its bits.
@@ -2491,6 +2509,8 @@
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double2) -> double2
 @builtin @pure fun saturate(x: double2) -> double2
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double2, b: double2, c: double2) -> double2
 /// Whether each component is a NaN, read from its bits.
 @builtin @pure fun is_nan(x: double2) -> bool2
 /// Whether each component is an infinity, of either sign, read from its bits.
@@ -2519,6 +2539,8 @@
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double3) -> double3
 @builtin @pure fun saturate(x: double3) -> double3
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double3, b: double3, c: double3) -> double3
 /// Whether each component is a NaN, read from its bits.
 @builtin @pure fun is_nan(x: double3) -> bool3
 /// Whether each component is an infinity, of either sign, read from its bits.
@@ -2547,6 +2569,8 @@
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double4) -> double4
 @builtin @pure fun saturate(x: double4) -> double4
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double4, b: double4, c: double4) -> double4
 /// Whether each component is a NaN, read from its bits.
 @builtin @pure fun is_nan(x: double4) -> bool4
 /// Whether each component is an infinity, of either sign, read from its bits.

@@ -87,6 +87,14 @@ test:
     let two: half = 2.0
     one.bits == 0x3c00u and half.from_bits(0x4000u) == two and half.from_bits(0xffff'3c00u) == one
 
+// a half's `fma` rounds once, straight to a half, never to a float on the way (EVAL-146):
+// (1 + 2^-6)^2 is 1 + 2^-5 + 2^-12, past a half's last bit, which the product alone loses
+test:
+    let a: half = 1.015625
+    let b: half = 1.03125
+    a * a - b == 0.0
+    fma(a, a, -b) == 0.000244140625
+
 // what FSR's approximate reciprocal does with them, which is plain uint arithmetic
 test:
     let x: half = 4.0

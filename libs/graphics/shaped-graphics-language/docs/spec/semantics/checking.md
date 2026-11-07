@@ -125,7 +125,7 @@ use view
   Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
   A double's maths functions are CHK-458's, and no subgroup operation takes a 64-bit value yet.
 * **CHK-458** A `double` and its vectors take `sqrt`, `inverse_sqrt`, `floor`, `ceil`, `trunc`, `round`, `fract`, `sign` and `saturate`.
-  They take `is_nan`, `is_inf`, `mix`, `step` and `smoothstep` too, the vectors `dot`, `length`, `distance` and `normalize`, and a `double3` `cross`.
+  They take `is_nan`, `is_inf`, `mix`, `step`, `smoothstep` and `fma` too, the vectors `dot`, `length`, `distance` and `normalize`, and a `double3` `cross`.
   No transcendental takes one, `sin` to `pow`: no target computes one in 64 bits, and a call is `no-matching-overload` whose detail says so; `x as float` takes the float's.
   Neither DXIL nor DXC's SPIR-V has a double `sqrt` or rounding, and DXC narrows a double handed to its float functions without a word, so HLSL writes each as a function of the text (EMIT-219).
 * **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.

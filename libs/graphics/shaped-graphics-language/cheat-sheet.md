@@ -697,6 +697,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   `is_nan` and `is_inf` are a bit test on every target, since Vulkan, WGSL and MSL may each assume neither arises.
   They take a half too, tested as the float it widens to.
   Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
+  `fma(a, b, c)` of halves, floats and doubles rounds once on the interpreter, and a GPU may round the product first except a double's on DXIL (EVAL-146, EMIT-254).
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
 - **`mat4` is the one matrix**, opaque and column-major, built from its columns: `mat4(c0, c1, c2, c3)` takes four `float4` (EVAL-99), `c3` being where the origin goes.

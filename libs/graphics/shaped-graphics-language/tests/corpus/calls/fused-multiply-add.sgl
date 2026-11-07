@@ -1,0 +1,27 @@
+// `fma(a, b, c)` is `a * b + c` rounded once, which the interpreter computes (EVAL-146)
+
+test fma(2.0, 3.0, 1.0) == 7.0 and fma(float2(1.0, 2.0), float2(3.0, 4.0), float2(5.0, 6.0)) == float2(8.0, 14.0)
+
+// (1 + 2^-12)^2 is 1 + 2^-11 + 2^-24, whose last bit is half an ULP of a float:
+// the product alone rounds it away, and one rounding keeps it
+test:
+    let a = 1.000244140625
+    let b = 1.00048828125
+    a * a - b == 0.0
+    fma(a, a, -b) == 0.000000059604644775390625
+
+// a NaN and an infinity are IEEE's, and a zero keeps the sign the sum gives it
+test:
+    let zero = 0.0
+    let inf = 1.0 / zero
+    is_nan(fma(inf, zero, 1.0)) and fma(inf, 2.0, 1.0) == inf and is_nan(fma(inf, 1.0, -inf))
+    fma(2.0, 3.0, inf) == inf
+    fma(-zero, 1.0, -zero).bits == 0x80000000u and fma(1.0, 1.0, -1.0).bits == 0u
+
+// an entry point that calls it is written for every target
+binding numbers:
+    values: mut buffer[float4]
+
+@compute(64) fun fused(@thread_id id: int3){numbers}:
+    let v = numbers.values[id.x]
+    numbers.values[id.x] = fma(v, v.yzwx, float4(fma(v.x, v.y, v.z)))
