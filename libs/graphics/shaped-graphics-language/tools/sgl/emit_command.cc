@@ -27,6 +27,7 @@ COMMAND("emit")
     auto target_name = cc::string("hlsl-dx12");
     auto run_tests = false;
     auto line_directives = false;
+    auto native_line_table = false;
     auto diagnostics = false;
     auto software_trace = false;
     auto undefined = cc::string("none");
@@ -48,6 +49,8 @@ COMMAND("emit")
     args.arg({"line-directives"}, line_directives,
              {.desc = "write `#line` into HLSL and MSL, as a host's compile does, naming the SGL line of each "
                       "statement"});
+    args.arg({"native-line-table"}, native_line_table,
+             {.desc = "write the SGL line of each operation into what --target spirv or dxil writes, for a debugger"});
     args.arg({"diagnostics"}, diagnostics,
              {.desc = "write print and assert into sg's debug buffer, as a dev build does"});
     args.arg({"software-trace"}, software_trace,
@@ -152,7 +155,8 @@ COMMAND("emit")
          .software_trace = software_trace,
          .weakens_float = weaken_float,
          .device_features = device_features,
-         .native = is_spirv || is_dxil ? sgl::emit::native_route::require : sgl::emit::native_route::text});
+         .native = is_spirv || is_dxil ? sgl::emit::native_route::require : sgl::emit::native_route::text,
+         .native_line_table = native_line_table});
     if (text.has_error())
     {
         cc::eprint(text.error());

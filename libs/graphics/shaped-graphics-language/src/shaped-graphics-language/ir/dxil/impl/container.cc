@@ -461,18 +461,42 @@ struct container_part
     return out.take();
 }
 
+/// EMIT-257: the name a debugger looks the program's debug info up by, NUL-ended and padded to a word.
+[[nodiscard]] cc::vector<byte> debug_name_part(cc::string_view name)
+{
+    auto out = byte_writer();
+    out.u16_le(0); // no flags
+    out.u16_le(u16(name.size()));
+    for (auto const c : name)
+        out.u8_le(u8(c));
+    out.u8_le(0);
+    auto const written = 4 + name.size() + 1;
+    out.zeros((4 - written % 4) % 4);
+    return out.take();
+}
+
 } // namespace
 
 cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
 {
     auto const bitcode = w.module().write(k_triple, k_layout);
     auto const& s = w.summary();
+    // DXC's -Zi: the program part keeps its bytes, and the debug module beside it carries the lines
+    auto const add_debug_parts = [&](cc::vector<container_part>& parts)
+    {
+        if (!w.has_debug_info())
+            return;
+        auto const debug = w.module().write(k_triple, k_layout, true);
+        parts.push_back({.name = four_cc('I', 'L', 'D', 'B'), .bytes = program_part(s, debug)});
+        parts.push_back({.name = four_cc('I', 'L', 'D', 'N'), .bytes = debug_name_part(w.debug_name())});
+    };
 
     auto parts = cc::vector<container_part>();
     parts.push_back({.name = four_cc('S', 'F', 'I', '0'), .bytes = feature_part(s)});
     if (s.is_library)
     {
         parts.push_back({.name = four_cc('R', 'D', 'A', 'T'), .bytes = runtime_data_part(s)});
+        add_debug_parts(parts);
         parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
         return assembled(parts);
     }
@@ -483,6 +507,7 @@ cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
     if (s.psv_stage == k_psv_hull || s.psv_stage == k_psv_domain || writes_primitives)
         parts.push_back({.name = four_cc('P', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::patch)});
     parts.push_back({.name = four_cc('P', 'S', 'V', '0'), .bytes = pipeline_state_part(s)});
+    add_debug_parts(parts);
     parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
 
     return assembled(parts);

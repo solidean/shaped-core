@@ -8,6 +8,8 @@
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
+#include <filesystem>
+
 using namespace cc::primitive_defines;
 
 // What SGL's own SPIR-V costs against SGL's text through DXC, for shaders of real work.
@@ -109,6 +111,57 @@ BENCHMARK("slib - a vertex and pixel pair through SGL's own binaries against DXC
         auto const native = front_only(target, route::require);
         CC_LOG_INFO("{}: through DXC {} ms, the text alone {} ms, SGL's own {} ms, {}x faster",
                     is_dx12 ? "dxil" : "spirv", dxc, text, native, dxc / native);
+    }
+}
+
+// EMIT-257: what a line table costs, on the shader with the most lines to say, whose modules reach several files.
+BENCHMARK("slib - the viewer's tracer through SGL's own binaries with and without their line table, best of N")
+{
+    auto names = cc::vector<cc::string>();
+    auto sources = cc::vector<cc::string>();
+    for (auto const dir : {cc::string_view("libs/graphics/shaped-viewer/shaders/sgl"),
+                           cc::string_view("libs/graphics/shaped-rendering/shaders/modules")})
+    {
+        namespace fs = std::filesystem;
+        auto const root = nx::source_path(dir);
+        for (auto const& e : fs::directory_iterator(fs::path(root.data(), root.data() + root.size())))
+            if (e.is_regular_file() && e.path().extension() == ".sgl")
+            {
+                names.push_back(cc::string(e.path().generic_string().c_str()));
+                sources.push_back(read_source(cc::format("{}/{}", dir, e.path().filename().generic_string().c_str())));
+            }
+    }
+    auto library = cc::vector<sgl::library_file>();
+    for (auto i = isize(0); i < names.size(); ++i)
+        library.push_back({.name = names[i], .source = sources[i]});
+
+    constexpr auto path = cc::string_view("libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl");
+    auto const source = read_source(path);
+    for (auto const target : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+    {
+        auto const is_dx12 = target == sgl::emit::target::hlsl_dx12;
+        auto bytes = isize(0);
+        auto const compile = [&](bool line_table)
+        {
+            return best_of(40,
+                           [&]
+                           {
+                               auto written = sgl::compile_to_text({.source = source,
+                                                                    .source_name = path,
+                                                                    .library = library,
+                                                                    .entry_point = "path_trace",
+                                                                    .target = target,
+                                                                    .native = sgl::emit::native_route::require,
+                                                                    .native_line_table = line_table});
+                               REQUIRE(written.has_value());
+                               bytes = is_dx12 ? written.value().dxil.size() : written.value().spirv.size() * 4;
+                           });
+        };
+        auto const off = compile(false);
+        auto const off_bytes = bytes;
+        auto const on = compile(true);
+        CC_LOG_INFO("{}: {} ms and {} bytes without the line table, {} ms and {} bytes with it",
+                    is_dx12 ? "dxil" : "spirv", off, off_bytes, on, bytes);
     }
 }
 

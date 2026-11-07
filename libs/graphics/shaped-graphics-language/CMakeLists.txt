@@ -72,6 +72,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/spirv/spirv.cc
     src/shaped-graphics-language/ir/spirv/impl/writer.cc
     src/shaped-graphics-language/ir/spirv/impl/writer_declarations.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer_lines.cc
     src/shaped-graphics-language/ir/spirv/impl/writer_operations.cc
     src/shaped-graphics-language/ir/dominance.cc
     src/shaped-graphics-language/ir/simplify.cc
@@ -86,6 +87,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/dxil/impl/writer.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_math.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_memory.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_lines.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_query.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_ray.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_resources.cc
@@ -517,6 +519,7 @@ if(SC_BUILD_TESTS)
         tests/emit/sixteen-bit-emit-test.cc
         tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/double-maths-emit-test.cc
+        tests/emit/native-line-table-test.cc
         tests/emit/spirv-emit-test.cc
         tests/ir/debug-ir-test.cc
         tests/ir/ir-test-support.hh

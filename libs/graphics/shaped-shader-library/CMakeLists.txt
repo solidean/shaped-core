@@ -274,6 +274,7 @@ if(SC_BUILD_TESTS)
             tests/sgl-double-maths-spirv-test.cc
             tests/sgl-hit-object-spirv-test.cc
             tests/sgl-native-dxil-test.cc
+            tests/sgl-native-line-table-test.cc
             tests/sgl-real-shaders-test.cc
             tests/sgl-signature-golden-test.cc
         )

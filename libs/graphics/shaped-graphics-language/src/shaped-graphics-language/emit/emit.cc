@@ -1,6 +1,8 @@
 #include "emit.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/ir/ir.hh>
@@ -148,6 +150,39 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
         m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl, .erases_prints = true}),
         t, sources);
 }
+
+namespace sgl::emit
+{
+namespace
+{
+/// EMIT-257: each statement's line and its calls, as `source_lines` reads them, in the order the statements stand.
+[[nodiscard]] ir::line_table line_table_of(check::checked_module const& m,
+                                           check::flat_entry_point const& e,
+                                           options const& sources)
+{
+    auto lines = check::source_lines{.m = m, .files = sources.files, .names = sources.names};
+    auto table = ir::line_table();
+    for (auto f = isize(0); f < sources.files.size(); ++f)
+    {
+        table.names.push_back(cc::string(lines.name_of(i32(f))));
+        table.texts.push_back(cc::string(sources.files[f].file.source));
+    }
+    table.statements.reserve(e.stmts.size());
+    for (auto const& s : e.stmts)
+    {
+        auto const origin = lines.origin_of(e, s);
+        auto place = ir::source_place{.file = origin.at.file,
+                                      .line = origin.at.line,
+                                      .calls_first = u32(table.calls.size()),
+                                      .calls_count = u32(origin.inlined_from.size())};
+        for (auto const& call : origin.inlined_from)
+            table.calls.push_back({.file = call.file, .line = call.line});
+        table.statements.push_back(place);
+    }
+    return table;
+}
+} // namespace
+} // namespace sgl::emit
 
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,
                                                     check::flat_entry_point const& e,
@@ -356,6 +391,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (sources.native != native_route::text)
     {
         auto program = ir::program();
+        if (sources.native_line_table && !sources.files.empty())
+            program.lines = line_table_of(m, plan.e, sources);
         auto const is_dxil = t == target::hlsl_dx12;
         auto const gap
             = is_dxil ? ir::compile_dxil(plan, program, result.dxil) : ir::compile_spirv(plan, program, result.spirv);
