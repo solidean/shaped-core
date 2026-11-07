@@ -1,5 +1,6 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
@@ -20,7 +21,7 @@ struct temp_dir
 {
     std::filesystem::path path;
 
-    explicit temp_dir(char const* name) : path(std::filesystem::temp_directory_path() / name)
+    explicit temp_dir(char const* name) : path(cc::temp_file_path(name).c_str())
     {
         std::error_code ec;
         std::filesystem::remove_all(path, ec);
