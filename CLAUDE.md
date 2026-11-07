@@ -408,6 +408,8 @@ What binds you while writing:
 
 * **Never reflow prose into a justified block.
   A new point starts a new line.**
+* **American English**: `color`, not `colour`; `meters`, not `metres`; `center`, `gray`, `behavior`, `neighbor`, `-ize`.
+  Identifiers and prose alike, in new code; existing names change only with an API decision.
 * This binds **all prose we write**, whatever the language it sits in: `///` and `//` comments, `#` comments in CMake and Python, docstrings, commit messages and PR descriptions.
   And **every `.md` file in the repo** — docs, readmes, cheat sheets, this file, skill files.
   Build files are not exempt either.
