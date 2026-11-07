@@ -95,6 +95,37 @@ So it needs other work beside it, and is more likely one more symptom of the GPU
 
 **Not done:** why a real loss exits 0xC0000409 rather than the abort handler's 3 now that the report completes, which is `crash_handler.cc`'s and left to it.
 
+**Bisected with `--shard`, the same day.**
+nexus's `--shard K/N` splits the `vulkan` context's children by a hash of their names, so the halves are disjoint and stable.
+
+| shard of the `vulkan` context | clean iterations | failures |
+|---|---|---|
+| 0 of 2 | 100 | none |
+| 1 of 2 | 34 | 1: a `mat3` test read nine of 64 matrices back as another resource's bytes, with no loss |
+| 1 of 4 | 100 | none |
+| 3 of 4 | 100 | none |
+
+So no quarter does it on its own, though the half that holds both quarters failed.
+Each quarter's iteration is about two seconds, against seven for the whole context, so either the cause takes tests from both quarters or it takes a longer run's worth of work.
+That points at state the run builds up rather than one test.
+The resource use over a run was not measured.
+
+The `mat3` failure is the same kind as the stale readback: foreign bytes where a buffer's own should be.
+The other four buffers of that test read back right, and the bytes it got were plausibly another test's, which suggests one allocation's memory in use by a second live resource.
+That is a hypothesis; it may be what a loss looks like when it does not hang the GPU.
+
+**Out-of-bounds shader access is excluded.**
+sg enables only `nullDescriptor` of `VK_EXT_robustness2`, so on vulkan an out-of-bounds access is undefined where dx12's descriptors bound it, which fitted dx12 alone running clean.
+With `robustBufferAccess`, `robustBufferAccess2` and `robustImageAccess2` turned on, the `vulkan` context still lost the device, on iteration 36.
+That covers descriptor-bound buffers and images; an out-of-bounds buffer device address is not bounds-checked by either, so that is not excluded.
+GPU-assisted validation stalled the context in an async-upload test before reporting anything, and was given up.
+
+**Async transfer is in every loss, and could not be taken out.**
+The tests a loss is first seen in are async upload, async download and stream tests more often than not, and the first abort of all was `vkQueueSubmit (async upload)`.
+Forcing transfers onto the graphics queue, the fallback for a device with no spare queue, hangs the first iteration instead.
+That is [bug-sg-vulkan-transfer-fallback-deadlocks](bug-sg-vulkan-transfer-fallback-deadlocks.md).
+So whether the loss needs the transfer queues is still open, and making that fallback work is what would answer it.
+
 **On the Agility SDK, the loss on every run is another bug.**
 Intel's dx12 driver removes the device creating one hit-object pipeline, through DXC's DXIL and SGL's alike.
 [intel-d3d12-hit-object-pipeline-removes-device](../../../../../docs/bugs-external/intel-d3d12-hit-object-pipeline-removes-device/readme.md) is the write-up.
