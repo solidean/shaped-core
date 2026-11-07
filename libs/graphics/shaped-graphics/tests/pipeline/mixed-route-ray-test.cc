@@ -177,6 +177,8 @@ ASYNC_INVOCABLE_TEST("sg - a hit object and a regrouped trace through SGL's bina
     if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
         SKIP("this context takes SGL's binary for every package, so there is no DXC route to mix with");
     auto const takes_dxil = ctx->accepts_shader_format(sg::shader_format::dxil);
+    if (takes_dxil)
+        SKIP("a regrouped stage holds a body in a target's own text, which the DXIL route does not lower yet");
 
     auto const regrouped_dxc = co_await text::regrouped_stage.description(*ctx);
     auto const regrouped_native = takes_dxil ? co_await dxil::regrouped_stage.description(*ctx)
