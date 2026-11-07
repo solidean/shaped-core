@@ -105,15 +105,23 @@ ASYNC_INVOCABLE_TEST("sv - turning a layer's bloom on and off keeps its accumula
     if (!sv_test::can_run(ctx))
         SKIP("no ray tracing or no SGL compiler, so the tracer does not build");
 
+    // From past the start only: a view restarts on purpose while its material compiles, which has nothing to do with bloom.
+    constexpr auto settled = u32(32);
+
     auto highest = u32(0);
     auto frames = 0;
     (void)co_await captured_middle(ctx, {.curve = sr::display_curve::neutral}, "256",
                                    [&](sv::view_ref const& view, sr::display_transform& shown)
                                    {
                                        auto const samples = view.accumulated_samples();
+                                       if (samples < settled && highest < settled)
+                                       {
+                                           highest = samples;
+                                           return;
+                                       }
                                        CHECK(samples >= highest).dump("frame", frames);
                                        highest = cc::max(highest, samples);
-                                       if (samples > 0 && (frames++ / 4) % 2 == 0)
+                                       if ((frames++ / 4) % 2 == 0)
                                            shown.bloom.strength = 0.5f;
                                    });
     CHECK(frames > 8);
