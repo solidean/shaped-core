@@ -531,6 +531,9 @@ fn main_ps(p: pixel_input) -> target_ {
   The first guess is an atomic load where the text reads plainly, since either is only a guess the exchange checks.
 * **EMIT-251** A native route holds a `bool32` as a `uint` of 0 or 1, in memory and as a value alike.
   `x as bool32` is a `select` of 1 and 0, and `x as bool` is a comparison with 0, so any word but 0 reads as `true`, as the text's does.
+* **EMIT-252** A native route updates an `@atomic` image's texel through a place of its own, the image and the coordinate, with an array's layer as the coordinate's last lane.
+  On SPIR-V it is `OpImageTexelPointer` of the image's variable, sample 0, in `Image` storage, which the atomics take as they take any pointer.
+  On DXIL it is `atomicBinOp` or `atomicCompareExchange` of the image's handle, the coordinate's lanes as its offsets and `undef` past them.
 
 ## Lines
 

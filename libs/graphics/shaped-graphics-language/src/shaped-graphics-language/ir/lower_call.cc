@@ -393,7 +393,23 @@ value_ref lowering::atomic(flat_call const& c, flat_expr const& x)
 {
     auto const arguments = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(_e.at(c.arguments)));
     auto const& record = *_m.builtin_function(c.intrinsic);
-    auto const target = place_of(arguments[0]);
+    // an `@atomic` image's `texel_max(i, xy, v)`, which the flat tree writes for `i[xy].max(v)` (CHK-373)
+    auto const is_texel = record.is_atomic && cc::string_view(record.name).starts_with("texel_");
+    auto const texel_shape = check::texture_shape((record.write.data >> 12) & 15u);
+    auto const is_layered
+        = texel_shape == check::texture_shape::d1_array || texel_shape == check::texture_shape::d2_array;
+    // where the atomic's own operands begin: after the image, the coordinate and an array's layer
+    auto const first = !is_texel ? isize(1) : is_layered ? isize(3) : isize(2);
+    auto const texel_coordinate = [&]() -> value_ref
+    {
+        auto const xy = expr(arguments[1]);
+        if (!is_layered)
+            return xy;
+        auto const xy_type = _out.type_of(xy);
+        return add(op::construct, vector_type(scalar_of(xy_type), lanes_of(xy_type) + 1), {xy, expr(arguments[2])});
+    };
+    auto const texel = is_texel ? texel_of(arguments[0], texel_coordinate()) : cc::optional<place>();
+    auto const target = is_texel ? texel : place_of(arguments[0]);
     if (!target.has_value())
     {
         unsupported(cc::format("the atomic {} of something that is no place", record.name));
@@ -403,12 +419,13 @@ value_ref lowering::atomic(flat_call const& c, flat_expr const& x)
     auto const held = _out.at(_out.type_of(pointer)).element;
     auto const& scalar = _out.at(held);
     auto const is_float = scalar.kind == type_kind::float_;
+    // a texel is its image's scalar, where a buffer's element is an `atomic[T]` that may hold a float as bits
     auto const declared_float
-        = _m.at(_m.at(_e.at(arguments[0]).type).element).kind == check::type_kind::structure
+        = !is_texel && _m.at(_m.at(_e.at(arguments[0]).type).element).kind == check::type_kind::structure
        && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element) != nullptr
        && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element)->leaf_kind == value_kind::scalar_float;
-    auto const name = cc::string_view(record.name);
-    auto const value = arguments.size() > 1 ? expr(arguments[1]) : value_ref::none;
+    auto const name = cc::string_view(record.name).subview(is_texel ? 6 : 0);
+    auto const value = arguments.size() > first ? expr(arguments[first]) : value_ref::none;
     // a float held as a uint's bits, which every target but vulkan's with a device float add keeps it as
     if (declared_float && !is_float)
     {
@@ -454,7 +471,7 @@ value_ref lowering::atomic(flat_call const& c, flat_expr const& x)
         return add(op::atomic_exchange, held, {pointer, value});
     if (name.starts_with("compare_exchange"))
     {
-        auto const desired = expr(arguments[2]);
+        auto const desired = expr(arguments[first + 1]);
         auto const old = add(op::atomic_compare_exchange, held, {pointer, desired, value});
         auto const result = value_type(x.type);
         if (result == held)

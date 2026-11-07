@@ -41,6 +41,7 @@ enum op_code : u32
     FunctionEnd = 56,
     FunctionCall = 57,
     Variable = 59,
+    ImageTexelPointer = 60,
     Undef = 1,
     Load = 61,
     Store = 62,
@@ -306,6 +307,7 @@ enum storage_class : u32
     TaskPayloadWorkgroupEXT = 5402,
     FunctionStorage = 7,
     PushConstant = 9,
+    Image = 11,
     StorageBuffer = 12,
 };
 } // namespace spv

@@ -49,6 +49,7 @@ enum class shape : u8
     load,
     store,
     access_chain,
+    texel_pointer,
     array_length,
     stage_load,
     stage_store,
@@ -140,6 +141,7 @@ constexpr shape k_shapes[] = {
     shape::load,                // load
     shape::store,               // store
     shape::access_chain,        // access_chain
+    shape::texel_pointer,       // texel_pointer
     shape::array_length,        // array_length
     shape::stage_load,          // stage_load
     shape::stage_store,         // stage_store
@@ -963,6 +965,19 @@ private:
         }
         case shape::access_chain:
             return check_chain(i, operands);
+        case shape::texel_pointer:
+        {
+            need_count(operands, 3);
+            auto const image = _failure.empty() ? pointer_operand() : type_ref::none;
+            if (!_failure.empty())
+                return;
+            if (kind_of(image) != type_kind::image)
+                return mismatch(type_at(operands, 0), "a pointer to an image");
+            if (kind_of(i.type) != type_kind::pointer || _p.at(i.type).space != storage::image
+                || _p.at(i.type).element != _p.at(image).element)
+                return mismatch(i.type, "a pointer of image storage to the image's scalar");
+            return;
+        }
         case shape::array_length:
             (void)pointer_operand();
             return;

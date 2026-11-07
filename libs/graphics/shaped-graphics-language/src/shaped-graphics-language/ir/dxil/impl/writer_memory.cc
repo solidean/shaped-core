@@ -292,6 +292,20 @@ writer::place writer::place_of(value_ref pointer)
     return _places[index_of(pointer)];
 }
 
+void writer::texel_pointer(u32 index, instruction const& i)
+{
+    auto const operands = _p.operands_of(i);
+    auto const image = value_ref(operands[0]);
+    auto result = is_global(image) ? place{.root = u32(index_of(image))} : _places[index_of(image)];
+    result.kind = place::kind_t::texel;
+    auto const coordinate = value_ref(operands[1]);
+    result.path_first = u32(_paths.size());
+    result.path_count = leaves_of(_p.type_of(coordinate));
+    for (auto l = u32(0); l < result.path_count; ++l)
+        _paths.push_back(leaf_at(coordinate, l));
+    _places[index] = result;
+}
+
 ll_value writer::add_dynamic(ll_value dynamic, ll_value index, u32 scale)
 {
     auto const scaled = scale == 1 ? index : _m.binary(binary_op::mul, index, _m.constant_i32(scale));

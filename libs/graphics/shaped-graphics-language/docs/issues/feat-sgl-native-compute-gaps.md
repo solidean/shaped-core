@@ -5,14 +5,11 @@ parent: epic-sgl-native-ir-targets
 
 # What a compute entry point still cannot lower
 
-Texel atomics, a body or a type in a target's own text, DXIL's `double` maths, and an `affine3` in GPU memory.
+A body or a type in a target's own text, DXIL's `double` maths, and an `affine3` in GPU memory.
 A sample's offset too, which no fixture holds.
 
 ## Left, and why
 
-- **Texel atomics** (`coherence.sgl`'s `reduce_max`), on both writers.
-  A texel is an image and a coordinate rather than a place, so `lowering::atomic` has no pointer to update.
-  It wants a place of its own: `OpImageTexelPointer` on SPIR-V, whose pointer the atomics already take, and on DXIL the image's handle with the coordinate as `atomicBinOp`'s three offsets.
 - **A body in a target's own text** (`double_values.sgl`'s `triple_values`) and **a type spelled in it** (`repack_values`'s `packed`, CHK-432), on both writers.
   These stay text by what they are: the source states the target's text, which only that target's compiler reads.
   What the prelude says that way is another matter: `maybe_reorder` moved to SGL, and so may anything else of the prelude's.
@@ -31,6 +28,7 @@ A sample's offset too, which no fixture holds.
 | DXIL's shuffles, ballot, quad reads and inclusive folds | EMIT-249 | the DXIL writer |
 | a float atomic with no device add | EMIT-250 | shared lowering |
 | `bool32` | EMIT-251 | shared lowering |
+| texel atomics, in every image shape | EMIT-252 | `op::texel_pointer`, and a texel place on DXIL |
 
 The prologue is a copy: the text route still writes EMIT-229 by hand, and lowering writes it again.
 Like `print` before LEGAL-70, it belongs in legalize, as flat statements over a workgroup `sgl_written` every route then lowers.
@@ -59,3 +57,22 @@ Each lowering runs on the GPU through `dx12-native-dxil` and `vulkan-native-spir
 - `bool32`: `compute-test.cc`'s layout test.
 
 A temporary mutation of each failed on the native contexts alone: a 64-bit `umin` as `umax`, a shadow cleared to ones, quad axis 1 as 2, the float sum added twice, and `as bool` read as `== 0`.
+
+## Texel atomics, measured on 2026-11-07
+
+`op::texel_pointer` is the image and the coordinate as a place, a pointer of `storage::image` every atomic takes unchanged.
+A texel load or store could take the same pointer, though nothing lowers one through it yet.
+Against DXC's output for `reduce_max`, the operations are the same: `OpImageTexelPointer` then `OpAtomicUMax` and `OpAtomicIAdd`, and `atomicBinOp` 7 and 0 with `undef` past the coordinate.
+
+| | before | after |
+|---|---|---|
+| SPIR-V, compute | 117 of 120 | 119 of 121 |
+| DXIL, compute | 116 of 120 | 118 of 121 |
+| SPIR-V, under the robustness profiles | 876 | 882 |
+| DXIL, under the robustness profiles | 849 | 855 |
+| both writers, with the device features | 687 | 691 |
+
+The 121st entry is `coherence.sgl`'s new `texel_shapes`, one of each image shape.
+It takes a signed `min` on a 1D image, an `add` on a 2D array's layer, an `exchange` on a 3D image, both compare-exchanges, and an atomic store and load.
+Its GPU test, in `compute-coherence-test.cc`, checks what each returns and leaves on every context, and a layer and a depth of their own beside each.
+A layer lowered as 0 failed `dx12-native-dxil` and `vulkan-native-spirv` alone, and DXC's contexts passed.

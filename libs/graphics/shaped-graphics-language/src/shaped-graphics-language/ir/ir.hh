@@ -132,6 +132,8 @@ enum class sgl::ir::storage : sgl::u8
     ray_output,
     /// What a call of a callable hands over and reads back: one global per type.
     callable_output,
+    /// One texel of a storage image, which only `op::texel_pointer` reaches.
+    image,
 };
 
 /// One member of a structure; `offset` and `matrix_stride` mean something where it stands in GPU memory.
@@ -382,6 +384,9 @@ enum class sgl::ir::op : sgl::u16
     /// Operands: pointer, value.
     store,
     access_chain,
+    /// Operands: the image's pointer, the coordinate, the sample.
+    /// A texel as a place: a pointer of `storage::image` to the image's scalar, which an atomic takes.
+    texel_pointer,
     /// Operands: the block's pointer, the position of its runtime array as a literal.
     array_length,
     /// Operands: a position in `program::stage_elements` as a literal, then an index where its `array_size` is set.

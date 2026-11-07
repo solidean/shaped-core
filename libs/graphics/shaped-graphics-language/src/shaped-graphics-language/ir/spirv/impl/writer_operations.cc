@@ -134,6 +134,7 @@ constexpr op_rule k_rules[] = {
     {op::construct, rule_kind::plain, spv::CompositeConstruct},
     {op::load, rule_kind::plain, spv::Load},
     {op::access_chain, rule_kind::plain, spv::AccessChain},
+    {op::texel_pointer, rule_kind::plain, spv::ImageTexelPointer},
     {op::combine_sampler, rule_kind::plain, spv::SampledImage},
     {op::image_read, rule_kind::plain, spv::ImageRead},
     {op::image_levels, rule_kind::plain, spv::ImageQueryLevels},

@@ -11,7 +11,7 @@ using emit::impl::address_space;
 
 namespace
 {
-constexpr auto k_storage_classes = isize(storage::callable_output) + 1;
+constexpr auto k_storage_classes = isize(storage::image) + 1;
 
 /// Whether two descriptions are one type, for what is interned: a scalar, a vector, an array, an image, a sampler.
 [[nodiscard]] bool is_same(ir::type const& a, ir::type const& b)
@@ -527,6 +527,23 @@ cc::optional<place> lowering::chain_of(flat_expr_id id, cc::vector<u32>& chain)
         return place{.pointer = object.value().pointer, .type = x.type};
     }
     return {};
+}
+
+cc::optional<place> lowering::texel_of(flat_expr_id image, value_ref coordinate)
+{
+    auto const* const bound = _e.at(image).node.try_as<flat_binding_member>();
+    auto const resource = bound != nullptr
+                            ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
+                            : bound_element(image);
+    if (!ir::is_valid(resource))
+    {
+        unsupported("a texel of a binding array");
+        return {};
+    }
+    auto const held = _out.at(_out.at(_out.type_of(resource)).element).element;
+    auto const pointer = add(op::texel_pointer, pointer_type(held, storage::image),
+                             {resource, coordinate, uint_constant(0)}, 0, nonuniform_of(resource));
+    return place{.pointer = pointer, .type = _m.at(_e.at(image).type).element};
 }
 
 cc::optional<place> lowering::place_of(flat_expr_id id)

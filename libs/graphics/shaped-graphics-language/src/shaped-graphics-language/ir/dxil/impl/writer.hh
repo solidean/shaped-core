@@ -152,6 +152,8 @@ private:
             buffer,
             /// A task stage's payload: `path_first` and `path_count` are a range of `_paths`.
             payload,
+            /// One texel of a storage image: `path_first` and `path_count` are the coordinate's lanes in `_paths`.
+            texel,
         } kind = kind_t::none;
         /// The storage in `_memories`, or the global.
         u32 root = 0;
@@ -329,6 +331,10 @@ private:
     [[nodiscard]] cc::vector<ll_value> payload_pointers_of(place const& p, type_ref t);
     [[nodiscard]] place place_of(value_ref pointer);
     void access_chain(u32 index, instruction const& i);
+    /// A texel's place, whose coordinate an atomic hands DXIL as its offsets.
+    void texel_pointer(u32 index, instruction const& i);
+    /// An atomic's three offsets: a buffer's element and its bytes, or a texel's coordinate.
+    void atomic_offsets(place const& p, ll_value (&offsets)[3]);
     void load(u32 index, instruction const& i);
     void store(instruction const& i);
     void load_memory(place const& p, type_ref t, cc::vector<ll_value>& out);

@@ -466,20 +466,34 @@ void writer::array_length(u32 index, instruction const& i)
     define_one(index, is_raw ? _m.binary(binary_op::lshr, width, _m.constant_i32(2)) : width);
 }
 
+void writer::atomic_offsets(place const& p, ll_value (&offsets)[3])
+{
+    auto const undefined = _m.constant_undef(_m.int_type());
+    offsets[0] = offsets[1] = offsets[2] = undefined;
+    if (p.kind == place::kind_t::texel)
+    {
+        for (auto l = u32(0); l < p.path_count && l < 3; ++l)
+            offsets[l] = _paths[p.path_first + l];
+        return;
+    }
+    auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
+    offsets[0] = is_raw ? _m.binary(binary_op::add, _m.binary(binary_op::mul, p.index, _m.constant_i32(4)),
+                                    byte_offset(p, p.offset))
+                        : p.index;
+    if (!is_raw)
+        offsets[1] = byte_offset(p, p.offset);
+}
+
 ll_value writer::atomic_on_buffer(place const& p, u32 op, ll_value value, ll_type t)
 {
-    auto const handle = handle_at(p);
-    auto const undefined = _m.constant_undef(_m.int_type());
-    auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
-    auto const first = is_raw ? _m.binary(binary_op::add, _m.binary(binary_op::mul, p.index, _m.constant_i32(4)),
-                                          byte_offset(p, p.offset))
-                              : p.index;
+    ll_value offsets[3];
+    atomic_offsets(p, offsets);
     ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::atomic_bin_op)].number),
-                             handle,
+                             handle_at(p),
                              _m.constant_i32(op),
-                             first,
-                             is_raw ? undefined : byte_offset(p, p.offset),
-                             undefined,
+                             offsets[0],
+                             offsets[1],
+                             offsets[2],
                              value};
     return call(dx_op::atomic_bin_op, t, args);
 }
@@ -525,12 +539,13 @@ void writer::atomic_op(u32 index, instruction const& i)
             auto const pointer = memory_pointer(where, 0, held);
             return define_one(index, _m.extract_value(_m.atomic_exchange(pointer, comparator, desired), 0));
         }
-        auto const undefined = _m.constant_undef(_m.int_type());
+        ll_value offsets[3];
+        atomic_offsets(where, offsets);
         ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::atomic_compare_exchange)].number),
                                  handle_at(where),
-                                 where.index,
-                                 byte_offset(where, where.offset),
-                                 undefined,
+                                 offsets[0],
+                                 offsets[1],
+                                 offsets[2],
                                  comparator,
                                  desired};
         return define_one(index, call(dx_op::atomic_compare_exchange, type, args));
