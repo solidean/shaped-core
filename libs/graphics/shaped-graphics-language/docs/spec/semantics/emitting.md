@@ -642,6 +642,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Each reads and writes a double's bits through `asuint` and `asdouble`, over its arithmetic and `fma`: DXC hands a double to its own `sqrt` or `floor` as a float.
   `sqrt` and `inverse_sqrt` start from the float `rsqrt` of the mantissa brought to 1 to 4, take two Newton steps, and `sqrt` corrects by the residual `fma` gives.
   `sign` and `saturate` are HLSL's own, which take a double.
+* **EMIT-255** HLSL writes a double's bits (CHK-517) as functions of the text, `sgl_double_bits` over `asuint` and `sgl_double_from_bits` over `asdouble`.
+  `asuint` hands a double's words to two out parameters, which no expression can take.
+  A native route bitcasts: SPIR-V's `OpBitcast` between a double and a `uint2`, and DXIL's `splitDouble` and `makeDouble` (EMIT-196).
 * **EMIT-254** `fma` is each target's own: HLSL's `fma` of a double and `mad` of a float or a half, and WGSL's and MSL's `fma`.
   A native route writes DXIL's `dx.op.fma` of a double and `dx.op.fmad` of the others, and SPIR-V's GLSL.std.450 `Fma`, as DXC writes them.
   Only a double's on DXIL is stated to round once, as HLSL's documentation of `fma` says, and every other may round the product first.

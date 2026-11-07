@@ -88,6 +88,19 @@ void non_finite_each(leaves in, result& out)
     }
 }
 
+/// CHK-517: a double's 64 bits as a uint2, the low word first.
+void double_as_uint(leaves in, result& out)
+{
+    auto const bits = in[0].wide_bits();
+    out.push_back(scalar::of_uint(u32(bits)));
+    out.push_back(scalar::of_uint(u32(bits >> 32)));
+}
+/// CHK-517: the double a uint2's two words are, the low word first.
+void uint_as_double(leaves in, result& out)
+{
+    out.push_back(scalar::of_wide(check::value_kind::scalar_double, u64(in[1].bits) << 32 | in[0].bits));
+}
+
 /// EVAL-146: `a * b + c` rounded once.
 void fma(leaves in, result& out)
 {
@@ -414,6 +427,21 @@ constexpr cc::string_view k_library_names[] = {
 constexpr cc::string_view k_sign[] = {"sign"};
 constexpr cc::string_view k_saturate[] = {"saturate"};
 
+// EMIT-255: HLSL's `asuint` of a double hands its words to two out parameters, so each direction is a function of the text
+cc::string double_bits_helper(helper_context const& c)
+{
+    return c.target == language::hlsl ? cc::string("uint2 sgl_double_bits(double x)\n{\n    uint2 u;\n    asuint(x, "
+                                                   "u.x, u.y);\n    return u;\n}\n")
+                                      : cc::string();
+}
+cc::string double_from_bits_helper(helper_context const& c)
+{
+    return c.target == language::hlsl
+             ? cc::string("double sgl_double_from_bits(uint2 u)\n{\n    return asdouble(u.x, u.y);\n}\n")
+             : cc::string();
+}
+constexpr cc::string_view k_double_bits_names[] = {"asuint", "asdouble", "sgl_double_bits", "sgl_double_from_bits"};
+
 spelling library_call(cc::string_view name)
 {
     return {.hlsl = cc::format("sgl_double_{}", name), .helper = library_helper, .hlsl_names = k_library_names};
@@ -482,4 +510,12 @@ void sgl::builtins::register_double_math(registry& r)
                      "/// `v * inverse_sqrt(dot(v, v))`.");
     }
     add_function(r, "cross", {"a", "double3", "b", "double3"}, "double3", cross, library_call("cross"));
+
+    r.add_comment("// a double's bits as two words, the low first, so no ulong and no shader_int64 stands between "
+                  "(CHK-517);\n"
+                  "// `d.bits` and `double.from_bits(u)` in core.sgl are how a program spells them");
+    add_function(r, "reinterpret_as_uint", {"x", "double"}, "uint2", double_as_uint,
+                 {.hlsl = "sgl_double_bits", .helper = double_bits_helper, .hlsl_names = k_double_bits_names});
+    add_function(r, "reinterpret_as_double", {"x", "uint2"}, "double", uint_as_double,
+                 {.hlsl = "sgl_double_from_bits", .helper = double_from_bits_helper, .hlsl_names = k_double_bits_names});
 }

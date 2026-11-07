@@ -1001,6 +1001,9 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         auto const to_width = _out.at(scalar_of(result)).width;
         if (from_width == to_width)
             return add(op::bitcast, result, {args[0]});
+        // CHK-517: a double and its two words, as many bits either way
+        if (from_width * u32(lanes_of(from)) == to_width * u32(lanes_of(result)))
+            return add(op::bitcast, result, {args[0]});
         // a half's bits in the low half of a uint, and back
         auto const narrow = intern({.kind = type_kind::int_, .width = 16});
         if (from_width == 16 && to_width == 32)

@@ -700,6 +700,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   `fma(a, b, c)` of halves, floats and doubles rounds once on the interpreter, and a GPU may round the product first except a double's on DXIL (EVAL-146, EMIT-254).
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
+  A double's `d.bits` is a `uint2`, low word first, and `double.from_bits(u)` takes one back, with no `ulong` or `shader_int64` between (CHK-517).
 - **`mat4` is the one matrix**, opaque and column-major, built from its columns: `mat4(c0, c1, c2, c3)` takes four `float4` (EVAL-99), `c3` being where the origin goes.
   `register_transforms.cc` holds it, `m * p`, `m * v`, `m * float4`, `m * m`, `determinant(m) -> float` (EVAL-98) and `transpose(m)` of a `mat4`, a `mat3` or a `mat2`, every target's own function.
   `a + b`, `a - b`, `-m`, `m * s` and `s * m` act on each element of any of the three (EVAL-109).

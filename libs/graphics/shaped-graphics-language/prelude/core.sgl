@@ -102,6 +102,10 @@ fun float4.from_bits(u: uint4) => reinterpret_as_float(u)
 fun half.bits => reinterpret_as_uint(self)
 fun half.from_bits(u: uint) => reinterpret_as_half(u)
 
+// a double's bits are two words, the low first, so no ulong stands between and nothing needs shader_int64 (CHK-517)
+fun double.bits => reinterpret_as_uint(self)
+fun double.from_bits(u: uint2) => reinterpret_as_double(u)
+
 fun int.from_bits(u: uint) => reinterpret_as_int(u)
 fun int2.from_bits(u: uint2) => reinterpret_as_int(u)
 fun int3.from_bits(u: uint3) => reinterpret_as_int(u)
