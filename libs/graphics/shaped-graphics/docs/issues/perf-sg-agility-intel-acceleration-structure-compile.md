@@ -5,11 +5,13 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_runtime.cc
 ---
 
-# A process on the Agility SDK pays 25-37 s per acceleration-structure kind on Intel, so the test suite takes 182 s
+# A process on the Agility SDK pays a 20-30 s compile at its first acceleration-structure build on Intel, so the test suite takes 182 s
 
-On Intel's driver 32.0.101.9150, a process that has made a D3D12 device on the Agility SDK's runtime recompiles the driver's acceleration-structure kernels on every run.
-Each first build of a kind costs 25–37 s, on dx12 and on vulkan alike, and the compiles queue behind one another.
-[The external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the matrix that isolates it.
+On Intel's driver 32.0.101.9150, a process that has called the Agility SDK's `CreateDeviceFactory` never reads the driver's acceleration-structure compile back from its cache.
+Its first build, of any kind, costs 20–30 s on dx12 and on vulkan alike; every later build of the process costs nothing.
+Without the Agility SDK the compile is cached per application, and the first build takes about 12 ms.
+[The external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the matrix that isolates the trigger.
+Its `run.py` is a standalone reproduction.
 
 ## Measured, 2026-11-07, Arc B580
 
@@ -28,7 +30,8 @@ Every option below trades some of that on Intel for time, so which one is a deci
 1. **Keep the Agility runtime out of processes that do not need it.**
    A `dx12_config` field, or a process-wide setting, picks the system runtime.
    The default test drivers run on it, and one Agility driver runs the tests that need SM 6.9.
-   That driver must be its own process to help, since one Agility device poisons vulkan's builds too.
+   That driver must be its own process to help, since the Agility device factory alone, with no dx12 device, poisons vulkan's builds too.
+   sg makes that factory the first time a dx12 context asks for the Agility runtime, so the setting must keep it from being made at all.
    Nexus runs drivers in-process, so that is either a separate binary or `--thorough` only.
 2. **Scope it to the vendor.** The same, applied only where the adapter is Intel's, so other machines keep full coverage in the default run.
 3. **Leave it, and raise the budget.** Cheapest, and the 182 s stays.
@@ -38,5 +41,6 @@ Option 1's knob is what an application would reach for there as well.
 
 ## Not done
 
-- No standalone reproduction yet, so nothing is filed with Intel.
+- Nothing is filed with Intel yet; the external entry carries a draft report.
+- Driver 32.0.101.8629, the last good one of the related IGCIT #1548, was not tried.
 - Another Agility SDK version was not tried; that needs a new pin and its terms read.
