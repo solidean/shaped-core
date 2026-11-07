@@ -302,5 +302,5 @@ TEST("slib - a device's micromaps and reordering leave only the named gaps on ei
             }
     }
     CC_LOG_INFO("device features: {} lowered, {} refused", lowered, refused_count);
-    CHECK(lowered >= 660);
+    CHECK(lowered >= 680);
 }
