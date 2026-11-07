@@ -159,6 +159,8 @@ constexpr shape k_shapes[] = {
     shape::atomic,              // atomic_fadd
     shape::no_result,           // control_barrier
     shape::no_result,           // discard
+    shape::no_result,           // emit_vertex
+    shape::no_result,           // end_strip
     shape::combine_sampler,     // combine_sampler
     shape::image_access,        // sample_lod
     shape::image_access,        // sample_implicit

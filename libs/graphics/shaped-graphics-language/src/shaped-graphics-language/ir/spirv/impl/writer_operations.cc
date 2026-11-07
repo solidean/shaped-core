@@ -39,6 +39,7 @@ enum class rule_kind : u8
     atomic_fadd,
     barrier,
     discard,
+    stream,
     derivative,
     sample_lod,
     sample_bias,
@@ -158,6 +159,8 @@ constexpr op_rule k_rules[] = {
     {op::atomic_fadd, rule_kind::atomic_fadd, spv::AtomicFAddEXT},
     {op::control_barrier, rule_kind::barrier, spv::ControlBarrier},
     {op::discard, rule_kind::discard, spv::DemoteToHelperInvocation},
+    {op::emit_vertex, rule_kind::stream, spv::EmitVertex},
+    {op::end_strip, rule_kind::stream, spv::EndPrimitive},
     {op::sample_lod, rule_kind::sample_lod, spv::ImageSampleExplicitLod},
     {op::sample_implicit, rule_kind::plain, spv::ImageSampleImplicitLod},
     {op::sample_bias, rule_kind::sample_bias, spv::ImageSampleImplicitLod},
@@ -306,15 +309,32 @@ void writer::nonuniform(instruction const& i, u32 id)
         mark(id_of(index));
 }
 
-u32 writer::element_pointer(u32 element)
+u32 writer::element_pointer(u32 element, u32 index)
 {
     auto const lane = _element_lanes[element];
     if (lane == 0)
         return _elements + element;
-    // `SampleMask` is an array of one, the only element of a stage that stands behind one
+    // an element behind an array: per control point or vertex, `SampleMask` of one, or a tessellation factor
+    auto const& e = _p.stage_elements[element];
     auto const pointer = _bound++;
-    emit(_code, spv::AccessChain, {lane, pointer, _elements + element, literal_id(0)});
+    auto const at = e.array_size > 0 ? index : literal_id(e.system == built_in::sample_mask ? 0 : e.semantic_index);
+    emit(_code, spv::AccessChain, {lane, pointer, _element_variables[element], at});
     return pointer;
+}
+
+void writer::tess_coord(instruction const& i, u32 id)
+{
+    auto const element = _p.operands_of(i)[0];
+    auto three = type_ref::none;
+    for (auto t = isize(0); t < _p.types.size(); ++t)
+        if (_p.types[t].kind == type_kind::vector && _p.types[t].count == 3
+            && _p.types[t].element == _p.at(i.type).element)
+            three = type_ref(t);
+    if (i.type == three)
+        return emit(_code, spv::Load, {id_of(i.type), id, _elements + element});
+    auto const loaded = _bound++;
+    emit(_code, spv::Load, {id_of(three), loaded, _elements + element});
+    emit(_code, spv::VectorShuffle, {id_of(i.type), id, loaded, loaded, 0u, 1u});
 }
 
 void writer::frag_coord(instruction const& i, u32 id)
@@ -367,11 +387,21 @@ void writer::instruction_of(u32 index)
     case rule_kind::array_length:
         return emit(_code, rule.opcode, {id_of(i.type), id, id_of_raw(operands[0]), operands[1]});
     case rule_kind::stage_load:
+    {
         if (_p.stage == check::stage::pixel && _p.stage_elements[operands[0]].system == built_in::position)
             return frag_coord(i, id);
-        return emit(_code, rule.opcode, {id_of(i.type), id, element_pointer(operands[0])});
+        if (_p.stage_elements[operands[0]].system == built_in::domain_location)
+            return tess_coord(i, id);
+        auto const pointer = element_pointer(operands[0], operands.size() > 1 ? id_of_raw(operands[1]) : 0);
+        return emit(_code, rule.opcode, {id_of(i.type), id, pointer});
+    }
     case rule_kind::stage_store:
-        return emit(_code, rule.opcode, {element_pointer(operands[0]), id_of_raw(operands[1])});
+    {
+        auto const pointer = element_pointer(operands[0], operands.size() > 2 ? id_of_raw(operands[2]) : 0);
+        return emit(_code, rule.opcode, {pointer, id_of_raw(operands[1])});
+    }
+    case rule_kind::stream:
+        return emit(_code, rule.opcode, {});
     case rule_kind::discard:
         require(spv::CapDemoteToHelperInvocation);
         return emit(_code, rule.opcode, {});

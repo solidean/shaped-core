@@ -429,123 +429,144 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     }
     out.exit_block();
 
-    // ---- the function
-    out.enter_block(k_block_function, 4);
-    out.record(k_inst_declareblocks, {u64(_blocks.size())});
-    auto next = global_count + constant_count;
-    auto const relative = [&](u32 raw) -> u64 { return u64(next - number_of(raw)); };
-    auto const signed_relative = [&](u32 raw) -> u64 { return signed_vbr(i64(next) - i64(number_of(raw))); };
-    for (auto const& b : _blocks)
-        for (auto i = b.first; i < b.first + b.count; ++i)
+    // ---- the functions: each numbers its own blocks and values from where the module's end
+    auto first_block = u32(0);
+    auto earlier_values = u32(0);
+    for (auto body = isize(0); body <= _later_bodies.size(); ++body)
+    {
+        auto const end_block = body < _later_bodies.size() ? _later_bodies[body] : u32(_blocks.size());
+        out.enter_block(k_block_function, 4);
+        out.record(k_inst_declareblocks, {u64(end_block - first_block)});
+        auto next = global_count + constant_count;
+        auto values_here = u32(0);
+        auto const local_number = [&](u32 raw) -> u32
         {
-            auto const& inst = _instructions[i];
-            auto const args = cc::span<u32 const>(_args.data() + inst.first, isize(inst.count));
-            switch (inst.code)
+            auto const v = ll_value(raw);
+            return ll_is_constant(v) || ll_is_global(v) ? number_of(raw) : number_of(raw) - earlier_values;
+        };
+        auto const relative = [&](u32 raw) -> u64 { return u64(next - local_number(raw)); };
+        auto const signed_relative = [&](u32 raw) -> u64 { return signed_vbr(i64(next) - i64(local_number(raw))); };
+        auto const block_number = [&](u32 raw) -> u64 { return u64(raw - first_block); };
+        for (auto block_at = first_block; block_at < end_block; ++block_at)
+        {
+            auto const& b = _blocks[block_at];
+            for (auto i = b.first; i < b.first + b.count; ++i)
             {
-            case inst_code::binary:
-                scratch.clear();
-                scratch.push_back(relative(args[0]));
-                scratch.push_back(relative(args[1]));
-                scratch.push_back(inst.sub);
-                if (inst.flags != 0)
-                    scratch.push_back(inst.flags);
-                out.record(k_inst_binop, scratch);
-                break;
-            case inst_code::cast:
-                out.record(k_inst_cast, {relative(args[0]), u64(u32(inst.type)), u64(inst.sub)});
-                break;
-            case inst_code::compare:
-                scratch.clear();
-                scratch.push_back(relative(args[0]));
-                scratch.push_back(relative(args[1]));
-                scratch.push_back(inst.sub);
-                if (inst.flags != 0)
-                    scratch.push_back(inst.flags);
-                out.record(k_inst_cmp2, scratch);
-                break;
-            case inst_code::select:
-                out.record(k_inst_vselect, {relative(args[0]), relative(args[1]), relative(args[2])});
-                break;
-            case inst_code::extract_value:
-                out.record(k_inst_extractval, {relative(args[0]), u64(args[1])});
-                break;
-            case inst_code::call:
-            {
-                scratch.clear();
-                scratch.push_back(0);
-                scratch.push_back(1u << 15); // the function's type is stated
-                scratch.push_back(u32(_globals[ll_index(ll_value(args[0]))].type));
-                scratch.push_back(relative(args[0]));
-                for (auto k = isize(1); k < args.size(); ++k)
-                    scratch.push_back(relative(args[k]));
-                out.record(k_inst_call, scratch);
-                break;
-            }
-            case inst_code::alloca_:
-                out.record(k_inst_alloca,
-                           {u64(args[0]), u64(u32(_i32)), number_of(args[1]), u64(inst.flags) | (1u << 6)});
-                break;
-            case inst_code::load:
-                out.record(k_inst_load, {relative(args[0]), u64(u32(inst.type)), u64(inst.flags), 0u});
-                break;
-            case inst_code::store:
-                out.record(k_inst_store, {relative(args[0]), relative(args[1]), u64(inst.flags), 0u});
-                break;
-            case inst_code::element_pointer:
-                scratch.clear();
-                scratch.push_back(1); // inbounds
-                scratch.push_back(args[0]);
-                for (auto k = isize(1); k < args.size(); ++k)
-                    scratch.push_back(relative(args[k]));
-                out.record(k_inst_gep, scratch);
-                break;
-            case inst_code::atomic_rmw:
-                out.record(k_inst_atomicrmw, {relative(args[0]), relative(args[1]), u64(inst.sub), 0u, k_order_seq_cst,
-                                              k_scope_cross_thread});
-                break;
-            case inst_code::atomic_exchange:
-                out.record(k_inst_cmpxchg, {relative(args[0]), relative(args[1]), relative(args[2]), 0u,
-                                            k_order_seq_cst, k_scope_cross_thread, k_order_seq_cst, 0u});
-                break;
-            case inst_code::phi:
-                scratch.clear();
-                scratch.push_back(u32(inst.type));
-                for (auto k = isize(0); k < args.size(); k += 2)
+                auto const& inst = _instructions[i];
+                auto const args = cc::span<u32 const>(_args.data() + inst.first, isize(inst.count));
+                switch (inst.code)
                 {
-                    scratch.push_back(signed_relative(args[k]));
-                    scratch.push_back(args[k + 1]);
-                }
-                out.record(k_inst_phi, scratch);
-                break;
-            case inst_code::branch:
-                out.record(k_inst_br, {u64(args[0])});
-                break;
-            case inst_code::branch_if:
-                out.record(k_inst_br, {u64(args[0]), u64(args[1]), relative(args[2])});
-                break;
-            case inst_code::switch_:
-                scratch.clear();
-                scratch.push_back(u32(type_of(ll_value(args[0]))));
-                scratch.push_back(relative(args[0]));
-                scratch.push_back(args[1]);
-                for (auto k = isize(2); k < args.size(); k += 2)
+                case inst_code::binary:
+                    scratch.clear();
+                    scratch.push_back(relative(args[0]));
+                    scratch.push_back(relative(args[1]));
+                    scratch.push_back(inst.sub);
+                    if (inst.flags != 0)
+                        scratch.push_back(inst.flags);
+                    out.record(k_inst_binop, scratch);
+                    break;
+                case inst_code::cast:
+                    out.record(k_inst_cast, {relative(args[0]), u64(u32(inst.type)), u64(inst.sub)});
+                    break;
+                case inst_code::compare:
+                    scratch.clear();
+                    scratch.push_back(relative(args[0]));
+                    scratch.push_back(relative(args[1]));
+                    scratch.push_back(inst.sub);
+                    if (inst.flags != 0)
+                        scratch.push_back(inst.flags);
+                    out.record(k_inst_cmp2, scratch);
+                    break;
+                case inst_code::select:
+                    out.record(k_inst_vselect, {relative(args[0]), relative(args[1]), relative(args[2])});
+                    break;
+                case inst_code::extract_value:
+                    out.record(k_inst_extractval, {relative(args[0]), u64(args[1])});
+                    break;
+                case inst_code::call:
                 {
-                    scratch.push_back(number_of(args[k]));
-                    scratch.push_back(args[k + 1]);
+                    scratch.clear();
+                    scratch.push_back(0);
+                    scratch.push_back(1u << 15); // the function's type is stated
+                    scratch.push_back(u32(_globals[ll_index(ll_value(args[0]))].type));
+                    scratch.push_back(relative(args[0]));
+                    for (auto k = isize(1); k < args.size(); ++k)
+                        scratch.push_back(relative(args[k]));
+                    out.record(k_inst_call, scratch);
+                    break;
                 }
-                out.record(k_inst_switch, scratch);
-                break;
-            case inst_code::return_void:
-                out.record(k_inst_ret, {});
-                break;
-            case inst_code::unreachable:
-                out.record(k_inst_unreachable, {});
-                break;
+                case inst_code::alloca_:
+                    out.record(k_inst_alloca,
+                               {u64(args[0]), u64(u32(_i32)), number_of(args[1]), u64(inst.flags) | (1u << 6)});
+                    break;
+                case inst_code::load:
+                    out.record(k_inst_load, {relative(args[0]), u64(u32(inst.type)), u64(inst.flags), 0u});
+                    break;
+                case inst_code::store:
+                    out.record(k_inst_store, {relative(args[0]), relative(args[1]), u64(inst.flags), 0u});
+                    break;
+                case inst_code::element_pointer:
+                    scratch.clear();
+                    scratch.push_back(1); // inbounds
+                    scratch.push_back(args[0]);
+                    for (auto k = isize(1); k < args.size(); ++k)
+                        scratch.push_back(relative(args[k]));
+                    out.record(k_inst_gep, scratch);
+                    break;
+                case inst_code::atomic_rmw:
+                    out.record(k_inst_atomicrmw, {relative(args[0]), relative(args[1]), u64(inst.sub), 0u,
+                                                  k_order_seq_cst, k_scope_cross_thread});
+                    break;
+                case inst_code::atomic_exchange:
+                    out.record(k_inst_cmpxchg, {relative(args[0]), relative(args[1]), relative(args[2]), 0u,
+                                                k_order_seq_cst, k_scope_cross_thread, k_order_seq_cst, 0u});
+                    break;
+                case inst_code::phi:
+                    scratch.clear();
+                    scratch.push_back(u32(inst.type));
+                    for (auto k = isize(0); k < args.size(); k += 2)
+                    {
+                        scratch.push_back(signed_relative(args[k]));
+                        scratch.push_back(block_number(args[k + 1]));
+                    }
+                    out.record(k_inst_phi, scratch);
+                    break;
+                case inst_code::branch:
+                    out.record(k_inst_br, {block_number(args[0])});
+                    break;
+                case inst_code::branch_if:
+                    out.record(k_inst_br, {block_number(args[0]), block_number(args[1]), relative(args[2])});
+                    break;
+                case inst_code::switch_:
+                    scratch.clear();
+                    scratch.push_back(u32(type_of(ll_value(args[0]))));
+                    scratch.push_back(relative(args[0]));
+                    scratch.push_back(block_number(args[1]));
+                    for (auto k = isize(2); k < args.size(); k += 2)
+                    {
+                        scratch.push_back(number_of(args[k]));
+                        scratch.push_back(block_number(args[k + 1]));
+                    }
+                    out.record(k_inst_switch, scratch);
+                    break;
+                case inst_code::return_void:
+                    out.record(k_inst_ret, {});
+                    break;
+                case inst_code::unreachable:
+                    out.record(k_inst_unreachable, {});
+                    break;
+                }
+                if (inst.type != _void)
+                {
+                    ++next;
+                    ++values_here;
+                }
             }
-            if (inst.type != _void)
-                ++next;
         }
-    out.exit_block();
+        out.exit_block();
+        first_block = end_block;
+        earlier_values += values_here;
+    }
     out.exit_block();
     return out.take_bytes();
 }

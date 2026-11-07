@@ -279,6 +279,12 @@ void module_builder::md_named(cc::string_view name, cc::span<u32 const> nodes)
         {.name_first = add_name(name), .name_size = u32(name.size()), .first = first, .count = u32(nodes.size())});
 }
 
+void module_builder::begin_function()
+{
+    if (!_blocks.empty())
+        _later_bodies.push_back(u32(_blocks.size()));
+}
+
 ll_block module_builder::add_block()
 {
     _blocks.push_back({});

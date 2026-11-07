@@ -52,6 +52,11 @@ private:
     cc::vector<byte> _bytes;
 };
 
+/// `PSVShaderKind`.
+constexpr u32 k_psv_geometry = 2;
+constexpr u32 k_psv_hull = 3;
+constexpr u32 k_psv_domain = 4;
+
 /// SFI0: the features a pipeline must be able to give it.
 [[nodiscard]] cc::vector<byte> feature_part(module_summary const& s)
 {
@@ -77,17 +82,7 @@ void pad_to_word(byte_writer& out)
     for (auto i = isize(0); i < s.signature.size(); ++i)
         if (s.signature[i].table == table)
             elements.push_back(i);
-    // by register then column, where `PSV0` and `dx.sig` keep declared order; a no-row element's -1 sorts last
-    auto const place_of = [&](isize i) { return (u64(u32(s.signature[i].row)) << 8) | s.signature[i].first_column; };
-    for (auto a = isize(1); a < elements.size(); ++a)
-    {
-        auto const held = elements[a];
-        auto at = a;
-        for (; at > 0 && place_of(elements[at - 1]) > place_of(held); --at)
-            elements[at] = elements[at - 1];
-        elements[at] = held;
-    }
-
+    // names first, as they are declared, since the order below reads their offsets
     auto names = cc::vector<cc::string_view>();
     auto offsets = cc::vector<u32>();
     auto next = k_header_size + u32(elements.size()) * k_element_size;
@@ -101,6 +96,20 @@ void pad_to_word(byte_writer& out)
         next += u32(name.size()) + 1;
         return offsets.back();
     };
+    for (auto const i : elements)
+        (void)offset_of(s.signature[i].name);
+
+    // by register then name offset, where `PSV0` and `dx.sig` keep declared order; a no-row element's -1 sorts last
+    // One name in a row stays declared, which is by column: DXC's sort reads the offset, so a factor leads a link in `w`.
+    auto const place_of = [&](isize i) { return (u64(u32(s.signature[i].row)) << 32) | offset_of(s.signature[i].name); };
+    for (auto a = isize(1); a < elements.size(); ++a)
+    {
+        auto const held = elements[a];
+        auto at = a;
+        for (; at > 0 && place_of(elements[at - 1]) > place_of(held); --at)
+            elements[at] = elements[at - 1];
+        elements[at] = held;
+    }
 
     auto out = byte_writer();
     out.u32_le(u32(elements.size()));
@@ -116,8 +125,10 @@ void pad_to_word(byte_writer& out)
         out.u32_le(e.component_type);
         out.u32_le(u32(e.row));
         out.u8_le(u8(e.mask()));
-        // an input states the lanes it reads, and an output the ones it never writes
-        out.u8_le(table == signature_table::input ? used : u8(~used & 0xf));
+        // what is read states the lanes it reads, and what is written the ones it never writes
+        auto const is_read
+            = table == signature_table::input || (table == signature_table::patch && s.psv_stage == k_psv_domain);
+        out.u8_le(is_read ? used : u8(~used & 0xf));
         out.u16_le(0);
         out.u32_le(0); // no minimum precision
     }
@@ -143,12 +154,17 @@ void pad_to_word(byte_writer& out)
     strings.u8_le(0);
     auto name_offsets = cc::vector<u32>();
     auto index_offsets = cc::vector<u32>();
+    auto row_counts = cc::vector<u8>();
     auto indices = cc::vector<u32>();
     auto inputs = 0;
     auto outputs = 0;
-    for (auto const& e : s.signature)
+    auto patches = 0;
+    for (auto at = isize(0); at < s.signature.size(); ++at)
     {
-        (e.table == signature_table::input ? inputs : outputs) += 1;
+        auto const& e = s.signature[at];
+        if (e.continues)
+            continue;
+        (e.table == signature_table::input ? inputs : e.table == signature_table::output ? outputs : patches) += 1;
         auto name_at = u32(0);
         if (e.system_value == 0)
         {
@@ -158,12 +174,25 @@ void pad_to_word(byte_writer& out)
             strings.u8_le(0);
         }
         name_offsets.push_back(name_at);
+        // the run of indices it states, where a run that stands already is shared
+        auto rows = isize(1);
+        while (at + rows < s.signature.size() && s.signature[at + rows].continues)
+            ++rows;
+        auto const matches = [&](isize from)
+        {
+            for (auto k = isize(0); k < rows; ++k)
+                if (from + k >= indices.size() || indices[from + k] != s.signature[at + k].semantic_index)
+                    return false;
+            return true;
+        };
         auto index_at = isize(0);
-        while (index_at < indices.size() && indices[index_at] != e.semantic_index)
+        while (index_at < indices.size() && !matches(index_at))
             ++index_at;
         if (index_at == indices.size())
-            indices.push_back(e.semantic_index);
+            for (auto k = isize(0); k < rows; ++k)
+                indices.push_back(s.signature[at + k].semantic_index);
         index_offsets.push_back(u32(index_at));
+        row_counts.push_back(u8(rows));
     }
     auto const entry_at = u32(strings.size());
     for (auto const c : cc::string_view(s.entry_name))
@@ -174,18 +203,44 @@ void pad_to_word(byte_writer& out)
     auto out = byte_writer();
     out.u32_le(k_runtime_info_size);
     // PSVRuntimeInfo0: a stage's own 16 bytes, then the wave sizes
-    out.u8_le(s.writes_position || s.writes_depth ? 1 : 0);
-    out.u8_le(s.runs_per_sample ? 1 : 0);
-    out.zeros(14);
+    auto const stage_info_at = out.size();
+    if (s.psv_stage == k_psv_geometry)
+    {
+        out.u32_le(s.input_primitive);
+        out.u32_le(s.output_topology);
+        out.u32_le(1); // the one stream
+        out.u8_le(s.writes_position ? 1 : 0);
+    }
+    else if (s.psv_stage == k_psv_hull)
+    {
+        out.u32_le(s.control_points);
+        out.u32_le(s.control_points);
+        out.u32_le(s.domain);
+        out.u32_le(s.output_primitive);
+    }
+    else if (s.psv_stage == k_psv_domain)
+    {
+        out.u32_le(s.control_points);
+        out.u8_le(s.writes_position ? 1 : 0);
+        out.zeros(3);
+        out.u32_le(s.domain);
+    }
+    else
+    {
+        out.u8_le(s.writes_position || s.writes_depth ? 1 : 0);
+        out.u8_le(s.runs_per_sample ? 1 : 0);
+    }
+    out.zeros(16 - (out.size() - stage_info_at));
     out.u32_le(0);
     out.u32_le(0xffffffffu);
     // PSVRuntimeInfo1
     out.u8_le(u8(s.psv_stage));
     out.u8_le(s.uses_view ? 1 : 0);
-    out.u16_le(0);
+    // a geometry stage's most vertices, or the rows of patch constants
+    out.u16_le(u16(s.psv_stage == k_psv_geometry ? s.max_vertices : s.patch_rows));
     out.u8_le(u8(inputs));
     out.u8_le(u8(outputs));
-    out.u8_le(0); // no patch constants
+    out.u8_le(u8(patches));
     out.u8_le(u8(s.input_rows));
     out.u8_le(u8(s.output_rows));
     out.zeros(3); // the other three streams
@@ -220,13 +275,17 @@ void pad_to_word(byte_writer& out)
         return out.take();
 
     out.u32_le(k_signature_element_size);
+    auto stated = isize(0);
     for (auto i = isize(0); i < s.signature.size(); ++i)
     {
         auto const& e = s.signature[i];
-        out.u32_le(name_offsets[i]);
-        out.u32_le(index_offsets[i]);
+        if (e.continues)
+            continue;
+        out.u32_le(name_offsets[stated]);
+        out.u32_le(index_offsets[stated]);
         auto const has_row = e.row >= 0;
-        out.u8_le(1); // the rows
+        out.u8_le(row_counts[stated]);
+        ++stated;
         out.u8_le(has_row ? u8(e.row) : u8(0));
         // the columns, then the first one and that it is allocated, which an element with no register is not
         out.u8_le(u8(e.lanes | (has_row ? (e.first_column << 4) | 0x40 : 0)));
@@ -238,7 +297,11 @@ void pad_to_word(byte_writer& out)
     }
     for (auto const word : s.view_outputs)
         out.u32_le(word);
+    for (auto const word : s.view_patch)
+        out.u32_le(word);
     for (auto const word : s.dependencies)
+        out.u32_le(word);
+    for (auto const word : s.patch_dependencies)
         out.u32_le(word);
     return out.take();
 }
@@ -274,6 +337,9 @@ cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
     parts.push_back({.name = four_cc('S', 'F', 'I', '0'), .bytes = feature_part(s)});
     parts.push_back({.name = four_cc('I', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::input)});
     parts.push_back({.name = four_cc('O', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::output)});
+    // a stage with patch constants has the third, though it reads none
+    if (s.psv_stage == k_psv_hull || s.psv_stage == k_psv_domain)
+        parts.push_back({.name = four_cc('P', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::patch)});
     parts.push_back({.name = four_cc('P', 'S', 'V', '0'), .bytes = pipeline_state_part(s)});
     parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
 

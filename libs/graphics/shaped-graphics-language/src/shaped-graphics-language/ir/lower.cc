@@ -20,6 +20,7 @@ lowering::lowering(emit::impl::plan const& plan, program& out) : _plan(plan), _m
     _constant_slots.resize_to_filled(256, 0u);
     _locals.resize_to_filled(_e.locals.size(), value_ref::none);
     _is_variable.resize_to_filled(_e.locals.size(), false);
+    _parameter_elements.resize_to_filled(_e.locals.size(), k_no_element);
     _block_globals.resize_to_filled(plan.group_blocks.size(), value_ref::none);
     _resource_globals.resize_to_filled(plan.resources.size(), value_ref::none);
     _workgroup_globals.resize_to_filled(plan.workgroup.size(), value_ref::none);
@@ -119,10 +120,11 @@ void lowering::branch_if(value_ref condition, block_ref yes, block_ref no)
 void lowering::run()
 {
     auto const is_raster = _e.entry_stage == stage::vertex || _e.entry_stage == stage::pixel;
-    if (_e.entry_stage != stage::compute && !is_raster)
+    auto const is_primitive = _e.entry_stage == stage::geometry || _e.entry_stage == stage::tessellation_control
+                           || _e.entry_stage == stage::tessellation_evaluation;
+    if (_e.entry_stage != stage::compute && !is_raster && !is_primitive)
     {
-        unsupported(cc::format("a {} entry point, of which only compute, vertex and pixel are lowered yet",
-                               stage_name(_e.entry_stage)));
+        unsupported(cc::format("a {} entry point, whose stage is not lowered yet", stage_name(_e.entry_stage)));
         // what crosses its edge stands on its own, and DXIL's packer reads it ahead of any lowering of the body
         return declare_stage_elements();
     }
@@ -135,6 +137,12 @@ void lowering::run()
     {
         declare_stage_elements();
         read_stage_edge();
+    }
+    else if (is_primitive)
+    {
+        declare_stage_elements();
+        describe_primitive_stage();
+        read_primitive_edge();
     }
     else
         declare_stage_inputs();

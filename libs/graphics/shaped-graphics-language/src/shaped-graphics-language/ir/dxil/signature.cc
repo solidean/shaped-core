@@ -220,6 +220,7 @@ void pack_patch(program const& p, cc::span<u32 const> elements, cc::vector<signa
     auto rows = packer();
     auto next_edge = u32(0);
     auto next_inside = u32(0);
+    auto const first_at = out.size();
     for (auto const index : elements)
     {
         auto const system = p.stage_elements[index].system;
@@ -232,11 +233,13 @@ void pack_patch(program const& p, cc::span<u32 const> elements, cc::vector<signa
                            : edges == 3     ? k_tri_edge
                            : next_edge == 0 ? k_line_density
                                             : k_line_detail;
+            e.continues = next_edge > 0;
             rows.place_factor(e, next_edge++, 3);
         }
         else
         {
             e.system_value = insides == 2 ? k_quad_inside : k_tri_inside;
+            e.continues = next_inside > 0;
             if (insides == 2)
                 rows.place_factor(e, edges + next_inside++, 3);
             else
@@ -250,9 +253,14 @@ void pack_patch(program const& p, cc::span<u32 const> elements, cc::vector<signa
         if (system == built_in::tess_edge || system == built_in::tess_inside)
             continue;
         auto e = element_of(p, index, signature_table::patch);
+        e.mode = interpolation::none; // what no stage interpolates
         rows.place(e, false);
         out.push_back(cc::move(e));
     }
+    // placed factors first, but `dx.sig` and `PSV0` state them as declared
+    for (auto a = first_at + 1; a < out.size(); ++a)
+        for (auto at = a; at > first_at && out[at - 1].element > out[at].element; --at)
+            cc::swap(out[at - 1], out[at]);
 }
 } // namespace
 

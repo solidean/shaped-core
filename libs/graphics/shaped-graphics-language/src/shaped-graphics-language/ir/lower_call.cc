@@ -797,6 +797,11 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         return value_ref::none;
     }
     auto const& record = *found;
+    if (_e.entry_stage == stage::geometry && (record.name == "emit" || record.name == "end_strip"))
+    {
+        stream_call(c, record.name == "emit");
+        return value_ref::none;
+    }
     auto const result = x.type == checked_module::void_type ? _void : value_type(x.type);
     if (record.is_atomic)
         return atomic(c, x);

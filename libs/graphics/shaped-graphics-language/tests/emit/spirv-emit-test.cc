@@ -105,6 +105,36 @@ constexpr cc::string_view k_pixel_surface
       "    let at = (l.position.x as int) % 2\n"
       "    return shelf.images[nonuniform at].sample(l.near, shelf.smooth)\n";
 
+constexpr cc::string_view k_primitive_stages
+    = "require geometry_shader\n"
+      "require tessellation_shader\n"
+      "struct point:\n"
+      "    at: float2\n"
+      "    frame: mat2\n"
+      "\n"
+      "struct factors:\n"
+      "    @edge_factors edges: float[3]\n"
+      "    @inside_factors inside: float\n"
+      "    scale: float\n"
+      "\n"
+      "struct link:\n"
+      "    @position position: hpos4\n"
+      "\n"
+      "@tessellation_control(partitioning = .integer, winding = .counter_clockwise)\n"
+      "fun control(patch: point[3]) -> factors:\n"
+      "    return { edges = [patch[0].at.x, 2.0, 3.0], inside = 4.0, scale = 1.0 }\n"
+      "\n"
+      "@tessellation_evaluation\n"
+      "fun evaluate(patch: point[3], f: factors, @domain_location uvw: float3) -> link:\n"
+      "    return { position = hpos4(uvw.x * patch[0].at.x, f.scale, f.edges[1], 1.0) }\n"
+      "\n"
+      "@geometry(max_vertices = 3)\n"
+      "fun some(tri: link[3], stream: mut triangle_stream[link]):\n"
+      "    for i in 0 ..< 3:\n"
+      "        if tri[i].position.x > 0.0:\n"
+      "            stream.emit(tri[i])\n"
+      "    stream.end_strip()\n";
+
 /// The name of every `.sgl` file under `root`, sorted, so a failure reads the same on every run.
 [[nodiscard]] cc::vector<cc::string> files_under(cc::string_view root)
 {
@@ -202,7 +232,50 @@ TEST("sgl spirv - what has no lowering yet is named, and a preference falls back
     CHECK(!preferred.value().text.empty());
 }
 
-TEST("sgl spirv - every compute entry point of the fixtures that lowers is what spirv-val calls valid")
+TEST("sgl spirv - a control stage hands each point on, waits for them all, then runs its body once per patch")
+{
+    auto const e = written(k_primitive_stages, "control", sgl::emit::native_route::require);
+    REQUIRE(e.has_value());
+    auto const words = cc::span<u32 const>(e.value().spirv);
+    CHECK(has_capability(words, 3)); // Tessellation
+    CHECK(!has_capability(words, 2));
+    CHECK(counted(words, 224) == 1);  // OpControlBarrier
+    CHECK(counted(words, 57) == 1);   // OpFunctionCall
+    CHECK(counted(words, 54) == 2);   // OpFunction: the entry point and the body
+    CHECK(with_mode(words, 22) == 1); // Triangles
+    CHECK(with_mode(words, 4) == 1);  // VertexOrderCw: EMIT-134 mirrors the `.counter_clockwise` the source names
+    CHECK(with_mode(words, 26) == 1); // OutputVertices
+    CHECK(decorated(words, 15) == 3); // Patch: both factor arrays and `scale`
+}
+
+TEST("sgl spirv - an evaluation stage reads patch constants as inputs, and a geometry stage's emit stays in its branch")
+{
+    auto const evaluated = written(k_primitive_stages, "evaluate", sgl::emit::native_route::require);
+    REQUIRE(evaluated.has_value());
+    auto const read = cc::span<u32 const>(evaluated.value().spirv);
+    CHECK(with_mode(read, 22) == 1);
+    CHECK(with_mode(read, 26) == 0);
+    CHECK(decorated(read, 15) == 3);
+
+    auto const emitted = written(k_primitive_stages, "some", sgl::emit::native_route::require);
+    REQUIRE(emitted.has_value());
+    auto const stream = cc::span<u32 const>(emitted.value().spirv);
+    CHECK(has_capability(stream, 2));  // Geometry
+    CHECK(with_mode(stream, 29) == 1); // OutputTriangleStrip
+    CHECK(counted(stream, 218) == 1);  // OpEmitVertex
+    CHECK(counted(stream, 219) == 1);  // OpEndPrimitive
+    CHECK(counted(stream, 247) >= 1);  // the branch around it: nothing lifts an effect out
+}
+
+TEST("sgl spirv - a patch's links take the locations after the control point's pieces")
+{
+    auto const e = written(k_primitive_stages, "control", sgl::emit::native_route::text);
+    REQUIRE(e.has_value());
+    // `at` at 0, `frame`'s two columns at 1 and 2
+    CHECK(e.value().text.contains("[[vk::location(3)]] float scale"));
+}
+
+TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-val calls valid")
 {
 #if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
     SKIP("this platform runs no spirv-val, and has no std::system to start one with");
@@ -221,11 +294,13 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
     auto command_text = cc::vector<char>::create_copy_of(cc::span<char const>(command.data(), command.size()));
     command_text.push_back('\0');
     auto files = files_under(nx::source_path(SGL_SG_SHADERS_DIR));
+    files.push_back_range(files_under(cc::format("{}/../sgl_mixed", nx::source_path(SGL_SG_SHADERS_DIR))));
     files.push_back_range(files_under(nx::source_path(SGL_SR_SHADERS_DIR)));
     REQUIRE(!files.empty());
 
     auto lowered = 0;
     auto raster_lowered = 0;
+    auto primitive_lowered = 0;
     for (auto const& file : files)
     {
         auto const source = read_all(file);
@@ -241,16 +316,23 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
                                                  .native = sgl::emit::native_route::prefer});
             if (e.has_error() || e.value().spirv.empty())
                 continue;
-            auto const is_raster
-                = e.value().stage == sgl::check::stage::vertex || e.value().stage == sgl::check::stage::pixel;
-            ++(is_raster ? raster_lowered : lowered);
+            auto const stage = e.value().stage;
+            auto const is_raster = stage == sgl::check::stage::vertex || stage == sgl::check::stage::pixel;
+            auto const is_primitive = stage == sgl::check::stage::geometry
+                                   || stage == sgl::check::stage::tessellation_control
+                                   || stage == sgl::check::stage::tessellation_evaluation;
+            ++(is_primitive ? primitive_lowered : is_raster ? raster_lowered : lowered);
             write_words(module_path, e.value().spirv);
             CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
         }
     }
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
-    CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points and {} vertex and pixel ones", lowered, raster_lowered);
+    CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points, {} vertex and pixel ones, and {} geometry and "
+                "tessellation "
+                "ones",
+                lowered, raster_lowered, primitive_lowered);
     CHECK(lowered >= 95);
     CHECK(raster_lowered >= 64);
+    CHECK(primitive_lowered >= 18);
 #endif
 }

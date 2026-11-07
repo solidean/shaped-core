@@ -88,12 +88,13 @@ TEST("slib - SGL's own DXIL of real kernels passes the validator")
     }
 }
 
-TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers passes the validator")
+TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the validator")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
     auto files = files_under(nx::source_path("libs/graphics/shaped-graphics/tests/shaders/sgl"));
+    files.push_back_range(files_under(nx::source_path("libs/graphics/shaped-graphics/tests/shaders/sgl_mixed")));
     files.push_back_range(files_under(nx::source_path("libs/graphics/shaped-rendering/shaders")));
     REQUIRE(!files.empty());
 
@@ -101,6 +102,8 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
     auto lowered = 0;
     auto raster_reached = 0;
     auto raster_lowered = 0;
+    auto primitive_reached = 0;
+    auto primitive_lowered = 0;
     for (auto const& file : files)
     {
         auto const source = read_file(file);
@@ -118,15 +121,18 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
                 continue;
             auto const stage = e.value().stage;
             auto const is_raster = stage == sgl::check::stage::vertex || stage == sgl::check::stage::pixel;
-            if (stage != sgl::check::stage::compute && !is_raster)
+            auto const is_primitive = stage == sgl::check::stage::geometry
+                                   || stage == sgl::check::stage::tessellation_control
+                                   || stage == sgl::check::stage::tessellation_evaluation;
+            if (stage != sgl::check::stage::compute && !is_raster && !is_primitive)
                 continue;
-            ++(is_raster ? raster_reached : reached);
+            ++(is_primitive ? primitive_reached : is_raster ? raster_reached : reached);
             if (e.value().dxil.empty())
             {
                 CC_LOG_INFO("{}: {}: {}", file, entry.entry_point, e.value().native_gap);
                 continue;
             }
-            ++(is_raster ? raster_lowered : lowered);
+            ++(is_primitive ? primitive_lowered : is_raster ? raster_lowered : lowered);
             auto const refused = compiler.value().validate(e.value().dxil);
             CHECK(!refused.has_value())
                 .dump("file", file)
@@ -134,11 +140,15 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
                 .dump("validator", refused.value_or(cc::string()));
         }
     }
-    CC_LOG_INFO("SGL's DXIL lowers {} of the {} compute entry points and {} of the {} vertex and pixel ones", lowered,
-                reached, raster_lowered, raster_reached);
+    CC_LOG_INFO("SGL's DXIL lowers {} of the {} compute entry points, {} of the {} vertex and pixel ones, and {} of "
+                "the "
+                "{} geometry and tessellation ones",
+                lowered, reached, raster_lowered, raster_reached, primitive_lowered, primitive_reached);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CHECK(lowered >= 90);
     CHECK(raster_lowered >= 64);
+    CHECK(primitive_lowered == primitive_reached);
+    CHECK(primitive_lowered >= 18);
 }
 
 TEST("slib - a pixel stage's surface is DXIL's own operations, and a binding array's element its own handle")
@@ -173,6 +183,69 @@ TEST("slib - a pixel stage's surface is DXIL's own operations, and a binding arr
     // the second argument after the binding is the index, and the last says it differs between invocations
     CHECK(text.value().contains(", i1 true)  ; CreateHandleFromBinding"));
     CHECK(text.value().contains("SV_Depth"));
+}
+
+TEST("slib - a control stage is two functions on DXIL, and an evaluation stage reads what it wrote")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view source
+        = "require geometry_shader\n"
+          "require tessellation_shader\n"
+          "struct point:\n"
+          "    at: float2\n"
+          "\n"
+          "struct factors:\n"
+          "    tint: float\n"
+          "    @edge_factors edges: float[3]\n"
+          "    @inside_factors inside: float\n"
+          "\n"
+          "struct link:\n"
+          "    @position position: hpos4\n"
+          "\n"
+          "@tessellation_control(partitioning = .fractional_odd, winding = .clockwise)\n"
+          "fun control(patch: point[3]) -> factors:\n"
+          "    return { tint = 1.0, edges = [patch[0].at.x, 2.0, 3.0], inside = 4.0 }\n"
+          "\n"
+          "@tessellation_evaluation\n"
+          "fun evaluate(patch: point[3], f: factors, @domain_location uvw: float3, @primitive_id id: int) -> link:\n"
+          "    return { position = hpos4(uvw.x * patch[0].at.x, f.tint, f.edges[1], id as float) }\n"
+          "\n"
+          "@geometry(max_vertices = 3)\n"
+          "fun copied(tri: link[3], stream: mut triangle_stream[link]):\n"
+          "    for i in 0 ..< 3:\n"
+          "        stream.emit(tri[i])\n"
+          "    stream.end_strip()\n";
+    auto const control = written(source, "control");
+    REQUIRE(control.has_value());
+    CHECK(!compiler.value().validate(control.value().dxil).has_value());
+    auto const hull = compiler.value().disassemble(control.value().dxil);
+    REQUIRE(hull.has_value());
+    CHECK(hull.value().contains("define void @control_patch()"));
+    CHECK(hull.value().contains("define void @control()"));
+    CHECK(hull.value().contains("@dx.op.outputControlPointID.i32(i32 107)"));
+    // the array is one element of three rows in `dx.sig`, and three lines of `PSG1` a disassembly prints
+    CHECK(hull.value().contains("@dx.op.storePatchConstant.f32(i32 106, i32 1, i32 2, i8 0,"));
+    // EMIT-134: the domain's own orientation mirrors the `.clockwise` the source names
+    CHECK(hull.value().contains("OutputPrimitive=triangle_ccw"));
+
+    auto const evaluate = written(source, "evaluate");
+    REQUIRE(evaluate.has_value());
+    CHECK(!compiler.value().validate(evaluate.value().dxil).has_value());
+    auto const domain = compiler.value().disassemble(evaluate.value().dxil);
+    REQUIRE(domain.has_value());
+    CHECK(domain.value().contains("@dx.op.loadPatchConstant.f32(i32 104, i32 1, i32 1, i8 0)"));
+    CHECK(domain.value().contains("@dx.op.domainLocation.f32(i32 105, i8 0)"));
+    CHECK(domain.value().contains("@dx.op.primitiveID.i32(i32 108)"));
+
+    auto const geometry = written(source, "copied");
+    REQUIRE(geometry.has_value());
+    CHECK(!compiler.value().validate(geometry.value().dxil).has_value());
+    auto const stream = compiler.value().disassemble(geometry.value().dxil);
+    REQUIRE(stream.has_value());
+    CHECK(stream.value().contains("@dx.op.emitStream(i32 97, i8 0)"));
+    CHECK(stream.value().contains("@dx.op.cutStream(i32 98, i8 0)"));
 }
 
 TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a sum reorder")

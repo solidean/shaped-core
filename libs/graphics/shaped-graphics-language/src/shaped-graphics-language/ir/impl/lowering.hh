@@ -24,6 +24,8 @@ struct place
     check::type_id type = check::type_id::none;
 };
 
+inline constexpr u32 k_no_element = 0xffffffffu;
+
 class lowering
 {
 public:
@@ -58,12 +60,28 @@ private:
     void declare_stage_elements();
     /// A vertex or pixel stage's parameters, read from their elements ahead of the body.
     void read_stage_edge();
+    /// Refuses a link the native routes do not carry yet.
+    void check_links();
+    /// What `_out.primitive` says of a geometry or a tessellation stage.
+    void describe_primitive_stage();
+    /// A geometry or tessellation stage's parameters, in the order written; an array of them stays unread (EMIT-240).
+    void read_primitive_edge();
+    void read_stage_input(isize input, u32 element);
     /// Each output element of the value a `return` gives.
     void store_stage_result(value_ref result);
-    [[nodiscard]] value_ref read_element(u32 element);
-    [[nodiscard]] value_ref read_struct(check::type_id t, u32& element);
+    /// The elements of `part` written with `value` of `t`, member by member.
+    void store_struct(check::type_id t, value_ref value, stage_part part);
+    /// `element` as it stands, or at `index` where it stands once per control point or vertex.
+    [[nodiscard]] value_ref read_element(u32 element, value_ref index = value_ref::none);
+    [[nodiscard]] value_ref read_struct(check::type_id t, u32& element, value_ref index = value_ref::none);
     /// EMIT-196: the 64-bit value of `t` read back from the words its next elements hold.
-    [[nodiscard]] value_ref joined_words(check::type_id t, u32& element);
+    [[nodiscard]] value_ref joined_words(check::type_id t, u32& element, value_ref index = value_ref::none);
+    /// The first element of the array parameter `id` names, or `k_no_element` for anything else.
+    [[nodiscard]] u32 stage_array_of(flat_expr_id id) const;
+    /// A whole array parameter of `t`, which only a use of the array itself asks for.
+    [[nodiscard]] value_ref read_stage_array(check::type_id t, u32 first);
+    /// `s.emit(v)` or `s.end_strip()` on a geometry stage's stream.
+    void stream_call(check::flat_call const& c, bool is_emit);
     /// EMIT-196: the elements from `element` on written with the 64-bit `value` of `t`, its words low first.
     void store_words(check::type_id t, value_ref value, u32& element);
     /// Whether the parameter at `position` is a pixel stage's second struct, what a mesh stage wrote per primitive.
@@ -164,6 +182,8 @@ private:
     /// Parallel to `_e.locals`: an immutable local's value, or a mutable one's variable.
     cc::vector<value_ref> _locals;
     cc::vector<bool> _is_variable;
+    /// Parallel to `_e.locals`: the first element of a geometry or tessellation parameter, or `k_no_element`.
+    cc::vector<u32> _parameter_elements;
     /// What a `break` and a `continue` reach, innermost last.
     cc::vector<block_ref> _breaks;
     cc::vector<block_ref> _continues;

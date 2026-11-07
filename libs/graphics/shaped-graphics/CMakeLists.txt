@@ -542,7 +542,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 native_dxil.sgl:*
         )
-        # One stage pair three ways, which the mixed-route test links across routes.
+        # The same stages three ways, which the mixed-route test links across routes.
         sc_add_shader_package(
             TARGET     shaped-graphics-test
             NAME       sg_test_mixed_text
@@ -552,6 +552,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
+                primitive_stages.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -563,6 +564,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
+                primitive_stages.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -574,6 +576,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
+                primitive_stages.sgl:*
         )
 
         sc_add_shader_package(

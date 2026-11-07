@@ -232,6 +232,11 @@ value_ref lowering::expr(flat_expr_id id)
         [&](flat_enum_value const& v) { result = int_constant(_m.at(_m.at(x.type).cases)[v.case_index].value); },
         [&](flat_local_ref const& l)
         {
+            if (auto const first = stage_array_of(id); first != k_no_element)
+            {
+                result = read_stage_array(x.type, first);
+                return;
+            }
             auto const position = index_of(l.local);
             result = _locals[position];
             if (_is_variable[position])
@@ -269,6 +274,12 @@ value_ref lowering::expr(flat_expr_id id)
         },
         [&](flat_element const& a)
         {
+            // EMIT-240: one vertex of a parameter is its elements at that index, whatever the index is
+            if (auto element = stage_array_of(a.object); element != k_no_element)
+            {
+                result = read_struct(x.type, element, expr(a.index));
+                return;
+            }
             if (auto const memory = place_of(id); memory.has_value())
             {
                 result = load(memory.value());

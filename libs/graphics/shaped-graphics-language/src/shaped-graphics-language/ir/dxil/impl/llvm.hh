@@ -204,6 +204,9 @@ public:
     void md_named(cc::string_view name, cc::span<u32 const> nodes);
 
     // ---- the one function body; blocks are written in the order they are added
+    /// Marks where the next function body starts: the blocks added from here on are its own.
+    /// Bodies stand in the order of their functions' `add_function`; a module of one need not call it.
+    void begin_function();
     [[nodiscard]] ll_block add_block();
     void open_block(ll_block b);
     [[nodiscard]] ll_value binary(binary_op op, ll_value a, ll_value b, u8 flags = 0);
@@ -408,6 +411,8 @@ private:
     /// Parallel to the instructions that give a value: their position.
     cc::vector<u32> _results;
     cc::vector<block_entry> _blocks;
+    /// Where each function body after the first starts in `_blocks`.
+    cc::vector<u32> _later_bodies;
     /// Blocks are filled in the order they open, so each one's run ends where the next opens.
     ll_block _open = ll_block::none;
     isize _call_count = 0;

@@ -54,11 +54,23 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::depth, 22},
     {built_in::depth_greater_equal, 22},
     {built_in::depth_less_equal, 22},
+    {built_in::tess_edge, 11},
+    {built_in::tess_inside, 12},
+    {built_in::domain_location, 13},
 };
 /// A pixel stage reads `@position` as what the rasterizer made of it, where a vertex stage's is `Position`.
 constexpr u32 k_frag_coord = 15;
 
+/// `InvocationId`.
+constexpr u32 k_invocation_id = 8;
+/// `TessLevelOuter` and `TessLevelInner` are always this long, whatever the domain writes of them.
+constexpr u32 k_outer_factors = 4;
+constexpr u32 k_inner_factors = 2;
+
 constexpr u32 k_model_vertex = 0;
+constexpr u32 k_model_tessellation_control = 1;
+constexpr u32 k_model_tessellation_evaluation = 2;
+constexpr u32 k_model_geometry = 3;
 constexpr u32 k_model_fragment = 4;
 constexpr u32 k_model_compute = 5;
 constexpr u32 k_mode_origin_upper_left = 7;
@@ -66,6 +78,28 @@ constexpr u32 k_mode_depth_replacing = 12;
 constexpr u32 k_mode_depth_greater = 14;
 constexpr u32 k_mode_depth_less = 15;
 constexpr u32 k_mode_local_size = 17;
+constexpr u32 k_mode_invocations = 0;
+constexpr u32 k_mode_spacing_equal = 1;
+constexpr u32 k_mode_spacing_fractional_even = 2;
+constexpr u32 k_mode_spacing_fractional_odd = 3;
+constexpr u32 k_mode_vertex_order_cw = 4;
+constexpr u32 k_mode_vertex_order_ccw = 5;
+constexpr u32 k_mode_input_points = 19;
+constexpr u32 k_mode_input_lines = 20;
+constexpr u32 k_mode_input_lines_adjacency = 21;
+constexpr u32 k_mode_triangles = 22;
+constexpr u32 k_mode_input_triangles_adjacency = 23;
+constexpr u32 k_mode_quads = 24;
+constexpr u32 k_mode_isolines = 25;
+constexpr u32 k_mode_output_vertices = 26;
+constexpr u32 k_mode_output_points = 27;
+constexpr u32 k_mode_output_line_strip = 28;
+constexpr u32 k_mode_output_triangle_strip = 29;
+
+[[nodiscard]] constexpr bool is_factor(built_in b)
+{
+    return b == built_in::tess_edge || b == built_in::tess_inside;
+}
 } // namespace
 
 u32 writer::storage_of(storage s)
@@ -267,47 +301,72 @@ void writer::write_constants()
 
 u32 writer::space_of(stage_element const& e) const
 {
-    auto const is_input
-        = e.part == stage_part::input || (e.part == stage_part::primitive && _p.stage == check::stage::pixel);
+    // what a stage before wrote per primitive or per patch, this one reads
+    auto const is_input = e.part == stage_part::input
+                       || (e.part == stage_part::primitive && _p.stage == check::stage::pixel)
+                       || (e.part == stage_part::patch && _p.stage == check::stage::tessellation_evaluation);
     return is_input ? u32(spv::Input) : u32(spv::Output);
+}
+
+u32 writer::pointer_to(u32 space, u32 pointee)
+{
+    for (auto const& known : _pointer_types)
+        if (known.space == space && known.pointee == pointee)
+            return known.id;
+    auto const id = _bound++;
+    emit(_declarations, spv::TypePointer, {id, space, pointee});
+    _pointer_types.push_back({.space = space, .pointee = pointee, .id = id});
+    return id;
 }
 
 void writer::write_stage_elements()
 {
+    auto const is_tessellation
+        = _p.stage == check::stage::tessellation_control || _p.stage == check::stage::tessellation_evaluation;
+    if (is_tessellation)
+        require(spv::Tessellation);
+    if (_p.stage == check::stage::geometry)
+        require(spv::Geometry);
+    if (_p.stage == check::stage::tessellation_control)
+    {
+        _invocation = _bound++;
+        emit(_declarations, spv::Variable, {pointer_to(spv::Input, id_of(_uint)), _invocation, spv::Input});
+        emit(_annotations, spv::Decorate, {_invocation, spv::BuiltIn, k_invocation_id});
+    }
     for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
     {
         auto const& e = _p.stage_elements[i];
         auto const id = _elements + u32(i);
         auto const space = space_of(e);
-        auto const is_mask = e.system == built_in::sample_mask;
-        // a pointer type is declared once, and a program's own table holds none of these
-        auto pointer = u32(0);
-        for (auto k = isize(0); k < i; ++k)
-            if (_p.stage_elements[k].type == e.type && space_of(_p.stage_elements[k]) == space
-                && (_p.stage_elements[k].system == built_in::sample_mask) == is_mask)
-                pointer = _element_pointers[k];
-        if (pointer == 0)
+        // a factor is one element of an array of them, and the first one declares that array
+        if (is_factor(e.system) && e.semantic_index != 0)
         {
-            pointer = _bound++;
-            auto held = id_of(e.type);
-            if (is_mask)
-            {
-                auto const array = _bound++;
-                auto const one = literal_id(1);
-                emit(_declarations, spv::TypeArray, {array, held, one});
-                held = array;
-            }
-            emit(_declarations, spv::TypePointer, {pointer, space, held});
+            _element_variables.push_back(_element_variables[i - isize(e.semantic_index)]);
+            _element_lanes.push_back(_element_lanes[i - isize(e.semantic_index)]);
+            continue;
         }
-        _element_pointers.push_back(pointer);
+        auto held = id_of(e.type);
+        // `TessCoord` is three lanes, though a parameter of a quad or an isoline takes two
+        if (e.system == built_in::domain_location)
+            for (auto t = isize(0); t < _p.types.size(); ++t)
+                if (_p.types[t].kind == type_kind::vector && _p.types[t].count == 3
+                    && _p.types[t].element == _p.at(e.type).element)
+                    held = _types + u32(t);
+        auto const count = e.system == built_in::sample_mask ? u32(1)
+                         : e.system == built_in::tess_edge   ? k_outer_factors
+                         : e.system == built_in::tess_inside ? k_inner_factors
+                                                             : e.array_size;
         auto lane = u32(0);
-        if (is_mask)
+        if (count > 0)
         {
-            lane = _bound++;
-            emit(_declarations, spv::TypePointer, {lane, space, id_of(e.type)});
+            lane = pointer_to(space, held);
+            auto const array = _bound++;
+            emit(_declarations, spv::TypeArray, {array, held, literal_id(count)});
+            held = array;
         }
+        _element_variables.push_back(id);
         _element_lanes.push_back(lane);
-        emit(_declarations, spv::Variable, {pointer, id, space});
+        emit(_declarations, spv::Variable, {pointer_to(space, held), id, space});
         name(id, _p.name_at(e.name_first, e.name_size));
         for (auto const& known : k_built_ins)
             if (known.input == e.system)
@@ -322,10 +381,11 @@ void writer::write_stage_elements()
                     require(spv::SampleRateShading);
                 if (e.system == built_in::view_index)
                     require(spv::MultiView);
-                if (e.system == built_in::primitive_id)
+                if (e.system == built_in::primitive_id && !is_tessellation)
                     require(spv::Geometry);
                 if (e.system == built_in::layer)
-                    require(_p.stage == check::stage::pixel ? spv::Geometry : spv::ShaderLayer);
+                    require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry ? spv::Geometry
+                                                                                                  : spv::ShaderLayer);
             }
         if (e.system == built_in::none && e.location >= 0)
             emit(_annotations, spv::Decorate, {id, spv::Location, u32(e.location)});
@@ -336,6 +396,10 @@ void writer::write_stage_elements()
             else if (e.system != built_in::position)
                 emit(_annotations, spv::Decorate, {id, spv::Flat});
         }
+        // DXC marks an evaluation stage's primitive id as per patch, which it is
+        if (e.part == stage_part::patch
+            || (e.system == built_in::primitive_id && _p.stage == check::stage::tessellation_evaluation))
+            emit(_annotations, spv::Decorate, {id, spv::Patch});
         if (e.part == stage_part::primitive)
         {
             require(spv::MeshShadingEXT);
@@ -389,19 +453,75 @@ void writer::write_globals()
     }
 }
 
+void writer::write_primitive_modes()
+{
+    auto const mode = [&](u32 number) { emit(_modes, spv::ExecutionMode, {_function, number}); };
+    auto const& shape = _p.primitive;
+    if (_p.stage == check::stage::geometry)
+    {
+        emit(_modes, spv::ExecutionMode, {_function, k_mode_output_vertices, shape.max_vertices});
+        emit(_modes, spv::ExecutionMode, {_function, k_mode_invocations, 1u});
+        mode(shape.input_vertices == 1   ? k_mode_input_points
+             : shape.input_vertices == 2 ? k_mode_input_lines
+             : shape.input_vertices == 4 ? k_mode_input_lines_adjacency
+             : shape.input_vertices == 6 ? k_mode_input_triangles_adjacency
+                                         : k_mode_triangles);
+        mode(shape.output_vertices == 1   ? k_mode_output_points
+             : shape.output_vertices == 2 ? k_mode_output_line_strip
+                                          : k_mode_output_triangle_strip);
+        return;
+    }
+    mode(shape.domain == tessellation_domain::isoline    ? k_mode_isolines
+         : shape.domain == tessellation_domain::triangle ? k_mode_triangles
+                                                         : k_mode_quads);
+    if (_p.stage != check::stage::tessellation_control)
+        return;
+    using partitioning = check::tessellation_partitioning;
+    mode(shape.partitioning == partitioning::integer           ? k_mode_spacing_equal
+         : shape.partitioning == partitioning::fractional_even ? k_mode_spacing_fractional_even
+                                                               : k_mode_spacing_fractional_odd);
+    if (shape.domain != tessellation_domain::isoline)
+        mode(shape.is_output_clockwise ? k_mode_vertex_order_cw : k_mode_vertex_order_ccw);
+    emit(_modes, spv::ExecutionMode, {_function, k_mode_output_vertices, shape.input_vertices});
+}
+
 void writer::write_entry()
 {
-    auto const words = 3 + string_words(_p.entry_name) + _p.stage_elements.size() + _p.globals.size();
-    head(_entry, spv::EntryPoint, words);
-    _entry.push_back(_p.stage == check::stage::vertex  ? k_model_vertex
-                     : _p.stage == check::stage::pixel ? k_model_fragment
-                                                       : k_model_compute);
+    auto interface = cc::vector<u32>();
+    for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
+        if (_element_variables[i] == _elements + u32(i))
+            interface.push_back(_elements + u32(i));
+    if (_invocation != 0)
+        interface.push_back(_invocation);
+    for (auto i = isize(0); i < _p.globals.size(); ++i)
+        interface.push_back(_globals + u32(i));
+
+    auto model = k_model_compute;
+    switch (_p.stage)
+    {
+    case check::stage::vertex:
+        model = k_model_vertex;
+        break;
+    case check::stage::pixel:
+        model = k_model_fragment;
+        break;
+    case check::stage::geometry:
+        model = k_model_geometry;
+        break;
+    case check::stage::tessellation_control:
+        model = k_model_tessellation_control;
+        break;
+    case check::stage::tessellation_evaluation:
+        model = k_model_tessellation_evaluation;
+        break;
+    default:
+        break;
+    }
+    head(_entry, spv::EntryPoint, 3 + string_words(_p.entry_name) + interface.size());
+    _entry.push_back(model);
     _entry.push_back(_function);
     string_into(_entry, _p.entry_name);
-    for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
-        _entry.push_back(_elements + u32(i));
-    for (auto i = isize(0); i < _p.globals.size(); ++i)
-        _entry.push_back(_globals + u32(i));
+    _entry.push_back_range(interface);
     if (_p.stage == check::stage::pixel)
     {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});
@@ -416,9 +536,11 @@ void writer::write_entry()
                 emit(_modes, spv::ExecutionMode, {_function, k_mode_depth_less});
         }
     }
-    else if (_p.stage != check::stage::vertex)
+    else if (model == k_model_compute)
         emit(_modes, spv::ExecutionMode,
              {_function, k_mode_local_size, u32(_p.workgroup[0]), u32(_p.workgroup[1]), u32(_p.workgroup[2])});
+    else if (model != k_model_vertex)
+        write_primitive_modes();
     name(_function, _p.entry_name);
 
     // what no operation can say: a whole entry point's float behaviour, by width

@@ -178,9 +178,12 @@ Three lines of that table hold behaviour rather than a name:
 **The later stages need one more operation each, and nothing new in the table.**
 
 - **Geometry.** `op::emit_vertex` and `op::end_strip`, with inputs indexed by vertex and stores of the outputs ahead of each `emit_vertex`.
+  The array itself never becomes a value unless it is read whole, so a vertex at a dynamic index costs its elements and no copy.
 - **Tessellation.** The control stage's SGL body is what HLSL writes as the patch-constant function, and the hull function is a generated pass-through.
   So `program` stays one body, and each writer generates the pass-through from the element table.
   Patch constants are `stage_part::patch`, where DXIL's factors take their fixed rows first.
+  `program::primitive` holds what such a stage states beyond its elements, and mesh's limits and topology belong beside them.
+  `module_builder::begin_function` is what lets one module hold the second function, which the mesh stage does not need.
 - **Mesh and task.** `op::set_mesh_counts`, `op::write_primitive` and `op::dispatch_mesh`, which is a terminator on SPIR-V, with outputs indexed by vertex or primitive.
   Per-primitive values are `stage_part::primitive`, packed on their own from row 0 in the mesh stage.
   The pixel stage packs them after its vertex rows, as one list.
@@ -205,7 +208,8 @@ Clip and cull distances are no part of SGL, so `pack_signature` does not hold th
    The golden test cannot say that the routes link; only this one can.
 4. **The pixel surface, on both writers: done.** EMIT-238 states it, with the sampling family, 64-bit links and what a mesh stage wrote.
    Binding arrays came with it (EMIT-239), since they stopped three of these entry points and more of compute's.
-5. **Geometry and tessellation, then mesh and task, on both writers**, each with its corpus sweep and its pairs in the mixed-route test.
+5. **Geometry and tessellation, on both writers: done.** EMIT-240 states it.
+6. **Mesh and task, on both writers**, with its corpus sweep and its pairs in the mixed-route test.
 
 ## Measured on the first slice
 
@@ -237,11 +241,34 @@ On 2026-11-06, on the Arc B580 and over the repo's SGL:
   With `SC_SHADER_DIAGNOSTICS` on, the default, an entry point holding either falls back to DXC under a preference and is an error under `NATIVE_DXIL` or `NATIVE_SPIRV`.
   Neither writer reaches sg's debug window yet, and that is one gap of every stage rather than of pixel stages.
 
+## Measured on geometry and tessellation
+
+On 2026-11-07, on the Arc B580 and over the repo's SGL:
+
+- **All 18 geometry and tessellation entry points lower on both writers**, each past DXC's validator and `spirv-val`.
+- **The signature golden holds at no mismatch**, with these stages' lowered containers now compared lane by lane.
+- **The mixed-route test draws every pairing of the routes**, on dx12 and vulkan, every lane within 1e-4 of DXC's pipeline.
+  Its stages are [`primitive_stages.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/primitive_stages.sgl).
+  Those are triangle, line and point geometry, of 8 pairings each, and triangle, quad and line patches, of 16.
+  A patch's draw culls the side its winding must not face, and flipping the winding in lowering fails 60 checks.
+- **A control point's pieces moved a patch's locations.**
+  `patch_location_base` counted members, so a control point holding a matrix put the patch's first link on its last column, and DXC refused the text with vulkan's duplicate location.
+  It now counts locations, so those shaders compile through DXC, and no other text changed.
+
+What the measurements changed of the design:
+
+- **`dx.sig` and `PSV0` state a factor array as one element of several rows**, where `PSG1` states a line per row.
+  So `pack_signature` keeps a row each, and `signature_element::continues` marks the later ones.
+- **A signature part sorts by register and then name offset, not by column.**
+  The two agree until a factor shares its row with a link, where DXC's order puts the name written first, which the validator compares byte for byte.
+- **Patch constants take ids in declared order**, though the factors are placed first.
+- **An evaluation stage's `PSG1` states what it reads, as an input does, and a control stage's what it never writes.**
+- **`gl_PrimitiveID` is `Patch` in an evaluation stage**, as DXC writes it.
+
 ## Not confirmed
 
 - **Whether a driver uses the dependency table.** The validator and the debug layer take a conservative one, and the cube's image on the B580 is byte for byte DXC's, but no other driver was tried.
 - **Whether every path must store every output.** A path that ends in a `discard` stores nothing, and the validator's reading of a partial write is untried.
 - **How D3D12 links a mesh stage to a pixel stage.** The rows differ by construction, and sg's mesh tests pass through DXC, but no mismatched pair was tried.
-- **Geometry and tessellation pairs at pipeline creation.** Packing was measured there, and only vertex with pixel was linked by hand.
 - **`-Od` and `-Zi`.** The sweep compiled at the default optimization level, with no debug info.
 - **The Agility SDK's runtime and any GPU but the B580.** The link answers come from the D3D12 runtime rather than from a driver, so they should hold, but that is inference.
