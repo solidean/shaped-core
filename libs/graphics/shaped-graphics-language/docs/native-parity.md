@@ -318,6 +318,9 @@ That is the container rather than the code: DXC's side is stripped of reflection
     `hoist_common_values` now computes such a chain once in the arms' common dominator, which took the DXIL to 61 handles against DXC's 72; shade read 1.19 and 1.20.
   - `flatten_branches` off, for DXC's branches where native has 49 more selects: 1.20.
   - `merge_buffer_loads` off, for DXC's 112 single loads where native has 49 and 22 of four lanes: 1.33, so the merging helps.
+  - Shader model 6.8, as DXC's module states, which also sets `ResMayNotAlias` for its UAVs: 1.19 and 1.16.
+  The two modules' buffer accesses state the same alignment, their handles stand in the same blocks, and their loops nest alike.
+  Native's arithmetic is 1.03 of DXC's, spread over many lines with none above 24 operations, so what is left needs the driver's own view of the code.
 * **AMD's dx12 convolution, 1.03.**
   Its hot loop is the same shape on both routes, block for block: the same conditional loads, the same phis.
   DXC's extra live words are the row prologue, which it writes with branches where native selects, and which runs three times a thread.
