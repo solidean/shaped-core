@@ -309,6 +309,7 @@ enum storage_class : u32
     Uniform = 2,
     Output = 3,
     Workgroup = 4,
+    Private = 6,
     TaskPayloadWorkgroupEXT = 5402,
     FunctionStorage = 7,
     PushConstant = 9,

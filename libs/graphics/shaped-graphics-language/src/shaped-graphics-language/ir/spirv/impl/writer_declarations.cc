@@ -164,6 +164,8 @@ u32 writer::storage_of(storage s) const
         return k_callable_data;
     case storage::image:
         return spv::Image;
+    case storage::table:
+        return spv::Private;
     }
     return spv::FunctionStorage;
 }
@@ -502,12 +504,48 @@ void writer::write_interpolation(u32 id, interpolation mode)
     }
 }
 
+u32 writer::table_constant(type_ref type, cc::span<u32 const> leaves, isize& at)
+{
+    auto const& info = _p.at(type);
+    auto parts = cc::vector<u32>();
+    switch (info.kind)
+    {
+    case type_kind::vector:
+    case type_kind::matrix:
+    case type_kind::array:
+        for (auto k = u32(0); k < info.count; ++k)
+            parts.push_back(table_constant(info.element, leaves, at));
+        break;
+    case type_kind::structure:
+        for (auto m = u32(0); m < info.member_count; ++m)
+            parts.push_back(table_constant(_p.members[info.first_member + m].type, leaves, at));
+        break;
+    default:
+        return id_of(value_ref(leaves[at++]));
+    }
+    auto const id = _bound++;
+    head(_declarations, spv::ConstantComposite, 3 + parts.size());
+    _declarations.push_back(id_of(type));
+    _declarations.push_back(id);
+    _declarations.push_back_range(parts);
+    return id;
+}
+
 void writer::write_globals()
 {
     for (auto i = isize(0); i < _p.globals.size(); ++i)
     {
         auto const& g = _p.globals[i];
         auto const id = _globals + u32(i);
+        if (_p.at(g.type).space == storage::table)
+        {
+            auto const leaves = cc::span<u32 const>(_p.initializers.data() + g.initializer_first, g.initializer_count);
+            auto at = isize(0);
+            auto const value = table_constant(_p.at(g.type).element, leaves, at);
+            emit(_declarations, spv::Variable, {id_of(g.type), id, spv::Private, value});
+            name(id, _p.name_at(g.name_first, g.name_size));
+            continue;
+        }
         emit(_declarations, spv::Variable, {id_of(g.type), id, storage_of(_p.at(g.type).space)});
         name(id, _p.name_at(g.name_first, g.name_size));
         if (g.set >= 0)

@@ -58,6 +58,8 @@ private:
     [[nodiscard]] u32 literal_id(u32 value);
     /// A constant, or a `construct` of constants as the one `OpConstantComposite` an image operand must name.
     [[nodiscard]] u32 constant_composite(value_ref v);
+    /// The constant of `type` a table's leaves state from `at` on, which moves past them.
+    [[nodiscard]] u32 table_constant(type_ref type, cc::span<u32 const> leaves, isize& at);
 
     // ---- writer_lines.cc (EMIT-257)
     /// States the line of instruction `index` before it, where the line table has one and it changed.

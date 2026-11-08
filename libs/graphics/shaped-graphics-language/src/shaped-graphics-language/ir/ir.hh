@@ -134,6 +134,8 @@ enum class sgl::ir::storage : sgl::u8
     callable_output,
     /// One texel of a storage image, which only `op::texel_pointer` reaches.
     image,
+    /// A table the program states in full, which every invocation reads and none writes: a global with an initializer.
+    table,
 };
 
 /// One member of a structure; `offset` and `matrix_stride` mean something where it stands in GPU memory.
@@ -763,6 +765,9 @@ struct sgl::ir::global
     bool is_comparison = false;
     u32 name_first = 0;
     u32 name_size = 0;
+    /// A `storage::table`'s value: a range of `program::initializers`, one scalar constant per leaf, depth first.
+    u32 initializer_first = 0;
+    u32 initializer_count = 0;
 };
 
 /// A variable of the function.
@@ -815,6 +820,8 @@ struct sgl::ir::program
     cc::vector<stage_element> stage_elements;
     cc::vector<instruction> instructions;
     cc::vector<u32> operands;
+    /// The leaves of every table's value, each a scalar constant.
+    cc::vector<u32> initializers;
     /// In the order a target writes them, each dominated by the ones before it; the first is the entry.
     cc::vector<block> blocks;
     /// Every name a table holds a range of.

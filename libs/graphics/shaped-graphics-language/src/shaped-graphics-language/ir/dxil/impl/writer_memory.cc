@@ -47,6 +47,45 @@ u32 writer::memory_of_type(type_ref value, bool is_workgroup, cc::string_view na
     return u32(_memories.size() - 1);
 }
 
+u32 writer::memory_of_table(global const& g)
+{
+    auto const value = _p.at(g.type).element;
+    auto entry = memory{.value = value, .leaves = leaves_of(value)};
+    auto const name = _p.name_at(g.name_first, g.name_size);
+    for (auto l = u32(0); l < entry.leaves; ++l)
+    {
+        auto type = scalar_type(scalar_at(value, l));
+        if (type == _m.bool_type())
+            type = _m.int_type();
+        auto const slot = storage_slot(_m.is_float(type), _m.bits_of(type));
+        if (entry.storage[slot] != ll_value::none)
+            continue;
+        // one array per scalar type, as a variable's, its other types' leaves zero
+        auto elements = cc::vector<ll_value>();
+        for (auto k = u32(0); k < entry.leaves; ++k)
+        {
+            auto held = scalar_type(scalar_at(value, k));
+            auto const is_bool = held == _m.bool_type();
+            if (is_bool)
+                held = _m.int_type();
+            if (held != type)
+            {
+                elements.push_back(_m.is_float(type) ? _m.constant_float(type, 0) : _m.constant_int(type, 0));
+                continue;
+            }
+            auto const leaf = value_ref(_p.initializers[isize(g.initializer_first) + k]);
+            auto const& c = _p.constants[index_of(leaf)];
+            auto const bits = c.is_null ? u64(0) : (u64(c.high) << 32) | c.low;
+            elements.push_back(_m.is_float(type) ? _m.constant_float(type, bits) : _m.constant_int(type, bits));
+        }
+        auto const array = _m.array(type, entry.leaves);
+        entry.storage[slot] = _m.add_constant_table(cc::format("{}.{}", name, slot), array,
+                                                    _m.constant_struct(array, elements), _m.bits_of(type) / 8);
+    }
+    _memories.push_back(entry);
+    return u32(_memories.size() - 1);
+}
+
 void writer::declare_memory()
 {
     _local_memory.resize_to_filled(_p.locals.size(), -1);
@@ -59,6 +98,11 @@ void writer::declare_memory()
     for (auto g = isize(0); g < _p.globals.size(); ++g)
     {
         auto const& pointer = _p.at(_p.globals[g].type);
+        if (pointer.space == storage::table)
+        {
+            _global_memory[g] = i32(memory_of_table(_p.globals[g]));
+            continue;
+        }
         if (pointer.space == storage::workgroup)
             _global_memory[g] = i32(
                 memory_of_type(pointer.element, true, _p.name_at(_p.globals[g].name_first, _p.globals[g].name_size)));

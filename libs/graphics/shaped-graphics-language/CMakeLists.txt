@@ -78,6 +78,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/dominance.cc
     src/shaped-graphics-language/ir/simplify.cc
     src/shaped-graphics-language/ir/ssa.cc
+    src/shaped-graphics-language/ir/tables.cc
     src/shaped-graphics-language/ir/verify.cc
     src/shaped-graphics-language/ir/dxil/dxil.cc
     src/shaped-graphics-language/ir/dxil/signature.cc
@@ -520,6 +521,7 @@ if(SC_BUILD_TESTS)
         tests/ir/passes-ir-test.cc
         tests/ir/signature-ir-test.cc
         tests/ir/sweep-ir-test.cc
+        tests/ir/tables-ir-test.cc
         tests/ir/verify-ir-test.cc
         tests/emit/matrix-arithmetic-emit-test.cc
         tests/emit/line-mapping-emit-test.cc

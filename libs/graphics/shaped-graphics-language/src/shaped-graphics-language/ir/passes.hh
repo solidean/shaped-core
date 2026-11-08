@@ -36,6 +36,13 @@ void flatten_branches(program& p);
 /// Leaves the lanes' phis unread for `remove_unused`, and keeps control flow as it stood.
 void regroup_lanes(program& p);
 
+/// Makes each local written once, whole, with constants, ahead of every read and never again, a `storage::table`.
+///
+/// That is a `let` of constants an index reaches at run time, which SSA leaves in memory.
+/// A target states a table once, where a local is memory each invocation fills first; tables of the same leaves are one.
+/// The local's store goes, and so does the local.
+void state_constant_tables(program& p);
+
 /// Reorders each run of `fast` additions in one block, so a total meets each product alone and fuses with it.
 ///
 /// A sum only reorders with sums of its own guarantee, and each addition keeps its statement and its place in the block.

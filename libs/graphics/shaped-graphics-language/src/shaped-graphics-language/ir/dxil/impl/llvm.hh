@@ -207,6 +207,8 @@ public:
     [[nodiscard]] ll_value add_variable(cc::string_view name, ll_type value, u32 address_space, u32 alignment);
     /// `external constant`: what a library's resource is until the runtime binds it.
     [[nodiscard]] ll_value add_external_constant(cc::string_view name, ll_type value, u32 alignment);
+    /// `internal constant`, holding `initializer`: a table the module states in full.
+    [[nodiscard]] ll_value add_constant_table(cc::string_view name, ll_type value, ll_value initializer, u32 alignment);
     /// States the parameters of the module's one function, which precede every value of its body.
     void set_arguments(cc::span<ll_type const> types);
     [[nodiscard]] ll_value argument(u32 index) const { return ll_value(index | k_ll_constant_bit | k_ll_global_bit); }
@@ -368,6 +370,8 @@ private:
         u32 address_space = 0;
         u32 alignment = 0;
         bool is_constant = false;
+        /// A variable's value, where the module states it, which makes it internal.
+        ll_value initializer = ll_value::none;
         u32 attributes = 0;
         u32 name_first = 0;
         u32 name_size = 0;

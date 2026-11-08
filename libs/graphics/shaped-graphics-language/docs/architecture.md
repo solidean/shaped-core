@@ -206,6 +206,7 @@ The size and alignment the layout rules place a value by, and each target's own,
 ## The native layer
 
 `ir/` is one entry point below the flat tree, which a binary target writes out with no compiler behind it: `ir::lower` fills an `ir::program`, and `ir::construct_ssa` promotes its locals.
+`ir::state_constant_tables` then makes a local SSA left in memory a `storage::table` where it is a constant written once: an initialized `Private` variable on SPIR-V, an internal constant on DXIL.
 `ir/pipeline.hh` is each target's whole way, one plain function per target, `ir::compile_spirv` and `ir::compile_dxil`; a pass joins a route there.
 A stage's edge is `program::stage_elements`, filled by `ir/lower_stage.cc` from the plan, which `op::stage_load` and `op::stage_store` reach; `ir/dxil/signature.hh` places it in DXIL's rows.
 Every stage but the ray-tracing ones lowers: a vertex or pixel entry reads its edge ahead of its body, and each `return` stores its outputs.

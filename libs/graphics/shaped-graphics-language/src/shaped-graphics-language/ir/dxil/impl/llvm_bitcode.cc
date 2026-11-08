@@ -350,7 +350,10 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         auto const& g = _globals[i];
         if (!g.is_function)
         {
-            out.record(7, {u64(u32(g.type)), (g.is_constant ? 3u : 2u) | (u64(g.address_space) << 2), 0u, 0u,
+            // an initializer is its value's number plus one, and makes the variable internal, linkage 3
+            auto const has_value = g.initializer != ll_value::none;
+            out.record(7, {u64(u32(g.type)), (g.is_constant ? 3u : 2u) | (u64(g.address_space) << 2),
+                           has_value ? number_of(u32(g.initializer)) + 1 : 0u, has_value ? 3u : 0u,
                            log2_plus_one(g.alignment), 0u});
             continue;
         }

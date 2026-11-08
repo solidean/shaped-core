@@ -337,6 +337,8 @@ private:
     // ---- writer_memory.cc
     void declare_memory();
     [[nodiscard]] ll_value add_dynamic(ll_value dynamic, ll_value index, u32 scale);
+    /// A table's memory: an internal constant per scalar type it holds.
+    [[nodiscard]] u32 memory_of_table(global const& g);
     [[nodiscard]] u32 memory_of_type(type_ref value, bool is_workgroup, cc::string_view name);
     /// DXC's shape of a payload's `t`: a vector or a matrix is an array of scalars, and a `bool` an `i32`.
     [[nodiscard]] ll_type payload_type(type_ref t);

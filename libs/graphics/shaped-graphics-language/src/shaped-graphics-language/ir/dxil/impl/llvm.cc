@@ -266,6 +266,18 @@ ll_value module_builder::add_external_constant(cc::string_view name, ll_type val
     return ll_value(u32(_globals.size() - 1) | k_ll_global_bit);
 }
 
+ll_value module_builder::add_constant_table(cc::string_view name, ll_type value, ll_value initializer, u32 alignment)
+{
+    _globals.push_back({.type = value,
+                        .pointer = pointer(value),
+                        .alignment = alignment,
+                        .is_constant = true,
+                        .initializer = initializer,
+                        .name_first = add_name(name),
+                        .name_size = u32(name.size())});
+    return ll_value(u32(_globals.size() - 1) | k_ll_global_bit);
+}
+
 u32 module_builder::md_string(cc::string_view text)
 {
     _metadata.push_back({.code = md_code::string, .first = add_name(text), .count = u32(text.size())});

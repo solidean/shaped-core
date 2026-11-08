@@ -36,6 +36,8 @@ void assert_whole([[maybe_unused]] program const& p,
     assert_whole(p, control_flow::structured, "lowering");
     construct_ssa(p);
     assert_whole(p, control_flow::structured, "construct_ssa");
+    state_constant_tables(p);
+    assert_whole(p, control_flow::structured, "state_constant_tables");
     return {};
 }
 } // namespace

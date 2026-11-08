@@ -97,7 +97,8 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 | a material's shade kernel | spirv | 1.88 | 1.39 |
 | raster `environment_ps` | dxil | 1.96 | 1.02 |
 | raster `cull_second` | dxil | 1.19 | 1.16 |
-| `bc7_cs` | dxil | 1.49 | 1.49 |
+| `bc7_cs` | dxil | 1.49 | 1.27 |
+| bloom `first_cs` | dxil | 1.21 | 1.03 |
 | `bc3_cs` | spirv | 1.30 | 1.27 |
 
 The shade kernel is generated per material at run time, so `table` does not hold it; the row is the cornell box's `pbr`.
@@ -124,9 +125,14 @@ That is the container rather than the code: DXC's side is stripped of reflection
 * **A known branch stayed on SPIR-V.**
   The structured mode folds a selection's known condition to a branch, and keeps the other side as a label and `OpUnreachable` for any merge naming it.
 * **A local array a loop indexes stayed in memory.**
-  DXC unrolls a short loop of constant bounds and promotes the array; native unrolls only what `@unroll` asks for.
   The viewer's environment loops now say `@unroll`, which took path_miss's DXIL from 1209 operations to 412, DXC's being 397.
-  The compiler choosing that itself is [perf-sgl-native-constant-loops-not-unrolled](issues/perf-sgl-native-constant-loops-not-unrolled.md).
+  The compiler unrolling such loops itself was tried, and grew every entry it touched: DXC keeps these loops.
+  [perf-sgl-native-constant-loops-not-unrolled](issues/.closed/2026/11/perf-sgl-native-constant-loops-not-unrolled.md) holds the measurements.
+* **A table of constants was memory each invocation filled.**
+  A `let` of constants an index reaches at run time stayed a local, which DXIL fills with a store per element at every use.
+  bc7 inlines dozens of them, its weight and partition tables: 1171 stores against DXC's 460.
+  `state_constant_tables` makes each one a table: an internal constant on DXIL and a `Private` variable on SPIR-V, one per set of leaves.
+  bc7's DXIL went from 1.49 to 1.27 and bloom's from 1.21 to 1.03, and nothing grew.
 
 ## What remains
 
@@ -138,6 +144,7 @@ That is the container rather than the code: DXC's side is stripped of reflection
 * **SPIR-V turns no if-else into a select.**
   DXC's SPIR-V goes through spirv-opt, which does, and `flatten_branches` is DXIL's alone: connect's SPIR-V holds 171 phis and no `OpSelect` against DXC's 78 and 14.
   vulkan's frame is faster than DXC's regardless, so this is a size gap, and a lead should a vulkan kernel come in slow.
-* **bc7's DXIL, 1.49 in size.**
-  This is the unrolling above, in sr's own compression shader: 67 allocas against DXC's 27, and 1156 stores against 460.
-  It is not timed here.
+* **bc7's DXIL, 1.27 in size.**
+  Its stores are DXC's now; what is left is 195 more `fdiv`, 234 more `select` and 242 more `load` than DXC's.
+  The `fdiv`s are the wavefront's shape again, a division by a constant DXC writes as a multiplication.
+  [perf-sgl-dxil-bc7-arithmetic-gap](issues/perf-sgl-dxil-bc7-arithmetic-gap.md) has the rest; it is not timed here.
