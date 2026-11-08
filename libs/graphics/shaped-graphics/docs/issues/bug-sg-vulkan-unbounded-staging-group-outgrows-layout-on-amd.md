@@ -18,3 +18,10 @@ It passes on the Intel Arc B580 on every context.
 Not yet known: the two sizes, and whether the vulkan context on the DXC route fails too (it ran in another shard and passed there, or did not reach the test).
 The likely cause is the layout's size for an unbounded binding being taken from a capacity or a descriptor size that AMD reports differently.
 AMD's descriptor-buffer sizes and alignments differ from Intel's, so that arithmetic is the first place to look.
+
+## Cause
+
+AMD's driver (vulkan 2.0.353) sizes a layout whose last binding is `VARIABLE_DESCRIPTOR_COUNT` as though that binding held no elements.
+`vkGetDescriptorSetLayoutSizeEXT` gave 16 bytes for one storage buffer followed by 65,536 more at offset 16, where the spec says the size counts the variable binding at its full count.
+Intel's driver follows the spec.
+`vulkan_binding_group_layout::create` now takes the larger of the driver's size and the last binding's offset plus its capacity, which is what the spec's own size is.

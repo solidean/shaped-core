@@ -179,6 +179,9 @@ private:
     /// A pointer to one element of a binding array, or none where `x` is no element of one.
     [[nodiscard]] value_ref bound_element(flat_expr_id id);
     /// `k_ir_nonuniform` where `pointer` came through such an index.
+    /// The length of a binding array's element at a non-uniform index, asked at uniform indices alone; none where the
+    /// target or the stage asks it as it is.
+    [[nodiscard]] value_ref uniform_element_length(flat_expr_id id);
     [[nodiscard]] u8 nonuniform_of(value_ref pointer) const;
     [[nodiscard]] value_ref load(place const& p);
     void store(place const& p, value_ref value);

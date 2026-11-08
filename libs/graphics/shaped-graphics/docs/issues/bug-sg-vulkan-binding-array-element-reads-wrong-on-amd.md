@@ -25,3 +25,11 @@ Measured in `debug-output-test.cc`:
 Every failing lane reads through a binding array's second element, so the second element's descriptor is likely the wrong one or absent.
 That is also where [the unbounded layout assert](bug-sg-vulkan-unbounded-staging-group-outgrows-layout-on-amd.md) points, so the two probably share one cause.
 That cause is sg's descriptor-buffer arithmetic for array elements, a stride or an offset that AMD's descriptor sizes break and Intel's happen not to.
+
+## Cause
+
+It was not the descriptors: the layout was right, offsets 0 and 16 in 48 bytes, and every load reached the element its lane indexed.
+The guards read the wrong length.
+AMD's driver answers `OpArrayLength` of an element at a non-uniform index with the first active lane's element, so lanes 1 and 3 measured their index against element 0's length.
+SGL now asks that length at uniform indices on vulkan.
+[debt-sgl-vulkan-element-length-asked-at-uniform-indices](../../../shaped-graphics-language/docs/issues/debt-sgl-vulkan-element-length-asked-at-uniform-indices.md) tracks the workaround.

@@ -65,7 +65,11 @@ public:
     /// `buffer_length` of the element `index` of the binding array `name`; only HLSL reaches this, since WGSL has no
     /// binding arrays and MSL no lengths.
     [[nodiscard]] virtual cc::string buffer_length_at(cc::string_view, cc::string_view, bool) const { return "0u"; }
-    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool) const { return {}; }
+    /// Its helper, for an array of `count` elements, 0 where unbounded; `may_waterfall` where the stage has subgroup operations.
+    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool, i32, bool) const
+    {
+        return {};
+    }
 
     /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
     [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }

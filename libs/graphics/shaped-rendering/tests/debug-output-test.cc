@@ -1,3 +1,4 @@
+#include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -80,7 +81,7 @@ cc::shared_async<guarded_compute> guarded_compute_of(sg::context& ctx,
 
     auto named = cc::vector<sg::named_view>();
     for (auto const& b : shader.bindings)
-        if (b.count > 1)
+        if (b.count > 1 || b.is_unbounded())
             named.push_back({.name = b.name, .view = cc::move(views)});
         else
             named.push_back({.name = b.name, .view = written.as_readwrite_buffer()});
@@ -329,6 +330,66 @@ ASYNC_INVOCABLE_TEST("sr - an index past an element of a binding array is measur
         co_await ctx.idle_completion();
         co_await ctx.idle_completion();
         ctx.process_completed_epochs();
+        co_await ctx.idle_completion();
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sr - the length of a binding array's element at a non-uniform index is that element's, in a "
+                     "fixed array and an unbounded one",
+                     (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+    if (inner_compiler_for(ctx) == nullptr || !ctx.supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays, or sg binds no debug window on it yet");
+
+    // AMD's vulkan driver once answered every lane with element 0's length (debt-sgl-vulkan-element-length-asked-at-uniform-indices)
+    struct array_kind
+    {
+        cc::string_view require;
+        cc::string_view extent;
+    };
+    auto kinds = cc::vector<array_kind>{{.require = "binding_arrays", .extent = "2"}};
+    if (ctx.supports(sg::feature::unbounded_binding_arrays))
+        kinds.push_back({.require = "binding_arrays, unbounded_binding_arrays", .extent = ""});
+    auto const short_view
+        = ctx.persistent.create_buffer_from_data(cc::vector<u32>{10, 11}, sg::buffer_usage::readonly_buffer);
+    auto const long_view = ctx.persistent.create_buffer_from_data(cc::vector<u32>{20, 21, 22, 23, 24, 25, 26, 27},
+                                                                  sg::buffer_usage::readonly_buffer);
+    for (auto const& kind : kinds)
+    {
+        auto const source
+            = cc::format("require {}\n\nbinding work:\n    written: mut buffer[uint]\n    views: buffer[uint][{}]\n"
+                         "\n@compute(4) fun cs(@thread_id id: int3){{work}}:\n"
+                         "    work.written[id.x] = work.views[nonuniform (id.x % 2)].length\n",
+                         kind.require, kind.extent);
+        auto const written = ctx.persistent.create_buffer_from_data(
+            cc::vector<u32>{99, 99, 99, 99}, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        auto views = cc::vector<sg::raw_view>();
+        views.push_back(short_view.as_readonly_buffer());
+        views.push_back(long_view.as_readonly_buffer());
+        auto const compute = co_await guarded_compute_of(ctx, source, "length.sgl", slib::sgl_undefined_guard::none,
+                                                         written, cc::move(views));
+
+        auto cmd = ctx.create_command_list();
+        cmd->compute.bind_pipeline(*compute.pipeline);
+        cmd->compute.bind_group(0, *compute.group);
+        auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
+                                                               {.index = 1, .access = sg::access_flag::shader_read}};
+        auto const declared = cmd->compute.declare_array_buffer_access("work.views", reads);
+        cmd->compute.dispatch_threads(4);
+        auto const future = cmd->download.data_from_buffer(written);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        auto const data = co_await future.data();
+        REQUIRE(data.size() == 4);
+        CHECK(data[0] == 2);
+        CHECK(data[1] == 8);
+        CHECK(data[2] == 2);
+        CHECK(data[3] == 8);
+
+        co_await ctx.idle_completion();
         co_await ctx.idle_completion();
     }
 }

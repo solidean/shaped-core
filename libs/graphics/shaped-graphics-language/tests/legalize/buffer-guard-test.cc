@@ -244,8 +244,12 @@ TEST("sgl emit - an element's length keeps its mark in the helper, and a zero is
         auto const text = sgl::compile_to_text(
             {.source = source, .entry_point = "cs", .target = t, .guards_undefined = undefined_guard::define});
         REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
-        CHECK(text.value().text.contains("[NonUniformResourceIndex(i)].GetDimensions(n, stride);"))
-            .dump("text", text.value().text);
+        if (t == sgl::emit::target::hlsl_dx12)
+            CHECK(text.value().text.contains("[NonUniformResourceIndex(i)].GetDimensions(n, stride);"))
+                .dump("text", text.value().text);
+        else // asked per element, at uniform indices (debt-sgl-vulkan-element-length-asked-at-uniform-indices)
+            CHECK(text.value().text.contains("[3].GetDimensions(k, stride);\n    n = i == 3u ? k : n;"))
+                .dump("text", text.value().text);
         CHECK(text.value().text.contains(")0;")).dump("text", text.value().text);
     }
 }

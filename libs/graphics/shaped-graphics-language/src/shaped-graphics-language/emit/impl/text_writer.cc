@@ -1910,8 +1910,11 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         auto const* const call = element != nullptr ? p.e.at(element->index).node.try_as<check::flat_call>() : nullptr;
         auto const* const mark = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
         auto const is_nonuniform = mark != nullptr && mark->mark == builtins::index_mark::nonuniform;
-        auto text = element != nullptr ? d.buffer_length_at_helper(p.resources[found].name, is_nonuniform, is_bytes)
-                                       : d.buffer_length_helper(p.resources[found].name, is_bytes);
+        auto text = element != nullptr
+                      ? d.buffer_length_at_helper(
+                            p.resources[found].name, is_nonuniform, is_bytes, p.resources[found].count,
+                            p.e.entry_stage == check::stage::compute || p.e.entry_stage == check::stage::pixel)
+                      : d.buffer_length_helper(p.resources[found].name, is_bytes);
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;

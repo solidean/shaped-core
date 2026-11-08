@@ -52,8 +52,34 @@ public:
     {
         return cc::format("sgl_length_{}{}({})", is_nonuniform ? "nonuniform_" : "", name, index);
     }
-    cc::string buffer_length_at_helper(cc::string_view name, bool is_nonuniform, bool is_bytes) const override
+    cc::string buffer_length_at_helper(cc::string_view name,
+                                       bool is_nonuniform,
+                                       bool is_bytes,
+                                       i32 count,
+                                       bool may_waterfall) const override
     {
+        // TEMPORARY(debt-sgl-vulkan-element-length-asked-at-uniform-indices): AMD's vulkan driver answers
+        // OpArrayLength of a non-uniform element with the first lane's element, so each length is asked at a uniform index.
+        auto const dimensions = [&](cc::string_view element, cc::string_view into)
+        {
+            return is_bytes ? cc::format("{}.GetDimensions({});", element, into)
+                            : cc::format("{}.GetDimensions({}, stride);", element, into);
+        };
+        if (_is_vulkan && is_nonuniform && count > 0 && count <= 16)
+        {
+            auto text = cc::format("uint sgl_length_nonuniform_{}(uint i)\n{{\n    uint n, k, stride;\n    {}\n", name,
+                                   dimensions(cc::format("{}[0]", name), "n"));
+            for (auto e = 1; e < count; ++e)
+                text.appendf("    {}\n    n = i == {}u ? k : n;\n", dimensions(cc::format("{}[{}]", name, e), "k"), e);
+            text += "    return n;\n}\n";
+            return text;
+        }
+        if (_is_vulkan && is_nonuniform && count == 0 && may_waterfall)
+            return cc::format("uint sgl_length_nonuniform_{}(uint i)\n{{\n    uint n = 0u, stride;\n    for (;;)\n    "
+                              "{{\n        const uint first = WaveReadLaneFirst(i);\n        {}\n        if (first == "
+                              "i)\n"
+                              "            break;\n    }}\n    return n;\n}}\n",
+                              name, dimensions(cc::format("{}[first]", name), "n"));
         auto const element
             = is_nonuniform ? cc::format("{}[NonUniformResourceIndex(i)]", name) : cc::format("{}[i]", name);
         auto const prefix = is_nonuniform ? "nonuniform_" : "";

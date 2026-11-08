@@ -613,6 +613,70 @@ value_ref lowering::bound_element(flat_expr_id id)
                is_nonuniform(element->index) ? k_ir_nonuniform : u8(0));
 }
 
+value_ref lowering::uniform_element_length(flat_expr_id id)
+{
+    // TEMPORARY(debt-sgl-vulkan-element-length-asked-at-uniform-indices): AMD's vulkan driver answers
+    // OpArrayLength of a non-uniform element with the first lane's element, so each length is asked at a uniform index.
+    if (_plan.which != emit::target::hlsl_vulkan)
+        return value_ref::none;
+    auto const* const element = _e.at(id).node.try_as<flat_element>();
+    if (element == nullptr || !is_nonuniform(element->index))
+        return value_ref::none;
+    auto const* const bound = _e.at(element->object).node.try_as<flat_binding_member>();
+    if (bound == nullptr)
+        return value_ref::none;
+    auto const found = emit::impl::resource_of(_plan, bound->binding, bound->member);
+    if (found < 0)
+        return value_ref::none;
+    auto const array = bound_resource(found);
+    if (!ir::is_valid(array))
+        return value_ref::none;
+    auto const& pointer = _out.at(_out.type_of(array));
+    auto const& elements = _out.at(pointer.element);
+    auto const held = elements.element;
+    auto const space = pointer.space;
+    auto const is_fixed = elements.kind == type_kind::array && elements.count <= 16;
+    if (!is_fixed && _e.entry_stage != stage::compute && _e.entry_stage != stage::pixel)
+        return value_ref::none;
+
+    auto const index = expr(element->index);
+    auto const index_type = _out.type_of(index);
+    auto const length_at = [&](value_ref at)
+    {
+        u32 const chain[] = {u32(array), u32(at)};
+        auto const p = add(op::access_chain, pointer_type(held, space), chain);
+        u32 const operands[] = {u32(p), 0u};
+        return add(op::array_length, _uint, operands);
+    };
+    if (is_fixed)
+    {
+        auto const constant = [&](u32 k) { return index_type == _uint ? uint_constant(k) : int_constant(i32(k)); };
+        auto length = length_at(constant(0));
+        for (auto k = u32(1); k < elements.count; ++k)
+            length = add(op::select, _uint, {add(op::ieq, _bool, {index, constant(k)}), length_at(constant(k)), length});
+        return length;
+    }
+
+    // a waterfall: each turn answers the lanes whose index the first lane still asking holds
+    auto const variable = add_local(_uint, "element_length");
+    auto const header = new_block();
+    auto const body = new_block();
+    auto const next = new_block();
+    auto const merge = new_block();
+    branch(header);
+    open_block(header);
+    set_merge(merge_kind::loop, merge, next);
+    branch(body);
+    open_block(body);
+    auto const first = add(op::subgroup, index_type, {index}, u8(subgroup::broadcast_first));
+    add(op::store, type_ref::none, {variable, length_at(first)});
+    branch_if(add(op::ieq, _bool, {index, first}), merge, next);
+    open_block(next);
+    branch(header);
+    open_block(merge);
+    return add(op::load, _uint, {variable});
+}
+
 u8 lowering::nonuniform_of(value_ref pointer) const
 {
     if (!ir::is_valid(pointer) || is_constant(pointer) || is_global(pointer) || is_local(pointer))
