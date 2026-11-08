@@ -37,6 +37,22 @@ namespace
     }
 }
 
+/// Whether `pointer` reaches into a constant block, whose every element a dispatch reads alike and may read at any time.
+[[nodiscard]] bool is_into_constants(program const& p, value_ref pointer)
+{
+    while (is_operation(pointer))
+    {
+        auto const& i = p.instructions[index_of(pointer)];
+        if (i.code != op::access_chain)
+            return false;
+        pointer = value_ref(p.operands_of(i)[0]);
+    }
+    if (!is_global(pointer))
+        return false;
+    auto const kind = p.globals[index_of(pointer)].kind;
+    return kind == global_kind::constants || kind == global_kind::inline_constants;
+}
+
 [[nodiscard]] bool may_share(program const& p, instruction const& i)
 {
     if (i.code == op::load)
@@ -241,7 +257,10 @@ void sgl::ir::share_common_values(program& p)
                 p.operands[i.first + k] = current(p.operands[i.first + k]);
 }
 
-void sgl::ir::hoist_common_chains(program& p)
+namespace
+{
+/// One round of `hoist_common_values`, which reports whether it moved anything.
+[[nodiscard]] bool hoist_round(program& p)
 {
     auto const g = walk_of(p);
     auto const tree = dominance(g.edges_to, g.preds);
@@ -262,13 +281,41 @@ void sgl::ir::hoist_common_chains(program& p)
         return true;
     };
 
-    // each chain's twins: the first of each group, and every other its group holds
+    // A value every invocation of the dispatch shares: no phi, no per-thread input, and fed by nothing else.
+    // Its operands may stand later in the tables than it does, so the marking runs until it settles.
+    auto is_invariant = cc::vector<bool>::create_filled(p.instructions.size(), false);
+    for (auto changed = true; changed;)
+    {
+        changed = false;
+        for (auto i = isize(0); i < p.instructions.size(); ++i)
+        {
+            auto const& inst = p.instructions[i];
+            if (is_invariant[i] || block_of[i] == 0xffffffffu || inst.code == op::stage_load)
+                continue;
+            auto const operands = p.operands_of(inst);
+            if (inst.code == op::load ? !is_into_constants(p, value_ref(operands[0])) : !may_speculate(inst.code))
+                continue;
+            auto fed = true;
+            for (auto k = isize(0); k < operands.size(); ++k)
+                if (operand_role(inst.code, k) == operand::value && is_operation(value_ref(operands[k]))
+                    && !is_invariant[index_of(value_ref(operands[k]))])
+                    fed = false;
+            if (fed)
+            {
+                is_invariant[i] = true;
+                changed = true;
+            }
+        }
+    }
+
+    // each group's twins: the first of each group, and every other its group holds
     auto lead_of = cc::vector<u32>::create_filled(p.instructions.size(), 0xffffffffu);
     auto leads = cc::vector<u32>();
     for (auto i = isize(0); i < p.instructions.size(); ++i)
     {
         auto const& inst = p.instructions[i];
-        if (inst.code != op::access_chain || block_of[i] == 0xffffffffu || !g.is_reached[block_of[i]])
+        if ((inst.code != op::access_chain && !is_invariant[i]) || block_of[i] == 0xffffffffu
+            || !g.is_reached[block_of[i]])
             continue;
         auto found = false;
         for (auto const l : leads)
@@ -321,7 +368,7 @@ void sgl::ir::hoist_common_chains(program& p)
         any = true;
     }
     if (!any)
-        return;
+        return false;
 
     // the tables again: each group's one chain ahead of its common dominator's terminator, and its twins gone
     // what each block takes ahead of its terminator, a chain after any moved chain it reads
@@ -409,4 +456,14 @@ void sgl::ir::hoist_common_chains(program& p)
     }
     p.instructions = cc::move(kept);
     p.operands = cc::move(operands);
+    return true;
+}
+} // namespace
+
+void sgl::ir::hoist_common_values(program& p)
+{
+    // a round moves one level of a value's operands, so a load of a moved chain moves the round after it
+    for (auto round = 0; round < 16 && hoist_round(p); ++round)
+    {
+    }
 }

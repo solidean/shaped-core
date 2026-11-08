@@ -952,6 +952,21 @@ private:
 
     /// `any` or `all` of a vector comparison whose two sides are known in every lane: `v != float3(0, 0, 1)` of a
     /// constant `v`, which no bool vector need be made for.
+    /// A known condition's opposite, and a twice-negated condition as itself.
+    void fold_not(u32 index, instruction const& i, value_ref a)
+    {
+        auto x = u64(0);
+        auto width = u32(0);
+        auto is_float = false;
+        if (scalar_bits(a, x, width, is_float))
+        {
+            set_alias(index, constant_of(i.type, x != 0 ? 0 : 1));
+            return;
+        }
+        if (is_operation(a) && _p.instructions[index_of(a)].code == op::logical_not)
+            set_alias(index, resolved(value_ref(_p.operands_of(_p.instructions[index_of(a)])[0])));
+    }
+
     void fold_every(u32 index, bool is_all, value_ref compared)
     {
         if (!is_operation(compared))
@@ -1068,6 +1083,11 @@ private:
                 {
                     fold_select(index, resolved(value_ref(operands[0])), resolved(value_ref(operands[1])),
                                 resolved(value_ref(operands[2])));
+                    continue;
+                }
+                if (i.code == op::logical_not)
+                {
+                    fold_not(index, i, resolved(value_ref(operands[0])));
                     continue;
                 }
                 if (i.code == op::s_to_f || i.code == op::u_to_f)

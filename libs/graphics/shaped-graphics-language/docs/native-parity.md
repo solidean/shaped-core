@@ -25,6 +25,8 @@ Both open no window.
 Three effects of the B580 decide how to read them:
 
 * A newly loaded binary runs in a driver's cold tier, up to 16% slow, for its first dispatches; both benchmarks run past it before timing.
+  The first process after the compiler changed can read far worse than that, past the warm-up, with the driver's caches cold.
+  On 2026-11-08 one such process read the BC encoders at 1.5 to 3.1 on the B580's dx12, and the two after it at 0.67 to 0.88; a ratio a change moves that far is read again.
 * A process lands in one of two speed modes about 1.5 times apart, which moves both routes alike but can move a ratio by 10% in one process.
   So a ratio is read across at least three processes, and one that only one process shows is that process's mode.
 * Outside a slow-mode process, sr's ratios repeat within 0.1% from process to process, and a whole frame's within about 3%.
@@ -277,6 +279,16 @@ That is the container rather than the code: DXC's side is stripped of reflection
   So the shade kernel kept 602 scalar float phis against DXC's 154, beside DXC's 143 of `float3` and 51 of `float4`.
   A way whose lanes are another merge's phis now makes those a group first, so the vector is one phi at every merge it crosses.
   The shade kernel's SPIR-V went from 1.03 to 0.99 of DXC's, the path tracer's from 1.03 to 0.90, and bc7's from 0.80 to 0.70.
+* **An unrolled loop tested a constant in every arm of every iteration.**
+  bc4 read `bc_constants.snorm` and compared it with 0 in both arms of each texel's `channel_range` branch, 32 times, where DXC hoists the test out of the loop before unrolling it.
+  No copy dominates another, so `share_common_values` could not merge them.
+  `hoist_common_values`, which moved access chains alone, now also moves a value the whole dispatch shares into the common dominator of its copies, in rounds until nothing moves.
+  bc4's DXIL went from 1.07 of DXC's operations to 1.03, and bc5's from 1.07 to 1.04.
+* **A `not` of a known condition stayed a branch.**
+  `simplify` folded every logical operation but `logical_not`, so an unrolled `continue` past a test of a constant kept its branch, which the DXIL writer then wrote as `br i1 true`.
+  In bc3, whose color block never has a transparent texel, that left 48 such branches and a phi for every accumulator at each of their merges.
+  `simplify` now folds a `not` of a constant, and of a `not`.
+  bc3's DXIL went from 1.10 of DXC's operations to 1.00, and its SPIR-V from 1.02 to 0.91.
 
 ## What remains
 
@@ -290,7 +302,7 @@ That is the container rather than the code: DXC's side is stripped of reflection
   The Radeon's dx12 shade read 1.01 and vulkan's on the B580 1.0, so the gap is the B580's dx12 driver's alone, which reports no figures.
   Three causes were tried and ruled out, each a run against 1.19:
   - Handles: the shade kernel made a bindless texture's handle in each arm of an if-else over samplers, 54 where DXC makes 3.
-    `hoist_common_chains` now computes such a chain once in the arms' common dominator, which took the DXIL to 61 handles against DXC's 72; shade read 1.19 and 1.20.
+    `hoist_common_values` now computes such a chain once in the arms' common dominator, which took the DXIL to 61 handles against DXC's 72; shade read 1.19 and 1.20.
   - `flatten_branches` off, for DXC's branches where native has 49 more selects: 1.20.
   - `merge_buffer_loads` off, for DXC's 112 single loads where native has 49 and 22 of four lanes: 1.33, so the merging helps.
 * **AMD's dx12 convolution, 1.03.**

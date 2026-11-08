@@ -201,6 +201,29 @@ TEST("sgl ir simplify - a known condition drops the arm it rules out, and the ph
     CHECK(!dump(b.p).contains("0x40000000"));
 }
 
+TEST("sgl ir simplify - a branch on the negation of a known condition goes the other way")
+{
+    // what an unrolled `continue` past a test of a constant leaves, once the test folds
+    auto b = program_builder();
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const twice = b.add(op::logical_not, b.bool_type, {u32(b.add(op::logical_not, b.bool_type, {u32(b.no)}))});
+    b.branch_if(b.add(op::logical_not, b.bool_type, {u32(twice)}), 1, 2);
+    b.open(1);
+    b.branch(3);
+    b.open(2);
+    b.branch(3);
+    b.open(3);
+    b.keep(b.add(op::phi, b.float_type, {u32(b.one), 1, u32(b.two), 2}));
+    b.finish();
+    simplify(b.p);
+    CHECK(refusal_of(b.p, control_flow::unstructured) == "");
+    CHECK(count_of(b.p, op::branch_conditional) == 0);
+    CHECK(count_of(b.p, op::logical_not) == 0);
+    CHECK(dump(b.p).contains("store @ 0x3f800000"));
+}
+
 TEST("sgl ir simplify - the other condition keeps the other value")
 {
     auto b = program_builder();

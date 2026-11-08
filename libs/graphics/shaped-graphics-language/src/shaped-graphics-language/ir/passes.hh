@@ -20,14 +20,18 @@ void remove_unused(program& p);
 /// Leaves the replaced operation unread, for `remove_unused`, and keeps control flow as it stood.
 void share_common_values(program& p);
 
-/// Computes once an access chain several blocks compute alike, none of which dominates another, in their common
-/// dominator, where every operand of it already stands.
-///
-/// A chain only names an element, so computing it on a path that does not read it changes nothing but an address.
-/// What it is for is a binding array's element: DXIL makes the element's handle where the chain stands, so a texture an
-/// if-else chain over samplers reads in each arm is one handle, as DXC makes it, rather than one an arm.
-/// The hoisted chain keeps the first twin's statement; run it after `share_common_values`, which leaves no twin dominated.
-void hoist_common_chains(program& p);
+/// Computes once a value several blocks compute alike, none of which dominates another, in their common dominator,
+/// where every operand of it already stands.
+/// It moves two kinds of value, each of which computing on a path that does not need it changes nothing:
+/// - An access chain, which only names an element.
+///   DXIL makes a binding array element's handle where the chain stands, so a texture an if-else over samplers reads in
+///   each arm is one handle, as DXC makes it, rather than one an arm.
+/// - A value the whole dispatch shares, fed only by constants, globals and the constant blocks' elements, which costs a
+///   uniform register.
+///   An unrolled loop leaves one copy of a test of a constant in every arm of every iteration, which DXC hoists out of
+///   the loop before unrolling it.
+/// The hoisted value keeps the first twin's statement; run it after `share_common_values`, which leaves no twin dominated.
+void hoist_common_values(program& p);
 
 /// Joins blocks, threads edges past blocks that only pass values on, and turns a branch with little on its sides into
 /// `select`s, which run both sides whichever way it would have gone.
