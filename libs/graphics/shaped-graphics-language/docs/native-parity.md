@@ -289,6 +289,18 @@ That is the container rather than the code: DXC's side is stripped of reflection
   In bc3, whose color block never has a transparent texel, that left 48 such branches and a phi for every accumulator at each of their merges.
   `simplify` now folds a `not` of a constant, and of a `not`.
   bc3's DXIL went from 1.10 of DXC's operations to 1.00, and its SPIR-V from 1.02 to 0.91.
+* **A comparison of a value that is one of a few constants stayed a comparison.**
+  bc7's `fit_subset` takes `pmode` as `if opaque => 3 else 2` or `if mode == 1 => 1 else 2`, so its `pmode != 0` is always true, which DXC folds.
+  Native kept `quantize`'s path without a p-bit and `quantize_pair`'s early return in every copy.
+  `simplify` now folds a comparison every choice of whose operands answers alike, a choice being a constant, a select of two or a phi of them.
+  bc7's DXIL went from 1.23 of DXC's operations to 1.09, and its SPIR-V from 0.70 to 0.61.
+* **An array passed by value was copied, and every read of an element was a load.**
+  Inlining leaves a function's array parameter as a local the caller's array is copied into, and bc7 copied its 64 floats three times.
+  `share_common_values` shared no read of a local, since a local can be written.
+  A read after which no store to its local can run is now final: a read it dominates of the same element is it, and a local whose one store copies another local from a final read is that other local.
+  `remove_unused` drops a store into a local nothing reads, which is what the forwarded copy then is.
+  bc7's DXIL went from 1.09 of DXC's operations to 0.99, three allocas fewer.
+  Its time moved toward DXC's on every device: the Radeon's dx12 from 1.03 to 0.97, the B580's dx12 from 0.66 to 0.73, and the B580's vulkan from 0.57 to 0.56.
 
 ## What remains
 
@@ -299,6 +311,7 @@ That is the container rather than the code: DXC's side is stripped of reflection
   A kernel's own ratio does not measure it: with the SPIR-V unchanged, vulkan's shade read 1.01 in one set and 1.11 in another.
   `native-parity.py lines` counts both routes' arithmetic per `.sgl` line, which is how to find the next part of it.
   On 2026-11-08 the frame read 1.049 and 1.051, and among its kernels only shade stood apart, 1.19 and 1.20, with extend, segment and connect within 1%.
+  After the forwarded copies and the folded comparisons below it read 1.15 and 1.16, and the frame 1.04 and 1.04.
   The Radeon's dx12 shade read 1.01 and vulkan's on the B580 1.0, so the gap is the B580's dx12 driver's alone, which reports no figures.
   Three causes were tried and ruled out, each a run against 1.19:
   - Handles: the shade kernel made a bindless texture's handle in each arm of an if-else over samplers, 54 where DXC makes 3.
@@ -334,6 +347,7 @@ That is the container rather than the code: DXC's side is stripped of reflection
   - the phi's operands written in the other order;
   - the empty arm laid out first, as DXC's is, by swapping the source's arms;
   - `flatten_branches` off, which keeps the conversion's branches as DXC does: 4 jumps rather than 14, but 121 copies rather than 53.
-* **bc7's DXIL, 1.23 in size.**
-  Its stores and divisions are DXC's now; what is left is 234 more `select` and 242 more `load` than DXC's, against fewer allocas.
-  [perf-sgl-dxil-bc7-arithmetic-gap](issues/perf-sgl-dxil-bc7-arithmetic-gap.md) has the rest; it is not timed here.
+* **The raster cull's `cull_second` DXIL, 1.16 in operations.**
+  It computes an item's world box twice, in `in_view` and again for `occluded`, where DXC computes it once.
+  The first is in the arm of `if item.has_box == 0u => return true` that falls through, and the second under `visible and item.has_box != 0u`.
+  No copy dominates the other; DXC's jump threading sends the arm that returned straight past the second test, after which the first does.

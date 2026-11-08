@@ -53,10 +53,24 @@ namespace
     return kind == global_kind::constants || kind == global_kind::inline_constants;
 }
 
-[[nodiscard]] bool may_share(program const& p, instruction const& i)
+/// The local `pointer` reaches into, or -1 where it reaches into none.
+[[nodiscard]] i32 local_root_of(program const& p, value_ref pointer)
+{
+    while (is_operation(pointer))
+    {
+        auto const& i = p.instructions[index_of(pointer)];
+        if (i.code != op::access_chain)
+            return -1;
+        pointer = value_ref(p.operands_of(i)[0]);
+    }
+    return is_local(pointer) ? i32(index_of(pointer)) : -1;
+}
+
+/// Whether `i` gives a value another of its operands gives too; `is_final_read` is a read no store can follow.
+[[nodiscard]] bool may_share(program const& p, instruction const& i, bool is_final_read)
 {
     if (i.code == op::load)
-        return reads_unchanging_memory(p, value_ref(p.operands_of(i)[0]));
+        return is_final_read || reads_unchanging_memory(p, value_ref(p.operands_of(i)[0]));
     return gives_only_a_value(i.code);
 }
 
@@ -135,9 +149,33 @@ void sgl::ir::remove_unused(program& p)
             stack.push_back(at);
         }
     };
+    // a local nothing reads but stores is never observed, so neither is a store into it
+    auto is_read = cc::vector<bool>::create_filled(p.locals.size(), false);
     for (auto const& block : p.blocks)
         for (auto i = block.first; i < block.first + block.count; ++i)
-            if (has_effect(p.instructions[i].code))
+        {
+            auto const& inst = p.instructions[i];
+            auto const operands = p.operands_of(inst);
+            for (auto k = isize(0); k < operands.size(); ++k)
+            {
+                if (operand_role(inst.code, k) != operand::value
+                    || (k == 0 && (inst.code == op::store || inst.code == op::access_chain)))
+                    continue;
+                auto const local = local_root_of(p, value_ref(operands[k]));
+                if (local >= 0)
+                    is_read[local] = true;
+            }
+        }
+    auto const is_unobserved = [&](instruction const& inst)
+    {
+        if (inst.code != op::store)
+            return false;
+        auto const local = local_root_of(p, value_ref(p.operands_of(inst)[0]));
+        return local >= 0 && !is_read[local];
+    };
+    for (auto const& block : p.blocks)
+        for (auto i = block.first; i < block.first + block.count; ++i)
+            if (has_effect(p.instructions[i].code) && !is_unobserved(p.instructions[i]))
                 keep(i);
     while (!stack.empty())
     {
@@ -181,12 +219,179 @@ void sgl::ir::remove_unused(program& p)
     p.instructions = cc::move(kept);
 }
 
+namespace
+{
+/// Each local a pointer reaches only through loads, stores and access chains, so every write to it is a store.
+[[nodiscard]] cc::vector<bool> plain_locals(program const& p, walked_graph const& g)
+{
+    auto plain = cc::vector<bool>::create_filled(p.locals.size(), true);
+    for (auto at = isize(0); at < g.walked.size(); ++at)
+    {
+        if (!g.is_reached[at])
+            continue;
+        auto const& block = p.blocks[isize(g.walked[at])];
+        for (auto i = block.first; i < block.first + block.count; ++i)
+        {
+            auto const& inst = p.instructions[i];
+            auto const operands = p.operands_of(inst);
+            for (auto k = isize(0); k < operands.size(); ++k)
+            {
+                if (operand_role(inst.code, k) != operand::value)
+                    continue;
+                auto const local = local_root_of(p, value_ref(operands[k]));
+                if (local >= 0
+                    && !(k == 0 && (inst.code == op::load || inst.code == op::store || inst.code == op::access_chain)))
+                    plain[local] = false;
+            }
+        }
+    }
+    return plain;
+}
+
+/// Each read of a plain local after which no store to that local can run, by instruction.
+/// Two such reads of one element give one value, as does any read one of them dominates.
+[[nodiscard]] cc::vector<bool> final_reads(program const& p, walked_graph const& g, cc::span<bool const> plain)
+{
+    auto is_final = cc::vector<bool>::create_filled(p.instructions.size(), false);
+    auto const local_of = [&](instruction const& inst) -> i32
+    {
+        if (inst.code != op::load && inst.code != op::store)
+            return -1;
+        return local_root_of(p, value_ref(p.operands_of(inst)[0]));
+    };
+    auto has_load = cc::vector<bool>::create_filled(p.locals.size(), false);
+    for (auto at = isize(0); at < g.walked.size(); ++at)
+    {
+        auto const& block = p.blocks[isize(g.walked[at])];
+        for (auto i = block.first; i < block.first + block.count; ++i)
+            if (p.instructions[i].code == op::load && local_of(p.instructions[i]) >= 0)
+                has_load[local_of(p.instructions[i])] = true;
+    }
+
+    // the blocks a walk can reach a store to the local from, a block holding one among them
+    auto scratch = cc::vector<u32>();
+    auto reaches = cc::vector<bool>::create_filled(g.walked.size(), false);
+    auto stack = cc::vector<u32>();
+    for (auto local = isize(0); local < p.locals.size(); ++local)
+    {
+        if (!plain[local] || !has_load[local])
+            continue;
+        for (auto&& r : reaches)
+            r = false;
+        stack.clear();
+        for (auto at = isize(0); at < g.walked.size(); ++at)
+        {
+            if (!g.is_reached[at])
+                continue;
+            auto const& block = p.blocks[isize(g.walked[at])];
+            for (auto i = block.first; i < block.first + block.count; ++i)
+                if (p.instructions[i].code == op::store && local_of(p.instructions[i]) == i32(local))
+                {
+                    reaches[at] = true;
+                    stack.push_back(u32(at));
+                    break;
+                }
+        }
+        while (!stack.empty())
+        {
+            auto const at = stack.back();
+            stack.pop_back();
+            for (auto e = g.edges_to[at]; e < g.edges_to[at + 1]; ++e)
+                if (!reaches[g.preds[e]])
+                {
+                    reaches[g.preds[e]] = true;
+                    stack.push_back(g.preds[e]);
+                }
+        }
+        for (auto at = isize(0); at < g.walked.size(); ++at)
+        {
+            if (!g.is_reached[at])
+                continue;
+            auto const& block = p.blocks[isize(g.walked[at])];
+            auto later = false;
+            for (auto const to : successors_of(p, p.instructions[block.first + block.count - 1], scratch))
+                later = later || reaches[g.place[to]];
+            for (auto i = block.first + block.count; i-- > block.first;)
+            {
+                auto const& inst = p.instructions[i];
+                if (local_of(inst) != i32(local))
+                    continue;
+                if (inst.code == op::store)
+                    later = true;
+                else
+                    is_final[i] = !later;
+            }
+        }
+    }
+    return is_final;
+}
+} // namespace
+
 void sgl::ir::share_common_values(program& p)
 {
     auto const g = walk_of(p);
     auto const& walked = g.walked;
     auto const& is_reached = g.is_reached;
     auto const tree = dominance(g.edges_to, g.preds);
+    auto const plain = plain_locals(p, g);
+
+    // A local whose one store copies another local whole, read where nothing writes that other one after, reads as it.
+    // Its every operand is the other one but the copy's own target, which nothing then reads and remove_unused drops.
+    if (!p.locals.empty())
+    {
+        auto const is_final = final_reads(p, g, plain);
+        auto stores = cc::vector<u32>::create_filled(p.locals.size(), 0u);
+        auto copied_from = cc::vector<i32>::create_filled(p.locals.size(), -1);
+        for (auto at = isize(0); at < walked.size(); ++at)
+        {
+            if (!is_reached[at])
+                continue;
+            auto const& block = p.blocks[isize(walked[at])];
+            for (auto i = block.first; i < block.first + block.count; ++i)
+            {
+                auto const& inst = p.instructions[i];
+                if (inst.code != op::store)
+                    continue;
+                auto const operands = p.operands_of(inst);
+                auto const target = local_root_of(p, value_ref(operands[0]));
+                if (target < 0)
+                    continue;
+                ++stores[target];
+                auto const value = value_ref(operands[1]);
+                if (!is_local(value_ref(operands[0])) || !is_operation(value) || !is_final[index_of(value)])
+                    continue;
+                auto const source = value_ref(p.operands_of(p.instructions[index_of(value)])[0]);
+                if (is_local(source) && index_of(source) != u32(target)
+                    && p.locals[index_of(source)].type == p.locals[target].type)
+                    copied_from[target] = i32(index_of(source));
+            }
+        }
+        auto forward = cc::vector<i32>::create_filled(p.locals.size(), -1);
+        auto any = false;
+        for (auto l = isize(0); l < p.locals.size(); ++l)
+            if (stores[l] == 1 && copied_from[l] >= 0 && plain[l] && plain[copied_from[l]])
+            {
+                forward[l] = copied_from[l];
+                any = true;
+            }
+        if (any)
+            for (auto& inst : p.instructions)
+            {
+                auto* const operands = p.operands.data() + inst.first;
+                for (auto k = isize(0); k < isize(inst.count); ++k)
+                {
+                    if (operand_role(inst.code, k) != operand::value || !is_local(value_ref(operands[k])))
+                        continue;
+                    if (inst.code == op::store && k == 0)
+                        continue;
+                    auto l = i32(index_of(value_ref(operands[k])));
+                    for (auto steps = 0; forward[l] >= 0 && steps < 64; ++steps)
+                        l = forward[l];
+                    operands[k] = u32(local_at(u32(l)));
+                }
+            }
+    }
+    auto const is_final = final_reads(p, g, plain);
 
     struct entry
     {
@@ -219,7 +424,7 @@ void sgl::ir::share_common_values(program& p)
             for (auto k = isize(0); k < isize(i.count); ++k)
                 if (operand_role(i.code, k) == operand::value)
                     operands[k] = current(operands[k]);
-            if (!may_share(p, i))
+            if (!may_share(p, i, is_final[index]))
                 continue;
             auto hash = u32(i.code) * 0x9e3779b1u + u32(i.type) * 0x85ebca6bu + (u32(i.sub) << 16) + (u32(i.aux) << 8)
                       + u32(i.guarantee);

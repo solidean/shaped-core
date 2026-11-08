@@ -11,12 +11,15 @@
 namespace sgl::ir
 {
 /// Drops every operation nothing reads and whose running has no effect, phis that only read each other too.
+/// A store into a local nothing reads has none.
 void remove_unused(program& p);
 
 /// Replaces an operation with an earlier one of the same operands and guarantee that dominates it.
 ///
 /// What stays keeps its own statement: a line asked for that value second names the line that asked first.
 /// Reads of memory a shader cannot write share too, so a value read twice from a binding is one read.
+/// So does a read of a local after which no store to it can run, and a local whose one store copies such a read of
+/// another local reads as that other local, which leaves the copy to `remove_unused`.
 /// Leaves the replaced operation unread, for `remove_unused`, and keeps control flow as it stood.
 void share_common_values(program& p);
 

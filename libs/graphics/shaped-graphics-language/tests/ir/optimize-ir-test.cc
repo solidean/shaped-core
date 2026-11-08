@@ -174,6 +174,94 @@ TEST("sgl ir share_common_values - a read shares only where the shader cannot wr
     CHECK(count_of(b.p, op::load) == 3);
 }
 
+namespace
+{
+/// A function local of four floats; locals made after the first share its types, as a program's do.
+struct local_array
+{
+    type_ref type;
+    type_ref pointer;
+    value_ref local;
+};
+[[nodiscard]] local_array add_array(program_builder& b, local_array const* like = nullptr)
+{
+    auto const type
+        = like != nullptr ? like->type : b.add_type({.kind = type_kind::array, .count = 4, .element = b.float_type});
+    auto const pointer = like != nullptr
+                           ? like->pointer
+                           : b.add_type({.kind = type_kind::pointer, .space = storage::function, .element = type});
+    b.p.locals.push_back({.type = pointer});
+    return {.type = type, .pointer = pointer, .local = local_at(u32(b.p.locals.size() - 1))};
+}
+[[nodiscard]] value_ref element_of(program_builder& b, local_array const& a, value_ref at)
+{
+    return b.add(op::access_chain, b.float_pointer, {u32(a.local), u32(at)});
+}
+} // namespace
+
+TEST("sgl ir share_common_values - two reads of a local's element after its last store are one, and with one between "
+     "two")
+{
+    auto b = program_builder();
+    auto const xs = add_array(b);
+    b.blocks(1);
+    b.open(0);
+    auto const at = b.add(op::f_to_s, b.uint_type, {u32(unknown(b))});
+    b.add(op::store, b.void_type, {u32(element_of(b, xs, at)), u32(b.one)});
+    auto const before = b.add(op::load, b.float_type, {u32(element_of(b, xs, at))});
+    b.add(op::store, b.void_type, {u32(element_of(b, xs, at)), u32(b.two)});
+    auto const after = b.add(op::load, b.float_type, {u32(element_of(b, xs, at))});
+    auto const again = b.add(op::load, b.float_type, {u32(element_of(b, xs, at))});
+    b.keep(b.add(op::fadd, b.float_type, {u32(b.add(op::fadd, b.float_type, {u32(before), u32(after)})), u32(again)}));
+    b.finish();
+    share_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    // `unknown`'s read, and the element's before and after the second store
+    CHECK(count_of(b.p, op::load) == 3);
+}
+
+TEST("sgl ir share_common_values - a whole copy of a local nothing writes after is read as that local, and goes")
+{
+    // what inlining a function that takes an array by value leaves
+    auto b = program_builder();
+    auto const xs = add_array(b);
+    auto const copy = add_array(b, &xs);
+    b.blocks(1);
+    b.open(0);
+    auto const at = b.add(op::f_to_s, b.uint_type, {u32(unknown(b))});
+    b.add(op::store, b.void_type, {u32(element_of(b, xs, at)), u32(b.one)});
+    b.add(op::store, b.void_type, {u32(copy.local), u32(b.add(op::load, xs.type, {u32(xs.local)}))});
+    auto const first = b.add(op::load, b.float_type, {u32(element_of(b, copy, at))});
+    auto const second = b.add(op::load, b.float_type, {u32(element_of(b, xs, at))});
+    b.keep(b.add(op::fadd, b.float_type, {u32(first), u32(second)}));
+    b.finish();
+    share_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    // the element's store and the kept sum's, and the copy with neither its read nor its write
+    CHECK(count_of(b.p, op::store) == 2);
+    CHECK(count_of(b.p, op::load) == 2);
+}
+
+TEST("sgl ir share_common_values - a copy of a local written after it stays a copy")
+{
+    auto b = program_builder();
+    auto const xs = add_array(b);
+    auto const copy = add_array(b, &xs);
+    b.blocks(1);
+    b.open(0);
+    auto const at = b.add(op::f_to_s, b.uint_type, {u32(unknown(b))});
+    b.add(op::store, b.void_type, {u32(copy.local), u32(b.add(op::load, xs.type, {u32(xs.local)}))});
+    b.add(op::store, b.void_type, {u32(element_of(b, xs, at)), u32(b.one)});
+    b.keep(b.add(op::load, b.float_type, {u32(element_of(b, copy, at))}));
+    b.finish();
+    share_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::store) == 3);
+}
+
 // ---- hoist_common_values
 
 TEST("sgl ir hoist_common_values - a chain both arms take alike is one, in the block that branches")

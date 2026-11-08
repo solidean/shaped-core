@@ -94,6 +94,50 @@ constexpr fold_rule k_folds[] = {
     return width >= 64 ? i64(bits) : i64(bits << (64 - width)) >> (64 - width);
 }
 
+/// What the integer comparison `code` makes of `x` and `y`, both `width` wide; false where `code` is none.
+[[nodiscard]] constexpr bool compares(op code, u64 x, u64 y, u32 width, bool& result)
+{
+    auto const sx = signed_of(x, width);
+    auto const sy = signed_of(y, width);
+    auto const ux = x & mask_of(width);
+    auto const uy = y & mask_of(width);
+    switch (code)
+    {
+    case op::ieq:
+        result = ux == uy;
+        return true;
+    case op::ine:
+        result = ux != uy;
+        return true;
+    case op::slt:
+        result = sx < sy;
+        return true;
+    case op::sle:
+        result = sx <= sy;
+        return true;
+    case op::sgt:
+        result = sx > sy;
+        return true;
+    case op::sge:
+        result = sx >= sy;
+        return true;
+    case op::ult:
+        result = ux < uy;
+        return true;
+    case op::ule:
+        result = ux <= uy;
+        return true;
+    case op::ugt:
+        result = ux > uy;
+        return true;
+    case op::uge:
+        result = ux >= uy;
+        return true;
+    default:
+        return false;
+    }
+}
+
 class simplifier
 {
 public:
@@ -678,6 +722,63 @@ private:
         _changed = true;
     }
 
+    /// Every integer `v` can be, where it is a constant, or a select or a phi of such: false where one is not known.
+    [[nodiscard]] bool choices_of(value_ref v, cc::vector<u64>& out, u32& width, int depth = 0) const
+    {
+        auto x = u64(0);
+        auto is_float = false;
+        if (scalar_bits(v, x, width, is_float))
+        {
+            if (is_float)
+                return false;
+            for (auto const known : out)
+                if (known == x)
+                    return true;
+            out.push_back(x);
+            return out.size() <= 8;
+        }
+        if (!is_operation(v) || depth >= 3)
+            return false;
+        auto const& i = _p.instructions[index_of(v)];
+        auto const operands = _p.operands_of(i);
+        if (i.code == op::select)
+            return choices_of(resolved(value_ref(operands[1])), out, width, depth + 1)
+                && choices_of(resolved(value_ref(operands[2])), out, width, depth + 1);
+        if (i.code == op::phi)
+        {
+            for (auto k = isize(0); k < operands.size(); k += 2)
+                if (!choices_of(resolved(value_ref(operands[k])), out, width, depth + 1))
+                    return false;
+            return true;
+        }
+        return false;
+    }
+
+    /// A comparison every choice of its operands answers alike, as that answer: `(c ? 1 : 2) != 0` is true.
+    void fold_compare_of_choices(u32 index, instruction const& i, value_ref a, value_ref b)
+    {
+        auto xs = cc::vector<u64>();
+        auto ys = cc::vector<u64>();
+        auto width = u32(0);
+        auto other_width = u32(0);
+        if (!choices_of(a, xs, width) || !choices_of(b, ys, other_width) || width != other_width)
+            return;
+        auto first = false;
+        auto is_first = true;
+        for (auto const x : xs)
+            for (auto const y : ys)
+            {
+                auto result = false;
+                if (!compares(i.code, x, y, width, result))
+                    return;
+                if (!is_first && result != first)
+                    return;
+                first = result;
+                is_first = false;
+            }
+        set_alias(index, constant_of(i.type, first ? 1 : 0));
+    }
+
     void fold_binary(u32 index, instruction const& i, fold_kind kind, value_ref a, value_ref b)
     {
         auto x = u64(0);
@@ -722,6 +823,8 @@ private:
             auto const decides = i.code == op::logical_and ? known == 0 : known != 0;
             return set_alias(index, decides ? (has_a ? a : b) : rest);
         }
+        if (kind == fold_kind::compare && (!has_a || !has_b))
+            return fold_compare_of_choices(index, i, a, b);
         if (!has_a || !has_b)
             return;
 
@@ -791,46 +894,9 @@ private:
         }
         case fold_kind::compare:
         {
-            auto const sx = signed_of(x, width);
-            auto const sy = signed_of(y, width);
-            auto const ux = x & mask_of(width);
-            auto const uy = y & mask_of(width);
             auto result = false;
-            switch (i.code)
-            {
-            case op::ieq:
-                result = ux == uy;
-                break;
-            case op::ine:
-                result = ux != uy;
-                break;
-            case op::slt:
-                result = sx < sy;
-                break;
-            case op::sle:
-                result = sx <= sy;
-                break;
-            case op::sgt:
-                result = sx > sy;
-                break;
-            case op::sge:
-                result = sx >= sy;
-                break;
-            case op::ult:
-                result = ux < uy;
-                break;
-            case op::ule:
-                result = ux <= uy;
-                break;
-            case op::ugt:
-                result = ux > uy;
-                break;
-            case op::uge:
-                result = ux >= uy;
-                break;
-            default:
+            if (!compares(i.code, x, y, width, result))
                 return;
-            }
             return set_alias(index, constant_of(type, result ? 1 : 0));
         }
         case fold_kind::logical:

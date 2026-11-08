@@ -56,8 +56,8 @@
   "dxil": 5987
  },
  "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc7_cs": {
-  "spirv": 5345,
-  "dxil": 7832
+  "spirv": 4642,
+  "dxil": 6296
  },
  "libs/graphics/shaped-rendering/shaders/exposure_meter.sgl::main_cs": {
   "spirv": 85,
@@ -184,12 +184,12 @@
   "dxil": 514
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::connect": {
-  "spirv": 1414,
-  "dxil": 985
+  "spirv": 1407,
+  "dxil": 981
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::extend": {
-  "spirv": 2172,
-  "dxil": 1423
+  "spirv": 2165,
+  "dxil": 1419
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::finalize": {
   "spirv": 299,
