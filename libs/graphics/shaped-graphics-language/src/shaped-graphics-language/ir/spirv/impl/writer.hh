@@ -91,6 +91,8 @@ private:
     void ray_query(instruction const& i, u32 id);
     void hit_object(instruction const& i, u32 id);
     void instruction_of(u32 index);
+    /// Finds each vector `fmul` of a splat of one scalar, which `OpVectorTimesScalar` writes without building the splat.
+    void find_scalings();
     /// Tells the target that `i`, of id `id`, came through an index that differs between invocations.
     void nonuniform(instruction const& i, u32 id);
     /// What a load or a store of an element goes through, `index` naming a control point or a vertex where it has one.
@@ -165,5 +167,10 @@ private:
     cc::vector<u32> _annotations;
     cc::vector<u32> _declarations;
     cc::vector<u32> _code;
+    /// Per instruction: which operand of a scaling `fmul` is the splat, `k_no_splat` for none.
+    cc::vector<u8> _splat_operand;
+    /// Per instruction: a splat only scalings read, which is never written.
+    cc::vector<bool> _unwritten;
+    static constexpr u8 k_no_splat = 2;
 };
 } // namespace sgl::ir::spirv::impl

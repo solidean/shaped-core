@@ -1108,6 +1108,7 @@ private:
     /// The tables again, without what a walk found dropped and with every operand as it resolved.
     void rebuild()
     {
+        find_named();
         auto place = cc::vector<u32>::create_filled(_p.instructions.size(), 0u);
         auto next = u32(0);
         for (auto const b : _order)
@@ -1206,8 +1207,28 @@ private:
         return _visited[isize(from)] && (_target[isize(from)] == k_no_target || _target[isize(from)] == u32(to));
     }
 
-    /// A block no walk reached is dropped, unless SPIR-V's merge and continue targets must keep naming it.
-    [[nodiscard]] bool is_kept(block_ref b) const { return _visited[isize(b)] || _keeps_structure; }
+    /// A block no walk reached is dropped, unless a header that stays names it as its merge or continue target.
+    [[nodiscard]] bool is_kept(block_ref b) const { return _visited[isize(b)] || _named[isize(b)]; }
+
+    /// What the headers a walk reached still name, where SPIR-V's structure is kept.
+    void find_named()
+    {
+        _named.resize_to_filled(_p.blocks.size(), false);
+        for (auto& named : _named)
+            named = false;
+        if (!_keeps_structure)
+            return;
+        for (auto b = isize(0); b < _p.blocks.size(); ++b)
+        {
+            auto const& block = _p.blocks[b];
+            // a header whose branch folded states no merge any more
+            if (!_visited[b] || _target[b] != k_no_target || block.merges == merge_kind::none)
+                continue;
+            _named[isize(block.merge)] = true;
+            if (block.merges == merge_kind::loop)
+                _named[isize(block.continue_to)] = true;
+        }
+    }
 
     program& _p;
     bool _keeps_structure = false;
@@ -1215,6 +1236,7 @@ private:
     cc::vector<value_ref> _alias;
     cc::vector<bool> _reached;
     cc::vector<bool> _visited;
+    cc::vector<bool> _named;
     /// Passed by the walk unreached: no edge out of it is taken.
     cc::vector<bool> _skipped;
     /// Parallel to the blocks: the one block a folded branch goes to.

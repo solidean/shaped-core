@@ -283,6 +283,40 @@ TEST("sgl ir simplify - any of a vector comparison known in every lane is a cons
     CHECK(count_of(b.p, op::select) == 0);
 }
 
+TEST("sgl ir simplify structured - a dead arm goes whole, and only a merge a live header names stays a stub")
+{
+    for (auto const both_arms_return : {false, true})
+    {
+        // a known selection around a nested one, or a live selection whose merge no way reaches
+        auto b = program_builder();
+        b.blocks(6);
+        b.open(0);
+        b.select_merge(0, 5);
+        auto const read = b.add(op::load, b.float_type, {u32(b.out)});
+        auto const less = b.add(op::flt, b.bool_type, {u32(read), u32(b.two)});
+        b.branch_if(both_arms_return ? less : b.no, 1, 5);
+        b.open(1);
+        b.select_merge(1, 4);
+        b.branch_if(b.add(op::fgt, b.bool_type, {u32(read), u32(b.one)}), 2, 3);
+        b.open(2);
+        b.add(op::return_, b.void_type, {});
+        b.open(3);
+        b.add(op::return_, b.void_type, {});
+        b.open(4);
+        b.branch(5);
+        b.open(5);
+        b.finish();
+        simplify(b.p, control_flow::structured);
+        CHECK(refusal_of(b.p, control_flow::structured) == "");
+        auto standing = 0;
+        for (auto const& block : b.p.blocks)
+            standing += block.count > 0 ? 1 : 0;
+        // the inner merge no walk reaches stays as `unreachable` only where its header runs
+        CHECK(standing == (both_arms_return ? 6 : 2)).dump("program", dump(b.p));
+        CHECK(count_of(b.p, op::unreachable) == (both_arms_return ? 1 : 0));
+    }
+}
+
 TEST("sgl ir simplify - a condition nobody knows keeps both arms")
 {
     auto b = program_builder();

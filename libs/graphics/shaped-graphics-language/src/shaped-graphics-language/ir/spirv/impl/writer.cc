@@ -11,6 +11,7 @@ cc::vector<u32> writer::run()
     write_constants();
     write_stage_elements();
     write_globals();
+    find_scalings();
     write_function();
     if (_p.stage == check::stage::tessellation_control)
         write_control_entry();
@@ -168,6 +169,9 @@ void writer::write_function()
     for (auto k = isize(0); k < order.size(); ++k)
     {
         auto const& b = _p.blocks[isize(order[k])];
+        // a block a pass dropped, which nothing names
+        if (b.count == 0)
+            continue;
         emit(_code, spv::Label, {id_of(order[k])});
         forget_line();
         if (k == 0)

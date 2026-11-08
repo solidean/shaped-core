@@ -191,6 +191,28 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
     CHECK(decorated(precise.value().spirv, 42) == 2);
 }
 
+TEST("sgl spirv - a vector scaled by a scalar builds no splat, and an if around little is a select")
+{
+    auto const e = written("binding work:\n"
+                           "    values: mut buffer[float4]\n"
+                           "\n"
+                           "@compute(64) fun run(@thread_id id: int3){work}:\n"
+                           "    let s = work.values[0].w\n"
+                           "    let mut v = work.values[id.x] * s\n"
+                           "    if v.x > 1.0:\n"
+                           "        v = v + float4(1.0, 2.0, 3.0, 4.0)\n"
+                           "    work.values[id.x] = v\n",
+                           "run", sgl::emit::native_route::require);
+    REQUIRE(e.has_value());
+    auto const& words = e.value().spirv;
+    CHECK(counted(words, 142) == 1); // OpVectorTimesScalar
+    CHECK(counted(words, 133) == 0); // no OpFMul of a splat
+    CHECK(counted(words, 80) == 0);  // nor the OpCompositeConstruct it read
+    CHECK(counted(words, 169) == 1); // OpSelect
+    CHECK(counted(words, 245) == 0); // and no OpPhi
+    CHECK(counted(words, 247) == 0); // nor the OpSelectionMerge it folded
+}
+
 TEST("sgl spirv - a pixel stage's surface is SPIR-V's own, and a discard goes on as a helper (EMIT-238)")
 {
     auto const e = written(k_pixel_surface, "surface_ps", sgl::emit::native_route::require);

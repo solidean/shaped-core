@@ -477,8 +477,64 @@ void writer::ray_query(instruction const& i, u32 id)
     }
 }
 
+void writer::find_scalings()
+{
+    auto const count = _p.instructions.size();
+    _splat_operand = cc::vector<u8>::create_filled(count, k_no_splat);
+    _unwritten = cc::vector<bool>::create_filled(count, false);
+    // a splat is one scalar operation in every lane of a float vector; one of constants is a constant of the module
+    auto const is_splat = [&](u32 raw)
+    {
+        auto const v = value_ref(raw);
+        if (!is_operation(v))
+            return false;
+        auto const& c = _p.instructions[index_of(v)];
+        auto const& t = _p.at(c.type);
+        if (c.code != op::construct || t.kind != type_kind::vector || c.count != t.count || c.count < 2
+            || _p.at(t.element).kind != type_kind::float_)
+            return false;
+        auto const lanes = _p.operands_of(c);
+        if (!is_operation(value_ref(lanes[0])))
+            return false;
+        for (auto const lane : lanes)
+            if (lane != lanes[0])
+                return false;
+        return true;
+    };
+    for (auto k = isize(0); k < count; ++k)
+    {
+        auto const& i = _p.instructions[k];
+        if (i.code != op::fmul || _p.at(i.type).kind != type_kind::vector)
+            continue;
+        auto const operands = _p.operands_of(i);
+        if (is_splat(operands[1]))
+            _splat_operand[k] = 1;
+        else if (is_splat(operands[0]))
+            _splat_operand[k] = 0;
+    }
+    // a splat any other operation reads is written still
+    auto read_otherwise = cc::vector<bool>::create_filled(count, false);
+    for (auto k = isize(0); k < count; ++k)
+    {
+        auto const& i = _p.instructions[k];
+        auto const operands = _p.operands_of(i);
+        for (auto o = isize(0); o < operands.size(); ++o)
+            if (operand_role(i.code, o) == operand::value && is_operation(value_ref(operands[o]))
+                && o != isize(_splat_operand[k]))
+                read_otherwise[index_of(value_ref(operands[o]))] = true;
+    }
+    for (auto k = isize(0); k < count; ++k)
+        if (_splat_operand[k] != k_no_splat)
+        {
+            auto const splat = index_of(value_ref(_p.operands_of(_p.instructions[k])[_splat_operand[k]]));
+            _unwritten[splat] = !read_otherwise[splat];
+        }
+}
+
 void writer::instruction_of(u32 index)
 {
+    if (_unwritten[index])
+        return;
     auto const& i = _p.instructions[index];
     auto const id = _instructions + index;
     auto const operands = _p.operands_of(i);
@@ -504,6 +560,13 @@ void writer::instruction_of(u32 index)
             _declarations.push_back(id);
             for (auto const v : operands)
                 _declarations.push_back(id_of_raw(v));
+            return;
+        }
+        if (_splat_operand[index] != k_no_splat)
+        {
+            auto const splat = _p.instructions[index_of(value_ref(operands[_splat_operand[index]]))];
+            emit(_code, spv::VectorTimesScalar,
+                 {id_of(i.type), id, id_of_raw(operands[1 - _splat_operand[index]]), id_of_raw(_p.operands_of(splat)[0])});
             return;
         }
         head(_code, rule.opcode, 3 + operands.size());
