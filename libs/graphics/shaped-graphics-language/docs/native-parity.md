@@ -163,6 +163,13 @@ That is the container rather than the code: DXC's side is stripped of reflection
   The largest lines left are `reorient_frame`'s, behind `leaned != f.n`, which DXC skips on the path that returned `n` itself.
   A kernel's own ratio does not measure it: with the SPIR-V unchanged, vulkan's shade read 1.01 in one set and 1.11 in another.
   `native-parity.py lines` counts both routes' arithmetic per `.sgl` line, which is how to find the next part of it.
+* **AMD's dx12 convolution, 1.03.**
+  The DXIL is not where it shows, as far as four measurements on 2026-11-08 can say, each against a run of 1.032.
+  - The hot loop holds DXC's 96 `fmul` and 96 `fadd`, its 12 loads, two fewer instructions, and a chain of the same depth, 13.
+  - Issuing its loads first in the block, where native had them beside their uses and DXC early, read 1.032 again.
+  - Marking every integer `add`, `sub` and `mul` `nsw`, as DXC does, read 1.027 and 1.031.
+  - Shader model 6.8 rather than 6.6, which also sets `ResMayNotAlias` as DXC's module does, read 1.029 and 1.030.
+  What AMD's compiler makes of each module is the next place to look: its register count and its ISA.
 * **SPIR-V turns no if-else into a select.**
   DXC's SPIR-V goes through spirv-opt, which does, and `flatten_branches` is DXIL's alone: connect's SPIR-V holds 171 phis and no `OpSelect` against DXC's 78 and 14.
   vulkan's frame is faster than DXC's regardless, so this is a size gap, and a lead should a vulkan kernel come in slow.
