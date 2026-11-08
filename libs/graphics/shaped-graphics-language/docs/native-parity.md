@@ -33,6 +33,7 @@ Three effects of the B580 decide how to read them:
 **The driver's own figures** come with the vulkan benchmark of `sr`, whose context captures them: each kernel's pipeline on both routes, a line per figure.
 AMD reports registers (`numUsedVgprs`, `numUsedSgprs`) and Intel instructions and blocks; dx12 reports none.
 On 2026-11-08 both routes compiled to the same registers on AMD but for SVGF's filter, 34 vector registers against 32, and Intel's à-trous to the same 2936 instructions.
+After the SPIR-V passes later that day, AMD gave native's à-trous 31 against 30, and the rest stood.
 
 **shan's live words are no register count.**
 `uv run dev.py run shan -- diff` on the binaries `diff` leaves splits them into vector words, values that differ across a wave, and scalar words, values it shares.
@@ -92,6 +93,7 @@ The same benchmarks on the Radeon iGPU of a Ryzen 9 9950X3D2 (RDNA 2, driver 32.
 
 Every ratio repeated to the third decimal in all three processes, so the AMD GPU shows none of the B580's speed modes.
 The convolution on dx12 is just past the bar, the one exception there, and the megakernel on vulkan just inside it.
+Once SPIR-V's branches became selects and its vectors one phi a merge, vulkan's megakernel read 1.004 and its wavefront 0.890 in one process.
 Neither has been diagnosed; the convolution's opposite sign on vulkan says the gap is the DXIL rather than the kernel.
 
 **Both benchmarks need the text route asked for by name.**
