@@ -3,6 +3,7 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
+#include <shader-analysis/cost.hh>
 #include <shader-analysis/metrics.hh>
 
 namespace shan
@@ -30,6 +31,8 @@ cc::vector<difference> diff(module_metrics const& a, module_metrics const& b)
     add("selections", x.selections, y.selections);
     add("calls", x.calls, y.calls);
     add("variable_words", x.variable_words, y.variable_words);
+    add("compute_cost", i64(compute_cost(x, default_cost_model()) + 0.5),
+        i64(compute_cost(y, default_cost_model()) + 0.5));
     add("max_live_words", x.max_live_words, y.max_live_words);
     add("max_live_vector_words", x.max_live_vector_words, y.max_live_vector_words);
     add("max_live_scalar_words", x.max_live_scalar_words, y.max_live_scalar_words);

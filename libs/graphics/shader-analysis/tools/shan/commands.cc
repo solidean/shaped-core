@@ -89,3 +89,23 @@ COMMAND("diff")
     cc::print("{}", shan::to_text(d));
     return exit_ok;
 }
+
+// `shan lanes`: the lanes a module's operations work on, by kind, which shader-analysis' cost model is calibrated from.
+COMMAND("lanes")
+{
+    auto path = cc::string();
+    auto args = nx::args({.name = "shan lanes",
+                          .description = "Prints the module's lanes per kind, tab-separated: the kind, its lanes, "
+                                         "those the wave shares, and both as often as a wave runs them."});
+    args.positional("FILE", path, {.desc = "the SPIR-V module or DXIL container"});
+    if (auto const r = args.parse(nx::test_args()); r.should_exit())
+        return r.exit_code();
+    auto const metrics = metrics_of(path);
+    if (!metrics.has_value())
+        return exit_usage;
+    auto const& t = metrics.value().total;
+    for (auto k = isize(0); k < shan::k_op_kind_count; ++k)
+        cc::println("{}\t{}\t{}\t{}\t{}", shan::name_of(shan::op_kind(k)), t.lanes[k], t.uniform_lanes[k],
+                    t.executed_lanes[k], t.executed_uniform_lanes[k]);
+    return exit_ok;
+}

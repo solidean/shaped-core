@@ -7,6 +7,7 @@ project(shader-analysis LANGUAGES CXX)
 add_library(shader-analysis
     src/shader-analysis/fwd.cc
     src/shader-analysis/op_kind.cc
+    src/shader-analysis/cost.cc
     src/shader-analysis/spirv_metrics.cc
     src/shader-analysis/dxil_metrics.cc
     src/shader-analysis/impl/graph.cc
@@ -23,6 +24,7 @@ target_sources(shader-analysis
     FILES
     src/shader-analysis/fwd.hh
     src/shader-analysis/op_kind.hh
+    src/shader-analysis/cost.hh
     src/shader-analysis/metrics.hh
     src/shader-analysis/diff.hh
 )
@@ -49,6 +51,7 @@ if(SC_BUILD_TESTS)
         tests/diff-test.cc
         tests/dxil-metrics-test.cc
         tests/uniformity-test.cc
+        tests/cost-test.cc
     )
     sc_nexus_binary(shader-analysis-test KINDS tests)
     target_link_libraries(shader-analysis-test PRIVATE shader-analysis nexus)

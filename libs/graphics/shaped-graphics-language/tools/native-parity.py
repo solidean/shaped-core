@@ -10,7 +10,8 @@
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py lines <file.sgl> <entry> <cs|vs|ps|lib>
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py driver [filter]
 
-`table` prints libs/graphics/shaped-graphics-language/docs/native-parity.md's size table over the repo's real shaders.
+`table` prints libs/graphics/shaped-graphics-language/docs/native-parity.md's size table over the repo's real shaders,
+and leaves each entry's binaries in a folder of --out per file, which shader-analysis' calibrate-cost.py reads.
 `diff` prints one entry's opcode histogram difference, and leaves both binaries and their disassemblies in --out.
 `lines` counts one entry's DXIL arithmetic per `.sgl` file and line on both routes, and prints where they differ most.
 `driver` prints what the vulkan driver made of every compute entry on both SPIR-V routes, from its own statistics:
@@ -292,7 +293,7 @@ def update(sgl, out, names):
 
 
 # what a driver reports that says what its code costs; Intel's and AMD's names
-KEY_FIGURES = ("Instruction Count", "Basic Block Count", "Scratch Memory Size", "Spill", "numUsedVgprs",
+KEY_FIGURES = ("Instruction Count", "Basic Block Count", "Loop Count", "Scratch Memory Size", "Spill", "numUsedVgprs",
                "numUsedSgprs", "scratchMemUsageInBytes")
 
 
@@ -390,7 +391,9 @@ def main():
             if only and only not in entry and only not in rel:
                 continue
             try:
-                result = compare(sgl, file, entry, stage, out, names)
+                # a folder per file, since two files may name an entry alike
+                (out / file.stem).mkdir(exist_ok=True)
+                result = compare(sgl, file, entry, stage, out / file.stem, names)
             except RuntimeError as e:
                 print("| %s | %s | failed: %s |" % (file.name, entry, str(e).splitlines()[-1][:100]))
                 continue

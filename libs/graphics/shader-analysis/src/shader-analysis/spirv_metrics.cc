@@ -1,3 +1,4 @@
+#include "cost.hh"
 #include "impl/graph.hh"
 #include "metrics.hh"
 
@@ -53,6 +54,18 @@ constexpr u16 return_value = 254;
 constexpr u16 unreachable = 255;
 constexpr u16 terminate_invocation = 4416;
 constexpr u16 decorate = 71;
+constexpr u16 iadd = 128;
+constexpr u16 isub = 130;
+constexpr u16 iequal = 170;
+constexpr u16 inot_equal = 171;
+constexpr u16 ugreater_than = 172;
+constexpr u16 sgreater_than = 173;
+constexpr u16 ugreater_than_equal = 174;
+constexpr u16 sgreater_than_equal = 175;
+constexpr u16 uless_than = 176;
+constexpr u16 sless_than = 177;
+constexpr u16 uless_than_equal = 178;
+constexpr u16 sless_than_equal = 179;
 constexpr u16 access_chain = 65;
 constexpr u16 in_bounds_access_chain = 66;
 constexpr u16 ptr_access_chain = 67;
@@ -266,6 +279,218 @@ void value_operands(babel::spirv::instruction const& i, cc::vector<u32>& out)
     return impl::uniformity_source::operands;
 }
 
+/// Whether the integer comparison `code` holds of `a` and `b`; nullopt where `code` is no integer comparison.
+[[nodiscard]] cc::optional<bool> compares(u16 code, i64 a, i64 b)
+{
+    switch (code)
+    {
+    case op::iequal:
+        return a == b;
+    case op::inot_equal:
+        return a != b;
+    case op::ugreater_than:
+    case op::sgreater_than:
+        return a > b;
+    case op::ugreater_than_equal:
+    case op::sgreater_than_equal:
+        return a >= b;
+    case op::uless_than:
+    case op::sless_than:
+        return a < b;
+    case op::uless_than_equal:
+    case op::sless_than_equal:
+        return a <= b;
+    default:
+        return {};
+    }
+}
+
+/// The trips of the loop a header at `header` heads, where a counter of its phis starts at a constant, steps by one,
+/// and a branch leaves the loop on comparing it, or its next value, with a constant; 0 where it is anything else.
+[[nodiscard]] f64 trips_of(babel::spirv::module const& m,
+                           module_facts const& facts,
+                           cc::map<u32, isize> const& defined_at,
+                           isize header,
+                           u32 merge_label)
+{
+    auto const constant = [&](u32 id, i64& out)
+    {
+        auto const* const c = facts.constants.get_ptr(id);
+        if (c == nullptr)
+            return false;
+        out = i64(i32(u32(*c)));
+        return true;
+    };
+    auto const at = [&](u32 id) -> cc::optional<babel::spirv::instruction>
+    {
+        auto const* const k = defined_at.get_ptr(id);
+        if (k == nullptr)
+            return {};
+        return m.at(*k);
+    };
+    constexpr auto k_most_trips = 4096;
+    for (auto k = header + 1; k < m.instruction_count() && m.at(k).opcode() == op::phi; ++k)
+    {
+        auto const phi = m.at(k);
+        auto const args = phi.arguments();
+        if (args.size() != 4)
+            continue;
+        // the start, a constant, and the next value, the phi plus or minus a constant
+        for (auto way = 0; way < 2; ++way)
+        {
+            auto start = i64(0);
+            if (!constant(args[2 * way], start))
+                continue;
+            auto const next = at(args[2 * (1 - way)]);
+            if (!next.has_value() || (next.value().opcode() != op::iadd && next.value().opcode() != op::isub))
+                continue;
+            auto const step_args = next.value().arguments();
+            auto step = i64(0);
+            if (step_args[0] != phi.result_id() || !constant(step_args[1], step) || step == 0)
+                continue;
+            if (next.value().opcode() == op::isub)
+                step = -step;
+            // a compare of the phi or its next value with a constant, which a branch leaving the loop decides on
+            for (auto c = header; c < m.instruction_count() && m.at(c).opcode() != op::function_end; ++c)
+            {
+                auto const branch = m.at(c);
+                if (branch.opcode() != op::branch_conditional)
+                    continue;
+                auto const b = branch.arguments();
+                auto const leaves_on = b[1] == merge_label ? 1 : b[2] == merge_label ? 0 : -1;
+                if (leaves_on < 0)
+                    continue;
+                auto const test = at(b[0]);
+                if (!test.has_value())
+                    continue;
+                auto const t = test.value().arguments();
+                auto bound = i64(0);
+                auto const of_next = t[0] == next.value().result_id();
+                if ((t[0] != phi.result_id() && !of_next) || !constant(t[1], bound))
+                    continue;
+                auto trips = 0;
+                for (auto i = start; trips < k_most_trips; i += step)
+                {
+                    auto const holds = compares(test.value().opcode(), of_next ? i + step : i, bound);
+                    if (!holds.has_value())
+                        return 0;
+                    // a test of the next value runs after the body, so the body has run once more
+                    if (holds.value() == (leaves_on == 1))
+                        return f64(of_next ? trips + 1 : trips);
+                    ++trips;
+                }
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+
+/// What one lane of a GLSL.std.450 function's result spends, beside its operands' lanes where it reduces them.
+struct spend
+{
+    cost_class cost = cost_class::alu;
+    f32 factor = 1;
+    cost_class extra = cost_class::free;
+    f32 extra_factor = 0;
+};
+
+/// A GLSL.std.450 instruction's spend per lane of its result; `width` is its first operand's lanes, which a length or a
+/// distance reduces to one.
+[[nodiscard]] spend glsl_spend(u32 number, f32 width)
+{
+    using enum cost_class;
+    switch (number)
+    {
+    case 13: // Sin
+    case 14: // Cos
+    case 29: // Exp2
+    case 30: // Log2
+    case 31: // Sqrt
+    case 32: // InverseSqrt
+        return {.cost = transcendental};
+    case 27: // Exp
+    case 28: // Log
+        return {.cost = transcendental, .extra = alu, .extra_factor = 1};
+    case 26: // Pow
+        return {.cost = transcendental, .factor = 2, .extra = alu, .extra_factor = 1};
+    case 15: // Tan
+        return {.cost = transcendental, .factor = 3, .extra = alu, .extra_factor = 1};
+    case 16: // Asin
+    case 17: // Acos
+    case 18: // Atan
+    case 25: // Atan2
+        return {.cost = alu, .factor = 12, .extra = transcendental, .extra_factor = 1};
+    case 19: // Sinh
+    case 20: // Cosh
+    case 21: // Tanh
+    case 22: // Asinh
+    case 23: // Acosh
+    case 24: // Atanh
+        return {.cost = transcendental, .factor = 2, .extra = alu, .extra_factor = 4};
+    case 33: // Determinant
+    case 34: // MatrixInverse
+        return {.cost = alu, .factor = 10};
+    case 43: // FClamp
+    case 44: // UClamp
+    case 45: // SClamp
+    case 46: // FMix
+    case 47: // IMix
+    case 51: // Frexp
+    case 53: // Ldexp
+    case 68: // Cross
+    case 70: // FaceForward
+    case 81: // NClamp
+        return {.cost = alu, .factor = 2};
+    case 49: // SmoothStep
+        return {.cost = alu, .factor = 4};
+    case 66: // Length: a dot of the operand, and a square root
+        return {.cost = alu, .factor = width, .extra = transcendental, .extra_factor = 1};
+    case 67: // Distance: a difference, its dot, a square root
+        return {.cost = alu, .factor = 2 * width, .extra = transcendental, .extra_factor = 1};
+    case 69: // Normalize: a dot, its reciprocal square root once, a multiply
+        return {.cost = alu, .factor = 2, .extra = transcendental, .extra_factor = 1 / width};
+    case 71: // Reflect
+        return {.cost = alu, .factor = 3};
+    case 72: // Refract
+        return {.cost = alu, .factor = 5, .extra = transcendental, .extra_factor = 1 / width};
+    default:
+        return {};
+    }
+}
+
+/// What `code` spends per lane of its result, where its kind's own class says too little; nullopt where that is all.
+/// `operand_width` is its first operand's lanes, which a dot and a matrix product reduce.
+[[nodiscard]] cc::optional<spend> spend_of(babel::spirv::instruction const& i, f32 operand_width, f32 result_width)
+{
+    using enum cost_class;
+    switch (i.opcode())
+    {
+    case 132: // IMul
+        return spend{.cost = int_multiply};
+    case 134: // UDiv
+    case 135: // SDiv
+    case 137: // UMod
+    case 138: // SRem
+    case 139: // SMod
+        return spend{.cost = int_divide};
+    case 136: // FDiv: a reciprocal and a multiply
+        return spend{.cost = alu, .extra = transcendental, .extra_factor = 1};
+    case 140: // FRem
+    case 141: // FMod
+        return spend{.cost = alu, .factor = 3, .extra = transcendental, .extra_factor = 1};
+    case 148: // Dot
+    case 145: // MatrixTimesVector
+    case 144: // VectorTimesMatrix
+    case 146: // MatrixTimesMatrix
+        return spend{.cost = alu, .factor = result_width > 0 ? operand_width / result_width : operand_width};
+    case op::ext_inst:
+        return glsl_spend(i.words.size() > 4 ? i.words[4] : 0, operand_width);
+    default:
+        return {};
+    }
+}
+
 /// The blocks a terminator reaches, by label id.
 void successors(babel::spirv::instruction const& i, cc::vector<u32>& out)
 {
@@ -335,6 +560,11 @@ cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts co
                 return true;
         return false;
     };
+    auto defined_at = cc::map<u32, isize>();
+    for (auto k = first; k < end; ++k)
+        if (auto const id = m.at(k).result_id(); id != 0)
+            defined_at[id] = k;
+    auto block_start = isize(0);
     auto operands = cc::vector<u32>();
     auto targets = cc::vector<u32>();
     auto in_block = false;
@@ -348,12 +578,16 @@ cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts co
                 return cc::error(cc::format("shan: a block of {} has no terminator", f.name));
             g.blocks.push_back({.first = u32(g.instructions.size()), .end = u32(g.instructions.size())});
             in_block = true;
+            block_start = k;
             continue;
         }
         if (!in_block || code == op::line || code == op::no_line)
             continue;
         if (code == op::loop_merge)
+        {
             ++f.loops;
+            g.blocks.back().trips = trips_of(m, facts, defined_at, block_start, i.arguments()[0]);
+        }
         if (code == op::selection_merge)
             ++f.selections;
         if (code == op::function_call)
@@ -384,6 +618,25 @@ cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts co
             .counts = kind != op_kind::declaration && code != op::loop_merge && code != op::selection_merge,
             .source = source_of(i),
         };
+        if (kind != op_kind::declaration)
+        {
+            // the first operand's lanes, which a dot or a length reduces
+            auto const args = i.arguments();
+            auto const first_arg = code == op::ext_inst ? 2 : 0;
+            auto operand_width = 1.0f;
+            if (isize(first_arg) < args.size())
+                if (auto const v = value(args[first_arg]); v >= 0)
+                    operand_width = f32(cc::max(1, g.widths[v]));
+            auto const result_width = gi.result >= 0 ? f32(cc::max(1, g.widths[gi.result])) : 1.0f;
+            if (auto const s = spend_of(i, operand_width, result_width); s.has_value())
+            {
+                gi.has_cost = true;
+                gi.cost = s.value().cost;
+                gi.cost_factor = s.value().factor;
+                gi.extra = s.value().extra;
+                gi.extra_factor = s.value().extra_factor;
+            }
+        }
         if (code == op::load && !i.arguments().empty() && varying_load(i.arguments()[0]))
             gi.source = impl::uniformity_source::varying;
         if ((code == op::branch_conditional || code == op::switch_) && !i.arguments().empty())
@@ -459,11 +712,16 @@ cc::string to_text(module_metrics const& m)
     auto out = cc::string();
     auto const write = [&](function_metrics const& f)
     {
-        out.appendf("{}: {} instructions, {} blocks, {} loops, {} selections, {} calls\n", f.name, f.instructions,
-                    f.blocks, f.loops, f.selections, f.calls);
+        out.appendf("{}: {} instructions, {} blocks, {} loops ({} counted), {} selections, {} calls\n", f.name,
+                    f.instructions, f.blocks, f.loops, f.counted_loops, f.selections, f.calls);
         out.appendf("  max live {} words ({} vector, {} scalar), critical path {}, variables {} words\n",
                     f.max_live_words, f.max_live_vector_words, f.max_live_scalar_words, f.critical_path,
                     f.variable_words);
+        out.appendf("  compute cost {:.0f}:", compute_cost(f, default_cost_model()));
+        for (auto c = isize(0); c < k_cost_class_count; ++c)
+            if (f.executed_class_lanes[c] > 0)
+                out.appendf(" {} {:.0f}", name_of(cost_class(c)), f.executed_class_lanes[c]);
+        out.append("\n");
         for (auto k = isize(0); k < k_op_kind_count; ++k)
             if (f.kinds[k] != 0)
                 out.appendf("  {} {}\n", name_of(op_kind(k)), f.kinds[k]);

@@ -24,6 +24,12 @@
 //   m.total.max_live_words;                          // the register pressure of the worst function
 //   m.total.kinds[isize(shan::op_kind::load)];       // every load of the module
 
+namespace shan
+{
+/// The trips a loop is taken to run where a module does not say, which weighs a loop's body against the rest.
+inline constexpr f64 k_assumed_loop_trips = 8.0;
+} // namespace shan
+
 /// One function's metrics, or a module's totals: counts summed, `max_live_words` and `critical_path` the worst.
 struct shan::function_metrics
 {
@@ -35,6 +41,8 @@ struct shan::function_metrics
     i32 kinds[k_op_kind_count] = {};
     i32 blocks = 0;
     i32 loops = 0;
+    /// The loops whose trips their counter states, which the compute cost runs that often rather than `k_assumed_loop_trips`.
+    i32 counted_loops = 0;
     i32 selections = 0;
     i32 calls = 0;
     /// The words of the function's own variables, which a driver keeps in registers or in memory.
@@ -47,6 +55,17 @@ struct shan::function_metrics
     i32 max_live_scalar_words = 0;
     /// The longest chain of dependent operations in one block, in `latency_of` units.
     i32 critical_path = 0;
+    /// Per kind: the lanes its operations work on, a `float3`'s add three, each counted once where it stands.
+    f64 lanes[k_op_kind_count] = {};
+    /// The same, of the operations whose operands and result the whole wave shares.
+    f64 uniform_lanes[k_op_kind_count] = {};
+    /// Per kind, the lanes as often as a wave runs them: each block by `impl::frequencies`, a loop `k_assumed_loop_trips` times.
+    f64 executed_lanes[k_op_kind_count] = {};
+    f64 executed_uniform_lanes[k_op_kind_count] = {};
+    /// Per `cost_class`, the lanes executed, a compound operation in each class it spends: `normalize` is a dot, a
+    /// reciprocal square root and a multiply.
+    f64 executed_class_lanes[k_cost_class_count] = {};
+    f64 executed_uniform_class_lanes[k_cost_class_count] = {};
 
     [[nodiscard]] i32 count_of(op_kind kind) const { return kinds[isize(kind)]; }
 };

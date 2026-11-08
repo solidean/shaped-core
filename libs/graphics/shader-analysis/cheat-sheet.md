@@ -47,6 +47,18 @@ f.critical_path;                          // the longest dependent chain in one 
 shan::to_text(m);                         // -> cc::string, one line a metric
 ```
 
+## Cost
+
+```cpp
+#include <shader-analysis/cost.hh>
+
+shan::compute_cost(f, shan::default_cost_model());   // -> f64, lane-cycles of an fma if compute bound
+shan::cost_class::transcendental;          // free, alu, int_multiply, int_divide, conversion, transcendental, memory, control
+f.executed_class_lanes[isize(c)];          // lanes per class, as often as a wave runs them
+f.counted_loops;                           // loops whose counter states its trips; the rest run k_assumed_loop_trips
+shan::cost_model{.per_lane = {...}};       // a GPU's rate per class; memory is never counted
+```
+
 ## Diff
 
 ```cpp
@@ -66,4 +78,7 @@ shan::to_text(d);                         // -> cc::string, one line each
 - **A switch's cases are read as 32-bit literals**, which a 64-bit selector's are not.
 - **Live words are in the module's own order, and a driver reorders before it allocates.**
   AMD gives the convolution 38 vector registers where shan counts 79 vector words, on both routes alike; compare two modules, never a module with a register file.
+- **The compute cost is an estimate for two modules of one entry point.**
+  A branch the wave shares runs each arm at its share, one it does not both in full, a loop's guard and its body's stay in full.
+  Its rates are documented ones, not yet measured on a GPU.
 - **Uniformity does not follow memory.** A load from a function's own variable is varying whatever was stored, and one from a buffer at a shared address is scalar.

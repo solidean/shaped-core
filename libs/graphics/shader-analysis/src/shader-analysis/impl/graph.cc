@@ -18,12 +18,42 @@ void clear(cc::span<u64> bits, i32 v)
 }
 } // namespace
 
+cost_class class_of(op_kind kind)
+{
+    switch (kind)
+    {
+    case op_kind::float_arithmetic:
+    case op_kind::int_arithmetic:
+    case op_kind::extended:
+    case op_kind::compare:
+    case op_kind::logic:
+    case op_kind::subgroup:
+    case op_kind::derivative:
+        return cost_class::alu;
+    case op_kind::conversion:
+        return cost_class::conversion;
+    case op_kind::load:
+    case op_kind::store:
+    case op_kind::image:
+    case op_kind::atomic:
+    case op_kind::barrier:
+    case op_kind::ray:
+        return cost_class::memory;
+    case op_kind::control:
+        return cost_class::control;
+    default:
+        return cost_class::free;
+    }
+}
+
 void measure(graph const& g, function_metrics& f)
 {
     auto const values = g.widths.size();
     auto const words = (values + 63) / 64;
     auto const blocks = g.blocks.size();
     f.blocks = i32(blocks);
+    for (auto const& b : g.blocks)
+        f.counted_loops += b.trips > 0 ? 1 : 0;
 
     auto const bitset = [&] { return cc::vector<u64>::create_filled(words, 0); };
     auto defs = cc::vector<cc::vector<u64>>();
@@ -41,6 +71,8 @@ void measure(graph const& g, function_metrics& f)
     }
     auto block_of_value = cc::vector<i32>::create_filled(values, -1);
 
+    auto const varying = varying_values(g);
+    auto const frequency = frequencies(g, varying, k_assumed_loop_trips);
     // per block: what it defines, what it reads before defining, what it hands the phis of its successors
     for (auto b = isize(0); b < blocks; ++b)
     {
@@ -52,6 +84,28 @@ void measure(graph const& g, function_metrics& f)
             {
                 ++f.kinds[isize(i.kind)];
                 ++f.instructions;
+                // a float3's add is three lanes, which a GPU that works on scalars runs as three
+                auto const lanes = f64(cc::max(1, i.result >= 0 ? g.widths[i.result] : 1));
+                auto is_uniform = i.result >= 0 ? !varying[i.result] : true;
+                for (auto o = i.first; o < i.first + i.count && i.result < 0; ++o)
+                    is_uniform = is_uniform && !(g.operands[o] >= 0 && varying[g.operands[o]]);
+                auto const k = isize(i.kind);
+                f.lanes[k] += lanes;
+                f.executed_lanes[k] += lanes * frequency[b];
+                if (is_uniform)
+                {
+                    f.uniform_lanes[k] += lanes;
+                    f.executed_uniform_lanes[k] += lanes * frequency[b];
+                }
+                auto const spend = [&](cost_class c, f64 factor)
+                {
+                    f.executed_class_lanes[isize(c)] += lanes * factor * frequency[b];
+                    if (is_uniform)
+                        f.executed_uniform_class_lanes[isize(c)] += lanes * factor * frequency[b];
+                };
+                spend(i.has_cost ? i.cost : class_of(i.kind), i.has_cost ? f64(i.cost_factor) : 1.0);
+                if (i.has_cost && i.extra_factor > 0)
+                    spend(i.extra, f64(i.extra_factor));
             }
             for (auto p = i.phi_first; p < i.phi_first + i.phi_count; ++p)
                 if (g.phi_values[p] >= 0 && g.phi_blocks[p] >= 0 && g.phi_blocks[p] < i32(blocks))
@@ -90,7 +144,6 @@ void measure(graph const& g, function_metrics& f)
 
     // each block backwards from what it hands on, for the live words, apart by whether a wave shares them; forwards,
     // for its chains
-    auto const varying = varying_values(g);
     auto depth = cc::vector<i32>::create_filled(values, 0);
     for (auto b = isize(0); b < blocks; ++b)
     {
@@ -146,10 +199,13 @@ void measure(graph const& g, function_metrics& f)
     }
 }
 
-cc::vector<i32> dominators(graph const& g)
+namespace
+{
+/// Each node's immediate dominator over `successors` from `entry`, the entry its own and what no walk reaches -1.
+[[nodiscard]] cc::vector<i32> immediate_dominators(cc::span<cc::vector<i32> const> successors, i32 entry)
 {
     // over the blocks in reverse postorder from block 0 (Cooper, Harvey, Kennedy)
-    auto const n = g.blocks.size();
+    auto const n = successors.size();
     if (n == 0)
         return {};
     auto order = cc::vector<i32>();
@@ -159,12 +215,12 @@ cc::vector<i32> dominators(graph const& g)
         i32 block;
         isize next;
     };
-    auto stack = cc::vector<frame>{{.block = 0, .next = 0}};
-    seen[0] = true;
+    auto stack = cc::vector<frame>{{.block = entry, .next = 0}};
+    seen[entry] = true;
     while (!stack.empty())
     {
         auto& top = stack.back();
-        auto const& succ = g.blocks[top.block].successors;
+        auto const& succ = successors[top.block];
         if (top.next < succ.size())
         {
             auto const s = succ[top.next++];
@@ -183,11 +239,11 @@ cc::vector<i32> dominators(graph const& g)
         rank[order[k]] = i32(order.size() - 1 - k);
     auto predecessors = cc::vector<cc::vector<i32>>::create_defaulted(n);
     for (auto b = isize(0); b < n; ++b)
-        for (auto const s : g.blocks[b].successors)
+        for (auto const s : successors[b])
             if (s >= 0 && s < i32(n))
                 predecessors[s].push_back(i32(b));
     auto idom = cc::vector<i32>::create_filled(n, -1);
-    idom[0] = 0;
+    idom[entry] = entry;
     auto const intersect = [&](i32 a, i32 b)
     {
         while (a != b)
@@ -205,7 +261,7 @@ cc::vector<i32> dominators(graph const& g)
         for (auto k = order.size(); k > 0; --k)
         {
             auto const b = order[k - 1];
-            if (b == 0)
+            if (b == entry)
                 continue;
             auto chosen = -1;
             for (auto const p : predecessors[b])
@@ -219,6 +275,173 @@ cc::vector<i32> dominators(graph const& g)
         }
     }
     return idom;
+}
+
+/// The blocks' successors, as lists.
+[[nodiscard]] cc::vector<cc::vector<i32>> successor_lists(graph const& g)
+{
+    auto lists = cc::vector<cc::vector<i32>>();
+    auto const n = i32(g.blocks.size());
+    for (auto const& b : g.blocks)
+    {
+        auto& list = lists.emplace_back();
+        for (auto const s : b.successors)
+            if (s >= 0 && s < n)
+                list.push_back(s);
+    }
+    return lists;
+}
+} // namespace
+
+cc::vector<i32> dominators(graph const& g)
+{
+    if (g.blocks.empty())
+        return {};
+    return immediate_dominators(successor_lists(g), 0);
+}
+
+cc::vector<i32> post_dominators(graph const& g)
+{
+    // the edges reversed, from one exit every block that leaves the function reaches
+    auto const n = i32(g.blocks.size());
+    if (n == 0)
+        return {};
+    auto reversed = cc::vector<cc::vector<i32>>::create_defaulted(isize(n) + 1);
+    for (auto b = 0; b < n; ++b)
+    {
+        auto leaves = true;
+        for (auto const s : g.blocks[b].successors)
+            if (s >= 0 && s < n)
+            {
+                reversed[s].push_back(b);
+                leaves = false;
+            }
+        if (leaves)
+            reversed[n].push_back(b);
+    }
+    auto ipdom = immediate_dominators(reversed, n);
+    ipdom.pop_back();
+    for (auto& d : ipdom)
+        d = d == n ? -1 : d;
+    return ipdom;
+}
+
+cc::vector<natural_loop> natural_loops(graph const& g)
+{
+    auto result = cc::vector<natural_loop>();
+    auto const n = i32(g.blocks.size());
+    if (n == 0)
+        return result;
+    auto const idom = dominators(g);
+    auto predecessors = cc::vector<cc::vector<i32>>::create_defaulted(n);
+    auto latches = cc::vector<cc::vector<i32>>::create_defaulted(n);
+    for (auto t = 0; t < n; ++t)
+        for (auto const h : g.blocks[t].successors)
+        {
+            if (h < 0 || h >= n)
+                continue;
+            predecessors[h].push_back(t);
+            if (idom[t] < 0)
+                continue;
+            for (auto at = t; at >= 0; at = at == idom[at] ? -1 : idom[at])
+                if (at == h)
+                {
+                    latches[h].push_back(t);
+                    break;
+                }
+        }
+    for (auto h = 0; h < n; ++h)
+    {
+        if (latches[h].empty())
+            continue;
+        auto& loop = result.emplace_back();
+        loop.header = h;
+        loop.body = cc::vector<bool>::create_filled(n, false);
+        loop.body[h] = true;
+        auto stack = cc::vector<i32>::create_copy_of(cc::span<i32 const>(latches[h]));
+        while (!stack.empty())
+        {
+            auto const b = stack.back();
+            stack.pop_back();
+            if (loop.body[b])
+                continue;
+            loop.body[b] = true;
+            for (auto const p : predecessors[b])
+                if (!loop.body[p])
+                    stack.push_back(p);
+        }
+    }
+    return result;
+}
+
+
+cc::vector<f64> frequencies(graph const& g, cc::span<bool const> varying, f64 loop_trips)
+{
+    auto const n = i32(g.blocks.size());
+    auto frequency = cc::vector<f64>::create_filled(n, 0.0);
+    if (n == 0)
+        return frequency;
+    auto const idom = dominators(g);
+    auto const ipdom = post_dominators(g);
+    auto const post_dominates = [&](i32 a, i32 b)
+    {
+        for (auto at = b; at >= 0; at = ipdom[at])
+            if (at == a)
+                return true;
+        return false;
+    };
+    // each block in the order a walk dominates it, as often as its dominator, but for an arm of a branch
+    auto order = cc::vector<i32>();
+    auto children = cc::vector<cc::vector<i32>>::create_defaulted(n);
+    for (auto b = 1; b < n; ++b)
+        if (idom[b] >= 0)
+            children[idom[b]].push_back(b);
+    order.push_back(0);
+    for (auto k = isize(0); k < order.size(); ++k)
+        order.push_back_range(children[order[k]]);
+    auto const loops = natural_loops(g);
+    auto leads_to_loop = cc::vector<bool>::create_filled(n, false);
+    for (auto const& loop : loops)
+        for (auto at = loop.header; at >= 0; at = at == idom[at] ? -1 : idom[at])
+            leads_to_loop[at] = true;
+    // the way a loop's exit test stays in the loop runs as often as its trips say, which the loop multiplies in below
+    auto stays_in_loop = cc::vector<bool>::create_filled(n, false);
+    for (auto const& loop : loops)
+        for (auto b = 0; b < n; ++b)
+        {
+            auto const d = idom[b];
+            if (!loop.body[b] || d < 0 || !loop.body[d])
+                continue;
+            for (auto const s : g.blocks[d].successors)
+                if (s >= 0 && s < n && !loop.body[s])
+                    stays_in_loop[b] = true;
+        }
+    frequency[0] = 1.0;
+    for (auto const b : order)
+    {
+        if (b == 0)
+            continue;
+        auto const d = idom[b];
+        auto share = 1.0;
+        // an arm that leads into a loop is a guard on that loop, which is all but always taken
+        if (!post_dominates(b, d) && !leads_to_loop[b] && !stays_in_loop[b])
+        {
+            // a branch the wave shares takes one way; one it does not takes them all, one after the other
+            auto const condition = g.blocks[d].condition;
+            auto const ways = g.blocks[d].successors.size();
+            share = condition >= 0 && varying[condition] ? 1.0 : ways > 1 ? 1.0 / f64(ways) : 0.5;
+        }
+        frequency[b] = frequency[d] * share;
+    }
+    // a natural loop's body runs its trips as often again
+    for (auto const& loop : loops)
+    {
+        auto const trips = g.blocks[loop.header].trips > 0 ? g.blocks[loop.header].trips : loop_trips;
+        for (auto b = 0; b < n; ++b)
+            if (loop.body[b])
+                frequency[b] *= trips;
+    }
+    return frequency;
 }
 
 i32 back_edges(graph const& g)
@@ -310,6 +533,19 @@ void accumulate(function_metrics const& f, function_metrics& total)
     total.selections += f.selections;
     total.calls += f.calls;
     total.variable_words += f.variable_words;
+    for (auto k = isize(0); k < k_op_kind_count; ++k)
+    {
+        total.lanes[k] += f.lanes[k];
+        total.uniform_lanes[k] += f.uniform_lanes[k];
+        total.executed_lanes[k] += f.executed_lanes[k];
+        total.executed_uniform_lanes[k] += f.executed_uniform_lanes[k];
+    }
+    for (auto c = isize(0); c < k_cost_class_count; ++c)
+    {
+        total.executed_class_lanes[c] += f.executed_class_lanes[c];
+        total.executed_uniform_class_lanes[c] += f.executed_uniform_class_lanes[c];
+    }
+    total.counted_loops += f.counted_loops;
     total.max_live_words = cc::max(total.max_live_words, f.max_live_words);
     total.max_live_vector_words = cc::max(total.max_live_vector_words, f.max_live_vector_words);
     total.max_live_scalar_words = cc::max(total.max_live_scalar_words, f.max_live_scalar_words);

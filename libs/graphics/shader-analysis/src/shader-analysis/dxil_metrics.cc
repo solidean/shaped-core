@@ -111,6 +111,55 @@ using babel::llvm37::type_kind;
     return impl::uniformity_source::operands;
 }
 
+/// What a `dx.op` call of DXIL opcode `opcode` spends, where its kind's class says too little; nullopt where that is all.
+[[nodiscard]] cc::optional<impl::graph_instruction> dx_spend(i64 opcode)
+{
+    using enum cost_class;
+    auto const with = [](cost_class c, f32 factor = 1, cost_class extra = free, f32 extra_factor = 0)
+    {
+        return impl::graph_instruction{.has_cost = true,
+                                       .cost = c,
+                                       .cost_factor = factor,
+                                       .extra = extra,
+                                       .extra_factor = extra_factor};
+    };
+    switch (opcode)
+    {
+    case 12: // Cos
+    case 13: // Sin
+    case 21: // Exp, base 2
+    case 23: // Log, base 2
+    case 24: // Sqrt
+    case 25: // Rsqrt
+        return with(transcendental);
+    case 14: // Tan
+        return with(transcendental, 3, alu, 1);
+    case 15: // Acos
+    case 16: // Asin
+    case 17: // Atan
+        return with(alu, 12, transcendental, 1);
+    case 18: // Hcos
+    case 19: // Hsin
+    case 20: // Htan
+        return with(transcendental, 2, alu, 4);
+    case 41: // IMul
+    case 42: // UMul
+    case 48: // IMad
+    case 49: // UMad
+        return with(int_multiply);
+    case 43: // UDiv
+        return with(int_divide);
+    case 54: // Dot2
+        return with(alu, 2);
+    case 55: // Dot3
+        return with(alu, 3);
+    case 56: // Dot4
+        return with(alu, 4);
+    default:
+        return {};
+    }
+}
+
 [[nodiscard]] op_kind kind_of(babel::llvm37::module const& m,
                               babel::llvm37::body const& b,
                               babel::llvm37::instruction const& i)
@@ -168,6 +217,113 @@ using babel::llvm37::type_kind;
     }
 }
 
+/// The trips of `loop`, where a phi of its header starts at a constant, steps by a constant, and a branch leaving the
+/// loop compares it, or its next value, with a constant; 0 where it is anything else.
+[[nodiscard]] f64 trips_of(babel::llvm37::module const& m, babel::llvm37::body const& b, impl::natural_loop const& loop)
+{
+    using babel::llvm37::operand_role;
+    using babel::llvm37::value_kind;
+    auto const constant = [&](u32 id, i64& out)
+    {
+        auto const v = m.value_of(b, id);
+        return v.kind == value_kind::constant && m.integer_of(v.index, out);
+    };
+    // the instruction that gives value id `id`, or null
+    auto const giving = [&](u32 id) -> babel::llvm37::instruction const*
+    {
+        if (id < b.first_value || id - b.first_value >= u32(b.values.size()))
+            return nullptr;
+        auto const& v = b.values[id - b.first_value];
+        return v.kind == value_kind::instruction ? &b.instructions[v.index] : nullptr;
+    };
+    auto const holds = [](u32 predicate, i64 x, i64 y) -> cc::optional<bool>
+    {
+        switch (predicate)
+        {
+        case 32:
+            return x == y;
+        case 33:
+            return x != y;
+        case 34:
+        case 38:
+            return x > y;
+        case 35:
+        case 39:
+            return x >= y;
+        case 36:
+        case 40:
+            return x < y;
+        case 37:
+        case 41:
+            return x <= y;
+        default:
+            return {};
+        }
+    };
+    constexpr auto k_most_trips = 4096;
+    for (auto const& phi : b.instructions)
+    {
+        if (phi.code != inst_code::phi || i32(phi.block) != loop.header || phi.count != 4)
+            continue;
+        auto const ops = m.operands_of(b, phi);
+        for (auto way = 0; way < 2; ++way)
+        {
+            auto start = i64(0);
+            if (!constant(ops[2 * way], start))
+                continue;
+            auto const* const next = giving(ops[2 * (1 - way)]);
+            if (next == nullptr || next->code != inst_code::binop || (next->sub != 0 && next->sub != 1))
+                continue;
+            auto const step_ops = m.operands_of(b, *next);
+            auto step = i64(0);
+            if (step_ops.size() < 2 || step_ops[0] != phi.result || !constant(step_ops[1], step) || step == 0)
+                continue;
+            step = next->sub == 1 ? -step : step;
+            for (auto const& br : b.instructions)
+            {
+                if (br.code != inst_code::br || br.count != 3 || i32(br.block) >= i32(loop.body.size())
+                    || !loop.body[br.block])
+                    continue;
+                auto const br_ops = m.operands_of(b, br);
+                auto targets = cc::vector<u32>();
+                auto condition = u32(0xffffffffu);
+                for (auto k = isize(0); k < br_ops.size(); ++k)
+                {
+                    if (b.roles[br.first + k] == operand_role::block)
+                        targets.push_back(br_ops[k]);
+                    else if (b.roles[br.first + k] == operand_role::value)
+                        condition = br_ops[k];
+                }
+                if (targets.size() != 2)
+                    continue;
+                // which way leaves: the target outside the body
+                auto const outside = [&](u32 t) { return t >= u32(loop.body.size()) || !loop.body[t]; };
+                auto const leaves_on = outside(targets[0]) ? 1 : outside(targets[1]) ? 0 : -1;
+                auto const* const test = giving(condition);
+                if (leaves_on < 0 || test == nullptr || (test->code != inst_code::cmp2 && test->code != inst_code::cmp))
+                    continue;
+                auto const t = m.operands_of(b, *test);
+                auto bound = i64(0);
+                auto const of_next = t.size() >= 2 && t[0] == next->result;
+                if (t.size() < 2 || (t[0] != phi.result && !of_next) || !constant(t[1], bound))
+                    continue;
+                auto trips = 0;
+                for (auto i = start; trips < k_most_trips; i += step)
+                {
+                    auto const h = holds(test->sub, of_next ? i + step : i, bound);
+                    if (!h.has_value())
+                        return 0;
+                    if (h.value() == (leaves_on == 1))
+                        return f64(of_next ? trips + 1 : trips);
+                    ++trips;
+                }
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+
 [[nodiscard]] function_metrics measure_body(babel::llvm37::module const& m, babel::llvm37::body const& b)
 {
     auto f = function_metrics();
@@ -209,7 +365,69 @@ using babel::llvm37::type_kind;
         };
         if (i.code == inst_code::call)
             if (auto const name = m.callee_name(b, i); name.starts_with("dx.op."))
+            {
                 gi.source = dx_op_source(name);
+                // the opcode, the call's first argument
+                auto opcode = i64(-1);
+                if (i.count >= 2)
+                    if (auto const v = m.value_of(b, b.operands[i.first + 1]);
+                        v.kind == babel::llvm37::value_kind::constant)
+                        (void)m.integer_of(v.index, opcode);
+                if (auto const s = dx_spend(opcode); s.has_value())
+                {
+                    gi.has_cost = true;
+                    gi.cost = s.value().cost;
+                    gi.cost_factor = s.value().cost_factor;
+                    gi.extra = s.value().extra;
+                    gi.extra_factor = s.value().extra_factor;
+                }
+            }
+        // LLVM's binop codes: 2 a multiply, 3 to 6 a division or remainder, which 4 and 6 are of floats
+        if (i.code == inst_code::binop)
+        {
+            auto const is_f = is_float(m, i.type);
+            if (!is_f && i.sub == 2)
+                gi = {.kind = gi.kind,
+                      .result = gi.result,
+                      .first = gi.first,
+                      .phi_first = gi.phi_first,
+                      .counts = gi.counts,
+                      .source = gi.source,
+                      .has_cost = true,
+                      .cost = cost_class::int_multiply};
+            else if (!is_f && i.sub >= 3 && i.sub <= 6)
+                gi = {.kind = gi.kind,
+                      .result = gi.result,
+                      .first = gi.first,
+                      .phi_first = gi.phi_first,
+                      .counts = gi.counts,
+                      .source = gi.source,
+                      .has_cost = true,
+                      .cost = cost_class::int_divide};
+            else if (is_f && i.sub == 4)
+                gi = {.kind = gi.kind,
+                      .result = gi.result,
+                      .first = gi.first,
+                      .phi_first = gi.phi_first,
+                      .counts = gi.counts,
+                      .source = gi.source,
+                      .has_cost = true,
+                      .cost = cost_class::alu,
+                      .extra = cost_class::transcendental,
+                      .extra_factor = 1};
+            else if (is_f && i.sub == 6)
+                gi = {.kind = gi.kind,
+                      .result = gi.result,
+                      .first = gi.first,
+                      .phi_first = gi.phi_first,
+                      .counts = gi.counts,
+                      .source = gi.source,
+                      .has_cost = true,
+                      .cost = cost_class::alu,
+                      .cost_factor = 3,
+                      .extra = cost_class::transcendental,
+                      .extra_factor = 1};
+        }
         // what a load from a function's own variable holds, or an atomic returns, is not followed
         if (i.code == inst_code::atomic_rmw || i.code == inst_code::cmpxchg)
             gi.source = impl::uniformity_source::varying;
@@ -257,6 +475,8 @@ using babel::llvm37::type_kind;
         g.instructions.push_back(gi);
         g.blocks[i.block].end = u32(g.instructions.size());
     }
+    for (auto const& loop : impl::natural_loops(g))
+        g.blocks[loop.header].trips = trips_of(m, b, loop);
     impl::measure(g, f);
     f.loops = impl::back_edges(g);
     return f;

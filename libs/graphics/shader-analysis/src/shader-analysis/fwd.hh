@@ -9,6 +9,9 @@ namespace shan
 using namespace cc::primitive_defines;
 
 enum class op_kind : u8;
+enum class cost_class : u8;
+inline constexpr isize k_cost_class_count = 8;
+struct cost_model;
 struct function_metrics;
 struct module_metrics;
 struct difference;
