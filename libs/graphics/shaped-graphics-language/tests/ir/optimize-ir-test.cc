@@ -303,6 +303,103 @@ TEST("sgl ir flatten_branches - a loop stays a loop, and its phi still names its
     CHECK(count_of(b.p, op::branch_conditional) == 1);
 }
 
+TEST("sgl ir flatten_branches structured - nested selections fold from the inside out into one block")
+{
+    auto b = program_builder();
+    b.blocks(6);
+    b.open(0);
+    b.select_merge(0, 5);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 5);
+    b.open(1);
+    b.select_merge(1, 4);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.one)}), 2, 3);
+    b.open(2);
+    auto const inner = b.add(op::fadd, b.float_type, {u32(x), u32(b.one)});
+    b.branch(4);
+    b.open(3);
+    b.branch(4);
+    b.open(4);
+    auto const joined = b.add(op::phi, b.float_type, {u32(inner), 2, u32(b.two), 3});
+    b.branch(5);
+    b.open(5);
+    b.keep(b.add(op::phi, b.float_type, {u32(joined), 4, u32(x), 0}));
+    b.finish();
+    require_whole(b.p, control_flow::structured);
+    flatten_branches(b.p, control_flow::structured);
+    require_whole(b.p, control_flow::structured);
+    CHECK(b.p.blocks.size() == 1);
+    CHECK(b.p.blocks[0].merges == merge_kind::none);
+    CHECK(count_of(b.p, op::phi) == 0);
+    CHECK(count_of(b.p, op::select) == 2);
+}
+
+TEST("sgl ir flatten_branches structured - a selection in a loop folds, and the loop keeps its header, merge and "
+     "continue target")
+{
+    auto b = program_builder();
+    b.blocks(7);
+    b.open(0);
+    b.branch(1);
+    b.open(1);
+    b.loop_merge(1, 6, 5);
+    auto const counter = b.add(op::phi, b.float_type, {u32(b.one), 0, 0, 5});
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(counter), u32(b.two)}), 2, 6);
+    b.open(2);
+    b.select_merge(2, 5);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(counter), u32(b.one)}), 3, 4);
+    b.open(3);
+    auto const step = b.add(op::fadd, b.float_type, {u32(counter), u32(b.one)});
+    b.branch(5);
+    b.open(4);
+    b.branch(5);
+    b.open(5);
+    // the continue target, which is the selection's merge too
+    auto const taken = b.add(op::phi, b.float_type, {u32(step), 3, u32(b.two), 4});
+    auto const more = b.add(op::fadd, b.float_type, {u32(counter), u32(taken)});
+    b.branch(1);
+    b.open(6);
+    b.keep(counter);
+    b.finish();
+    b.p.operands[b.p.instructions[index_of(counter)].first + 2] = u32(more);
+    require_whole(b.p, control_flow::structured);
+    flatten_branches(b.p, control_flow::structured);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::select) == 1);
+    CHECK(count_of(b.p, op::phi) == 1);
+    auto loops = 0;
+    for (auto const& block : b.p.blocks)
+    {
+        CHECK(block.merges != merge_kind::selection);
+        loops += block.merges == merge_kind::loop ? 1 : 0;
+    }
+    CHECK(loops == 1);
+}
+
+TEST("sgl ir flatten_branches structured - a phi of a pointer keeps its branch, which logical addressing cannot select")
+{
+    auto b = program_builder();
+    auto const held = read_only_buffer(b);
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    b.open(1);
+    b.branch(3);
+    b.open(2);
+    b.branch(3);
+    b.open(3);
+    auto const chosen = b.add(op::phi, b.buffer_pointer, {u32(b.out), 1, u32(held), 2});
+    b.keep(b.add(op::load, b.float_type, {u32(chosen)}));
+    b.finish();
+    flatten_branches(b.p, control_flow::structured);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::select) == 0);
+    CHECK(count_of(b.p, op::phi) == 1);
+    CHECK(b.p.blocks[0].merges == merge_kind::selection);
+}
+
 // ---- chain_sums
 
 TEST("sgl ir chain_sums - a total meets each product alone, and each addition keeps its statement")

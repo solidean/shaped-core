@@ -2,6 +2,7 @@
 
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics-language/ir/ir.hh>
+#include <shaped-graphics-language/ir/verify.hh>
 
 using namespace sgl;
 using namespace sgl::ir;
@@ -16,7 +17,7 @@ constexpr int k_most_flatten_rounds = 16;
 class flattener
 {
 public:
-    explicit flattener(program& p) : _p(p) {}
+    flattener(program& p, control_flow flow) : _p(p), _structured(flow == control_flow::structured) {}
 
     void run()
     {
@@ -54,7 +55,8 @@ private:
     void number_blocks()
     {
         auto const order = blocks_in_order(_p);
-        auto is_reached = cc::vector<bool>::create_filled(_p.blocks.size(), false);
+        // a structured program keeps what no walk reaches, which may be a construct's merge block
+        auto is_reached = cc::vector<bool>::create_filled(_p.blocks.size(), _structured);
         auto stack = cc::vector<u32>();
         auto scratch = cc::vector<u32>();
         is_reached[isize(order[0])] = true;
@@ -79,6 +81,26 @@ private:
                 _count.push_back(_p.blocks[isize(b)].count);
             }
         _block_count = _first.size();
+        _merges = cc::vector<merge_kind>::create_filled(_block_count, merge_kind::none);
+        _merge = cc::vector<u32>::create_filled(_block_count, k_nothing);
+        _continue_to = cc::vector<u32>::create_filled(_block_count, k_nothing);
+        _named = cc::vector<u32>::create_filled(_block_count, 0u);
+        if (_structured)
+            for (auto const b : order)
+            {
+                auto const& block = _p.blocks[isize(b)];
+                auto const at = place[isize(b)];
+                _merges[at] = block.merges;
+                if (block.merges == merge_kind::none)
+                    continue;
+                _merge[at] = place[isize(block.merge)];
+                ++_named[_merge[at]];
+                if (block.merges == merge_kind::loop)
+                {
+                    _continue_to[at] = place[isize(block.continue_to)];
+                    ++_named[_continue_to[at]];
+                }
+            }
         for (auto b = isize(0); b < _block_count; ++b)
             for (auto i = _first[b]; i < _first[b] + _count[b]; ++i)
             {
@@ -206,6 +228,30 @@ private:
             }
         default:
             return lanes_of(i.type);
+        }
+    }
+
+    /// What SPIR-V's logical addressing lets a `select` choose: data, never a pointer or a handle.
+    [[nodiscard]] bool is_selectable(type_ref t) const
+    {
+        auto const& info = _p.at(t);
+        switch (info.kind)
+        {
+        case type_kind::bool_:
+        case type_kind::int_:
+        case type_kind::float_:
+            return true;
+        case type_kind::vector:
+        case type_kind::matrix:
+        case type_kind::array:
+            return is_selectable(info.element);
+        case type_kind::structure:
+            for (auto m = info.first_member; m < info.first_member + info.member_count; ++m)
+                if (!is_selectable(_p.members[m].type))
+                    return false;
+            return true;
+        default:
+            return false;
         }
     }
 
@@ -403,6 +449,16 @@ private:
     /// A block with this one for its only way in is this block.
     [[nodiscard]] outcome join(isize b, u32 to)
     {
+        // the construct `to` heads becomes this block's, and a block a construct names stays a block of its own
+        if (_structured)
+        {
+            if (_named[to] != 0 || _merges[b] != merge_kind::none)
+                return outcome::nothing;
+            _merges[b] = _merges[to];
+            _merge[b] = _merge[to];
+            _continue_to[b] = _continue_to[to];
+            _merges[to] = merge_kind::none;
+        }
         while (is_phi(_head[to]))
         {
             auto const phi = _head[to];
@@ -452,6 +508,21 @@ private:
         }
         if (merge == k_nothing || i64(merge) == b)
             return outcome::nothing;
+        if (_structured)
+        {
+            // a selection of its own, whose arms head nothing and are no construct's target
+            if (_merges[b] != merge_kind::selection || _merge[b] != merge)
+                return outcome::nothing;
+            if ((is_yes && (_named[yes] != 0 || _merges[yes] != merge_kind::none))
+                || (is_no && (_named[no] != 0 || _merges[no] != merge_kind::none)))
+                return outcome::nothing;
+            for (auto i = _head[merge]; is_phi(i); i = _next[i])
+                if (!is_selectable(_p.instructions[i].type))
+                    return outcome::nothing;
+            --_named[merge];
+            _merges[b] = merge_kind::none;
+            _merge[b] = k_nothing;
+        }
 
         if (is_yes)
             splice_body(isize(yes), b);
@@ -460,8 +531,9 @@ private:
         // each phi of the merge: what either way gave is now one value, from this block
         auto const from_yes = is_yes ? yes : u32(b);
         auto const from_no = is_no ? no : u32(b);
-        for (auto i = _head[merge]; is_phi(i); i = _next[i])
+        for (auto i = _head[merge], next = k_nothing; is_phi(i); i = next)
         {
+            next = _next[i];
             auto const first = _p.instructions[i].first;
             auto const count = _p.instructions[i].count;
             auto yes_value = k_nothing;
@@ -491,6 +563,16 @@ private:
             _p.operands[first + kept] = chosen;
             _p.operands[first + kept + 1] = u32(b);
             _p.instructions[i].count = kept + 2;
+            // a phi of this block's way in alone is its value, where a merge a construct names stays a block of its own
+            if (kept == 0)
+            {
+                _replaced[i] = chosen;
+                if (_previous[i] != k_nothing)
+                    _next[_previous[i]] = next;
+                else
+                    _head[merge] = next;
+                _previous[next] = _previous[i];
+            }
         }
         if (is_yes)
             _is_dead[yes] = true;
@@ -517,7 +599,7 @@ private:
             auto only_phis = true;
             for (auto i = _head[b]; i != _tail[b] && only_phis; i = _next[i])
                 only_phis = _p.instructions[i].code == op::phi;
-            if (only_phis && thread_through(b, to))
+            if (!_structured && only_phis && thread_through(b, to))
                 return outcome::changed;
             if (i64(to) == b || _incoming[to] != 1 || to == 0)
                 return outcome::nothing;
@@ -565,8 +647,16 @@ private:
                 enter(to);
         }
         auto order = cc::vector<u32>::create_with_capacity(postorder.size());
-        for (auto i = postorder.size(); i > 0; --i)
-            order.push_back(postorder[i - 1]);
+        if (_structured)
+        {
+            // the order blocks opened in, what no walk reaches too: a header still opens ahead of its construct
+            for (auto b = isize(0); b < _block_count; ++b)
+                if (!_is_dead[b])
+                    order.push_back(u32(b));
+        }
+        else
+            for (auto i = postorder.size(); i > 0; --i)
+                order.push_back(postorder[i - 1]);
 
         auto block_place = cc::vector<u32>::create_filled(_block_count, k_nothing);
         for (auto i = isize(0); i < order.size(); ++i)
@@ -604,7 +694,15 @@ private:
                 copy.first = first;
                 kept.push_back(copy);
             }
-            blocks.push_back({.first = start, .count = u32(kept.size()) - start});
+            auto rebuilt = ir::block{.first = start, .count = u32(kept.size()) - start};
+            if (_merges[b] != merge_kind::none)
+            {
+                rebuilt.merges = _merges[b];
+                rebuilt.merge = block_ref(block_place[_merge[b]]);
+                if (_merges[b] == merge_kind::loop)
+                    rebuilt.continue_to = block_ref(block_place[_continue_to[b]]);
+            }
+            blocks.push_back(rebuilt);
         }
         _p.instructions = cc::move(kept);
         _p.operands = cc::move(operands);
@@ -612,7 +710,13 @@ private:
     }
 
     program& _p;
+    bool _structured = false;
     isize _block_count = 0;
+    /// Parallel to the blocks, where structured: each one's construct, and how many constructs name it.
+    cc::vector<merge_kind> _merges;
+    cc::vector<u32> _merge;
+    cc::vector<u32> _continue_to;
+    cc::vector<u32> _named;
     cc::vector<u32> _first;
     cc::vector<u32> _count;
     cc::vector<u32> _next;
@@ -630,7 +734,12 @@ private:
 };
 } // namespace
 
+void sgl::ir::flatten_branches(program& p, control_flow flow)
+{
+    flattener(p, flow).run();
+}
+
 void sgl::ir::flatten_branches(program& p)
 {
-    flattener(p).run();
+    flatten_branches(p, control_flow::unstructured);
 }

@@ -78,6 +78,7 @@ Native over DXC, GPU time on the Arc B580: the median of three processes, in eac
 
 Of the wavefront's kernels on dx12, only shade read high in both sets, 1.20 and 1.19, and connect went from 1.26 before to 0.96 and 1.02.
 After the constant phis below, on 2026-11-08, the dx12 frame read 1.032, 1.034 and 1.037, and vulkan's 0.80, 0.80 and 0.80.
+Once SPIR-V's branches became selects, vulkan's megakernel read 0.79 and its wavefront 0.76 in one process, and sr's dispatches what they read before.
 
 The same benchmarks on the Radeon iGPU of a Ryzen 9 9950X3D2 (RDNA 2, driver 32.0.21042.62), `SC_GPU=amd`, the median of three processes:
 
@@ -108,21 +109,21 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 
 | entry | target | before | after |
 |---|---|---:|---:|
-| à-trous `main_cs` | spirv | 1.32 | 1.02 |
-| viewer `path_trace` | spirv | 63,248 bytes against 42,744 | 51,628 bytes, 1.21 |
+| à-trous `main_cs` | spirv | 1.32 | 0.98 |
+| viewer `path_trace` | spirv | 63,248 bytes against 42,744 | 48,660 bytes, 1.06 |
 | viewer `path_trace` | dxil | 1.25 | 0.98 |
 | viewer `path_miss` | dxil | 1.99 | 1.04 |
 | wavefront `extend` | dxil | 1.21 | 1.04 |
 | wavefront `segment` | dxil | 1.42 | 0.99 |
 | wavefront `connect` | dxil | 1.22 | 1.05 |
-| wavefront `connect` | spirv | 1.14 | 1.14 |
+| wavefront `connect` | spirv | 1.14 | 1.05 |
 | a material's shade kernel | dxil | 1.96 | 1.03 |
-| a material's shade kernel | spirv | 1.88 | 1.29 |
+| a material's shade kernel | spirv | 1.88 | 1.11 |
 | raster `environment_ps` | dxil | 1.96 | 1.02 |
 | raster `cull_second` | dxil | 1.19 | 1.16 |
 | `bc7_cs` | dxil | 1.49 | 1.23 |
 | bloom `first_cs` | dxil | 1.21 | 1.03 |
-| `bc3_cs` | spirv | 1.30 | 1.27 |
+| `bc3_cs` | spirv | 1.30 | 1.16 |
 
 The shade kernel is generated per material at run time; the row is the cornell box's `pbr`, whose committed copy `table` holds.
 Every other entry stands within about 10% of DXC's operations, and most below it.
@@ -171,6 +172,11 @@ That is the container rather than the code: DXC's side is stripped of reflection
   bc7 rescales a byte as `x * 255.0 / 255.0` and `x * top / 255.0`, which DXC's fast flags reassociate and native kept, 192 `fdiv`s by 255.
   At `.fast` the DXIL builder now folds `(v * c) / d` to `v * (c / d)` or to `v`, writes `v / d` as `v * (1 / d)`, and lets lanes share `top / 255`.
   bc7's DXIL went from 1.27 to 1.23, and holds no division by a constant, as DXC's holds none.
+* **SPIR-V turned no if-else into a select.**
+  `flatten_branches` was DXIL's alone, and DXC's SPIR-V goes through spirv-opt, which does: connect's SPIR-V held 171 phis and no `OpSelect` against DXC's 78 and 14.
+  The pass gained a structured mode, which folds a selection whose arms head nothing and joins a block only into one no construct names.
+  It keeps a phi of a pointer or a handle as a branch, since logical addressing selects neither.
+  Every SPIR-V entry shrank: the path tracer from 1.21 to 1.06 of DXC's, the shade kernel from 1.29 to 1.11, and bc7 from 0.98 to 0.82.
 
 ## What remains
 
@@ -190,9 +196,6 @@ That is the container rather than the code: DXC's side is stripped of reflection
   - Shader model 6.8 rather than 6.6, which also sets `ResMayNotAlias` as DXC's module does, read 1.029 and 1.030.
   - shan counts DXC's DXIL at 124 vector words live against native's 82, so the slower module is not the one that holds more.
   What AMD's compiler makes of each module is the next place to look: its register count and its ISA.
-* **SPIR-V turns no if-else into a select.**
-  DXC's SPIR-V goes through spirv-opt, which does, and `flatten_branches` is DXIL's alone: connect's SPIR-V holds 171 phis and no `OpSelect` against DXC's 78 and 14.
-  vulkan's frame is faster than DXC's regardless, so this is a size gap, and a lead should a vulkan kernel come in slow.
 * **bc7's DXIL, 1.23 in size.**
   Its stores and divisions are DXC's now; what is left is 234 more `select` and 242 more `load` than DXC's, against fewer allocas.
   [perf-sgl-dxil-bc7-arithmetic-gap](issues/perf-sgl-dxil-bc7-arithmetic-gap.md) has the rest; it is not timed here.

@@ -24,8 +24,15 @@ void share_common_values(program& p);
 /// `select`s, which run both sides whichever way it would have gone.
 ///
 /// A `select` stands for a phi and keeps that phi's statement and guarantee.
-/// Clears every merge and continue target and renumbers the blocks in reverse postorder, dropping what no walk reaches,
-/// so this is for a target with no structured control flow to keep, DXIL.
+/// `unstructured` clears every merge and continue target and renumbers the blocks in reverse postorder, dropping what
+/// no walk reaches: that is DXIL's.
+/// `structured` keeps every construct it does not fold and every block in the order it opened, what no walk reaches
+/// too, so SPIR-V's merge and continue targets still hold.
+/// It folds only a selection whose arms head nothing, joins a block only into one no construct names, and threads no
+/// edge; a phi of a pointer or a handle keeps its branch, since logical addressing selects neither.
+void flatten_branches(program& p, control_flow flow);
+
+/// `flatten_branches` for DXIL, `unstructured`.
 void flatten_branches(program& p);
 
 /// Gathers the phis a `construct` reads lane by lane back into one phi of the vector, where each way in hands over the
