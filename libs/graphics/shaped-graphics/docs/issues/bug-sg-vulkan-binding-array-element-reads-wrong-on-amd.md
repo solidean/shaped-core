@@ -3,6 +3,8 @@ created: 2026-11-07
 refs:
   - file: libs/graphics/shaped-rendering/tests/debug-output-test.cc
   - test: "sr - define runs a load of more words than the memory holds on none of them, and gives zero (LEGAL-68)"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-08T06:40Z
 ---
 
 # On AMD's vulkan driver, a binding array's elements read the wrong buffer or nothing, on both routes
