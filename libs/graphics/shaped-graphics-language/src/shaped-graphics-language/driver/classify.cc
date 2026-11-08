@@ -170,7 +170,7 @@ struct classifier
             return token_class::function;
         case check::symbol_kind::test:
             return token_class::name;
-        case check::symbol_kind::unsupported:
+        case check::symbol_kind::alias:
             return token_class::type;
         }
         return token_class::name;

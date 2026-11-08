@@ -1,0 +1,84 @@
+// `type name = expression` is another name for the type its value names, wherever a type stands (CHK-14)
+
+type color = float3
+type weight = float
+type weights = float[4]
+
+struct light:
+    tint: color
+    strength: weight
+
+enum falloff:
+    none
+    linear
+    squared
+
+type curve = falloff
+type lamp = light
+
+// an alias stands for its type in every type position: a local, a parameter, a result, a field and an array
+fun brighter(c: color, by: weight) -> color => c * by
+
+test:
+    let c: color = float3(0.5, 0.25, 1.0)
+    brighter(c, 2.0) == float3(1.0, 0.5, 2.0)
+
+test:
+    let ws: weights = float[4].filled(0.25)
+    ws.length == 4 and ws[3] == 0.25
+
+test light(tint = float3(1.0, 0.0, 0.0), strength = 2.0).strength == 2.0
+
+// a value of the alias is a value of the type itself, which an `as` and a comparison see as one type
+test (3 as weight) == 3.0
+
+// an alias of a struct constructs it, its own constructor and the functions of its name among the overloads
+test lamp(tint = float3(0.0, 1.0, 0.0), strength = 0.5).tint.y == 1.0
+test color(1.0, 2.0, 3.0).z == 3.0
+
+// an alias of an enum names its cases, and its values are the enum's
+fun reach(f: curve) -> float:
+    return case f:
+        .none => 1.0
+        .linear => 0.5
+        .squared => 0.25
+
+test reach(curve.linear) == 0.5
+test curve.squared == falloff.squared
+
+// an alias of a struct reaches its type scope
+fun light.boosted(self) -> light => light(tint = self.tint, strength = self.strength * 2.0)
+fun light.dim() -> light => light(tint = float3(0.1), strength = 0.1)
+
+test lamp.dim().strength == 0.1
+test lamp.dim().boosted().strength == 0.2
+
+// an alias may name an alias
+type hue = color
+
+test:
+    let h: hue = color(0.0, 0.0, 1.0)
+    h.z == 1.0
+
+// an alias of a function type stands where a function type does: a parameter's whole type
+type shaping = (float) -> float
+
+fun shaped(f: shaping, x: float) -> float => f(x)
+
+test shaped(x => x * x, 3.0) == 9.0
+
+// and nowhere else, as CHK-317 has it of the function type itself
+@expect(error = "wrong-kind-of-name")
+test:
+    let f: shaping = x => x
+    true
+
+// an alias names a type and no value, as its type's own name does (CHK-63)
+@expect(error = "unsupported-yet")
+test:
+    let x = color
+    true
+
+// an alias of a type that is no struct is no call
+@expect(error = "wrong-kind-of-name")
+test weights(1.0, 2.0, 3.0, 4.0)[0] == 1.0

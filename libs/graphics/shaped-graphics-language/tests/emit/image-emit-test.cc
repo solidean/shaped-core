@@ -267,5 +267,5 @@ TEST("sgl emit - a texel of an option's format is the texel of the format the co
     auto const same = picked_text(".rg32_float", target::hlsl_vulkan);
     CHECK(same.contains("[[vk::image_format(\"rg32f\")]] RWTexture2D<float2> io_picked;\n"));
     CHECK(same.contains("    io_picked[id.xy] = c.xy;\n"));
-    CHECK(picked_text(".r32_float", target::msl).contains("    io_picked.write(float4(c.xy.x, 0.0, 0.0, 0.0), "));
+    CHECK(picked_text(".r32_float", target::msl).contains("    io_picked.write(float4(c.x, 0.0, 0.0, 0.0), "));
 }

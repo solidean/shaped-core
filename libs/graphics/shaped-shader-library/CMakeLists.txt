@@ -316,6 +316,7 @@ if(SC_BUILD_TESTS)
             double_values.sgl:compute:main
             listed.sgl:compute:spread
             scaled.sgl:*
+            blended.sgl:*
             tapped.sgl:*
             host_layout.sgl:*
             twin_a.sgl:*

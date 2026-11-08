@@ -44,7 +44,7 @@ sgl::text_request                          // source, source_name ("<sgl>"), lib
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
                                            // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
-                                           // `16`, `-3`, `true`, `.rgba16_float`; the rest keep their defaults, tests always run at them
+                                           // `16`, `-3`, `0.5`, `true`, `.rgba16_float`; the rest keep their defaults, tests always run at them
                                            // a used module's option is named `common.taps`; a name no option has, a value of
                                            // another type, or a name given twice: `invalid-option`
 r.value().options                          // the options the entry point reaches, by name: each set of their values is one text
@@ -74,7 +74,8 @@ d.value().structs                          // the @vertex / @pixel structs: name
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint,
                                            // samplers: the file-scope samplers its code reaches
 d.value().samplers                         // the file-scope samplers: name, index (declaration order), sampler_type, settings, shape
-d.value().options                          // every `@option const`: name, type (`bool`, `int`, an enum's name), value as described
+d.value().options                          // every `@option const`: name, type (`bool`, `int`, `float`, `uint`, an enum's name), value
+                                           // as described, and `follows`: the options its default is computed from (CHK-519)
                                            // entry points, pipelines and bindings each carry the `options` they reach or name
 @expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
 d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths),
@@ -509,6 +510,12 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 
 ```sgl sketch
 @option const tile = 8                   // the host sets it per compile, and this is its default (CHK-353)
+@option const strength = 0.25            // any scalar: a float is set by its literal and holds the nearest float
+@option const spread = strength * 4.0    // a default naming another option FOLLOWS it unless set itself (CHK-519)
+type color = float3                      // an alias: its name stands for the type in every type position (CHK-14)
+enum stage_bit:
+    vertex = 1 << 0                      // a case value is any int computed before anything runs (CHK-146)
+f(mut v.zx)                              // a swizzle of distinct letters is a mut argument: the body writes those lanes (CHK-352)
 @compute(tile, tile) fun blur(...)       // an option stands where a const stands: a workgroup size, an array length, an image format
                                          // a used module's option is set as `common.taps`, apart from the program's `taps` (CHK-354)
 texel[.rg16_float]                       // the type an image of that format loads and stores: float2; texel[out_format] per compile (CHK-390)

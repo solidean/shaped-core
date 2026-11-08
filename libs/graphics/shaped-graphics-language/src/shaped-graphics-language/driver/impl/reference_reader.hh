@@ -233,8 +233,9 @@ struct reader
             return cc::string("sampler ") + s.name;
         case check::symbol_kind::test:
             return "test";
-        case check::symbol_kind::unsupported:
-            return cc::string("type ") + s.name;
+        case check::symbol_kind::alias:
+            return s.type == check::type_id::none ? cc::string("type ") + s.name
+                                                  : cc::format("type {} = {}", s.name, type_name(s.type));
         }
         return s.name;
     }

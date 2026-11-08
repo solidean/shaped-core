@@ -1,0 +1,11 @@
+// Options of every scalar type a host sets from C++: a float, a uint, and one whose default follows another.
+
+@option const strength = 0.25
+@option const passes: uint = 2u
+@option const spread = strength * 4.0
+
+binding blended_work:
+    values: mut buffer[float]
+
+@compute(64) fun blend(@thread_id id: int3){blended_work}:
+    blended_work.values[id.x] = blended_work.values[id.x] * spread + (passes as float)

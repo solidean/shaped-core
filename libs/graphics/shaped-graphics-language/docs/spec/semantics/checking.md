@@ -38,7 +38,14 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
   An operator is looked up the same way: `a - b` in a prelude file chooses among the prelude's `@operator` functions alone.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
-* **CHK-14** A `type` alias is `unsupported-yet`, and it still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
+* **CHK-14** `type name = value` is an **alias**: a symbol whose name stands for the type its value names, in every type position.
+  A value of the alias is a value of that type, so an alias makes no type of its own, and two aliases of one type are one type.
+  An alias of a struct is called as the struct is, through its overload set as seen where the struct is declared, and reaches its type scope.
+  An alias of an enum names its cases, `curve.linear`.
+  An alias of a function type stands where that type does, a parameter's whole type alone (CHK-317); anywhere else it is `wrong-kind-of-name`.
+  An alias that names itself, directly or through other aliases, is a `dependency-cycle`.
+  An alias is no value, as its type's own name is none (CHK-63), and no type of a `fun T.name` extension yet, which is `unsupported-yet`.
+  A `const` is carried by CHK-219.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `notation` is `unsupported-yet`; `use` is CHK-347.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
@@ -210,7 +217,9 @@ use view
   A property or a function of the type scope, an extension included, whose name is a swizzle of the type is `member-name-clash`, at that declaration.
 * **CHK-352** A swizzle whose letters are distinct is a place wherever its operand is one (CHK-112), so `=` and every `op=` take it.
   Its operand's indices are evaluated once, before any component is written, as a mut argument's are (CHK-316).
-  One with a repeated letter, `v.xx = p`, is `not-assignable`, and a swizzle as a mut argument, `f(mut v.xy)`, is `unsupported-yet`.
+  One with a repeated letter, `v.xx = p`, is `not-assignable`.
+  It is a mut argument too, `f(mut v.zx)`: the body reads and writes exactly those lanes, and a field or a swizzle of the parameter is one of them.
+  A swizzle of a struct of the program is a new value built of its fields, which no body can write through, so as a mut argument it is `unsupported-yet`.
 
 ```sgl
 struct falloff:
@@ -277,9 +286,14 @@ fun f(x: float) -> float:
   `mod(a, b)` is the remainder that floors, `a - b * floor(a / b)`, as GLSL's does, with `b` a scalar or of `a`'s type.
   The float `%` truncates instead, as HLSL's and MSL's `fmod` do (CHK-313).
 * **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).
-  An option is a `bool`, an `int` or an enum case, an image format among them; one of another type is `unsupported-yet`.
-  An option whose value names another option is `unsupported-yet` too, whether directly or through what it computes; a plain `const` naming one follows it.
+  An option is a `bool`, a scalar or an enum case, an image format among them; one of another type is `unsupported-yet`.
+  A value for a `float` option is written as its literal is, an integer among them, and the option holds the float nearest it.
+  A value for a `uint` option is an integer literal from 0 to 2^32 - 1.
   A computed `const` reaches every option its value reaches, wherever it is named (CHK-355).
+* **CHK-519** An option whose default names another option, directly or through what it computes, **follows** that option ([why](why/checking.md#chk-519)).
+  A compile that gives it no value computes its default from the value the compile gives the one it names, and a value given for it stands instead.
+  It reaches every option it follows, so an entry point that names it is compiled anew for each value of those.
+  A host's options struct holds it unset, as a `cc::optional`, so a host that sets only the option it follows has it follow.
 * **CHK-354** A compile names a value for each option it sets, and the option stands for that value wherever it is named, as CHK-219 has a `const` stand for its own.
   So every rule that judges a constant judges each set of values on its own.
   An option of the program's own module is named by its name, and one of a module the program uses by its qualified name, `common.taps` (CHK-348) ([why](why/checking.md#chk-354)).
@@ -324,7 +338,10 @@ An option is read like any `const`, and a branch on it leaves the text with what
 * **CHK-143** A member of an `enum` block that is a case gives the type one **case**, named by that member, in the order written.
 * **CHK-144** A case has an `int` value: the one it writes, or one more than the case before it, and 0 for the first.
 * **CHK-145** Two cases of one enum may hold one value, so `all = 7` beside `red = 1` is a legal alias; two that hold one name is `duplicate-declaration` by CHK-28.
-* **CHK-146** The written value of a case is an `int` literal, by CHK-61; any other expression there is `unsupported-yet`.
+* **CHK-146** The written value of a case is an `int`, computed once before anything runs, as a const's value is (CHK-219).
+  So `vertex = 1 << 0` and `double = lanes * 2` are case values, a function of the module among what they call.
+  A value that reaches an option is `unsupported-yet`, since an enum is one type for every compile.
+  A value that names a case of its own enum needs the enum it is part of, which is a `dependency-cycle`.
 * **CHK-147** `enum.case` is an expression of the enum's type, and a name the enum has no case of is `unknown-member`.
 * **CHK-148** An enum's own name is no value, by CHK-63.
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
@@ -361,9 +378,10 @@ enum light_kind:
   A test whose asserts are what it checks ends in `true // why`.
   A test that expects `.fail`, `.assert` or `.discard` is exempt, since it cannot pass without its run ending so, and so is a test with no statement, which the AST pass reported.
 * **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else, and `assert condition, message` a message too (CHK-424).
-* **CHK-424** A message is a one-line quoted literal, and it is no value: a string has no type, and a quoted literal anywhere else is `unsupported-yet`.
+* **CHK-424** A message is a quoted literal, and it is no value: a string has no type, and a quoted literal anywhere else is `unsupported-yet`.
+  A multi-line message is its content lines joined by `\n`, past the opening line's indentation, as STR-15 to STR-21 give a multi-line string.
   Each interpolation is checked where the message stands, and is a scalar, a plain vector of one, or an enum; anything else is `type-mismatch`.
-  A multi-line message is `unsupported-yet`, and so is an `assert` message that is no quoted literal.
+  An `assert` message that is no quoted literal is `unsupported-yet`.
   `print value` with no quotes prints the one value, of any type.
   A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.

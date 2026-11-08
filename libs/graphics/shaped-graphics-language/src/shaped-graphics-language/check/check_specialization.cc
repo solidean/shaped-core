@@ -48,7 +48,7 @@ bool checker::is_type_operand(function_scope const& scope, ast::expr_id expr) co
     if (found == nullptr || found->empty())
         return false;
     auto const kind = out.at(found->front()).kind;
-    return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
+    return kind == symbol_kind::structure || kind == symbol_kind::enumeration || kind == symbol_kind::alias;
 }
 
 cc::optional<type_id> checker::check_type_comparison(function_scope& scope, ast::expr_id id, ast::call const& call)

@@ -695,8 +695,19 @@ struct checker
     void compile(symbol_id id);
     void compile_struct(symbol_id id);
     void compile_enum(symbol_id id);
+    /// A `type` alias: the type its value names, which a function type may be as a parameter's whole type (CHK-14).
+    void compile_alias(symbol_id id);
+    /// The struct or enum `id` names: itself for one, and for an alias the one whose type it names.
+    /// `none` for every other symbol, and for an alias of any other type or one that failed.
+    [[nodiscard]] symbol_id declared_type_of(symbol_id id, i32 file, source_span where);
     /// A `const`: its value is a number literal, an enum case or another `const`, and anything else is `unsupported-yet`.
     void compile_const(symbol_id id);
+    /// A function of no parameter and no binding whose body is a value computed before anything runs, a const's or a
+    /// case's, named `name` and standing at `decl` of `file`; it is checked as a test's body is (CHK-224).
+    [[nodiscard]] symbol_id add_value_scope(i32 file, ast::decl_id decl, cc::string name);
+    /// CHK-146: the `int` a case's written `value` computes, once and before anything runs, as a const's is (CHK-219).
+    /// None where it is no `int`, does not compute, or reaches an option, each reported.
+    [[nodiscard]] cc::optional<i32> compute_case_value(i32 file, ast::decl_id member, ast::expr_id value);
     /// CHK-354: `info` as the compile's value for option `id` sets it, or as written where it sets none.
     /// A value of another type than the option's is `invalid-option`, and leaves the default.
     void apply_option_value(symbol_id id, constant_info& info);

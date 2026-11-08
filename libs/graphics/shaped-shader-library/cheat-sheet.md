@@ -430,6 +430,8 @@ auto const quality = shaders::taa::options{.tile = 16, .lowres = true};
 auto const tuned = co_await shaders::taa::reproject.acquire_pipeline(ctx, quality); // a compile per set it reaches
 shaders::taa::reproject.acquire(ctx, quality)      // the shader alone; .values() is the struct as an acquire's span takes it
 shaders::taa::reproject_t::reached_options         // span<string_view const>: the names it keys on; the rest multiply nothing
+//   bool, int, cc::u32 and float fields, sg::pixel_format for a format; an option that follows another is a
+//   cc::optional left unset, so it follows what the host sets (CHK-519)
 //   an option of a type the generator has no C++ for (a program's own enum) is left out of the struct, and a wrapper
 //   reaching one is a generator error
 // an image whose format names an option is an sg::any_texture_view field, and the group's layout is per set of values:

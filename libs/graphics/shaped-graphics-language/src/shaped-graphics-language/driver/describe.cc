@@ -270,10 +270,25 @@ described_option describe_option(check::checked_module const& m, check::symbol_i
 {
     auto const& s = m.at(id);
     auto const& c = m.constants[s.info];
-    auto value = c.kind == check::constant_kind::integer ? cc::format("{}", c.integer)
+    // a float is spelled so a compile reads back the very value, with a point or an exponent as a literal has
+    auto const real_text = [&]
+    {
+        auto text = m.name_of(c.type) == "float" ? cc::to_string(f32(c.real)) : cc::to_string(c.real);
+        return text.contains('.') || text.contains('e') ? text : text + ".0";
+    };
+    auto value = c.kind == check::constant_kind::real ? real_text()
+               : c.kind == check::constant_kind::integer
+                   ? (c.is_unsigned ? cc::format("{}", u32(c.integer)) : cc::format("{}", c.integer))
                : m.name_of(c.type) == "bool" ? cc::string(m.at(m.at(c.type).cases)[c.case_index].name)
                                              : cc::format(".{}", m.at(m.at(c.type).cases)[c.case_index].name);
-    return {.name = host_name_of(m, id), .type = cc::string(m.name_of(c.type)), .value = cc::move(value)};
+    auto follows = cc::vector<cc::string>();
+    for (auto const option : c.computed_options)
+        if (option != id)
+            follows.push_back(host_name_of(m, option));
+    return {.name = host_name_of(m, id),
+            .type = cc::string(m.name_of(c.type)),
+            .value = cc::move(value),
+            .follows = cc::move(follows)};
 }
 
 /// `legal` is `e` legalized, which is the tree the footprint is read from.

@@ -387,6 +387,12 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
                 o.write("name", cc::string_view(option.name));
                 o.write("type", cc::string_view(option.type));
                 o.write("value", cc::string_view(option.value));
+                if (!option.follows.empty())
+                {
+                    auto follows = o.write_array("follows", babel::json::layout::compact);
+                    for (auto const& name : option.follows)
+                        follows.write(cc::string_view(name));
+                }
             }
         }
         {

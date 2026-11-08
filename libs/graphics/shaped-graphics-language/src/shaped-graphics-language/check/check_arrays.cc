@@ -51,7 +51,7 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     if (found == nullptr)
         return false;
     auto const kind = out.at(found->front()).kind;
-    return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
+    return kind == symbol_kind::structure || kind == symbol_kind::enumeration || kind == symbol_kind::alias;
 }
 
 i32 checker::case_index_of(type_id type, cc::string_view name) const

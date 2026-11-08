@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/math/float.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics-language/check/resources.hh>
@@ -496,6 +497,20 @@ slib::shader_option slib::option_of(cc::string_view name, bool value)
 slib::shader_option slib::option_of(cc::string_view name, int value)
 {
     return {.name = cc::string(name), .value = cc::format("{}", value)};
+}
+
+slib::shader_option slib::option_of(cc::string_view name, u32 value)
+{
+    return {.name = cc::string(name), .value = cc::format("{}", value)};
+}
+
+slib::shader_option slib::option_of(cc::string_view name, float value)
+{
+    CC_ASSERT(cc::is_finite(value), "an option's float is finite");
+    auto text = cc::to_string(value);
+    if (!text.contains('.') && !text.contains('e'))
+        text += ".0";
+    return {.name = cc::string(name), .value = cc::move(text)};
 }
 
 slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value)

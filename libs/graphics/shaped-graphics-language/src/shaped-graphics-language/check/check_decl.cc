@@ -434,7 +434,21 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
                 if (demand(id, file, where) == symbol_state::checked)
                     result = out.at(id).type;
             }
-            else if (kind != symbol_kind::unsupported)
+            else if (kind == symbol_kind::alias)
+            {
+                // CHK-14: the type it names; a function type stands where a parameter's whole type does alone (CHK-317)
+                if (demand(id, file, where) == symbol_state::checked)
+                    result = out.at(id).type;
+                if (result != checked_module::error_type && out.at(result).kind == type_kind::function
+                    && !is_whole_parameter_type)
+                {
+                    report(diagnostic_kind::wrong_kind_of_name, file, where,
+                           cc::format("{} names a function type, which is the type of a parameter, and of nothing else",
+                                      text));
+                    result = checked_module::error_type;
+                }
+            }
+            else
                 report(diagnostic_kind::wrong_kind_of_name, file, where,
                        cc::format("{} is a {}, and a type stands here", text,
                                   kind == symbol_kind::function   ? "function"
@@ -1289,6 +1303,36 @@ void checker::compile_struct(symbol_id id)
     }
 }
 
+void checker::compile_alias(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const decl = out.at(id).declaration;
+    auto const& ast = ast_of(file);
+    cc::string_view const known[] = {"shadowable", "internal"};
+    judge_attributes(file, ast.at(decl).attributes, known, "a type alias");
+    // the value may be a function type, which each use of the alias then judges as CHK-317 does
+    allows_function_type = true;
+    auto const type = resolve_type(file, ast.at(decl).node.as<ast::type_decl>().value, nullptr);
+    auto& s = out.symbols.own(index_of(id));
+    if (type == checked_module::error_type)
+        s.state = symbol_state::failed;
+    else
+        s.type = type;
+}
+
+symbol_id checker::declared_type_of(symbol_id id, i32 file, source_span where)
+{
+    auto const kind = out.at(id).kind;
+    if (kind == symbol_kind::structure || kind == symbol_kind::enumeration)
+        return id;
+    if (kind != symbol_kind::alias || demand(id, file, where) != symbol_state::checked)
+        return symbol_id::none;
+    auto const& type = out.at(out.at(id).type);
+    if (type.kind != type_kind::structure && type.kind != type_kind::enumeration)
+        return symbol_id::none;
+    return type.symbol;
+}
+
 void checker::compile_enum(symbol_id id)
 {
     auto const file = out.at(id).file;
@@ -1361,8 +1405,8 @@ void checker::compile_enum(symbol_id id)
                     : cc::optional<i32>();
             if (written.has_value())
                 value = written.value();
-            else
-                unsupported(file, where_value, "a case value that is no int literal");
+            else if (auto const computed = compute_case_value(file, member, c->value); computed.has_value())
+                value = computed.value();
         }
         // An implicit value follows the one before it, and `int` has no value after its last.
         if (value == 2147483647)
@@ -1407,6 +1451,50 @@ void checker::judge_shadowing(i32 file, cc::string_view name, source_span where)
             report(diagnostic_kind::shadows_unshadowable, file, where, cc::format("{} is @shadowable(false)", name));
             return;
         }
+}
+
+symbol_id checker::add_value_scope(i32 file, ast::decl_id decl, cc::string name)
+{
+    auto const scope = symbol_id(out.symbols.size());
+    out.symbols.push_back({.file = file,
+                           .declaration = decl,
+                           .kind = symbol_kind::test,
+                           .state = symbol_state::checked,
+                           .name = cc::move(name),
+                           .info = i32(out.functions.size())});
+    out.functions.push_back({.symbol = scope,
+                             .parameters = {.first = u32(out.parameters.size()), .count = 0},
+                             .result = checked_module::error_type,
+                             .bindings = {.first = u32(out.binding_lists.size()), .count = 0}});
+    notes.push_back({});
+    return scope;
+}
+
+cc::optional<i32> checker::compute_case_value(i32 file, ast::decl_id member, ast::expr_id value)
+{
+    auto const where = span_of(file, value);
+    auto const& c = ast_of(file).at(member).node.as<ast::enum_case_decl>();
+    auto const scope_symbol = add_value_scope(file, member, cc::format("case {}", text_of(file, c.name)));
+    auto scope = function_scope{.function = scope_symbol, .file = file};
+    auto const int_type = prelude_type(builtins::k_int);
+    if (check_expected(scope, value, int_type, "a case value") == checked_module::error_type)
+        return cc::nullopt;
+    // an enum is one type for every compile, so a case cannot follow what a compile sets
+    if (!options_reached(scope_symbol, symbol_id::none).empty())
+    {
+        unsupported(file, where, "a case value that reaches an option");
+        return cc::nullopt;
+    }
+    auto e = evaluate_const(scope_symbol, file, value, int_type);
+    if (!e.is_ok)
+    {
+        if (e.kind == diagnostic_kind::unsupported_yet)
+            unsupported(file, where, e.detail);
+        else
+            report(e.kind, file, where, cc::format("case {} {}", text_of(file, c.name), e.detail));
+        return cc::nullopt;
+    }
+    return i32(e.leaves[0].as_int());
 }
 
 void checker::compile_const(symbol_id id)
@@ -1465,20 +1553,7 @@ void checker::compile_const(symbol_id id)
     auto const value_scope = [&]
     {
         if (!is_valid(scope_symbol))
-        {
-            scope_symbol = symbol_id(out.symbols.size());
-            out.symbols.push_back({.file = file,
-                                   .declaration = decl,
-                                   .kind = symbol_kind::test,
-                                   .state = symbol_state::checked,
-                                   .name = cc::format("const {}", out.at(id).name),
-                                   .info = i32(out.functions.size())});
-            out.functions.push_back({.symbol = scope_symbol,
-                                     .parameters = {.first = u32(out.parameters.size()), .count = 0},
-                                     .result = error_type,
-                                     .bindings = {.first = u32(out.binding_lists.size()), .count = 0}});
-            notes.push_back({});
-        }
+            scope_symbol = add_value_scope(file, decl, cc::format("const {}", out.at(id).name));
         auto scope = function_scope{.function = scope_symbol, .file = file};
         // CHK-413: a function's own `const` reads the ones its body declared before it
         for (auto const& local : local_constants)
@@ -1675,20 +1750,17 @@ void checker::compile_const(symbol_id id)
         }
     }
 
-    // CHK-353: an option is a bool, an int or an enum case, and the compile may give it another value of its type
+    // CHK-353: an option is a scalar or an enum case, and the compile may give it another value of its type
     if (find_attribute(file, d.attributes, "option") != nullptr)
     {
-        if (info.kind == constant_kind::real || info.kind == constant_kind::composite || info.is_unsigned)
+        if (info.kind == constant_kind::composite)
         {
-            unsupported(file, c.name, "an option of float or uint; an option is a bool, an int or an enum case");
+            unsupported(file, c.name, "an option of this type; an option is a bool, a scalar or an enum case");
             return fail();
         }
-        // the host would set the named option and not see this one follow it
-        if (is_valid(info.option) || !info.computed_options.empty())
-        {
-            unsupported(file, where, "an option whose value names another option");
-            return fail();
-        }
+        // CHK-519: a default that names another option follows the value this compile gives it, so this one reaches it
+        if (is_valid(info.option))
+            info.computed_options.push_back(info.option);
         info.option = id;
         apply_option_value(id, info);
     }
@@ -1877,8 +1949,7 @@ cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argu
         }
         else
         {
-            if (out.at(binding).kind != symbol_kind::unsupported)
-                report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no binding", text));
+            report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no binding", text));
             is_failed = true;
         }
     }

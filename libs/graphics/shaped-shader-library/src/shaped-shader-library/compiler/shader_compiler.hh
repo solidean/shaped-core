@@ -132,6 +132,9 @@ namespace slib
 /// An option's value as a compile takes it, from the C++ type a generated options struct holds it as.
 [[nodiscard]] shader_option option_of(cc::string_view name, bool value);
 [[nodiscard]] shader_option option_of(cc::string_view name, int value);
+[[nodiscard]] shader_option option_of(cc::string_view name, u32 value);
+/// `value` must be finite; it is spelled so the compile reads back exactly this float.
+[[nodiscard]] shader_option option_of(cc::string_view name, float value);
 [[nodiscard]] shader_option option_of(cc::string_view name, sg::pixel_format value);
 } // namespace slib
 

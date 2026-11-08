@@ -642,10 +642,38 @@ type_id checker::check_named_call(function_scope& scope,
 
     // CHK-247: the functions of its name, and those of its first argument's type scope, whatever else the name is
     auto const kind = found == nullptr || found->empty() ? symbol_kind::function : out.at(found->front()).kind;
-    if (kind == symbol_kind::unsupported)
+    if (kind == symbol_kind::alias)
     {
-        (void)check_arguments(scope, call.arguments, false);
-        return error_type;
+        // CHK-14: a call of an alias is a call of the struct it names, whose overload set is seen where it is declared
+        auto const alias = found->front();
+        set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = alias});
+        auto const named = declared_type_of(alias, file, callee_where);
+        if (!is_valid(named) || out.at(named).kind != symbol_kind::structure)
+        {
+            (void)check_arguments(scope, call.arguments, false);
+            if (out.at(alias).state == symbol_state::checked)
+                report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+                       cc::format("{} names {}, and a call needs a function or a struct", text,
+                                  out.name_of(out.at(alias).type)));
+            return error_type;
+        }
+        auto const& struct_name = out.at(named).name;
+        auto arguments = check_arguments(scope, call.arguments, true);
+        arguments.stated = cc::vector<stated_argument>::create_copy_of(stated);
+        auto const first_type
+            = arguments.written.empty() || arguments.written[0].splat_member > 0 ? type_id::none : arguments.types[0];
+        auto const candidates = candidates_of(out.at(named).file, struct_name, first_type);
+        if (demand(named, file, callee_where) != symbol_state::checked)
+            return error_type;
+        auto const type = out.at(named).type;
+        if (candidates.empty())
+        {
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{} is opaque and has no constructor", out.name_of(type)));
+            return type;
+        }
+        auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, struct_name);
+        return result == error_type ? type : result;
     }
     auto const is_structure = kind == symbol_kind::structure;
     auto arguments = check_arguments(scope, call.arguments, is_structure);
@@ -802,11 +830,11 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
     if (auto const* const found = symbols_named(file, member.object, &scope))
     {
-        auto const kind = out.at(found->front()).kind;
-        if (kind == symbol_kind::structure || kind == symbol_kind::enumeration)
+        // an alias of a struct or an enum reaches its type scope as the type's own name does (CHK-14)
+        auto const owner = declared_type_of(found->front(), file, span_of(file, member.object));
+        if (is_valid(owner))
         {
-            auto const owner = found->front();
-            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = owner});
+            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = found->front()});
             auto const arguments = check_arguments(scope, call.arguments, false);
             if (demand(owner, file, span_of(file, member.object)) != symbol_state::checked || member.name.empty())
                 return error_type;
@@ -825,7 +853,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
             return resolve_overload(scope, id, call.callee, candidates, arguments,
                                     cc::format("{}.{}", out.at(owner).name, name));
         }
-        if (kind == symbol_kind::binding)
+        if (out.at(found->front()).kind == symbol_kind::binding)
         {
             (void)check_arguments(scope, call.arguments, false);
             unsupported(file, span_of(file, call.callee), "a call through a binding");

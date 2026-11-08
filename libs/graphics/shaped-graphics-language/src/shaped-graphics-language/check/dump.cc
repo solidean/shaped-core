@@ -68,8 +68,8 @@ struct dumper
         case symbol_kind::sampler:
             out += "(sampler ";
             break;
-        case symbol_kind::unsupported:
-            out += "(unsupported ";
+        case symbol_kind::alias:
+            out += "(alias ";
             break;
         }
         out += s.name;

@@ -86,6 +86,8 @@ WIDE_VECTORS = {f"{family}{width}" for family in ("long", "ulong", "double") for
 OPTION_TYPES = {
     "bool": ("bool", lambda value: value),
     "int": ("int", lambda value: value),
+    "uint": ("cc::u32", lambda value: f"{value}u"),
+    "float": ("float", lambda value: f"{value}f"),
     "pixel_format": ("sg::pixel_format", lambda value: f"sg::pixel_format::{value.lstrip('.')}"),
 }
 
@@ -116,6 +118,11 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
 
     def field(name: str, option: dict, indent: str, of: str) -> str:
         cpp, spell = OPTION_TYPES[option["type"]]
+        follows = option.get("follows", [])
+        if follows:
+            # CHK-519: left unset, the compile computes it from the options its default names
+            return (f"{indent}cc::optional<{cpp}> {name} = {{}}; ///< `@option const {name}`{of}, "
+                    f"which follows {', '.join(follows)} unless set\n")
         return f"{indent}{cpp} {name} = {spell(option['value'])}; ///< `@option const {name}`{of}\n"
 
     out = [f"/// The options of {path}, each at the default its source writes. Generated; do not edit.\n"]
@@ -132,9 +139,16 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
     out.append("\n")
     out.append("    /// The values as an acquire takes them, each by the name the compile sets it by.\n")
     out.append("    [[nodiscard]] cc::vector<slib::shader_option> values() const\n    {\n")
-    names = [name for name, _ in own] + [f"{m}.{name}" for m, fields in modules.items() for name, _ in fields]
-    listed = ", ".join(f'slib::option_of("{name}", {name})' for name in names)
-    out.append(f"        return {{{listed}}};\n    }}\n")
+    named = [(name, o) for name, o in own] + [(f"{m}.{name}", o) for m, fields in modules.items() for name, o in fields]
+    listed = ", ".join(f'slib::option_of("{name}", {name})' for name, o in named if not o.get("follows"))
+    following = [name for name, o in named if o.get("follows")]
+    if not following:
+        out.append(f"        return {{{listed}}};\n    }}\n")
+    else:
+        out.append(f"        auto values = cc::vector<slib::shader_option>{{{listed}}};\n")
+        for name in following:
+            out.append(f'        if ({name}.has_value())\n            values.push_back(slib::option_of("{name}", {name}.value()));\n')
+        out.append("        return values;\n    }\n")
     out.append("};\n")
     return "".join(out)
 
@@ -378,8 +392,8 @@ def includes(entries: SglEntries) -> list[str]:
     # A file's options struct: its values as an acquire takes them, and a format's enumerators for a default.
     # A wrapper's reached names are a span of string views.
     if entries.option_structs:
-        out += ["<clean-core/container/vector.hh>", "<shaped-shader-library/compiler/shader_compiler.hh>",
-                "<shaped-graphics/resource/pixel_format.hh>"]
+        out += ["<clean-core/container/vector.hh>", "<clean-core/error/optional.hh>",
+                "<shaped-shader-library/compiler/shader_compiler.hh>", "<shaped-graphics/resource/pixel_format.hh>"]
     if entries.option_structs or entries.described_entry_points or entries.pipelines or entries.raytracing_pipelines:
         out += ["<clean-core/container/span.hh>", "<clean-core/string/string_view.hh>"]
     # A layout built per set of values, from a group whose formats name options.

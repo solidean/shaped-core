@@ -354,9 +354,12 @@ struct sgl::described_option
     cc::string name;
     /// `bool`, `int`, or the name of its enum, `pixel_format` for an image's format.
     cc::string type;
-    /// What this describe compiled it as, spelled as a compile's value is: `8`, `-3`, `true`, `.rgba16_float`.
+    /// What this describe compiled it as, spelled as a compile's value is: `8`, `-3`, `0.5`, `true`, `.rgba16_float`.
     /// Its written default, unless the request gave it another.
     cc::string value;
+    /// The options its default is computed from, by the name a compile sets each by (CHK-519).
+    /// A compile that gives it no value computes it from theirs, so a host leaves it unset to have it follow them.
+    cc::vector<cc::string> follows;
 };
 
 struct sgl::module_description

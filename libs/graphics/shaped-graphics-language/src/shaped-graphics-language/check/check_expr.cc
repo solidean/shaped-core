@@ -876,6 +876,7 @@ type_id checker::check_symbol_value(function_scope& scope,
     {
     case symbol_kind::structure:
     case symbol_kind::enumeration:
+    case symbol_kind::alias:
         unsupported(file, where, "a type as a value");
         break;
     case symbol_kind::function:
@@ -911,8 +912,6 @@ type_id checker::check_symbol_value(function_scope& scope,
         }
         return out.at(symbol).type;
     }
-    case symbol_kind::unsupported:
-        break;
     }
     return error_type;
 }
@@ -1018,11 +1017,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
 
         // `light_kind.point`: an enum is no value either (CHK-148), so its name never reaches `check_expr`
-        if (out.at(found->front()).kind == symbol_kind::enumeration)
+        // an alias of an enum names its cases as the enum's own name does (CHK-14)
+        auto const enumeration = out.at(found->front()).kind == symbol_kind::alias
+                                   ? declared_type_of(found->front(), file, span_of(file, member.object))
+                                   : found->front();
+        if (is_valid(enumeration) && out.at(enumeration).kind == symbol_kind::enumeration)
         {
-            auto const enumeration = found->front();
             auto const object_where = span_of(file, member.object);
-            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = enumeration});
+            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = found->front()});
             if (demand(enumeration, file, object_where) != symbol_state::checked)
                 return error_type;
 

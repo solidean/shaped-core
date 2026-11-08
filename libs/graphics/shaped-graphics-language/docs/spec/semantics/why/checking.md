@@ -617,8 +617,7 @@ The footprint and the bound resources would then be the union of every variant, 
 A switch that changes an image's format specializes on no target at all.
 A preprocessor would break what the syntax is built on: local errors, lossless parsing, and one tree for the language server.
 
-An option naming another would make the named one a second way to set it, and a host that set only the first would not see the second follow.
-No use asks for that chain yet, so it is refused rather than given a meaning that would have to be kept.
+A float option is a compile per value like any other, and whether a host can afford that is the host's to judge, not the language's.
 
 ## CHK-354
 
@@ -642,6 +641,13 @@ It leaves the text, so the target compiler never sees it, and the footprint, so 
 Leaving it to the target compiler would strip the code and still leave the footprint covering it, which is the cost FSR's permutations exist to avoid.
 The guarantee holds for any constant, so a helper called with a literal flag sheds its other side too.
 
+
+## CHK-519
+
+A default computed from another option is how a derived permutation is written once, where it is defined, rather than at every host that sets the first.
+Following is what makes that worth having: a host that sets the first and not the second sees the second change with it.
+A value given for the second still stands, so a host that needs another value says so, and nothing it set is overridden.
+The options struct holds the second unset, since a field at its default would send that default and keep it from following.
 ## CHK-357
 
 `1u` and `0.5f` port as written, and the width defaults to 32 because that is what every target's own short suffix means.

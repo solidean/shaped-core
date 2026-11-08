@@ -456,9 +456,8 @@ enum class sgl::check::symbol_kind : sgl::u8
     /// A file-scope `sampler`: a static sampler of the pipeline layout of every entry point that uses it (CHK-314).
     /// `info` is its position in `checked_module::samplers`, and `type` the sampler type its settings make.
     sampler,
-    /// A named declaration this phase has no meaning for yet: `type`.
-    /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
-    unsupported,
+    /// A `type` alias, whose `type` is the type its value names once it is compiled (CHK-14).
+    alias,
 };
 
 /// Where the demand-driven pass is with one symbol.
@@ -493,7 +492,7 @@ struct sgl::check::symbol
 {
     i32 file = 0;
     ast::decl_id declaration = ast::decl_id::none;
-    symbol_kind kind = symbol_kind::unsupported;
+    symbol_kind kind = symbol_kind::structure;
     symbol_state state = symbol_state::untouched;
     cc::string name;
     /// The registry record a `@builtin fun` stands for; `none` for a struct and for a declaration of the program's own.
@@ -502,7 +501,7 @@ struct sgl::check::symbol
     builtin_type_id intrinsic_type = builtin_type_id::none;
     /// The operator of an `@operator` function, which lookup finds through this spelling and never through `name`.
     cc::string operator_spelling;
-    /// A struct's type, a const's, and a file-scope sampler's.
+    /// A struct's type, a const's, a file-scope sampler's, and the type an alias names.
     type_id type = type_id::none;
     /// A position in `checked_module::functions`, `bindings`, `pipelines`, `constants` or `samplers`, by `kind`; -1
     /// before it is compiled.

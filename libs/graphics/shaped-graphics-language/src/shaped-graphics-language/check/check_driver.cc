@@ -284,6 +284,12 @@ void checker::attach_extensions(isize first)
         }
         auto const owner = found->front();
         auto const owner_kind = out.at(owner).kind;
+        // an alias names its type only once it is compiled, and type scopes are made before anything is
+        if (owner_kind == symbol_kind::alias)
+        {
+            unsupported(file, extended, "an extension through a type alias; extend the type it names");
+            continue;
+        }
         if (owner_kind != symbol_kind::structure && owner_kind != symbol_kind::enumeration)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, extended,
@@ -607,16 +613,6 @@ void checker::declare(i32 file, ast::decl_id decl)
     auto const& d = ast_of(file).at(decl);
     auto const named = [&](symbol_kind kind, source_span name)
     { return symbol{.file = file, .declaration = decl, .kind = kind, .name = text_of(file, name)}; };
-    auto const unsupported_symbol = [&](source_span name, cc::string_view construct)
-    {
-        unsupported(file, span_of(file, decl), construct);
-        if (name.empty())
-            return;
-        auto s = named(symbol_kind::unsupported, name);
-        s.state = symbol_state::failed;
-        add_symbol(cc::move(s), name);
-    };
-
     d.node.visit(
         [&](ast::fun_decl const& f)
         {
@@ -697,7 +693,11 @@ void checker::declare(i32 file, ast::decl_id decl)
             }
             add_member_tests(file, e.members, cc::format("enum {}", text_of(file, e.name)));
         },
-        [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
+        [&](ast::type_decl const& t)
+        {
+            if (!t.name.empty())
+                add_symbol(named(symbol_kind::alias, t.name), t.name);
+        },
         [&](ast::const_decl const& c)
         {
             if (!c.name.empty())
@@ -799,8 +799,8 @@ void checker::compile(symbol_id id)
     case symbol_kind::test:
         // A test's signature is made where it is found, and its body is checked with the others.
         break;
-    case symbol_kind::unsupported:
-        out.symbols.own(index_of(id)).state = symbol_state::failed;
+    case symbol_kind::alias:
+        compile_alias(id);
         break;
     }
 

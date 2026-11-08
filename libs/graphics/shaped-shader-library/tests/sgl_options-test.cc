@@ -88,6 +88,35 @@ TEST("slib sgl options - one entry point under two sets of values is two shaders
     CHECK(asset->acquire(sg::shader_format::wgsl, reordered) == wide);
 }
 
+TEST("slib sgl options - a float and a uint option are fields of their own type, and read back exactly",
+     exclusive("slib-shader-library"))
+{
+    using blended_options = slib_test::sgl_shaders::blended::options;
+    auto const defaults = blended_options{};
+    CHECK(defaults.strength == 0.25f);
+    CHECK(defaults.passes == 2u);
+    // CHK-519: an option whose default names another is unset, so the compile computes it from the one it names
+    CHECK(!defaults.spread.has_value());
+    auto const values = blended_options{.strength = 0.1f, .passes = 4000000000u}.values();
+    REQUIRE(values.size() == 2);
+    CHECK(values[0].value == cc::to_string(0.1f));
+    CHECK(values[1].value == "4000000000");
+    CHECK(slib::option_of("whole", 2.0f).value == "2.0");
+
+    slib::shader_library lib;
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
+    lib.add_package(slib_test::sgl_shaders::package());
+    auto const& asset = slib_test::sgl_shaders::blended::blend.asset;
+    REQUIRE(asset != nullptr);
+    auto const plain = text_of(asset->acquire(sg::shader_format::wgsl, defaults.values()));
+    CHECK(plain.contains("blended_work_values[id.x] * 1.0 + f32(2u);"));
+    // a host that changes `strength` alone has `spread` follow it, and one that sets `spread` has it stand
+    auto const followed = text_of(asset->acquire(sg::shader_format::wgsl, blended_options{.strength = 0.5f}.values()));
+    CHECK(followed.contains("blended_work_values[id.x] * 2.0 + f32(2u);"));
+    auto const set = text_of(asset->acquire(sg::shader_format::wgsl, blended_options{.spread = 3.0f}.values()));
+    CHECK(set.contains("blended_work_values[id.x] * 3.0 + f32(2u);"));
+}
+
 TEST("slib sgl options - a value the source refuses is the shader's error", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;

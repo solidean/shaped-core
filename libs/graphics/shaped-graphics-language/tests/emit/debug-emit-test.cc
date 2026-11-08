@@ -89,6 +89,38 @@ TEST("sgl emit - each site is described: an id, its pieces, its values' shapes a
     CHECK(compile(k_compute, target::wgsl).debug_sites[0].id == print.id);
 }
 
+TEST("sgl emit - a multi-line message is its content lines joined, past their indentation, with no escapes")
+{
+    // STR-15 to STR-21: a line deeper than the content keeps what it has beyond it, a blank one between is empty,
+    // a backslash is content, and `$$` is still a dollar
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    print \"\n"
+                            "        first $v\n"
+                            "          indented \\n\n"
+                            "\n"
+                            "        dollar $$\n"
+                            "    \"\n"
+                            "    assert v >= 0.0, \"\n"
+                            "        negative\n"
+                            "        $v\n"
+                            "    \"\n"
+                            "    work.values[id.x] = v * 2.0\n";
+    auto const e = compile(source, target::hlsl_dx12);
+    REQUIRE(e.debug_sites.size() == 2);
+    auto const& print = e.debug_sites[0];
+    REQUIRE(print.pieces.size() == 2);
+    CHECK(print.pieces[0] == "first ");
+    CHECK(print.pieces[1] == "\n  indented \\n\n\ndollar $");
+    auto const& assert_site = e.debug_sites[1];
+    REQUIRE(assert_site.pieces.size() == 2);
+    CHECK(assert_site.pieces[0] == "negative\n");
+    CHECK(assert_site.pieces[1] == "");
+}
+
 TEST("sgl emit - one print reached along two call chains is two sites, even in two compiles of one entry point")
 {
     // what an option picks is another permutation of `cs`, and sg keeps one description per id across all of them
