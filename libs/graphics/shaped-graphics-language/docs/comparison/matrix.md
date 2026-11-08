@@ -4,7 +4,7 @@ How SGL compares with the other ways to write one set of shaders for DX12, Vulka
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
 **As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its A7, B2, B3, B6, D3, E4, F7 and G5 as of 2026-11-05.
-Its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F3, F4 and G6 as of 2026-11-06.
+Its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F4 as of 2026-11-06, and its B6, D8, F3, F8 and G6 as of 2026-11-08.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
@@ -58,7 +58,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **B3** Float semantics | ⚠️ per target; Metal fast math by default; DXC writes a float `!=` as an ordered compare in SPIR-V, so `NaN != NaN` is false on Vulkan | ⚠️ implementation-defined; `precise` has no effect on Metal | ⚠️ loose by spec; Metal relaxed by default in Dawn and wgpu | ❌ per target | ✅ the exact meaning is IEEE f32, which the interpreter computes; on a GPU an entry point's `@float` level licenses named departures, `fast` by default, up to `ieee` wherever the target keeps it (B12); `!=` is true for a NaN on every target |
 | **B4** Out-of-bounds access | ⚠️ per target and robustness setting | ⚠️ undefined by spec | ⚠️ bounded outcomes, where the translator is configured for them | ❌ undefined unless robustness is on | ✅ undefined by default; the interpreter reports it as a program error, and a profile guards an array index, a binding array's, a buffer index and a `bytes` access by `values.length`, an element of a binding array's included, defining it under `define`, where memory that holds nothing reads zero and drops a store; metal's buffers not yet, whose lengths sg does not pass in 🗺️ [feat](../issues/feat-sgl-guard-buffer-elements.md) (B10, B11) |
 | **B5** Uniformity, derivatives, discard | ⚠️ no uniformity check; a failure surfaces at Tint or in the browser | ⚠️ no model of WGSL uniformity; open bugs | ⚠️ Tint enforces it; Naga skips derivative checks | ⚠️ no uniformity analysis | ⚠️ its own uniformity pass for every target; discard's helper lanes on metal 🗺️ [feat](../issues/feat-sgl-discard-helper-emulation.md) |
-| **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ✅ `atomic[float]` on all four, native on vulkan and metal and a compare-exchange loop on dx12 and webgpu, which have no float add; `atomic[long]` and `atomic[ulong]` in buffers and workgroup memory on dx12 and vulkan, each where the device has them; metal's `ulong` min and max, untried on Apple hardware 🗺️ [feat](../issues/.closed/2026/11/feat-sgl-metal-ulong-min-max-atomics-on-hardware.md) |
+| **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ✅ `atomic[float]` on all four, native on vulkan and metal and a compare-exchange loop on dx12 and webgpu, which have no float add; `atomic[long]` and `atomic[ulong]` in buffers and workgroup memory on dx12 and vulkan, each where the device has them; metal's `ulong` min and max too, run on an M4 |
 | **B7** Subgroup operations | ⚠️ MSC requires wave size 32; WGSL needs its extension | ⚠️ docs and code disagree for WGSL; wave size left to the user | ✅ `subgroups` extension, shipped in Chrome 134 | ✅ to Wave and SIMD-group ops | ✅ behind `subgroups` on all four; code must be correct at any size |
 | **B8** Vendor features (SER, OMM) | ⚠️ DX12 only (SM 6.9); DXC has no SPIR-V lowering; none on Metal or WebGPU; not reported statically | ⚠️ SER on DX12 and Vulkan, checked statically; no OMM | ❌ | ⚠️ extensions reach Vulkan; other targets fail at SPIRV-Cross | ✅ opacity micromaps traced on dx12 and vulkan with no change to the shader, sg building them, and `ray_flags.force_omm_2_state` on both; SER on both, `maybe_reorder`, a reordering trace and a first-class hit object, checked statically and drawn on vulkan and on dx12 under the Agility SDK; vulkan's written as SPIR-V's own instructions, since DXC lowers none; metal and webgpu have neither |
 | **B9** Inline target code | ⚠️ inline SPIR-V, Vulkan only | ✅ `__target_switch`, `__intrinsic_asm`, `spirv_asm` | ⚠️ whole-module passthrough in wgpu only | ❌ | ✅ a function body in HLSL, WGSL or MSL text under `const if` on target, feature and option, with placeholders, a file preamble per language, text types and a declared contract (`@pure`, `@barrier`, `@subgroup`, `@derivatives`); dx12's `maybe_reorder` is written this way; no buffer parameter or `#line` inside the text yet 🗺️ [incubator](../spec/incubator/specialization.md) |
@@ -86,7 +86,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **D5** half, f64, int64, int16 | ⚠️ f64 on DX12 and Vulkan, which alone have it, but DXC narrows a double handed to `sqrt`, `floor`, `lerp` or `sin` to a float without a word; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ✅ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses a stage link on every target with its type, as its words where DXIL and MSL carry none; a double's sqrt, rounding and vector geometry on dx12 and vulkan, written once in SGL's prelude since DXC narrows a double handed to them, and lowered from it by the text and both native routes alike; `fma` of halves, floats and doubles, rounded once on the interpreter and for a double on DXIL; a double's bits as a `uint2`; no transcendental of a double, which no target has |
 | **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; mesh and task stages with a payload, per-primitive attributes, triangles or lines and an indirect draw on dx12 and vulkan, refused on webgpu; metal not yet 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md); no work graphs |
 | **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ⚠️ a prototype outside the normative spec: `fwd_diff` and `bwd_diff` over floats, vectors, matrices and geometry types, loops of constant bounds over a tape, derivatives written by hand, each mode held to central differences on the interpreter; a differentiable buffer is written by hand 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
-| **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums, inference, arrow lambdas |
+| **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums with computed case values, type aliases, inference, arrow lambdas |
 
 ## E. Testing and debugging
 
@@ -104,12 +104,12 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 |---|---|---|---|---|---|
 | **F1** Hot reload, native | ✅ libraries in process | ✅ in-process API | ✅ microseconds to translate | ✅ libraries in process | ✅ survives a broken edit |
 | **F2** Compile in the browser | ❌ no official DXC for wasm (a third-party build is ~17 MB); no MSC | ✅ official slang-wasm, 25 MB (10 MB zipped) | ✅ the browser takes WGSL; Naga is 1.6 MB as wasm | ⚠️ glslang ~0.9 MB plus a 1.7 MB translator | ✅ the compiler runs in the page, and edits live there: sgl-cube's page rebuilds its pipeline as its shader is typed or saved on disk, a broken edit keeping the last that built and showing its error; the whole `sgl` tool, language server included, is 5.6 MB as wasm (1.7 MB gzip, 1.2 MB brotli) |
-| **F3** Compile in a shipped product | ⚠️ DXC is tens of MB; MSC's redistribution terms are unclear | ⚠️ 26.5 MB, plus DXC for DXIL | ⚠️ Naga is small; DX12 still needs DXC | ⚠️ a heavy chain | ⚠️ the compiler depends on clean-core alone; metal and webgpu need no toolchain, nor do compute and raster stages, mesh and task among them, on vulkan or dx12 where a package opts into SGL's own SPIR-V or DXIL, ray queries, ray-tracing stages, hit objects and texel atomics among them; a body or a type in target text, and DXIL's `double` maths still need DXC 🗺️ [epic](../issues/epic-sgl-native-ir-targets.md) |
+| **F3** Compile in a shipped product | ⚠️ DXC is tens of MB; MSC's redistribution terms are unclear | ⚠️ 26.5 MB, plus DXC for DXIL | ⚠️ Naga is small; DX12 still needs DXC | ⚠️ a heavy chain | ✅ the compiler depends on clean-core alone, and no target needs a toolchain for what SGL writes: SPIR-V and DXIL are SGL's own by default, every stage, ray tracing and `double` maths among them, and MSL and WGSL are text the driver compiles; a body or a type a program writes in a target's own text is that target's compiler's (B9) |
 | **F4** Compile speed | ❓ | ❓ | ✅ Naga: 20–60 µs per small shader and backend | ❓ | ✅ a corpus of bgfx shaders compiles as fast as with Naga; a compile's fixed cost is ~10 µs and the corpus's smallest shader takes 16 µs, against Naga's ~18 µs; the prelude's ~20 ms once per process remain 🗺️ [epic](../issues/epic-sgl-separate-compilation.md) |
 | **F5** Permutations | ⚠️ macros; specialization constants on SPIR-V only | ✅ macros, specialization constants, link-time specialization | ⚠️ `override` constants; WESL `@if` | ✅ macros and specialization constants | ✅ options; a false branch leaves the text and the footprint; no specialization constants |
 | **F6** Shipping and caching | ✅ offline bundles | ⚠️ precompiled modules; determinism undocumented | ⚠️ no bundle format | ⚠️ SPIR-V as the cached form | ✅ frozen bundles, a persistent cache, deterministic text |
 | **F7** Editor tooling | ⚠️ third-party language servers | ⚠️ `slangd`; no formatter | ⚠️ wgsl-analyzer | ⚠️ community language servers | ✅ an in-tree language server: diagnostics, tokens, inlay hints, hover with every overload, go-to-definition, completion, signature help, references, rename, formatting, an outline, folding, workspace symbols and test runs; a formatter, `sgl format`, that proves its output parses the same |
-| **F8** Toolchain hosts | ⚠️ MSC on macOS and Windows only | ⚠️ text anywhere; metallib needs Apple's tool | ✅ | ✅ | ⚠️ text anywhere, wasm included; DXIL needs DXC (Windows, Linux), a metallib needs macOS |
+| **F8** Toolchain hosts | ⚠️ MSC on macOS and Windows only | ⚠️ text anywhere; metallib needs Apple's tool | ✅ | ✅ | ✅ every target's code is written in process on any host, wasm included: DXIL and SPIR-V by SGL itself, MSL and WGSL as text; a metallib ahead of time needs Apple's toolchain on macOS, and a body in HLSL text needs DXC |
 | **F9** Licensing | ⚠️ MSC is proprietary; whether an app may ship it is unanswered | ✅ Apache-2.0 with LLVM exception | ✅ MIT, Apache-2.0, BSD-3 | ✅ permissive | ✅ MIT |
 
 ## G. Ecosystem and risk
@@ -121,7 +121,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **G3** Exit cost | ✅ you keep HLSL | ✅ readable output; Slang-only features lost | ✅ a standard with two implementations | ✅ | ⚠️ the emitted HLSL, MSL and WGSL are readable and can be kept; they follow sg's binding model; MIT allows a fork |
 | **G4** Migration from HLSL | ✅ none | ✅ accepts most HLSL | ❌ a rewrite | ❌ a rewrite | ⚠️ a rewrite; LLM-assisted ports of hundreds of shaders have gone through |
 | **G5** Vendor libraries (FSR, NRD, RTXDI) | ✅ native; NVAPI on DX12 only | ⚠️ compile for DX12 and Vulkan | ❌ | ⚠️ | ⚠️ beside SGL as HLSL packages on dx12 and vulkan, or ported; reachable from SGL through a text body (B9) over a preamble, untried on a whole vendor library |
-| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ SGL's time over the same three kernels written by hand, so lower is faster, on an Arc B580: dx12 0.99–1.00×, vulkan 0.97–0.99×, webgpu 0.81–1.00× on Dawn and 0.52–1.00× on wgpu; metal unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md) |
+| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ SGL's time over the same three kernels written by hand, so lower is faster, on an Arc B580: dx12 0.99–1.00×, vulkan 0.97–0.99×, webgpu 0.81–1.00× on Dawn and 0.52–1.00× on wgpu; its own SPIR-V and DXIL against its text through DXC, over 22 kernels and two path tracers on an Arc B580 and a Radeon iGPU, within 3% but for four named gaps, the largest 1.15 on the B580's dx12, and ahead on the BC encoders; metal unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md) |
 
 ## Sources
 
@@ -233,7 +233,7 @@ Per row and column:
   - Slang: SLANG capdef `atomic64`, `atomicfloat`
   - WGSL: NAGA CHANGELOG v24
   - GLSL + chain: SXC `spirv_msl.cpp`
-  - SGL: CHK-296, [incubator/atomics.md](../spec/incubator/atomics.md), sg `tests/compute/compute-sixty-four-bit-test.cc` (2026-11-05)
+  - SGL: CHK-296, [incubator/atomics.md](../spec/incubator/atomics.md), sg `tests/compute/compute-sixty-four-bit-test.cc` (2026-11-05), its run on an M4 in [feat-sgl-metal-ulong-min-max-atomics-on-hardware](../issues/.closed/2026/11/feat-sgl-metal-ulong-min-max-atomics-on-hardware.md) (2026-11-06)
 - **B7**
   - HLSL + chain: MSC manual
   - Slang: SLANG capdef `subgroup_basic`, issue 14095
@@ -341,7 +341,7 @@ Per row and column:
   - Slang: SLANG convenience features
   - WGSL: WGSL
   - GLSL + chain: GLSL
-  - SGL: CHK-36, CHK-68, CHK-142 to CHK-151, CHK-416
+  - SGL: CHK-14, CHK-36, CHK-68, CHK-142 to CHK-151, CHK-416
 - **E1**
   - HLSL + chain: DXC
   - Slang: SLANG `slangc` targets (`slangvm`, `llvm`, `cpp`)
@@ -385,7 +385,7 @@ Per row and column:
   - HLSL + chain: MSC changelog 3.1, <https://developer.apple.com/forums/thread/829379>
   - Slang: SLANG Windows release, measured
   - WGSL: NAGA
-  - SGL: [architecture.md](../architecture.md) "Dependencies", slib `docs/frozen-shaders.md`
+  - SGL: [architecture.md](../architecture.md) "Dependencies", slib `docs/frozen-shaders.md`, slib's `cheat-sheet.md` on a context's default route, [feat-sgl-native-compute-gaps](../issues/feat-sgl-native-compute-gaps.md) on what stays text (2026-11-08)
 - **F4**
   - Slang: SLANG issue 13565
   - WGSL: NAGA measured on the bgfx shaders
@@ -407,7 +407,7 @@ Per row and column:
 - **F8**
   - HLSL + chain: MSC, <https://vulkan.lunarg.com/doc/view/latest/mac/getting_started.html>
   - Slang: SLANG `slangc` reference
-  - SGL: root `CMakeLists.txt`, slib `docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md`
+  - SGL: root `CMakeLists.txt`, slib `docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md`, [epic-sgl-native-ir-targets](../issues/epic-sgl-native-ir-targets.md) on the bypass digest DXIL loads under (2026-11-08)
 - **F9**
   - HLSL + chain: DXC, SXC, TINT, NAGA licenses, MSC agreements
   - Slang: SLANG `LICENSES/`
@@ -443,5 +443,6 @@ Per row and column:
   - Slang: SLANG issues 11774, 13220, 13245, 14016
   - WGSL: NAGA `BoundsCheckPolicy`
   - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc`, `tests/bench/sgl-against-wgsl-benchmark.cc` (2026-11-06, Arc B580)
+  - SGL, its own binaries against its text through DXC: [native-parity.md](../native-parity.md), shaped-rendering `tests/bench/sgl-routes-benchmark.cc` (2026-11-08, Arc B580 and Radeon iGPU)
   - SGL, what the text owes the target's compiler: EMIT-230, EMIT-231
   - SGL, the gap on an RTX: [perf-sgl-svgf-filter-two-percent](../issues/perf-sgl-svgf-filter-two-percent.md)
