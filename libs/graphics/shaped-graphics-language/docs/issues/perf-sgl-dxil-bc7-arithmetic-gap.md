@@ -4,6 +4,8 @@ parent: epic-sgl-native-ir-targets
 refs:
   - file: libs/graphics/shaped-rendering/shaders/compression/bc.sgl
   - file: libs/graphics/shaped-graphics-language/docs/native-parity.md
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-08T08:17Z
 ---
 
 # bc7's DXIL is 1.27 times DXC's: divisions by constants, selects and loads
