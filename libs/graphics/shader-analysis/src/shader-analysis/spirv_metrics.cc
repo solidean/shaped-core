@@ -629,7 +629,14 @@ cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts co
                 if (auto const v = value(args[first_arg]); v >= 0)
                     operand_width = f32(cc::max(1, g.widths[v]));
             auto const result_width = gi.result >= 0 ? f32(cc::max(1, g.widths[gi.result])) : 1.0f;
-            if (auto const s = spend_of(i, operand_width, result_width); s.has_value())
+            auto s = spend_of(i, operand_width, result_width);
+            // a multiply by a power of two is a shift to every driver
+            if (code == 132 && s.has_value())
+                for (auto const arg : args)
+                    if (auto const* const c = facts.constants.get_ptr(arg);
+                        c != nullptr && *c != 0 && (*c & (*c - 1)) == 0)
+                        s = spend{.cost = cost_class::alu};
+            if (s.has_value())
             {
                 gi.has_cost = true;
                 gi.cost = s.value().cost;

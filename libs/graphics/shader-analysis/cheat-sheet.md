@@ -82,4 +82,5 @@ shan::to_text(d);                         // -> cc::string, one line each
 - **The compute cost is an estimate for two modules of one entry point.**
   A branch the wave shares runs each arm at its share, one it does not both in full, a loop's guard and its body's stay in full.
   Its rates are `pipeline-stats throughput`'s, measured on two GPUs; a multiply and its add count two where both run one fma.
+  A loop's counter, compare and branch count every trip, which a driver that unrolls it does not pay; an integer multiply by a power of two is a shift.
 - **Uniformity does not follow memory.** A load from a function's own variable is varying whatever was stored, and one from a buffer at a shared address is scalar.

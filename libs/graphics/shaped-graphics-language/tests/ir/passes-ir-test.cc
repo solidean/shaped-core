@@ -317,6 +317,26 @@ TEST("sgl ir simplify structured - a dead arm goes whole, and only a merge a liv
     }
 }
 
+TEST("sgl ir simplify - an integer multiply by a power of two is a shift, either way round")
+{
+    for (auto const constant_first : {false, true})
+    {
+        auto b = program_builder();
+        auto const eight = b.add_constant({.type = b.uint_type, .low = 8});
+        b.blocks(1);
+        b.open(0);
+        auto const read = b.add(op::f_to_u, b.uint_type, {u32(b.add(op::load, b.float_type, {u32(b.out)}))});
+        auto const product = constant_first ? b.add(op::imul, b.uint_type, {u32(eight), u32(read)})
+                                            : b.add(op::imul, b.uint_type, {u32(read), u32(eight)});
+        b.keep(b.add(op::u_to_f, b.float_type, {u32(product)}));
+        b.finish();
+        simplify(b.p);
+        CHECK(refusal_of(b.p, control_flow::unstructured) == "");
+        CHECK(count_of(b.p, op::imul) == 0);
+        CHECK(count_of(b.p, op::shift_left) == 1);
+    }
+}
+
 TEST("sgl ir simplify - a condition nobody knows keeps both arms")
 {
     auto b = program_builder();

@@ -389,7 +389,16 @@ using babel::llvm37::type_kind;
         if (i.code == inst_code::binop)
         {
             auto const is_f = is_float(m, i.type);
-            if (!is_f && i.sub == 2)
+            // a multiply by a power of two is a shift to every driver
+            auto by_power_of_two = false;
+            for (auto const o : m.operands_of(b, i))
+            {
+                auto c = i64(0);
+                if (auto const v = m.value_of(b, o);
+                    v.kind == babel::llvm37::value_kind::constant && m.integer_of(v.index, c))
+                    by_power_of_two = by_power_of_two || (c > 0 && (c & (c - 1)) == 0);
+            }
+            if (!is_f && i.sub == 2 && !by_power_of_two)
                 spend(cost_class::int_multiply);
             else if (!is_f && i.sub >= 3 && i.sub <= 6)
                 spend(cost_class::int_divide);

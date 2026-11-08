@@ -541,7 +541,12 @@ ll_value module_builder::folded_binary(binary_op op, ll_value a, ll_value b, u8 
     case binary_op::ashr:
         return is_right && known == 0 ? other : ll_value::none;
     case binary_op::mul:
-        return known == 1 ? other : ll_value::none;
+        if (known == 1)
+            return other;
+        // a multiply by a power of two is the shift DXC writes, which wraps alike; no overflow flag goes with it
+        if (known != 0 && (known & (known - 1)) == 0)
+            return binary(binary_op::shl, other, constant_int(type, u64(cc::bit_width(known) - 1)), 0);
+        return ll_value::none;
     case binary_op::bit_and:
         if (width == 1)
             return known != 0 ? other : (has_a ? a : b);

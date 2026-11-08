@@ -667,6 +667,17 @@ private:
         return true;
     }
 
+    /// `index`, an integer multiply of `v` by `power`, a power of two, as the shift DXC writes and a driver runs.
+    /// Both wrap alike, signed or not, so the value is the same.
+    void shift_by(u32 index, value_ref v, u64 power)
+    {
+        auto& i = _p.instructions[index];
+        i.code = op::shift_left;
+        _p.operands[i.first] = u32(v);
+        _p.operands[i.first + 1] = u32(constant_of(i.type, u64(cc::bit_width(power) - 1)));
+        _changed = true;
+    }
+
     void fold_binary(u32 index, instruction const& i, fold_kind kind, value_ref a, value_ref b)
     {
         auto x = u64(0);
@@ -688,6 +699,8 @@ private:
                 return set_alias(index, a);
             if (i.code == op::imul && y == 1)
                 return set_alias(index, a);
+            if (i.code == op::imul && (y & (y - 1)) == 0 && y != 0)
+                return shift_by(index, a, y);
         }
         if (has_a && !has_b && !is_float)
         {
@@ -695,6 +708,8 @@ private:
                 return set_alias(index, b);
             if (i.code == op::imul && x == 1)
                 return set_alias(index, b);
+            if (i.code == op::imul && (x & (x - 1)) == 0 && x != 0)
+                return shift_by(index, b, x);
         }
         if (i.code == op::fmul && has_b && !has_a && is_other_float && other_width == 32 && y == 0x3f800000u)
             return set_alias(index, a);
