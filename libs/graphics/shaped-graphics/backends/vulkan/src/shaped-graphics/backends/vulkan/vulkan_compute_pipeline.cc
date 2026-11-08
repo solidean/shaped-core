@@ -102,7 +102,10 @@ cc::result<vulkan_compute_pipeline_handle> vulkan_compute_pipeline::create(vulka
         // A pipeline built against a descriptor-buffer set layout has to say so, and may not be used with sets.
         .flags
         = VkPipelineCreateFlags(VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT)
-        | (ctx.captures_driver_statistics() ? VkPipelineCreateFlags(VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR) : 0u),
+        | (ctx.captures_driver_statistics() ? VkPipelineCreateFlags(VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR) : 0u)
+        | (ctx.captures_driver_representations()
+               ? VkPipelineCreateFlags(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR)
+               : 0u),
         .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                   .pNext = pipeline->_required_subgroup_size > 0 ? &required_size : nullptr,
                   .stage = VK_SHADER_STAGE_COMPUTE_BIT,

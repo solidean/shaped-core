@@ -18,3 +18,17 @@ struct sg::driver_statistic
     /// The value, a boolean as 0 or 1.
     f64 value = 0;
 };
+
+/// One form a driver keeps of a pipeline's code: its own IR at some stage, or the machine code, as text.
+///
+/// What forms there are is the driver's: AMD's last is the ISA's disassembly, Intel's its own assembly.
+/// A backend hands them back only where its context was asked to capture them, which costs more than the statistics.
+struct sg::driver_representation
+{
+    /// The compiled program it is of, as `driver_statistic::executable` names it.
+    cc::string executable;
+    cc::string name;
+    cc::string description;
+    /// The form as text; empty where the driver gave it as binary data, which is not kept.
+    cc::string text;
+};

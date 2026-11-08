@@ -310,3 +310,34 @@ TEST("sg vulkan - a context that captures driver statistics reports a pipeline's
         }
     }
 }
+
+TEST("sg vulkan - a context that keeps the driver's forms of a pipeline's code hands them back, and one that does not "
+     "none")
+{
+    for (auto const capture : {true, false})
+    {
+        auto const created = sg::create_vulkan_context({.capture_driver_representations = capture});
+        REQUIRE(created.has_value());
+        auto& ctx = *created.value();
+        auto const shader = make_double_shader();
+        auto group_layout = ctx.uncached.create_binding_group_layout(shader.bindings);
+        auto layout = ctx.uncached.create_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+        auto const pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = layout});
+        REQUIRE(pipeline != nullptr);
+        auto const forms = pipeline->driver_representations();
+        auto const& vk = static_cast<vulkan::vulkan_context const&>(ctx);
+        if (!capture || !vk.captures_driver_representations())
+        {
+            CHECK(forms.empty());
+            continue;
+        }
+        // which forms a driver keeps is its own, Intel's none as text; each it does keep names what it is of
+        for (auto const& f : forms)
+        {
+            CHECK(!f.name.empty());
+            CHECK(!f.executable.empty());
+        }
+        // and the statistics come with it
+        CHECK(vk.captures_driver_statistics());
+    }
+}

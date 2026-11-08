@@ -862,7 +862,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // What the driver reports of each pipeline it compiles, only where the config asks, since capturing costs.
     char const* const statistics_names[] = {VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME};
     auto statistics_supported = false;
-    if (config.capture_driver_statistics && device_extensions_available(best_device, statistics_names))
+    if ((config.capture_driver_statistics || config.capture_driver_representations)
+        && device_extensions_available(best_device, statistics_names))
     {
         auto statistics_query = VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
@@ -1248,8 +1249,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
             vkGetDeviceProcAddr(device, "vkGetPipelineExecutablePropertiesKHR"));
         ctx->_get_pipeline_executable_statistics = PFN_vkGetPipelineExecutableStatisticsKHR(
             vkGetDeviceProcAddr(device, "vkGetPipelineExecutableStatisticsKHR"));
+        if (config.capture_driver_representations)
+            ctx->_get_pipeline_executable_representations = PFN_vkGetPipelineExecutableInternalRepresentationsKHR(
+                vkGetDeviceProcAddr(device, "vkGetPipelineExecutableInternalRepresentationsKHR"));
         if (ctx->_get_pipeline_executable_properties == nullptr)
+        {
             ctx->_get_pipeline_executable_statistics = nullptr;
+            ctx->_get_pipeline_executable_representations = nullptr;
+        }
     }
     if (mesh_shader_supported)
         ctx->_cmd_draw_mesh_tasks = PFN_vkCmdDrawMeshTasksEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));

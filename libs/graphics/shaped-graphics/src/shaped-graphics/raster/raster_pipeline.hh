@@ -120,6 +120,11 @@ public:
     /// (`vulkan_config::capture_driver_statistics`).
     [[nodiscard]] virtual cc::vector<driver_statistic> driver_statistics() const { return {}; }
 
+    /// The forms the driver kept of this pipeline's code, its machine code among them where it gives that.
+    /// Empty where the backend has none, or its context was not asked to keep them
+    /// (`vulkan_config::capture_driver_representations`).
+    [[nodiscard]] virtual cc::vector<driver_representation> driver_representations() const { return {}; }
+
     /// Whether creation actually consumed the `cached_pipeline` blob it was handed.
     ///
     /// False when none was supplied, and false when one was supplied and the backend rejected it.

@@ -65,6 +65,11 @@ struct sg::backend::vulkan::vulkan_config
     /// Off by default, since capturing costs at pipeline creation; a device without the extension reports nothing.
     bool capture_driver_statistics = false;
 
+    /// Ask the driver to keep its forms of each pipeline's code too, its ISA among them, which
+    /// `compute_pipeline::driver_representations` hands back; implies `capture_driver_statistics`.
+    /// Off by default, since keeping them costs more at pipeline creation than the statistics do.
+    bool capture_driver_representations = false;
+
     /// SGL's own SPIR-V carries each operation's `.sgl` line and the sources it names, for RenderDoc (EMIT-257).
     /// It changes no instruction, only the module's size, and does nothing for what DXC compiles.
     bool native_line_tables = false;
@@ -1021,6 +1026,12 @@ public:
     PFN_vkGetPipelineExecutablePropertiesKHR _get_pipeline_executable_properties = nullptr;
     PFN_vkGetPipelineExecutableStatisticsKHR _get_pipeline_executable_statistics = nullptr;
     [[nodiscard]] bool captures_driver_statistics() const { return _get_pipeline_executable_statistics != nullptr; }
+    /// Where `vulkan_config::capture_driver_representations` asked too.
+    PFN_vkGetPipelineExecutableInternalRepresentationsKHR _get_pipeline_executable_representations = nullptr;
+    [[nodiscard]] bool captures_driver_representations() const
+    {
+        return _get_pipeline_executable_representations != nullptr;
+    }
     PFN_vkCmdDrawMeshTasksIndirectEXT _cmd_draw_mesh_tasks_indirect = nullptr;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.
     struct subgroup_size_control

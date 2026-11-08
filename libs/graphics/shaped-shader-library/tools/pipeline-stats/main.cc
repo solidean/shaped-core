@@ -122,26 +122,34 @@ struct built
     return result;
 }
 
-/// One route's pipeline and the driver's figures of it, or why there are none.
-[[nodiscard]] cc::result<cc::vector<sg::driver_statistic>> figures_of(sg::context& ctx,
-                                                                      slib::shader_library const& lib,
-                                                                      cc::string_view source,
-                                                                      cc::string_view label,
-                                                                      cc::string_view entry,
-                                                                      bool native)
+/// What the driver says of one route's pipeline: its figures, and the forms of its code where the context keeps them.
+struct report
+{
+    cc::vector<sg::driver_statistic> statistics;
+    cc::vector<sg::driver_representation> representations;
+};
+
+/// One route's pipeline and the driver's report of it, or why there is none.
+[[nodiscard]] cc::result<report> figures_of(sg::context& ctx,
+                                            slib::shader_library const& lib,
+                                            cc::string_view source,
+                                            cc::string_view label,
+                                            cc::string_view entry,
+                                            bool native)
 {
     auto b = build(ctx, lib, source, label, entry, native);
     if (b.has_error())
         return cc::error(b.error().to_string());
-    return b.value().pipeline->driver_statistics();
+    return report{.statistics = b.value().pipeline->driver_statistics(),
+                  .representations = b.value().pipeline->driver_representations()};
 }
 /// The same, a layout or a pipeline that throws as its failure.
-[[nodiscard]] cc::result<cc::vector<sg::driver_statistic>> guarded(sg::context& ctx,
-                                                                   slib::shader_library const& lib,
-                                                                   cc::string_view source,
-                                                                   cc::string_view label,
-                                                                   cc::string_view entry,
-                                                                   bool native)
+[[nodiscard]] cc::result<report> guarded(sg::context& ctx,
+                                         slib::shader_library const& lib,
+                                         cc::string_view source,
+                                         cc::string_view label,
+                                         cc::string_view entry,
+                                         bool native)
 {
     try
     {
@@ -152,6 +160,33 @@ struct built
         return cc::error(cc::string(e.message()));
     }
 }
+/// Writes each form of `r`'s code to `dir`, one file each: `<entry>.<route>.<executable>.<form>.txt`.
+void write_forms(cc::string_view dir, cc::string_view entry, cc::string_view route, report const& r)
+{
+    // a name as a file's: letters, digits and dashes
+    auto const file_name = [](cc::string_view name)
+    {
+        auto out = cc::string();
+        for (auto const ch : name)
+            out.push_back((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ? ch : '-');
+        return out;
+    };
+    for (auto const& f : r.representations)
+    {
+        if (f.text.empty())
+            continue;
+        auto const path = cc::format("{}/{}.{}.{}.{}.txt", dir, entry, route, file_name(f.executable), file_name(f.name));
+        auto file = cc::file_write_stream_adapter::create(path);
+        if (file.has_error())
+        {
+            CC_LOG_ERROR("cannot write {}: {}", path, file.error().to_string());
+            continue;
+        }
+        auto stream = file.value().stream();
+        (void)stream.write(cc::span<byte const>(reinterpret_cast<byte const*>(f.text.data()), f.text.size()));
+        (void)stream.flush();
+    }
+}
 } // namespace
 
 COMMAND("compute")
@@ -159,6 +194,7 @@ COMMAND("compute")
     auto path = cc::string();
     auto entries = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
+    auto forms_dir = cc::string();
     auto args
         = nx::args({.name = "pipeline-stats compute",
                     .description = "Prints what the vulkan driver reports of each compute entry point's pipeline, "
@@ -168,6 +204,9 @@ COMMAND("compute")
     args.arg({"entry"}, entries, {.desc = "a compute entry point; any number", .metavar = "NAME"});
     args.arg({"module-dir"}, module_dirs,
              {.desc = "a directory of SGL modules the source may use, absolute", .metavar = "DIR"});
+    args.arg({"isa"}, forms_dir,
+             {.desc = "a directory to write the driver's forms of each pipeline's code to, its ISA among them",
+              .metavar = "DIR"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
     auto const source = read_text(path);
@@ -177,7 +216,8 @@ COMMAND("compute")
         return exit_failed;
     }
 
-    auto created = sg::create_vulkan_context({.native_spirv = false, .capture_driver_statistics = true});
+    auto created = sg::create_vulkan_context(
+        {.native_spirv = false, .capture_driver_statistics = true, .capture_driver_representations = !forms_dir.empty()});
     if (created.has_error())
     {
         CC_LOG_ERROR("no vulkan context: {}", created.error().to_string());
@@ -204,10 +244,15 @@ COMMAND("compute")
             failed = true;
             continue;
         }
-        for (auto const& n : native.value())
+        if (!forms_dir.empty())
+        {
+            write_forms(forms_dir, entry, "native", native.value());
+            write_forms(forms_dir, entry, "dxc", dxc.value());
+        }
+        for (auto const& n : native.value().statistics)
         {
             auto other = cc::string("-");
-            for (auto const& d : dxc.value())
+            for (auto const& d : dxc.value().statistics)
                 if (d.executable == n.executable && d.name == n.name)
                     other = cc::format("{}", d.value);
             cc::println("{}\t{}\t{}\t{}\t{}", entry, n.executable, n.name, n.value, other);

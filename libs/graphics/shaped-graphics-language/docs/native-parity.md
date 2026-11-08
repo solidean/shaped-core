@@ -82,6 +82,10 @@ It does not see the Radeon's dx12 convolution at 1.03, which is not arithmetic.
 A kernel that waits on memory is nearer 1.0 than the model says, since the model leaves memory out.
 The bold rows are where native costs more: a wave holding more vector registers leaves room for fewer waves beside it.
 
+`pipeline-stats compute ... --isa <dir>` writes the driver's own forms of each route's code there, which on the Radeon is the ISA.
+Its listing of `extend` has the same memory instructions on both routes, near enough the same instructions, and the same traversal loop, so the 16 registers are where values live rather than what runs.
+Which region of the 2500 instructions holds them takes a liveness count over the ISA, which nothing does yet; the Radeon's vulkan frame is 0.89 of DXC's whatever it is.
+
 **shan's live words are no register count.**
 `uv run dev.py run shan -- diff` on the binaries `diff` leaves splits them into vector words, values that differ across a wave, and scalar words, values it shares.
 Against AMD's vector registers on 2026-11-08, native and DXC's SPIR-V:

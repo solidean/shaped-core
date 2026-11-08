@@ -282,6 +282,8 @@ struct pipeline_layout_description; // {groups, static_samplers} — input to cr
 class compute_pipeline;
 /// A figure a driver reports of a pipeline it compiled; see query/driver_statistic.hh.
 struct driver_statistic;
+/// A form a driver keeps of a pipeline's code, its ISA among them; see query/driver_statistic.hh.
+struct driver_representation;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
 struct bound_view;    // one raw_view (inline) or a vector of them — a named_view's element list
