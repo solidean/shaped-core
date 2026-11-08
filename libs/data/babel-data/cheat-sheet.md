@@ -139,6 +139,24 @@ isize n = r.size();               // child block count
 babel::markdown::ref c = r[0];    // i-th child block; invalid ref if out of range
 ```
 
+## SPIR-V (`babel::spirv`)
+
+```cpp
+#include <babel-data/shader/spirv.hh>
+
+auto const m = babel::spirv::read(bytes).value();     // bytes, a read_stream, or words; a big-endian module is swapped
+m.head.version; m.head.bound;                          // the header as stored; major_version() / minor_version()
+m.instruction_count(); m.at(i);                        // the instructions in module order, each a view of its words
+i.opcode(); i.operands();                              // the first word's low half; every word after it
+i.result_id(); i.result_type();                        // 0 where the opcode has none, or the table does not know it
+i.arguments();                                         // the operands after the result type and id
+i.string_at(k, &taken);                                // the literal string at operand k, and how many words it took
+babel::spirv::info_of(opcode);                         // -> opcode_info const* {name, has_result, has_result_type}; null if unknown
+```
+
+Nothing is decoded beyond the shape every instruction shares; what an operand means is `shan`'s or the caller's.
+The opcode table is generated from the SPIR-V headers: `uv run libs/data/babel-data/tools/gen-spirv-opcodes.py --write`.
+
 ## Gotchas
 
 Only what the signatures above cannot tell you.

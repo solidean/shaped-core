@@ -3,7 +3,7 @@
 #include <clean-core/fwd.hh>
 #include <clean-core/record/domain_fwd.hh>
 
-/// Aggregate forward declarations for babel-data — the base64, JSON and markdown half of babel.
+/// Aggregate forward declarations for babel-data — the base64, JSON, markdown and shader-binary half of babel.
 /// It also declares `namespace babel` itself: the vocabulary aliases every babel header writes bare, and the
 /// fallback recording domain a site falls back to when its format declares none of its own.
 /// babel-serializer's own fwd.hh includes this one and adds the formats above it.
@@ -41,6 +41,17 @@ class string_writer;
 /// The domain every recording site in babel::json is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::json
+
+namespace babel::spirv
+{
+struct header;
+struct opcode_info;
+struct instruction;
+class module;
+
+/// The domain every recording site in babel::spirv is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::spirv
 
 namespace babel::markdown
 {

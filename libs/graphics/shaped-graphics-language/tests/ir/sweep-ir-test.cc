@@ -1,5 +1,6 @@
 #include "ir-test-support.hh"
 
+#include <babel-data/shader/spirv.hh>
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -10,7 +11,7 @@
 
 using namespace cc::primitive_defines;
 
-// Every entry point the repo's SGL holds, down both routes, where its stage is lowered yet.
+// Every entry point the repo's SGL holds, down both routes, where its stage is lowered yet, its SPIR-V read back by babel.
 // Where assertions are on a compile verifies its program after lowering and after each pass, so this is what walks the
 // verifier over everything; `spirv-val` and DXC's validator only see the shaders sg and sr ship.
 // A debug build pays seconds per file for that, so a default run takes every eighth and --thorough takes them all.
@@ -36,6 +37,22 @@ namespace
     auto bytes = stream.read_all();
     REQUIRE(bytes.has_value());
     return cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size()));
+}
+/// babel's reader takes SGL's SPIR-V as a module: every instruction whole, and every id it gives below the bound.
+void reads_back(cc::span<u32 const> words, cc::string_view entry)
+{
+    auto const m = babel::spirv::read(words);
+    REQUIRE(m.has_value()).dump("entry", entry).dump("error", m.has_error() ? m.error().to_string() : cc::string());
+    auto unknown = 0;
+    auto past_bound = 0;
+    for (auto k = isize(0); k < m.value().instruction_count(); ++k)
+    {
+        auto const i = m.value().at(k);
+        unknown += babel::spirv::info_of(i.opcode()) == nullptr ? 1 : 0;
+        past_bound += i.result_id() >= m.value().head.bound ? 1 : 0;
+    }
+    CHECK(unknown == 0).dump("entry", entry);
+    CHECK(past_bound == 0).dump("entry", entry);
 }
 } // namespace
 
@@ -70,6 +87,8 @@ TEST("sgl ir - every entry point of the repo's SGL goes down both native routes"
                      .native = sgl::emit::native_route::prefer});
                 if (e.has_error())
                     continue;
+                if (!e.value().spirv.empty())
+                    reads_back(e.value().spirv, entry.entry_point);
                 spirv += e.value().spirv.empty() ? 0 : 1;
                 dxil += e.value().dxil.empty() ? 0 : 1;
             }

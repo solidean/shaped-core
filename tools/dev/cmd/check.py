@@ -540,6 +540,12 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   "(--fix regenerates them)",
                   True, committed_codegen("fixed-int-gen", Path("libs/base/typed-geometry/tools/gen-fixed-int.py")),
                   watches=("libs/base/typed-geometry/**",)),
+        dev.Check("spirv-opcodes-gen",
+                  "babel-data's SPIR-V opcode table is what gen-spirv-opcodes.py makes of the SPIR-V headers "
+                  "(--fix regenerates it)",
+                  True, committed_codegen("spirv-opcodes-gen", Path("libs/data/babel-data/tools/gen-spirv-opcodes.py")),
+                  watches=("libs/data/babel-data/tools/**", "libs/data/babel-data/src/babel-data/shader/**",
+                           "extern/spirv-reflect/include/**")),
         dev.Check("simd-gen",
                   "clean-simd's generated register and fixed layers are what gen-simd.py writes (--fix regenerates them)",
                   True, committed_codegen("simd-gen", Path("libs/base/clean-simd/tools/gen-simd.py")),

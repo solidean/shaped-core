@@ -21,6 +21,9 @@ add_library(babel-data
     src/babel-data/data/json.cc
     src/babel-data/data/json_writer.cc
     src/babel-data/data/markdown.cc
+
+    src/babel-data/shader/spirv.cc
+    src/babel-data/shader/spirv_opcode_table.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -37,6 +40,8 @@ target_sources(babel-data
     src/babel-data/data/base64.hh
     src/babel-data/data/json.hh
     src/babel-data/data/markdown.hh
+
+    src/babel-data/shader/spirv.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -62,6 +67,8 @@ if(SC_BUILD_TESTS)
         tests/data/base64-test.cc
         tests/data/json-test.cc
         tests/data/markdown-test.cc
+
+        tests/shader/spirv-test.cc
     )
     sc_nexus_binary(babel-data-test KINDS tests)
 

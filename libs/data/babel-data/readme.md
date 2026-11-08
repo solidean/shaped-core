@@ -1,6 +1,6 @@
 # babel-data
 
-The externals-free base of babel: base64, JSON and markdown.
+The externals-free base of babel: base64, JSON, markdown, and the shader binaries SPIR-V so far.
 Namespace `babel`.
 Depends on **clean-core** and nothing else.
 
@@ -13,7 +13,7 @@ auto const tag0 = doc.root()["tags"][0].as_double(); // 1
 ```
 
 Headers are included by their full path from `src/`, e.g. `#include <babel-data/data/markdown.hh>`.
-Each format lives in its own sub-namespace (`babel::base64`, `babel::json`, `babel::markdown`); `<babel-data/all.hh>` is the umbrella.
+Each format lives in its own sub-namespace (`babel::base64`, `babel::json`, `babel::markdown`, `babel::spirv`); `<babel-data/all.hh>` is the umbrella.
 
 ## One namespace, two libraries
 
@@ -55,6 +55,7 @@ Source lives in `src/babel-data/`:
 | `data/base64` | the base64 codec (`decode` / `decode_into` / `decoded_size` / `encode`) |
 | `data/json` | the JSON reader (`document` / `node` / `ref`, `read`) and writer (`writer`, `string_writer`) |
 | `data/markdown` | the block-level markdown reader (same `document` / `ref` shape) |
+| `shader/spirv` | the SPIR-V module reader: the header and every instruction as a view of its words, and a generated opcode table |
 
 ## Building & testing
 
