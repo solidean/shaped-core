@@ -46,42 +46,63 @@ cc::span<sgl::parsed_prelude_file const> sgl::parsed_prelude()
 
 namespace
 {
-/// The store `set_prelude_store` set, which the first `checked_prelude()` reads under the same lock.
-cc::mutex<cc::optional<sgl::prelude_store>>& prelude_store_slot()
+/// The store `set_artifact_store` set; every load and save goes through it under its lock.
+cc::mutex<cc::optional<sgl::artifact_store>>& artifact_store_slot()
 {
-    static auto slot = cc::mutex<cc::optional<sgl::prelude_store>>();
+    static auto slot = cc::mutex<cc::optional<sgl::artifact_store>>();
     return slot;
 }
 } // namespace
 
-void sgl::set_prelude_store(prelude_store store)
+void sgl::set_artifact_store(artifact_store store)
 {
-    prelude_store_slot().lock([&](cc::optional<prelude_store>& held) { held = cc::move(store); });
+    artifact_store_slot().lock([&](cc::optional<artifact_store>& held) { held = cc::move(store); });
+}
+
+cc::string sgl::impl::artifact_key()
+{
+    return cc::format("sgl.{}", compiler_fingerprint());
+}
+
+cc::optional<cc::vector<sgl::byte>> sgl::impl::load_artifact_bytes(cc::string_view name)
+{
+    return artifact_store_slot().lock(
+        [&](cc::optional<artifact_store>& store) -> cc::optional<cc::vector<sgl::byte>>
+        {
+            if (!store.has_value() || !store.value().load)
+                return {};
+            return store.value().load(name);
+        });
+}
+
+void sgl::impl::save_artifact_bytes(cc::string_view name, cc::span<sgl::byte const> bytes)
+{
+    artifact_store_slot().lock(
+        [&](cc::optional<artifact_store>& store)
+        {
+            if (store.has_value() && store.value().save)
+                store.value().save(name, bytes);
+        });
 }
 
 sgl::check::checked_prelude const* sgl::checked_prelude()
 {
-    static auto const checked = []
+    static auto const checked = []() -> cc::optional<check::checked_prelude>
     {
         auto files = cc::vector<check::module_file>();
         for (auto const& f : parsed_prelude())
             files.push_back({.file = f.file, .ast = f.ast});
-        return prelude_store_slot().lock(
-            [&](cc::optional<prelude_store>& store) -> cc::optional<check::checked_prelude>
-            {
-                // the compilation model's artifacts: a layer this process never checked, keyed by the compiler's build
-                auto const key = cc::format("sgl.prelude.{}", compiler_fingerprint());
-                if (store.has_value() && store.value().load)
-                    if (auto bytes = store.value().load(key); bytes.has_value())
-                        if (auto loaded = check::load_artifact(bytes.value(), key, files, builtins::default_registry());
-                            loaded.has_value())
-                            return loaded;
-                auto made = check::check_prelude(files, builtins::default_registry());
-                if (made.has_value() && store.has_value() && store.value().save)
-                    if (auto const bytes = check::save_artifact(made.value(), key); bytes.has_value())
-                        store.value().save(key, bytes.value());
-                return made;
-            });
+        // the compilation model's artifacts: a layer this process never checked, keyed by the compiler's build
+        auto const key = impl::artifact_key();
+        if (auto const bytes = impl::load_artifact_bytes("prelude"); bytes.has_value())
+            if (auto loaded = check::load_artifact(bytes.value(), key, files, builtins::default_registry());
+                loaded.has_value())
+                return loaded;
+        auto made = check::check_prelude(files, builtins::default_registry());
+        if (made.has_value())
+            if (auto const bytes = check::save_artifact(made.value(), key); bytes.has_value())
+                impl::save_artifact_bytes("prelude", bytes.value());
+        return made;
     }();
     return checked.has_value() ? &checked.value() : nullptr;
 }

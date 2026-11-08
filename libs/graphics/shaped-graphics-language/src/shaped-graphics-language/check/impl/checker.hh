@@ -378,6 +378,10 @@ struct module_plan
 /// A library file without a `module` line is no module's, and is left out.
 [[nodiscard]] module_plan plan_modules(cc::span<module_file const> library, module_file program);
 
+/// Whether `plan` reaches library modules a layer may hold: some, and none of them the program's own module.
+/// A library file of the program's module shares the program's scope, which a program's check starts afresh.
+[[nodiscard]] bool may_layer(module_plan const& plan);
+
 /// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {

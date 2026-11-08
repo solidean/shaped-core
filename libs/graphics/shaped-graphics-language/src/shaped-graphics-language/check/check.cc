@@ -157,18 +157,6 @@ impl::resume_point freeze_layer(checker& c, i32 files)
     };
 }
 
-/// Whether `plan` reaches library modules a layer may hold: some, and none of them the program's own module.
-/// A library file of the program's module shares the program's scope, which a program's check starts afresh.
-bool may_layer(module_plan const& plan)
-{
-    if (!plan.diagnostics.empty() || plan.library_order.empty())
-        return false;
-    for (auto i = isize(0); i < plan.library_order.size(); ++i)
-        if (plan.file_module[i] == 0)
-            return false;
-    return true;
-}
-
 /// Whether `plan` reaches the modules `layer` holds, in the same order and under the same names.
 /// The program's own module is not the layer's, and may be named anything.
 bool plan_matches(module_plan const& plan, cc::span<i32 const> library_order, cc::span<cc::string const> modules)
@@ -184,6 +172,16 @@ bool plan_matches(module_plan const& plan, cc::span<i32 const> library_order, cc
     return true;
 }
 } // namespace
+
+bool sgl::check::impl::may_layer(module_plan const& plan)
+{
+    if (!plan.diagnostics.empty() || plan.library_order.empty())
+        return false;
+    for (auto i = isize(0); i < plan.library_order.size(); ++i)
+        if (plan.file_module[i] == 0)
+            return false;
+    return true;
+}
 
 cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file const> prelude,
                                                         builtins::registry const& builtins)
@@ -255,6 +253,18 @@ cc::optional<checked_prelude> sgl::check::check_modules(checked_prelude const& p
 bool sgl::check::reaches_modules_to_layer(cc::span<module_file const> library, module_file program)
 {
     return may_layer(plan_modules(library, program));
+}
+
+cc::vector<cc::string> sgl::check::modules_to_layer(cc::span<module_file const> library, module_file program)
+{
+    auto plan = plan_modules(library, program);
+    auto out = cc::vector<cc::string>();
+    if (!may_layer(plan))
+        return out;
+    // module 0 is the program's own, which no layer holds
+    for (auto i = isize(1); i < plan.modules.size(); ++i)
+        out.push_back(cc::move(plan.modules[i]));
+    return out;
 }
 
 bool sgl::check::reaches_the_same_modules(checked_prelude const& layer,

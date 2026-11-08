@@ -340,6 +340,17 @@ INVOCABLE_TEST("sgl checked modules - a program behind its modules' layer checks
     CHECK(behind.types.size() == beside.types.size());
     CHECK(behind.tests.size() == beside.tests.size());
 
+    // the compilation model's artifacts: the layer read back is the layer, the modules' tests' trees among it
+    auto const saved = sgl::check::save_artifact(layer.value(), artifact_key);
+    REQUIRE(saved.has_value());
+    auto const loaded = sgl::check::load_modules_artifact(saved.value(), artifact_key, *checked, library, user,
+                                                          sgl::builtins::default_registry());
+    REQUIRE(loaded.has_value());
+    CHECK(loaded.value().module() == layer.value().module());
+    auto const behind_loaded = sgl::check::check(loaded.value(), library, user);
+    CHECK(behind_loaded == behind);
+    CHECK(observed(behind_loaded, files) == observed(behind, files));
+
     // the layer is shared by every program that reaches its modules, so a program's check leaves its part alone
     auto written = cc::string();
     for (auto const& w : prelude_writes(layer.value().module(), behind))
@@ -401,7 +412,7 @@ TEST("sgl prelude artifact - anything but its own bytes under its own key is a m
                  cc::span<sgl::check::module_file const>(files).subspan({.offset = 0, .size = files.size() - 1})));
 }
 
-TEST("sgl prelude artifact - a layer of modules is no artifact yet")
+TEST("sgl modules artifact - one module's source changed is a miss, and so is a program that reaches other modules")
 {
     auto const& library = corpus_modules().files;
     auto files = cc::vector<program>();
@@ -413,9 +424,42 @@ TEST("sgl prelude artifact - a layer of modules is no artifact yet")
         auto const user = sgl::check::module_file{.file = parsed, .ast = built};
         if (!sgl::check::reaches_modules_to_layer(library, user))
             continue;
+        auto const& registry = sgl::builtins::default_registry();
         auto const layer = sgl::check::check_modules(*sgl::checked_prelude(), library, user);
         REQUIRE(layer.has_value());
-        CHECK(!sgl::check::save_artifact(layer.value(), artifact_key).has_value());
+        auto const saved = sgl::check::save_artifact(layer.value(), artifact_key);
+        REQUIRE(saved.has_value());
+        CHECK(sgl::check::load_modules_artifact(saved.value(), artifact_key, *sgl::checked_prelude(), library, user,
+                                                registry)
+                  .has_value());
+        CHECK(!sgl::check::load_modules_artifact(saved.value(), "another key", *sgl::checked_prelude(), library, user,
+                                                 registry)
+                   .has_value());
+        // the prelude's artifact is no layer of modules, and a layer of modules is no prelude's
+        CHECK(!sgl::check::load_modules_artifact(prelude_artifact(), artifact_key, *sgl::checked_prelude(), library,
+                                                 user, registry)
+                   .has_value());
+        CHECK(!sgl::check::load_artifact(saved.value(), artifact_key, prelude_modules(), registry).has_value());
+
+        // every module file the layer holds, edited by one trailing line
+        auto edited = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
+        auto edited_asts = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
+        auto changed = cc::vector<sgl::check::module_file>();
+        for (auto const& m : library)
+        {
+            edited.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(cc::string(m.file.source) + "\n// edited\n")));
+            edited_asts.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*edited.back())));
+            changed.push_back({.file = *edited.back(), .ast = *edited_asts.back()});
+        }
+        CHECK(!sgl::check::load_modules_artifact(saved.value(), artifact_key, *sgl::checked_prelude(), changed, user,
+                                                 registry)
+                   .has_value());
+        // a program of no module reaches no layer
+        auto const none = sgl::parse("fun f() -> int => 1\n");
+        auto const none_ast = sgl::ast::build(none);
+        CHECK(!sgl::check::load_modules_artifact(saved.value(), artifact_key, *sgl::checked_prelude(), library,
+                                                 {.file = none, .ast = none_ast}, registry)
+                   .has_value());
         return;
     }
     FAIL("no corpus file reaches a module");

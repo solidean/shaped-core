@@ -832,7 +832,7 @@ struct sgl::check::flat_entry_point
     /// The bindings of the function's `{...}` list in the order written, which is what decides the pipeline layout.
     cc::vector<symbol_id> bindings;
     /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
-    i32 workgroup[3] = {1, 1, 1};
+    cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
     /// `function_info::preferred_subgroup_size`, which the host asks the device for and no text but dx12's states.
     i32 preferred_subgroup_size = 0;
     /// What a device needs to run it, `function_info::features`.

@@ -348,7 +348,7 @@ bcache::cache_key slib::impl::sgl_emit_persistent_key(cc::hash128 key)
             .version = bcache::version(i32(k_codec_version * 1000 + sg::impl::k_shader_codec_version))};
 }
 
-void slib::impl::keep_sgl_prelude_in(cc::optional<bcache::blob_cache*> chosen)
+void slib::impl::keep_sgl_layers_in(cc::optional<bcache::blob_cache*> chosen)
 {
     if (chosen.has_value())
         return;
@@ -357,26 +357,28 @@ void slib::impl::keep_sgl_prelude_in(cc::optional<bcache::blob_cache*> chosen)
         return;
     static auto const kept = [store]
     {
-        // sgl's key holds its compiler's fingerprint already, and the artifact checks it again when it is read
-        auto const key_of = [](cc::string_view key) -> bcache::cache_key
+        // a slot, which a later artifact of it replaces: the artifact checks sgl's build and the sources when it is read
+        auto const key_of = [](cc::string_view name) -> bcache::cache_key
         {
-            return {.space = bcache::cache_namespace("slib.sgl.prelude"),
-                    .key = bcache::logical_key::create_from_hash(cc::hash256::create(key.as_bytes())),
+            return {.space = bcache::cache_namespace("slib.sgl.layer"),
+                    .key = bcache::logical_key::create_from_hash(cc::hash256::create(name.as_bytes())),
                     .version = bcache::version(1)};
         };
-        sgl::set_prelude_store({
-            .load = [store, key_of](cc::string_view key) -> cc::optional<cc::vector<byte>>
+        sgl::set_artifact_store({
+            .load = [store, key_of](cc::string_view name) -> cc::optional<cc::vector<byte>>
             {
-                auto const hit = passive_get(*store, key_of(key), k_sgl_lookup_patience_secs);
+                auto const hit = passive_get(*store, key_of(name), k_sgl_lookup_patience_secs);
                 if (!hit.has_value())
                     return {};
                 return cc::vector<byte>::create_copy_of(hit.value().data.span());
             },
             .save =
-                [store, key_of](cc::string_view key, cc::span<byte const> bytes)
+                [store, key_of](cc::string_view name, cc::span<byte const> bytes)
             {
-                // fire and forget: a lost write is a later process checking the prelude again
-                (void)store->put(key_of(key), cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes)),
+                // The first writer wins, so a stale entry is invalidated first; the store takes messages in order.
+                // Fire and forget: a lost write is a later process checking the layer again.
+                (void)store->invalidate(key_of(name));
+                (void)store->put(key_of(name), cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes)),
                                  {.compute_time_secs = 0.01});
             },
         });

@@ -6,7 +6,9 @@
 #include <clean-core/container/map.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/check/artifact.hh>
 #include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 #include <shaped-graphics-language/test/run_tests.hh>
 
@@ -136,7 +138,22 @@ layer_ptr layer_of(parsed_library& library, sgl::check::checked_prelude const& p
         return {};
 
     CC_RECORD_SCOPE("sgl.check_modules");
-    auto made = sgl::check::check_modules(prelude, library.files, program);
+    // the compilation model's artifacts: a layer an earlier process checked, in its set's slot of the host's store
+    auto name = cc::string("modules");
+    for (auto const& m : sgl::check::modules_to_layer(library.files, program))
+        name.appendf(".{}", m);
+    auto const key = sgl::impl::artifact_key();
+    auto made = cc::optional<sgl::check::checked_prelude>();
+    if (auto const bytes = sgl::impl::load_artifact_bytes(name); bytes.has_value())
+        made = sgl::check::load_modules_artifact(bytes.value(), key, prelude, library.files, program,
+                                                 sgl::builtins::default_registry());
+    if (!made.has_value())
+    {
+        made = sgl::check::check_modules(prelude, library.files, program);
+        if (made.has_value())
+            if (auto const bytes = sgl::check::save_artifact(made.value(), key); bytes.has_value())
+                sgl::impl::save_artifact_bytes(name, bytes.value());
+    }
     return library.checked.lock(
         [&](parsed_library::layers& l) -> layer_ptr
         {

@@ -1,3 +1,4 @@
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -11,13 +12,16 @@ using namespace cc::primitive_defines;
 // A new tool of the toolchain - a formatter, a linter, the language server - is one more file with one more COMMAND.
 int main(int argc, char** argv)
 {
-    // The checked prelude, kept in one file for every later run: a build of another compiler overwrites it rather than
-    // adding one, and its key is inside, so a file of another build or one cut short is a miss that checks instead.
-    auto const path = cc::format("{}/sgl-prelude.layer", cc::temp_directory_path());
-    sgl::set_prelude_store({
-        .load = [path](cc::string_view) -> cc::optional<cc::vector<byte>>
+    // Checked layers, one file per slot for every later run: a build of another compiler overwrites its slot rather than
+    // adding a file, and the key is inside, so a file of another build or one cut short is a miss that checks instead.
+    auto const path_of = [](cc::string_view name)
+    {
+        return cc::format("{}/sgl-{:016x}.layer", cc::temp_directory_path(), cc::hash128::create(name.as_bytes(), 0).low);
+    };
+    sgl::set_artifact_store({
+        .load = [path_of](cc::string_view name) -> cc::optional<cc::vector<byte>>
         {
-            auto opened = cc::file_read_stream_adapter::open(path);
+            auto opened = cc::file_read_stream_adapter::open(path_of(name));
             if (!opened.has_value())
                 return {};
             cc::read_stream stream = opened.value().stream();
@@ -27,9 +31,9 @@ int main(int argc, char** argv)
             return cc::move(bytes.value());
         },
         .save =
-            [path](cc::string_view, cc::span<byte const> bytes)
+            [path_of](cc::string_view name, cc::span<byte const> bytes)
         {
-            auto opened = cc::file_write_stream_adapter::create(path);
+            auto opened = cc::file_write_stream_adapter::create(path_of(name));
             if (!opened.has_value())
                 return;
             cc::write_stream stream = opened.value().stream();

@@ -205,14 +205,19 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    What it does not do is share a module between two sets that both reach it, which is what ids naming their layer would buy.
 3. **The prelude's artifact.** *Landed on 2026-11-08: the prelude's 5.8 ms check is a 0.68 ms load of 1.6 MB, in a release build.*
    `check::save_artifact` and `load_artifact` write and read the checker's whole state after the prelude, bodies included, under a host's key.
-   `sgl::set_prelude_store` is where a host keeps it: the `sgl` tool in one file of the temp directory, slib in its default persistent cache.
+   `sgl::set_artifact_store` is where a host keeps it: the `sgl` tool in a file of the temp directory, slib in its default persistent cache.
    In a fresh `sgl` process the load is 2.3 ms with the file's read; the prelude's parse, about 13 ms there, is what a process still pays.
 4. **The parse in the artifact.** *Tried on 2026-11-08 and not kept: reading a parse back costs what parsing it does.*
    A parse is some twenty times its source: the prelude's files took the artifact from 1.6 MB to 9.6 MB.
    In a fresh `sgl` process that file's read was 5.0 ms and its walk 3.6 ms, against about 1 ms to parse the two files beside `builtins.sgl`.
    `builtins.sgl` is most of the prelude, and the builtin registry parses it as it is built, 8.6 ms there, before any store is asked.
    What would cut the per-process parse is a faster parse or a smaller `builtins.sgl` ([epic-sgl-prelude-check-cost](../../issues/epic-sgl-prelude-check-cost.md)), not an artifact.
-5. **Module artifacts:** imports, relocation on load, and keys with early cutoff, kept by slib's persistent cache.
+5. **Module artifacts.** *A first form landed on 2026-11-08: the layer of one set of modules, the prelude's part included, as one artifact.*
+   Within one build the same modules in the same order make the same ids, so it needs neither imports nor relocation.
+   `check::load_modules_artifact` plans the program's modules as `check_modules` does and reads the layer back for them.
+   Its slot is the modules' names, so an edit to one overwrites the set's entry; a module's flat test trees are in it too.
+   shaped-viewer's tracer pipeline: its modules' layer is a 3.9 ms load against a 16 ms check, and a whole `sgl describe` fell from about 100 to 65 ms.
+   What it does not do is share one module between two sets, or cut a dependent off from an edit of a body: imports and relocation are those.
 6. **Option overlays**, so a compile that sets options continues from the artifacts too.
 7. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
 

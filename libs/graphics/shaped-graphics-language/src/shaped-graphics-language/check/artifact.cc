@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
+#include <clean-core/container/variant.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <shaped-graphics-language/check/artifact.hh>
@@ -355,8 +356,52 @@ struct archive
             p = nullptr;
     }
 
-    /// A flat tree is no artifact's yet: a layer holding one is not written.
-    void io(flat_entry_point&) { failed = true; }
+    /// Its alternative's position, then the alternative.
+    template <class... Ts>
+    void io(cc::variant<Ts...>& v)
+    {
+        auto index = i32(v.index());
+        raw(&index, sizeof(index));
+        if constexpr (!Writing)
+        {
+            if (failed || index < 0 || index >= i32(sizeof...(Ts)))
+            {
+                failed = true;
+                return;
+            }
+            emplace_at<0>(v, index);
+        }
+        v.visit([this](auto& alternative) { io(alternative); });
+    }
+
+    template <isize I, class... Ts>
+    static void emplace_at(cc::variant<Ts...>& v, i32 index)
+    {
+        if constexpr (I < isize(sizeof...(Ts)))
+        {
+            if (index == I)
+                (void)v.template emplace<I>();
+            else
+                emplace_at<I + 1>(v, index);
+        }
+    }
+
+    /// A flat tree's mint names what it took and what its own mint is, and none of what it points at.
+    /// Those are the names other mints took, which only an emitter going on from it reads, and a tree a layer holds is
+    /// a test's, which the interpreter runs and nothing emits; a mint read back points at nothing.
+    void io(name_mint& m)
+    {
+        io(m.taken);
+        io(m.index);
+        io(m.next_suffix);
+        if constexpr (!Writing)
+        {
+            m.parent = nullptr;
+            m.also_taken = nullptr;
+            m.also_taken_below = nullptr;
+            m.also_reserved = nullptr;
+        }
+    }
 
     template <class T>
     void io(T& v)
@@ -408,20 +453,10 @@ struct header
     u64 payload_size = 0;
     cc::hash128 payload;
 };
-} // namespace
 
-cc::optional<cc::vector<byte>> sgl::check::save_artifact(checked_prelude const& layer, cc::string_view key)
+/// The header followed by `payload`, which is what an artifact is.
+cc::vector<byte> framed(cc::span<byte const> payload, cc::string_view key, cc::span<cc::string_view const> sources)
 {
-    if (!layer._library_order.empty())
-        return {};
-    auto const sources = sources_of(layer._files);
-    auto payload = cc::vector<byte>();
-    auto a = archive<true>{.out = &payload, .sources = sources};
-    walk(a, const_cast<i32&>(layer._prelude_count), const_cast<resume_point&>(layer._resume),
-         const_cast<checker&>(*layer._state));
-    if (a.failed)
-        return {};
-
     auto h = header{};
     cc::memcpy(h.magic, k_magic, sizeof(k_magic));
     h.key_hash = cc::hash128::create(key.as_bytes(), 0).low;
@@ -430,11 +465,35 @@ cc::optional<cc::vector<byte>> sgl::check::save_artifact(checked_prelude const& 
     h.payload = cc::hash128::create(payload, h.payload_size);
     auto out = cc::vector<byte>();
     out.reserve(isize(sizeof(header)) + payload.size());
-    auto const* const head = reinterpret_cast<byte const*>(&h);
-    for (auto i = isize(0); i < isize(sizeof(header)); ++i)
-        out.push_back(head[i]);
+    out.push_back_range(cc::span<byte const>(reinterpret_cast<byte const*>(&h), isize(sizeof(header))));
     out.push_back_range(payload);
     return out;
+}
+
+/// Whether `bytes` are an artifact written under `key` for `sources`, whole and unchanged.
+bool is_framed(cc::span<byte const> bytes, cc::string_view key, cc::span<cc::string_view const> sources)
+{
+    if (bytes.size() < isize(sizeof(header)))
+        return false;
+    auto h = header{};
+    cc::memcpy(&h, bytes.data(), sizeof(header));
+    auto const payload = bytes.subspan({.offset = isize(sizeof(header)), .size = bytes.size() - isize(sizeof(header))});
+    return cc::memcmp(h.magic, k_magic, sizeof(k_magic)) == 0
+        && h.key_hash == cc::hash128::create(key.as_bytes(), 0).low && h.sources == sources_hash(sources)
+        && h.payload_size == u64(payload.size()) && h.payload == cc::hash128::create(payload, h.payload_size);
+}
+} // namespace
+
+cc::optional<cc::vector<byte>> sgl::check::save_artifact(checked_prelude const& layer, cc::string_view key)
+{
+    auto const sources = sources_of(layer._files);
+    auto payload = cc::vector<byte>();
+    auto a = archive<true>{.out = &payload, .sources = sources};
+    walk(a, const_cast<i32&>(layer._prelude_count), const_cast<resume_point&>(layer._resume),
+         const_cast<checker&>(*layer._state));
+    if (a.failed)
+        return {};
+    return framed(payload, key, sources);
 }
 
 cc::optional<checked_prelude> sgl::check::load_artifact(cc::span<byte const> bytes,
@@ -442,23 +501,52 @@ cc::optional<checked_prelude> sgl::check::load_artifact(cc::span<byte const> byt
                                                         cc::span<module_file const> prelude,
                                                         builtins::registry const& builtins)
 {
-    if (bytes.size() < isize(sizeof(header)))
-        return {};
-    auto h = header{};
-    cc::memcpy(&h, bytes.data(), sizeof(header));
-    auto const payload = bytes.subspan({.offset = isize(sizeof(header)), .size = bytes.size() - isize(sizeof(header))});
     auto const sources = sources_of(prelude);
-    if (cc::memcmp(h.magic, k_magic, sizeof(k_magic)) != 0 || h.key_hash != cc::hash128::create(key.as_bytes(), 0).low
-        || !(h.sources == sources_hash(sources)) || h.payload_size != u64(payload.size())
-        || !(h.payload == cc::hash128::create(payload, h.payload_size)))
+    if (!is_framed(bytes, key, sources))
         return {};
-
+    auto const payload = bytes.subspan({.offset = isize(sizeof(header)), .size = bytes.size() - isize(sizeof(header))});
     auto result = checked_prelude();
     result._files.push_back_range(prelude);
     result._state = cc::make_unique<checker>(checker{.files = {}, .builtins = builtins});
     auto a = archive<false>{.in = payload, .sources = sources, .texts = &result._texts, .registry = &builtins};
     walk(a, result._prelude_count, result._resume, *result._state);
-    if (a.failed || a.at != payload.size() || result._prelude_count != i32(prelude.size()))
+    // a layer of modules has more files than the prelude, and reads back only through `load_modules_artifact`
+    if (a.failed || a.at != payload.size() || result._prelude_count != i32(prelude.size())
+        || result._resume.files != i32(prelude.size()))
+        return {};
+    return result;
+}
+
+cc::optional<checked_prelude> sgl::check::load_modules_artifact(cc::span<byte const> bytes,
+                                                                cc::string_view key,
+                                                                checked_prelude const& prelude,
+                                                                cc::span<module_file const> library,
+                                                                module_file program,
+                                                                builtins::registry const& builtins)
+{
+    CC_ASSERT(prelude._library_order.empty(), "a layer of modules stands on the prelude's layer");
+    // what the program reaches, planned as `check_modules` plans it: the same files in the same order are the same ids
+    auto plan = plan_modules(library, program);
+    if (!may_layer(plan))
+        return {};
+    auto files = cc::vector<module_file>();
+    files.push_back_range(cc::span<module_file const>(prelude._files));
+    for (auto const i : plan.library_order)
+        files.push_back(library[i]);
+    auto const sources = sources_of(files);
+    if (!is_framed(bytes, key, sources))
+        return {};
+
+    auto const payload = bytes.subspan({.offset = isize(sizeof(header)), .size = bytes.size() - isize(sizeof(header))});
+    auto result = checked_prelude();
+    result._files = files;
+    result._library_order = plan.library_order;
+    result._modules = plan.modules;
+    result._state = cc::make_unique<checker>(checker{.files = {}, .builtins = builtins});
+    auto a = archive<false>{.in = payload, .sources = sources, .texts = &result._texts, .registry = &builtins};
+    walk(a, result._prelude_count, result._resume, *result._state);
+    if (a.failed || a.at != payload.size() || result._prelude_count != prelude._prelude_count
+        || result._resume.files != i32(files.size()))
         return {};
     return result;
 }
