@@ -566,8 +566,7 @@ void writer::instruction_of(u32 index)
         {
             auto const splat = _p.instructions[index_of(value_ref(operands[_splat_operand[index]]))];
             emit(_code, spv::VectorTimesScalar,
-                 {id_of(i.type), id, id_of_raw(operands[1 - _splat_operand[index]]),
-                  id_of_raw(_p.operands_of(splat)[0])});
+                 {id_of(i.type), id, id_of_raw(operands[1 - _splat_operand[index]]), id_of_raw(_p.operands_of(splat)[0])});
             return;
         }
         head(_code, rule.opcode, 3 + operands.size());
