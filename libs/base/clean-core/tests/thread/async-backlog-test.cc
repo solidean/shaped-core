@@ -522,6 +522,35 @@ cc::shared_async<cc::unit> fan_out_from_frame(cc::atomic<bool>* alive, cc::share
     co_await await_all_of(cc::span<cc::shared_async<cc::unit> const>(children));
 }
 
+/// The same fan-out, its children reaching into this frame, and holding this coroutine's own node so that they may.
+cc::shared_async<cc::unit> fan_out_holding_frame(cc::atomic<bool>* alive,
+                                                 cc::shared_ptr<fan_out_state> state,
+                                                 cc::atomic<int>* saw_frame)
+{
+    auto const probe = frame_probe(alive);
+    auto self = co_await cc::async_this_node();
+    auto children = cc::vector<cc::shared_async<cc::unit>>();
+    for (auto i = 0; i < 2; ++i)
+        children.push_back(cc::async_start(cc::make_async_lazy(
+            [state, self, alive, saw_frame]
+            {
+                state->entered.fetch_add(1);
+                // bounded only so that a test that never releases fails instead of hanging
+                auto const t0 = cc::current_time_steady_secs();
+                while (!state->release.load() && cc::current_time_steady_secs() - t0 < 10.0)
+                    cc::this_thread_yield();
+                if (alive->load())
+                    saw_frame->fetch_add(1);
+                state->finished.fetch_add(1);
+                return cc::unit{};
+            })));
+    self = {}; // the frame keeps none of itself across the suspension, or it could never be dropped
+    auto const t0 = cc::current_time_steady_secs();
+    while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    co_await await_all_of(cc::span<cc::shared_async<cc::unit> const>(children));
+}
+
 cc::shared_async<cc::unit> await_forever(cc::atomic<bool>* alive, cc::atomic<bool>* entered, cc::shared_async<int> never)
 {
     auto const probe = frame_probe(alive);
@@ -566,6 +595,45 @@ TEST("async backlog - a parked frame dropped while work below it runs is destroy
     while (cc::async_abandoned_work().outstanding_count() > before && cc::current_time_steady_secs() - t2 < 10.0)
         cc::this_thread_yield();
     CHECK(state->finished.load() == 2);
+    CHECK(cc::async_abandoned_work().outstanding_count() == before);
+}
+
+// Work that holds the coroutine's own node keeps its frame for as long as it runs, so it may reach into it.
+// Once that work is done the frame goes, a drop still a drop: the coroutine runs no further than it had.
+TEST("async backlog - children holding async_this_node keep their dropped frame alive while they run, then let it go",
+     nx::config::no_scheduler,
+     exclusive())
+{
+    cc::async_thread_pool pool(3);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+
+    auto const before = cc::async_abandoned_work().outstanding_count();
+    auto alive = cc::atomic<bool>(true);
+    auto saw_frame = cc::atomic<int>(0);
+    auto const state = cc::make_shared<fan_out_state>();
+    auto outer = cc::make_async_scheduled([](cc::unit) { return 1; }, fan_out_holding_frame(&alive, state, &saw_frame));
+    CC_DEFER { state->release.store(true); };
+    auto const t0 = cc::current_time_steady_secs();
+    while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    REQUIRE(state->entered.load() == 2);
+
+    // dropped while they run: a premature teardown has time to show, and does not happen
+    outer = {};
+    auto const dropped = cc::current_time_steady_secs();
+    while (alive.load() && cc::current_time_steady_secs() - dropped < 0.2)
+        cc::this_thread_yield();
+    CHECK(alive.load());
+
+    state->release.store(true);
+    auto const t1 = cc::current_time_steady_secs();
+    while (alive.load() && cc::current_time_steady_secs() - t1 < 10.0)
+        cc::this_thread_yield();
+    CHECK(!alive.load());
+    CHECK(saw_frame.load() == 2);
+    auto const t2 = cc::current_time_steady_secs();
+    while (cc::async_abandoned_work().outstanding_count() > before && cc::current_time_steady_secs() - t2 < 10.0)
+        cc::this_thread_yield();
     CHECK(cc::async_abandoned_work().outstanding_count() == before);
 }
 

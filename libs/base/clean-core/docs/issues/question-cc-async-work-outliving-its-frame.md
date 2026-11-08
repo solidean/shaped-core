@@ -69,6 +69,9 @@ The never-resolved teardown walked the parked node's deps, through parked deps u
 - The cycle it makes is the risk: the frame holds the child, the child holds the frame, and a child that never runs, queued in a dead pool, keeps both alive.
   Breaking it needs dead schedulers to resolve their unrun nodes as cancelled, which releases their captures, a defined meaning for "dropped, not run".
 - Open: what the extra reference costs where the flag is set, where in the node it lives without growing every node, and whether cancel-on-pool-death is wanted on its own merits.
+- **Its manual form exists since 2026-11-08:** `co_await cc::async_this_node()` gives a coroutine a strong handle to its own node, which its children capture.
+  A consumer's long export coroutine uses it, since moving its many phases' locals into shared state was the larger change; the dead-pool leak is accepted there.
+  The flag would be that, automatic, and with the cycle broken.
 
 ### 5. Cooperative cancellation that joins
 
@@ -86,7 +89,7 @@ The never-resolved teardown walked the parked node's deps, through parked deps u
 
 ## Recommendation, as of writing
 
-- **Now:** keep 2, with the docs, and add 6: the lint and the debug diagnostic first, both cheap.
+- **Now:** keep 2, with the docs and with `async_this_node` for frames that cannot give their state away, and add 6: the lint and the debug diagnostic first, both cheap.
 - **Next:** 3, a fan-out primitive that owns its state, since the parallel-helper shape is where nearly every occurrence so far came from.
 - **Evaluate:** 4, opt-in scoped children, together with cancel-on-pool-death, measured on the node layout before anything else.
 - **Rejected:** 1 as a general mechanism, for the reasons above; and 5 as a default.
