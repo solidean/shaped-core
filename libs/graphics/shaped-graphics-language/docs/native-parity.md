@@ -109,21 +109,21 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 
 | entry | target | before | after |
 |---|---|---:|---:|
-| à-trous `main_cs` | spirv | 1.32 | 0.98 |
-| viewer `path_trace` | spirv | 63,248 bytes against 42,744 | 1.03 |
+| à-trous `main_cs` | spirv | 1.32 | 0.93 |
+| viewer `path_trace` | spirv | 63,248 bytes against 42,744 | 0.90 |
 | viewer `path_trace` | dxil | 1.25 | 0.98 |
 | viewer `path_miss` | dxil | 1.99 | 1.04 |
 | wavefront `extend` | dxil | 1.21 | 1.04 |
 | wavefront `segment` | dxil | 1.42 | 0.99 |
 | wavefront `connect` | dxil | 1.22 | 1.05 |
-| wavefront `connect` | spirv | 1.14 | 1.05 |
+| wavefront `connect` | spirv | 1.14 | 1.01 |
 | a material's shade kernel | dxil | 1.96 | 1.03 |
-| a material's shade kernel | spirv | 1.88 | 1.03 |
+| a material's shade kernel | spirv | 1.88 | 0.99 |
 | raster `environment_ps` | dxil | 1.96 | 1.02 |
 | raster `cull_second` | dxil | 1.19 | 1.16 |
 | `bc7_cs` | dxil | 1.49 | 1.23 |
 | bloom `first_cs` | dxil | 1.21 | 1.03 |
-| `bc3_cs` | spirv | 1.30 | 1.16 |
+| `bc3_cs` | spirv | 1.30 | 1.07 |
 
 The shade kernel is generated per material at run time; the row is the cornell box's `pbr`, whose committed copy `table` holds.
 Every other entry stands within about 10% of DXC's operations, and most below it.
@@ -181,6 +181,11 @@ That is the container rather than the code: DXC's side is stripped of reflection
   The structured `simplify` kept every block no walk reached as a label and `OpUnreachable`, 212 of them in the shade kernel; it now keeps only a merge or continue target a header that stays names.
   `v * s` was a splat and a vector `OpFMul` where DXC writes `OpVectorTimesScalar`, which the writer now does, leaving out a splat nothing else reads.
   The shade kernel's SPIR-V went from 1.11 to 1.03 of DXC's, and the path tracer's from 1.06 to 1.03.
+* **A vector crossing nested merges stayed lanes at the inner one.**
+  `regroup_lanes` found a group only from a `construct` reading phis, and an inner merge's lane phis are read by the outer merge's alone.
+  So the shade kernel kept 602 scalar float phis against DXC's 154, beside DXC's 143 of `float3` and 51 of `float4`.
+  A way whose lanes are another merge's phis now makes those a group first, so the vector is one phi at every merge it crosses.
+  The shade kernel's SPIR-V went from 1.03 to 0.99 of DXC's, the path tracer's from 1.03 to 0.90, and bc7's from 0.80 to 0.70.
 
 ## What remains
 

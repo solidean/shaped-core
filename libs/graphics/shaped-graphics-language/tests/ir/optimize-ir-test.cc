@@ -400,6 +400,51 @@ TEST("sgl ir flatten_branches structured - a phi of a pointer keeps its branch, 
     CHECK(b.p.blocks[0].merges == merge_kind::selection);
 }
 
+// ---- regroup_lanes
+
+TEST("sgl ir regroup_lanes - a vector crossing nested merges is one phi at each, the inner one found through the outer")
+{
+    // only the outer merge's phis reach a `construct`; the inner merge's are read by the outer's alone
+    auto b = program_builder();
+    b.blocks(6);
+    b.open(0);
+    b.select_merge(0, 5);
+    auto const x = unknown(b);
+    auto const whole = b.add(op::construct, b.float2_type, {u32(x), u32(unknown(b))});
+    auto const lane0 = b.add(op::extract, b.float_type, {u32(whole), 0});
+    auto const lane1 = b.add(op::extract, b.float_type, {u32(whole), 1});
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 4);
+    b.open(1);
+    b.select_merge(1, 3);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.one)}), 2, 3);
+    b.open(2);
+    auto const moved = b.add(op::fadd, b.float_type, {u32(lane0), u32(b.one)});
+    b.branch(3);
+    b.open(3);
+    auto const inner0 = b.add(op::phi, b.float_type, {u32(moved), 2, u32(lane0), 1});
+    auto const inner1 = b.add(op::phi, b.float_type, {u32(lane1), 2, u32(lane1), 1});
+    b.branch(5);
+    b.open(4);
+    b.branch(5);
+    b.open(5);
+    auto const outer0 = b.add(op::phi, b.float_type, {u32(inner0), 3, u32(lane0), 4});
+    auto const outer1 = b.add(op::phi, b.float_type, {u32(inner1), 3, u32(lane1), 4});
+    auto const rebuilt = b.add(op::construct, b.float2_type, {u32(outer0), u32(outer1)});
+    b.keep(b.add(op::extract, b.float_type, {u32(rebuilt), 1}));
+    b.finish();
+    require_whole(b.p, control_flow::structured);
+    regroup_lanes(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    auto vector_phis = 0;
+    auto lane_phis = 0;
+    for (auto const& i : b.p.instructions)
+        if (i.code == op::phi)
+            (i.type == b.float2_type ? vector_phis : lane_phis) += 1;
+    CHECK(vector_phis == 2);
+    CHECK(lane_phis == 0);
+}
+
 // ---- chain_sums
 
 TEST("sgl ir chain_sums - a total meets each product alone, and each addition keeps its statement")

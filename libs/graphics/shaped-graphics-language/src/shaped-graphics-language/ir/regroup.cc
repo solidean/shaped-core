@@ -7,6 +7,7 @@ using namespace sgl::ir;
 // SSA construction promotes a local scalar by scalar, so a vector crosses a merge as one phi per lane.
 // That is DXIL's own shape, and a SPIR-V module would rebuild the vector after every merge and take it apart before.
 // A group here is the phis a `construct` reads lane by lane, and each way in must hand over one vector whole.
+// A way that hands over the lanes of another merge's phis is that merge's group first, so nested merges regroup as one.
 
 namespace
 {
@@ -22,6 +23,7 @@ public:
         auto const count = _p.instructions.size();
         _replaced = cc::vector<u32>::create_filled(count, k_nothing);
         _block_of = cc::vector<u32>::create_filled(count, k_nothing);
+        _in_progress = cc::vector<bool>::create_filled(count, false);
         _heads = cc::vector<cc::vector<u32>>::create_defaulted(_p.blocks.size());
         _tails = cc::vector<cc::vector<u32>>::create_defaulted(_p.blocks.size());
         _lanes = cc::vector<cc::vector<u32>>::create_defaulted(_p.blocks.size());
@@ -53,7 +55,7 @@ private:
         auto from_one = true;
         for (auto k = isize(0); k < phis.size(); ++k)
         {
-            auto const lane = _p.operands_of(_p.instructions[phis[k]])[2 * edge];
+            auto const lane = current(_p.operands_of(_p.instructions[phis[k]])[2 * edge]);
             self = self && lane == phis[k];
             if (!is_operation(value_ref(lane)) || _p.instructions[lane].code != op::extract)
             {
@@ -78,17 +80,22 @@ private:
 
     [[nodiscard]] bool regroup(u32 built)
     {
-        // copies, since the tables grow below
         auto const c = _p.instructions[built];
-        auto const whole = _p.at(c.type);
-        auto const phis = cc::vector<u32>::create_copy_of(_p.operands_of(c));
+        return regroup_phis(cc::vector<u32>::create_copy_of(_p.operands_of(c)), c.type);
+    }
+
+    /// Makes `phis` one phi of `vector_type`, where each is a phi of one block, a lane in order.
+    [[nodiscard]] bool regroup_phis(cc::vector<u32> const& phis, type_ref vector_type)
+    {
+        auto const whole = _p.at(vector_type);
         if (whole.kind != type_kind::vector || isize(whole.count) != phis.size() || phis.size() < 2)
             return false;
         auto block = k_nothing;
         for (auto k = isize(0); k < phis.size(); ++k)
         {
             auto const v = value_ref(phis[k]);
-            if (!is_operation(v) || _p.instructions[phis[k]].code != op::phi || _replaced[phis[k]] != k_nothing)
+            if (!is_operation(v) || phis[k] >= _replaced.size() || _p.instructions[phis[k]].code != op::phi
+                || _replaced[phis[k]] != k_nothing || _in_progress[phis[k]])
                 return false;
             if (_p.instructions[phis[k]].type != whole.element)
                 return false;
@@ -110,12 +117,29 @@ private:
                 if (other[e] != first[e])
                     return false;
         }
+        // a way whose lanes are another merge's phis hands that merge's vector over, once those are a group too
+        for (auto const k : phis)
+            _in_progress[k] = true;
+        for (auto e = isize(0); e < first.size() / 2; ++e)
+        {
+            auto inner = cc::vector<u32>();
+            for (auto const k : phis)
+                inner.push_back(current(_p.operands_of(_p.instructions[k])[2 * e]));
+            auto is_self = true;
+            for (auto k = isize(0); k < phis.size(); ++k)
+                is_self = is_self && inner[k] == phis[k];
+            if (!is_self)
+                (void)regroup_phis(inner, vector_type);
+        }
+        for (auto const k : phis)
+            _in_progress[k] = false;
+
         // a way that hands a vector over pays for building it on the others; lanes alone everywhere are better left lanes
         auto ways = cc::vector<handed>();
         auto is_whole_once = false;
         for (auto e = isize(0); e < first.size() / 2; ++e)
         {
-            ways.push_back(whole_of(phis, e, c.type));
+            ways.push_back(whole_of(phis, e, vector_type));
             is_whole_once = is_whole_once || !ways.back().is_built;
         }
         if (!is_whole_once)
@@ -127,7 +151,7 @@ private:
         auto const operands_first = u32(_p.operands.size());
         _p.instructions.push_back({.code = op::phi,
                                    .guarantee = lead.guarantee,
-                                   .type = c.type,
+                                   .type = vector_type,
                                    .first = operands_first,
                                    .count = u32(2 * ways.size()),
                                    .statement = lead.statement});
@@ -149,7 +173,7 @@ private:
                 }
                 _p.instructions.push_back({.code = op::construct,
                                            .guarantee = lead.guarantee,
-                                           .type = c.type,
+                                           .type = vector_type,
                                            .first = parts,
                                            .count = u32(phis.size()),
                                            .statement = lead.statement});
@@ -249,6 +273,8 @@ private:
     /// Parallel to the instructions this pass found: the lane that replaces a phi now part of a group.
     cc::vector<u32> _replaced;
     cc::vector<u32> _block_of;
+    /// The phis of a group being made, which a group it reaches through its ways may not take.
+    cc::vector<bool> _in_progress;
     /// Per block: the groups' phis it opens with, and the constants' constructs its ways out need.
     cc::vector<cc::vector<u32>> _heads;
     cc::vector<cc::vector<u32>> _tails;

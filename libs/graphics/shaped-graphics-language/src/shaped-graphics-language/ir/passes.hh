@@ -37,6 +37,7 @@ void flatten_branches(program& p);
 
 /// Gathers the phis a `construct` reads lane by lane back into one phi of the vector, where each way in hands over the
 /// lanes of one vector, the phi itself, or constants, which become a construct ahead of that way's branch.
+/// A way whose lanes are the phis of another merge makes those a group first, so nested merges regroup as one.
 ///
 /// SSA construction promotes a vector scalar by scalar, which DXIL wants and SPIR-V does not.
 /// A lane's phi becomes an `extract` of the new phi, and keeps its statement and guarantee there.

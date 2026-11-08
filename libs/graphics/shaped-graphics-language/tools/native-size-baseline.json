@@ -1,22 +1,22 @@
 {
  "libs/graphics/shaped-rendering/shaders/atrous_denoise.sgl::main_cs": {
-  "spirv": 341,
+  "spirv": 324,
   "dxil": 290
  },
  "libs/graphics/shaped-rendering/shaders/bloom.sgl::down_cs": {
-  "spirv": 85,
+  "spirv": 78,
   "dxil": 65
  },
  "libs/graphics/shaped-rendering/shaders/bloom.sgl::finish_cs": {
-  "spirv": 166,
+  "spirv": 148,
   "dxil": 138
  },
  "libs/graphics/shaped-rendering/shaders/bloom.sgl::first_cs": {
-  "spirv": 146,
+  "spirv": 128,
   "dxil": 104
  },
  "libs/graphics/shaped-rendering/shaders/bloom.sgl::up_cs": {
-  "spirv": 103,
+  "spirv": 96,
   "dxil": 99
  },
  "libs/graphics/shaped-rendering/shaders/box_filter_mipmap.sgl::main_1d_array_cs": {
@@ -40,11 +40,11 @@
   "dxil": 108
  },
  "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc1_cs": {
-  "spirv": 1046,
+  "spirv": 965,
   "dxil": 1252
  },
  "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc3_cs": {
-  "spirv": 1349,
+  "spirv": 1282,
   "dxil": 1595
  },
  "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc4_cs": {
@@ -56,7 +56,7 @@
   "dxil": 1619
  },
  "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc7_cs": {
-  "spirv": 6176,
+  "spirv": 5390,
   "dxil": 7847
  },
  "libs/graphics/shaped-rendering/shaders/exposure_meter.sgl::main_cs": {
@@ -76,7 +76,7 @@
   "dxil": 42
  },
  "libs/graphics/shaped-rendering/shaders/nn_conv.sgl::main_cs": {
-  "spirv": 807,
+  "spirv": 777,
   "dxil": 666
  },
  "libs/graphics/shaped-rendering/shaders/nn_pool.sgl::main_cs": {
@@ -108,7 +108,7 @@
   "dxil": 184
  },
  "libs/graphics/shaped-rendering/shaders/svgf.sgl::variance_cs": {
-  "spirv": 178,
+  "spirv": 171,
   "dxil": 140
  },
  "libs/graphics/shaped-viewer/shaders/raster_cull.sgl::cull": {
@@ -160,7 +160,7 @@
   "dxil": 421
  },
  "libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl::path_trace": {
-  "spirv": 1859,
+  "spirv": 1624,
   "dxil": 1984
  },
  "libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl::shadow_miss": {
@@ -184,11 +184,11 @@
   "dxil": 516
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::connect": {
-  "spirv": 1481,
+  "spirv": 1436,
   "dxil": 1045
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::extend": {
-  "spirv": 2260,
+  "spirv": 2219,
   "dxil": 1543
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::finalize": {
@@ -204,7 +204,7 @@
   "dxil": 223
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::segment": {
-  "spirv": 1496,
+  "spirv": 1382,
   "dxil": 1662
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::sort": {
@@ -212,7 +212,7 @@
   "dxil": 40
  },
  "libs/graphics/shaped-viewer/tests/data/pbr_shade_kernel.sgl::sv_shade": {
-  "spirv": 7395,
+  "spirv": 7046,
   "dxil": 6284
  }
 }
