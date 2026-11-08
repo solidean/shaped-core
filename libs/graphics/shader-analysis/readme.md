@@ -33,7 +33,7 @@ A driver allocates and schedules better or worse than that, but two modules of o
 ## Formats
 
 - **SPIR-V**, through `babel::spirv`; its loops and selections are its merges.
-- **DXIL**, through `babel::dxil`, `babel::llvm` and `babel::llvm37`; a `dx.op` call is the kind its operation class is, and a loop an edge back to a block that dominates its source.
+- **DXIL**, through `babel::dxil`, `babel::llvm` and `babel::llvm37`; a `dx.op` call is the kind its operation class is, and a loop a header that edges back from the blocks it dominates reach, however many there are.
 
 `shan::analyze_binary` takes either and tells them apart by their first bytes.
 

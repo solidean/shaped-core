@@ -55,6 +55,8 @@ cc::optional<cc::string> sgl::ir::compile_spirv(emit::impl::plan const& plan, pr
     assert_whole(p, control_flow::structured, "simplify after regroup_lanes");
     share_common_values(p);
     assert_whole(p, control_flow::structured, "share_common_values");
+    hoist_common_chains(p);
+    assert_whole(p, control_flow::structured, "hoist_common_chains");
     remove_unused(p);
     assert_whole(p, control_flow::structured, "remove_unused");
     flatten_branches(p, control_flow::structured);
@@ -73,6 +75,8 @@ cc::optional<cc::string> sgl::ir::compile_dxil(emit::impl::plan const& plan, pro
     assert_whole(p, control_flow::unstructured, "simplify");
     share_common_values(p);
     assert_whole(p, control_flow::unstructured, "share_common_values");
+    hoist_common_chains(p);
+    assert_whole(p, control_flow::unstructured, "hoist_common_chains");
     remove_unused(p);
     assert_whole(p, control_flow::unstructured, "remove_unused");
     flatten_branches(p);

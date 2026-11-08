@@ -457,7 +457,8 @@ using babel::llvm37::type_kind;
     for (auto const& loop : impl::natural_loops(g))
         g.blocks[loop.header].trips = trips_of(m, b, loop);
     impl::measure(g, f);
-    f.loops = impl::back_edges(g);
+    // a loop is its header, however many `continue`s branch back to it
+    f.loops = i32(impl::natural_loops(g).size());
     return f;
 }
 } // namespace

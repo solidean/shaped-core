@@ -86,7 +86,7 @@ namespace shan
 /// The metrics of every function body of a DXIL module.
 /// A `dx.op` call is the kind its operation class is: `rawBufferLoad` a load, `unary` and `dot3` extended,
 /// `createHandle` and `annotateHandle` an address; an `llvm.*` intrinsic is a declaration.
-/// A selection is a conditional branch or a switch, and a loop an edge back to a block dominating its source.
+/// A selection is a conditional branch or a switch, and a loop a block that edges back from blocks it dominates reach.
 [[nodiscard]] cc::result<module_metrics> analyze(babel::llvm37::module const& m);
 
 /// A SPIR-V module or a DXIL container, told apart by its first bytes, read and analyzed.
