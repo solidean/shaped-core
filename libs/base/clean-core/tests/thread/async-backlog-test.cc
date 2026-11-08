@@ -470,4 +470,211 @@ TEST("async backlog - settled waits for a node dropped unresolved to finish its 
     CHECK(stage.load() == 2);
     CHECK(backlog.outstanding_count() == 0);
 }
+
+namespace
+{
+/// Clears `alive` when the frame it lives in is destroyed, so a test can see when that happens.
+struct frame_probe
+{
+    cc::atomic<bool>* alive = nullptr;
+
+    explicit frame_probe(cc::atomic<bool>* a) : alive(a) {}
+    frame_probe(frame_probe const&) = delete;
+    frame_probe& operator=(frame_probe const&) = delete;
+    ~frame_probe() { alive->store(false); }
+};
+
+/// What a fan-out's children share, owned by them rather than by the frame that started them.
+struct fan_out_state
+{
+    cc::atomic<int> entered = {0};
+    cc::atomic<bool> release = {false};
+    cc::atomic<int> finished = {0};
+};
+
+cc::shared_async<cc::unit> await_all_of(cc::span<cc::shared_async<cc::unit> const> work)
+{
+    co_await cc::async_all(work);
+}
+
+/// A fan-out two levels below a frame: this frame awaits a coroutine that awaits the children.
+/// Each child holds the state it writes, so it is safe whatever becomes of this frame.
+cc::shared_async<cc::unit> fan_out_from_frame(cc::atomic<bool>* alive, cc::shared_ptr<fan_out_state> state)
+{
+    auto const probe = frame_probe(alive);
+    auto children = cc::vector<cc::shared_async<cc::unit>>();
+    for (auto i = 0; i < 2; ++i)
+        children.push_back(cc::async_start(cc::make_async_lazy(
+            [state]
+            {
+                state->entered.fetch_add(1);
+                // bounded only so that a test that never releases fails instead of hanging
+                auto const t0 = cc::current_time_steady_secs();
+                while (!state->release.load() && cc::current_time_steady_secs() - t0 < 10.0)
+                    cc::this_thread_yield();
+                state->finished.fetch_add(1);
+                return cc::unit{};
+            })));
+    // running on the pool before they are awaited, so none is driven inline here and the frames above them park
+    auto const t0 = cc::current_time_steady_secs();
+    while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    co_await await_all_of(cc::span<cc::shared_async<cc::unit> const>(children));
+}
+
+/// Awaits `work`, holding `keep` until it resolves: it reads `work`, which may live in the frame `keep` holds.
+cc::shared_async<cc::unit> await_all_holding(cc::span<cc::shared_async<cc::unit> const> work, cc::async_node_ptr keep)
+{
+    co_await cc::async_all(work);
+    (void)keep;
+}
+
+/// The same fan-out, its children reaching into this frame, and holding this coroutine's own node so that they may.
+/// The coroutine awaiting them reads this frame's `children` after them, so it holds the node as well.
+cc::shared_async<cc::unit> fan_out_holding_frame(cc::atomic<bool>* alive,
+                                                 cc::shared_ptr<fan_out_state> state,
+                                                 cc::atomic<int>* saw_frame)
+{
+    auto const probe = frame_probe(alive);
+    auto self = co_await cc::async_this_node();
+    auto children = cc::vector<cc::shared_async<cc::unit>>();
+    for (auto i = 0; i < 2; ++i)
+        children.push_back(cc::async_start(cc::make_async_lazy(
+            [state, self, alive, saw_frame]
+            {
+                state->entered.fetch_add(1);
+                // bounded only so that a test that never releases fails instead of hanging
+                auto const t0 = cc::current_time_steady_secs();
+                while (!state->release.load() && cc::current_time_steady_secs() - t0 < 10.0)
+                    cc::this_thread_yield();
+                if (alive->load())
+                    saw_frame->fetch_add(1);
+                state->finished.fetch_add(1);
+                return cc::unit{};
+            })));
+    auto const t0 = cc::current_time_steady_secs();
+    while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    // moved into the awaiting coroutine, so this frame keeps none of itself across the suspension
+    auto all = await_all_holding(cc::span<cc::shared_async<cc::unit> const>(children), cc::move(self));
+    co_await all;
+}
+
+cc::shared_async<cc::unit> await_forever(cc::atomic<bool>* alive, cc::atomic<bool>* entered, cc::shared_async<int> never)
+{
+    auto const probe = frame_probe(alive);
+    entered->store(true);
+    (void)(co_await never);
+}
+} // namespace
+
+// The contract a fan-out must be written to: a parked frame dropped unresolved is destroyed at once, and the work below
+// it runs on, abandoned, so that work must own everything it touches and never reach into the frame.
+// Pinned 2026-11-08, after a consumer's parallel helper whose children wrote through references to its frame's locals
+// was found under ASan as a double free; see "Work that outlives its frame" in libs/base/clean-core/docs/systems/async.md.
+TEST("async backlog - a parked frame dropped while work below it runs is destroyed at once, so that work must own its "
+     "state",
+     nx::config::no_scheduler,
+     exclusive())
+{
+    cc::async_thread_pool pool(3);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+
+    auto const before = cc::async_abandoned_work().outstanding_count();
+    auto alive = cc::atomic<bool>(true);
+    auto const state = cc::make_shared<fan_out_state>();
+    // the parent is a scheduled node's argument, so its last handle goes when that node is dropped unresolved
+    auto outer = cc::make_async_scheduled([](cc::unit) { return 1; }, fan_out_from_frame(&alive, state));
+    CC_DEFER
+    {
+        state->release.store(true);
+    };
+    auto const t0 = cc::current_time_steady_secs();
+    while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    REQUIRE(state->entered.load() == 2);
+
+    // the frame goes with the drop, once the poller lets go, while both children still run
+    outer = {};
+    auto const t1 = cc::current_time_steady_secs();
+    while (alive.load() && cc::current_time_steady_secs() - t1 < 10.0)
+        cc::this_thread_yield();
+    CHECK(!alive.load());
+    CHECK(state->finished.load() == 0);
+
+    // they finish on what they own, and only the abandoned work still knew of them
+    state->release.store(true);
+    auto const t2 = cc::current_time_steady_secs();
+    while ((state->finished.load() < 2 || cc::async_abandoned_work().outstanding_count() > before)
+           && cc::current_time_steady_secs() - t2 < 10.0)
+        cc::this_thread_yield();
+    CHECK(state->finished.load() == 2);
+    CHECK(cc::async_abandoned_work().outstanding_count() == before);
+}
+
+// Work that holds the coroutine's own node keeps its frame for as long as it runs, so it may reach into it.
+// Once that work is done the frame goes, a drop still a drop: the coroutine runs no further than it had.
+TEST("async backlog - children holding async_this_node keep their dropped frame alive while they run, then let it go",
+     nx::config::no_scheduler,
+     exclusive())
+{
+    cc::async_thread_pool pool(3);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+
+    auto const before = cc::async_abandoned_work().outstanding_count();
+    auto alive = cc::atomic<bool>(true);
+    auto saw_frame = cc::atomic<int>(0);
+    auto const state = cc::make_shared<fan_out_state>();
+    auto outer = cc::make_async_scheduled([](cc::unit) { return 1; }, fan_out_holding_frame(&alive, state, &saw_frame));
+    CC_DEFER
+    {
+        state->release.store(true);
+    };
+    auto const t0 = cc::current_time_steady_secs();
+    while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    REQUIRE(state->entered.load() == 2);
+
+    // dropped while they run: a premature teardown has time to show, and does not happen
+    outer = {};
+    auto const dropped = cc::current_time_steady_secs();
+    while (alive.load() && cc::current_time_steady_secs() - dropped < 0.2)
+        cc::this_thread_yield();
+    CHECK(alive.load());
+
+    state->release.store(true);
+    auto const t1 = cc::current_time_steady_secs();
+    while (alive.load() && cc::current_time_steady_secs() - t1 < 10.0)
+        cc::this_thread_yield();
+    CHECK(!alive.load());
+    CHECK(saw_frame.load() == 2);
+    auto const t2 = cc::current_time_steady_secs();
+    while (cc::async_abandoned_work().outstanding_count() > before && cc::current_time_steady_secs() - t2 < 10.0)
+        cc::this_thread_yield();
+    CHECK(cc::async_abandoned_work().outstanding_count() == before);
+}
+
+// What it awaits runs nowhere, and its frame is torn down at once.
+TEST("async backlog - a parked frame whose work runs nowhere is torn down at once", nx::config::no_scheduler, exclusive())
+{
+    cc::async_thread_pool pool(2);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+
+    auto alive = cc::atomic<bool>(true);
+    auto entered = cc::atomic<bool>(false);
+    auto const never = cc::make_async_manual<int>();
+    auto parent = cc::async_start(await_forever(&alive, &entered, never));
+    auto const t0 = cc::current_time_steady_secs();
+    while (!entered.load() && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    REQUIRE(entered.load());
+
+    // dropped parked, or dropped running and parked a moment later: either way torn down, without the manual node resolving
+    parent = {};
+    auto const t1 = cc::current_time_steady_secs();
+    while (alive.load() && cc::current_time_steady_secs() - t1 < 10.0)
+        cc::this_thread_yield();
+    CHECK(!alive.load());
+    never->push_value(1);
+}
 #endif

@@ -918,7 +918,35 @@ A backlog answers "is it done", not "whose is it": work it tracks still carries 
 `cc::async_all` returns on its first failed member, and the members still running go there.
 So do the scheduled or running deps of a parked node torn down because its last handle dropped.
 Both are cold paths: a successful `async_all`, a completion and a poll never touch it.
-A component whose teardown must know that nothing it started still runs settles it after its own backlog, since abandoned work is otherwise awaited by nobody.
+
+### Work that outlives its frame
+
+**A parked frame dropped unresolved is destroyed at once, and the work below it runs on.**
+Its scheduled and running deps go to `cc::async_abandoned_work()`, and a parked dep is torn down in turn, so "below" reaches as deep as the fan-out goes.
+Nothing waits for that work before the frame's locals are destroyed: their memory is gone while the work may still be writing it.
+
+**So work a frame starts must own everything it touches**, never reach into the frame by reference.
+The trap is a parallel helper written as a lambda coroutine: `[&]` captures, children capturing `&f` or `&results`, a vector of per-task outputs the children index.
+It is correct exactly as long as the frame is awaited to completion.
+It turns into a use-after-free the first time an awaiter drops it, as a cancellation, a cache eviction or a prewarm nobody reads does.
+What shows is a crash or a double free in the children, far from the drop; ASan finds it at once, and a leftover-work report in a test is often its only other trace.
+
+The safe shapes, by preference:
+
+* **Share the state:** what the children read and write lives in a `cc::shared_ptr` that the frame and every child hold, so the last of them frees it.
+* **Return, don't write back:** each child resolves to its own result, and the frame gathers them after `async_all`.
+* **Own nothing the frame owns:** a child that reads only values it captured by copy is safe by construction.
+* **Hold the frame:** where a helper's children must reach into its frame, as a long coroutine's phases do, each child captures `co_await cc::async_this_node()`.
+  That strong handle to the coroutine's own node keeps its frame while they run, and lets it go when the last of them is done, so a drop still ends the work there.
+  Whatever reads the frame after the children holds it too, the coroutine that awaits them first: its `async_all` reads a span of handles the frame owns.
+  The frame itself must not keep that handle across a suspension, or the node holds itself alive: move it into the children and that awaiting coroutine's parameter.
+  A pool destroyed with such children still queued leaks the frame, since the child holds it and it holds the child; a leak, never a use-after-free.
+
+[async-backlog-test.cc](../../tests/thread/async-backlog-test.cc) pins the contract: the frame dies with the drop, and children holding their own state finish on it.
+It pins `async_this_node` too: children holding it keep the dropped frame for as long as they run, and no longer.
+Keeping a dropped frame alive until its work settles was tried and taken back, 2026-11-08.
+It waited on work that may never run, in a pool destroyed with work still queued, and so leaked frames instead.
+The open question is [question-cc-async-work-outliving-its-frame](../issues/question-cc-async-work-outliving-its-frame.md).
 
 ## Ambient context
 

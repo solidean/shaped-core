@@ -565,6 +565,25 @@ struct async_awaiter_yield
     void await_resume() const {}
 };
 
+/// The running coroutine's own node, as a strong handle, without suspending — `co_await cc::async_this_node()`.
+struct async_awaiter_this_node
+{
+    async_node_ptr node;
+
+    [[nodiscard]] bool await_ready() const { return false; }
+
+    template <class P>
+    bool await_suspend(std::coroutine_handle<P> h)
+    {
+        CC_ASSERT(h.promise().ctx != nullptr, "co_await outside of a compute step");
+        // empty where its owners are letting it go just now; running, it is not torn down under the step either way
+        node = async_node_weak::from_alive(h.promise().ctx->current).lock();
+        return false; // never suspends
+    }
+
+    [[nodiscard]] async_node_ptr await_resume() { return cc::move(node); }
+};
+
 /// Rehome the coroutine's node and continue there — `co_await cc::async_resume_on(h)`.
 struct async_awaiter_resume_on
 {
@@ -733,6 +752,16 @@ shared_async<T, E> async_start(shared_async<T, E> h)
 /// What it does buy is narrow and real: the node becomes stealable by a peer, and work pushed after it runs first.
 /// It is not a way to wait for something external — that is a manual node, pushed by whatever completes it.
 [[nodiscard]] inline impl::async_awaiter_yield async_yield()
+{
+    return {};
+}
+
+/// A strong handle to this coroutine's own node, for work it starts that reaches into its frame.
+/// Held by that work, it keeps the frame alive while the work runs, so a drop of the parked coroutine cannot free locals
+/// the work still writes; see "Work that outlives its frame" in libs/base/clean-core/docs/systems/async.md.
+/// Never keep it in the frame across a suspension: the node would then hold itself alive.
+/// Hand it to the work, and to the inner coroutine that awaits the work, since that one reads the frame after it.
+[[nodiscard]] inline impl::async_awaiter_this_node async_this_node()
 {
     return {};
 }
