@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # ///
 
 """Self-test for tools/dev/cmd/symbolize.py — reading wasm code offsets out of a report — and for lib/pipeline/sites.py,

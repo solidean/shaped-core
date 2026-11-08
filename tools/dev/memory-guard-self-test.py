@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # ///
 
 """Self-test for tools/dev/lib/core/memory_guard.py — the caps over what dev.py starts, and the free-RAM floor.

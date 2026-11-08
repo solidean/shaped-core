@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # dependencies = []
 # ///
 """Invariant test for the profile machinery's pure half: lane allocation and the Chrome-tracing export.
