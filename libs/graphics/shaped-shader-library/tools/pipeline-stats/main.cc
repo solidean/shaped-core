@@ -1,3 +1,4 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -8,11 +9,13 @@
 #include <nexus/run.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/query/driver_statistic.hh>
+#include <shaped-graphics/resource/buffer.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
@@ -46,9 +49,16 @@ constexpr int exit_failed = 1;
         cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size())));
 }
 
+/// A pipeline layout and the group layouts it is made of, by slot.
+struct layout
+{
+    sg::pipeline_layout_handle pipeline;
+    cc::vector<sg::binding_group_layout_handle> groups;
+};
+
 /// The layout a shader's own bindings state, one group per descriptor set, and an inline block where it states one.
 /// SGL states an `@inline` block as the one constants buffer of no set.
-[[nodiscard]] sg::pipeline_layout_handle layout_of(sg::context& ctx, sg::compiled_shader const& shader)
+[[nodiscard]] layout layout_of(sg::context& ctx, sg::compiled_shader const& shader)
 {
     auto sets = cc::vector<cc::vector<sg::binding>>();
     auto desc = sg::pipeline_layout_description();
@@ -64,18 +74,31 @@ constexpr int exit_failed = 1;
             sets.push_back({});
         sets[set].push_back(b);
     }
+    auto result = layout();
     for (auto const& set : sets)
-        desc.groups.push_back(ctx.cached.acquire_binding_group_layout(set));
-    return ctx.cached.acquire_pipeline_layout(desc);
+    {
+        result.groups.push_back(ctx.cached.acquire_binding_group_layout(set));
+        desc.groups.push_back(result.groups.back());
+    }
+    result.pipeline = ctx.cached.acquire_pipeline_layout(desc);
+    return result;
 }
 
-/// One route's pipeline and the driver's figures of it, or why there are none.
-[[nodiscard]] cc::result<cc::vector<sg::driver_statistic>> figures_of(sg::context& ctx,
-                                                                      slib::shader_library const& lib,
-                                                                      cc::string_view source,
-                                                                      cc::string_view label,
-                                                                      cc::string_view entry,
-                                                                      bool native)
+/// One route's shader, its layout and its pipeline.
+struct built
+{
+    sg::compiled_shader shader;
+    layout layouts;
+    sg::compute_pipeline_handle pipeline;
+};
+
+/// The entry point compiled on one route and its pipeline built, or why not.
+[[nodiscard]] cc::result<built> build(sg::context& ctx,
+                                      slib::shader_library const& lib,
+                                      cc::string_view source,
+                                      cc::string_view label,
+                                      cc::string_view entry,
+                                      bool native)
 {
     auto options = cc::vector<slib::shader_option>();
     // the context prefers DXC's, so the native route is asked for by name
@@ -88,12 +111,29 @@ constexpr int exit_failed = 1;
     (void)cc::try_async_blocking_get(compiled);
     if (compiled->has_error())
         return cc::error(compiled->try_error()->underlying().to_string());
-    auto const& shader = *compiled->try_value();
-    auto const pipeline = ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = layout_of(ctx, shader)});
+    auto result = built{.shader = *compiled->try_value()};
+    result.layouts = layout_of(ctx, result.shader);
+    auto const pipeline
+        = ctx.cached.acquire_compute_pipeline({.shader = result.shader, .layout = result.layouts.pipeline});
     (void)cc::try_async_blocking_get(pipeline);
     if (pipeline->has_error())
         return cc::error(pipeline->try_error()->underlying().to_string());
-    return (*pipeline->try_value())->driver_statistics();
+    result.pipeline = *pipeline->try_value();
+    return result;
+}
+
+/// One route's pipeline and the driver's figures of it, or why there are none.
+[[nodiscard]] cc::result<cc::vector<sg::driver_statistic>> figures_of(sg::context& ctx,
+                                                                      slib::shader_library const& lib,
+                                                                      cc::string_view source,
+                                                                      cc::string_view label,
+                                                                      cc::string_view entry,
+                                                                      bool native)
+{
+    auto b = build(ctx, lib, source, label, entry, native);
+    if (b.has_error())
+        return cc::error(b.error().to_string());
+    return b.value().pipeline->driver_statistics();
 }
 /// The same, a layout or a pipeline that throws as its failure.
 [[nodiscard]] cc::result<cc::vector<sg::driver_statistic>> guarded(sg::context& ctx,
@@ -174,6 +214,162 @@ COMMAND("compute")
         }
     }
     return failed ? exit_failed : exit_ok;
+}
+
+namespace
+{
+constexpr auto k_chains = 4;
+constexpr auto k_trips = 256;
+
+/// A kernel of four independent chains, each `body` 256 times, between a read and a write of every thread's values.
+/// `@` in `body` is each chain's float and `#` its uint; `s` and `t` are a float and a uint of the thread's, set before
+/// the loop; a body of several steps puts one on each line.
+/// A recurrence by a thread's own value is none a driver solves in closed form, which it does for one by constants.
+/// The chains read nothing of each other, so a GPU may run all four at once and the kernel measures throughput.
+/// An empty body is the kernel's own cost alone.
+[[nodiscard]] cc::string kernel_of(cc::string_view body)
+{
+    auto source = cc::string("binding work:\n"
+                             "    values: mut buffer[float]\n"
+                             "    bits: mut buffer[uint]\n"
+                             "\n"
+                             "@compute(64) fun run(@thread_id id: int3){work}:\n"
+                             "    let i = id.x\n"
+                             "    let mut a = work.values[i]\n"
+                             "    let mut b = a + 1.0\n"
+                             "    let mut c = a + 2.0\n"
+                             "    let mut d = a + 3.0\n"
+                             "    let mut x = work.bits[i]\n"
+                             "    let mut y = x + 1u\n"
+                             "    let mut z = x + 2u\n"
+                             "    let mut w = x + 3u\n"
+                             "    let s = a * 0.5 + 0.25\n"
+                             "    let t = x | 1u\n");
+    if (!body.empty())
+    {
+        source.appendf("    for k in 0 ..< {}:\n", k_trips);
+        constexpr cc::string_view floats = "abcd";
+        constexpr cc::string_view uints = "xyzw";
+        for (auto chain = isize(0); chain < k_chains; ++chain)
+        {
+            source.append("        ");
+            for (auto const ch : body)
+            {
+                source.push_back(ch == '@' ? floats[chain] : ch == '#' ? uints[chain] : ch);
+                if (ch == '\n')
+                    source.append("        ");
+            }
+            source.append("\n");
+        }
+    }
+    source.append("    work.values[i] = a + b + c + d\n"
+                  "    work.bits[i] = x + y + z + w\n");
+    return source;
+}
+
+/// A kernel that measures one operation: its body, and the full-rate operations each step spends beside it.
+/// A step is no affine function of the chain it updates, which a driver would solve for all its trips at once.
+struct kernel
+{
+    cc::string_view name;
+    cc::string_view body;
+    f64 alu_beside = 0;
+    /// The operations it measures each step.
+    f64 count = 1;
+};
+} // namespace
+
+// `pipeline-stats throughput`: what each operation costs this GPU, relative to an fma, from kernels that spend in one each.
+COMMAND("throughput")
+{
+    auto threads = 1 << 20;
+    auto args = nx::args({.name = "pipeline-stats throughput",
+                          .description = "Times a generated kernel per operation on the vulkan GPU that SC_GPU "
+                                         "picks, and prints each operation's cost relative to an fma: its time past "
+                                         "an empty kernel's, less the full-rate operations beside it, per operation."});
+    if (auto const r = args.parse(nx::test_args()); r.should_exit())
+        return r.exit_code();
+    auto created = sg::create_vulkan_context({.native_spirv = false});
+    if (created.has_error())
+    {
+        CC_LOG_ERROR("no vulkan context: {}", created.error().to_string());
+        return exit_failed;
+    }
+    auto& ctx = *created.value();
+    if (!ctx.supports(sg::feature::timestamp_query))
+    {
+        CC_LOG_ERROR("this device has no timestamp queries");
+        return exit_failed;
+    }
+    auto lib = slib::shader_library();
+    slib::add_available_compilers(lib);
+    auto const usage = sg::buffer_usage::readwrite_buffer;
+    auto const values = ctx.persistent.create_buffer_from_data(cc::vector<f32>::create_filled(threads, 0.75f), usage);
+    auto const bits = ctx.persistent.create_buffer_from_data(cc::vector<u32>::create_filled(threads, 12345u), usage);
+
+    // the first two are what every other is measured against; see kernel_of for `@`, `#`, `s` and `t`
+    auto const kernels = cc::vector<kernel>{
+        {.name = "empty", .body = ""},
+        {.name = "fma", .body = "@ = fma(@, @, s)"},
+        {.name = "mul_add", .body = "@ = @ * @ + s", .alu_beside = 1},
+        {.name = "sqrt", .body = "@ = sqrt(@ + s)", .alu_beside = 1},
+        {.name = "exp2", .body = "@ = exp2(@ * s)", .alu_beside = 1},
+        {.name = "sin", .body = "@ = sin(@ + s)", .alu_beside = 1},
+        {.name = "divide", .body = "@ = s / @ + 0.5", .alu_beside = 1},
+        {.name = "int_multiply", .body = "# = # * # + t", .alu_beside = 1},
+        {.name = "int_divide", .body = "# = # / t + 7u", .alu_beside = 1},
+        {.name = "conversion", .body = "@ = (# as float) * @\n# = (@ as uint) + t", .alu_beside = 1, .count = 2},
+    };
+    auto per_thread = cc::vector<f64>();
+    for (auto const& k : kernels)
+    {
+        auto b = build(ctx, lib, kernel_of(k.body), k.name, "run", true);
+        if (b.has_error())
+        {
+            CC_LOG_ERROR("{}: {}", k.name, b.error().to_string());
+            return exit_failed;
+        }
+        constexpr auto k_rounds = 9;
+        constexpr auto k_batch = 4;
+        auto spans = cc::vector<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp>>();
+        for (auto r = 0; r < k_rounds; ++r)
+        {
+            auto cmd = ctx.create_command_list();
+            auto const group = ctx.transient.create_binding_group(
+                b.value().layouts.groups[0],
+                cc::vector<sg::named_view>{{.name = "work.values", .view = values.as_readwrite_buffer()},
+                                           {.name = "work.bits", .view = bits.as_readwrite_buffer()}});
+            auto const from = cmd->query.record_gpu_timestamp();
+            for (auto j = 0; j < k_batch; ++j)
+            {
+                cmd->compute.bind_pipeline(*b.value().pipeline);
+                cmd->compute.bind_group(0, *group);
+                cmd->compute.dispatch_threads(u32(threads));
+            }
+            auto const to = cmd->query.record_gpu_timestamp();
+            ctx.submit_command_list(cc::move(cmd));
+            ctx.advance_epoch();
+            spans.push_back({from, to});
+        }
+        (void)cc::try_async_blocking_get(ctx.idle_completion());
+        auto ns = cc::vector<f64>();
+        for (auto const& [from, to] : spans)
+            ns.push_back(1e9 * (to.try_get_seconds().value() - from.try_get_seconds().value()) / k_batch);
+        cc::sort(ns);
+        // the median, which the rounds a driver's tiers warm in do not reach
+        per_thread.push_back(ns[ns.size() / 2] / f64(threads));
+    }
+
+    auto const operations = f64(k_chains * k_trips);
+    auto const fma = (per_thread[1] - per_thread[0]) / operations;
+    cc::println("operation\tns per thread\tcost of an fma");
+    for (auto i = isize(0); i < kernels.size(); ++i)
+    {
+        auto const own = per_thread[i] - per_thread[0] - kernels[i].alu_beside * fma * operations;
+        cc::println("{}\t{:.4f}\t{:.2f}", kernels[i].name, per_thread[i],
+                    i == 0 ? 0.0 : own / (operations * kernels[i].count) / fma);
+    }
+    return exit_ok;
 }
 
 int main(int argc, char** argv)

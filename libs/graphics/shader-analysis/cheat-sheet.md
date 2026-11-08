@@ -53,6 +53,7 @@ shan::to_text(m);                         // -> cc::string, one line a metric
 #include <shader-analysis/cost.hh>
 
 shan::compute_cost(f, shan::default_cost_model());   // -> f64, lane-cycles of an fma if compute bound
+shan::xe2_cost_model(); shan::rdna2_cost_model();   // rates measured on the B580 and the Radeon; default is xe2
 shan::cost_class::transcendental;          // free, alu, int_multiply, int_divide, conversion, transcendental, memory, control
 f.executed_class_lanes[isize(c)];          // lanes per class, as often as a wave runs them
 f.counted_loops;                           // loops whose counter states its trips; the rest run k_assumed_loop_trips
@@ -80,5 +81,5 @@ shan::to_text(d);                         // -> cc::string, one line each
   AMD gives the convolution 38 vector registers where shan counts 79 vector words, on both routes alike; compare two modules, never a module with a register file.
 - **The compute cost is an estimate for two modules of one entry point.**
   A branch the wave shares runs each arm at its share, one it does not both in full, a loop's guard and its body's stay in full.
-  Its rates are documented ones, not yet measured on a GPU.
+  Its rates are `pipeline-stats throughput`'s, measured on two GPUs; a multiply and its add count two where both run one fma.
 - **Uniformity does not follow memory.** A load from a function's own variable is varying whatever was stored, and one from a buffer at a shared address is scalar.

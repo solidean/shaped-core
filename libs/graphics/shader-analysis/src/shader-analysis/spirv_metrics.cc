@@ -404,6 +404,7 @@ struct spend
     {
     case 13: // Sin
     case 14: // Cos
+        return {.cost = transcendental, .extra = alu, .extra_factor = 2};
     case 29: // Exp2
     case 30: // Log2
     case 31: // Sqrt
@@ -474,8 +475,8 @@ struct spend
     case 138: // SRem
     case 139: // SMod
         return spend{.cost = int_divide};
-    case 136: // FDiv: a reciprocal and a multiply
-        return spend{.cost = alu, .extra = transcendental, .extra_factor = 1};
+    case 136: // FDiv: one transcendental, as both GPUs measured it
+        return spend{.cost = transcendental};
     case 140: // FRem
     case 141: // FMod
         return spend{.cost = alu, .factor = 3, .extra = transcendental, .extra_factor = 1};

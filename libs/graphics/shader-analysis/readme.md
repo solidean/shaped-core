@@ -42,6 +42,7 @@ A driver allocates and schedules better or worse than that, but two modules of o
 ```bash
 uv run dev.py run shan -- analyze module.spv       # the totals, then each function
 uv run dev.py run shan -- diff native.spv dxc.spv  # every total the two differ in, worst first
+uv run dev.py run shan -- cost module.spv          # the compute cost under each GPU's measured rates
 ```
 
 `native-parity.py diff` leaves both routes' binaries in its output folder, which is where a pair to compare comes from: `.spv` and `.dxil` alike.

@@ -103,7 +103,7 @@ TEST("shan cost - a branch on a thread's own value runs both arms, one the wave 
     }
 }
 
-TEST("shan cost - a division spends a reciprocal beside its multiply, and the model weighs each class at its rate")
+TEST("shan cost - a division is one transcendental a lane, and the model weighs each class at its rate")
 {
     auto b = spirv_builder();
     declare_basics(b);
@@ -116,10 +116,11 @@ TEST("shan cost - a division spends a reciprocal beside its multiply, and the mo
     b.op(253, {});
     b.op(56, {});
     auto const f = only_function(b);
-    CHECK(executed(f, shan::cost_class::alu) == 4.0);
+    // as both GPUs measured it: a division costs what a square root does, and nothing beside
+    CHECK(executed(f, shan::cost_class::alu) == 0.0);
     CHECK(executed(f, shan::cost_class::transcendental) == 4.0);
     auto model = shan::cost_model{.name = "test"};
     model.per_lane[isize(shan::cost_class::alu)] = 1.0;
     model.per_lane[isize(shan::cost_class::transcendental)] = 4.0;
-    CHECK(shan::compute_cost(f, model) == 20.0);
+    CHECK(shan::compute_cost(f, model) == 16.0);
 }

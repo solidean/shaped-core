@@ -9,6 +9,8 @@
 // AN ESTIMATE FOR COMPARING TWO MODULES OF ONE ENTRY POINT, as if both were compute bound.
 // Memory is left out: two routes of one entry point read and write the same footprint, so it moves neither alike.
 // Each operation counts its lanes, a `float3`'s add three, which is what a GPU that works on scalars issues.
+// A multiply and the add that takes it count as two, where both GPUs measured run them as one fma: an overcount where a
+// module and its rival fuse alike.
 // How often it runs is `impl::frequencies`: a loop its stated trips or `k_assumed_loop_trips`, an arm of a branch the wave
 // shares at its share, and both arms of one it does not.
 //
@@ -29,6 +31,7 @@ enum class shan::cost_class : shan::u8
     /// A conversion between an integer and a float, or between float widths.
     conversion,
     /// A special function unit's: a reciprocal, a square root and its reciprocal, exp, log, sin, cos.
+    /// A float division is one, as both GPUs measured it; a sin or a cos is one and two slots of range reduction.
     transcendental,
     /// A read or a write of memory or an image, an atomic, a barrier, a trace: what this model leaves out.
     memory,
@@ -50,8 +53,16 @@ namespace shan
 /// The name `to_text` gives a class: `transcendental`.
 [[nodiscard]] cc::string_view name_of(cost_class c);
 
-/// Rates as GPUs document them, before any calibration: transcendentals and integer multiplies at a quarter of the full
-/// rate, an integer division as a dozen multiplies, a branch as one slot.
+/// The rates `pipeline-stats throughput` measured on an Arc B580: a transcendental 3.2 fmas, an integer multiply 7.5, an
+/// integer division 18, a conversion 0.85.
+/// A branch is one slot, unmeasured.
+[[nodiscard]] cost_model const& xe2_cost_model();
+
+/// The same on the Radeon iGPU of a Ryzen 9 9950X3D2: a transcendental 3.4 fmas, an integer multiply 4.4, an integer
+/// division 23, a conversion 1.6.
+[[nodiscard]] cost_model const& rdna2_cost_model();
+
+/// `xe2_cost_model`, the GPU SGL's parity is measured on first.
 [[nodiscard]] cost_model const& default_cost_model();
 
 /// What `f` would spend if compute bound, in lane-cycles of an fma: each class's executed lanes at its rate.

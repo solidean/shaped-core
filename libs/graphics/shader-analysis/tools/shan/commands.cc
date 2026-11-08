@@ -3,6 +3,7 @@
 #include <nexus/args/ambient.hh>
 #include <nexus/args/args.hh>
 #include <nexus/test.hh>
+#include <shader-analysis/cost.hh>
 #include <shader-analysis/diff.hh>
 #include <shader-analysis/metrics.hh>
 
@@ -107,5 +108,23 @@ COMMAND("lanes")
     for (auto k = isize(0); k < shan::k_op_kind_count; ++k)
         cc::println("{}\t{}\t{}\t{}\t{}", shan::name_of(shan::op_kind(k)), t.lanes[k], t.uniform_lanes[k],
                     t.executed_lanes[k], t.executed_uniform_lanes[k]);
+    return exit_ok;
+}
+
+// `shan cost`: what a module would spend if compute bound, under each GPU's measured rates.
+COMMAND("cost")
+{
+    auto path = cc::string();
+    auto args = nx::args({.name = "shan cost",
+                          .description = "Prints the module's compute cost under each GPU's measured rates, "
+                                         "tab-separated: the model and the cost in lane-cycles of an fma."});
+    args.positional("FILE", path, {.desc = "the SPIR-V module or DXIL container"});
+    if (auto const r = args.parse(nx::test_args()); r.should_exit())
+        return r.exit_code();
+    auto const metrics = metrics_of(path);
+    if (!metrics.has_value())
+        return exit_usage;
+    for (auto const* const model : {&shan::xe2_cost_model(), &shan::rdna2_cost_model()})
+        cc::println("{}\t{:.0f}", model->name, shan::compute_cost(metrics.value().total, *model));
     return exit_ok;
 }

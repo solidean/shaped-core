@@ -63,6 +63,21 @@ Each driver cleans up what a module leaves, which is why a module's operations o
 It weighs each operation's lanes by its class's rate, as often as a wave runs it, and leaves memory out.
 On 2026-11-08 it put the wavefront's `extend` and `connect` at 1.08 and 1.07 of DXC's on DXIL and 0.99 on SPIR-V, beside the dx12 frame's 1.03 to 1.06 and vulkan's faster one.
 It also puts bc1 at 1.33 and 1.39 on the two formats, which no benchmark times, and the convolution below DXC's on both.
+
+Its rates are measured: `uv run dev.py run pipeline-stats -- throughput` times a kernel per operation and prints each against an fma.
+
+| operation | B580 | Radeon |
+|---|---:|---:|
+| sqrt, exp2, a float division | 3.2 | 3.3 |
+| sin | 7.3 | 4.7 |
+| integer multiply | 7.5 | 4.4 |
+| integer division | 18 | 23 |
+| conversion | 0.85 | 1.6 |
+| an add after a multiply | 0 | 0 |
+
+Against the benchmarks it orders the convolution's vulkan gap right, 0.90 for the B580's 0.935, and puts the other kernels within a few percent of 1.0, where they measure.
+It does not see the Radeon's dx12 convolution at 1.03, which is not arithmetic.
+A kernel that waits on memory is nearer 1.0 than the model says, since the model leaves memory out.
 The bold rows are where native costs more: a wave holding more vector registers leaves room for fewer waves beside it.
 
 **shan's live words are no register count.**

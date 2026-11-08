@@ -127,6 +127,7 @@ using babel::llvm37::type_kind;
     {
     case 12: // Cos
     case 13: // Sin
+        return with(transcendental, 1, alu, 2);
     case 21: // Exp, base 2
     case 23: // Log, base 2
     case 24: // Sqrt
@@ -363,6 +364,14 @@ using babel::llvm37::type_kind;
             .phi_first = u32(g.phi_values.size()),
             .counts = kind != op_kind::declaration,
         };
+        auto const spend = [&](cost_class c, f32 factor = 1, cost_class extra = cost_class::free, f32 extra_factor = 0)
+        {
+            gi.has_cost = true;
+            gi.cost = c;
+            gi.cost_factor = factor;
+            gi.extra = extra;
+            gi.extra_factor = extra_factor;
+        };
         if (i.code == inst_code::call)
             if (auto const name = m.callee_name(b, i); name.starts_with("dx.op."))
             {
@@ -374,59 +383,20 @@ using babel::llvm37::type_kind;
                         v.kind == babel::llvm37::value_kind::constant)
                         (void)m.integer_of(v.index, opcode);
                 if (auto const s = dx_spend(opcode); s.has_value())
-                {
-                    gi.has_cost = true;
-                    gi.cost = s.value().cost;
-                    gi.cost_factor = s.value().cost_factor;
-                    gi.extra = s.value().extra;
-                    gi.extra_factor = s.value().extra_factor;
-                }
+                    spend(s.value().cost, s.value().cost_factor, s.value().extra, s.value().extra_factor);
             }
         // LLVM's binop codes: 2 a multiply, 3 to 6 a division or remainder, which 4 and 6 are of floats
         if (i.code == inst_code::binop)
         {
             auto const is_f = is_float(m, i.type);
             if (!is_f && i.sub == 2)
-                gi = {.kind = gi.kind,
-                      .result = gi.result,
-                      .first = gi.first,
-                      .phi_first = gi.phi_first,
-                      .counts = gi.counts,
-                      .source = gi.source,
-                      .has_cost = true,
-                      .cost = cost_class::int_multiply};
+                spend(cost_class::int_multiply);
             else if (!is_f && i.sub >= 3 && i.sub <= 6)
-                gi = {.kind = gi.kind,
-                      .result = gi.result,
-                      .first = gi.first,
-                      .phi_first = gi.phi_first,
-                      .counts = gi.counts,
-                      .source = gi.source,
-                      .has_cost = true,
-                      .cost = cost_class::int_divide};
+                spend(cost_class::int_divide);
             else if (is_f && i.sub == 4)
-                gi = {.kind = gi.kind,
-                      .result = gi.result,
-                      .first = gi.first,
-                      .phi_first = gi.phi_first,
-                      .counts = gi.counts,
-                      .source = gi.source,
-                      .has_cost = true,
-                      .cost = cost_class::alu,
-                      .extra = cost_class::transcendental,
-                      .extra_factor = 1};
+                spend(cost_class::transcendental);
             else if (is_f && i.sub == 6)
-                gi = {.kind = gi.kind,
-                      .result = gi.result,
-                      .first = gi.first,
-                      .phi_first = gi.phi_first,
-                      .counts = gi.counts,
-                      .source = gi.source,
-                      .has_cost = true,
-                      .cost = cost_class::alu,
-                      .cost_factor = 3,
-                      .extra = cost_class::transcendental,
-                      .extra_factor = 1};
+                spend(cost_class::alu, 3, cost_class::transcendental, 1);
         }
         // what a load from a function's own variable holds, or an atomic returns, is not followed
         if (i.code == inst_code::atomic_rmw || i.code == inst_code::cmpxchg)
