@@ -8,7 +8,10 @@
 #include <clean-core/string/uri.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/check/artifact.hh>
 #include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+#include <clean-core/thread/mutex.hh>
 
 cc::span<sgl::prelude_file const> sgl::prelude_files()
 {
@@ -41,6 +44,21 @@ cc::span<sgl::parsed_prelude_file const> sgl::parsed_prelude()
     return parsed;
 }
 
+namespace
+{
+/// The store `set_prelude_store` set, which the first `checked_prelude()` reads under the same lock.
+cc::mutex<cc::optional<sgl::prelude_store>>& prelude_store_slot()
+{
+    static auto slot = cc::mutex<cc::optional<sgl::prelude_store>>();
+    return slot;
+}
+} // namespace
+
+void sgl::set_prelude_store(prelude_store store)
+{
+    prelude_store_slot().lock([&](cc::optional<prelude_store>& held) { held = cc::move(store); });
+}
+
 sgl::check::checked_prelude const* sgl::checked_prelude()
 {
     static auto const checked = []
@@ -48,7 +66,22 @@ sgl::check::checked_prelude const* sgl::checked_prelude()
         auto files = cc::vector<check::module_file>();
         for (auto const& f : parsed_prelude())
             files.push_back({.file = f.file, .ast = f.ast});
-        return check::check_prelude(files, builtins::default_registry());
+        return prelude_store_slot().lock(
+            [&](cc::optional<prelude_store>& store) -> cc::optional<check::checked_prelude>
+            {
+                // the compilation model's artifacts: a layer this process never checked, keyed by the compiler's build
+                auto const key = cc::format("sgl.prelude.{}", compiler_fingerprint());
+                if (store.has_value() && store.value().load)
+                    if (auto bytes = store.value().load(key); bytes.has_value())
+                        if (auto loaded = check::load_artifact(bytes.value(), key, files, builtins::default_registry());
+                            loaded.has_value())
+                            return loaded;
+                auto made = check::check_prelude(files, builtins::default_registry());
+                if (made.has_value() && store.has_value() && store.value().save)
+                    if (auto const bytes = check::save_artifact(made.value(), key); bytes.has_value())
+                        store.value().save(key, bytes.value());
+                return made;
+            });
     }();
     return checked.has_value() ? &checked.value() : nullptr;
 }

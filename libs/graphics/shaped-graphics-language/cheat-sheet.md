@@ -94,6 +94,15 @@ sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file co
 sgl::prelude_file_of(path)                 // -> i32: which prelude file a path or file:// uri is, else -1; only a file in
                                            // a shaped-graphics-language/prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
+sgl::set_prelude_store({.load, .save})     // where the checked prelude is kept between processes: a host's store, keyed
+                                           // by the compiler's fingerprint; BEFORE the first compile, later it does nothing
+                                           // a miss, a cut-short or a corrupt entry checks the prelude as without a store
+
+#include <shaped-graphics-language/check/artifact.hh>
+sgl::check::save_artifact(layer, key)      // -> optional<vector<byte>>: the prelude's layer as bytes; none for a layer
+                                           // of modules, which no artifact holds yet
+sgl::check::load_artifact(bytes, key, prelude_files, registry)  // -> optional<checked_prelude>: none for another key,
+                                           // other prelude sources, or bytes cut short or changed: a miss, never an error
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes

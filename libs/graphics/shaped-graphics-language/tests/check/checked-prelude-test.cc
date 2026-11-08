@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/print.hh>
+#include <shaped-graphics-language/check/artifact.hh>
 #include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -12,6 +13,8 @@
 #include <nexus/source_root.hh>
 
 #include <filesystem>
+
+using namespace cc::primitive_defines;
 
 // A program checked behind the checked prelude is the program checked together with the prelude.
 // Everything a caller observes of the two modules is compared, which is all of it but the ids.
@@ -155,6 +158,42 @@ cc::vector<cc::string> prelude_writes(sgl::check::checked_module const& prelude,
     compare("test_units", prelude.test_units, m.test_units);
     return out;
 }
+
+/// The library's prelude files, as `check_prelude` takes them.
+cc::vector<sgl::check::module_file> prelude_modules()
+{
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto const& f : sgl::parsed_prelude())
+        files.push_back({.file = f.file, .ast = f.ast});
+    return files;
+}
+
+constexpr cc::string_view artifact_key = "the key of this test's artifacts";
+
+/// The checked prelude written as an artifact, once.
+cc::vector<byte> const& prelude_artifact()
+{
+    static auto const bytes = []
+    {
+        auto saved = sgl::check::save_artifact(*sgl::checked_prelude(), artifact_key);
+        CC_ASSERT(saved.has_value(), "the library's prelude is a layer an artifact holds");
+        return cc::move(saved.value());
+    }();
+    return bytes;
+}
+
+/// The checked prelude read back from its artifact, once, as a process that never checked it would have it.
+sgl::check::checked_prelude const& loaded_prelude()
+{
+    static auto const loaded = []
+    {
+        auto layer = sgl::check::load_artifact(prelude_artifact(), artifact_key, prelude_modules(),
+                                               sgl::builtins::default_registry());
+        CC_ASSERT(layer.has_value(), "an artifact reads back under its own key");
+        return cc::move(layer.value());
+    }();
+    return loaded;
+}
 } // namespace
 
 TEST("sgl checked prelude - the library's prelude checks clean, so every compile continues from it")
@@ -176,8 +215,12 @@ INVOCABLE_TEST("sgl checked prelude - a program behind it checks as it does with
 
     auto const together = sgl::check::check(files, user);
     auto const behind = sgl::check::check(*checked, user);
+    // the compilation model's artifacts: a layer read back is the layer, so a program behind it checks to the same ids
+    auto const behind_loaded = sgl::check::check(loaded_prelude(), user);
+    CHECK(behind_loaded == behind);
     files.push_back(user);
     CHECK(observed(behind, files) == observed(together, files));
+    CHECK(observed(behind_loaded, files) == observed(behind, files));
     if (p.name.starts_with("reporting"))
         CHECK(!together.diagnostics.empty());
     CHECK(behind.symbols.size() == together.symbols.size());
@@ -320,4 +363,59 @@ TEST("sgl checked modules - every corpus file that uses a module")
         ++layered;
     }
     REQUIRE(layered > 0);
+}
+
+TEST("sgl prelude artifact - reads back as the layer it was written from")
+{
+    CHECK(loaded_prelude().module() == sgl::checked_prelude()->module());
+    // what is read back writes the same bytes, so nothing a walk reaches is lost on the way
+    auto const again = sgl::check::save_artifact(loaded_prelude(), artifact_key);
+    REQUIRE(again.has_value());
+    REQUIRE(again.value().size() == prelude_artifact().size());
+    CHECK(cc::memcmp(again.value().data(), prelude_artifact().data(), prelude_artifact().size()) == 0);
+}
+
+TEST("sgl prelude artifact - anything but its own bytes under its own key is a miss")
+{
+    auto const& bytes = prelude_artifact();
+    auto const files = prelude_modules();
+    auto const& registry = sgl::builtins::default_registry();
+    auto const loads = [&](cc::span<byte const> b, cc::string_view key, cc::span<sgl::check::module_file const> f)
+    { return sgl::check::load_artifact(b, key, f, registry).has_value(); };
+
+    CHECK(loads(bytes, artifact_key, files));
+    // another compiler's build
+    CHECK(!loads(bytes, "another key", files));
+    // cut short anywhere: in the header, in the payload, by one byte
+    for (auto const size : {isize(0), isize(7), isize(40), bytes.size() / 2, bytes.size() - 1})
+        CHECK(!loads(cc::span<byte const>(bytes).subspan({.offset = 0, .size = size}), artifact_key, files));
+    // one byte changed, in the header and in the payload
+    for (auto const at : {isize(0), isize(9), bytes.size() / 3, bytes.size() - 1})
+    {
+        auto changed = bytes;
+        changed[at] = byte(u8(changed[at]) ^ 0x5a);
+        CHECK(!loads(changed, artifact_key, files));
+    }
+    // other prelude sources, here one file fewer
+    CHECK(!loads(bytes, artifact_key, cc::span<sgl::check::module_file const>(files).subspan({.offset = 0, .size = files.size() - 1})));
+}
+
+TEST("sgl prelude artifact - a layer of modules is no artifact yet")
+{
+    auto const& library = corpus_modules().files;
+    auto files = cc::vector<program>();
+    add_files_under(files, "corpus", nx::source_path(SGL_CORPUS_DIR));
+    for (auto const& f : files)
+    {
+        auto const parsed = sgl::parse(f.source);
+        auto const built = sgl::ast::build(parsed);
+        auto const user = sgl::check::module_file{.file = parsed, .ast = built};
+        if (!sgl::check::reaches_modules_to_layer(library, user))
+            continue;
+        auto const layer = sgl::check::check_modules(*sgl::checked_prelude(), library, user);
+        REQUIRE(layer.has_value());
+        CHECK(!sgl::check::save_artifact(layer.value(), artifact_key).has_value());
+        return;
+    }
+    FAIL("no corpus file reaches a module");
 }

@@ -94,7 +94,7 @@ v.clear();  v.fill(x);  auto a = v.extract_allocation();
 // array factories mirror vector's create_* (no push/pop/resize); has fill / extract_allocation.
 
 #include <clean-core/container/fixed_array.hh>     // cc::fixed_array<T, N> — inline T[N] aggregate
-cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, data, begin/end, size()
+cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, data, begin/end, size(), element-wise ==
 auto& [a, b, c] = fa;                              // tuple protocol: get<I>(), structured bindings
 
 #include <clean-core/container/pair.hh>            // cc::pair<T, U> — aggregate .first/.second, ==/<=>/hash

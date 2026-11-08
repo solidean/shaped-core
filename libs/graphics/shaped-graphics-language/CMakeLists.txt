@@ -95,6 +95,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/dxil/impl/writer_resources.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_stage.cc
 
+    src/shaped-graphics-language/check/artifact.cc
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc
@@ -295,6 +296,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/builtins/subgroup_calls.hh
     src/shaped-graphics-language/builtins/texture_calls.hh
 
+    src/shaped-graphics-language/check/artifact.hh
     src/shaped-graphics-language/check/check.hh
     src/shaped-graphics-language/check/checked_module.hh
     src/shaped-graphics-language/check/dump.hh
@@ -306,6 +308,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/resources.hh
     src/shaped-graphics-language/check/symbols.hh
     src/shaped-graphics-language/check/impl/checker.hh
+    src/shaped-graphics-language/check/impl/fields.hh
 
     src/shaped-graphics-language/legalize/core.hh
     src/shaped-graphics-language/legalize/legalize.hh

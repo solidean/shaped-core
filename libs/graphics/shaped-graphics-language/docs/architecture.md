@@ -81,6 +81,12 @@ A prelude that reports anything is never kept, and a custom prelude, or a source
 It stays one pass because nothing the prelude checks depends on the program: a lookup from a prelude file, operators included, sees the prelude alone.
 `tests/check/checked-prelude-test.cc` compares the two paths over the corpus, the samples and sg's shaders.
 
+**A process reads the checked prelude back where its host keeps it** (`check/artifact.hh`, `sgl::set_prelude_store`).
+`save_artifact` writes the checker's state after the prelude as bytes, and `load_artifact` makes that state again, a copy rather than a check.
+One walk does both, and it walks each struct by its fields (`check/impl/fields.hh`), so a field added to the checker's state is in every artifact with nothing listed.
+Such a struct is an aggregate with no C array field, and one the walk cannot take fails to compile there.
+The same test file runs every program behind the layer read back and requires the very checked module, ids included.
+
 **A diagnostic judged of an inlined body belongs to the entry points it was judged of** (CHK-402).
 The flattener and the uniformity pass judge each entry point's flat tree, so their diagnostics carry `located_diagnostic::entry_points`, and identical ones merge into one that names them all.
 Their details name the stage rather than the entry point, which is what lets a helper two entry points share yield one.

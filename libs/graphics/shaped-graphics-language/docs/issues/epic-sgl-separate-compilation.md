@@ -21,17 +21,18 @@ Decided with the maintainer on 2026-11-08, and written into the compilation mode
 - **Artifacts are cache entries, never shipped.** SGL is a development tool and what ships is compiled shaders, so an artifact is keyed by the compiler's build and has no format version.
 - **Sections as wasm's:** imports, interface, contributions, impls, names, so a reader loads the interface without a body.
 - **In memory, ids stay positions,** and an artifact is relocated once per load through its import table.
-- **Bodies are checked from source on demand** in the first form; serialized impls come only if that shows.
+- **Artifacts carry their bodies checked,** and load whole.
+  Checking a body on demand has nowhere cheap to land under positional ids, as [feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md) found.
 - **Early cutoff:** a dependent's key names its imports' interfaces, so a body edit re-checks no user.
 - **Options are an overlay:** an artifact is checked at the defaults, and a compile re-checks only what reaches an option it sets.
 
 The steps, each a child issue when it is taken up, in this order:
 
-1. **Bodies on demand** ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)): a layer checks a body when a compile first needs it.
-2. **The prelude's artifact:** interface and contributions, no imports, bodies from source.
+1. **The prelude's artifact.** *Landed on 2026-11-08:* the 5.8 ms check is a 0.68 ms load, kept by the `sgl` tool and by slib's default cache.
+2. **The parse in the artifact,** about 13 ms of a fresh process now, the largest part of what it still pays for the prelude.
 3. **Module artifacts:** imports, relocation on load, early-cutoff keys, kept by slib's persistent cache.
 4. **Option overlays,** so a compile that sets options continues from the artifacts too.
-5. **Parallel layers,** and serialized impls if checking bodies from source shows.
+5. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
 6. **The language server on artifacts.**
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.

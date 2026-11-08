@@ -11,6 +11,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
+#include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics/binding/impl/shader_codec.hh>
 #include <shaped-graphics/context/cold_caches.hh>
 #include <shaped-shader-library/impl/sgl_emit_cache.hh>
@@ -131,9 +132,11 @@ cc::mutex<cc::map<cc::hash128, slib::preprocessed_source>>& memory_tier()
 /// TEMPORARY(debt-slib-sgl-emit-passive-poll): a hand-rolled poll, standing in for a passive timed wait on a `cc::async` node, which clean-core lacks.
 /// `cc::try_async_blocking_get_for` is the timed wait it has, and that one drives the ambient scheduler, which this must not.
 /// Replace the loop with that wait once it lands; issue: feat-cc-async-passive-timed-wait
-cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store, cc::hash128 key, cc::optional<double> patience_secs)
+cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store,
+                                            bcache::cache_key const& key,
+                                            cc::optional<double> patience_secs)
 {
-    auto const node = store.get(slib::impl::sgl_emit_persistent_key(key));
+    auto const node = store.get(key);
     auto const deadline = cc::current_time_steady_secs() + patience_secs.value_or(0.0);
     auto yields = 0;
     while (!node->is_ready())
@@ -345,6 +348,42 @@ bcache::cache_key slib::impl::sgl_emit_persistent_key(cc::hash128 key)
             .version = bcache::version(i32(k_codec_version * 1000 + sg::impl::k_shader_codec_version))};
 }
 
+void slib::impl::keep_sgl_prelude_in(cc::optional<bcache::blob_cache*> chosen)
+{
+    if (chosen.has_value())
+        return;
+    auto* const store = sgl_emit_store({});
+    if (store == nullptr)
+        return;
+    static auto const kept = [store]
+    {
+        // sgl's key holds its compiler's fingerprint already, and the artifact checks it again when it is read
+        auto const key_of = [](cc::string_view key) -> bcache::cache_key
+        {
+            return {.space = bcache::cache_namespace("slib.sgl.prelude"),
+                    .key = bcache::logical_key::create_from_hash(cc::hash256::create(key.as_bytes())),
+                    .version = bcache::version(1)};
+        };
+        sgl::set_prelude_store({
+            .load = [store, key_of](cc::string_view key) -> cc::optional<cc::vector<byte>>
+            {
+                auto const hit = passive_get(*store, key_of(key), k_sgl_lookup_patience_secs);
+                if (!hit.has_value())
+                    return {};
+                return cc::vector<byte>::create_copy_of(hit.value().data.span());
+            },
+            .save = [store, key_of](cc::string_view key, cc::span<byte const> bytes)
+            {
+                // fire and forget: a lost write is a later process checking the prelude again
+                (void)store->put(key_of(key), cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes)),
+                                 {.compute_time_secs = 0.01});
+            },
+        });
+        return true;
+    }();
+    (void)kept;
+}
+
 void slib::impl::forget_sgl_emit(cc::hash128 key)
 {
     memory_tier().lock([&](cc::map<cc::hash128, preprocessed_source>& tier) { (void)tier.erase(key); });
@@ -387,7 +426,7 @@ cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
     if (persistent != nullptr)
     {
         // A miss, an expired entry and a storage failure are one answer, and every one of them falls through to the front end.
-        auto const hit = passive_get(*persistent, key, patience_secs);
+        auto const hit = passive_get(*persistent, sgl_emit_persistent_key(key), patience_secs);
         if (hit.has_value())
         {
             if (auto decoded = decode_preprocessed(hit.value().data.span()); decoded.has_value())

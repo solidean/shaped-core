@@ -96,7 +96,7 @@ And a compile copies the whole checked prelude to continue from it, because the 
 * A layer, once checked, is never written again, so any number of compiles on any number of threads share it.
 
 A user of a module needs its interface always, and a body only where it inlines it, instantiates it or evaluates it.
-So a saved layer holds the interface, and finds a body when a compile asks for one ("Artifacts" below).
+So a saved layer holds the interface and the bodies apart, and a reader that needs no body reads none ("Artifacts" below).
 
 ### What a layer is
 
@@ -153,17 +153,15 @@ A process that compiles at run time ships the compiler too, so the artifacts it 
   Symbols, types, struct fields, enum cases with their values, functions' signatures and attributes, parameters, bindings, pipelines, samplers, and each `const` as its value.
   A value a type position needed is stored computed, so a user reads it without the body that computed it.
 * **Contributions:** what the module adds to scopes it does not own, extensions, operators and interned instances, merged on load.
-* **Impls:** one entry per function, behind a table of offsets, so one body loads without the rest.
-  Optional, and absent in the first form.
+* **Impls:** the checked tables of the bodies, one entry per function behind a table of offsets.
 * **Names:** files and spans for the language server, which emit never reads.
 
-**Without impls, a body is checked from source the first time a compile needs it.**
-
-* The sources are always there, the key names them, and a symbol's declaration id is the same in a new parse of the same source.
-* So a module's file is parsed when a compile first needs one of its bodies, and that body is checked once per process into the layer the artifact loaded as.
-* A compile needs a body to inline it into an entry point, to instantiate a generic, and to evaluate a function at check time, a type position's call among them.
-* A compile that only checks the program, as `describe` and the language server do, needs no body of a module it uses unless the program evaluates or instantiates one.
-* Serialized checked bodies replace that check if it ever shows in a measurement.
+**An artifact carries its bodies checked, and loads whole: a body is copied, never checked again.**
+Checking a body on demand was the first plan, and it has nowhere cheap to land under positional ids ([feat-sgl-bodies-on-demand](../../issues/feat-sgl-bodies-on-demand.md)).
+A body checked into the shared layer would grow it under a program's ids, and could intern a type the program holds already under another id.
+A body checked into the compile's own layer costs every compile the bodies it reaches, which a layer checked whole charges nobody.
+So a reader that needs no body skips the impls by their offsets, and one that does copies them with the rest.
+The files are still parsed from source, since the flat trees read the AST; carrying the parse too is the next cut.
 
 **Early cutoff: a dependent's key names its imports' interfaces, not their sources.**
 
@@ -205,20 +203,19 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    The driver keeps one per set of modules, beside the library it parsed once for the process, for compiles that set no options.
    A shaped-viewer hit group's `describe` went from 81 to 54 ms, and its check from 71 to 23 ms.
    What it does not do is share a module between two sets that both reach it, which is what ids naming their layer would buy.
-3. **Bodies on demand:** a layer checks a function's body when a compile first needs it, not with its module.
-   It is what loading an artifact without impls stands on, and it is measured on its own: how much of a layer's check is bodies.
-4. **The prelude's artifact:** its interface and contributions, with no imports, its bodies checked from source on demand.
+3. **The prelude's artifact.** *Landed on 2026-11-08: the prelude's 5.8 ms check is a 0.68 ms load of 1.6 MB, in a release build.*
+   `check::save_artifact` and `load_artifact` write and read the checker's whole state after the prelude, bodies included, under a host's key.
+   `sgl::set_prelude_store` is where a host keeps it: the `sgl` tool in one file of the temp directory, slib in its default persistent cache.
+   In a fresh `sgl` process the load is 2.3 ms with the file's read; the prelude's parse, about 13 ms there, is what a process still pays.
+4. **The parse in the artifact**, so a process that loads the prelude parses none of it.
 5. **Module artifacts:** imports, relocation on load, and keys with early cutoff, kept by slib's persistent cache.
 6. **Option overlays**, so a compile that sets options continues from the artifacts too.
-7. **Parallel layers**, and serialized impls if checking bodies from source shows.
+7. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
 
 ### Open in this design
 
 * Whether the per-stack relocation shows, which would bring back ids that name their layer.
-* Which of the checker's side tables a declaration's check writes for a body's check to read later, which the interface must then hold.
 * How a declaration records an option it reaches through another module's declaration, which the overlay needs across artifacts.
-* Whether a compile reports an error in a module's body it never reaches: on demand it does not.
-  A module's own check still does: its tests, the language server on its file, and an artifact's making.
 * Whether the language server, which keeps its own parse of the prelude, moves onto artifacts.
 
 ## What it touches

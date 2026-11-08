@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
@@ -618,7 +619,7 @@ struct sgl::check::function_info
     /// `@vertex`, `@pixel` or `@compute` makes the function an entry point.
     stage entry_stage = stage::none;
     /// The grid a `@compute` entry point is dispatched in, from `@compute(x, y, z)`; 1 for an axis nobody wrote.
-    i32 workgroup[3] = {1, 1, 1};
+    cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
     /// The subgroup size a `@compute` entry point asks for by `@preferred_subgroup_size(n)`; 0 where it asks none.
     i32 preferred_subgroup_size = 0;
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
@@ -838,7 +839,7 @@ struct sgl::check::target
 /// A `count` of one is a field; zero is no swizzle at all.
 struct sgl::check::swizzle
 {
-    i8 fields[4] = {};
+    cc::fixed_array<i8, 4> fields = {};
     i8 count = 0;
 
     [[nodiscard]] constexpr bool has_repeats() const

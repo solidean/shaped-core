@@ -149,6 +149,8 @@ private:
     cc::unique_ptr<impl::checker> _state;
     /// How much of each list the prelude filled, which a program's check starts behind.
     impl::resume_point _resume;
+    /// The text a layer read back from an artifact points into where it is in none of `_files`.
+    cc::vector<cc::unique_ptr<cc::string>> _texts;
 
     friend cc::optional<checked_prelude> check_prelude(cc::span<module_file const> prelude,
                                                        builtins::registry const& builtins);
@@ -163,4 +165,9 @@ private:
     friend bool reaches_the_same_modules(checked_prelude const& layer,
                                          cc::span<module_file const> library,
                                          module_file program);
+    friend cc::optional<cc::vector<cc::byte>> save_artifact(checked_prelude const& layer, cc::string_view key);
+    friend cc::optional<checked_prelude> load_artifact(cc::span<cc::byte const> bytes,
+                                                       cc::string_view key,
+                                                       cc::span<module_file const> prelude,
+                                                       builtins::registry const& builtins);
 };

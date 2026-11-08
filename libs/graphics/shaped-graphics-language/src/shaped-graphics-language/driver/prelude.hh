@@ -1,6 +1,9 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/fwd.hh>
@@ -21,8 +24,24 @@ struct sgl::parsed_prelude_file
     ast::file_ast ast;
 };
 
+/// Where the checked prelude is kept between processes, so a process reads it back rather than checking it again.
+/// sgl opens no file, so the store is its host's: slib's persistent cache, the `sgl` tool's directory, or none.
+/// What `load` hands back is checked against the key and the bytes' own hash before it is used, so a store may lose,
+/// cut short or corrupt an entry, and the compile then checks the prelude as it would without one.
+struct sgl::prelude_store
+{
+    /// The bytes `save` kept under `key`, or none.
+    cc::unique_function<cc::optional<cc::vector<byte>>(cc::string_view key)> load;
+    /// Keeps `bytes` under `key` for a later process, or drops them.
+    cc::unique_function<void(cc::string_view key, cc::span<byte const> bytes)> save;
+};
+
 namespace sgl
 {
+/// The store the first `checked_prelude()` reads the prelude from, and keeps it in after checking it on a miss.
+/// It has no effect once `checked_prelude()` has run, so a host sets it before its first compile.
+void set_prelude_store(prelude_store store);
+
 /// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, then `raytracing.sgl`.
 ///
 /// `builtins.sgl` is `builtins::default_registry().prelude_text()`: generated in memory, so the library never opens the committed file.

@@ -526,3 +526,22 @@ TEST("fixed_array - non-trivial structured binding")
         CHECK(tracked::ctor_count == tracked::dtor_count);
     }
 }
+
+TEST("fixed_array - == compares element-wise, so an aggregate holding one defaults its own")
+{
+    constexpr auto a = cc::fixed_array<int, 3>{1, 2, 3};
+    static_assert(a == cc::fixed_array<int, 3>{1, 2, 3});
+    static_assert(!(a == cc::fixed_array<int, 3>{1, 2, 4}));
+    static_assert(cc::fixed_array<int, 0>{} == cc::fixed_array<int, 0>{});
+
+    struct holder
+    {
+        cc::fixed_array<int, 2> pair = {};
+        bool operator==(holder const&) const = default;
+    };
+    auto const one = holder{.pair = {1, 2}};
+    auto const same = holder{.pair = {1, 2}};
+    auto const swapped = holder{.pair = {2, 1}};
+    CHECK(one == same);
+    CHECK(!(one == swapped));
+}

@@ -12,7 +12,7 @@ The prelude is checked once per process, and every compile then continues from t
 Both halves still carry work that is not the program's own.
 The children name each cut, with what it costs today and the test that measures it.
 
-The persistent shader cache of slib does not skip the prelude check, so this cost is paid once per process wherever a pipeline is acquired (shaped-shader-library's `docs/structure.md`).
+Since 2026-11-08 a host may keep the checked prelude between processes (`sgl::set_prelude_store`), which the `sgl` tool and slib's default cache do; the parse is still paid once per process.
 
 ## Measured, 2026-11-06
 
@@ -35,6 +35,5 @@ The form parser climbs precedence in one loop instead of a frame per level, whic
 The test-only builtins (`test_texel` and its siblings) are about 16 KB of the prelude, some 4% of what a process pays for it.
 A compile pays nothing for them, since no pass of a program's check walks the prelude any more.
 
-Step 3 of the compilation model, saving checked layers (`docs/spec/incubator/compilation-model.md`), would remove the 20 ms.
-It is shelved, and belongs to [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md): a cache with its invalidation does not pay for 15 ms per process yet.
-What would reopen it: many short-lived processes compiling, or a prelude that grows well past today's size.
+Saving checked layers removes the check from a process that reads the prelude back: 5.8 ms became a 0.68 ms load on 2026-11-08.
+It belongs to [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md), whose next step carries the parse too.

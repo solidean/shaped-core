@@ -1,5 +1,6 @@
 ---
 created: 2026-11-08
+priority: someday
 parent: epic-sgl-separate-compilation
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/check_modules.cc
@@ -62,6 +63,8 @@ This is the step's real design question, and it does not have an easy answer und
 
 What this suggests instead: an artifact carries its bodies' checked tables, and loads whole, relocated with the rest.
 Loading a body is then a copy, never a check, and laziness only saves reading bytes.
-That reverses "bodies from source first", so it is the maintainer's to decide.
+
+The maintainer decided so on 2026-11-08, and the prelude's artifact carries its bodies.
+This issue stays for a reader that only checks, the language server and `describe`, if a measurement ever asks: its bodies would land in the compile's own layer.
 - If a program reaches most of its modules' bodies, serialized impls stop being "if it shows" and become what makes a module artifact pay.
   The prelude's artifact should pay either way: a program likely reaches few of its bodies, which is unmeasured, and its parse goes too.
