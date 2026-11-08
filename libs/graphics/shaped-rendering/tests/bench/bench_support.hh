@@ -10,6 +10,8 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh>
+#include <shaped-shader-library/shader_asset.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 // What the benchmarks of SGL against a hand-written original share: the inputs, the targets and the timed loop.
@@ -30,6 +32,33 @@ struct contender
     /// What the driver reports of the contender's pipeline, where its context captures it; empty otherwise.
     cc::unique_function<cc::vector<sg::driver_statistic>()> statistics;
 };
+
+/// `options` with the one that asks for SGL's own binary on `ctx`'s format, which a context of the text route honours.
+[[nodiscard]] inline cc::vector<slib::shader_option> with_native(sg::context const& ctx,
+                                                                 cc::vector<slib::shader_option> options)
+{
+    auto const name
+        = ctx.backend() == sg::backend_kind::vulkan ? slib::k_native_spirv_option : slib::k_native_dxil_option;
+    options.push_back({.name = cc::string(name), .value = cc::string("true")});
+    return options;
+}
+
+/// A contender of `pipeline`, once it has built, recorded by `record`.
+[[nodiscard]] inline contender contender_of(cc::string_view name,
+                                            sg::context& ctx,
+                                            sg::async_compute_pipeline const& pipeline,
+                                            cc::unique_function<void(sg::command_list&, sg::compute_pipeline const&)>* record)
+{
+    return {.name = cc::string(name),
+            .is_ready =
+                [&ctx, &pipeline]
+            {
+                (void)ctx.backlog.start(pipeline);
+                return pipeline->is_ready() && pipeline->try_value() != nullptr;
+            },
+            .record = [record, &pipeline](sg::command_list& cmd) { (*record)(cmd, **pipeline->try_value()); },
+            .statistics = [&pipeline] { return (*pipeline->try_value())->driver_statistics(); }};
+}
 
 /// Each statistic the driver reports of the contenders' pipelines, a line per statistic and a column per contender.
 /// Nothing where none reports any, which is every context but a vulkan one asked to capture them.

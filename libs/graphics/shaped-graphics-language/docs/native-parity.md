@@ -15,6 +15,8 @@ uv run dev.py benchmark "SGL's own binary against its text through DXC" --timeou
 ```
 
 * `sr - ...` dispatches à-trous, SVGF's filter and the network's convolution, from [sgl-against-hlsl-benchmark.cc](../../shaped-rendering/tests/bench/sgl-against-hlsl-benchmark.cc).
+* `sr - ..., the kernels with no HLSL original` dispatches the BC encoders, bloom's four passes, the box filter's 2D level, the exposure meter and SVGF's temporal and variance passes,
+  from [sgl-routes-benchmark.cc](../../shaped-rendering/tests/bench/sgl-routes-benchmark.cc).
 * `sv - the tracers ...` runs the megakernel and the wavefront on the cornell box, from [native-route-benchmark.cc](../../shaped-viewer/tests/native-route-benchmark.cc).
   It gives every wavefront kernel its own ratio, and times a frame only once the compiles a frame starts have settled.
   A material's shade kernel is still compiling for the first frames, and shades with the stand-in until it lands.
@@ -162,6 +164,23 @@ The texel loops of every encoder but bc7's now say `@unroll`, so each index is a
 bc1 went from 0.22 ms to 0.048 natively on vulkan, and bc4 and bc5 halved on dx12; the Radeon moved within a few percent.
 bc7's stay loops: unrolled, its native was 22% faster on vulkan and 6% slower on dx12, while DXC's vulkan module took 586 kB of scratch and 5 times as long.
 bc7's native is the faster route on the B580 anyway, from half of DXC's scratch, 27 520 bytes against 55 424.
+
+**The rest of sr's kernels** joined them the same day, each at the size its routine runs it at for a 1024x1024 image.
+Native over text, one process on the B580 and on the Radeon's dx12, two on the Radeon's vulkan:
+
+| kernel | B580 dx12 | B580 vulkan | Radeon dx12 | Radeon vulkan |
+|---|---:|---:|---:|---:|
+| bloom first | 0.99 | 1.00 | 1.01 | 1.01, 1.01 |
+| bloom down | 1.00 | 0.90 | 1.00 | 1.00, 1.00 |
+| bloom up | 0.99 | 1.00 | 1.00 | 1.00, 1.00 |
+| bloom finish | 1.00 | 1.00 | 1.00 | **1.05, 1.05** |
+| mipmap 2d | 1.01 | 1.01 | 1.00 | 1.00, 1.00 |
+| exposure meter | 1.03 | 1.02 | 1.00 | 1.00, 1.00 |
+| SVGF temporal | 1.00 | 1.00 | 1.00 | 1.00, 0.99 |
+| SVGF variance | 0.95 | 1.00 | 1.01 | 1.00, 1.00 |
+
+bloom down is a 10 µs dispatch and the exposure meter one group of 256 threads, so their B580 ratios are the timestamps' resolution; each one's fastest dispatch is even.
+The B580 compiles both routes of every kernel here to the same instruction count, but SVGF temporal's 173 against 175, and none uses scratch.
 The convolution on dx12 is just past the bar, the one exception there, and the megakernel on vulkan just inside it.
 Once SPIR-V's branches became selects and its vectors one phi a merge, vulkan's megakernel read 1.004 and its wavefront 0.890 in one process.
 Neither has been diagnosed; the convolution's opposite sign on vulkan says the gap is the DXIL rather than the kernel.
@@ -284,6 +303,17 @@ That is the container rather than the code: DXC's side is stripped of reflection
   - Shader model 6.8 rather than 6.6, which also sets `ResMayNotAlias` as DXC's module does, read 1.029 and 1.030.
   - shan counts DXC's DXIL at 124 vector words live against native's 82, so the slower module is not the one that holds more.
   What AMD's compiler makes of each module is the next place to look: its register count and its ISA.
+* **The Radeon's vulkan bloom finish, 1.05: a wave size the driver picks.**
+  AMD's compiler makes DXC's module a wave64 program and native's a wave32 one; its ISA's header says which, and the instructions are the same on both.
+  It is the one kernel of the 15 surveyed on 2026-11-08 whose two routes the driver gives different wave sizes; the others agree, 10 at wave64 and 4 at wave32.
+  The trigger is in the module's shape rather than its preamble, which is the same on both routes but for ids.
+  - Stamping DXC's generator number into native's module left it wave32.
+  - DXC wraps the body in a `switch` whose merge holds the one `Return`, for the bounds check's early return, where native returns from the branch.
+    Written with no early return, both routes compile to wave32; written without `scattered`'s branches, or without `scattered`, so do both.
+  - bloom first and up have the same early return, and their two routes agree, so the `switch` is not the whole rule.
+  SPIR-V has no way to ask for a wave size, so the module cannot fix it; a pipeline can, through `VK_EXT_subgroup_size_control`, which sg does not expose.
+* **The Radeon's vulkan bc3, 1.07 and 1.08.**
+  Both routes are wave64, native at 126 vector registers to DXC's 128; nothing is diagnosed yet.
 * **bc7's DXIL, 1.23 in size.**
   Its stores and divisions are DXC's now; what is left is 234 more `select` and 242 more `load` than DXC's, against fewer allocas.
   [perf-sgl-dxil-bc7-arithmetic-gap](issues/perf-sgl-dxil-bc7-arithmetic-gap.md) has the rest; it is not timed here.

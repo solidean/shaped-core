@@ -79,32 +79,6 @@ enum class pairing : u8
     text_against_native,
 };
 
-/// `options` with the one that asks for SGL's own binary on `ctx`'s format, which a context of the text route honours.
-[[nodiscard]] cc::vector<slib::shader_option> with_native(sg::context const& ctx, cc::vector<slib::shader_option> options)
-{
-    auto const name
-        = ctx.backend() == sg::backend_kind::vulkan ? slib::k_native_spirv_option : slib::k_native_dxil_option;
-    options.push_back({.name = cc::string(name), .value = cc::string("true")});
-    return options;
-}
-
-/// A contender of `pipeline`, once it has built, recorded by `record`.
-[[nodiscard]] contender contender_of(cc::string_view name,
-                                     sg::context& ctx,
-                                     sg::async_compute_pipeline const& pipeline,
-                                     cc::unique_function<void(sg::command_list&, sg::compute_pipeline const&)>* record)
-{
-    return {.name = cc::string(name),
-            .is_ready =
-                [&ctx, &pipeline]
-            {
-                (void)ctx.backlog.start(pipeline);
-                return pipeline->is_ready() && pipeline->try_value() != nullptr;
-            },
-            .record = [record, &pipeline](sg::command_list& cmd) { (*record)(cmd, **pipeline->try_value()); },
-            .statistics = [&pipeline] { return (*pipeline->try_value())->driver_statistics(); }};
-}
-
 /// What SGL's side of each pair wrote, which holds two routes of one source to one answer.
 struct kernel_outputs
 {
@@ -441,60 +415,6 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx,
             auto const data = co_await written.data();
             outputs->convolution = cc::vector<f32>::create_copy_of(cc::span<f32 const>(data));
         }
-    }
-
-    // ---- the BC encoders, one 1024x1024 image each, which have no HLSL original and so only the two routes --------------
-    if (pair == pairing::text_against_native)
-    {
-        namespace bc = sr::sgl_shaders::compression_bc;
-        auto const blocks_wide = (k_extent[0] + 3) / 4;
-        auto const blocks_high = (k_extent[1] + 3) / 4;
-        auto const constants = bc::bc_constants{.blocks_wide = blocks_wide,
-                                                .blocks_high = blocks_high,
-                                                .row_blocks = blocks_wide,
-                                                .width = k_extent[0],
-                                                .height = k_extent[1],
-                                                .srgb = 0,
-                                                .bc1_cut_out = 0,
-                                                .channel_range = 0,
-                                                .snorm = 0};
-        auto const usage = sg::buffer_usage::readwrite_buffer;
-        auto const narrow = ctx.persistent.create_buffer<tg::vec<2, u32>>(blocks_wide * blocks_high, usage);
-        auto const wide = ctx.persistent.create_buffer<tg::vec<4, u32>>(blocks_wide * blocks_high, usage);
-        auto const narrow_layout = ctx.cached.acquire_binding_group_layout<bc::bc_io8>();
-        auto const wide_layout = ctx.cached.acquire_binding_group_layout<bc::bc_io16>();
-        // bc3, bc5 and bc7 write 16 bytes a block, bc1 and bc4 eight
-        auto const encoder = [&](cc::string_view name, auto const& entry, bool is_wide) -> cc::shared_async<cc::unit>
-        {
-            auto const layout = entry.acquire_layout(ctx);
-            auto const text_pipeline = slib::acquire_compute_pipeline(&ctx, entry.asset, layout, {});
-            auto const native_pipeline = slib::acquire_compute_pipeline(&ctx, entry.asset, layout, with_native(ctx, {}));
-            auto record = cc::unique_function<void(sg::command_list&, sg::compute_pipeline const&)>(
-                [&](sg::command_list& cmd, sg::compute_pipeline const& pipeline)
-                {
-                    auto const group
-                        = is_wide
-                            ? ctx.transient.create_binding_group(
-                                  cmd, wide_layout,
-                                  bc::bc_io16{.source = color.as_texture_view(), .blocks = wide.as_readwrite_buffer()})
-                            : ctx.transient.create_binding_group(
-                                  cmd, narrow_layout,
-                                  bc::bc_io8{.source = color.as_texture_view(), .blocks = narrow.as_readwrite_buffer()});
-                    cmd.compute.bind_pipeline(pipeline);
-                    cmd.compute.bind_group(0, *group);
-                    cmd.compute.set_inline_constants(constants.to_block());
-                    cmd.compute.dispatch_threads(blocks_wide, blocks_high);
-                });
-            auto contenders = cc::vector<contender>();
-            contenders.push_back(contender_of("text", ctx, text_pipeline, &record));
-            contenders.push_back(contender_of("native", ctx, native_pipeline, &record));
-            co_await measure(ctx, name, contenders);
-        };
-        co_await encoder("bc1", bc::bc1_cs, false);
-        co_await encoder("bc3", bc::bc3_cs, true);
-        co_await encoder("bc4", bc::bc4_cs, false);
-        co_await encoder("bc5", bc::bc5_cs, true);
-        co_await encoder("bc7", bc::bc7_cs, true);
     }
 
     co_await ctx.idle_completion();

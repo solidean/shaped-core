@@ -495,7 +495,10 @@ if(SC_BUILD_TESTS)
     # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device and a vulkan one.
     # The HLSL is kept under tests/bench/shaders as it stood before the port, and nothing but the benchmark reads it.
     if(_sr_test_backends AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
-        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-hlsl-benchmark.cc)
+        target_sources(shaped-rendering-test PRIVATE
+            tests/bench/sgl-against-hlsl-benchmark.cc
+            tests/bench/sgl-routes-benchmark.cc
+        )
         target_compile_definitions(shaped-rendering-test PRIVATE SR_BENCH_HAS_VULKAN=$<TARGET_EXISTS:shaped-graphics-vulkan>)
         sc_add_shader_package(
             TARGET     shaped-rendering-test
