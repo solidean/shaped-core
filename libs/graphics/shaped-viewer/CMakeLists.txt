@@ -295,6 +295,9 @@ if(SC_BUILD_TESTS)
     # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the import test that reads the real scene when present.
     sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR ../../../extern/bistro/.install)
 
+    # The pbr shade kernel the generator writes, committed for native-parity.py's size gate; a test keeps it current.
+    sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_DATA_DIR tests/data)
+
     # The GPU tests run once per backend this build has: an entry driver per backend invokes every
     # `INVOCABLE_TEST(..., (sg::context_handle const&))` in the binary against one context of it.
     # dx12 needs DXC to compile the shaders; metal compiles SGL through slib's own compiler edge, so it needs nothing more.

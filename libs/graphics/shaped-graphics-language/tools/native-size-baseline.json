@@ -210,5 +210,9 @@
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::sort": {
   "spirv": 49,
   "dxil": 40
+ },
+ "libs/graphics/shaped-viewer/tests/data/pbr_shade_kernel.sgl::sv_shade": {
+  "spirv": 9198,
+  "dxil": 6538
  }
 }

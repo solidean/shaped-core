@@ -53,6 +53,8 @@ FILES = [
     "libs/graphics/shaped-viewer/shaders/wavefront.sgl",
     "libs/graphics/shaped-viewer/shaders/raster_pass.sgl",
     "libs/graphics/shaped-viewer/shaders/raster_cull.sgl",
+    # generated at run time; a viewer test keeps this copy what the generator writes
+    "libs/graphics/shaped-viewer/tests/data/pbr_shade_kernel.sgl",
 ]
 STAGES = {"compute": "cs", "vertex": "vs", "pixel": "ps"}
 ENTRY = re.compile(r"^@(compute|vertex|pixel|raygen|closest_hit|any_hit|miss|intersection|callable)\b[^\n]*?\bfun ([a-z_0-9]+)", re.M)

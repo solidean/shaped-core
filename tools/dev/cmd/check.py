@@ -581,7 +581,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   "SGL's own SPIR-V and DXIL of the repo's shaders stay within 2% of native-size-baseline.json, in operations",
                   False, check_sgl_native_size,
                   watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-rendering/shaders/**",
-                           "libs/graphics/shaped-viewer/shaders/**"),
+                           "libs/graphics/shaped-viewer/shaders/**", "libs/graphics/shaped-viewer/tests/data/**"),
                   builds=("sgl",)),
         dev.Check("abspaths",
                   "no compile definition or generated source carries an absolute source or build path "

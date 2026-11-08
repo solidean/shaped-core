@@ -1,5 +1,8 @@
 #include <clean-core/container/array.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/environment.hh>
+#include <clean-core/streams/file_stream.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
@@ -448,4 +451,34 @@ TEST("sv::generate_material_shader - the builtin pbr type generates")
         CHECK(g.source.contains(cc::format("    let {} = sv_attribute_{}(ctx)", d.name, d.name)));
     }
     CHECK(g.layout.slots.size() == lib.get_type(pbr).signature.size());
+}
+
+TEST("sv - the committed pbr shade kernel is what the generator writes, which the native size gate measures")
+{
+    // native-parity.py's `check` holds SGL's binaries of this file to a baseline, and it stands for every material's
+    // shade kernel, which the program generates at run time; SC_UPDATE_NATIVE_SAMPLES=1 writes it anew
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+    auto const type = materials.acquire_type(sv::builtin_material::pbr).value();
+    auto const id = materials.acquire(sv::material::create("pbr", type, {}));
+    auto const generated = sv::generate_material_shader(sv::resolve_material(materials, id, make_mesh())).shade_source;
+    auto const path = nx::source_path(SV_TEST_DATA_DIR "/pbr_shade_kernel.sgl");
+
+    if (cc::environment_variable("SC_UPDATE_NATIVE_SAMPLES").has_value())
+    {
+        auto file = cc::file_write_stream_adapter::create(path);
+        REQUIRE(file.has_value());
+        auto stream = file.value().stream();
+        REQUIRE(stream.write(generated.as_bytes()).has_value());
+        REQUIRE(stream.flush().has_value());
+    }
+    auto file = cc::file_read_stream_adapter::open(path);
+    REQUIRE(file.has_value());
+    auto stream = file.value().stream();
+    auto const bytes = stream.read_all();
+    REQUIRE(bytes.has_value());
+    auto const committed = cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size());
+    CHECK(committed == cc::string_view(generated))
+        .dump("fix", "run `SC_UPDATE_NATIVE_SAMPLES=1 uv run dev.py test \"the committed pbr shade kernel\"`, then "
+                     "`native-parity.py update` where the gate moves");
 }

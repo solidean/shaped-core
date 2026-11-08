@@ -42,6 +42,8 @@ uv run libs/graphics/shaped-graphics-language/tools/native-parity.py diff <file.
 `lines` is one entry's DXIL arithmetic per `.sgl` file and line on both routes, which says where a gap stands.
 `check` counts SGL's own operations alone, in about a second, against [native-size-baseline.json](../tools/native-size-baseline.json).
 An entry that grows more than 2% fails `dev.py check`'s `sgl-native-size` gate, and `update` commits a new baseline where the growth is meant or an entry shrank.
+The gate holds the `pbr` material's shade kernel too, from a copy the program would generate: [pbr_shade_kernel.sgl](../../shaped-viewer/tests/data/pbr_shade_kernel.sgl).
+A viewer test fails once the generator writes something else, and `SC_UPDATE_NATIVE_SAMPLES=1` on that test writes the copy anew.
 DXC gets slib's own arguments, so its side is what a context of the text route builds.
 An operation is one instruction inside the function, so declarations, names and decorations do not count.
 
@@ -105,7 +107,7 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 | bloom `first_cs` | dxil | 1.21 | 1.03 |
 | `bc3_cs` | spirv | 1.30 | 1.27 |
 
-The shade kernel is generated per material at run time, so `table` does not hold it; the row is the cornell box's `pbr`.
+The shade kernel is generated per material at run time; the row is the cornell box's `pbr`, whose committed copy `table` holds.
 Every other entry stands within about 10% of DXC's operations, and most below it.
 
 DXIL's bytes run 5% to 20% over DXC's even where the operations match, imgui's being 30 against 30.
