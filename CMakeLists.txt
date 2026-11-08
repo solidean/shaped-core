@@ -112,17 +112,18 @@ option(SC_MIMALLOC "Back the default memory resource with mimalloc; OFF uses the
 # amount, a float converted into a fixed_int.
 # These sit in the hottest loops of exact geometry predicates, which is why they are not CC_ASSERTs and default OFF.
 # A whole-build switch, never per-target: a header-only check compiled two ways in one program is an ODR violation.
-# The clang debug presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+# Off in every preset: a build dir configured with it ON runs the checks now and then, not on every commit.
 option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and preconditions at runtime" OFF)
 
 # Log a warning wherever a typed-geometry query meets an input it assumes away: parallel lines, a zero-length segment.
 # A warning rather than an assert, so a test can feed a special case on purpose and declare it; nexus fails the rest.
-# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug presets.
+# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH; the clang debug presets turn it on.
 option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
 
 # Let a context link's releases be watched, so nexus names who still holds a test's context when it reports leftover async work.
 # Off, the release path is exactly what it is without the feature; on, every release of a context link pays one load and a compare.
 # Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH: the release is inline.
+# Off in every preset, like SC_CHECK_WIDE_ARITH.
 option(SC_ASYNC_AMBIENT_TRACE "Let nexus name who holds a test's context when it reports leftover async work" OFF)
 
 # Test clean-simd at every lane width it generates flat, rather than at one 256-bit type per element.

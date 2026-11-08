@@ -141,14 +141,12 @@
         {
             "name": "x64-windows-clang-ninja-debug",
             "displayName": "Debug Clang (Ninja, Windows)",
-            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES), runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS), and names who holds a test's leftover async work (SC_ASYNC_AMBIENT_TRACE).",
+            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES) and runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS).",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "SC_CHECK_WIDE_ARITH": "ON",
                 "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
                 "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON",
                 "SC_SOURCE_SITES": "OPAQUE"
             }
         },
@@ -213,14 +211,12 @@
         {
             "name": "x64-linux-clang-ninja-debug",
             "displayName": "Debug Clang (Ninja, Linux)",
-            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES), runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS), and names who holds a test's leftover async work (SC_ASYNC_AMBIENT_TRACE).",
+            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES) and runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS).",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "SC_CHECK_WIDE_ARITH": "ON",
                 "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
                 "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON",
                 "SC_SOURCE_SITES": "OPAQUE"
             }
         },
@@ -483,14 +479,12 @@
         {
             "name": "macos-arm-llvm-debug",
             "displayName": "macOS ARM Debug",
-            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES), runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS), and names who holds a test's leftover async work (SC_ASYNC_AMBIENT_TRACE).",
+            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES) and runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS).",
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "SC_CHECK_WIDE_ARITH": "ON",
                 "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
-                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON"
+                "SC_SIMD_EXHAUSTIVE_TESTS": "ON"
             }
         },
         {

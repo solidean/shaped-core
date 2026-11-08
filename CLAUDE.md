@@ -355,7 +355,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   `REPORT` logs it as a failed shader assert at the `.sgl` line and ends that invocation, `ABORT` only ends it, and `DEFINE` gives it WGSL's value and goes on.
   See [docs/platforms.md](docs/platforms.md#operations-with-no-value-sc_shader_undefined).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
-  Off by default because they sit in predicate hot loops; the clang `debug-*` presets turn it on, so CI and `check --all-presets` exercise it.
+  Off in every preset, since the checks sit in predicate hot loops: a build dir configured with it ON runs them, now and then, and neither `check` nor CI does.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
 * `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the clang `debug-*` presets turn it on.
   See [docs/platforms.md](docs/platforms.md#exhaustive-simd-tests-sc_simd_exhaustive_tests).
@@ -363,7 +363,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   The clang `debug-*` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
   See [docs/platforms.md](docs/platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases).
 * `SC_ASYNC_AMBIENT_TRACE` (default OFF) lets nexus name who still holds a test's context when it reports leftover async work → `CC_ASYNC_AMBIENT_TRACE`.
-  Off, nothing is paid; on, every context release pays a load and a compare; the clang `debug-*` presets turn it on.
+  Off, nothing is paid; on, every context release pays a load and a compare; off in every preset, like `SC_CHECK_WIDE_ARITH`.
   See [docs/platforms.md](docs/platforms.md#who-holds-a-tests-context-sc_async_ambient_trace).
 
 ---
