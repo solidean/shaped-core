@@ -267,6 +267,13 @@ That is the container rather than the code: DXC's side is stripped of reflection
   The largest lines left are `reorient_frame`'s, behind `leaned != f.n`, which DXC skips on the path that returned `n` itself.
   A kernel's own ratio does not measure it: with the SPIR-V unchanged, vulkan's shade read 1.01 in one set and 1.11 in another.
   `native-parity.py lines` counts both routes' arithmetic per `.sgl` line, which is how to find the next part of it.
+  On 2026-11-08 the frame read 1.049 and 1.051, and among its kernels only shade stood apart, 1.19 and 1.20, with extend, segment and connect within 1%.
+  The Radeon's dx12 shade read 1.01 and vulkan's on the B580 1.0, so the gap is the B580's dx12 driver's alone, which reports no figures.
+  Three causes were tried and ruled out, each a run against 1.19:
+  - Handles: the shade kernel made a bindless texture's handle in each arm of an if-else over samplers, 54 where DXC makes 3.
+    `hoist_common_chains` now computes such a chain once in the arms' common dominator, which took the DXIL to 61 handles against DXC's 72; shade read 1.19 and 1.20.
+  - `flatten_branches` off, for DXC's branches where native has 49 more selects: 1.20.
+  - `merge_buffer_loads` off, for DXC's 112 single loads where native has 49 and 22 of four lanes: 1.33, so the merging helps.
 * **AMD's dx12 convolution, 1.03.**
   Its hot loop is the same shape on both routes, block for block: the same conditional loads, the same phis.
   DXC's extra live words are the row prologue, which it writes with branches where native selects, and which runs three times a thread.

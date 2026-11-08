@@ -43,6 +43,68 @@ namespace
         return reads_unchanging_memory(p, value_ref(p.operands_of(i)[0]));
     return gives_only_a_value(i.code);
 }
+
+/// The blocks that hold anything in their opening order, each one's place among them, which a walk reaches, and who
+/// dominates whom by place.
+struct walked_graph
+{
+    cc::vector<block_ref> walked;
+    cc::vector<u32> place;
+    cc::vector<bool> is_reached;
+    cc::vector<u32> edges_to;
+    cc::vector<u32> preds;
+};
+
+[[nodiscard]] walked_graph walk_of(program const& p)
+{
+    auto g = walked_graph();
+    // a block with nothing in it is one no walk reached, which every table here skips
+    auto const order = blocks_in_order(p);
+    g.place = cc::vector<u32>::create_filled(p.blocks.size(), 0xffffffffu);
+    g.walked = cc::vector<block_ref>::create_with_capacity(order.size());
+    for (auto const b : order)
+        if (p.blocks[isize(b)].count > 0)
+        {
+            g.place[isize(b)] = u32(g.walked.size());
+            g.walked.push_back(b);
+        }
+
+    // the graph, by place: a block's predecessors as one run per block, from what a walk reaches alone
+    g.is_reached = cc::vector<bool>::create_filled(g.walked.size(), false);
+    auto stack = cc::vector<u32>();
+    auto scratch = cc::vector<u32>();
+    auto const terminator_of = [&](isize at) -> instruction const&
+    {
+        auto const& block = p.blocks[isize(g.walked[at])];
+        return p.instructions[block.first + block.count - 1];
+    };
+    g.is_reached[0] = true;
+    stack.push_back(0);
+    g.edges_to = cc::vector<u32>::create_filled(g.walked.size() + 1, 0u);
+    while (!stack.empty())
+    {
+        auto const at = stack.back();
+        stack.pop_back();
+        for (auto const to : successors_of(p, terminator_of(at), scratch))
+        {
+            ++g.edges_to[g.place[to] + 1];
+            if (!g.is_reached[g.place[to]])
+            {
+                g.is_reached[g.place[to]] = true;
+                stack.push_back(g.place[to]);
+            }
+        }
+    }
+    for (auto i = isize(0); i < g.walked.size(); ++i)
+        g.edges_to[i + 1] += g.edges_to[i];
+    g.preds = cc::vector<u32>::create_filled(isize(g.edges_to[g.walked.size()]), 0u);
+    auto cursor = cc::vector<u32>::create_copy_of(cc::span<u32 const>(g.edges_to));
+    for (auto i = isize(0); i < g.walked.size(); ++i)
+        if (g.is_reached[i])
+            for (auto const to : successors_of(p, terminator_of(i), scratch))
+                g.preds[cursor[g.place[to]]++] = u32(i);
+    return g;
+}
 } // namespace
 
 void sgl::ir::remove_unused(program& p)
@@ -105,52 +167,10 @@ void sgl::ir::remove_unused(program& p)
 
 void sgl::ir::share_common_values(program& p)
 {
-    // a block with nothing in it is one no walk reached, which every table here skips
-    auto const order = blocks_in_order(p);
-    auto place = cc::vector<u32>::create_filled(p.blocks.size(), 0xffffffffu);
-    auto walked = cc::vector<block_ref>::create_with_capacity(order.size());
-    for (auto const b : order)
-        if (p.blocks[isize(b)].count > 0)
-        {
-            place[isize(b)] = u32(walked.size());
-            walked.push_back(b);
-        }
-
-    // the graph, by place: a block's predecessors as one run per block, from what a walk reaches alone
-    auto is_reached = cc::vector<bool>::create_filled(walked.size(), false);
-    auto stack = cc::vector<u32>();
-    auto scratch = cc::vector<u32>();
-    auto const terminator_of = [&](isize at) -> instruction const&
-    {
-        auto const& block = p.blocks[isize(walked[at])];
-        return p.instructions[block.first + block.count - 1];
-    };
-    is_reached[0] = true;
-    stack.push_back(0);
-    auto edges_to = cc::vector<u32>::create_filled(walked.size() + 1, 0u);
-    while (!stack.empty())
-    {
-        auto const at = stack.back();
-        stack.pop_back();
-        for (auto const to : successors_of(p, terminator_of(at), scratch))
-        {
-            ++edges_to[place[to] + 1];
-            if (!is_reached[place[to]])
-            {
-                is_reached[place[to]] = true;
-                stack.push_back(place[to]);
-            }
-        }
-    }
-    for (auto i = isize(0); i < walked.size(); ++i)
-        edges_to[i + 1] += edges_to[i];
-    auto preds = cc::vector<u32>::create_filled(isize(edges_to[walked.size()]), 0u);
-    auto cursor = cc::vector<u32>::create_copy_of(cc::span<u32 const>(edges_to));
-    for (auto i = isize(0); i < walked.size(); ++i)
-        if (is_reached[i])
-            for (auto const to : successors_of(p, terminator_of(i), scratch))
-                preds[cursor[place[to]]++] = u32(i);
-    auto const tree = dominance(edges_to, preds);
+    auto const g = walk_of(p);
+    auto const& walked = g.walked;
+    auto const& is_reached = g.is_reached;
+    auto const tree = dominance(g.edges_to, g.preds);
 
     struct entry
     {
@@ -219,4 +239,174 @@ void sgl::ir::share_common_values(program& p)
         if (i.code == op::phi)
             for (auto k = u32(0); k < i.count; k += 2)
                 p.operands[i.first + k] = current(p.operands[i.first + k]);
+}
+
+void sgl::ir::hoist_common_chains(program& p)
+{
+    auto const g = walk_of(p);
+    auto const tree = dominance(g.edges_to, g.preds);
+    auto block_of = cc::vector<u32>::create_filled(p.instructions.size(), 0xffffffffu);
+    for (auto at = isize(0); at < g.walked.size(); ++at)
+    {
+        auto const& block = p.blocks[isize(g.walked[at])];
+        for (auto i = block.first; i < block.first + block.count; ++i)
+            block_of[i] = u32(at);
+    }
+    auto const is_same = [&](instruction const& a, instruction const& b)
+    {
+        if (a.code != b.code || a.type != b.type || a.aux != b.aux || a.count != b.count)
+            return false;
+        for (auto k = u32(0); k < a.count; ++k)
+            if (p.operands[a.first + k] != p.operands[b.first + k])
+                return false;
+        return true;
+    };
+
+    // each chain's twins: the first of each group, and every other its group holds
+    auto lead_of = cc::vector<u32>::create_filled(p.instructions.size(), 0xffffffffu);
+    auto leads = cc::vector<u32>();
+    for (auto i = isize(0); i < p.instructions.size(); ++i)
+    {
+        auto const& inst = p.instructions[i];
+        if (inst.code != op::access_chain || block_of[i] == 0xffffffffu || !g.is_reached[block_of[i]])
+            continue;
+        auto found = false;
+        for (auto const l : leads)
+            if (is_same(p.instructions[l], inst))
+            {
+                lead_of[i] = l;
+                found = true;
+                break;
+            }
+        if (!found)
+        {
+            leads.push_back(u32(i));
+            lead_of[i] = u32(i);
+        }
+    }
+
+    // a group's blocks' common dominator, where every operand is already there; -1 where it has no twin to share
+    // A twin already in that block dominates the rest, so it stays where it stands and the others read it.
+    auto target = cc::vector<i32>::create_filled(p.instructions.size(), -1);
+    auto keeper = cc::vector<u32>::create_filled(p.instructions.size(), 0xffffffffu);
+    auto any = false;
+    for (auto const l : leads)
+    {
+        auto common = block_of[l];
+        auto twins = 0;
+        for (auto i = isize(0); i < p.instructions.size(); ++i)
+            if (lead_of[i] == l && u32(i) != l)
+            {
+                ++twins;
+                while (!tree.dominates(common, block_of[i]))
+                    common = tree.immediate(common);
+            }
+        if (twins == 0)
+            continue;
+        auto available = true;
+        for (auto const o : p.operands_of(p.instructions[l]))
+            if (is_operation(value_ref(o)) && !tree.dominates(block_of[index_of(value_ref(o))], common))
+                available = false;
+        if (!available)
+            continue;
+        keeper[l] = l;
+        for (auto i = isize(0); i < p.instructions.size(); ++i)
+            if (lead_of[i] == l && block_of[i] == common)
+            {
+                // the first in the block, which every other in it follows
+                keeper[l] = u32(i);
+                break;
+            }
+        target[l] = keeper[l] == l && block_of[l] != common ? i32(common) : -2;
+        any = true;
+    }
+    if (!any)
+        return;
+
+    // the tables again: each group's one chain ahead of its common dominator's terminator, and its twins gone
+    // what each block takes ahead of its terminator, a chain after any moved chain it reads
+    auto moved_into = cc::vector<cc::vector<u32>>::create_defaulted(g.walked.size());
+    auto is_placed = cc::vector<bool>::create_filled(p.instructions.size(), false);
+    auto const place_moved = [&](auto&& self, u32 l) -> void
+    {
+        if (is_placed[l])
+            return;
+        is_placed[l] = true;
+        for (auto const o : p.operands_of(p.instructions[l]))
+            if (is_operation(value_ref(o)))
+            {
+                auto const base = lead_of[index_of(value_ref(o))];
+                if (base != 0xffffffffu && target[base] == target[l])
+                    self(self, base);
+            }
+        moved_into[target[l]].push_back(l);
+    };
+    for (auto const l : leads)
+        if (target[l] >= 0)
+            place_moved(place_moved, l);
+
+    // a twin read through its group's keeper, and a moved keeper written at its common dominator, not here
+    auto const is_folded = [&](u32 i)
+    {
+        auto const l = lead_of[i];
+        if (l == 0xffffffffu || target[l] == -1)
+            return false;
+        return keeper[l] != i || target[l] >= 0;
+    };
+    auto place = cc::vector<u32>::create_filled(p.instructions.size(), 0xffffffffu);
+    auto next = u32(0);
+    auto const order = blocks_in_order(p);
+    for (auto const b : order)
+    {
+        auto const& block = p.blocks[isize(b)];
+        auto const at = g.place[isize(b)];
+        for (auto i = block.first; i < block.first + block.count; ++i)
+        {
+            if (is_folded(i))
+                continue;
+            if (i + 1 == block.first + block.count && at != 0xffffffffu)
+                for (auto const l : moved_into[at])
+                    place[l] = next++;
+            place[i] = next++;
+        }
+    }
+    auto const moved = [&](u32 raw) -> u32
+    {
+        if (!is_operation(value_ref(raw)))
+            return raw;
+        auto const i = index_of(value_ref(raw));
+        auto const l = lead_of[i] != 0xffffffffu && target[lead_of[i]] != -1 ? keeper[lead_of[i]] : i;
+        return place[l];
+    };
+    auto kept = cc::vector<instruction>::create_with_capacity(isize(next));
+    auto operands = cc::vector<u32>::create_with_capacity(p.operands.size());
+    auto const copy = [&](u32 i)
+    {
+        auto inst = p.instructions[i];
+        auto const held = p.operands_of(inst);
+        auto const first = u32(operands.size());
+        for (auto k = isize(0); k < held.size(); ++k)
+            operands.push_back(operand_role(inst.code, k) == operand::value ? moved(held[k]) : held[k]);
+        inst.first = first;
+        kept.push_back(inst);
+    };
+    for (auto const b : order)
+    {
+        auto& block = p.blocks[isize(b)];
+        auto const at = g.place[isize(b)];
+        auto const start = u32(kept.size());
+        for (auto i = block.first; i < block.first + block.count; ++i)
+        {
+            if (is_folded(i))
+                continue;
+            if (i + 1 == block.first + block.count && at != 0xffffffffu)
+                for (auto const l : moved_into[at])
+                    copy(l);
+            copy(i);
+        }
+        block.first = start;
+        block.count = u32(kept.size()) - start;
+    }
+    p.instructions = cc::move(kept);
+    p.operands = cc::move(operands);
 }

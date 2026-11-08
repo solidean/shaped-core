@@ -38,7 +38,7 @@ m.functions;                              // one per OpFunction, named by OpName
 m.entry_points;                           // the OpEntryPoint names
 f.instructions;                           // what runs: no labels, merges, lines or declarations
 f.count_of(shan::op_kind::load);          // -> i32
-f.blocks; f.loops; f.selections; f.calls;  // DXIL: a loop is a back edge, a selection a conditional branch or switch
+f.blocks; f.loops; f.selections; f.calls;  // DXIL: a loop is a header back edges reach, a selection a conditional branch or switch
 f.variable_words;                         // the function's own variables, in 32-bit words
 f.max_live_words;                         // register pressure: the most words of SSA values live at once
 f.max_live_vector_words;                  // the same of values that differ across a wave: what VGPRs hold

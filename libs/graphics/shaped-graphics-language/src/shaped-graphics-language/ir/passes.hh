@@ -20,6 +20,15 @@ void remove_unused(program& p);
 /// Leaves the replaced operation unread, for `remove_unused`, and keeps control flow as it stood.
 void share_common_values(program& p);
 
+/// Computes once an access chain several blocks compute alike, none of which dominates another, in their common
+/// dominator, where every operand of it already stands.
+///
+/// A chain only names an element, so computing it on a path that does not read it changes nothing but an address.
+/// What it is for is a binding array's element: DXIL makes the element's handle where the chain stands, so a texture an
+/// if-else chain over samplers reads in each arm is one handle, as DXC makes it, rather than one an arm.
+/// The hoisted chain keeps the first twin's statement; run it after `share_common_values`, which leaves no twin dominated.
+void hoist_common_chains(program& p);
+
 /// Joins blocks, threads edges past blocks that only pass values on, and turns a branch with little on its sides into
 /// `select`s, which run both sides whichever way it would have gone.
 ///

@@ -174,6 +174,74 @@ TEST("sgl ir share_common_values - a read shares only where the shader cannot wr
     CHECK(count_of(b.p, op::load) == 3);
 }
 
+// ---- hoist_common_chains
+
+TEST("sgl ir hoist_common_chains - a chain both arms take alike is one, in the block that branches")
+{
+    // an if-else over samplers reads one texture's element in each arm, which DXIL makes a handle of where the chain is
+    auto b = program_builder();
+    auto const array_type = b.add_type({.kind = type_kind::array, .count = 4, .element = b.float_type});
+    auto const array_pointer
+        = b.add_type({.kind = type_kind::pointer, .space = storage::function, .element = array_type});
+    b.p.locals.push_back({.type = array_pointer});
+    auto const xs = local_at(0);
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const x = unknown(b);
+    auto const at = b.add(op::f_to_s, b.uint_type, {u32(x)});
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    b.open(1);
+    auto const first = b.add(op::load, b.float_type, {u32(b.add(op::access_chain, b.float_pointer, {u32(xs), u32(at)}))});
+    b.branch(3);
+    b.open(2);
+    auto const second
+        = b.add(op::fadd, b.float_type,
+                {u32(b.add(op::load, b.float_type, {u32(b.add(op::access_chain, b.float_pointer, {u32(xs), u32(at)}))})),
+                 u32(b.one)});
+    b.branch(3);
+    b.open(3);
+    b.keep(b.add(op::phi, b.float_type, {u32(first), 1, u32(second), 2}));
+    b.finish();
+    share_common_values(b.p);
+    hoist_common_chains(b.p);
+    require_whole(b.p, control_flow::structured);
+    REQUIRE(count_of(b.p, op::access_chain) == 1);
+    // it stands in the block that branches, ahead of its terminator, where both arms see it
+    auto const& entry = b.p.blocks[0];
+    auto in_entry = false;
+    for (auto i = entry.first; i < entry.first + entry.count; ++i)
+        in_entry = in_entry || b.p.instructions[i].code == op::access_chain;
+    CHECK(in_entry);
+}
+
+TEST("sgl ir hoist_common_chains - a chain whose index an arm computes stays in that arm")
+{
+    auto b = program_builder();
+    auto const array_type = b.add_type({.kind = type_kind::array, .count = 4, .element = b.float_type});
+    auto const array_pointer
+        = b.add_type({.kind = type_kind::pointer, .space = storage::function, .element = array_type});
+    b.p.locals.push_back({.type = array_pointer});
+    auto const xs = local_at(0);
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    b.open(1);
+    auto const at = b.add(op::f_to_s, b.uint_type, {u32(x)});
+    auto const first = b.add(op::load, b.float_type, {u32(b.add(op::access_chain, b.float_pointer, {u32(xs), u32(at)}))});
+    b.branch(3);
+    b.open(2);
+    b.branch(3);
+    b.open(3);
+    b.keep(b.add(op::phi, b.float_type, {u32(first), 1, u32(b.one), 2}));
+    b.finish();
+    hoist_common_chains(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::access_chain) == 1);
+}
+
 // ---- flatten_branches
 
 TEST("sgl ir flatten_branches - a branch around little is a select, carrying the phi's statement and guarantee")
