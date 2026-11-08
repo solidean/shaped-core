@@ -572,7 +572,8 @@ cc::shared_async<cc::unit> await_forever(cc::atomic<bool>* alive, cc::atomic<boo
 // it runs on, abandoned, so that work must own everything it touches and never reach into the frame.
 // Pinned 2026-11-08, after a consumer's parallel helper whose children wrote through references to its frame's locals
 // was found under ASan as a double free; see "Work that outlives its frame" in libs/base/clean-core/docs/systems/async.md.
-TEST("async backlog - a parked frame dropped while work below it runs is destroyed at once, so that work must own its state",
+TEST("async backlog - a parked frame dropped while work below it runs is destroyed at once, so that work must own its "
+     "state",
      nx::config::no_scheduler,
      exclusive())
 {
@@ -584,7 +585,10 @@ TEST("async backlog - a parked frame dropped while work below it runs is destroy
     auto const state = cc::make_shared<fan_out_state>();
     // the parent is a scheduled node's argument, so its last handle goes when that node is dropped unresolved
     auto outer = cc::make_async_scheduled([](cc::unit) { return 1; }, fan_out_from_frame(&alive, state));
-    CC_DEFER { state->release.store(true); };
+    CC_DEFER
+    {
+        state->release.store(true);
+    };
     auto const t0 = cc::current_time_steady_secs();
     while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
         cc::this_thread_yield();
@@ -622,7 +626,10 @@ TEST("async backlog - children holding async_this_node keep their dropped frame 
     auto saw_frame = cc::atomic<int>(0);
     auto const state = cc::make_shared<fan_out_state>();
     auto outer = cc::make_async_scheduled([](cc::unit) { return 1; }, fan_out_holding_frame(&alive, state, &saw_frame));
-    CC_DEFER { state->release.store(true); };
+    CC_DEFER
+    {
+        state->release.store(true);
+    };
     auto const t0 = cc::current_time_steady_secs();
     while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
         cc::this_thread_yield();
