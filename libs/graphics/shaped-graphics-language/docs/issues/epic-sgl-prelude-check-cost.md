@@ -36,4 +36,16 @@ The test-only builtins (`test_texel` and its siblings) are about 16 KB of the pr
 A compile pays nothing for them, since no pass of a program's check walks the prelude any more.
 
 Saving checked layers removes the check from a process that reads the prelude back: 5.8 ms became a 0.68 ms load on 2026-11-08.
-It belongs to [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md), whose next step carries the parse too.
+It belongs to [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md).
+
+## Measured in a fresh process, 2026-11-08
+
+Release `sgl emit` of the sgl-cube's vertex shader, with the checked prelude read back from the tool's file.
+
+- **The builtin registry: 11 ms.** Registering the records takes 2.2 ms, and `finalize` 8.6 ms, which is the parse of `builtins.sgl`, 387 KB of the prelude's 467 KB.
+  `finalize` reads each record's name and parameters back from that parse, and the prelude's first file is the same parse.
+- **The two hand-written files' parse: about 1 ms.**
+- **Reading the checked layer back: 2.3 ms,** the 1.6 MB file's read included.
+
+Putting the parses into the artifact was tried, and lost: the artifact grew to 9.6 MB, and reading it back cost what parsing does.
+So what is left is the parse itself: a faster parse, or a `builtins.sgl` with less in it, are the cuts.

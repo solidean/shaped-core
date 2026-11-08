@@ -161,7 +161,7 @@ Checking a body on demand was the first plan, and it has nowhere cheap to land u
 A body checked into the shared layer would grow it under a program's ids, and could intern a type the program holds already under another id.
 A body checked into the compile's own layer costs every compile the bodies it reaches, which a layer checked whole charges nobody.
 So a reader that needs no body skips the impls by their offsets, and one that does copies them with the rest.
-The files are still parsed from source, since the flat trees read the AST; carrying the parse too is the next cut.
+The files are parsed from source, since the flat trees read the AST: a parse read back costs what parsing costs (step 4 below).
 
 **Early cutoff: a dependent's key names its imports' interfaces, not their sources.**
 
@@ -207,7 +207,11 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    `check::save_artifact` and `load_artifact` write and read the checker's whole state after the prelude, bodies included, under a host's key.
    `sgl::set_prelude_store` is where a host keeps it: the `sgl` tool in one file of the temp directory, slib in its default persistent cache.
    In a fresh `sgl` process the load is 2.3 ms with the file's read; the prelude's parse, about 13 ms there, is what a process still pays.
-4. **The parse in the artifact**, so a process that loads the prelude parses none of it.
+4. **The parse in the artifact.** *Tried on 2026-11-08 and not kept: reading a parse back costs what parsing it does.*
+   A parse is some twenty times its source: the prelude's files took the artifact from 1.6 MB to 9.6 MB.
+   In a fresh `sgl` process that file's read was 5.0 ms and its walk 3.6 ms, against about 1 ms to parse the two files beside `builtins.sgl`.
+   `builtins.sgl` is most of the prelude, and the builtin registry parses it as it is built, 8.6 ms there, before any store is asked.
+   What would cut the per-process parse is a faster parse or a smaller `builtins.sgl` ([epic-sgl-prelude-check-cost](../../issues/epic-sgl-prelude-check-cost.md)), not an artifact.
 5. **Module artifacts:** imports, relocation on load, and keys with early cutoff, kept by slib's persistent cache.
 6. **Option overlays**, so a compile that sets options continues from the artifacts too.
 7. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
