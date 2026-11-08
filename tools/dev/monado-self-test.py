@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # ///
 
 """Self-test for tools/dev/lib/toolchain/monado.py — what a test run adds to select the simulated headset.

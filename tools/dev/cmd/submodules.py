@@ -22,7 +22,7 @@ _COLORS = {"initialized": console.green, "would init": console.green, "updated":
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Fast-forward the submodules to their recorded commits, or to their tracked branches, never touching local work")
     s = p.add_subparsers(dest="submodules_cmd", required=True, metavar="<command>")
-    q = s.add_parser("sync", help="init the missing submodules, fast-forward every clean one to the commit the superproject records (--tip: to its tracked branch), then init their missing submodules")
+    q = s.add_parser("sync", help="init the missing submodules, fast-forward every clean one to the commit the superproject records (--tip: to its tracked branch), then their own submodules to the commits they record")
     q.add_argument("paths", nargs="*", help="only these submodules (default: all)")
     q.add_argument("--dry-run", action="store_true", help="fetch and report, change nothing")
     q.add_argument("--no-fetch", action="store_true", help="use the remote-tracking branches as they are")
@@ -52,9 +52,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     fresh = [s for s, o in zip(missing, outcomes) if o.status == "initialized"]
     tip = args.tip or args.bump
     outcomes += [lib.sync(ctx.root, s, dry_run=args.dry_run, fetch=not args.no_fetch, tip=tip) for s in subs + fresh]
-    # After the sync, so a nested submodule a fast-forward just declared is initialized too.
+    # After the sync, so the nested checkouts follow the pointers a fast-forward just moved.
     for s in subs + fresh:
-        outcomes += lib.init_nested(ctx.root, s, dry_run=args.dry_run)
+        outcomes += lib.sync_nested(ctx.root, s, dry_run=args.dry_run, fetch=not args.no_fetch)
     width = max(len(o.path) for o in outcomes)
     for o in outcomes:
         print(f"  {o.path:<{width}}  {_COLORS[o.status](f"{o.status:<12}")}  {o.detail}")

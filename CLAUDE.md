@@ -11,7 +11,7 @@ A library's entry below is a few lines, written for whoever *uses* the library; 
 **shaped-core** is a collection of foundational C++ libraries by Shaped Code, powering SOLIDEAN, internal tools, customer projects, and research.
 
 * C++23, CMake (>= 3.28), presets per platform/compiler (MSVC / Clang / GCC across Windows / Linux / macOS / Android).
-* [dev.py](dev.py) is the unified build & test driver, run via `uv` (Python 3.10+) — see the `building-and-testing` skill.
+* [dev.py](dev.py) is the unified build & test driver, run via `uv` (Python 3.12+) — see the `building-and-testing` skill.
 * The library set is **growing** — the list below is current, not exhaustive.
 
 ---
