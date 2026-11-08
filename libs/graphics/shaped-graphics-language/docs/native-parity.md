@@ -312,8 +312,16 @@ That is the container rather than the code: DXC's side is stripped of reflection
     Written with no early return, both routes compile to wave32; written without `scattered`'s branches, or without `scattered`, so do both.
   - bloom first and up have the same early return, and their two routes agree, so the `switch` is not the whole rule.
   SPIR-V has no way to ask for a wave size, so the module cannot fix it; a pipeline can, through `VK_EXT_subgroup_size_control`, which sg does not expose.
-* **The Radeon's vulkan bc3, 1.07 and 1.08.**
-  Both routes are wave64, native at 126 vector registers to DXC's 128; nothing is diagnosed yet.
+* **The Radeon's vulkan bc3, 1.07 and 1.08: the driver copies each texel past its sRGB conversion.**
+  Both routes are wave64, native at 126 vector registers to DXC's 128, and their ISA is the same 4500 instructions but for 34 `v_mov` and 14 `s_branch`.
+  Those sit in `stored`'s `if bc_constants.srgb != 0`, once a texel of the unrolled read.
+  DXC's arm converts a texel in the registers it was loaded into, so the other arm is empty and the merge a fallthrough.
+  Native's arm writes two of the three channels to fresh registers, so the other arm copies the texel there and the converting one jumps over it.
+  Both modules merge the same `float4` phi, of the converted texel and the loaded one, so the choice is the driver's register coalescing.
+  Three differences between the two modules were tried on 2026-11-08 and changed nothing:
+  - the phi's operands written in the other order;
+  - the empty arm laid out first, as DXC's is, by swapping the source's arms;
+  - `flatten_branches` off, which keeps the conversion's branches as DXC does: 4 jumps rather than 14, but 121 copies rather than 53.
 * **bc7's DXIL, 1.23 in size.**
   Its stores and divisions are DXC's now; what is left is 234 more `select` and 242 more `load` than DXC's, against fewer allocas.
   [perf-sgl-dxil-bc7-arithmetic-gap](issues/perf-sgl-dxil-bc7-arithmetic-gap.md) has the rest; it is not timed here.
