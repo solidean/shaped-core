@@ -5,6 +5,8 @@ parent: epic-sgl-native-ir-targets
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/native-parity.md
   - file: libs/graphics/shaped-rendering/shaders/compression/bc.sgl
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-08T07:33Z
 ---
 
 # The native route unrolls no loop by itself, so a local array a loop indexes stays in memory
