@@ -142,3 +142,7 @@ A single `uv run dev.py test shaped-graphics-test`, no `--repeat`, lost the vulk
 Every vulkan test after it failed, and dx12's readbacks read zeros within the same second, as in the sightings above.
 The next run of the same binary passed whole.
 It was the first GPU run of a change that rewrote most native shaders, so the driver compiled them all anew.
+
+Again later that day, in `dev.py ship`'s test step: the stream tests' readbacks failed 6 s in, then `vkCreateSemaphore` asserted and the process faulted.
+It was again the first GPU run after native shaders changed, `hoist_common_chains` on every SGL module, with the drivers' caches cold.
+Two whole runs of the same binary straight after passed all 1980 tests.
