@@ -71,7 +71,8 @@ One-liner per library:
   Depends on clean-core.
   [docs/design.md](libs/base/clean-simd/docs/design.md) has the decisions; early stage.
 * **`libs/data/babel-data`** — the externals-free base of babel: a base64 codec, a JSON reader and writer, and a block-level markdown reader (`data/`).
-  Also the shader binaries (`shader/`), read as stored: `babel::spirv` so far, with LLVM bitcode and DXIL to follow.
+  Also the shader binaries (`shader/`), read as stored: `babel::spirv`, the `babel::dxil` container, and LLVM bitcode in two layers.
+  `babel::llvm` is the version-free bitstream, and `babel::llvm37` the LLVM 3.7 module DXIL froze; a later LLVM is a reader of its own beside it.
   Namespace `babel`.
   Depends on clean-core and nothing else, which is the library's whole contract.
   It also declares `namespace babel` itself — the vocabulary aliases and the fallback recording domain — so `fwd.hh` layers rather than forks.
@@ -196,7 +197,7 @@ One-liner per library:
   Namespace `shan`.
   Depends on clean-core + babel-data, whose readers parse the formats as stored; shan says what they mean.
   **Its metrics compare two modules of one entry point, SGL's own against DXC's above all; they model no GPU.**
-  SPIR-V today, DXIL next; `uv run dev.py run shan -- diff native.spv dxc.spv` is the command line.
+  SPIR-V and DXIL alike; `uv run dev.py run shan -- diff native.dxil dxc.dxil` is the command line.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`.
   Depends on shaped-rendering, plus babel-serializer for the asset importer.

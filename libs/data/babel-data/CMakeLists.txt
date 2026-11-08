@@ -23,6 +23,9 @@ add_library(babel-data
     src/babel-data/data/markdown.cc
 
     src/babel-data/shader/spirv.cc
+    src/babel-data/shader/llvm_bitstream.cc
+    src/babel-data/shader/llvm37.cc
+    src/babel-data/shader/dxil_container.cc
     src/babel-data/shader/spirv_opcode_table.cc
 )
 
@@ -42,6 +45,9 @@ target_sources(babel-data
     src/babel-data/data/markdown.hh
 
     src/babel-data/shader/spirv.hh
+    src/babel-data/shader/llvm_bitstream.hh
+    src/babel-data/shader/llvm37.hh
+    src/babel-data/shader/dxil_container.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -69,8 +75,12 @@ if(SC_BUILD_TESTS)
         tests/data/markdown-test.cc
 
         tests/shader/spirv-test.cc
+        tests/shader/dxil-test.cc
     )
     sc_nexus_binary(babel-data-test KINDS tests)
+
+    # the shader readers' binaries, DXC's output committed beside the tests that read it
+    sc_target_source_paths(babel-data-test PRIVATE BABEL_DATA_TEST_DIR tests)
 
     target_link_libraries(babel-data-test
         PRIVATE

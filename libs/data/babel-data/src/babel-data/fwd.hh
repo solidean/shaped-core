@@ -53,6 +53,37 @@ class module;
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::spirv
 
+namespace babel::llvm
+{
+struct record;
+struct block_entry;
+struct block;
+struct bitstream;
+} // namespace babel::llvm
+
+namespace babel::llvm37
+{
+enum class type_kind : u8;
+struct type;
+enum class inst_code : u16;
+enum class value_kind : u8;
+struct value;
+struct constant;
+struct global_variable;
+struct function;
+struct instruction;
+enum class operand_role : u8;
+struct body;
+struct module;
+} // namespace babel::llvm37
+
+namespace babel::dxil
+{
+struct part;
+struct program;
+struct container;
+} // namespace babel::dxil
+
 namespace babel::markdown
 {
 enum class node_kind : u8;

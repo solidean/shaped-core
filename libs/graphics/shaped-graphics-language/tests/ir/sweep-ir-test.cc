@@ -1,5 +1,8 @@
 #include "ir-test-support.hh"
 
+#include <babel-data/shader/dxil_container.hh>
+#include <babel-data/shader/llvm37.hh>
+#include <babel-data/shader/llvm_bitstream.hh>
 #include <babel-data/shader/spirv.hh>
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/record/log.hh>
@@ -11,7 +14,7 @@
 
 using namespace cc::primitive_defines;
 
-// Every entry point the repo's SGL holds, down both routes, where its stage is lowered yet, its SPIR-V read back by babel.
+// Every entry point the repo's SGL holds, down both routes, where its stage is lowered yet, its SPIR-V and DXIL read back by babel.
 // Where assertions are on a compile verifies its program after lowering and after each pass, so this is what walks the
 // verifier over everything; `spirv-val` and DXC's validator only see the shaders sg and sr ship.
 // A debug build pays seconds per file for that, so a default run takes every eighth and --thorough takes them all.
@@ -54,6 +57,31 @@ void reads_back(cc::span<u32 const> words, cc::string_view entry)
     CHECK(unknown == 0).dump("entry", entry);
     CHECK(past_bound == 0).dump("entry", entry);
 }
+/// babel's readers take SGL's DXIL as a container, its bitcode as LLVM 3.7, and every operand as a value it holds.
+void reads_back_dxil(cc::span<byte const> bytes, cc::string_view entry)
+{
+    auto const c = babel::dxil::read(bytes);
+    REQUIRE(c.has_value()).dump("entry", entry);
+    auto const* const part = c.value().part_named("DXIL");
+    REQUIRE(part != nullptr).dump("entry", entry);
+    auto const p = babel::dxil::program_of(*part);
+    REQUIRE(p.has_value()).dump("entry", entry);
+    auto const bc = babel::llvm::read_bitstream(p.value().bitcode);
+    REQUIRE(bc.has_value()).dump("entry", entry).dump("error", bc.has_error() ? bc.error().to_string() : cc::string());
+    auto const m = babel::llvm37::read(bc.value());
+    REQUIRE(m.has_value()).dump("entry", entry).dump("error", m.has_error() ? m.error().to_string() : cc::string());
+    auto unresolved = 0;
+    for (auto const& b : m.value().bodies)
+        for (auto const& i : b.instructions)
+        {
+            auto const operands = m.value().operands_of(b, i);
+            for (auto k = isize(0); k < operands.size(); ++k)
+                if (b.roles[i.first + k] == babel::llvm37::operand_role::value
+                    && m.value().value_of(b, operands[k]).index == 0xffffffffu)
+                    ++unresolved;
+        }
+    CHECK(unresolved == 0).dump("entry", entry);
+}
 } // namespace
 
 TEST("sgl ir - every entry point of the repo's SGL goes down both native routes",
@@ -89,6 +117,8 @@ TEST("sgl ir - every entry point of the repo's SGL goes down both native routes"
                     continue;
                 if (!e.value().spirv.empty())
                     reads_back(e.value().spirv, entry.entry_point);
+                if (!e.value().dxil.empty())
+                    reads_back_dxil(e.value().dxil, entry.entry_point);
                 spirv += e.value().spirv.empty() ? 0 : 1;
                 dxil += e.value().dxil.empty() ? 0 : 1;
             }
