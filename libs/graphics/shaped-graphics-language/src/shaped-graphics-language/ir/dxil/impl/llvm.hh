@@ -454,6 +454,11 @@ private:
     [[nodiscard]] bool has_effect(inst_entry const& inst) const;
     [[nodiscard]] bool may_share(inst_entry const& inst) const;
     /// What `binary` folds to for two known operands, or `none`.
+    /// `v` multiplied, or divided when `op` is `sdiv`, by the constant `c` on the side `is_right` says, under `fast`'s
+    /// reassociation; none where nothing simpler exists.
+    /// Of a product's two operands, the one another recent product reads beside some other value; none where neither.
+    [[nodiscard]] ll_value shared_factor(ll_value left, ll_value right) const;
+    [[nodiscard]] ll_value reassociated(binary_op op, ll_value v, f32 c, bool is_right, u8 flags);
     [[nodiscard]] ll_value folded_binary(binary_op op, ll_value a, ll_value b, u8 flags);
     /// Calls `visit` with a reference to each of the instruction's operands that is a value, not a type or a block.
     template <class Visit>

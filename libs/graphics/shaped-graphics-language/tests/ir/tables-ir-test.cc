@@ -1,10 +1,13 @@
+#include <clean-core/math/bit.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
+#include <shaped-graphics-language/ir/dxil/impl/llvm.hh>
 
 using namespace cc::primitive_defines;
 
-// state_constant_tables, seen through the SPIR-V SGL writes: a table is a Private variable, a local a Function one.
-// The DXIL writer states the same tables as internal constants, from the same program.
+// What makes the native binaries as small as DXC's: constant tables, and `.fast`'s reassociation of constants.
+// A table is seen through the SPIR-V SGL writes, a Private variable where a local is a Function one; DXIL states the
+// same tables as internal constants, from the same program.
 
 namespace
 {
@@ -76,4 +79,69 @@ TEST("sgl ir tables - a let whose value an invocation computes is no table")
                                           "    io.target[id.x] = read[id.y % 2] + weight(id.y)\n"));
     CHECK(variables_of(words, k_private) == 1);
     CHECK(variables_of(words, k_function) == 1);
+}
+
+TEST("sgl dxil - at .fast a product of constants that cancel is the value it scaled, and is kept without the flags")
+{
+    namespace dxil = sgl::ir::dxil::impl;
+    using dxil::binary_op;
+    using dxil::fp_flags;
+    auto const fast = u8(fp_flags::unsafe_algebra | fp_flags::no_nans | fp_flags::no_infs | fp_flags::no_signed_zeros
+                         | fp_flags::allow_reciprocal);
+    for (auto const flags : {fast, u8(0)})
+    {
+        auto m = dxil::module_builder();
+        m.begin_function();
+        m.open_block(m.add_block());
+        auto const f32 = m.float_type();
+        auto const memory = m.alloca_of(f32, 4);
+        auto const x = m.load(f32, memory, 4);
+        auto const c = m.constant_float(f32, cc::bit_cast<u32>(255.0f));
+        auto const scaled = m.binary(binary_op::mul, x, c, flags);
+        auto const before = m.instruction_count();
+        auto const back = m.binary(binary_op::sdiv, scaled, c, flags);
+        CHECK((back == x) == (flags == fast));
+        CHECK((m.instruction_count() == before) == (flags == fast));
+    }
+}
+
+namespace
+{
+/// The DXIL container SGL writes of `cs` storing `value` of the float4 `x`.
+[[nodiscard]] cc::vector<byte> dxil_storing(cc::string_view value)
+{
+    auto const source = cc::string("binding io:\n"
+                                   "    source: buffer[float4]\n"
+                                   "    target: mut buffer[float4]\n"
+                                   "\n"
+                                   "@compute(64) fun cs(@thread_id id: int3){io}:\n"
+                                   "    let x = io.source[id.x]\n"
+                                   "    io.target[id.x] = ")
+                      + cc::string(value) + "\n";
+    auto const e = sgl::compile_to_text({.source = source,
+                                         .entry_point = "cs",
+                                         .target = sgl::emit::target::hlsl_dx12,
+                                         .native = sgl::emit::native_route::require});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    return e.value().dxil;
+}
+
+[[nodiscard]] bool same_module(cc::string_view a, cc::string_view b)
+{
+    auto const x = dxil_storing(a);
+    auto const y = dxil_storing(b);
+    if (x.size() != y.size())
+        return false;
+    for (auto i = isize(0); i < x.size(); ++i)
+        if (x[i] != y[i])
+            return false;
+    return true;
+}
+} // namespace
+
+TEST("sgl dxil - at .fast a vector's product of constants that cancel writes the module of the vector alone")
+{
+    // simplify cancels it before the writer, so no constant of it is left in the module either
+    CHECK(same_module("x * 255.0 / 255.0", "x"));
+    CHECK(!same_module("x / 3.0", "x"));
 }

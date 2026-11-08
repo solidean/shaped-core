@@ -467,7 +467,9 @@ private:
                 return set_alias(index, b), true;
             if (has_b && y == 1.0)
                 return set_alias(index, a), true;
-            return false;
+            if (has_b)
+                return reassociate(index, i, a, y);
+            return has_a && reassociate(index, i, b, x);
         case op::fadd:
             if (has_a && x == 0.0)
                 return set_alias(index, b), true;
@@ -485,10 +487,47 @@ private:
                 return set_alias(index, a), true;
             if (has_a && x == 0.0)
                 return set_alias(index, zero_of(i.type)), true;
-            return false;
+            return has_b && y != 0.0 && reassociate(index, i, a, 1.0 / y);
         default:
             return false;
         }
+    }
+
+    /// `.fast` reassociates, so `(v * c) / d` is `v * (c / d)`, and `v` itself where those cancel: bc7's `x * 255 / 255`.
+    /// `by` is what the operation multiplies `a` by; a factor that is no splat of one leaves a scalar alone, since only
+    /// a scalar's constant is made here.
+    [[nodiscard]] bool reassociate(u32 index, instruction const& i, value_ref a, f64 by)
+    {
+        if (!is_operation(a))
+            return false;
+        auto const& inner = _p.instructions[index_of(a)];
+        if ((inner.code != op::fmul && inner.code != op::fdiv) || inner.guarantee != check::float_level::fast
+            || inner.type != i.type)
+            return false;
+        auto const parts = _p.operands_of(inner);
+        auto const left = resolved(value_ref(parts[0]));
+        auto const right = resolved(value_ref(parts[1]));
+        auto c = 0.0;
+        auto kept = value_ref::none;
+        if (known_float(right, c) && c != 0.0)
+            kept = left;
+        else if (inner.code == op::fmul && known_float(left, c))
+            kept = right;
+        else
+            return false;
+        auto const factor = (inner.code == op::fmul ? c : 1.0 / c) * by;
+        if (factor == 1.0)
+            return set_alias(index, kept), true;
+        auto const& t = _p.at(i.type);
+        if (t.kind != type_kind::float_ || t.width != 32 || !cc::is_finite(factor) || factor == 0.0)
+            return false;
+        // this operation becomes the one product, and the inner one is left for remove_unused
+        auto& self = _p.instructions[index];
+        self.code = op::fmul;
+        _p.operands[self.first] = u32(kept);
+        _p.operands[self.first + 1] = u32(constant_of(i.type, cc::bit_cast<u32>(f32(factor))));
+        _changed = true;
+        return true;
     }
 
     void fold_binary(u32 index, instruction const& i, fold_kind kind, value_ref a, value_ref b)

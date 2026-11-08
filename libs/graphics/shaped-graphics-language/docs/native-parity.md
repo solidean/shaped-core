@@ -99,7 +99,7 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 | a material's shade kernel | spirv | 1.88 | 1.39 |
 | raster `environment_ps` | dxil | 1.96 | 1.02 |
 | raster `cull_second` | dxil | 1.19 | 1.16 |
-| `bc7_cs` | dxil | 1.49 | 1.27 |
+| `bc7_cs` | dxil | 1.49 | 1.23 |
 | bloom `first_cs` | dxil | 1.21 | 1.03 |
 | `bc3_cs` | spirv | 1.30 | 1.27 |
 
@@ -135,18 +135,21 @@ That is the container rather than the code: DXC's side is stripped of reflection
   bc7 inlines dozens of them, its weight and partition tables: 1171 stores against DXC's 460.
   `state_constant_tables` makes each one a table: an internal constant on DXIL and a `Private` variable on SPIR-V, one per set of leaves.
   bc7's DXIL went from 1.49 to 1.27 and bloom's from 1.21 to 1.03, and nothing grew.
+* **A product of constants was a division per lane.**
+  bc7 rescales a byte as `x * 255.0 / 255.0` and `x * top / 255.0`, which DXC's fast flags reassociate and native kept, 192 `fdiv`s by 255.
+  At `.fast` the DXIL builder now folds `(v * c) / d` to `v * (c / d)` or to `v`, writes `v / d` as `v * (1 / d)`, and lets lanes share `top / 255`.
+  bc7's DXIL went from 1.27 to 1.23, and holds no division by a constant, as DXC's holds none.
 
 ## What remains
 
 * **dx12's wavefront frame, 1.05 to 1.08.**
   Its shade kernel is the one that reads high in every set, 1.17 to 1.20, and its DXIL is 1.21 times DXC's in operations.
   That DXIL still holds about 420 more `fmul`, 126 more `fdiv` and 86 more `dot3` than DXC's.
-  The shape says values DXC shares across branches or rewrites, such as `x / c` as `x * (1 / c)`, which native computes again.
+  Dividing through a constant's reciprocal is not it: with every such division gone, the frame read 1.047, 1.057 and 1.057, and shade 1.16 to 1.25.
   Matching the two listings function by function is the next step; nothing measured so far is a cause.
 * **SPIR-V turns no if-else into a select.**
   DXC's SPIR-V goes through spirv-opt, which does, and `flatten_branches` is DXIL's alone: connect's SPIR-V holds 171 phis and no `OpSelect` against DXC's 78 and 14.
   vulkan's frame is faster than DXC's regardless, so this is a size gap, and a lead should a vulkan kernel come in slow.
-* **bc7's DXIL, 1.27 in size.**
-  Its stores are DXC's now; what is left is 195 more `fdiv`, 234 more `select` and 242 more `load` than DXC's.
-  The `fdiv`s are the wavefront's shape again, a division by a constant DXC writes as a multiplication.
+* **bc7's DXIL, 1.23 in size.**
+  Its stores and divisions are DXC's now; what is left is 234 more `select` and 242 more `load` than DXC's, against fewer allocas.
   [perf-sgl-dxil-bc7-arithmetic-gap](issues/perf-sgl-dxil-bc7-arithmetic-gap.md) has the rest; it is not timed here.

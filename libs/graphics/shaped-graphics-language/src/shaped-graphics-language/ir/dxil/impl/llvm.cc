@@ -1,6 +1,7 @@
 #include "llvm.hh"
 
 #include <clean-core/math/bit.hh>
+#include <clean-core/math/float.hh>
 
 using namespace sgl;
 using namespace sgl::ir::dxil::impl;
@@ -389,6 +390,82 @@ cc::string_view module_builder::name_of(ll_type structure) const
     return name_at(_types[isize(structure)].name_first, _types[isize(structure)].name_size);
 }
 
+ll_value module_builder::shared_factor(ll_value left, ll_value right) const
+{
+    // a lane's product reads the factor its neighbours read too, a few instructions back
+    constexpr auto look_back = isize(16);
+    auto const end = _instructions.size();
+    for (auto i = end > look_back ? end - look_back : isize(0); i < end; ++i)
+    {
+        auto const& inst = _instructions[i];
+        if (inst.code != inst_code::binary || inst.sub != u8(binary_op::mul) || inst.count != 2)
+            continue;
+        for (auto k = u32(0); k < 2; ++k)
+        {
+            auto const read = ll_value(_args[inst.first + k]);
+            auto const partner = ll_value(_args[inst.first + 1 - k]);
+            if (read == right && partner != left && !ll_is_constant(right))
+                return right;
+            if (read == left && partner != right && !ll_is_constant(left))
+                return left;
+        }
+    }
+    return ll_value::none;
+}
+
+ll_value module_builder::reassociated(binary_op op, ll_value v, f32 c, bool is_right, u8 flags)
+{
+    // `fast` reassociates and divides through a reciprocal, as DXC's flags let LLVM: `(v * c) / d` is `v * (c / d)`,
+    // and `v / d` is `v * (1 / d)`; a constant that is no operand's right one only multiplies
+    if (op == binary_op::sdiv && !is_right)
+        return ll_value::none;
+    if (!cc::is_finite(c) || c == 0.0f)
+        return ll_value::none;
+    auto const factor = op == binary_op::mul ? f64(c) : 1.0 / f64(c);
+    auto const type = type_of(v);
+    if (!ll_is_constant(v) && !ll_is_global(v))
+    {
+        auto const& inner = _instructions[_results[ll_index(v)]];
+        if (inner.code == inst_code::binary && (inner.flags & fp_flags::unsafe_algebra) != 0
+            && (inner.sub == u8(binary_op::mul) || inner.sub == u8(binary_op::sdiv)))
+        {
+            auto const left = ll_value(_args[inner.first]);
+            auto const right = ll_value(_args[inner.first + 1]);
+            auto bits = u64(0);
+            auto kept = ll_value::none;
+            auto known = 0.0f;
+            if (constant_bits(right, bits))
+                kept = left;
+            else if (inner.sub == u8(binary_op::mul) && constant_bits(left, bits))
+                kept = right;
+            known = cc::bit_cast<f32>(u32(bits));
+            // `(v * s) * c` is `v * (s * c)`, which lanes sharing `s` then share whole: `x * top / 255` per lane
+            if (kept == ll_value::none && inner.sub == u8(binary_op::mul) && op == binary_op::mul)
+                if (auto const shared = shared_factor(left, right); shared != ll_value::none)
+                {
+                    auto const other = shared == left ? right : left;
+                    auto const scaled
+                        = binary(binary_op::mul, shared, constant_float(type, cc::bit_cast<u32>(f32(factor))), flags);
+                    return binary(binary_op::mul, other, scaled, flags);
+                }
+            if (kept != ll_value::none && cc::is_finite(known) && known != 0.0f)
+            {
+                auto const total = f32((inner.sub == u8(binary_op::mul) ? f64(known) : 1.0 / f64(known)) * factor);
+                if (total == 1.0f)
+                    return kept;
+                if (cc::is_finite(total) && total != 0.0f)
+                    return binary(binary_op::mul, kept, constant_float(type, cc::bit_cast<u32>(total)), flags);
+            }
+        }
+    }
+    if (op != binary_op::sdiv)
+        return ll_value::none;
+    auto const reciprocal = f32(factor);
+    if (!cc::is_finite(reciprocal) || reciprocal == 0.0f)
+        return ll_value::none;
+    return binary(binary_op::mul, v, constant_float(type, cc::bit_cast<u32>(reciprocal)), flags);
+}
+
 ll_value module_builder::folded_binary(binary_op op, ll_value a, ll_value b, u8 flags)
 {
     auto x = u64(0);
@@ -416,6 +493,8 @@ ll_value module_builder::folded_binary(binary_op op, ll_value a, ll_value b, u8 
             return b;
         if ((op == binary_op::add || op == binary_op::sub) && has_b && y == 0 && no_sign)
             return a;
+        if ((flags & fp_flags::unsafe_algebra) != 0 && (op == binary_op::mul || op == binary_op::sdiv))
+            return reassociated(op, has_b ? a : b, cc::bit_cast<f32>(u32(has_b ? y : x)), has_b, flags);
         return ll_value::none;
     }
     if (has_a && has_b)
