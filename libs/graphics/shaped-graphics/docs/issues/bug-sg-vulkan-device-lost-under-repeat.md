@@ -135,3 +135,10 @@ With that one test skipped, 25 whole-suite iterations on Agility lost nothing, a
 `sg - an async upload a submitted list reads is copied even after the last handle is dropped` read stale bytes once on `vulkan-native-spirv`, in the 42 whole-suite iterations above.
 That test pins a race between the upload actor skipping a copy whose target nobody holds and a list waiting on its value.
 Whether the actor can read the handle count and the awaited stamp out of order is unproven, and it may be the readback that precedes a loss.
+
+## Seen again on 2026-11-08
+
+A single `uv run dev.py test shaped-graphics-test`, no `--repeat`, lost the vulkan device 2.9 s in, while a fuzz run's first `mk_trace` waited (seed 1530684561).
+Every vulkan test after it failed, and dx12's readbacks read zeros within the same second, as in the sightings above.
+The next run of the same binary passed whole.
+It was the first GPU run of a change that rewrote most native shaders, so the driver compiled them all anew.

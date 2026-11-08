@@ -212,7 +212,7 @@
   "dxil": 40
  },
  "libs/graphics/shaped-viewer/tests/data/pbr_shade_kernel.sgl::sv_shade": {
-  "spirv": 9198,
-  "dxil": 6538
+  "spirv": 9029,
+  "dxil": 6284
  }
 }

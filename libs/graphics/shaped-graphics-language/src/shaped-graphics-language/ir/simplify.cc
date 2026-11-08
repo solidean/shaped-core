@@ -3,6 +3,7 @@
 #include <clean-core/math/bit.hh>
 #include <clean-core/math/float.hh>
 #include <shaped-graphics-language/builtins/impl/soft_math.hh>
+#include <shaped-graphics-language/ir/dominance.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 #include <shaped-graphics-language/ir/verify.hh>
 
@@ -100,6 +101,7 @@ public:
 
     void run()
     {
+        share_constants();
         for (auto round = 0; round < k_most_fold_rounds; ++round)
         {
             prepare();
@@ -112,6 +114,49 @@ public:
     }
 
 private:
+    /// Reads every scalar constant through one entry per type and bits, a null zero among them, so a comparison of
+    /// two values by identity sees one constant as one value.
+    void share_constants()
+    {
+        auto canonical = cc::vector<u32>::create_filled(_p.constants.size(), 0xffffffffu);
+        auto const size = isize(1) << cc::max(10, int(cc::bit_width(u64(_p.constants.size() * 2))));
+        auto table = cc::vector<u32>::create_filled(size, 0xffffffffu);
+        for (auto c = isize(0); c < _p.constants.size(); ++c)
+        {
+            auto const& k = _p.constants[c];
+            auto const kind = _p.at(k.type).kind;
+            if (k.is_undefined || (kind != type_kind::bool_ && kind != type_kind::int_ && kind != type_kind::float_))
+                continue;
+            auto const low = k.is_null ? 0u : k.low;
+            auto const high = k.is_null ? 0u : k.high;
+            auto at = isize((u32(k.type) * 0x9e3779b1u) ^ (low * 0x85ebca6bu) ^ (high * 0xc2b2ae35u)) & (size - 1);
+            while (table[at] != 0xffffffffu)
+            {
+                auto const& known = _p.constants[isize(table[at])];
+                if (known.type == k.type && (known.is_null ? 0u : known.low) == low
+                    && (known.is_null ? 0u : known.high) == high)
+                    break;
+                at = (at + 1) & (size - 1);
+            }
+            if (table[at] == 0xffffffffu)
+                table[at] = u32(c);
+            canonical[c] = table[at];
+        }
+        for (auto const& block : _p.blocks)
+            for (auto i = block.first; i < block.first + block.count; ++i)
+            {
+                auto const& inst = _p.instructions[i];
+                auto* const operands = _p.operands.data() + inst.first;
+                for (auto k = isize(0); k < isize(inst.count); ++k)
+                {
+                    auto const v = value_ref(operands[k]);
+                    if (operand_role(inst.code, k) == operand::value && is_constant(v)
+                        && canonical[index_of(v)] != 0xffffffffu)
+                        operands[k] = u32(constant_at(canonical[index_of(v)]));
+                }
+            }
+    }
+
     void prepare()
     {
         _order.clear();
@@ -124,6 +169,98 @@ private:
         _target = cc::vector<u32>::create_filled(_p.blocks.size(), k_no_target);
         _skipped = cc::vector<bool>::create_filled(_p.blocks.size(), false);
         _changed = false;
+        find_dominators();
+    }
+
+    /// Each block's closest dominator and its one predecessor, as the blocks stand at the start of a round.
+    /// What a round folds only removes edges, so a fact read off them stays true for what still runs.
+    void find_dominators()
+    {
+        _immediate = cc::vector<u32>::create_filled(_p.blocks.size(), k_no_target);
+        _only_from = cc::vector<u32>::create_filled(_p.blocks.size(), k_no_target);
+        auto node_of = cc::vector<u32>::create_filled(_p.blocks.size(), k_no_target);
+        for (auto k = isize(0); k < _order.size(); ++k)
+            node_of[isize(_order[k])] = u32(k);
+        auto predecessors = cc::vector<cc::vector<u32>>::create_defaulted(_order.size());
+        for (auto k = isize(0); k < _order.size(); ++k)
+        {
+            auto const& block = _p.blocks[isize(_order[k])];
+            auto seen = k_no_target;
+            for (auto const to : successors_of(_p, _p.instructions[block.first + block.count - 1], _scratch))
+                if (node_of[isize(to)] != k_no_target && to != seen)
+                {
+                    predecessors[isize(node_of[isize(to)])].push_back(u32(k));
+                    seen = to;
+                }
+        }
+        auto first = cc::vector<u32>();
+        auto preds = cc::vector<u32>();
+        for (auto const& from : predecessors)
+        {
+            first.push_back(u32(preds.size()));
+            for (auto const f : from)
+                preds.push_back(f);
+        }
+        first.push_back(u32(preds.size()));
+        auto const tree = dominance(first, preds);
+        for (auto k = isize(0); k < _order.size(); ++k)
+        {
+            auto const b = isize(_order[k]);
+            if (k > 0 && !predecessors[k].empty())
+                _immediate[b] = u32(_order[isize(tree.immediate(u32(k)))]);
+            if (predecessors[k].size() == 1)
+                _only_from[b] = u32(_order[isize(predecessors[k][0])]);
+        }
+    }
+
+    /// Whether two conditions are one: the same value, or the same operation of the same operands.
+    [[nodiscard]] bool same_condition(value_ref a, value_ref b) const
+    {
+        if (a == b)
+            return true;
+        if (!is_operation(a) || !is_operation(b))
+            return false;
+        auto const& x = _p.instructions[index_of(a)];
+        auto const& y = _p.instructions[index_of(b)];
+        if (x.code != y.code || x.type != y.type || x.count != y.count || x.sub != y.sub || !gives_only_a_value(x.code))
+            return false;
+        auto const xs = _p.operands_of(x);
+        auto const ys = _p.operands_of(y);
+        for (auto k = isize(0); k < xs.size(); ++k)
+        {
+            auto const is_value = operand_role(x.code, k) == operand::value;
+            if (!is_value && xs[k] != ys[k])
+                return false;
+            auto const p = resolved(value_ref(xs[k]));
+            auto const q = resolved(value_ref(ys[k]));
+            if (is_value && p != q && !same_constant(p, q))
+                return false;
+        }
+        return true;
+    }
+
+    /// Whether `condition` is decided where `b` runs: `b`, or a block dominating it, is entered by one way of a branch
+    /// on the same condition, and from nowhere else.
+    [[nodiscard]] bool known_condition(block_ref b, value_ref condition, bool& value) const
+    {
+        auto at = u32(b);
+        for (auto steps = 0; steps < 256 && at != k_no_target; ++steps)
+        {
+            if (auto const from = _only_from[isize(at)]; from != k_no_target)
+            {
+                auto const& head = _p.blocks[isize(from)];
+                auto const& branch = _p.instructions[head.first + head.count - 1];
+                auto const operands = _p.operands_of(branch);
+                if (branch.code == op::branch_conditional && operands[1] != operands[2]
+                    && same_condition(resolved(value_ref(operands[0])), condition))
+                {
+                    value = operands[1] == at;
+                    return true;
+                }
+            }
+            at = _immediate[isize(at)];
+        }
+        return false;
     }
 
     [[nodiscard]] value_ref resolved(value_ref v) const
@@ -798,9 +935,41 @@ private:
             set_alias(index, constant_of(i.type, cc::bit_cast<u32>(f32(x & mask_of(width)))));
     }
 
+    /// `any` or `all` of a vector comparison whose two sides are known in every lane: `v != float3(0, 0, 1)` of a
+    /// constant `v`, which no bool vector need be made for.
+    void fold_every(u32 index, bool is_all, value_ref compared)
+    {
+        if (!is_operation(compared))
+            return;
+        auto const& c = _p.instructions[index_of(compared)];
+        if (c.code != op::feq && c.code != op::fne && c.code != op::flt && c.code != op::fle && c.code != op::fgt
+            && c.code != op::fge)
+            return;
+        auto const sides = _p.operands_of(c);
+        auto a = lanes();
+        auto b = lanes();
+        if (!known_lanes(resolved(value_ref(sides[0])), a) || !known_lanes(resolved(value_ref(sides[1])), b)
+            || a.count != b.count)
+            return;
+        auto result = is_all;
+        for (auto l = u32(0); l < a.count; ++l)
+        {
+            auto const x = a.at[l];
+            auto const y = b.at[l];
+            auto const lane = c.code == op::feq ? x == y
+                            : c.code == op::fne ? x != y
+                            : c.code == op::flt ? x < y
+                            : c.code == op::fle ? x <= y
+                            : c.code == op::fgt ? x > y
+                                                : x >= y;
+            result = is_all ? result && lane : result || lane;
+        }
+        set_alias(index, constant_of(_p.instructions[index].type, result ? 1 : 0));
+    }
+
     void fold_select(u32 index, value_ref condition, value_ref yes, value_ref no)
     {
-        if (yes == no)
+        if (yes == no || same_constant(yes, no))
             return set_alias(index, yes);
         auto x = u64(0);
         auto width = u32(0);
@@ -875,6 +1044,11 @@ private:
                     fold_construct(index, i, operands);
                     continue;
                 }
+                if (i.code == op::any || i.code == op::all)
+                {
+                    fold_every(index, i.code == op::all, resolved(value_ref(operands[0])));
+                    continue;
+                }
                 if (i.code == op::select)
                 {
                     fold_select(index, resolved(value_ref(operands[0])), resolved(value_ref(operands[1])),
@@ -907,9 +1081,16 @@ private:
                 auto x = u64(0);
                 auto width = u32(0);
                 auto is_float = false;
+                auto is_true = false;
                 if (scalar_bits(resolved(value_ref(operands[0])), x, width, is_float))
                 {
                     _target[isize(b)] = x != 0 ? operands[1] : operands[2];
+                    _changed = true;
+                }
+                else if (known_condition(b, resolved(value_ref(operands[0])), is_true))
+                {
+                    // a branch on what a dominating branch already decided goes the way that one went
+                    _target[isize(b)] = is_true ? operands[1] : operands[2];
                     _changed = true;
                 }
                 else if (operands[1] == operands[2])
@@ -1039,6 +1220,9 @@ private:
     /// Parallel to the blocks: the one block a folded branch goes to.
     cc::vector<u32> _target;
     cc::vector<u32> _scratch;
+    /// Per block, its closest dominator and its one predecessor, `k_no_target` for none.
+    cc::vector<u32> _immediate;
+    cc::vector<u32> _only_from;
     bool _changed = false;
 };
 } // namespace

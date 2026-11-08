@@ -236,6 +236,53 @@ TEST("sgl ir simplify - a phi of two constants of the same bits is that constant
     }
 }
 
+TEST("sgl ir simplify - a branch on what a dominating branch decided goes that branch's way")
+{
+    // openpbr's `else if pick < p.fuzz + p.coat`, with no coat: the condition its `if` already found false
+    auto b = program_builder();
+    b.blocks(5);
+    b.open(0);
+    auto const read = b.add(op::load, b.float_type, {u32(b.out)});
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(read), u32(b.two)}), 1, 2);
+    b.open(1);
+    b.keep(b.one);
+    b.branch(4);
+    b.open(2);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(read), u32(b.two)}), 3, 4);
+    b.open(3);
+    b.keep(b.two);
+    b.branch(4);
+    b.open(4);
+    b.finish();
+    simplify(b.p);
+    CHECK(refusal_of(b.p, control_flow::unstructured) == "");
+    CHECK(count_of(b.p, op::branch_conditional) == 1);
+    CHECK(!dump(b.p).contains("store @ 0x40000000"));
+}
+
+TEST("sgl ir simplify - any of a vector comparison known in every lane is a constant, and so is a select of two zeros")
+{
+    auto b = program_builder();
+    auto const null = b.add_constant({.type = b.float_type, .is_null = true});
+    auto const zero = b.add_constant({.type = b.float_type, .low = 0});
+    b.blocks(1);
+    b.open(0);
+    auto const ones = b.add(op::construct, b.float2_type, {u32(b.one), u32(b.one)});
+    auto const mixed = b.add(op::construct, b.float2_type, {u32(b.one), u32(b.two)});
+    auto const bool2 = b.add_type({.kind = type_kind::vector, .count = 2, .element = b.bool_type});
+    auto const differs = b.add(op::fne, bool2, {u32(ones), u32(mixed)});
+    auto const any = b.add(op::any, b.bool_type, {u32(differs)});
+    auto const read = b.add(op::load, b.float_type, {u32(b.out)});
+    auto const picked = b.add(op::select, b.float_type,
+                              {u32(b.add(op::flt, b.bool_type, {u32(read), u32(b.two)})), u32(null), u32(zero)});
+    b.keep(b.add(op::select, b.float_type, {u32(any), u32(picked), u32(b.two)}));
+    b.finish();
+    simplify(b.p);
+    CHECK(refusal_of(b.p, control_flow::unstructured) == "");
+    CHECK(count_of(b.p, op::any) == 0);
+    CHECK(count_of(b.p, op::select) == 0);
+}
+
 TEST("sgl ir simplify - a condition nobody knows keeps both arms")
 {
     auto b = program_builder();

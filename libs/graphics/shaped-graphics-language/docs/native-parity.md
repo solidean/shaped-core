@@ -99,7 +99,7 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 | wavefront `segment` | dxil | 1.42 | 0.99 |
 | wavefront `connect` | dxil | 1.22 | 1.05 |
 | wavefront `connect` | spirv | 1.14 | 1.14 |
-| a material's shade kernel | dxil | 1.96 | 1.08 |
+| a material's shade kernel | dxil | 1.96 | 1.03 |
 | a material's shade kernel | spirv | 1.88 | 1.29 |
 | raster `environment_ps` | dxil | 1.96 | 1.02 |
 | raster `cull_second` | dxil | 1.19 | 1.16 |
@@ -145,6 +145,11 @@ That is the container rather than the code: DXC's side is stripped of reflection
   Counting operations per `.sgl` line on both sides showed it: DXC had none on the refraction lines, native 64 on one of them.
   `simplify` now takes constants of the same bits as one value, which took the shade kernel's DXIL from 1.21 to 1.08 of DXC's.
   `native-parity.py lines` is that count: it compiles DXC's side from HLSL stripped of its `#line`s with `-Zi`, since DXC keeps one file name for all of them, and maps each line back.
+* **A branch already decided, and a vector compared with a constant, stayed.**
+  With no coat, openpbr's `else if pick < p.fuzz + p.coat` is the condition its `if` already found false, which `simplify` now follows down the dominator tree.
+  `any` and `all` of a comparison known in every lane fold, so `s.geometry_coat_normal != float3(0.0, 0.0, 1.0)` of the default normal goes.
+  `simplify` also reads every scalar constant through one entry per type and bits, which a phi, a select and a condition compare.
+  The shade kernel's DXIL went from 1.08 to 1.03 of DXC's.
 * **A product of constants was a division per lane.**
   bc7 rescales a byte as `x * 255.0 / 255.0` and `x * top / 255.0`, which DXC's fast flags reassociate and native kept, 192 `fdiv`s by 255.
   At `.fast` the DXIL builder now folds `(v * c) / d` to `v * (c / d)` or to `v`, writes `v / d` as `v * (1 / d)`, and lets lanes share `top / 255`.
@@ -153,8 +158,9 @@ That is the container rather than the code: DXC's side is stripped of reflection
 ## What remains
 
 * **dx12's wavefront frame, 1.03 to 1.04.**
-  Its shade kernel's DXIL is 1.08 times DXC's in operations, from 1.21 before the constant phis.
-  What is left is spread thin over openpbr's frame, microfacet and evaluate lines, none more than 26 operations over DXC's.
+  Its shade kernel's DXIL is 1.03 times DXC's in operations, from 1.21 before the constant phis, and its arithmetic 1.03.
+  The last 1.08 to 1.03 left the frame where it was, 1.036 to 1.042, so what is left of the gap is not the count of operations.
+  The largest lines left are `reorient_frame`'s, behind `leaned != f.n`, which DXC skips on the path that returned `n` itself.
   A kernel's own ratio does not measure it: with the SPIR-V unchanged, vulkan's shade read 1.01 in one set and 1.11 in another.
   `native-parity.py lines` counts both routes' arithmetic per `.sgl` line, which is how to find the next part of it.
 * **SPIR-V turns no if-else into a select.**
