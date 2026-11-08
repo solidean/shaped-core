@@ -571,7 +571,7 @@ cc::shared_async<cc::unit> await_forever(cc::atomic<bool>* alive, cc::atomic<boo
 // The contract a fan-out must be written to: a parked frame dropped unresolved is destroyed at once, and the work below
 // it runs on, abandoned, so that work must own everything it touches and never reach into the frame.
 // Pinned 2026-11-08, after a consumer's parallel helper whose children wrote through references to its frame's locals
-// was found under ASan as a double free; see "Work that outlives its frame" in docs/systems/async.md.
+// was found under ASan as a double free; see "Work that outlives its frame" in libs/base/clean-core/docs/systems/async.md.
 TEST("async backlog - a parked frame dropped while work below it runs is destroyed at once, so that work must own its state",
      nx::config::no_scheduler,
      exclusive())
