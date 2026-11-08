@@ -101,7 +101,8 @@ enum class pairing : u8
                 (void)ctx.backlog.start(pipeline);
                 return pipeline->is_ready() && pipeline->try_value() != nullptr;
             },
-            .record = [record, &pipeline](sg::command_list& cmd) { (*record)(cmd, **pipeline->try_value()); }};
+            .record = [record, &pipeline](sg::command_list& cmd) { (*record)(cmd, **pipeline->try_value()); },
+            .statistics = [&pipeline] { return (*pipeline->try_value())->driver_statistics(); }};
 }
 
 /// What SGL's side of each pair wrote, which holds two routes of one source to one answer.
@@ -502,7 +503,8 @@ ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time pe
 #if SR_BENCH_HAS_VULKAN
 ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time per dispatch, on vulkan")
 {
-    auto created = sg::create_vulkan_context({.native_spirv = false});
+    // what the driver made of each route's pipeline, beside the time it takes
+    auto created = sg::create_vulkan_context({.native_spirv = false, .capture_driver_statistics = true});
     if (created.has_error())
         SKIP("no vulkan device");
     co_await compare_on(*created.value(), nullptr, pairing::text_against_native);

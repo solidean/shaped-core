@@ -2,10 +2,12 @@
 
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/query/driver_statistic.hh>
 #include <shaped-graphics/raster/blend_state.hh>
 #include <shaped-graphics/raster/depth_stencil_state.hh>
 #include <shaped-graphics/raster/primitive_topology.hh>
@@ -112,6 +114,11 @@ public:
     /// The backend's serialized PSO blob, for persisting and feeding back via raster_pipeline_description::cached_pipeline.
     /// Empty if the backend does not support it.
     [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;
+
+    /// What the driver reports of the code it compiled for this pipeline: registers, spills, instructions.
+    /// Empty where the backend has no such report, or its context was not asked to capture one
+    /// (`vulkan_config::capture_driver_statistics`).
+    [[nodiscard]] virtual cc::vector<driver_statistic> driver_statistics() const { return {}; }
 
     /// Whether creation actually consumed the `cached_pipeline` blob it was handed.
     ///

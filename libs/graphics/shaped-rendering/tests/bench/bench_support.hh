@@ -27,7 +27,37 @@ struct contender
     cc::string name;
     cc::unique_function<bool()> is_ready;
     cc::unique_function<void(sg::command_list&)> record;
+    /// What the driver reports of the contender's pipeline, where its context captures it; empty otherwise.
+    cc::unique_function<cc::vector<sg::driver_statistic>()> statistics;
 };
+
+/// Each statistic the driver reports of the contenders' pipelines, a line per statistic and a column per contender.
+/// Nothing where none reports any, which is every context but a vulkan one asked to capture them.
+inline void log_driver_statistics(cc::string_view kernel, cc::span<contender> contenders)
+{
+    auto all = cc::vector<cc::vector<sg::driver_statistic>>();
+    auto any = false;
+    for (auto& c : contenders)
+    {
+        all.push_back(c.statistics ? c.statistics() : cc::vector<sg::driver_statistic>());
+        any = any || !all.back().empty();
+    }
+    if (!any)
+        return;
+    for (auto const& s : all[0])
+    {
+        auto line = cc::format("{} driver: {} {}:", kernel, s.executable, s.name);
+        for (auto i = isize(0); i < contenders.size(); ++i)
+        {
+            auto value = cc::string("-");
+            for (auto const& t : all[i])
+                if (t.executable == s.executable && t.name == s.name)
+                    value = cc::format("{}", t.value);
+            line.appendf(" {} {}", contenders[i].name, value);
+        }
+        CC_LOG_INFO("{}", line);
+    }
+}
 
 /// The GPU milliseconds of each span, sorted.
 [[nodiscard]] inline cc::vector<f64> sorted_ms(cc::span<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp> const> spans)
@@ -108,6 +138,7 @@ inline cc::shared_async<cc::unit> measure(sg::context& ctx,
         ctx.advance_epoch();
         co_await ctx.idle_completion();
     }
+    log_driver_statistics(kernel, contenders);
 
     // Without timestamp queries a dispatch is timed as a batch of them on the wall clock, from one completion to the
     // next, and the batches of a pair alternate as single dispatches do.

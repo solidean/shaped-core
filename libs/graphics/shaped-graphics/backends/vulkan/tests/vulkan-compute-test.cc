@@ -281,3 +281,32 @@ ASYNC_TEST("sg vulkan - persistent binding groups free and reuse their descripto
     }
     CHECK(all_created);
 }
+
+TEST("sg vulkan - a context that captures driver statistics reports a pipeline's, and one that does not reports none")
+{
+    for (auto const capture : {true, false})
+    {
+        auto const created = sg::create_vulkan_context({.capture_driver_statistics = capture});
+        REQUIRE(created.has_value());
+        auto& ctx = *created.value();
+        auto const shader = make_double_shader();
+        auto group_layout = ctx.uncached.create_binding_group_layout(shader.bindings);
+        auto layout = ctx.uncached.create_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+        auto const pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = layout});
+        REQUIRE(pipeline != nullptr);
+        auto const statistics = pipeline->driver_statistics();
+        auto const& vk = static_cast<vulkan::vulkan_context const&>(ctx);
+        if (!capture || !vk.captures_driver_statistics())
+        {
+            CHECK(statistics.empty());
+            continue;
+        }
+        // whatever a driver names them, it reports something of a pipeline it compiled
+        CHECK(!statistics.empty());
+        for (auto const& s : statistics)
+        {
+            CHECK(!s.name.empty());
+            CHECK(!s.executable.empty());
+        }
+    }
+}

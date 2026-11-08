@@ -13,6 +13,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_completion_group.cc
     src/shaped-graphics/backends/vulkan/vulkan_forward_waits.cc
     src/shaped-graphics/backends/vulkan/vulkan_query.cc
+    src/shaped-graphics/backends/vulkan/vulkan_driver_statistics.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.queries.cc
     src/shaped-graphics/backends/vulkan/vulkan_download_async.cc
     src/shaped-graphics/backends/vulkan/vulkan_upload_async.cc

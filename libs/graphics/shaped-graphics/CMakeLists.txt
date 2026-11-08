@@ -111,6 +111,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list/raytracing.hh
     src/shaped-graphics/command_list/query.hh
     src/shaped-graphics/query/gpu_timestamp.hh
+    src/shaped-graphics/query/driver_statistic.hh
     src/shaped-graphics/raytracing/acceleration_structure.hh
     src/shaped-graphics/raytracing/impl/hit_record_check.hh
     src/shaped-graphics/raytracing/impl/software_trace.hh

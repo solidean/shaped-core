@@ -859,6 +859,22 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (mesh_shader_supported)
         device_extensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
 
+    // What the driver reports of each pipeline it compiles, only where the config asks, since capturing costs.
+    char const* const statistics_names[] = {VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME};
+    auto statistics_supported = false;
+    if (config.capture_driver_statistics && device_extensions_available(best_device, statistics_names))
+    {
+        auto statistics_query = VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+        };
+        auto features = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                                  .pNext = &statistics_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        statistics_supported = statistics_query.pipelineExecutableInfo == VK_TRUE;
+    }
+    if (statistics_supported)
+        device_extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+
     // Shader execution reordering, which SGL writes as SPIR-V instructions of its own, since DXC lowers none of HLSL's.
     // Only a reordering device counts: one whose hint is `none` regroups nothing, and SGL's hit objects are no use there.
     auto reorder_supported = false;
@@ -1108,9 +1124,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     void const* const chain = after_reorder;
 #endif
 
+    auto statistics_features = VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+        .pNext = const_cast<void*>(chain),
+        .pipelineExecutableInfo = VK_TRUE,
+    };
+    void const* const with_statistics = statistics_supported ? static_cast<void const*>(&statistics_features) : chain;
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = chain,
+        .pNext = with_statistics,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),
@@ -1219,6 +1242,15 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
     ctx->_shader_execution_reordering = raytracing_supported && reorder_supported;
+    if (statistics_supported)
+    {
+        ctx->_get_pipeline_executable_properties = PFN_vkGetPipelineExecutablePropertiesKHR(
+            vkGetDeviceProcAddr(device, "vkGetPipelineExecutablePropertiesKHR"));
+        ctx->_get_pipeline_executable_statistics = PFN_vkGetPipelineExecutableStatisticsKHR(
+            vkGetDeviceProcAddr(device, "vkGetPipelineExecutableStatisticsKHR"));
+        if (ctx->_get_pipeline_executable_properties == nullptr)
+            ctx->_get_pipeline_executable_statistics = nullptr;
+    }
     if (mesh_shader_supported)
         ctx->_cmd_draw_mesh_tasks = PFN_vkCmdDrawMeshTasksEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));
     ctx->_cmd_draw_mesh_tasks_indirect

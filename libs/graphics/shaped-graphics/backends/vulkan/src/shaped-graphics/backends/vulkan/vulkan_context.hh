@@ -60,6 +60,11 @@ struct sg::backend::vulkan::vulkan_config
     /// `false` takes the text route, SGL's HLSL through DXC, for every SGL shader of this context.
     bool native_spirv = true;
 
+    /// Ask the driver to keep what it reports of each pipeline it compiles, through VK_KHR_pipeline_executable_properties:
+    /// registers, spills, instruction counts, which `compute_pipeline::driver_statistics` hands back.
+    /// Off by default, since capturing costs at pipeline creation; a device without the extension reports nothing.
+    bool capture_driver_statistics = false;
+
     /// SGL's own SPIR-V carries each operation's `.sgl` line and the sources it names, for RenderDoc (EMIT-257).
     /// It changes no instruction, only the module's size, and does nothing for what DXC compiles.
     bool native_line_tables = false;
@@ -1012,6 +1017,10 @@ public:
     /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.
     bool _mesh_shader = false;
     PFN_vkCmdDrawMeshTasksEXT _cmd_draw_mesh_tasks = nullptr;
+    /// VK_KHR_pipeline_executable_properties, where `vulkan_config::capture_driver_statistics` asked and the device has it.
+    PFN_vkGetPipelineExecutablePropertiesKHR _get_pipeline_executable_properties = nullptr;
+    PFN_vkGetPipelineExecutableStatisticsKHR _get_pipeline_executable_statistics = nullptr;
+    [[nodiscard]] bool captures_driver_statistics() const { return _get_pipeline_executable_statistics != nullptr; }
     PFN_vkCmdDrawMeshTasksIndirectEXT _cmd_draw_mesh_tasks_indirect = nullptr;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.
     struct subgroup_size_control

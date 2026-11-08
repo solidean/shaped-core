@@ -254,6 +254,7 @@ ctx.is_shut_down()                                 // bool
 // SC_GPU=intel|amd|nvidia|<name substring>  every hardware dx12 and vulkan context of the process on that GPU; none matching fails, never falls back
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
+//   vulkan_config { bool capture_driver_statistics=false; }   VK_KHR_pipeline_executable_properties: each compute and raster pipeline keeps what the driver reports of it
 //   vulkan_config { bool native_spirv=true; }   SGL shaders take SGL's own SPIR-V where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_spirv()
 //   dx12_config { bool native_dxil=true; }     SGL shaders take SGL's own DXIL where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_dxil()
 // created to someone else's spec (an XR runtime's): MOVE-ONLY once a hook is set
@@ -762,6 +763,7 @@ sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle,
 sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout; pinned_data<byte const> cached_pipeline={} }
 compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backend's serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported / accelerator only, NOT in the cache key)
 pipeline.used_cached_pipeline()          // -> bool — did creation actually CONSUME desc.cached_pipeline? false = none given, or the backend rejected it
+pipeline.driver_statistics()             // -> vector<driver_statistic {executable, name, description, value}> — the driver's own figures (AMD: VGPRs, SGPRs; Intel: instructions, blocks); empty unless vulkan_config::capture_driver_statistics
                                          // A rejection is the exact "this persisted blob is stale" signal (driver update, other adapter) — refresh the entry on it, never on a byte compare
 layout->structural_hash()                // -> cc::hash128 on binding_group_layout / pipeline_layout — content identity, NOT the handle address; stable across processes, so it can key a persistent cache
 // layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).

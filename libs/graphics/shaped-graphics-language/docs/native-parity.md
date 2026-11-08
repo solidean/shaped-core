@@ -30,6 +30,10 @@ Three effects of the B580 decide how to read them:
   Between two sets of three processes, vulkan's finalize read 1.15 and then 3.17, and its connect 1.16 and then 0.36, while the frame's total moved by 3%.
   So the bar is read on a frame and on a single dispatch, and a kernel's ratio is a pointer for where to look.
 
+**The driver's own figures** come with the vulkan benchmark of `sr`, whose context captures them: each kernel's pipeline on both routes, a line per figure.
+AMD reports registers (`numUsedVgprs`, `numUsedSgprs`) and Intel instructions and blocks; dx12 reports none.
+On 2026-11-08 both routes compiled to the same registers on AMD but for SVGF's filter, 34 vector registers against 32, and Intel's à-trous to the same 2936 instructions.
+
 **Size** is [tools/native-parity.py](../tools/native-parity.py), over every entry point of the real shaders:
 
 ```bash
@@ -164,6 +168,8 @@ That is the container rather than the code: DXC's side is stripped of reflection
   A kernel's own ratio does not measure it: with the SPIR-V unchanged, vulkan's shade read 1.01 in one set and 1.11 in another.
   `native-parity.py lines` counts both routes' arithmetic per `.sgl` line, which is how to find the next part of it.
 * **AMD's dx12 convolution, 1.03.**
+  Its hot loop is the same shape on both routes, block for block: the same conditional loads, the same phis.
+  DXC's extra live words are the row prologue, which it writes with branches where native selects, and which runs three times a thread.
   The DXIL is not where it shows, as far as four measurements on 2026-11-08 can say, each against a run of 1.032.
   - The hot loop holds DXC's 96 `fmul` and 96 `fadd`, its 12 loads, two fewer instructions, and a chain of the same depth, 13.
   - Issuing its loads first in the block, where native had them beside their uses and DXC early, read 1.032 again.

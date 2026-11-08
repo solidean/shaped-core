@@ -280,6 +280,8 @@ class pipeline_layout;
 struct bound_sampler;               // {binding, sampler} — a register-bound static sampler on a pipeline_layout
 struct pipeline_layout_description; // {groups, static_samplers} — input to create_pipeline_layout
 class compute_pipeline;
+/// A figure a driver reports of a pipeline it compiled; see query/driver_statistic.hh.
+struct driver_statistic;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
 struct bound_view;    // one raw_view (inline) or a vector of them — a named_view's element list
