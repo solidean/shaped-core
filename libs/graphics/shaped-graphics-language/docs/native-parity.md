@@ -144,6 +144,24 @@ The same benchmarks on the Radeon iGPU of a Ryzen 9 9950X3D2 (RDNA 2, driver 32.
 | wavefront, one frame | 1.019 | 0.890 |
 
 Every ratio repeated to the third decimal in all three processes, so the AMD GPU shows none of the B580's speed modes.
+
+**The BC encoders** joined the `sr` benchmark on 2026-11-08, text against native only, since they have no HLSL original.
+Each encodes one 1024x1024 image; native over text, two clean processes on the B580 and one on the Radeon:
+
+| encoder | B580 dx12 | B580 vulkan | Radeon dx12 | Radeon vulkan |
+|---|---:|---:|---:|---:|
+| bc1 | 0.90, 0.90 | 0.98, 0.99 | 0.98 | 1.00 |
+| bc3 | 0.84, 0.84 | 0.93, 0.96 | 1.00 | 1.08 |
+| bc4 | 0.80, 0.80 | 1.00, 1.02 | 1.01 | 1.00 |
+| bc5 | 0.82, 0.82 | 1.00, 0.98 | 1.00 | 1.00 |
+| bc7 | 0.61, 0.66 | 0.59, 0.60 | **1.05** | 1.01 |
+
+Before that, bc1 read 1.63 on the B580's vulkan, from a cost no module count showed: the driver's scratch memory, 19 200 bytes against DXC's 8 192.
+A local array indexed by a loop's counter lives in scratch on the B580, where the Radeon keeps it in registers on either route.
+The texel loops of every encoder but bc7's now say `@unroll`, so each index is a constant and the arrays are registers: scratch went to 0 for bc1, bc4 and bc5.
+bc1 went from 0.22 ms to 0.048 natively on vulkan, and bc4 and bc5 halved on dx12; the Radeon moved within a few percent.
+bc7's stay loops: unrolled, its native was 22% faster on vulkan and 6% slower on dx12, while DXC's vulkan module took 586 kB of scratch and 5 times as long.
+bc7's native is the faster route on the B580 anyway, from half of DXC's scratch, 27 520 bytes against 55 424.
 The convolution on dx12 is just past the bar, the one exception there, and the megakernel on vulkan just inside it.
 Once SPIR-V's branches became selects and its vectors one phi a merge, vulkan's megakernel read 1.004 and its wavefront 0.890 in one process.
 Neither has been diagnosed; the convolution's opposite sign on vulkan says the gap is the DXIL rather than the kernel.
