@@ -6,9 +6,8 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/check.hh>
 
-/// A checked layer as bytes, and back: the compilation model's artifacts, so a process continues from a layer it never
-/// checked
-/// (`libs/graphics/shaped-graphics-language/docs/spec/incubator/compilation-model.md`, "Artifacts").
+/// A checked layer as bytes, and back, so a process continues from a layer it never checked.
+/// These are the compilation model's artifacts: `libs/graphics/shaped-graphics-language/docs/spec/incubator/compilation-model.md`.
 ///
 /// An artifact is a cache entry, never a file anyone keeps.
 /// It reads back only under the `key` it was written with, which a caller makes from the compiler's build

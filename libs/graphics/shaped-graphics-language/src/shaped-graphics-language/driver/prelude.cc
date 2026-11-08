@@ -6,12 +6,12 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/uri.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/artifact.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
-#include <clean-core/thread/mutex.hh>
 
 cc::span<sgl::prelude_file const> sgl::prelude_files()
 {

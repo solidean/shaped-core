@@ -26,7 +26,8 @@ int main(int argc, char** argv)
                 return {};
             return cc::move(bytes.value());
         },
-        .save = [path](cc::string_view, cc::span<byte const> bytes)
+        .save =
+            [path](cc::string_view, cc::span<byte const> bytes)
         {
             auto opened = cc::file_write_stream_adapter::create(path);
             if (!opened.has_value())

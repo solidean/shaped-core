@@ -150,7 +150,8 @@ TEST("sgl profile - parsing and checking the prelude itself",
     for (auto i = 0; i < rounds; ++i)
     {
         auto const load_start = cc::current_time_steady_secs();
-        auto const loaded = sgl::check::load_artifact(saved.value(), "profile", modules, sgl::builtins::default_registry());
+        auto const loaded
+            = sgl::check::load_artifact(saved.value(), "profile", modules, sgl::builtins::default_registry());
         load_secs = cc::min(load_secs, cc::current_time_steady_secs() - load_start);
         CHECK(loaded.has_value());
     }

@@ -372,7 +372,8 @@ void slib::impl::keep_sgl_prelude_in(cc::optional<bcache::blob_cache*> chosen)
                     return {};
                 return cc::vector<byte>::create_copy_of(hit.value().data.span());
             },
-            .save = [store, key_of](cc::string_view key, cc::span<byte const> bytes)
+            .save =
+                [store, key_of](cc::string_view key, cc::span<byte const> bytes)
             {
                 // fire and forget: a lost write is a later process checking the prelude again
                 (void)store->put(key_of(key), cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes)),

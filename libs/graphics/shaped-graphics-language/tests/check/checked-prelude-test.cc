@@ -397,7 +397,8 @@ TEST("sgl prelude artifact - anything but its own bytes under its own key is a m
         CHECK(!loads(changed, artifact_key, files));
     }
     // other prelude sources, here one file fewer
-    CHECK(!loads(bytes, artifact_key, cc::span<sgl::check::module_file const>(files).subspan({.offset = 0, .size = files.size() - 1})));
+    CHECK(!loads(bytes, artifact_key,
+                 cc::span<sgl::check::module_file const>(files).subspan({.offset = 0, .size = files.size() - 1})));
 }
 
 TEST("sgl prelude artifact - a layer of modules is no artifact yet")
