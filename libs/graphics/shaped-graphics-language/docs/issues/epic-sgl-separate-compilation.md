@@ -16,15 +16,22 @@ This is what matrix row D2 marks as "no separate compilation", and the part of F
 The design is proposed in the compilation model's [checked layers](../spec/incubator/compilation-model.md#separate-compilation-checked-layers).
 A checked module is an immutable layer, and a compile is a stack of layers with the program on top, so any number of compiles on any number of threads share one.
 
-What the epic has to deliver, each a child issue when it is taken up:
+Decided with the maintainer on 2026-11-08, and written into the compilation model's [checked layers](../spec/incubator/compilation-model.md#separate-compilation-checked-layers):
 
-- **Layers in memory.** Segmented flat tables and overlays for the four tables a program's check extends, so a compile stops copying the checked prelude and a module is checked once per process.
-- **Ids across layers.** A layer's ids are stable without knowing what sits above it, which is the precondition for anything saved.
-- **Saved layers.** A checked layer written to disk and loaded instead of checked, keyed by its sources, the compiler's version and its options.
-  The invalidation is the cost the prelude-check epic shelved this on; many short-lived processes, or a prelude far past today's size, reopen it.
-- **slib and the language server on layers.** slib builds each module's layer once per process for every shader and permutation.
-  The language server keeps a module directory's layers live across edits.
-- **Interface-only layers, if ever.** A cheaper layer of signatures alone is an optimization of building one, never a different thing crossing between modules.
-  Inlining and per-use generics need the bodies.
+- **Artifacts are cache entries, never shipped.** SGL is a development tool and what ships is compiled shaders, so an artifact is keyed by the compiler's build and has no format version.
+- **Sections as wasm's:** imports, interface, contributions, impls, names, so a reader loads the interface without a body.
+- **In memory, ids stay positions,** and an artifact is relocated once per load through its import table.
+- **Bodies are checked from source on demand** in the first form; serialized impls come only if that shows.
+- **Early cutoff:** a dependent's key names its imports' interfaces, so a body edit re-checks no user.
+- **Options are an overlay:** an artifact is checked at the defaults, and a compile re-checks only what reaches an option it sets.
+
+The steps, each a child issue when it is taken up, in this order:
+
+1. **Bodies on demand** ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)): a layer checks a body when a compile first needs it.
+2. **The prelude's artifact:** interface and contributions, no imports, bodies from source.
+3. **Module artifacts:** imports, relocation on load, early-cutoff keys, kept by slib's persistent cache.
+4. **Option overlays,** so a compile that sets options continues from the artifacts too.
+5. **Parallel layers,** and serialized impls if checking bodies from source shows.
+6. **The language server on artifacts.**
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.

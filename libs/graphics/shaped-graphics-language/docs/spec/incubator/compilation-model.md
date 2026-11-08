@@ -67,7 +67,7 @@ That needs no multi-file compilation.
 
 ## Separate compilation: checked layers
 
-*Proposed, for review; nothing here is built yet.*
+*Decided with the maintainer on 2026-11-08; steps 1 and 2 are built in a first form, the rest is not.*
 
 ### What it costs today
 
@@ -95,9 +95,8 @@ And a compile copies the whole checked prelude to continue from it, because the 
 * The program's check writes only to its own layer, and reads the ones below it.
 * A layer, once checked, is never written again, so any number of compiles on any number of threads share it.
 
-This answers "what an interface holds" from the list of open questions: everything the layer's check produced.
-Inlining is mandatory and a generic is checked where it is instantiated, so a user needs a module's checked bodies, not only its signatures.
-A cheap interface-only pass stays possible later, as an optimization of building a layer, not as a different thing crossing between modules.
+A user of a module needs its interface always, and a body only where it inlines it, instantiates it or evaluates it.
+So a saved layer holds the interface, and finds a body when a compile asks for one ("Artifacts" below).
 
 ### What a layer is
 
@@ -117,38 +116,78 @@ A layer is a contiguous part of each flat table, and the side tables split the s
 
 ### Ids
 
-The decision the rest follows from: **an id names its layer.**
+**In memory, an id stays a position in its whole table, and an artifact is relocated once, when it is loaded.**
 
-A module's layer has to be the same bytes whichever program uses it, and whichever other modules sit beside it in that compile.
-An id that is a global index cannot do that: the base of `view`'s ids would move with the modules checked before it.
-So an id carries a layer number and an index within the layer, and the layer number is the process's, assigned when the layer is made or loaded.
-A lookup is then a load of the layer's segment and an index into it, with no search.
+An artifact cannot hold such positions: the base of `view`'s ids moves with the modules checked before it.
+So an artifact names its own entries by its own index spaces, and names another layer's through an import, as a wasm module does.
+Loading appends its tables behind the layers it stands on, adds that base to each of its own ids, and resolves each import to the id it names there.
+That is one pass over the artifact per stack of layers a process builds, never one per compile.
 
-Two alternatives were considered:
+Considered and set aside:
 
-* **Rebase on use:** give a module's layer a base per compile and rewrite its ids.
-  That is a pass over the whole layer per compile, which is the copy this design removes.
+* **An id that names its layer**, 8 bits of layer and 24 of index.
+  One module's layer would be shared in memory by every stack that holds it, for an extra load per lookup and at most 256 layers alive.
+  It comes back if the per-stack relocation shows in a measurement.
+* **Rebase on use:** a pass over the whole layer per compile, which is the copy step 1 removed.
 * **One global order of all modules:** possible in a closed world, and slib's module directories are not one.
 
-### Saving a layer
+### Artifacts
 
-A layer can be written as bytes and read back: a **checked-module artifact**.
+A checked layer can be written as bytes and read back: a **module artifact**.
 
-* It is keyed by its sources, the keys of the layers below it, and the compiler's own build, so a different compiler never reads it.
-* It is a cache, never a file anyone keeps: a miss checks the module again, and an artifact that fails to read is a miss.
-  So it has no format version and no migration.
-* Loading it maps its dependencies' layer numbers to this process's, the one rewrite it needs, once per process rather than per compile.
+**An artifact is a cache entry, never a file anyone ships or keeps.**
+SGL is a development tool, and what ships is compiled shaders.
+A process that compiles at run time ships the compiler too, so the artifacts it needs are that compiler's.
 
-Two places keep one:
+* It is keyed by its module's sources, the interface keys of the artifacts it imports, and the compiler's own build, so a different compiler never reads it.
+* So it has no format version and no migration, and its layout follows the checker's tables.
+* A miss, a corrupt artifact and a truncated one all check the module again from source: deleting every artifact never changes a result.
+* Only a module whose check reported nothing has one; a module that reports is checked from source by every compile, which reports it.
+* The compiler writes and reads bytes, and where they are kept is its host's: slib's persistent cache, a table a frozen build embeds, or nowhere.
+  sgl depends on clean-core alone, so the store is never sgl's.
 
-* **The prelude's**, so a process starts without checking it.
-  First in the persistent cache slib already uses, which needs no build step; later perhaps embedded, which needs the compiler to run at build time to produce the bytes it then links in.
-* **A module's**, in the same persistent cache, so slib checks a module once per machine rather than once per process.
+**Its sections follow wasm's, so a reader jumps to the one it needs.**
+
+* **Imports:** each declaration of another layer it names, by module, name, kind and a hash of its signature.
+* **Interface:** everything a user of the module can name, checked.
+  Symbols, types, struct fields, enum cases with their values, functions' signatures and attributes, parameters, bindings, pipelines, samplers, and each `const` as its value.
+  A value a type position needed is stored computed, so a user reads it without the body that computed it.
+* **Contributions:** what the module adds to scopes it does not own, extensions, operators and interned instances, merged on load.
+* **Impls:** one entry per function, behind a table of offsets, so one body loads without the rest.
+  Optional, and absent in the first form.
+* **Names:** files and spans for the language server, which emit never reads.
+
+**Without impls, a body is checked from source the first time a compile needs it.**
+
+* The sources are always there, the key names them, and a symbol's declaration id is the same in a new parse of the same source.
+* So a module's file is parsed when a compile first needs one of its bodies, and that body is checked once per process into the layer the artifact loaded as.
+* A compile needs a body to inline it into an entry point, to instantiate a generic, and to evaluate a function at check time, a type position's call among them.
+* A compile that only checks the program, as `describe` and the language server do, needs no body of a module it uses unless the program evaluates or instantiates one.
+* Serialized checked bodies replace that check if it ever shows in a measurement.
+
+**Early cutoff: a dependent's key names its imports' interfaces, not their sources.**
+
+* An edit to a body that leaves its module's interface alone makes no artifact of a module using it stale.
+* A dependent whose own check read a body of an import, a generic it instantiated or a function it evaluated, names that body's hash in its key too.
+
+**Options are an overlay.**
+
+* An artifact is its module checked at its options' defaults.
+* Each declaration records the options it reaches (CHK-355), through other modules' declarations too.
+* A compile that sets options checks again, from source and in its own layer, exactly the declarations that reach an option it sets; those shadow the artifact's.
+* So every permutation slib compiles shares one artifact per module, and each pays only for what its options change.
+
+Two artifacts pay for themselves first:
+
+* **The prelude's**, so a process starts without parsing or checking it.
+* **A module's**, so slib checks a module once per machine rather than once per process.
 
 ### What it buys
 
 * A compile behind the prelude stops copying it: about two thirds of a small program's in-process compile.
 * A module is checked once per process, then once per machine with artifacts.
+* An edit to a module's body re-checks no module that uses it.
+* A compile that sets options continues from the artifacts, and checks again only what its options reach.
 * A process stops checking the prelude: the ~30 ms that every CLI call, application and test binary pays.
 * Modules with no dependency between them can be checked in parallel, since each is its own layer.
 
@@ -166,16 +205,21 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    The driver keeps one per set of modules, beside the library it parsed once for the process, for compiles that set no options.
    A shaped-viewer hit group's `describe` went from 81 to 54 ms, and its check from 71 to 23 ms.
    What it does not do is share a module between two sets that both reach it, which is what ids naming their layer would buy.
-3. **Artifacts**: saving and loading a layer, first for the prelude, then for modules, through slib's persistent cache.
-4. **Parallel layers**, and then perhaps an interface-only pass.
+3. **Bodies on demand:** a layer checks a function's body when a compile first needs it, not with its module.
+   It is what loading an artifact without impls stands on, and it is measured on its own: how much of a layer's check is bodies.
+4. **The prelude's artifact:** its interface and contributions, with no imports, its bodies checked from source on demand.
+5. **Module artifacts:** imports, relocation on load, and keys with early cutoff, kept by slib's persistent cache.
+6. **Option overlays**, so a compile that sets options continues from the artifacts too.
+7. **Parallel layers**, and serialized impls if checking bodies from source shows.
 
 ### Open in this design
 
-* How wide an id is: 8 bits of layer and 24 of index fit today's 32, and limit a process to 256 layers alive at once.
-  A process that checks hundreds of modules would need wider ids, or layers that are dropped and their numbers reused.
-* Whether a segmented lookup's extra load shows in the emitters, which read the checked module more than the checker writes it.
-* Which of the checker's writes into the prelude's state today are real dependencies on the program, rather than caches that belong in an overlay.
-* Whether the language server, which keeps its own parse of the prelude, moves onto the same layer.
+* Whether the per-stack relocation shows, which would bring back ids that name their layer.
+* Which of the checker's side tables a declaration's check writes for a body's check to read later, which the interface must then hold.
+* How a declaration records an option it reaches through another module's declaration, which the overlay needs across artifacts.
+* Whether a compile reports an error in a module's body it never reaches: on demand it does not.
+  A module's own check still does: its tests, the language server on its file, and an artifact's making.
+* Whether the language server, which keeps its own parse of the prelude, moves onto artifacts.
 
 ## What it touches
 
@@ -195,10 +239,6 @@ Each step stands on its own and is measured by the `sgl profile` tests.
 
 ## Open
 
-* What an interface holds when a signature's type needs a function body evaluated.
-  Proposed: the whole checked layer, bodies included (see "Separate compilation: checked layers").
-* Whether an interface is a file on disk, and whether it is SGL text.
-  Proposed: a cache entry of the checked layer's bytes, never a kept file and never SGL text.
 * Whether on-demand compilation is recursive or asynchronous.
 * How a dependency cycle is reported when its loop passes through a type expression.
 * How the files of a module are found beyond a list of directories.
