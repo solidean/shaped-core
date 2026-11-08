@@ -110,7 +110,7 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 | entry | target | before | after |
 |---|---|---:|---:|
 | à-trous `main_cs` | spirv | 1.32 | 0.98 |
-| viewer `path_trace` | spirv | 63,248 bytes against 42,744 | 48,660 bytes, 1.06 |
+| viewer `path_trace` | spirv | 63,248 bytes against 42,744 | 1.03 |
 | viewer `path_trace` | dxil | 1.25 | 0.98 |
 | viewer `path_miss` | dxil | 1.99 | 1.04 |
 | wavefront `extend` | dxil | 1.21 | 1.04 |
@@ -118,7 +118,7 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 | wavefront `connect` | dxil | 1.22 | 1.05 |
 | wavefront `connect` | spirv | 1.14 | 1.05 |
 | a material's shade kernel | dxil | 1.96 | 1.03 |
-| a material's shade kernel | spirv | 1.88 | 1.11 |
+| a material's shade kernel | spirv | 1.88 | 1.03 |
 | raster `environment_ps` | dxil | 1.96 | 1.02 |
 | raster `cull_second` | dxil | 1.19 | 1.16 |
 | `bc7_cs` | dxil | 1.49 | 1.23 |
@@ -177,6 +177,10 @@ That is the container rather than the code: DXC's side is stripped of reflection
   The pass gained a structured mode, which folds a selection whose arms head nothing and joins a block only into one no construct names.
   It keeps a phi of a pointer or a handle as a branch, since logical addressing selects neither.
   Every SPIR-V entry shrank: the path tracer from 1.21 to 1.06 of DXC's, the shade kernel from 1.29 to 1.11, and bc7 from 0.98 to 0.82.
+* **A dead arm stayed on SPIR-V as stubs, and a scaled vector built its splat.**
+  The structured `simplify` kept every block no walk reached as a label and `OpUnreachable`, 212 of them in the shade kernel; it now keeps only a merge or continue target a header that stays names.
+  `v * s` was a splat and a vector `OpFMul` where DXC writes `OpVectorTimesScalar`, which the writer now does, leaving out a splat nothing else reads.
+  The shade kernel's SPIR-V went from 1.11 to 1.03 of DXC's, and the path tracer's from 1.06 to 1.03.
 
 ## What remains
 

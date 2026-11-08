@@ -55,8 +55,12 @@ private:
     void number_blocks()
     {
         auto const order = blocks_in_order(_p);
-        // a structured program keeps what no walk reaches, which may be a construct's merge block
-        auto is_reached = cc::vector<bool>::create_filled(_p.blocks.size(), _structured);
+        // a structured program keeps what no walk reaches, which may be a construct's merge block, but for a block a
+        // pass already dropped
+        auto is_reached = cc::vector<bool>::create_filled(_p.blocks.size(), false);
+        if (_structured)
+            for (auto b = isize(0); b < _p.blocks.size(); ++b)
+                is_reached[b] = _p.blocks[b].count > 0;
         auto stack = cc::vector<u32>();
         auto scratch = cc::vector<u32>();
         is_reached[isize(order[0])] = true;
@@ -90,6 +94,8 @@ private:
             {
                 auto const& block = _p.blocks[isize(b)];
                 auto const at = place[isize(b)];
+                if (at == k_nothing)
+                    continue;
                 _merges[at] = block.merges;
                 if (block.merges == merge_kind::none)
                     continue;

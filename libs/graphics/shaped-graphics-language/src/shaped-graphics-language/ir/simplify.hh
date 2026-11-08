@@ -10,7 +10,8 @@ namespace sgl::ir
 /// It keeps every side effect and each operation's float guarantee.
 /// `unstructured` also folds a known branch and drops what no walk reaches, which may drop a loop whose back edge is
 /// folded away, so a merge block's construct no longer holds: that is for DXIL.
-/// `structured` folds values alone and keeps every block and edge, so SPIR-V's merge and continue targets still hold.
+/// `structured` folds a selection's known branch alone, so SPIR-V's merge and continue targets still hold.
+/// It drops what no walk reaches but a block a header that stays names, which is left a label and `unreachable`.
 void simplify(program& p, control_flow flow);
 
 /// `simplify` for DXIL, `unstructured`.
