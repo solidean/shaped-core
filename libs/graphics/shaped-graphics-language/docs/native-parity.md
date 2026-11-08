@@ -30,10 +30,35 @@ Three effects of the B580 decide how to read them:
   Between two sets of three processes, vulkan's finalize read 1.15 and then 3.17, and its connect 1.16 and then 0.36, while the frame's total moved by 3%.
   So the bar is read on a frame and on a single dispatch, and a kernel's ratio is a pointer for where to look.
 
-**The driver's own figures** come with the vulkan benchmark of `sr`, whose context captures them: each kernel's pipeline on both routes, a line per figure.
-AMD reports registers (`numUsedVgprs`, `numUsedSgprs`) and Intel instructions and blocks; dx12 reports none.
-On 2026-11-08 both routes compiled to the same registers on AMD but for SVGF's filter, 34 vector registers against 32, and Intel's à-trous to the same 2936 instructions.
-After the SPIR-V passes later that day, AMD gave native's à-trous 31 against 30, and the rest stood.
+**The driver's own figures** are what the GPU runs rather than what it was handed, and the better measure of size on vulkan.
+AMD reports registers (`numUsedVgprs`, `numUsedSgprs`) and Intel machine instructions and blocks; dx12 reports none.
+
+```bash
+uv run dev.py build -t pipeline-stats
+uv run libs/graphics/shaped-graphics-language/tools/native-parity.py driver [filter]   # SC_GPU=amd for the Radeon
+```
+
+`driver` builds every compute entry point's pipeline on both SPIR-V routes, on a context that captures the figures, and prints the ones that say what code costs.
+The vulkan benchmark of `sr` logs the same for its three kernels.
+On 2026-11-08, after the SPIR-V passes below, the entries where the two routes part:
+
+| kernel | B580 instructions | Radeon vector registers |
+|---|---:|---:|
+| wavefront `begin` | 593, 749 | 61, 71 |
+| wavefront `extend` | 3555, 3827 | **112, 96** |
+| wavefront `connect` | 2330, 2497 | **109, 96** |
+| wavefront `finalize` | 481, 455 | 61, 64 |
+| wavefront `sort` | 65, 52 | the same |
+| wavefront `args_shade` | 379, 302 | the same |
+| the shade kernel | 8602, 9086 | **191, 168** |
+| `bc7_cs` | 8253, 9571 | the same |
+| `bc1_cs` | 3095, 2951 | the same |
+| SVGF's filter | 2010, 2005 | 34, 32 |
+
+Native first, DXC second.
+Most of the 41 compute entries compile to within 1% of DXC's instructions on the B580 and to the same registers on the Radeon, whatever their modules' sizes.
+Each driver cleans up what a module leaves, which is why a module's operations overstate a gap.
+The bold rows are where native costs more: a wave holding more vector registers leaves room for fewer waves beside it.
 
 **shan's live words are no register count.**
 `uv run dev.py run shan -- diff` on the binaries `diff` leaves splits them into vector words, values that differ across a wave, and scalar words, values it shares.

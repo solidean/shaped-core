@@ -326,3 +326,13 @@ if(SC_BUILD_TESTS)
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-shader-library-test)
 endif()
+
+# `pipeline-stats`, what the vulkan driver reports of an SGL entry point's pipeline on both SPIR-V routes.
+if(SC_BUILD_TOOLS AND TARGET shaped-graphics-vulkan AND SC_HAS_DXC_COMPILER)
+    add_executable(pipeline-stats tools/pipeline-stats/main.cc)
+    sc_nexus_binary(pipeline-stats KINDS tool)
+    target_link_libraries(pipeline-stats PRIVATE shaped-shader-library shaped-graphics-vulkan nexus)
+    if(WIN32)
+        sc_stage_runtime_dlls(pipeline-stats TAG pipeline-stats-dxc DLLS ${DXC_RUNTIME_DLLS})
+    endif()
+endif()

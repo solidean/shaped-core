@@ -8,10 +8,14 @@
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py table [filter]
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py diff <file.sgl> <entry> <cs|vs|ps|lib>
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py lines <file.sgl> <entry> <cs|vs|ps|lib>
+    uv run libs/graphics/shaped-graphics-language/tools/native-parity.py driver [filter]
 
 `table` prints libs/graphics/shaped-graphics-language/docs/native-parity.md's size table over the repo's real shaders.
 `diff` prints one entry's opcode histogram difference, and leaves both binaries and their disassemblies in --out.
 `lines` counts one entry's DXIL arithmetic per `.sgl` file and line on both routes, and prints where they differ most.
+`driver` prints what the vulkan driver made of every compute entry on both SPIR-V routes, from its own statistics:
+the machine instructions and blocks on Intel, the registers on AMD, and the scratch either spills to.
+It runs `pipeline-stats` (`uv run dev.py build -t pipeline-stats`) on the GPU `SC_GPU` picks, one process per file.
 `check` counts SGL's own operations alone and compares them with native-size-baseline.json beside this script:
 an entry that grew more than 2% and more than 4 operations fails, and so does one the baseline does not name.
 `update` writes the baseline from what SGL writes now, which a change that shrinks or knowingly grows an entry commits.
@@ -287,15 +291,52 @@ def update(sgl, out, names):
     return 0
 
 
+# what a driver reports that says what its code costs; Intel's and AMD's names
+KEY_FIGURES = ("Instruction Count", "Basic Block Count", "Scratch Memory Size", "Spill", "numUsedVgprs",
+               "numUsedSgprs", "scratchMemUsageInBytes")
+
+
+def driver(tool, only):
+    print("| file | entry | figure | native | DXC | ratio |")
+    print("|---|---|---|---:|---:|---:|")
+    modules = []
+    for m in MODULES:
+        modules += ["--module-dir", str(ROOT / m)]
+    for rel in FILES:
+        file = ROOT / rel
+        entries = [m.group(2) for m in ENTRY.finditer(file.read_text(encoding="utf-8")) if m.group(1) == "compute"]
+        entries = [e for e in entries if not only or only in e or only in rel]
+        if not entries:
+            continue
+        cmd = [str(tool), "compute", str(file)] + [x for e in entries for x in ("--entry", e)] + modules
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        for line in p.stdout.splitlines():
+            parts = line.split("	")
+            if len(parts) != 5 or not any(k in parts[2] for k in KEY_FIGURES):
+                continue
+            entry, executable, name, native, dxc = parts
+            n, d = float(native), (float(dxc) if dxc != "-" else 0.0)
+            print("| %s | %s | %s | %g | %s | %s |" % (file.name, entry, name, n, dxc, "%.2f" % (n / d) if d else "-"))
+        for line in (p.stdout + p.stderr).splitlines():
+            if " error " in line and "nexus" in line:
+                print("| %s | | failed: %s |" % (file.name, line.split("error:")[-1].strip()[:120]))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["table", "diff", "lines", "check", "update"])
+    ap.add_argument("mode", choices=["table", "diff", "lines", "check", "update", "driver"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--build-dir", default="build/x64-windows-clang-ninja-relwithdebinfo")
     ap.add_argument("--out", default=None, help="where the binaries and listings go; a temporary folder by default")
     ap.add_argument("--sgl", default=None, help="the sgl tool to run; the --build-dir one by default")
     a = ap.parse_args()
     sgl = Path(a.sgl) if a.sgl else ROOT / a.build_dir / "libs/graphics/shaped-graphics-language/sgl.exe"
+    if a.mode == "driver":
+        tool = ROOT / a.build_dir / "libs/graphics/shaped-shader-library/pipeline-stats.exe"
+        if not tool.exists():
+            sys.exit("needs %s (uv run dev.py build -t pipeline-stats)" % tool)
+        driver(tool, a.args[0] if a.args else None)
+        return
     if a.mode in ("check", "update"):
         if not sgl.exists():
             sys.exit("needs %s (uv run dev.py build -t sgl)" % sgl)
