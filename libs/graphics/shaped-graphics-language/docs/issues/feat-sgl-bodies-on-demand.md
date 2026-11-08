@@ -20,5 +20,21 @@ What has to hold:
 - A compile that only checks the program reaches no module body it does not evaluate or instantiate.
 - A module's own check still checks every body: its tests, the language server on its file, and an artifact's making.
 
-Measure first: how much of a layer's check is bodies, for the prelude and for shaped-viewer's modules, through the `sgl profile` tests.
-If bodies are a small share, this step's own win is small, and it is still the precondition for artifacts.
+## Measured, 2026-11-08
+
+Release build, Windows, a Ryzen 9 9950X3D2, timing each outermost `checker::check_body_of` with a temporary counter.
+A body's time includes the signatures it compiles on demand, so these are upper bounds.
+
+- **The prelude:** of its 5.9 ms check, bodies are 2.9 ms, about half.
+- **shaped-viewer's tracer pipeline**, `sgl describe` with its module directories: `check_modules` takes 15.9 ms and the program's own check 2.6 ms.
+  Bodies are 18.5 ms of the process's checks, 4,270 of them, about 3 ms of that the prelude's.
+  So bodies are some 85% of the modules' layer.
+
+What this means for the design:
+
+- A body a compile reaches is checked once per process with or without an artifact, since the first form has no impls.
+  An artifact without impls saves only the interface's part and the bodies no program reaches.
+- So how many of a layer's bodies a program reaches decides what this step and an impl-less module artifact are worth.
+  Count that next: the distinct functions the tracer's entry points inline, against the 4,270 checked.
+- If a program reaches most of its modules' bodies, serialized impls stop being "if it shows" and become what makes a module artifact pay.
+  The prelude's artifact should pay either way: a program likely reaches few of its bodies, which is unmeasured, and its parse goes too.
