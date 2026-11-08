@@ -8,6 +8,8 @@ add_library(shader-analysis
     src/shader-analysis/fwd.cc
     src/shader-analysis/op_kind.cc
     src/shader-analysis/spirv_metrics.cc
+    src/shader-analysis/dxil_metrics.cc
+    src/shader-analysis/impl/graph.cc
     src/shader-analysis/diff.cc
 )
 
@@ -45,9 +47,12 @@ if(SC_BUILD_TESTS)
         tests/op-kind-test.cc
         tests/spirv-metrics-test.cc
         tests/diff-test.cc
+        tests/dxil-metrics-test.cc
     )
     sc_nexus_binary(shader-analysis-test KINDS tests)
     target_link_libraries(shader-analysis-test PRIVATE shader-analysis nexus)
+    # DXC's output babel-data's tests read, which these measure
+    sc_target_source_paths(shader-analysis-test PRIVATE SHAN_DXIL_DATA_DIR ../../data/babel-data/tests/shader/data)
     sc_add_nexus_web_runner(shader-analysis-test)
 endif()
 

@@ -1,4 +1,3 @@
-#include <babel-data/shader/spirv.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/args/ambient.hh>
@@ -24,14 +23,14 @@ constexpr int exit_usage = 1;
         cc::eprintln("shan: cannot open {}: {}", path, file.error().to_string());
         return {};
     }
-    cc::read_stream stream = file.value().stream();
-    auto const module = babel::spirv::read(stream);
-    if (module.has_error())
+    auto stream = file.value().stream();
+    auto const bytes = stream.read_all();
+    if (bytes.has_error())
     {
-        cc::eprintln("shan: {}: {}", path, module.error().to_string());
+        cc::eprintln("shan: cannot read {}: {}", path, bytes.error().to_string());
         return {};
     }
-    auto metrics = shan::analyze(module.value());
+    auto metrics = shan::analyze_binary(bytes.value());
     if (metrics.has_error())
     {
         cc::eprintln("shan: {}: {}", path, metrics.error().to_string());
@@ -46,9 +45,10 @@ COMMAND("analyze")
 {
     auto path = cc::string();
     auto args = nx::args({.name = "shan analyze",
-                          .description = "Prints a SPIR-V module's metrics: operations by kind, register pressure and "
+                          .description = "Prints a SPIR-V module's or a DXIL container's metrics: operations by kind, "
+                                         "register pressure and "
                                          "the critical path, its totals first and each function after."});
-    args.positional("FILE", path, {.desc = "the SPIR-V module"});
+    args.positional("FILE", path, {.desc = "the SPIR-V module or DXIL container"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
     if (path.empty())
@@ -69,7 +69,8 @@ COMMAND("diff")
     auto a = cc::string();
     auto b = cc::string();
     auto args = nx::args({.name = "shan diff",
-                          .description = "Prints every total in which two SPIR-V modules differ, the largest relative "
+                          .description = "Prints every total in which two SPIR-V modules or DXIL containers differ, "
+                                         "the largest relative "
                                          "difference first: each value, and the first over the second."});
     args.positional("A", a, {.desc = "the first module, a native one"});
     args.positional("B", b, {.desc = "the second module, DXC's of the same entry point"});

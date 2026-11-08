@@ -1,3 +1,4 @@
+#include "impl/graph.hh"
 #include "metrics.hh"
 
 #include <babel-data/shader/spirv.hh>
@@ -223,223 +224,52 @@ void successors(babel::spirv::instruction const& i, cc::vector<u32>& out)
     }
 }
 
-struct block_range
+/// One function as a graph: its blocks, its values numbered densely, each operand that names one of them.
+cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts const& facts, isize first, isize end)
 {
-    u32 label = 0;
-    isize first = 0;
-    isize end = 0;
-};
+    auto f = function_metrics();
+    auto const head = m.at(first);
+    f.id = head.result_id();
+    auto const* const named = facts.names.get_ptr(f.id);
+    f.name = named != nullptr ? *named : cc::format("%{}", f.id);
 
-class function_walk
-{
-public:
-    function_walk(babel::spirv::module const& m, module_facts const& facts) : _m(m), _facts(facts) {}
-
-    cc::result<function_metrics> run(isize first, isize end)
+    auto g = impl::graph();
+    auto value_of = cc::map<u32, i32>();
+    auto block_of_label = cc::map<u32, i32>();
+    for (auto k = first; k < end; ++k)
     {
-        auto f = function_metrics();
-        auto const head = _m.at(first);
-        f.id = head.result_id();
-        auto const* const named = _facts.names.get_ptr(f.id);
-        f.name = named != nullptr ? *named : cc::format("%{}", f.id);
-
-        // the function's values, numbered densely, and its blocks
-        for (auto k = first; k < end; ++k)
+        auto const i = m.at(k);
+        if (i.opcode() == op::label)
+            block_of_label[i.result_id()] = i32(block_of_label.size());
+        else if (i.result_id() != 0 && i.result_type() != 0)
         {
-            auto const i = _m.at(k);
-            if (i.opcode() == op::label)
-            {
-                if (!_blocks.empty())
-                    _blocks.back().end = k;
-                _block_of_label[i.result_id()] = i32(_blocks.size());
-                _blocks.push_back({.label = i.result_id(), .first = k + 1, .end = end});
-                continue;
-            }
-            if (i.result_id() != 0 && i.result_type() != 0)
-            {
-                _value_of[i.result_id()] = i32(_widths.size());
-                _widths.push_back(_facts.words_of(i.result_type()));
-            }
+            value_of[i.result_id()] = i32(g.widths.size());
+            g.widths.push_back(facts.words_of(i.result_type()));
         }
-        if (!_blocks.empty())
-            _blocks.back().end = end - 1; // OpFunctionEnd
-        f.blocks = i32(_blocks.size());
-        auto const words = (_widths.size() + 63) / 64;
-
-        // per block: what it defines, what it reads before defining, what it hands each phi of a successor
-        auto defs = cc::vector<cc::vector<u64>>();
-        auto uses = cc::vector<cc::vector<u64>>();
-        auto phi_out = cc::vector<cc::vector<u64>>();
-        auto succ = cc::vector<cc::vector<i32>>();
-        for (auto const& b : _blocks)
-        {
-            (void)b;
-            defs.push_back(cc::vector<u64>::create_filled(words, 0));
-            uses.push_back(cc::vector<u64>::create_filled(words, 0));
-            phi_out.push_back(cc::vector<u64>::create_filled(words, 0));
-            succ.push_back({});
-        }
-        auto operands = cc::vector<u32>();
-        auto targets = cc::vector<u32>();
-        for (auto b = isize(0); b < _blocks.size(); ++b)
-        {
-            auto const& block = _blocks[b];
-            auto has_terminator = false;
-            for (auto k = block.first; k < block.end; ++k)
-            {
-                auto const i = _m.at(k);
-                auto const code = i.opcode();
-                count(f, i);
-                if (code == op::phi)
-                {
-                    // a phi's value is read at the end of the block it names
-                    auto const args = i.arguments();
-                    for (auto a = isize(0); a + 1 < args.size(); a += 2)
-                        if (auto const* const from = _block_of_label.get_ptr(args[a + 1]))
-                            if (auto const* const v = _value_of.get_ptr(args[a]))
-                                set(phi_out[*from], *v);
-                }
-                else
-                {
-                    value_operands(i, operands);
-                    for (auto const o : operands)
-                        if (auto const* const v = _value_of.get_ptr(o); v != nullptr && !test(defs[b], *v))
-                            set(uses[b], *v);
-                }
-                if (auto const* const v = _value_of.get_ptr(i.result_id()); v != nullptr && i.result_type() != 0)
-                    set(defs[b], *v);
-                if (is_terminator(code))
-                {
-                    has_terminator = true;
-                    successors(i, targets);
-                    for (auto const t : targets)
-                        if (auto const* const to = _block_of_label.get_ptr(t))
-                            succ[b].push_back(*to);
-                }
-            }
-            if (!has_terminator)
-                return cc::error(cc::format("shan: block %{} of {} has no terminator", block.label, f.name));
-        }
-
-        // liveness, to a fixed point: what a block hands on is what its successors read, and its phis' values
-        auto live_in = cc::vector<cc::vector<u64>>();
-        auto live_out = cc::vector<cc::vector<u64>>();
-        for (auto b = isize(0); b < _blocks.size(); ++b)
-        {
-            live_in.push_back(cc::vector<u64>::create_filled(words, 0));
-            live_out.push_back(cc::vector<u64>::create_filled(words, 0));
-        }
-        for (auto changed = true; changed;)
-        {
-            changed = false;
-            for (auto b = _blocks.size(); b > 0; --b)
-            {
-                auto const at = b - 1;
-                for (auto w = isize(0); w < words; ++w)
-                {
-                    auto out = phi_out[at][w];
-                    for (auto const s : succ[at])
-                        out |= live_in[s][w];
-                    auto const in = uses[at][w] | (out & ~defs[at][w]);
-                    changed = changed || out != live_out[at][w] || in != live_in[at][w];
-                    live_out[at][w] = out;
-                    live_in[at][w] = in;
-                }
-            }
-        }
-
-        // each block backwards from what it hands on: the live words at every point, and forwards: its chains
-        auto live = cc::vector<u64>::create_filled(words, 0);
-        auto depth = cc::vector<i32>::create_filled(_widths.size(), 0);
-        for (auto b = isize(0); b < _blocks.size(); ++b)
-        {
-            auto const& block = _blocks[b];
-            live = cc::vector<u64>::create_copy_of(cc::span<u64 const>(live_out[b]));
-            auto words_live = weight(live);
-            f.max_live_words = cc::max(f.max_live_words, words_live);
-            for (auto k = block.end; k > block.first; --k)
-            {
-                auto const i = _m.at(k - 1);
-                if (auto const* const v = _value_of.get_ptr(i.result_id()); v != nullptr && test(live, *v))
-                {
-                    clear(live, *v);
-                    words_live -= _widths[*v];
-                }
-                if (i.opcode() != op::phi)
-                {
-                    value_operands(i, operands);
-                    for (auto const o : operands)
-                        if (auto const* const v = _value_of.get_ptr(o); v != nullptr && !test(live, *v))
-                        {
-                            set(live, *v);
-                            words_live += _widths[*v];
-                        }
-                }
-                f.max_live_words = cc::max(f.max_live_words, words_live);
-            }
-            for (auto k = block.first; k < block.end; ++k)
-            {
-                auto const i = _m.at(k);
-                auto const kind = kind_of(i);
-                auto longest = i32(0);
-                if (i.opcode() != op::phi)
-                {
-                    value_operands(i, operands);
-                    for (auto const o : operands)
-                        if (auto const* const v = _value_of.get_ptr(o); v != nullptr && defined_in(b, o))
-                            longest = cc::max(longest, depth[*v]);
-                }
-                auto const reach = longest + latency_of(kind);
-                f.critical_path = cc::max(f.critical_path, reach);
-                if (auto const* const v = _value_of.get_ptr(i.result_id()))
-                    depth[*v] = reach;
-            }
-        }
-        return f;
     }
-
-private:
-    babel::spirv::module const& _m;
-    module_facts const& _facts;
-    cc::vector<block_range> _blocks;
-    cc::map<u32, i32> _block_of_label;
-    cc::map<u32, i32> _value_of;
-    cc::vector<i32> _widths;
-
-    [[nodiscard]] static bool test(cc::span<u64 const> bits, i32 v) { return (bits[v / 64] >> (v % 64)) & 1u; }
-    static void set(cc::span<u64> bits, i32 v) { bits[v / 64] |= u64(1) << (v % 64); }
-    static void clear(cc::span<u64> bits, i32 v) { bits[v / 64] &= ~(u64(1) << (v % 64)); }
-
-    [[nodiscard]] i32 weight(cc::span<u64 const> bits) const
+    auto const value = [&](u32 id) -> i32
     {
-        auto sum = i32(0);
-        for (auto v = isize(0); v < _widths.size(); ++v)
-            if (test(bits, i32(v)))
-                sum += _widths[v];
-        return sum;
-    }
+        auto const* const v = value_of.get_ptr(id);
+        return v == nullptr ? -1 : *v;
+    };
 
-    [[nodiscard]] bool defined_in(isize b, u32 id) const
+    auto operands = cc::vector<u32>();
+    auto targets = cc::vector<u32>();
+    auto in_block = false;
+    for (auto k = first; k < end; ++k)
     {
-        auto const& block = _blocks[b];
-        for (auto k = block.first; k < block.end; ++k)
-            if (_m.at(k).result_id() == id)
-                return true;
-        return false;
-    }
-
-    [[nodiscard]] op_kind kind_of(babel::spirv::instruction const& i) const
-    {
-        if (i.opcode() == op::ext_inst && i.words.size() > 3 && _facts.is_describing(i.words[3]))
-            return op_kind::declaration;
-        return spirv_kind_of(i.opcode());
-    }
-
-    void count(function_metrics& f, babel::spirv::instruction const& i) const
-    {
+        auto const i = m.at(k);
         auto const code = i.opcode();
-        if (code == op::line || code == op::no_line)
-            return;
+        if (code == op::label)
+        {
+            if (in_block)
+                return cc::error(cc::format("shan: a block of {} has no terminator", f.name));
+            g.blocks.push_back({.first = u32(g.instructions.size()), .end = u32(g.instructions.size())});
+            in_block = true;
+            continue;
+        }
+        if (!in_block || code == op::line || code == op::no_line)
+            continue;
         if (code == op::loop_merge)
             ++f.loops;
         if (code == op::selection_merge)
@@ -447,17 +277,54 @@ private:
         if (code == op::function_call)
             ++f.calls;
         if (code == op::variable)
+            if (auto const* const pointee = facts.pointee.get_ptr(i.result_type()))
+                f.variable_words += facts.words_of(*pointee);
+
+        auto kind = spirv_kind_of(code);
+        if (code == op::ext_inst && i.words.size() > 3 && facts.is_describing(i.words[3]))
+            kind = op_kind::declaration;
+        auto gi = impl::graph_instruction{
+            .kind = kind,
+            .result = i.result_type() != 0 ? value(i.result_id()) : -1,
+            .first = u32(g.operands.size()),
+            .phi_first = u32(g.phi_values.size()),
+            .counts = kind != op_kind::declaration && code != op::loop_merge && code != op::selection_merge,
+        };
+        if (code == op::phi)
         {
-            auto const* const pointee = _facts.pointee.get_ptr(i.result_type());
-            f.variable_words += pointee != nullptr ? _facts.words_of(*pointee) : 0;
+            auto const args = i.arguments();
+            for (auto a = isize(0); a + 1 < args.size(); a += 2)
+            {
+                g.phi_values.push_back(value(args[a]));
+                auto const* const from = block_of_label.get_ptr(args[a + 1]);
+                g.phi_blocks.push_back(from == nullptr ? -1 : *from);
+            }
+            gi.phi_count = u32(g.phi_values.size()) - gi.phi_first;
         }
-        auto const kind = kind_of(i);
-        if (kind == op_kind::declaration || code == op::loop_merge || code == op::selection_merge)
-            return;
-        ++f.kinds[isize(kind)];
-        ++f.instructions;
+        else
+        {
+            value_operands(i, operands);
+            for (auto const o : operands)
+                if (auto const v = value(o); v >= 0)
+                    g.operands.push_back(v);
+        }
+        gi.count = u32(g.operands.size()) - gi.first;
+        g.instructions.push_back(gi);
+        g.blocks.back().end = u32(g.instructions.size());
+        if (is_terminator(code))
+        {
+            successors(i, targets);
+            for (auto const t : targets)
+                if (auto const* const to = block_of_label.get_ptr(t))
+                    g.blocks.back().successors.push_back(*to);
+            in_block = false;
+        }
     }
-};
+    if (in_block)
+        return cc::error(cc::format("shan: a block of {} has no terminator", f.name));
+    impl::measure(g, f);
+    return f;
+}
 } // namespace
 
 cc::result<module_metrics> analyze(babel::spirv::module const& m)
@@ -478,22 +345,11 @@ cc::result<module_metrics> analyze(babel::spirv::module const& m)
             ++end;
         if (end == m.instruction_count())
             return cc::error(cc::format("shan: function %{} has no OpFunctionEnd", i.result_id()));
-        auto walk = function_walk(m, facts);
-        auto f = walk.run(k, end + 1);
+        auto f = walk(m, facts, k, end + 1);
         if (f.has_error())
             return cc::error(f.error().to_string());
-        auto& t = result.total;
         auto const& g = f.value();
-        t.instructions += g.instructions;
-        for (auto kind = isize(0); kind < k_op_kind_count; ++kind)
-            t.kinds[kind] += g.kinds[kind];
-        t.blocks += g.blocks;
-        t.loops += g.loops;
-        t.selections += g.selections;
-        t.calls += g.calls;
-        t.variable_words += g.variable_words;
-        t.max_live_words = cc::max(t.max_live_words, g.max_live_words);
-        t.critical_path = cc::max(t.critical_path, g.critical_path);
+        impl::accumulate(g, result.total);
         result.functions.push_back(g);
         k = end;
     }

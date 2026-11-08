@@ -7,7 +7,7 @@
 #include <shader-analysis/fwd.hh>
 #include <shader-analysis/op_kind.hh>
 
-// What a module costs, function by function, read off its instructions alone.
+// What a module costs, function by function, read off its instructions alone: SPIR-V, or DXIL's LLVM 3.7.
 //
 // THESE ARE ESTIMATES FOR COMPARING TWO MODULES OF ONE ENTRY POINT, not a model of any GPU.
 // Register pressure is the most 32-bit words of SSA values live at once, a bool taking one and a pointer none.
@@ -56,6 +56,15 @@ namespace shan
 {
 /// The metrics of every function of `m`; an error where a function's body is malformed, a block with no terminator.
 [[nodiscard]] cc::result<module_metrics> analyze(babel::spirv::module const& m);
+
+/// The metrics of every function body of a DXIL module.
+/// A `dx.op` call is the kind its operation class is: `rawBufferLoad` a load, `unary` and `dot3` extended,
+/// `createHandle` and `annotateHandle` an address; an `llvm.*` intrinsic is a declaration.
+/// A selection is a conditional branch or a switch, and a loop an edge back to a block dominating its source.
+[[nodiscard]] cc::result<module_metrics> analyze(babel::llvm37::module const& m);
+
+/// A SPIR-V module or a DXIL container, told apart by its first bytes, read and analyzed.
+[[nodiscard]] cc::result<module_metrics> analyze_binary(cc::span<byte const> bytes);
 
 /// The metrics as text, one line a metric, the totals first and each function after.
 [[nodiscard]] cc::string to_text(module_metrics const& m);

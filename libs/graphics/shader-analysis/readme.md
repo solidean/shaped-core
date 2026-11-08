@@ -28,8 +28,10 @@ A driver allocates and schedules better or worse than that, but two modules of o
 
 ## Formats
 
-- **SPIR-V**, through `babel::spirv`.
-- **DXIL** is next: babel gains an LLVM bitstream reader, a module reader for LLVM 3.7, and the DXIL container on top.
+- **SPIR-V**, through `babel::spirv`; its loops and selections are its merges.
+- **DXIL**, through `babel::dxil`, `babel::llvm` and `babel::llvm37`; a `dx.op` call is the kind its operation class is, and a loop an edge back to a block that dominates its source.
+
+`shan::analyze_binary` takes either and tells them apart by their first bytes.
 
 ## Command line
 
@@ -38,7 +40,7 @@ uv run dev.py run shan -- analyze module.spv       # the totals, then each funct
 uv run dev.py run shan -- diff native.spv dxc.spv  # every total the two differ in, worst first
 ```
 
-`native-parity.py diff` leaves both routes' binaries in its output folder, which is where a pair to compare comes from.
+`native-parity.py diff` leaves both routes' binaries in its output folder, which is where a pair to compare comes from: `.spv` and `.dxil` alike.
 
 ## Building & testing
 

@@ -31,13 +31,14 @@ shan::k_op_kind_count;                    // the size of a per-kind table
 ```cpp
 #include <shader-analysis/metrics.hh>
 
-auto const m = shan::analyze(module).value();   // a babel::spirv::module; an error for a block with no terminator
+auto const m = shan::analyze(module).value();   // a babel::spirv::module or babel::llvm37::module; a malformed body is an error
+shan::analyze_binary(bytes);              // a SPIR-V module or a DXIL container, told apart by its first bytes
 m.total;                                  // function_metrics summed, max_live_words and critical_path the worst
 m.functions;                              // one per OpFunction, named by OpName or %id
 m.entry_points;                           // the OpEntryPoint names
 f.instructions;                           // what runs: no labels, merges, lines or declarations
 f.count_of(shan::op_kind::load);          // -> i32
-f.blocks; f.loops; f.selections; f.calls;
+f.blocks; f.loops; f.selections; f.calls;  // DXIL: a loop is a back edge, a selection a conditional branch or switch
 f.variable_words;                         // the function's own variables, in 32-bit words
 f.max_live_words;                         // register pressure: the most words of SSA values live at once
 f.critical_path;                          // the longest dependent chain in one block, in latency_of units
