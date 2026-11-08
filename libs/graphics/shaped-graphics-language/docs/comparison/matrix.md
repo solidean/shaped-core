@@ -233,7 +233,8 @@ Per row and column:
   - Slang: SLANG capdef `atomic64`, `atomicfloat`
   - WGSL: NAGA CHANGELOG v24
   - GLSL + chain: SXC `spirv_msl.cpp`
-  - SGL: CHK-296, [incubator/atomics.md](../spec/incubator/atomics.md), sg `tests/compute/compute-sixty-four-bit-test.cc` (2026-11-05), its run on an M4 in [feat-sgl-metal-ulong-min-max-atomics-on-hardware](../issues/.closed/2026/11/feat-sgl-metal-ulong-min-max-atomics-on-hardware.md) (2026-11-06)
+  - SGL: CHK-296, [incubator/atomics.md](../spec/incubator/atomics.md), sg `tests/compute/compute-sixty-four-bit-test.cc` (2026-11-05)
+  - SGL, the `ulong` min and max on an M4: [feat-sgl-metal-ulong-min-max-atomics-on-hardware](../issues/.closed/2026/11/feat-sgl-metal-ulong-min-max-atomics-on-hardware.md) (2026-11-06)
 - **B7**
   - HLSL + chain: MSC manual
   - Slang: SLANG capdef `subgroup_basic`, issue 14095
@@ -385,7 +386,8 @@ Per row and column:
   - HLSL + chain: MSC changelog 3.1, <https://developer.apple.com/forums/thread/829379>
   - Slang: SLANG Windows release, measured
   - WGSL: NAGA
-  - SGL: [architecture.md](../architecture.md) "Dependencies", slib `docs/frozen-shaders.md`, slib's `cheat-sheet.md` on a context's default route, [feat-sgl-native-compute-gaps](../issues/feat-sgl-native-compute-gaps.md) on what stays text (2026-11-08)
+  - SGL: [architecture.md](../architecture.md) "Dependencies", slib `docs/frozen-shaders.md`
+  - SGL, the default route: slib's `cheat-sheet.md`, and what stays text in [feat-sgl-native-compute-gaps](../issues/feat-sgl-native-compute-gaps.md) (2026-11-08)
 - **F4**
   - Slang: SLANG issue 13565
   - WGSL: NAGA measured on the bgfx shaders
@@ -407,7 +409,8 @@ Per row and column:
 - **F8**
   - HLSL + chain: MSC, <https://vulkan.lunarg.com/doc/view/latest/mac/getting_started.html>
   - Slang: SLANG `slangc` reference
-  - SGL: root `CMakeLists.txt`, slib `docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md`, [epic-sgl-native-ir-targets](../issues/epic-sgl-native-ir-targets.md) on the bypass digest DXIL loads under (2026-11-08)
+  - SGL: root `CMakeLists.txt`, slib `docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md`
+  - SGL, the bypass digest SGL's DXIL loads under: [epic-sgl-native-ir-targets](../issues/epic-sgl-native-ir-targets.md) (2026-11-08)
 - **F9**
   - HLSL + chain: DXC, SXC, TINT, NAGA licenses, MSC agreements
   - Slang: SLANG `LICENSES/`
