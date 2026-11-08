@@ -3,6 +3,8 @@ created: 2026-11-07
 refs:
   - file: libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_binding_group.cc
   - test: "sg - a staging group over an unbounded binding array holds its capacity, set and replaced in place"
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-08T06:40Z
 ---
 
 # On AMD's vulkan driver, a staging group over an unbounded binding array writes a descriptor image larger than its layout
