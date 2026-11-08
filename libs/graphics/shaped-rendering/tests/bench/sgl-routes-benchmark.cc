@@ -323,7 +323,8 @@ static cc::shared_async<cc::unit> compare_routes_on(sg::context& ctx)
     co_await ctx.idle_completion();
 }
 
-// The kernels with no original of their own, under the name native-parity.md's run selects.
+// The kernels with no original of their own, under the name the run in
+// libs/graphics/shaped-graphics-language/docs/native-parity.md selects.
 ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, the kernels with no HLSL original, on dx12")
 {
     auto created = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
