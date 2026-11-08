@@ -20,5 +20,7 @@ Measured: a view of 2 and a view of 8, read at `nonuniform (id.x % 2)`, gave `2 
 - An unbounded array, or a larger one, takes a waterfall over `broadcast_first` / `WaveReadLaneFirst`, in the compute and pixel stages alone, where sg requires subgroup operations.
   In every other stage it is still asked as it is, and still wrong on AMD.
 
-**Remove it** once an AMD driver answers the test above right without it, or a standalone repro shows the cause is ours.
-Not yet known: whether the driver gets it wrong only with descriptor buffers, which sg always uses on vulkan.
+It reproduces standalone, with descriptor sets as well as descriptor buffers:
+[amd-vulkan-nonuniform-array-length-reads-first-lane](../../../../../docs/bugs-external/amd-vulkan-nonuniform-array-length-reads-first-lane/readme.md).
+
+**Remove it** once that entry's `run.py --vendor 1002` exits 0 on a newer AMD driver.

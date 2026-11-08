@@ -191,7 +191,8 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
         ctx._descriptor_functions.get_binding_offset(ctx._device, layout, bindings[i].index, &offset);
         binding_offsets[i] = isize(offset);
     }
-    // AMD's driver sizes a variable-count binding at no elements where the spec says its whole capacity.
+    // AMD's driver sizes a variable-count binding at no elements where the spec says its whole capacity
+    // (docs/bugs-external/amd-vulkan-variable-count-layout-size-omits-binding).
     if (unbounded_capacity > 0)
     {
         auto const last = bindings.size() - 1;
