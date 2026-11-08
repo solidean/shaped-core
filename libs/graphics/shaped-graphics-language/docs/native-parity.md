@@ -34,6 +34,19 @@ Three effects of the B580 decide how to read them:
 AMD reports registers (`numUsedVgprs`, `numUsedSgprs`) and Intel instructions and blocks; dx12 reports none.
 On 2026-11-08 both routes compiled to the same registers on AMD but for SVGF's filter, 34 vector registers against 32, and Intel's à-trous to the same 2936 instructions.
 
+**shan's live words are no register count.**
+`uv run dev.py run shan -- diff` on the binaries `diff` leaves splits them into vector words, values that differ across a wave, and scalar words, values it shares.
+Against AMD's vector registers on 2026-11-08, native and DXC's SPIR-V:
+
+| kernel | vector words | `numUsedVgprs` |
+|---|---:|---:|
+| à-trous | 31, 36 | 30, 30 |
+| SVGF's filter | 28, 30 | 34, 32 |
+| convolution | 79, 82 | 38, 38 |
+
+The driver schedules before it allocates, so live words in the module's own order say where two modules part, not what either will occupy.
+The convolution's unrolled loads are the clearest case: half the words, on both routes alike.
+
 **Size** is [tools/native-parity.py](../tools/native-parity.py), over every entry point of the real shaders:
 
 ```bash
@@ -175,6 +188,7 @@ That is the container rather than the code: DXC's side is stripped of reflection
   - Issuing its loads first in the block, where native had them beside their uses and DXC early, read 1.032 again.
   - Marking every integer `add`, `sub` and `mul` `nsw`, as DXC does, read 1.027 and 1.031.
   - Shader model 6.8 rather than 6.6, which also sets `ResMayNotAlias` as DXC's module does, read 1.029 and 1.030.
+  - shan counts DXC's DXIL at 124 vector words live against native's 82, so the slower module is not the one that holds more.
   What AMD's compiler makes of each module is the next place to look: its register count and its ISA.
 * **SPIR-V turns no if-else into a select.**
   DXC's SPIR-V goes through spirv-opt, which does, and `flatten_branches` is DXIL's alone: connect's SPIR-V holds 171 phis and no `OpSelect` against DXC's 78 and 14.

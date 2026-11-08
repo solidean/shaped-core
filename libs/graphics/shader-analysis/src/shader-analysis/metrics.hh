@@ -12,6 +12,9 @@
 // THESE ARE ESTIMATES FOR COMPARING TWO MODULES OF ONE ENTRY POINT, not a model of any GPU.
 // Register pressure is the most 32-bit words of SSA values live at once, a bool taking one and a pointer none.
 // A driver's allocator does better or worse than that, but two modules of one entry point it treats alike.
+// It splits by uniformity: a value is varying, a vector word, where it derives from a thread's own input, a load from
+// a function's variable, an atomic, a lane operation, or a phi that a branch on a varying value parted the lanes for.
+// Everything else, a wave's own answer included, is a scalar word.
 // The critical path is the longest chain of dependent operations within one block, weighted by `latency_of`.
 //
 // A SPIR-V operand is an id or a literal, which only the full grammar tells apart; shan knows the literal positions of
@@ -38,6 +41,10 @@ struct shan::function_metrics
     i32 variable_words = 0;
     /// The most 32-bit words of SSA values live at one point.
     i32 max_live_words = 0;
+    /// The same, of the values that may differ between a wave's threads, which a GPU keeps in vector registers.
+    i32 max_live_vector_words = 0;
+    /// The same, of the values the whole wave shares, which a GPU may keep in scalar registers.
+    i32 max_live_scalar_words = 0;
     /// The longest chain of dependent operations in one block, in `latency_of` units.
     i32 critical_path = 0;
 

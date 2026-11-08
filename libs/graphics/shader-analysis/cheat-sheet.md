@@ -41,6 +41,8 @@ f.count_of(shan::op_kind::load);          // -> i32
 f.blocks; f.loops; f.selections; f.calls;  // DXIL: a loop is a back edge, a selection a conditional branch or switch
 f.variable_words;                         // the function's own variables, in 32-bit words
 f.max_live_words;                         // register pressure: the most words of SSA values live at once
+f.max_live_vector_words;                  // the same of values that differ across a wave: what VGPRs hold
+f.max_live_scalar_words;                  // the same of values the wave shares: what SGPRs may hold
 f.critical_path;                          // the longest dependent chain in one block, in latency_of units
 shan::to_text(m);                         // -> cc::string, one line a metric
 ```
@@ -62,3 +64,6 @@ shan::to_text(d);                         // -> cc::string, one line each
   SPIR-V does not mark literals; shan knows the literal positions of the opcodes a body is made of, and a literal that happens to equal a value's id elsewhere would count.
 - **A `NonSemantic.*` extended instruction is a declaration**, so debug info adds no operations.
 - **A switch's cases are read as 32-bit literals**, which a 64-bit selector's are not.
+- **Live words are in the module's own order, and a driver reorders before it allocates.**
+  AMD gives the convolution 38 vector registers where shan counts 79 vector words, on both routes alike; compare two modules, never a module with a register file.
+- **Uniformity does not follow memory.** A load from a function's own variable is varying whatever was stored, and one from a buffer at a shared address is scalar.

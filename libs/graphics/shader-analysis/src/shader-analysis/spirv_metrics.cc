@@ -52,6 +52,21 @@ constexpr u16 return_ = 253;
 constexpr u16 return_value = 254;
 constexpr u16 unreachable = 255;
 constexpr u16 terminate_invocation = 4416;
+constexpr u16 decorate = 71;
+constexpr u16 access_chain = 65;
+constexpr u16 in_bounds_access_chain = 66;
+constexpr u16 ptr_access_chain = 67;
+constexpr u16 in_bounds_ptr_access_chain = 70;
+constexpr u16 group_non_uniform_elect = 333;
+constexpr u16 group_non_uniform_all = 334;
+constexpr u16 group_non_uniform_ballot = 339;
+constexpr u16 group_non_uniform_inverse_ballot = 340;
+constexpr u16 group_non_uniform_ballot_bit_count = 342;
+constexpr u16 group_non_uniform_shuffle = 345;
+constexpr u16 group_non_uniform_shuffle_relative_down = 348;
+constexpr u16 group_non_uniform_iadd = 349;
+constexpr u16 group_non_uniform_logical_xor = 364;
+constexpr u16 subgroup_first_invocation_khr = 4422;
 } // namespace op
 
 [[nodiscard]] bool is_terminator(u16 code)
@@ -70,6 +85,8 @@ struct module_facts
     cc::map<u32, u64> constants;
     /// Extended instruction sets that only describe, `NonSemantic.*`.
     cc::vector<u32> describing_sets;
+    /// The module's variables whose loads differ across a wave: its inputs but the builtins a workgroup shares.
+    cc::vector<u32> varying_variables;
 
     [[nodiscard]] i32 words_of(u32 type) const
     {
@@ -83,11 +100,19 @@ struct module_facts
                 return true;
         return false;
     }
+    [[nodiscard]] bool is_varying_variable(u32 id) const
+    {
+        for (auto const v : varying_variables)
+            if (v == id)
+                return true;
+        return false;
+    }
 };
 
 [[nodiscard]] module_facts facts_of(babel::spirv::module const& m)
 {
     auto f = module_facts();
+    auto builtins = cc::map<u32, u32>();
     auto const bits_of = [&](u32 type) -> u32
     {
         auto const* const bits = f.type_bits.get_ptr(type);
@@ -140,6 +165,25 @@ struct module_facts
             if (w.size() >= 4)
                 f.constants[w[2]] = w[3] | (w.size() >= 5 ? u64(w[4]) << 32 : 0);
             break;
+        case op::decorate:
+            // BuiltIn
+            if (w.size() >= 4 && w[2] == 11)
+                builtins[w[1]] = w[3];
+            break;
+        case op::variable:
+        {
+            // a module's Input variable, unless it is a builtin a wave shares: NumWorkgroups, WorkgroupSize,
+            // WorkgroupId, SubgroupSize, NumSubgroups, SubgroupId
+            if (w.size() < 4 || w[3] != 1)
+                break;
+            auto const* const builtin = builtins.get_ptr(w[2]);
+            auto const shared = builtin != nullptr
+                             && (*builtin == 24 || *builtin == 25 || *builtin == 26 || *builtin == 36 || *builtin == 38
+                                 || *builtin == 40);
+            if (!shared)
+                f.varying_variables.push_back(w[2]);
+            break;
+        }
         default:
             break;
         }
@@ -199,6 +243,29 @@ void value_operands(babel::spirv::instruction const& i, cc::vector<u32>& out)
     }
 }
 
+/// Whether an instruction's result differs across a wave by what it is rather than by what it reads.
+[[nodiscard]] impl::uniformity_source source_of(babel::spirv::instruction const& i)
+{
+    auto const code = i.opcode();
+    auto const kind = spirv_kind_of(code);
+    if (code == op::group_non_uniform_elect || code == op::group_non_uniform_inverse_ballot
+        || (code >= op::group_non_uniform_shuffle && code <= op::group_non_uniform_shuffle_relative_down)
+        || kind == op_kind::atomic || kind == op_kind::derivative)
+        return impl::uniformity_source::varying;
+    // all, any, all-equal, broadcast, broadcast-first and ballot answer for the whole wave
+    if ((code >= op::group_non_uniform_all && code <= op::group_non_uniform_ballot)
+        || code == op::subgroup_first_invocation_khr)
+        return impl::uniformity_source::uniform;
+    // a bit count or an arithmetic group operation: a reduction is the wave's, a scan each lane's
+    if (code == op::group_non_uniform_ballot_bit_count
+        || (code >= op::group_non_uniform_iadd && code <= op::group_non_uniform_logical_xor))
+    {
+        auto const args = i.arguments();
+        return args.size() >= 2 && args[1] == 0 ? impl::uniformity_source::uniform : impl::uniformity_source::varying;
+    }
+    return impl::uniformity_source::operands;
+}
+
 /// The blocks a terminator reaches, by label id.
 void successors(babel::spirv::instruction const& i, cc::vector<u32>& out)
 {
@@ -253,6 +320,21 @@ cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts co
         return v == nullptr ? -1 : *v;
     };
 
+    // a pointer's variable through its access chains, and the function's own variables
+    auto root_of = cc::map<u32, u32>();
+    auto own_variables = cc::vector<u32>();
+    auto const varying_load = [&](u32 pointer)
+    {
+        auto const* const root = root_of.get_ptr(pointer);
+        auto const at = root == nullptr ? pointer : *root;
+        if (facts.is_varying_variable(at))
+            return true;
+        // what a function's own variable holds is not followed through its stores
+        for (auto const v : own_variables)
+            if (v == at)
+                return true;
+        return false;
+    };
     auto operands = cc::vector<u32>();
     auto targets = cc::vector<u32>();
     auto in_block = false;
@@ -277,8 +359,19 @@ cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts co
         if (code == op::function_call)
             ++f.calls;
         if (code == op::variable)
+        {
+            own_variables.push_back(i.result_id());
             if (auto const* const pointee = facts.pointee.get_ptr(i.result_type()))
                 f.variable_words += facts.words_of(*pointee);
+        }
+        if ((code == op::access_chain || code == op::in_bounds_access_chain || code == op::ptr_access_chain
+             || code == op::in_bounds_ptr_access_chain)
+            && !i.arguments().empty())
+        {
+            auto const base = i.arguments()[0];
+            auto const* const root = root_of.get_ptr(base);
+            root_of[i.result_id()] = root == nullptr ? base : *root;
+        }
 
         auto kind = spirv_kind_of(code);
         if (code == op::ext_inst && i.words.size() > 3 && facts.is_describing(i.words[3]))
@@ -289,7 +382,12 @@ cc::result<function_metrics> walk(babel::spirv::module const& m, module_facts co
             .first = u32(g.operands.size()),
             .phi_first = u32(g.phi_values.size()),
             .counts = kind != op_kind::declaration && code != op::loop_merge && code != op::selection_merge,
+            .source = source_of(i),
         };
+        if (code == op::load && !i.arguments().empty() && varying_load(i.arguments()[0]))
+            gi.source = impl::uniformity_source::varying;
+        if ((code == op::branch_conditional || code == op::switch_) && !i.arguments().empty())
+            g.blocks.back().condition = value(i.arguments()[0]);
         if (code == op::phi)
         {
             auto const args = i.arguments();
@@ -363,7 +461,8 @@ cc::string to_text(module_metrics const& m)
     {
         out.appendf("{}: {} instructions, {} blocks, {} loops, {} selections, {} calls\n", f.name, f.instructions,
                     f.blocks, f.loops, f.selections, f.calls);
-        out.appendf("  max live {} words, critical path {}, variables {} words\n", f.max_live_words, f.critical_path,
+        out.appendf("  max live {} words ({} vector, {} scalar), critical path {}, variables {} words\n",
+                    f.max_live_words, f.max_live_vector_words, f.max_live_scalar_words, f.critical_path,
                     f.variable_words);
         for (auto k = isize(0); k < k_op_kind_count; ++k)
             if (f.kinds[k] != 0)

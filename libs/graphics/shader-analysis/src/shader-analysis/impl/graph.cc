@@ -88,32 +88,48 @@ void measure(graph const& g, function_metrics& f)
         }
     }
 
-    // each block backwards from what it hands on, for the live words; forwards, for its chains
+    // each block backwards from what it hands on, for the live words, apart by whether a wave shares them; forwards,
+    // for its chains
+    auto const varying = varying_values(g);
     auto depth = cc::vector<i32>::create_filled(values, 0);
     for (auto b = isize(0); b < blocks; ++b)
     {
         auto const& block = g.blocks[b];
         auto live = cc::vector<u64>::create_copy_of(cc::span<u64 const>(live_out[b]));
-        auto live_words = i32(0);
+        auto live_vector = i32(0);
+        auto live_scalar = i32(0);
+        auto const add = [&](i32 v, i32 sign)
+        {
+            if (varying[v])
+                live_vector += sign * g.widths[v];
+            else
+                live_scalar += sign * g.widths[v];
+        };
+        auto const note = [&]
+        {
+            f.max_live_words = cc::max(f.max_live_words, live_vector + live_scalar);
+            f.max_live_vector_words = cc::max(f.max_live_vector_words, live_vector);
+            f.max_live_scalar_words = cc::max(f.max_live_scalar_words, live_scalar);
+        };
         for (auto v = isize(0); v < values; ++v)
             if (test(live, i32(v)))
-                live_words += g.widths[v];
-        f.max_live_words = cc::max(f.max_live_words, live_words);
+                add(i32(v), 1);
+        note();
         for (auto k = block.end; k > block.first; --k)
         {
             auto const& i = g.instructions[k - 1];
             if (i.result >= 0 && test(live, i.result))
             {
                 clear(live, i.result);
-                live_words -= g.widths[i.result];
+                add(i.result, -1);
             }
             for (auto o = i.first; o < i.first + i.count; ++o)
                 if (auto const v = g.operands[o]; v >= 0 && !test(live, v))
                 {
                     set(live, v);
-                    live_words += g.widths[v];
+                    add(v, 1);
                 }
-            f.max_live_words = cc::max(f.max_live_words, live_words);
+            note();
         }
         for (auto k = block.first; k < block.end; ++k)
         {
@@ -130,13 +146,12 @@ void measure(graph const& g, function_metrics& f)
     }
 }
 
-i32 back_edges(graph const& g)
+cc::vector<i32> dominators(graph const& g)
 {
-    // dominators over the blocks in reverse postorder from block 0 (Cooper, Harvey, Kennedy), then each edge to a
-    // block that dominates its source
+    // over the blocks in reverse postorder from block 0 (Cooper, Harvey, Kennedy)
     auto const n = g.blocks.size();
     if (n == 0)
-        return 0;
+        return {};
     auto order = cc::vector<i32>();
     auto seen = cc::vector<bool>::create_filled(n, false);
     struct frame
@@ -203,6 +218,13 @@ i32 back_edges(graph const& g)
             }
         }
     }
+    return idom;
+}
+
+i32 back_edges(graph const& g)
+{
+    auto const idom = dominators(g);
+    auto const n = g.blocks.size();
     auto const dominates = [&](i32 a, i32 b)
     {
         for (auto at = b; at >= 0; at = idom[at])
@@ -223,6 +245,61 @@ i32 back_edges(graph const& g)
     return edges;
 }
 
+cc::vector<bool> varying_values(graph const& g)
+{
+    auto varying = cc::vector<bool>::create_filled(g.widths.size(), false);
+    auto const idom = dominators(g);
+    auto block_of = cc::vector<i32>::create_filled(g.instructions.size(), -1);
+    for (auto b = isize(0); b < g.blocks.size(); ++b)
+        for (auto k = g.blocks[b].first; k < g.blocks[b].end; ++k)
+            block_of[k] = i32(b);
+    auto const parted = [&](i32 at, graph_instruction const& phi)
+    {
+        auto const top = idom[at];
+        for (auto p = phi.phi_first; p < phi.phi_first + phi.phi_count; ++p)
+        {
+            auto b = g.phi_blocks[p];
+            if (b < 0 || b >= i32(g.blocks.size()) || idom[b] < 0)
+                continue;
+            for (auto steps = isize(0); steps <= g.blocks.size(); ++steps)
+            {
+                if (auto const c = g.blocks[b].condition; c >= 0 && varying[c])
+                    return true;
+                if (b == top || b == 0)
+                    break;
+                b = idom[b];
+            }
+        }
+        return false;
+    };
+    // grows only, so it ends: a phi of a loop may turn varying once a value of its back edge has
+    for (auto changed = true; changed;)
+    {
+        changed = false;
+        for (auto k = isize(0); k < g.instructions.size(); ++k)
+        {
+            auto const& i = g.instructions[k];
+            if (i.result < 0 || varying[i.result] || i.source == uniformity_source::uniform)
+                continue;
+            auto is_varying = i.source == uniformity_source::varying;
+            for (auto o = i.first; o < i.first + i.count && !is_varying; ++o)
+                is_varying = g.operands[o] >= 0 && varying[g.operands[o]];
+            for (auto p = i.phi_first; p < i.phi_first + i.phi_count && !is_varying; ++p)
+                is_varying = g.phi_values[p] >= 0 && varying[g.phi_values[p]];
+            // a phi where lanes a varying branch parted meet again: one between an incoming block and the phi's
+            // immediate dominator, which is the branch of an if and a loop's exit test alike
+            if (!is_varying && i.phi_count > 0 && block_of[k] >= 0 && !idom.empty())
+                is_varying = parted(block_of[k], i);
+            if (is_varying)
+            {
+                varying[i.result] = true;
+                changed = true;
+            }
+        }
+    }
+    return varying;
+}
+
 void accumulate(function_metrics const& f, function_metrics& total)
 {
     total.instructions += f.instructions;
@@ -234,6 +311,8 @@ void accumulate(function_metrics const& f, function_metrics& total)
     total.calls += f.calls;
     total.variable_words += f.variable_words;
     total.max_live_words = cc::max(total.max_live_words, f.max_live_words);
+    total.max_live_vector_words = cc::max(total.max_live_vector_words, f.max_live_vector_words);
+    total.max_live_scalar_words = cc::max(total.max_live_scalar_words, f.max_live_scalar_words);
     total.critical_path = cc::max(total.critical_path, f.critical_path);
 }
 } // namespace shan::impl

@@ -91,6 +91,26 @@ using babel::llvm37::type_kind;
     return op_kind::other;
 }
 
+/// Whether a `dx.op` call's result differs across a wave by what it is rather than by what it reads.
+[[nodiscard]] impl::uniformity_source dx_op_source(cc::string_view name)
+{
+    auto rest = name.subview(6);
+    if (auto const dot = rest.find('.'); dot >= 0)
+        rest = rest.subview({.offset = 0, .size = dot});
+    auto const is = [&](cc::string_view prefix) { return rest.starts_with(prefix); };
+    // a wave's own answer is the same in every lane: an all, an any, a ballot, a reduction, a read of one lane
+    if (is("groupId") || is("waveReadLane") || is("waveAll") || is("waveAny") || is("waveActive")
+        || is("waveGetLaneCount"))
+        return impl::uniformity_source::uniform;
+    if (is("threadId") || is("flattenedThreadIdInGroup") || is("loadInput") || is("attributeAtVertex") || is("eval")
+        || is("sampleIndex") || is("coverage") || is("innerCoverage") || is("primitiveID") || is("waveGetLaneIndex")
+        || is("waveIsFirstLane") || is("wavePrefix") || is("waveMatch") || is("waveMultiPrefix") || is("quad")
+        || is("atomic") || is("dispatchRaysIndex") || is("rayQuery") || is("hitObject") || is("domainLocation")
+        || is("outputControlPointID") || is("gsInstanceID") || is("isHelperLane"))
+        return impl::uniformity_source::varying;
+    return impl::uniformity_source::operands;
+}
+
 [[nodiscard]] op_kind kind_of(babel::llvm37::module const& m,
                               babel::llvm37::body const& b,
                               babel::llvm37::instruction const& i)
@@ -187,6 +207,12 @@ using babel::llvm37::type_kind;
             .phi_first = u32(g.phi_values.size()),
             .counts = kind != op_kind::declaration,
         };
+        if (i.code == inst_code::call)
+            if (auto const name = m.callee_name(b, i); name.starts_with("dx.op."))
+                gi.source = dx_op_source(name);
+        // what a load from a function's own variable holds, or an atomic returns, is not followed
+        if (i.code == inst_code::atomic_rmw || i.code == inst_code::cmpxchg)
+            gi.source = impl::uniformity_source::varying;
         auto const operands = m.operands_of(b, i);
         auto const roles = cc::span<babel::llvm37::operand_role const>(b.roles).subspan(
             {.offset = isize(i.first), .size = isize(i.count)});
@@ -206,7 +232,15 @@ using babel::llvm37::type_kind;
                 if (roles[k] == babel::llvm37::operand_role::value)
                 {
                     if (auto const v = local(operands[k]); v >= 0)
+                    {
                         g.operands.push_back(v);
+                        if ((i.code == inst_code::br || i.code == inst_code::switch_) && g.blocks[i.block].condition < 0)
+                            g.blocks[i.block].condition = v;
+                        if (i.code == inst_code::load && v < i32(b.values.size())
+                            && b.values[v].kind == babel::llvm37::value_kind::instruction
+                            && b.instructions[b.values[v].index].code == inst_code::alloca_)
+                            gi.source = impl::uniformity_source::varying;
+                    }
                 }
                 else if (roles[k] == babel::llvm37::operand_role::block)
                     g.blocks[i.block].successors.push_back(i32(operands[k]));

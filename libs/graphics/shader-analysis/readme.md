@@ -23,6 +23,7 @@ shan measures those, so a comparison names where two modules part rather than on
 
 **The metrics are estimates for comparing two modules of one entry point, not a model of a GPU.**
 Register pressure is the most 32-bit words of SSA values live at one point, a bool taking one and a logical pointer none.
+It is split too: vector words are values that differ across a wave, which a GPU keeps in vector registers, and scalar words the values a wave shares.
 The critical path is the longest dependent chain inside one block, weighted by a rough latency per kind (`latency_of`).
 A driver allocates and schedules better or worse than that, but two modules of one entry point it treats alike.
 

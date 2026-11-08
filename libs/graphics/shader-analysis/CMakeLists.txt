@@ -48,6 +48,7 @@ if(SC_BUILD_TESTS)
         tests/spirv-metrics-test.cc
         tests/diff-test.cc
         tests/dxil-metrics-test.cc
+        tests/uniformity-test.cc
     )
     sc_nexus_binary(shader-analysis-test KINDS tests)
     target_link_libraries(shader-analysis-test PRIVATE shader-analysis nexus)

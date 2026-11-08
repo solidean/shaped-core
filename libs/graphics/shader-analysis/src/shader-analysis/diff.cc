@@ -31,6 +31,8 @@ cc::vector<difference> diff(module_metrics const& a, module_metrics const& b)
     add("calls", x.calls, y.calls);
     add("variable_words", x.variable_words, y.variable_words);
     add("max_live_words", x.max_live_words, y.max_live_words);
+    add("max_live_vector_words", x.max_live_vector_words, y.max_live_vector_words);
+    add("max_live_scalar_words", x.max_live_scalar_words, y.max_live_scalar_words);
     add("critical_path", x.critical_path, y.critical_path);
     for (auto k = isize(0); k < k_op_kind_count; ++k)
         add(cc::format("kind.{}", name_of(op_kind(k))), x.kinds[k], y.kinds[k]);
