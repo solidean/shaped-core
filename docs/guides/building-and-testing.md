@@ -515,6 +515,7 @@ Registered checks (`check --list` shows what each watches); the fixers run in th
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
 | `abspaths`   | No compile definition or generated source of the default preset's build carries an absolute source or build path ([where a binary finds the source tree](#where-a-binary-finds-the-source-tree)). Known exceptions name their issue in [abspaths.py](../../tools/dev/lib/quality/abspaths.py). | no (report only) |
 | `sgl-prelude`| SGL's committed `prelude/builtins.sgl` and slib's `impl/pipeline_fields.hh` are what `sgl` generates. Builds the `sgl` tool. | yes (rewrites the files) |
+| `sgl-native-size` | SGL's own SPIR-V and DXIL of the repo's shaders stay within 2% of the committed baseline in operations ([native-parity](../../libs/graphics/shaped-graphics-language/docs/native-parity.md#how-to-measure)). Builds the `sgl` tool; DXIL is counted where DXC is fetched. | no (report only) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
 
 ### What it prints about its own cost

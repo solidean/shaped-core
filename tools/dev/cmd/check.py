@@ -315,6 +315,31 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ok = False
         return ok
 
+    def check_sgl_native_size(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # SGL's own SPIR-V and DXIL of the repo's real shaders, counted in operations against a committed baseline.
+        # A change that grows an entry past it fails here, before a benchmark would notice; libs/graphics/shaped-graphics-language/docs/native-parity.md says why size is a lead.
+        # Not fixable: `native-parity.py update` commits a new baseline, which is a decision rather than a repair.
+        # Repo-wide by nature, so fix and scope are ignored.
+        script = ctx.root / "libs" / "graphics" / "shaped-graphics-language" / "tools" / "native-parity.py"
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        preset = presets[0]
+        targets = ctx.discover(preset)
+        artifact = next((t.artifact for t in targets if t.name == "sgl" and t.kind == "EXECUTABLE" and t.artifact), None)
+        if artifact is None or preset.is_emscripten:
+            dev.ui.write_line(f"sgl-native-size: skipped -- preset {preset.name!r} builds no `sgl` program to run")
+            return True
+        result = dev.run_step(
+            [sys.executable, str(script), "check", "--sgl", str(artifact)],
+            step_type="lint", name="sgl-native-size",
+            build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        if not result.ok and not mirror:
+            for log in (result.stdout_log, result.stderr_log):
+                text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                if text:
+                    dev.ui.write_line(text)
+        return result.ok
+
     def check_sgl_vscode_bundle(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The SGL VS Code extension commits its esbuild bundle, so users link the folder without an `npm install`.
         # This gate rebuilds the bundle from the pinned lockfile and compares bytes; --fix copies the fresh one over.
@@ -551,6 +576,12 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   True, check_sgl_prelude,
                   watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-shader-library/**",
                            "libs/graphics/shaped-graphics/**"),
+                  builds=("sgl",)),
+        dev.Check("sgl-native-size",
+                  "SGL's own SPIR-V and DXIL of the repo's shaders stay within 2% of native-size-baseline.json, in operations",
+                  False, check_sgl_native_size,
+                  watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-rendering/shaders/**",
+                           "libs/graphics/shaped-viewer/shaders/**"),
                   builds=("sgl",)),
         dev.Check("abspaths",
                   "no compile definition or generated source carries an absolute source or build path "

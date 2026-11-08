@@ -456,6 +456,7 @@ sgl lsp                                                                  # the l
 uv run dev.py run sgl -- format [--check] a.sgl b.sgl                    # SGL's spacing in place; --check exits 2 where a file would change
 uv run dev.py test sgl                                                   # the language server's tests, carried by the binary (docs/lsp.md)
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
+uv run dev.py check sgl-native-size                                      # native SPIR-V/DXIL size against tools/native-size-baseline.json
 ```
 
 ## Emitting

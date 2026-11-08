@@ -1,0 +1,214 @@
+{
+ "libs/graphics/shaped-rendering/shaders/atrous_denoise.sgl::main_cs": {
+  "spirv": 354,
+  "dxil": 290
+ },
+ "libs/graphics/shaped-rendering/shaders/bloom.sgl::down_cs": {
+  "spirv": 85,
+  "dxil": 65
+ },
+ "libs/graphics/shaped-rendering/shaders/bloom.sgl::finish_cs": {
+  "spirv": 171,
+  "dxil": 138
+ },
+ "libs/graphics/shaped-rendering/shaders/bloom.sgl::first_cs": {
+  "spirv": 149,
+  "dxil": 104
+ },
+ "libs/graphics/shaped-rendering/shaders/bloom.sgl::up_cs": {
+  "spirv": 106,
+  "dxil": 99
+ },
+ "libs/graphics/shaped-rendering/shaders/box_filter_mipmap.sgl::main_1d_array_cs": {
+  "spirv": 35,
+  "dxil": 37
+ },
+ "libs/graphics/shaped-rendering/shaders/box_filter_mipmap.sgl::main_1d_cs": {
+  "spirv": 29,
+  "dxil": 36
+ },
+ "libs/graphics/shaped-rendering/shaders/box_filter_mipmap.sgl::main_2d_array_cs": {
+  "spirv": 50,
+  "dxil": 64
+ },
+ "libs/graphics/shaped-rendering/shaders/box_filter_mipmap.sgl::main_2d_cs": {
+  "spirv": 42,
+  "dxil": 63
+ },
+ "libs/graphics/shaped-rendering/shaders/box_filter_mipmap.sgl::main_3d_cs": {
+  "spirv": 59,
+  "dxil": 108
+ },
+ "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc1_cs": {
+  "spirv": 1184,
+  "dxil": 1264
+ },
+ "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc3_cs": {
+  "spirv": 1517,
+  "dxil": 1607
+ },
+ "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc4_cs": {
+  "spirv": 549,
+  "dxil": 477
+ },
+ "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc5_cs": {
+  "spirv": 1770,
+  "dxil": 1619
+ },
+ "libs/graphics/shaped-rendering/shaders/compression/bc.sgl::bc7_cs": {
+  "spirv": 7575,
+  "dxil": 8063
+ },
+ "libs/graphics/shaped-rendering/shaders/exposure_meter.sgl::main_cs": {
+  "spirv": 85,
+  "dxil": 62
+ },
+ "libs/graphics/shaped-rendering/shaders/imgui.sgl::main_ps": {
+  "spirv": 12,
+  "dxil": 24
+ },
+ "libs/graphics/shaped-rendering/shaders/imgui.sgl::main_vs": {
+  "spirv": 19,
+  "dxil": 30
+ },
+ "libs/graphics/shaped-rendering/shaders/mix.sgl::main_cs": {
+  "spirv": 31,
+  "dxil": 42
+ },
+ "libs/graphics/shaped-rendering/shaders/nn_conv.sgl::main_cs": {
+  "spirv": 891,
+  "dxil": 666
+ },
+ "libs/graphics/shaped-rendering/shaders/nn_pool.sgl::main_cs": {
+  "spirv": 61,
+  "dxil": 53
+ },
+ "libs/graphics/shaped-rendering/shaders/nn_upsample.sgl::main_cs": {
+  "spirv": 58,
+  "dxil": 47
+ },
+ "libs/graphics/shaped-rendering/shaders/slug_quads.sgl::main_job_vs": {
+  "spirv": 469,
+  "dxil": 416
+ },
+ "libs/graphics/shaped-rendering/shaders/slug_quads.sgl::main_ps": {
+  "spirv": 409,
+  "dxil": 327
+ },
+ "libs/graphics/shaped-rendering/shaders/slug_quads.sgl::main_vs": {
+  "spirv": 216,
+  "dxil": 205
+ },
+ "libs/graphics/shaped-rendering/shaders/svgf.sgl::atrous_cs": {
+  "spirv": 2577,
+  "dxil": 2291
+ },
+ "libs/graphics/shaped-rendering/shaders/svgf.sgl::temporal_cs": {
+  "spirv": 198,
+  "dxil": 184
+ },
+ "libs/graphics/shaped-rendering/shaders/svgf.sgl::variance_cs": {
+  "spirv": 184,
+  "dxil": 140
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_cull.sgl::cull": {
+  "spirv": 163,
+  "dxil": 186
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_cull.sgl::cull_first": {
+  "spirv": 172,
+  "dxil": 192
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_cull.sgl::cull_second": {
+  "spirv": 376,
+  "dxil": 356
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_cull.sgl::pyramid_down": {
+  "spirv": 107,
+  "dxil": 59
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_cull.sgl::pyramid_seed": {
+  "spirv": 27,
+  "dxil": 18
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_cull.sgl::pyramid_seed_depth": {
+  "spirv": 28,
+  "dxil": 19
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_pass.sgl::environment_ps": {
+  "spirv": 248,
+  "dxil": 353
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_pass.sgl::environment_thin_ps": {
+  "spirv": 248,
+  "dxil": 356
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_pass.sgl::environment_vs": {
+  "spirv": 18,
+  "dxil": 17
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_pass.sgl::quadric_vs": {
+  "spirv": 160,
+  "dxil": 150
+ },
+ "libs/graphics/shaped-viewer/shaders/raster_pass.sgl::surface_vs": {
+  "spirv": 77,
+  "dxil": 98
+ },
+ "libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl::path_miss": {
+  "spirv": 291,
+  "dxil": 412
+ },
+ "libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl::path_trace": {
+  "spirv": 2174,
+  "dxil": 1994
+ },
+ "libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl::shadow_miss": {
+  "spirv": 6,
+  "dxil": 3
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::args_connect": {
+  "spirv": 37,
+  "dxil": 36
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::args_round": {
+  "spirv": 70,
+  "dxil": 44
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::args_shade": {
+  "spirv": 69,
+  "dxil": 61
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::begin": {
+  "spirv": 486,
+  "dxil": 516
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::connect": {
+  "spirv": 1619,
+  "dxil": 1045
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::extend": {
+  "spirv": 2456,
+  "dxil": 1543
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::finalize": {
+  "spirv": 327,
+  "dxil": 381
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::reset": {
+  "spirv": 27,
+  "dxil": 17
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::resolve": {
+  "spirv": 313,
+  "dxil": 223
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::segment": {
+  "spirv": 1746,
+  "dxil": 1654
+ },
+ "libs/graphics/shaped-viewer/shaders/wavefront.sgl::sort": {
+  "spirv": 49,
+  "dxil": 40
+ }
+}

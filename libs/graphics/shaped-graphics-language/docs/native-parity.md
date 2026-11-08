@@ -39,6 +39,8 @@ uv run libs/graphics/shaped-graphics-language/tools/native-parity.py diff <file.
 ```
 
 `table` is the table below, and `diff` one entry's opcode histograms side by side, with both binaries and listings kept.
+`check` counts SGL's own operations alone, in about a second, against [native-size-baseline.json](../tools/native-size-baseline.json).
+An entry that grows more than 2% fails `dev.py check`'s `sgl-native-size` gate, and `update` commits a new baseline where the growth is meant or an entry shrank.
 DXC gets slib's own arguments, so its side is what a context of the text route builds.
 An operation is one instruction inside the function, so declarations, names and decorations do not count.
 

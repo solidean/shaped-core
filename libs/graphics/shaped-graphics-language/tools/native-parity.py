@@ -10,11 +10,16 @@
 
 `table` prints libs/graphics/shaped-graphics-language/docs/native-parity.md's size table over the repo's real shaders.
 `diff` prints one entry's opcode histogram difference, and leaves both binaries and their disassemblies in --out.
+`check` counts SGL's own operations alone and compares them with native-size-baseline.json beside this script:
+an entry that grew more than 2% and more than 4 operations fails, and so does one the baseline does not name.
+`update` writes the baseline from what SGL writes now, which a change that shrinks or knowingly grows an entry commits.
+`dev.py check`'s sgl-native-size gate runs `check`.
 It needs sgl built (`uv run dev.py build -t sgl`) and DXC fetched; it runs on Windows, where DXC's validator is.
 DXC gets slib's own arguments, so its side is what a context of the text route builds.
 """
 
 import argparse
+import json
 import os
 import re
 import struct
@@ -128,14 +133,99 @@ def compare(sgl, file, entry, stage, out, names):
     return result
 
 
+BASELINE = Path(__file__).resolve().parent / "native-size-baseline.json"
+GROWTH = 1.02
+SLACK = 4
+
+
+def native_counts(sgl, file, entry, stage, out, names, with_dxil):
+    """{target: operations} of SGL's own binaries for one entry point."""
+    base = out / ("%s-%s" % (Path(file).stem, entry))
+    modules = [a for d in MODULES for a in ("--module-dir", ROOT / d)]
+    emit = [sgl, "emit", file, "--entry", entry] + modules
+    spv = base.with_suffix(".native.spv")
+    run(emit + ["--target", "spirv", "--spirv", spv])
+    counts = {"spirv": sum(spirv_histogram(spv, names).values())}
+    if with_dxil:
+        dxil = base.with_suffix(".native.dxil")
+        run(emit + ["--target", "dxil", "--dxil", dxil])
+        counts["dxil"] = sum(dxil_histogram(run([DXC, "-dumpbin", dxil])).values())
+    return counts
+
+
+def all_native_counts(sgl, out, names, with_dxil):
+    from concurrent.futures import ThreadPoolExecutor
+
+    jobs = []
+    for rel in FILES:
+        file = ROOT / rel
+        for m in ENTRY.finditer(file.read_text(encoding="utf-8")):
+            jobs.append(("%s::%s" % (rel, m.group(2)), file, m.group(2), STAGES.get(m.group(1), "lib")))
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+        futures = {key: pool.submit(native_counts, sgl, file, entry, stage, out, names, with_dxil)
+                   for key, file, entry, stage in jobs}
+    return {key: f.result() for key, f in futures.items()}
+
+
+def check(sgl, out, names):
+    with_dxil = DXC.exists()
+    counts = all_native_counts(sgl, out, names, with_dxil)
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {}
+    failures, shrunk = [], []
+    for key in sorted(set(counts) | set(baseline)):
+        if key not in baseline:
+            failures.append("%s: not in the baseline" % key)
+            continue
+        if key not in counts:
+            failures.append("%s: in the baseline, but no such entry point" % key)
+            continue
+        for target, ops in counts[key].items():
+            was = baseline[key].get(target)
+            if was is None:
+                failures.append("%s %s: not in the baseline" % (key, target))
+            elif ops > was * GROWTH and ops > was + SLACK:
+                failures.append("%s %s: %d operations, the baseline's %d (%+.1f%%)" % (key, target, ops, was, 100.0 * (ops - was) / was))
+            elif ops < was / GROWTH and ops < was - SLACK:
+                shrunk.append("%s %s: %d operations, the baseline's %d" % (key, target, ops, was))
+    for line in shrunk:
+        print("shrunk: " + line)
+    if shrunk:
+        print("`native-parity.py update` keeps what shrank from growing back")
+    if not with_dxil:
+        print("DXC is not fetched, so DXIL went uncounted")
+    for line in failures:
+        print("FAILED: " + line)
+    if failures:
+        print("a growth that is meant is committed with `uv run %s update`" % Path(__file__).relative_to(ROOT).as_posix())
+        return 1
+    print("%d entry points within %.0f%% of the baseline" % (len(counts), 100 * (GROWTH - 1)))
+    return 0
+
+
+def update(sgl, out, names):
+    if not DXC.exists():
+        sys.exit("update needs DXC, so the baseline holds DXIL too")
+    counts = all_native_counts(sgl, out, names, True)
+    BASELINE.write_bytes((json.dumps(dict(sorted(counts.items())), indent=1) + "\n").encode("utf-8"))
+    print("wrote %d entry points to %s" % (len(counts), BASELINE.relative_to(ROOT).as_posix()))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["table", "diff"])
+    ap.add_argument("mode", choices=["table", "diff", "check", "update"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--build-dir", default="build/x64-windows-clang-ninja-relwithdebinfo")
     ap.add_argument("--out", default=None, help="where the binaries and listings go; a temporary folder by default")
+    ap.add_argument("--sgl", default=None, help="the sgl tool to run; the --build-dir one by default")
     a = ap.parse_args()
-    sgl = ROOT / a.build_dir / "libs/graphics/shaped-graphics-language/sgl.exe"
+    sgl = Path(a.sgl) if a.sgl else ROOT / a.build_dir / "libs/graphics/shaped-graphics-language/sgl.exe"
+    if a.mode in ("check", "update"):
+        if not sgl.exists():
+            sys.exit("needs %s (uv run dev.py build -t sgl)" % sgl)
+        out = Path(a.out) if a.out else Path(os.environ.get("TEMP", "/tmp")) / "sgl-native-size"
+        out.mkdir(parents=True, exist_ok=True)
+        sys.exit(check(sgl, out, spirv_opcodes()) if a.mode == "check" else update(sgl, out, spirv_opcodes()))
     if not sgl.exists() or not DXC.exists():
         sys.exit("needs %s (uv run dev.py build -t sgl) and %s (fetched by a configure)" % (sgl, DXC))
     out = Path(a.out) if a.out else Path(os.environ.get("TEMP", "/tmp")) / "sgl-native-parity"
