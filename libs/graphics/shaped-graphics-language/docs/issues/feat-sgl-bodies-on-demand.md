@@ -35,6 +35,33 @@ What this means for the design:
 - A body a compile reaches is checked once per process with or without an artifact, since the first form has no impls.
   An artifact without impls saves only the interface's part and the bodies no program reaches.
 - So how many of a layer's bodies a program reaches decides what this step and an impl-less module artifact are worth.
-  Count that next: the distinct functions the tracer's entry points inline, against the 4,270 checked.
+
+Counted the same way, each `describe` with shaped-viewer's and shaped-rendering's module directories: distinct bodies checked, against distinct functions inlined.
+Most of the 4,270 above return at once, the body checked already; generic instances are left out.
+
+| program | module bodies checked | of them inlined | prelude bodies checked | of them inlined |
+|---|---|---|---|---|
+| `tracer_pipeline` | 239 | 39 | 228 | 4 |
+| `raster_pass` | 288 | 28 | 228 | 2 |
+| `wavefront` | 246 | 90 | 228 | 50 |
+| `hybrid_pass` | 316 | 184 | 228 | 50 |
+
+So a program reaches 10% to 58% of its modules' bodies, and at most a fifth of the prelude's.
+
+## Where a body checked on demand lands
+
+This is the step's real design question, and it does not have an easy answer under positional ids.
+
+- **Into the shared layer:** a body's check appends to the tables, call records, instances and interned types.
+  A program's ids continue right behind the layer, so the layer cannot grow once a program sits on it.
+  Interning breaks too: a program may have interned `buffer[foo]` in its own layer, and a body checked later into the layer below interns it again under another id.
+  Today's eager check is what keeps every type canonical.
+- **Into the compile's own layer,** as a generic instance is: correct by construction, since that layer sees everything below it.
+  But it costs every compile the bodies it reaches, about 55 µs each from the numbers above.
+  A compile behind today's eagerly checked layer pays nothing for them, so a process with many compiles comes out behind.
+
+What this suggests instead: an artifact carries its bodies' checked tables, and loads whole, relocated with the rest.
+Loading a body is then a copy, never a check, and laziness only saves reading bytes.
+That reverses "bodies from source first", so it is the maintainer's to decide.
 - If a program reaches most of its modules' bodies, serialized impls stop being "if it shows" and become what makes a module artifact pay.
   The prelude's artifact should pay either way: a program likely reaches few of its bodies, which is unmeasured, and its parse goes too.
