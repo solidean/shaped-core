@@ -338,6 +338,9 @@ add_subdirectory(libs/graphics/shaped-viewer)
 # alone, so it sits beside the graphics stack rather than on it.
 add_subdirectory(libs/graphics/shaped-graphics-language)
 
+# shader-analysis (shan): what a SPIR-V or DXIL module costs, over babel-data's readers alone.
+add_subdirectory(libs/graphics/shader-analysis)
+
 # shaped-shader-compiler-dxc (ssc): HLSL -> sg::compiled_shader via DXC. Windows-only, and only when
 # DXC has been built (extern/dxc adds the `dxc` target). Run `uv run extern/dxc/build-dxc.py` (dev.py
 # does this automatically) to enable it.
