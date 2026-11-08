@@ -621,7 +621,8 @@ It builds and runs the suite on the platform default **relwithdebinfo**, `CC_ASS
 Each further variant is a whole build of its own, so they are opt-in: `--all-presets` adds them, each under `--smoke`, and CI runs them all:
 
 - **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and the runtime checks only the clang debug presets turn on
-  (`SC_CHECK_WIDE_ARITH`, `SC_CHECK_GEOMETRY_SPECIAL_CASES`, `SC_ASYNC_AMBIENT_TRACE`, `SC_SIMD_EXHAUSTIVE_TESTS` — see [platforms.md](../platforms.md#wide-arithmetic-checks-sc_check_wide_arith))
+  (`SC_CHECK_GEOMETRY_SPECIAL_CASES`, `SC_SIMD_EXHAUSTIVE_TESTS` — see [platforms.md](../platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases));
+  `SC_CHECK_WIDE_ARITH` and `SC_ASYNC_AMBIENT_TRACE` are on in no preset, so neither `check` nor CI runs them ([platforms.md](../platforms.md#wide-arithmetic-checks-sc_check_wide_arith))
 - the **release** sibling — `CC_ASSERT` off
 - a **single-threaded** sibling — `SC_THREADS=OFF`, otherwise reachable only through a wasm build
 - on **Linux and macOS**, a **sanitizer** preset — ASan + UBSan

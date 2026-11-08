@@ -258,7 +258,9 @@ These sit in the hottest loops of exact geometry predicates, which is why they a
 The asserts themselves are tested where the switch is on.
 
 Like `SC_THREADS` it is whole-build, never per-target: an inline function compiled with and without the check in one program is an ODR violation.
-The clang debug presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+Every preset leaves it off, since the checks cost noticeable test time in some binaries and have not yet caught a real bug;
+a build dir configured with `-DSC_CHECK_WIDE_ARITH=ON` runs them, now and then rather than on every commit.
+`dev.py check`, with or without `--all-presets`, and CI do not exercise them.
 
 ## Geometry special-case checks (`SC_CHECK_GEOMETRY_SPECIAL_CASES`)
 
@@ -269,7 +271,7 @@ Checked, each such assumption that an input violates logs a warning in the `tg` 
 A warning rather than an assert, because a test that feeds a special case on purpose has to be writable.
 nexus fails a passing test that logs an undeclared warning, so in a test it is a failure unless declared with `nx::expect_warning`; in an application it is a log line.
 
-Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same clang debug presets.
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason; the clang debug presets turn it on.
 
 ## Who holds a test's context (`SC_ASYNC_AMBIENT_TRACE`)
 
@@ -283,7 +285,8 @@ Off, the release path is exactly what it is without the feature.
 On, every release of a context link loads the watched link and compares, and only a watched link takes the slow path.
 `cc::async_ambient_watch_releases` is the hook; it returns false in a build without the switch, so a caller needs no `#if`.
 
-Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline; the clang debug presets turn it on.
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline.
+Every preset leaves it off, as it does `SC_CHECK_WIDE_ARITH`: a build dir configured with `-DSC_ASYNC_AMBIENT_TRACE=ON` is where it runs.
 A Release build captures stacks without names, as every capture there does; a build with names, or a sidecar, is what reads them.
 
 ## Exhaustive SIMD tests (`SC_SIMD_EXHAUSTIVE_TESTS`)
