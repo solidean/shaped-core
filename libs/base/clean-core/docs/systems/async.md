@@ -938,7 +938,8 @@ The safe shapes, by preference:
 * **Own nothing the frame owns:** a child that reads only values it captured by copy is safe by construction.
 * **Hold the frame:** where a helper's children must reach into its frame, as a long coroutine's phases do, each child captures `co_await cc::async_this_node()`.
   That strong handle to the coroutine's own node keeps its frame while they run, and lets it go when the last of them is done, so a drop still ends the work there.
-  The frame itself must not keep that handle across a suspension, or the node holds itself alive: hand it to the children, or to an inner coroutine's parameter, at once.
+  Whatever reads the frame after the children holds it too, the coroutine that awaits them first: its `async_all` reads a span of handles the frame owns.
+  The frame itself must not keep that handle across a suspension, or the node holds itself alive: move it into the children and that awaiting coroutine's parameter.
   A pool destroyed with such children still queued leaks the frame, since the child holds it and it holds the child; a leak, never a use-after-free.
 
 [async-backlog-test.cc](../../tests/thread/async-backlog-test.cc) pins the contract: the frame dies with the drop, and children holding their own state finish on it.

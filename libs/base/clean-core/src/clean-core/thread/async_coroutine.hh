@@ -760,7 +760,7 @@ shared_async<T, E> async_start(shared_async<T, E> h)
 /// Held by that work, it keeps the frame alive while the work runs, so a drop of the parked coroutine cannot free locals
 /// the work still writes; see "Work that outlives its frame" in libs/base/clean-core/docs/systems/async.md.
 /// Never keep it in the frame across a suspension: the node would then hold itself alive.
-/// Hand it to the work, or to an inner coroutine's parameter, straight away.
+/// Hand it to the work, and to the inner coroutine that awaits the work, since that one reads the frame after it.
 [[nodiscard]] inline impl::async_awaiter_this_node async_this_node()
 {
     return {};

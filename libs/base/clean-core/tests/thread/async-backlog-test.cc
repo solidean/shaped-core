@@ -522,7 +522,15 @@ cc::shared_async<cc::unit> fan_out_from_frame(cc::atomic<bool>* alive, cc::share
     co_await await_all_of(cc::span<cc::shared_async<cc::unit> const>(children));
 }
 
+/// Awaits `work`, holding `keep` until it resolves: it reads `work`, which may live in the frame `keep` holds.
+cc::shared_async<cc::unit> await_all_holding(cc::span<cc::shared_async<cc::unit> const> work, cc::async_node_ptr keep)
+{
+    co_await cc::async_all(work);
+    (void)keep;
+}
+
 /// The same fan-out, its children reaching into this frame, and holding this coroutine's own node so that they may.
+/// The coroutine awaiting them reads this frame's `children` after them, so it holds the node as well.
 cc::shared_async<cc::unit> fan_out_holding_frame(cc::atomic<bool>* alive,
                                                  cc::shared_ptr<fan_out_state> state,
                                                  cc::atomic<int>* saw_frame)
@@ -544,11 +552,12 @@ cc::shared_async<cc::unit> fan_out_holding_frame(cc::atomic<bool>* alive,
                 state->finished.fetch_add(1);
                 return cc::unit{};
             })));
-    self = {}; // the frame keeps none of itself across the suspension, or it could never be dropped
     auto const t0 = cc::current_time_steady_secs();
     while (state->entered.load() < 2 && cc::current_time_steady_secs() - t0 < 10.0)
         cc::this_thread_yield();
-    co_await await_all_of(cc::span<cc::shared_async<cc::unit> const>(children));
+    // moved into the awaiting coroutine, so this frame keeps none of itself across the suspension
+    auto all = await_all_holding(cc::span<cc::shared_async<cc::unit> const>(children), cc::move(self));
+    co_await all;
 }
 
 cc::shared_async<cc::unit> await_forever(cc::atomic<bool>* alive, cc::atomic<bool>* entered, cc::shared_async<int> never)
@@ -592,7 +601,8 @@ TEST("async backlog - a parked frame dropped while work below it runs is destroy
     // they finish on what they own, and only the abandoned work still knew of them
     state->release.store(true);
     auto const t2 = cc::current_time_steady_secs();
-    while (cc::async_abandoned_work().outstanding_count() > before && cc::current_time_steady_secs() - t2 < 10.0)
+    while ((state->finished.load() < 2 || cc::async_abandoned_work().outstanding_count() > before)
+           && cc::current_time_steady_secs() - t2 < 10.0)
         cc::this_thread_yield();
     CHECK(state->finished.load() == 2);
     CHECK(cc::async_abandoned_work().outstanding_count() == before);
