@@ -210,6 +210,32 @@ TEST("sgl ir simplify - the other condition keeps the other value")
     CHECK(dump(b.p).contains("store @ 0x40000000"));
 }
 
+TEST("sgl ir simplify - a phi of two constants of the same bits is that constant, a null zero among them")
+{
+    // a struct returned from two places leaves a field at 0.0 in one and at a folded zero in the other
+    for (auto const flow : {control_flow::structured, control_flow::unstructured})
+    {
+        auto b = program_builder();
+        auto const zero = b.add_constant({.type = b.float_type, .low = 0});
+        auto const null = b.add_constant({.type = b.float_type, .is_null = true});
+        b.blocks(4);
+        b.open(0);
+        b.select_merge(0, 3);
+        auto const read = b.add(op::load, b.float_type, {u32(b.out)});
+        b.branch_if(b.add(op::flt, b.bool_type, {u32(read), u32(b.two)}), 1, 2);
+        b.open(1);
+        b.branch(3);
+        b.open(2);
+        b.branch(3);
+        b.open(3);
+        b.keep(b.add(op::phi, b.float_type, {u32(zero), 1, u32(null), 2}));
+        b.finish();
+        simplify(b.p, flow);
+        CHECK(refusal_of(b.p, flow) == "");
+        CHECK(count_of(b.p, op::phi) == 0);
+    }
+}
+
 TEST("sgl ir simplify - a condition nobody knows keeps both arms")
 {
     auto b = program_builder();

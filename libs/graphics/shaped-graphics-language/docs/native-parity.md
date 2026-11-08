@@ -39,6 +39,7 @@ uv run libs/graphics/shaped-graphics-language/tools/native-parity.py diff <file.
 ```
 
 `table` is the table below, and `diff` one entry's opcode histograms side by side, with both binaries and listings kept.
+`lines` is one entry's DXIL arithmetic per `.sgl` file and line on both routes, which says where a gap stands.
 `check` counts SGL's own operations alone, in about a second, against [native-size-baseline.json](../tools/native-size-baseline.json).
 An entry that grows more than 2% fails `dev.py check`'s `sgl-native-size` gate, and `update` commits a new baseline where the growth is meant or an entry shrank.
 DXC gets slib's own arguments, so its side is what a context of the text route builds.
@@ -57,6 +58,7 @@ Native over DXC, GPU time on the Arc B580: the median of three processes, in eac
 | wavefront, one frame | 1.08 | **1.05, 1.08** | 0.79 | 0.82, 0.79 |
 
 Of the wavefront's kernels on dx12, only shade read high in both sets, 1.20 and 1.19, and connect went from 1.26 before to 0.96 and 1.02.
+After the constant phis below, on 2026-11-08, the dx12 frame read 1.032, 1.034 and 1.037, and vulkan's 0.80, 0.80 and 0.80.
 
 The same benchmarks on the Radeon iGPU of a Ryzen 9 9950X3D2 (RDNA 2, driver 32.0.21042.62), `SC_GPU=amd`, the median of three processes:
 
@@ -95,8 +97,8 @@ Native over DXC in operations, for the entries whose gap was large or remains; `
 | wavefront `segment` | dxil | 1.42 | 0.99 |
 | wavefront `connect` | dxil | 1.22 | 1.05 |
 | wavefront `connect` | spirv | 1.14 | 1.14 |
-| a material's shade kernel | dxil | 1.96 | 1.21 |
-| a material's shade kernel | spirv | 1.88 | 1.39 |
+| a material's shade kernel | dxil | 1.96 | 1.08 |
+| a material's shade kernel | spirv | 1.88 | 1.29 |
 | raster `environment_ps` | dxil | 1.96 | 1.02 |
 | raster `cull_second` | dxil | 1.19 | 1.16 |
 | `bc7_cs` | dxil | 1.49 | 1.23 |
@@ -135,6 +137,12 @@ That is the container rather than the code: DXC's side is stripped of reflection
   bc7 inlines dozens of them, its weight and partition tables: 1171 stores against DXC's 460.
   `state_constant_tables` makes each one a table: an internal constant on DXIL and a `Private` variable on SPIR-V, one per set of leaves.
   bc7's DXIL went from 1.49 to 1.27 and bloom's from 1.21 to 1.03, and nothing grew.
+* **A phi of two equal constants stayed a phi.**
+  openpbr's `bsdf_lobe_probs` returns its struct from two places, and for a material with no transmission both leave `transmission` at zero.
+  One zero was a null constant and the other a folded `0.0`, so `simplify` saw two values, and every branch on `p.transmission` stayed.
+  Counting operations per `.sgl` line on both sides showed it: DXC had none on the refraction lines, native 64 on one of them.
+  `simplify` now takes constants of the same bits as one value, which took the shade kernel's DXIL from 1.21 to 1.08 of DXC's.
+  `native-parity.py lines` is that count: it compiles DXC's side from HLSL stripped of its `#line`s with `-Zi`, since DXC keeps one file name for all of them, and maps each line back.
 * **A product of constants was a division per lane.**
   bc7 rescales a byte as `x * 255.0 / 255.0` and `x * top / 255.0`, which DXC's fast flags reassociate and native kept, 192 `fdiv`s by 255.
   At `.fast` the DXIL builder now folds `(v * c) / d` to `v * (c / d)` or to `v`, writes `v / d` as `v * (1 / d)`, and lets lanes share `top / 255`.
@@ -142,11 +150,11 @@ That is the container rather than the code: DXC's side is stripped of reflection
 
 ## What remains
 
-* **dx12's wavefront frame, 1.05 to 1.08.**
-  Its shade kernel is the one that reads high in every set, 1.17 to 1.20, and its DXIL is 1.21 times DXC's in operations.
-  That DXIL still holds about 420 more `fmul`, 126 more `fdiv` and 86 more `dot3` than DXC's.
-  Dividing through a constant's reciprocal is not it: with every such division gone, the frame read 1.047, 1.057 and 1.057, and shade 1.16 to 1.25.
-  Matching the two listings function by function is the next step; nothing measured so far is a cause.
+* **dx12's wavefront frame, 1.03 to 1.04.**
+  Its shade kernel's DXIL is 1.08 times DXC's in operations, from 1.21 before the constant phis.
+  What is left is spread thin over openpbr's frame, microfacet and evaluate lines, none more than 26 operations over DXC's.
+  A kernel's own ratio does not measure it: with the SPIR-V unchanged, vulkan's shade read 1.01 in one set and 1.11 in another.
+  `native-parity.py lines` counts both routes' arithmetic per `.sgl` line, which is how to find the next part of it.
 * **SPIR-V turns no if-else into a select.**
   DXC's SPIR-V goes through spirv-opt, which does, and `flatten_branches` is DXIL's alone: connect's SPIR-V holds 171 phis and no `OpSelect` against DXC's 78 and 14.
   vulkan's frame is faster than DXC's regardless, so this is a size gap, and a lead should a vulkan kernel come in slow.

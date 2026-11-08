@@ -743,6 +743,17 @@ private:
         set_alias(index, resolved(value_ref(parts[operands[1]])));
     }
 
+    /// Whether two constants of one type have the same bits, a null being all zero.
+    [[nodiscard]] bool same_constant(value_ref a, value_ref b) const
+    {
+        auto x = u64(0);
+        auto y = u64(0);
+        auto width = u32(0);
+        auto is_float = false;
+        return _p.type_of(a) == _p.type_of(b) && scalar_bits(a, x, width, is_float)
+            && scalar_bits(b, y, width, is_float) && x == y;
+    }
+
     /// The vector a `construct` rebuilds when each part is the lane of one value at its own position.
     void fold_construct(u32 index, instruction const& i, cc::span<u32 const> operands)
     {
@@ -812,7 +823,8 @@ private:
             if (!_visited[isize(from)])
                 return;
             auto const v = resolved(value_ref(operands[k]));
-            if (v == self || v == unique)
+            // two constants of the same bits are one value, a zero spelled as null among them
+            if (v == self || v == unique || (is_valid(unique) && same_constant(v, unique)))
                 continue;
             if (is_valid(unique))
                 return;

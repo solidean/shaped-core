@@ -7,9 +7,11 @@
 
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py table [filter]
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py diff <file.sgl> <entry> <cs|vs|ps|lib>
+    uv run libs/graphics/shaped-graphics-language/tools/native-parity.py lines <file.sgl> <entry> <cs|vs|ps|lib>
 
 `table` prints libs/graphics/shaped-graphics-language/docs/native-parity.md's size table over the repo's real shaders.
 `diff` prints one entry's opcode histogram difference, and leaves both binaries and their disassemblies in --out.
+`lines` counts one entry's DXIL arithmetic per `.sgl` file and line on both routes, and prints where they differ most.
 `check` counts SGL's own operations alone and compares them with native-size-baseline.json beside this script:
 an entry that grew more than 2% and more than 4 operations fails, and so does one the baseline does not name.
 `update` writes the baseline from what SGL writes now, which a change that shrinks or knowingly grows an entry commits.
@@ -133,6 +135,78 @@ def compare(sgl, file, entry, stage, out, names):
     return result
 
 
+ARITHMETIC = {"fmul", "fadd", "fsub", "fdiv", "select", "fcmp", "dx.dot2", "dx.dot3", "dx.dot4", "dx.unary", "dx.binary",
+              "dx.tertiary"}
+
+
+def lines_of_listing(listing, line_map=None):
+    """{(file, line): arithmetic operations} of a DXIL listing with debug locations.
+
+    A location is read at its own line, not the call it was inlined through.
+    `line_map` turns a listing's line into the `.sgl` place it stands for, where the listing names one HLSL file.
+    """
+    md = {m.group(1): m.group(2) for m in re.finditer(r"^!(\d+) = (?:distinct )?!\w+\((.*)\)$", listing, re.M)}
+
+    def file_of(scope):
+        for _ in range(64):
+            body = md.get(scope, "")
+            f = re.search(r"file: !(\d+)", body)
+            if f:
+                name = re.search(r'filename: "([^"]*)"', md.get(f.group(1), ""))
+                return name.group(1).replace("\\5C", "/").replace("\\", "/").split("/")[-1] if name else "?"
+            s = re.search(r"scope: !(\d+)", body)
+            if not s:
+                return "?"
+            scope = s.group(1)
+        return "?"
+
+    counts = Counter()
+    for text in listing.splitlines():
+        at = re.search(r"!dbg !(\d+)", text)
+        op = re.match(r"\s*(?:%[\w.]+ = )?(\w+)", text)
+        if not at or not op:
+            continue
+        dx = re.search(r"@dx\.op\.(\w+)", text)
+        name = "dx." + dx.group(1) if dx else op.group(1)
+        if name not in ARITHMETIC:
+            continue
+        body = md.get(at.group(1), "")
+        line = re.search(r"line: (\d+)", body)
+        scope = re.search(r"scope: !(\d+)", body)
+        place = (file_of(scope.group(1)) if scope else "?", int(line.group(1)) if line else 0)
+        if line_map is not None:
+            place = line_map[place[1] - 1] if 1 <= place[1] <= len(line_map) else ("?", place[1])
+        counts[place] += 1
+    return counts
+
+
+def per_line(sgl, file, entry, stage, out):
+    """Both routes' DXIL arithmetic per `.sgl` line: native's line table, and DXC compiled with `-Zi`.
+
+    DXC keeps one file name for every `#line`, so its side compiles the HLSL stripped of them, and each line maps back.
+    """
+    base = out / ("%s-%s" % (Path(file).stem, entry))
+    modules = [a for d in MODULES for a in ("--module-dir", ROOT / d)]
+    emit = [sgl, "emit", file, "--entry", entry] + modules
+    native = base.with_suffix(".lines.native.dxil")
+    run(emit + ["--target", "dxil", "--dxil", native, "--native-line-table"])
+    hlsl, line_map, place = [], [], ("?", 0)
+    for text in run(emit + ["--target", "hlsl-dx12", "--line-directives"]).splitlines():
+        m = re.match(r'#line (\d+) "([^"]*)"', text)
+        if m:
+            place = (m.group(2).replace("\\", "/").split("/")[-1], int(m.group(1)))
+            continue
+        hlsl.append(text)
+        line_map.append(place)
+        place = (place[0], place[1] + 1)
+    plain = base.with_suffix(".lines.hlsl")
+    plain.write_bytes("\n".join(hlsl).encode("utf-8"))
+    profile = {"cs": "cs_6_8", "vs": "vs_6_8", "ps": "ps_6_8", "lib": "lib_6_8"}[stage]
+    dxc = base.with_suffix(".lines.dxc.dxil")
+    run([DXC, plain, "-E", entry, "-T", profile, "-O3", "-enable-16bit-types", "-Zi", "-Qembed_debug", "-Fo", dxc])
+    return lines_of_listing(run([DXC, "-dumpbin", native])), lines_of_listing(run([DXC, "-dumpbin", dxc]), line_map)
+
+
 BASELINE = Path(__file__).resolve().parent / "native-size-baseline.json"
 GROWTH = 1.02
 SLACK = 4
@@ -213,7 +287,7 @@ def update(sgl, out, names):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["table", "diff", "check", "update"])
+    ap.add_argument("mode", choices=["table", "diff", "lines", "check", "update"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--build-dir", default="build/x64-windows-clang-ninja-relwithdebinfo")
     ap.add_argument("--out", default=None, help="where the binaries and listings go; a temporary folder by default")
@@ -231,6 +305,23 @@ def main():
     out = Path(a.out) if a.out else Path(os.environ.get("TEMP", "/tmp")) / "sgl-native-parity"
     out.mkdir(parents=True, exist_ok=True)
     names = spirv_opcodes()
+
+    if a.mode == "lines":
+        if len(a.args) != 3:
+            sys.exit("lines takes <file.sgl> <entry> <cs|vs|ps|lib>")
+        native, dxc = per_line(sgl, Path(a.args[0]).resolve(), a.args[1], a.args[2], out)
+        print("%s dxil arithmetic: native %d, DXC %d" % (a.args[1], sum(native.values()), sum(dxc.values())))
+        files_native, files_dxc = Counter(), Counter()
+        for (f, _), n in native.items():
+            files_native[f] += n
+        for (f, _), n in dxc.items():
+            files_dxc[f] += n
+        for f in sorted(set(files_native) | set(files_dxc), key=lambda f: -(files_native[f] - files_dxc[f]))[:12]:
+            print("   %-36s native %6d  DXC %6d  %+d" % (f, files_native[f], files_dxc[f], files_native[f] - files_dxc[f]))
+        print()
+        for k in sorted(set(native) | set(dxc), key=lambda k: -(native[k] - dxc[k]))[:25]:
+            print("   %-36s %5d  native %5d  DXC %5d  %+d" % (k[0], k[1], native[k], dxc[k], native[k] - dxc[k]))
+        return
 
     if a.mode == "diff":
         if len(a.args) != 3:
