@@ -1,6 +1,6 @@
 # NVIDIA: a reordering raygen loses its payload beside a pipeline of the other qualifier setting
 
-**Status:** open, reproduced standalone, not yet filed upstream, not worked around; measured on 2026-11-09.
+**Status:** open, reproduced standalone, not yet filed upstream, worked around in SGL's DXIL writer; measured on 2026-11-09.
 **Affects:** NVIDIA D3D12 driver 621.01, GeForce RTX 5070 Ti, Windows 11; the Agility SDK 1.620.1 at Shader Model 6.9, DXC 1.9.2602.24.
 **Found by:** `sg - an SGL raygen that reorders its invocations traces what it would have traced` in shaped-graphics-test.
 There it failed on one of the two dx12 contexts in every run, and which one moved between runs.
@@ -67,16 +67,21 @@ mixed, no reordering           exit 0  second pipeline: |10 10 10 10 10 10 10 10
 REPRODUCED: beside a pipeline of the other qualifier setting on one device, a reordering raygen loses its closest hit's payload write
 ```
 
-## How shaped-core meets it
+## How shaped-core met it, and what we do about it
 
-DXC writes `!dx.dxrPayloadAnnotations` for every `[raypayload]` struct, and SGL's native DXIL writer writes none.
-So sg's dx12 context on DXC's route and its native-DXIL context build pipelines of the two settings.
+DXC writes `!dx.dxrPayloadAnnotations` for every `[raypayload]` struct, and SGL's native DXIL writer wrote none.
+So sg's dx12 context on DXC's route and its native-DXIL context built pipelines of the two settings.
 shaped-graphics-test brings both up on one adapter, and D3D12 gives them one device.
-[bug-sgl-dxil-reordered-raygen-wrong-cell](../../../libs/graphics/shaped-graphics-language/docs/issues/bug-sgl-dxil-reordered-raygen-wrong-cell.md) holds the narrowing.
+[bug-sgl-dxil-reordered-raygen-wrong-cell](../../../libs/graphics/shaped-graphics-language/docs/issues/.closed/2026/11/bug-sgl-dxil-reordered-raygen-wrong-cell.md) holds the narrowing.
 
-An application meets it with a single route too: two of its pipelines need only disagree, as code from two compilers or compiled with two flag sets would.
+SGL's native writer now states every payload's access as DXC does for SGL's text (EMIT-137), so the two routes agree.
+[writer_stage.cc](../../../libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/impl/writer_stage.cc) writes it and names this directory.
+`slib - SGL's DXIL states each payload field's access, as DXC does for SGL's text` holds it there.
+The annotations are what DXC writes anyway, so they stay when NVIDIA fixes the driver.
+
+An application still meets it with a single route: two of its pipelines need only disagree, as code from two compilers or compiled with two flag sets would.
 
 ## What to re-check
 
 On a driver update, run `run.py` on an NVIDIA GPU.
-Exit 0 retires this entry, and with it whatever workaround the issue settles on.
+Exit 0 retires this entry; the annotations SGL writes stay either way.

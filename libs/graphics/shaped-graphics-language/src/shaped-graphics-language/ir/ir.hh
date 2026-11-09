@@ -809,6 +809,14 @@ struct sgl::ir::line_table
     }
 };
 
+/// A ray payload of the entry point, and what each of its fields' shaders do with it (EMIT-137).
+/// Each mask is DXIL's: four bits a stage, the caller, closesthit, miss and anyhit, 1 read and 2 written.
+struct sgl::ir::payload_annotation
+{
+    type_ref type = type_ref::none;
+    cc::vector<u32> field_masks;
+};
+
 /// One entry point, whole.
 struct sgl::ir::program
 {
@@ -837,6 +845,8 @@ struct sgl::ir::program
     check::float_level guarantee = check::float_level::fast;
     /// The `.sgl` lines each writer states beside its operations, where the compile asked for them.
     line_table lines;
+    /// The payloads it is handed or traces with, each once; DXIL states them, as DXC does for its `[raypayload]`s.
+    cc::vector<payload_annotation> payloads;
 
     [[nodiscard]] cc::string_view name_at(u32 first, u32 size) const
     {

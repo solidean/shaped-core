@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/emit/impl/payload_access.hh>
 #include <shaped-graphics-language/ir/impl/lowering.hh>
 
 using namespace sgl;
@@ -64,6 +65,29 @@ void lowering::read_ray_edge()
         auto const position = index_of(_e.attributes);
         _locals[position] = hit_attribute_global(value_type(_e.at(_e.attributes).type));
         _is_variable[position] = true;
+    }
+}
+
+void lowering::annotate_payloads()
+{
+    auto candidates = cc::vector<type_id>();
+    candidates.push_back(_e.input);
+    for (auto const& r : _e.traced_rays)
+        candidates.push_back(_m.at(_m.at(_m.at(r.set).type).members)[r.ray].type);
+    for (auto const t : candidates)
+    {
+        if (!is_valid(t) || !emit::impl::is_payload(_plan, t))
+            continue;
+        auto const type = value_type(t);
+        auto is_known = false;
+        for (auto const& known : _out.payloads)
+            is_known = is_known || known.type == type;
+        if (is_known || !_failure.empty())
+            continue;
+        auto annotation = payload_annotation{.type = type};
+        for (auto const& member : _m.at(_m.at(t).members))
+            annotation.field_masks.push_back(emit::impl::payload_access_of(_plan, t, member.name).dxil_mask());
+        _out.payloads.push_back(cc::move(annotation));
     }
 }
 

@@ -53,7 +53,8 @@ A hit's transform is the one element that is a matrix.
 - **`createHandleFromBinding` does not work in a library.** The validator took the operation, and no `RDAT` we could write matched it, since a function's resource list comes from what uses a global.
   So a resource is an `external constant %dx.types.Handle`, loaded and handed to `createHandleForLib`, and `dx.resources` names it through a constant `bitcast`.
 - **`noreturn` is required.** `unreachable` after `ignoreHit` is refused unless the operation carries it.
-- **What it can leave out:** mangled names, `dx.typeAnnotations`, `dx.dxrPayloadAnnotations`, and `noalias` and `nocapture`.
+- **What it can leave out:** mangled names, `dx.typeAnnotations`, and `noalias` and `nocapture`.
+  `dx.dxrPayloadAnnotations` was on this list until NVIDIA's driver proved it otherwise (EMIT-137).
   A plain export name stands in `RDAT` as both names, and the validator and state object creation both take it.
 - **A nonuniform index is `!dx.nonuniform` on the `getelementptr`**, an attachment the builder writes in a block of its own.
 

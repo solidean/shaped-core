@@ -97,6 +97,8 @@ private:
     /// The stage element of `system`, declared on its first read, as a value of `type`.
     [[nodiscard]] value_ref ray_read(built_in system, type_ref type, cc::string_view name);
     void read_ray_edge();
+    /// The payloads the entry point is handed or traces with, and what each field's shaders do with it (EMIT-137).
+    void annotate_payloads();
     [[nodiscard]] value_ref hit_attribute_global(type_ref type);
     /// The one global of `space` that hands a value of `type` over.
     [[nodiscard]] value_ref output_global(type_ref type, storage space);

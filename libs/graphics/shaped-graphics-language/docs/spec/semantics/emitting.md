@@ -701,6 +701,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A payload a stage hands on to a trace or a callable is read and written by that stage, since what the nested shaders write must survive its exit.
   A stage that writes a field reads it too, since a write on some paths keeps the rest, and whatever some stage writes the caller reads, and the reverse.
   A payload type that a pipeline with `.host` groups traces, or that no pipeline of the module traces, states the widest access instead.
+  SGL's own DXIL states the same access in `!dx.dxrPayloadAnnotations`, field for field as DXC writes it for the text.
   An intersection's report is `ReportHit(t, 0, attributes)` where it hits, and a procedural record's shaders take the attributes as a parameter of their own.
 * **EMIT-139** MSL writes a pipeline as a kernel that intersects and then calls through sg's tables ([why](why/emitting.md#emit-139)).
   Every function of the pipeline agrees on the shapes below, since each is compiled apart.

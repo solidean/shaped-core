@@ -2,6 +2,8 @@
 created: 2026-11-09
 refs:
   - test: sg - an SGL raygen that reorders its invocations traces what it would have traced
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # A reordering raygen runs nothing on one of the two dx12 contexts of a test process
@@ -43,14 +45,16 @@ Narrowed further the same evening:
   With DXC's non-reordering `primary` raygen it passes.
 * Neither the container digest (signing SGL's containers with DXC's validator), nor the export names, nor the payload struct names change any of it.
 * SGL's native DXIL carries no `!dx.dxrPayloadAnnotations`, which DXC writes for every `[raypayload]` struct.
-  [feat-sgl-native-ray-tracing](feat-sgl-native-ray-tracing.md) leaves it out on purpose, since the validator and state object creation accept a module without it.
+  [feat-sgl-native-ray-tracing](../../../feat-sgl-native-ray-tracing.md) leaves it out on purpose, since the validator and state object creation accept a module without it.
   Hypothesis: NVIDIA's driver lays a payload out by its access qualifiers, so an annotated shader and an unannotated one disagree on where a field lives.
   The shared-device failure would then mean the driver keeps something of that layout per device.
 
 
 Settled the same night: it is NVIDIA's driver, and the annotations are the trigger.
-[nvidia-reorder-payload-qualifiers-across-pipelines](../../../../docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines/readme.md) reproduces it from 40 lines of HLSL and stock DXC.
+[nvidia-reorder-payload-qualifiers-across-pipelines](../../../../../../../docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines/readme.md) reproduces it.
+It takes 40 lines of HLSL and stock DXC.
 Two pipelines on one device, one compiled with payload access qualifiers and one with `-disable-payload-qualifiers`, raygens that reorder: the second loses its closest hit's payload write.
 In sg, compiling the DXC route with `-disable-payload-qualifiers` too made this test pass on both contexts, five runs of five.
 
-Left to decide is the workaround: SGL's native writer annotating payloads as DXC does, the DXC route dropping its qualifiers on dx12, or a skip on NVIDIA.
+Resolved by SGL's native writer stating every payload's access in `!dx.dxrPayloadAnnotations`, as DXC does for the text (EMIT-137).
+This test then passes on both dx12 contexts, five runs of five, and `slib - SGL's DXIL states each payload field's access, as DXC does for SGL's text` holds the annotations.

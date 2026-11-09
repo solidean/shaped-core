@@ -441,6 +441,73 @@ TEST("slib - every module SGL's DXIL writes names its producer in llvm.ident, a 
     }
 }
 
+// On NVIDIA, two pipelines of one device that disagree on a payload's access lose its writes, and DXC states it.
+// docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines has the reproduction.
+TEST("slib - SGL's DXIL states each payload field's access, as DXC does for SGL's text")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    // `value` is the closest hit's alone, and the miss writes `is_hit` too
+    constexpr cc::string_view source
+        = "require raytracing_pipeline\n"
+          "binding scene:\n"
+          "    world: acceleration_structure[.triangles]\n"
+          "    seen: mut buffer[int]\n"
+          "struct probe:\n"
+          "    value: int\n"
+          "    is_hit: int\n"
+          "rays probe_rays:\n"
+          "    surface: probe\n"
+          "@raygen fun shoot(@launch_id id: int3){scene}:\n"
+          "    let mut p = probe(0, 0)\n"
+          "    let r = ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0))\n"
+          "    trace(scene.world, r, probe_rays.surface, mut p)\n"
+          "    scene.seen[id.x] = p.value + p.is_hit\n"
+          "@miss fun probe_miss(p: mut probe):\n"
+          "    p.is_hit = 0\n"
+          "@closest_hit fun probe_hit(h: triangle_hit, p: mut probe):\n"
+          "    p.value = 10\n"
+          "    p.is_hit = 1\n"
+          "hit_group hits for probe_rays:\n"
+          "    surface = (closest_hit = probe_hit)\n"
+          "@raytracing pipeline probe_path:\n"
+          "    rays = probe_rays\n"
+          "    raygen = shoot\n"
+          "    miss.surface = probe_miss\n"
+          "    hit_groups = (hits)\n";
+    struct stage_case
+    {
+        cc::string_view entry;
+        sg::shader_stage stage;
+    };
+    for (auto const& c : {stage_case{"shoot", sg::shader_stage::raygen}, stage_case{"probe_miss", sg::shader_stage::miss},
+                          stage_case{"probe_hit", sg::shader_stage::closest_hit}})
+    {
+        auto const native = written(source, c.entry);
+        REQUIRE(native.has_value());
+        auto const text
+            = sgl::compile_to_text({.source = source, .entry_point = c.entry, .target = sgl::emit::target::hlsl_dx12});
+        REQUIRE(text.has_value());
+        auto const built
+            = compiler.value().compile({.source = text.value().text, .entry_point = c.entry, .stage = c.stage},
+                                       {.target = ssc::dxc::compile_target::dxil, .warnings_as_errors = false});
+        REQUIRE(built.has_value());
+        auto const ours = compiler.value().disassemble(native.value().dxil);
+        auto const theirs = compiler.value().disassemble(built.value().bytecode);
+        REQUIRE(ours.has_value());
+        REQUIRE(theirs.has_value());
+        // read and written by the caller and the closest hit; and by the miss too
+        for (auto const* expected :
+             {"!dx.dxrPayloadAnnotations = !{", "%struct.probe undef", "!{i32 0, i32 51}", "!{i32 0, i32 819}"})
+        {
+            CHECK(theirs.value().contains(expected)).context(cc::format("{} through DXC: {}", c.entry, expected));
+            CHECK(ours.value().contains(expected)).context(cc::format("{} in SGL's DXIL: {}", c.entry, expected));
+        }
+        CHECK(!compiler.value().validate(native.value().dxil).has_value());
+    }
+}
+
 TEST("slib - a container SGL writes carries the digest the retail runtime takes unsigned, and its stage's parts")
 {
     auto const e = written(k_sums, "fast_sum");

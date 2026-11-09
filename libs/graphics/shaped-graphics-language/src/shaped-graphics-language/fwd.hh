@@ -440,6 +440,7 @@ struct global;
 struct local;
 struct source_place;
 struct line_table;
+struct payload_annotation;
 enum class type_ref : u32;
 enum class value_ref : u32;
 enum class block_ref : u32;

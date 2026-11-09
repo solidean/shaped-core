@@ -144,7 +144,10 @@ void lowering::run()
         read_primitive_edge();
     }
     else if (is_ray_stage())
+    {
         read_ray_edge();
+        annotate_payloads();
+    }
     else
     {
         declare_stage_inputs();

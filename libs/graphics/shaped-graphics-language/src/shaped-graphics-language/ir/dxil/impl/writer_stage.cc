@@ -779,6 +779,29 @@ void writer::write_entry_metadata()
         _m.md_named("dx.shaderModel", model_node);
         if (has_resources)
             _m.md_named("dx.resources", resources_list);
+        // DXC states every payload's access, and on NVIDIA two pipelines of one device that disagree lose payload
+        // writes: docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines
+        if (!_p.payloads.empty())
+        {
+            constexpr u32 k_tag_payload_struct = 0;
+            constexpr u32 k_tag_field_access = 0;
+            auto payloads = cc::vector<u32>();
+            payloads.push_back(_m.md_i32(k_tag_payload_struct));
+            for (auto const& annotation : _p.payloads)
+            {
+                auto const type = payload_type(annotation.type);
+                auto fields = cc::vector<u32>();
+                for (auto const mask : annotation.field_masks)
+                {
+                    u32 const field[] = {_m.md_i32(k_tag_field_access), _m.md_i32(mask)};
+                    fields.push_back(_m.md_node(field));
+                }
+                payloads.push_back(_m.md_value(type, _m.constant_undef(type)));
+                payloads.push_back(_m.md_node(fields));
+            }
+            u32 const annotations[] = {_m.md_node(payloads)};
+            _m.md_named("dx.dxrPayloadAnnotations", annotations);
+        }
         _m.md_named("dx.entryPoints", entries);
         _summary.is_library = true;
         _summary.shader_kind = rule->kind;

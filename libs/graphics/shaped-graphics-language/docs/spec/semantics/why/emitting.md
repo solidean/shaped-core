@@ -280,6 +280,11 @@ DXR's payload qualifiers are a promise the driver optimizes by: a field nobody w
 Every shader of one pipeline must state the same qualifiers, so they are inferred from the whole module rather than per entry point.
 A host's hit group is compiled apart and cannot see the module, so a payload it may meet states the widest access, which DXC reads as a missed optimization and not an error.
 
+The validator and state object creation both accept a native module that states no access, and it once left the annotations out.
+NVIDIA's driver does not: two pipelines of one device that disagree on a payload's access lose the second one's payload writes.
+sg's text and native routes run on one device, so the native writer states what DXC states.
+[nvidia-reorder-payload-qualifiers-across-pipelines](../../../../../../../docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines/readme.md) has the reproduction.
+
 ## EMIT-138
 
 A struct member named like a type, `ray: ray`, is legal in SGL, where a member lives in its struct's scope.
