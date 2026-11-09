@@ -2,6 +2,8 @@
 created: 2026-11-09
 refs:
   - test: "sgl signature - DXIL's packer places every element of the repo's SGL as DXC does"
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # Lowering a shader-rosetta shader builds a vector from a u32 where its scalar belongs
