@@ -1237,7 +1237,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         auto const& at = probe.found.value();
         auto const where = ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt);
         report(diagnostic_kind::nesting_too_deep, at.file, where,
-               cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_depth));
+               cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_program_depth));
         return;
     }
     // CHK-516: here, with every call inlined, so a copy reached through a generic or a return is judged too

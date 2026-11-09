@@ -293,3 +293,136 @@ TEST("sgl guards - define zeroes a struct holding an atomic and a matrix, piece 
         CHECK(text.contains("(k) * 4u") == (target != sgl::emit::target::wgsl)).dump("text", text);
     }
 }
+
+namespace
+{
+/// A task and a mesh stage, each of whose invocation 2 stores nothing, which invocation 1 then reads.
+constexpr cc::string_view k_task_reads_a_hole = "require mesh_shader\n"
+                                                "struct handed:\n"
+                                                "    v: float\n"
+                                                "@workgroup binding tile:\n"
+                                                "    values: float[4]\n"
+                                                "@task(4) fun ts(@local_thread_index k: int){tile}:\n"
+                                                "    if k != 2:\n"
+                                                "        tile.values[k] = float(k)\n"
+                                                "    workgroup_barrier()\n"
+                                                "    let h: handed = {v = tile.values[(k + 1) % 4]}\n"
+                                                "    dispatch_mesh(1u, 1u, 1u, h)\n";
+constexpr cc::string_view k_mesh_reads_a_hole
+    = "require mesh_shader\n"
+      "struct corner:\n"
+      "    @position position: hpos4\n"
+      "@workgroup binding tile:\n"
+      "    values: float[4]\n"
+      "@mesh(4, vertices = 4, triangles = 2)\n"
+      "fun ms(@local_thread_index k: int, output: mut mesh_output[corner]){tile}:\n"
+      "    if k != 2:\n"
+      "        tile.values[k] = float(k)\n"
+      "    workgroup_barrier()\n"
+      "    let v = tile.values[(k + 1) % 4]\n"
+      "    output.set_counts(4u, 2u)\n"
+      "    output.vertex(k as uint, {position = hpos4(v, 0.0, 0.0, 1.0)})\n"
+      "    if k == 0:\n"
+      "        output.triangle(0u, uint3(0u, 1u, 2u))\n"
+      "        output.triangle(1u, uint3(0u, 2u, 3u))\n";
+} // namespace
+
+TEST("sgl guards - a task and a mesh stage shadow their workgroup memory as a compute stage does (LEGAL-69)")
+{
+    struct stage_case
+    {
+        cc::string_view source;
+        cc::string_view entry;
+    };
+    for (auto const& c : {stage_case{k_task_reads_a_hole, "ts"}, stage_case{k_mesh_reads_a_hole, "ms"}})
+    {
+        auto const r = legalize_one(c.source, undefined_guard::report);
+        CHECK(r.core.written_words == 1).dump("entry", c.entry);
+        REQUIRE(is_valid(r.core.workgroup_index));
+        auto found = false;
+        for (auto const& message : r.core.messages)
+            found = found
+                 || (message.pieces.size() == 2 && message.pieces[0] == "workgroup memory `tile.values["
+                     && message.pieces[1] == "]` is read before any invocation stored it");
+        CHECK(found).dump("core", r.dump);
+
+        // every target with mesh stages writes it, and SGL's own DXIL and SPIR-V too
+        for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan, sgl::emit::target::msl})
+            for (auto const native : {sgl::emit::native_route::text, sgl::emit::native_route::require})
+            {
+                if (t == sgl::emit::target::msl && native == sgl::emit::native_route::require)
+                    continue;
+                auto const text = sgl::compile_to_text({.source = c.source,
+                                                        .entry_point = c.entry,
+                                                        .target = t,
+                                                        .diagnostics = true,
+                                                        .guards_undefined = undefined_guard::report,
+                                                        .native = native});
+                CHECK(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
+            }
+    }
+}
+
+TEST("sgl guards - a site as deep as a program may nest is guarded, its guard past the program's depth (CHK-268, "
+     "LEGAL-65)")
+{
+    // a left-deep sum of `terms` reads whose deepest term is a division, so the division stands as deep as the sum
+    auto const source_of = [](int terms)
+    {
+        auto sum = cc::string("id.x / id.y");
+        for (auto i = 1; i < terms; ++i)
+            sum += " + id.x";
+        return cc::format("binding work:\n"
+                          "    result: mut buffer[int]\n"
+                          "\n"
+                          "@compute(1) fun cs(@thread_id id: int3){{work}}:\n"
+                          "    work.result[0] = {}\n",
+                          sum);
+    };
+    // the deepest sum the check pass takes
+    auto deepest = 0;
+    for (auto terms = 30; terms <= 45; ++terms)
+        if (reports_of(check_sources(read_prelude(), source_of(terms))) == "")
+            deepest = terms;
+    // past what a guard reached before its levels were kept free, 36 of the walks' 40
+    CHECK(deepest >= 37);
+    auto const r = legalize_one(source_of(deepest), undefined_guard::report);
+    CHECK(!r.core.messages.empty()).dump("core", r.dump);
+}
+
+TEST("sgl guards - workgroup memory whose shadow would not fit is left unshadowed, and the compile warns of it "
+     "(LEGAL-69)")
+{
+    // 16000 bytes, beside which the shadow's 500 pass 16384
+    constexpr auto source = cc::string_view("@workgroup binding tile:\n"
+                                            "    values: float[4000]\n"
+                                            "\n"
+                                            "binding work:\n"
+                                            "    result: mut buffer[float]\n"
+                                            "\n"
+                                            "@compute(4) fun cs(@local_thread_index li: int){tile, work}:\n"
+                                            "    tile.values[li] = float(li)\n"
+                                            "    workgroup_barrier()\n"
+                                            "    work.result[li] = tile.values[(li + 1) % 4]\n");
+    auto const warnings_of = [&](undefined_guard guard)
+    {
+        auto const text = sgl::compile_to_text({.source = source,
+                                                .source_name = "big.sgl",
+                                                .entry_point = "cs",
+                                                .target = sgl::emit::target::hlsl_dx12,
+                                                .diagnostics = guard == undefined_guard::report,
+                                                .guards_undefined = guard});
+        REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
+        auto all = cc::string();
+        for (auto const& w : text.value().warnings)
+            all += w + "\n";
+        return all;
+    };
+    auto const reported = warnings_of(undefined_guard::report);
+    CHECK(reported.contains("big.sgl: warning: workgroup-unshadowed: entry point 'cs' holds 16000 bytes of "
+                            "workgroup memory"))
+        .dump("warnings", reported);
+    CHECK(!warnings_of(undefined_guard::none).contains("workgroup-unshadowed"));
+    // `define` shadows nothing and zeroes the memory instead, so nothing is left untested
+    CHECK(!warnings_of(undefined_guard::define).contains("workgroup-unshadowed"));
+}

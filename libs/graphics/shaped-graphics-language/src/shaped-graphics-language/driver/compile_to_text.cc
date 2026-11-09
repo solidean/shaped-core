@@ -236,6 +236,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
     result.preferred_subgroup_size = e.preferred_subgroup_size;
+    result.unshadowed_bytes = legal.unshadowed_bytes;
     result.float_guarantee = float_guarantee;
     if (float_guarantee != check::float_level::fast)
         result.float_raised_by = raised_by;
@@ -321,6 +322,11 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
             request.source_name, e.name, float_level_name(e.float_guarantee),
             check::is_valid(e.float_raised_by) ? m.at(e.float_raised_by).name : cc::string(),
             emit::to_string(request.target)));
+    if (result.has_value() && result.value().unshadowed_bytes > 0)
+        result.value().warnings.push_back(cc::format(
+            "{}: warning: workgroup-unshadowed: entry point '{}' holds {} bytes of workgroup memory, past what its "
+            "shadow fits beside in 16384, so no read of it is tested for a store before it (LEGAL-69)",
+            request.source_name, e.name, result.value().unshadowed_bytes));
     return result;
 }
 
