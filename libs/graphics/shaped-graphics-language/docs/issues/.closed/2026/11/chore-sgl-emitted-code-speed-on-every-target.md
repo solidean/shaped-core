@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-rendering/tests/bench/sgl-against-hlsl-benchmark.cc
   - file: libs/graphics/shaped-rendering/tests/bench/sgl-against-wgsl-benchmark.cc
   - file: libs/graphics/shaped-graphics-language/readme.md
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # Measure the emitted code's speed on every target
@@ -38,11 +40,26 @@ So a pair of them can close before the work it brackets has run: SGL's convoluti
 Each batch of 128 dispatches is recorded first, then timed from its submission to the queue's completion, the pair alternating batch by batch.
 A completion is noticed on a tick of about 16 ms, which a batch of 45 ms or more leaves well under a fifth of.
 
-Left: metal, against the kernels hand-written in MSL, which is Mac work.
+metal is measured against the same kernels hand-written in MSL, in sr's `sgl-against-msl-benchmark.cc` (2026-11-09, Apple M4).
+Each `.metal` file ports the HLSL line for line and declares SGL's argument buffers and constants as SGL's own MSL does, and the outputs agree before they are timed.
+
+| adapter | à-trous | SVGF filter | convolution |
+|---|---|---|---|
+| Apple M4 | 0.88–1.25× (min 0.99–1.05×) | 0.95–1.08× (min 0.97–1.12×) | 0.77–1.06× (min 1.00–1.02×) |
+
+Six runs, the wall-clock method, batches of 128; the medians spread about ±25% run to run, as the GPU's clocks move both contenders together.
+The minima are the steady figure: SGL is even with hand-written MSL on all three.
+SGL's compile takes `-std=metal3.2` and the hand-written one the toolchain's default; both are `-O2 -fmetal-math-mode=safe`.
+Timestamps read 0 on metal under this load: [bug-sg-metal-timestamp-heaps-exhausted](../../../../../../shaped-graphics/docs/issues/bug-sg-metal-timestamp-heaps-exhausted.md).
 
 ## What the optimizing epic should take from it
 
-[epic-sgl-optimizing-passes-and-ir-targets](epic-sgl-optimizing-passes-and-ir-targets.md) assumed a browser's compiler leaves WGSL nearly as written.
+[epic-sgl-optimizing-passes-and-ir-targets](../../../epic-sgl-optimizing-passes-and-ir-targets.md) assumed a browser's compiler leaves WGSL nearly as written.
 On these kernels it does not cost: SGL's unoptimized WGSL matches hand-written WGSL under both Dawn and wgpu, and beats it where SGL unrolls.
 So the epic is not urgent for kernels of this kind; what would make it so is a measured kernel where SGL's text loses to hand-written WGSL.
 Kernels with deeper call chains, heavy struct copies or loops SGL cannot unroll are where such a case would show, and none is measured yet.
+
+## Resolution
+
+Every target is measured: dx12 and vulkan against hand-written HLSL, WebGPU against WGSL, metal against MSL.
+SGL's text is even with or faster than the hand-written kernels on all of them, the WGSL convolution's unrolling the one clear win.

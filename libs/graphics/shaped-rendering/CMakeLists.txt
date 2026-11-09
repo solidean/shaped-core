@@ -536,6 +536,16 @@ if(SC_BUILD_TESTS)
         )
     endif()
 
+    # SGL against the same three kernels written by hand in MSL, timed on metal.
+    # Each MSL file declares SGL's argument buffer and inline constants slot for slot, so one binding group serves both.
+    # sc_add_shader_package takes no MSL, so the benchmark reads the .metal files from the source tree and compiles them.
+    # APPLE stands for slib's metal compiler, whose target is added after this directory and so is not one to test for.
+    if(APPLE AND TARGET shaped-graphics-metal)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-msl-benchmark.cc)
+        sc_target_source_paths(shaped-rendering-test PRIVATE
+            SR_BENCH_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/bench/shaders")
+    endif()
+
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.
     # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
     # The probes' shader package stages them itself where it exists, and a second staging is a configure error.
