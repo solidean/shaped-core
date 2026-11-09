@@ -357,11 +357,23 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             if (has_downloads)
                 pending_counter->fetch_add(1, std::memory_order_acq_rel);
 
+            // What the list held, so a failure names the work it lost: the error alone says only that something did.
+            auto const& counted = sg::impl::recorded_stats(list).values;
+            auto const contents
+                = cc::format("submission {}: {} draws, {} dispatches, {} ray dispatches, {} blas and {} tlas builds",
+                             i64(claimed), counted[int(sg::stat::draws)], counted[int(sg::stat::dispatches)],
+                             counted[int(sg::stat::ray_dispatches)], counted[int(sg::stat::blas_builds)],
+                             counted[int(sg::stat::tlas_builds)]);
+
             auto* const options = MTL4::CommitOptions::alloc()->init();
             options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
               auto* const error = feedback->error();
+              // The GPU time tells the two MTL4 timeouts apart: a hang runs to the watchdog, a page fault ends early.
               if (error != nullptr)
-                  sink->report(device_error_kind_of(error), describe_error(error, "a metal command buffer failed"));
+                  sink->report(device_error_kind_of(error),
+                               cc::format("{}, after {:.3f} s on the GPU, {}",
+                                          describe_error(error, "a metal command buffer failed"),
+                                          feedback->GPUEndTime() - feedback->GPUStartTime(), contents));
 
               for (auto& download : *downloads)
               {

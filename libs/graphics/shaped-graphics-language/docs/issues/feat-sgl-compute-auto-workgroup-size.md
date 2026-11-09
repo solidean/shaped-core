@@ -20,7 +20,8 @@ A bare `@compute` should choose a good one, so nobody has to think about it and 
   The compiler writes the early return of a thread past the grid, against the grid size sg passes in.
 - **The size follows the indexing**: 64 where the body reads `id.x` alone, 8×8 where it reads `id.xy`, 4×4×4 where it reads all three.
   Every one is a multiple of 64, which fills waves of 32 and 64 and Intel's 8- and 16-lane modes alike.
-- **Tuning is a later opt-in**: a workgroup size may name an `@option` already (CHK-370), so slib can compile a few candidates, time them once per device with sg's timestamps, and keep the fastest in blob-cache.
+- **Tuning is a later opt-in**: a workgroup size may name an `@option` already (CHK-370), so slib can compile a few candidates.
+  It times them once per device with sg's timestamps, and keeps the fastest in blob-cache.
   Nothing observable depends on the size once the legality rule holds, so a tuned size changes no result.
 
 ## Warnings on a stated size
