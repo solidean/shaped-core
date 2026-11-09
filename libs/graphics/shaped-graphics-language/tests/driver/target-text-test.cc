@@ -89,6 +89,61 @@ TEST("sgl target text - a parameter of an atomic hands the text the place the ca
     CHECK(sgl::check::footprint_text(native.value().footprint) == "work.sum: read write");
 }
 
+namespace
+{
+constexpr cc::string_view k_buffers = "binding work:\n"
+                                      "    values: buffer[float]\n"
+                                      "    sums: mut buffer[float]\n"
+                                      "\n"
+                                      "fun load_twice(b: buffer[float], i: int) -> float:\n"
+                                      "    const if target_language == .hlsl:\n"
+                                      "        \"hlsl\n"
+                                      "            $result = $b[$i] + $b.Load($i);\n"
+                                      "        \"\n"
+                                      "    else:\n"
+                                      "        return b[i] * 2.0\n"
+                                      "\n"
+                                      "fun store(b: mut buffer[float], i: int, v: float):\n"
+                                      "    const if target_language == .hlsl:\n"
+                                      "        \"hlsl\n"
+                                      "            float stored = $v;\n"
+                                      "\n"
+                                      "            $b[$i] = stored;\n"
+                                      "        \"\n"
+                                      "    else:\n"
+                                      "        b[i] = v\n"
+                                      "\n"
+                                      "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                                      "    store(work.sums, id.x, load_twice(work.values, id.x))\n";
+} // namespace
+
+TEST("sgl target text - a buffer parameter hands the text the member the call named, and the footprint its access")
+{
+    auto const hlsl = compiled(k_buffers, target::hlsl_dx12);
+    REQUIRE(hlsl.has_value());
+    CHECK(hlsl.value().text.contains("load_twice_text = work_values[id.x] + work_values.Load(id.x);\n"));
+    CHECK(hlsl.value().text.contains("work_sums[i_1] = stored;\n"));
+    // the text may read what it is handed `mut` as well as write it, whatever the SGL branch does
+    CHECK(sgl::check::footprint_text(hlsl.value().footprint) == "work.values: read, work.sums: read write");
+}
+
+TEST("sgl target text - each line of a body's text names its own line of the source, which DXC's errors then name")
+{
+    auto const hlsl = sgl::compile_to_text({.source = k_buffers,
+                                            .source_name = "buffers.sgl",
+                                            .entry_point = "main_cs",
+                                            .target = target::hlsl_dx12,
+                                            .line_directives = true});
+    REQUIRE(hlsl.has_value());
+    auto const& text = hlsl.value().text;
+    CHECK(text.contains("#line 8 \"buffers.sgl\"\n    load_twice_text = work_values[id.x] + "
+                        "work_values.Load(id.x);\n"));
+    // an empty line of the text keeps the count, so the line after it is the source's
+    CHECK(text.contains("#line 16 \"buffers.sgl\"\n    float stored = v;\n\n    work_sums[i_1] = stored;\n"));
+    // after the text the statement's lines name the statement's line again
+    CHECK(text.contains("work_values.Load(id.x);\n#line 7 \"buffers.sgl\"\n    v = load_twice_text;\n"));
+}
+
 TEST("sgl target text - a run of tagged strings is one body, one per language, of which a target writes its own")
 {
     constexpr auto source = "binding work:\n"

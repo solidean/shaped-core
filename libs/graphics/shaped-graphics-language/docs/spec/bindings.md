@@ -685,6 +685,8 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
   The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
+* Any resource handed to a function of the program, which takes it as a parameter of exactly its type ([CHK-366](semantics/checking.md#bindings)).
+  A buffer parameter is subscripted as its member is, `values[i]`, and a body in a target's own text names it as `$values`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
 * Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform` and `uniform`.

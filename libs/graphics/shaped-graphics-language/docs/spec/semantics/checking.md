@@ -473,7 +473,7 @@ fun shade(k: float) -> float:
   That holds for every path a lookup takes: a name, the type scope and declaring scope of a first argument's type (CHK-247), and `T.f(…)` (CHK-248).
   A builtin step that a function of the prelude wraps is `@internal` too, such as a step of a ray query or of a pipeline's trace.
   On a declaration of the program's file it hides nothing.
-* **CHK-324** A function of the prelude may take a resource, as a function of the program may take a texture, an image or a sampler (CHK-366).
+* **CHK-324** A function of the prelude may take a resource, as a function of the program may (CHK-366).
   Inlining substitutes it: the argument stands wherever the parameter is named, since no target holds a resource in a local.
 
 ```sgl
@@ -518,6 +518,7 @@ fun shade(k: float) -> float:
   An attribute on the block is judged as on any other binding member.
 * **CHK-205** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
 * **CHK-206** A texture, an image and a sampler are parameters of a `@builtin` function, of a function of the prelude (CHK-324) and of a function of the program (CHK-366).
+  A buffer is a parameter of the last two.
   Anywhere else a value stands each is `unsupported-yet`.
 * **CHK-207** A builtin's image parameter names the texel it loads or stores instead of a format, `out image_2d[float4]`, and is a pattern:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
@@ -542,10 +543,13 @@ fun shade(k: float) -> float:
   It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).
   Either way it filters as a static sampler does for CHK-210 and CHK-281.
   Its name anywhere else is `unsupported-yet`; a test names it as a function does, and samples a texture its driver binds with it.
-* **CHK-366** A function of the program may take a texture, an image or a sampler as a parameter, which inlining substitutes as it does a prelude function's (CHK-324) ([why](why/checking.md#chk-366)).
+* **CHK-366** A function of the program may take a resource as a parameter: a buffer, `bytes`, a texture, an image, a sampler or an acceleration structure ([why](why/checking.md#chk-366)).
+  Inlining substitutes it as it does a prelude function's (CHK-324).
   Its argument is a binding member of exactly the parameter's type, an element of a binding array, a file-scope sampler, or a parameter of that type handed on.
-  Anything else does not match it, by CHK-70.
+  Anything else does not match it, by CHK-70, and the access is part of the type: a `buffer[float]` is no argument of a `mut buffer[float]`, nor the reverse.
+  `mut` on a buffer, `bytes` or an image is its access, as on a binding member, and never a caller's place (CHK-315).
   The parameter stands for its argument wherever it is named, so the member's access, its `@sampler` and its footprint are the parameter's, and the function lists no binding for it.
+  A buffer or `bytes` parameter is subscripted, its `length` read, or handed to a call; a texture, an image or a sampler is handed to a call.
   A local, a field and a result of a resource type stay `unsupported-yet`.
 * **CHK-367** `img[xy]` is a texel of an image member: a read of it is `img.load(xy)`, and an assignment to it is `img.store(xy, v)` ([why](why/checking.md#chk-367)).
   The subscript takes the arguments `load` takes, so an array's layer is named, `img[xy, layer = 2]`.

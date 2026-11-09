@@ -282,8 +282,9 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
         auto is_handed = false;
         for (auto const h : handed)
             is_handed = is_handed || h == id;
+        // CHK-366: a buffer is subscripted, or handed to a call as a texture is
         auto const is_buffer = out.at(result).kind == type_kind::buffer;
-        if (is_buffer ? id != subscripted : !is_handed)
+        if (!is_handed && !(is_buffer && id == subscripted))
         {
             unsupported(
                 file, where,
@@ -812,13 +813,15 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
             return error_type;
         }
         // CHK-366: a resource parameter stands where its binding member would, which is as a call's argument
-        if (local->type != error_type && is_resource(out.at(local->type).kind)
-            && out.at(local->type).kind != type_kind::buffer)
+        if (local->type != error_type && is_resource(out.at(local->type).kind))
         {
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;
-            if (!is_handed)
+            // a buffer and bytes are subscripted, or their length read, as a member's are
+            auto const kind = out.at(local->type).kind;
+            auto const is_read = (kind == type_kind::buffer || kind == type_kind::bytes) && id == subscripted;
+            if (!is_handed && !is_read)
             {
                 unsupported(file, where,
                             cc::format("{} as a value; hand it to a call, as in `t.load(xy)`", out.name_of(local->type)));
@@ -984,9 +987,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             }
             set_target(file, id, {.kind = target_kind::binding_member, .symbol = binding, .index = i32(index)});
             auto const type = out.at(out.bindings[out.at(binding).info].members)[index].type;
-            if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted)
+            // CHK-366: a buffer is subscripted, or handed to a call as a texture is
+            auto is_buffer_handed = false;
+            for (auto const h : handed)
+                is_buffer_handed = is_buffer_handed || h == id;
+            if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted && !is_buffer_handed)
             {
-                unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
+                unsupported(file, span_of(file, id),
+                            "a buffer as a value; read an element of it, as in `values[i]`, or hand it to a call");
                 return error_type;
             }
             if (!judge_atomic_use(file, id, type))

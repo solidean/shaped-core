@@ -15,7 +15,14 @@ source_line source_lines::line_of(i32 file, ast::expr_id expr, ast::stmt_id stmt
                                           : form_id::none;
     if (!is_valid(form))
         return {};
+    return line_at(file, f.file.at(form).where.offset);
+}
 
+source_line source_lines::line_at(i32 file, u32 offset)
+{
+    if (file < 0 || file >= files.size())
+        return {};
+    auto const& f = files[file];
     if (line_starts.size() < files.size())
         line_starts.resize_to_defaulted(files.size());
     auto& starts = line_starts[file];
@@ -28,7 +35,6 @@ source_line source_lines::line_of(i32 file, ast::expr_id expr, ast::stmt_id stmt
             if (text[i] == '\n' || (text[i] == '\r' && (i + 1 >= text.size() || text[i + 1] != '\n')))
                 starts.push_back(u32(i + 1));
     }
-    auto const offset = f.file.at(form).where.offset;
     auto line = isize(1);
     while (line < starts.size() && starts[line] <= offset)
         ++line;

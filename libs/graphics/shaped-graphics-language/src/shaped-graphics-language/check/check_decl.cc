@@ -618,7 +618,7 @@ type_id checker::resolve_value_type(i32 file,
         unsupported(file, span_of(file, expr), "an array of resources as a value; a binding array is a binding member");
         return checked_module::error_type;
     }
-    if (allows_resource && out.at(type).kind != type_kind::buffer)
+    if (allows_resource)
         return type;
     unsupported(file, span_of(file, expr),
                 out.at(type).kind == type_kind::buffer
@@ -2085,16 +2085,18 @@ void checker::compile_function(symbol_id id)
                            || is_evaluation || mesh != nullptr || task != nullptr
                            || find_attribute(file, d.attributes, "compute") != nullptr;
         auto const takes_resources = !is_builtin && !is_entry && !is_prelude_file(file);
-        // `mut image_2d[…]` is the access of an image, and no place
-        auto const names_image = [&](ast::expr_id t)
+        // `mut image_2d[…]`, `mut buffer[…]` and `mut bytes` are the access of a resource, and no place
+        auto const names_resource = [&](ast::expr_id t)
         {
+            if (auto const* const n = ast.at(t).node.try_as<ast::name>())
+                return text_of(file, n->where) == "bytes";
             auto const* const i = ast.at(t).node.try_as<ast::index>();
             auto const* const n = i != nullptr ? ast.at(i->object).node.try_as<ast::name>() : nullptr;
-            return n != nullptr && text_of(file, n->where).starts_with("image_");
+            return n != nullptr && (text_of(file, n->where).starts_with("image_") || text_of(file, n->where) == "buffer");
         };
         if (auto const* const q = ast::is_valid(p.type) ? ast.at(p.type).node.try_as<ast::qualified_type>() : nullptr;
             q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr
-            && mesh == nullptr && !(takes_resources && names_image(q->type)))
+            && mesh == nullptr && !(takes_resources && names_resource(q->type)))
         {
             is_mut_parameter = true;
             // a function is no place, so a function type is not the whole type here (CHK-317)

@@ -279,9 +279,9 @@ TEST("sgl check - a buffer is a resource and never a value")
     constexpr auto members = "    src: buffer[float]\n    dst: mut buffer[float]\n";
     constexpr auto value = "a buffer as a value";
 
-    // Read through a subscript and nowhere else: not bound to a local, not passed, not returned.
+    // Read through a subscript, or handed to a parameter that stands for it (CHK-366): not bound to a local, not returned.
     CHECK(reports_for(listing(members, "    let b = work.src\n")).contains(value));
-    CHECK(reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
+    CHECK(!reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
     CHECK(reports_for(cc::string("fun pass(x: float) -> buffer[float] => x\n\n") + listing(members)).contains(value));
     CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n")).contains(value));
 

@@ -157,21 +157,25 @@ struct writer
                 }
             }
             if (assumed != o.at)
-            {
-                out.appendf("#line {} \"", o.at.line);
-                // a `#line` name is a string literal, so a Windows path's backslashes are escaped
-                for (auto const c : origins.name_of(o.at.file))
-                {
-                    if (c == '\\' || c == '"')
-                        out += '\\';
-                    out += c;
-                }
-                out += "\"\n";
-                assumed = o.at;
-            }
+                write_directive(o.at);
         }
         o.emitted = next_line();
         lines.push_back(cc::move(o));
+    }
+
+    /// `#line` naming `at` (EMIT-182), from which the target counts the lines after it.
+    void write_directive(check::source_line at)
+    {
+        out.appendf("#line {} \"", at.line);
+        // a `#line` name is a string literal, so a Windows path's backslashes are escaped
+        for (auto const c : origins.name_of(at.file))
+        {
+            if (c == '\\' || c == '"')
+                out += '\\';
+            out += c;
+        }
+        out += "\"\n";
+        assumed = at;
     }
 
     /// `head` and the brace that opens its body, where the target puts it.
@@ -1193,15 +1197,33 @@ struct writer
             text += t.slots[i] < 0 ? cc::string_view(result) : cc::string_view(arguments[t.slots[i]]);
             text += t.pieces[i + 1];
         }
-        // each line of the text a line of its own, indented where the call stands
+        // EMIT-182: the text's lines name their own lines in its file, and the statement's lines after it theirs again
+        auto const marks
+            = sources.write_directives && d.has_line_directives() && current != nullptr && !sources.files.empty();
+        auto const at = marks ? origins.line_at(t.file, t.offset) : check::source_line();
+        if (at.file >= 0)
+        {
+            unwritten = nullptr;
+            write_directive(at);
+        }
+        // each line of the text a line of its own, indented where the call stands; an empty one keeps the count
         auto start = isize(0);
-        for (auto i = isize(0); i <= text.size(); ++i)
-            if (i == text.size() || text[i] == '\n')
+        for (auto i = isize(0); i < text.size(); ++i)
+            if (text[i] == '\n')
             {
                 if (i > start)
                     line(cc::string(cc::string_view(text).subview({.offset = start, .size = i - start})));
+                else
+                {
+                    out += "\n";
+                    assumed.line += assumed.file >= 0 ? 1 : 0;
+                }
                 start = i + 1;
             }
+        if (start < text.size())
+            line(cc::string(cc::string_view(text).subview({.offset = start, .size = text.size() - start})));
+        if (at.file >= 0)
+            write_directive(origins.origin_of(p.e, *current).at);
         return {.text = cc::move(result)};
     }
 

@@ -549,6 +549,8 @@ fn main_ps(p: pixel_input) -> target_ {
   So the target's compiler and debugger name the SGL line themselves, and a run of statements on consecutive lines takes one directive.
   Where the inlined calls change, a comment names them first, `// inlined from shade.sgl:12 > main.sgl:40`, each file by its name alone.
   The file name is a string literal, so a backslash or a quote in it is escaped.
+  A body in a target's own text names its own first line, and keeps its empty lines, so the compiler names the `.sgl` line of an error inside it.
+  After the text, a directive names the statement's line again.
   WGSL has no such directive, and its messages map back through the table (EMIT-181).
 * **EMIT-257** Asked for a native line table, a native route writes each operation's line of EMIT-181 into its binary, and nothing else changes.
   It is opt-in, `text_request::native_line_table`, since it carries the text of each file a line names.

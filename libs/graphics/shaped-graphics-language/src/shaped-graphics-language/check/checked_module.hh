@@ -158,7 +158,10 @@ struct sgl::check::target_text
     i32 file = 0;
     ast::stmt_id first = ast::stmt_id::none;
     shading_language language = shading_language::sgl;
-    /// One more than `slots`: the text before each placeholder, then the text after the last; lines end in `\n`.
+    /// Where the text's first line stands in `file`, which a `#line` ahead of the text names (EMIT-182).
+    u32 offset = 0;
+    /// One more than `slots`: the text before each placeholder, then the text after the last.
+    /// Its lines end in `\n`, one for each line of the source, so the text's lines stay the source's.
     cc::vector<cc::string> pieces;
     /// Parallel to the placeholders: the position of the parameter each names, and -1 for `$result`.
     cc::vector<i32> slots;
@@ -166,7 +169,7 @@ struct sgl::check::target_text
     [[nodiscard]] bool operator==(target_text const& rhs) const
     {
         return function == rhs.function && file == rhs.file && first == rhs.first && language == rhs.language
-            && ast::impl::is_equal(pieces, rhs.pieces) && ast::impl::is_equal(slots, rhs.slots);
+            && offset == rhs.offset && ast::impl::is_equal(pieces, rhs.pieces) && ast::impl::is_equal(slots, rhs.slots);
     }
 };
 
