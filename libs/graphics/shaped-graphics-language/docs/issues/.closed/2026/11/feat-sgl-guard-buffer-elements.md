@@ -3,6 +3,8 @@ created: 2026-11-05
 parent: epic-sgl-robustness-profiles
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_guards.cc
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # Guard buffer element and bytes accesses
@@ -24,7 +26,7 @@ An element of a binding array has its own `length` (CHK-460), and an access thro
 A binding array's own index is guarded by its `N`, on metal too (LEGAL-65).
 `define` runs no access of memory too short for it, so a read is zero, a store is dropped and an atomic gives zero (LEGAL-68).
 
-## Left
+## Done on 2026-11-09
 
-metal, whose buffers carry no length until sg passes the lengths in, a buffer of sizes beside the argument table.
-That is all that keeps B11 ⚠️ in the matrix.
+metal: each argument buffer ends in one byte length per slot, which sg fills when it mints a group, so legalize guards buffers there as on every target (EMIT-195).
+That landed in `9f50c19b4`, with sg's buffer-length test and sr's binding-array guard tests running on metal; matrix rows B4 and B11 say so since.

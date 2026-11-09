@@ -56,4 +56,9 @@ The steps, each a child issue when it is taken up, in this order:
    A keystroke in a shaped-viewer program is 3.8 ms; in a module it uses 5.6 to 7.4 ms by its place in the chain.
 9. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
 
+What is left is performance, each a child of its own with what would make it worth taking up:
+[perf-sgl-layer-freeze-copies](perf-sgl-layer-freeze-copies.md) for the maps and the rest of a link's copy,
+[perf-sgl-changed-interface-rechecks-dependents](perf-sgl-changed-interface-rechecks-dependents.md) for an edit that changes what a module declares,
+and [perf-sgl-parallel-layers](perf-sgl-parallel-layers.md).
+
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.

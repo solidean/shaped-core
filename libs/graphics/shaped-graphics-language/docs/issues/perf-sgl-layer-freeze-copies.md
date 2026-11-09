@@ -1,5 +1,6 @@
 ---
 created: 2026-11-09
+priority: someday
 parent: epic-sgl-separate-compilation
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/layered.hh
@@ -40,3 +41,6 @@ Measured in release, shaped-viewer's 10 modules:
 The keystroke in a program pays the lookup: about 3% more, measured against the old lists on the same tree.
 
 What is left: every `layered_map` freeze still copies the map below it, and the checker's plain vectors and maps are copied whole by every link.
+
+**When to take up the rest:** when memory is what a host runs short of, a library much larger than shaped-viewer's or a host keeping many option permutations alive.
+A link loaded from an artifact costs about 0.4 ms now, so the copies matter more for memory than for time.
