@@ -29,4 +29,22 @@ Measured again on 2026-11-09, evening, which overturns the route theory:
 
 So the pipeline and the shaders are not enough to trigger it.
 What sg adds is: its root signature and descriptor heaps, its shader-table layout, the second context sharing the one D3D12 device, and the other tests running on it in parallel.
-Next: dump the state object description and the shader-table bytes from both dx12 contexts in the failing process and diff them, or take a PIX capture of the failing dispatch.
+
+Narrowed further the same evening:
+
+* It needs both dx12 contexts: with either one skipped, the other passes every run.
+* Both contexts share one `ID3D12Device`, and the context whose state object is created second is the one that fails, whichever route that is.
+  The two creations do not overlap; they are tens of milliseconds apart.
+* The standalone harness had made a device per pipeline, since the Agility SDK's device factory hands out a new one per `CreateDevice`.
+  On one shared device it fails too, deterministically: a DXC pipeline and an SGL-native one, in either order, and the second gets 10 of 64 cells wrong.
+  Its symptom differs from sg's: instance 20's shadow ray answers unlit, where sg's raygen writes nothing.
+  Two DXC pipelines pass, `-O3` beside `-Od` included, and so do two native ones.
+* One pipeline that mixes the routes fails on its own device: DXC's reordering raygen and misses beside SGL's native `shade`, with the same 10 cells.
+  With DXC's non-reordering `primary` raygen it passes.
+* Neither the container digest (signing SGL's containers with DXC's validator), nor the export names, nor the payload struct names change any of it.
+* SGL's native DXIL carries no `!dx.dxrPayloadAnnotations`, which DXC writes for every `[raypayload]` struct.
+  [feat-sgl-native-ray-tracing](feat-sgl-native-ray-tracing.md) leaves it out on purpose, since the validator and state object creation accept a module without it.
+  Hypothesis: NVIDIA's driver lays a payload out by its access qualifiers, so an annotated shader and an unannotated one disagree on where a field lives.
+  The shared-device failure would then mean the driver keeps something of that layout per device.
+
+Next: write `!dx.dxrPayloadAnnotations` from the native DXIL writer as DXC does, then rerun the mixed pipeline in the harness and this test in sg.
