@@ -48,7 +48,7 @@ constexpr auto k_program = "use kept_top\n"
 } // namespace
 
 ASYNC_TEST("slib sgl module artifacts - a module one process checked is loaded by the next from the store, and never "
-     "checked there")
+           "checked there")
 {
     if (!bcache::blob_cache::is_storage_available())
         SKIP("no storage for a blob cache in this build");
