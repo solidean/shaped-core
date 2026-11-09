@@ -3,6 +3,8 @@ created: 2026-11-09
 priority: next
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # A bare @compute chooses its own workgroup size where nothing in it depends on the group, and a size that wastes a wave warns
