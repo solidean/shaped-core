@@ -17,15 +17,33 @@ cc::large_allocations::context_stats mine()
     return {};
 }
 
+thread_local u64 t_test_context = 0;
+
 /// Tracking is process-wide and a runner may track this whole run: switched on here, it is switched off only if it was off.
+/// Without a runner's hook every thread books to context 0, a background thread's large block included,
+/// so this thread is given a context of its own for the scope.
 struct tracking_scope
 {
     bool was = cc::large_allocations::is_tracking();
-    tracking_scope() { cc::large_allocations::start_tracking(); }
+    bool owns_hook = cc::file_access::current_context() == 0;
+    tracking_scope()
+    {
+        if (owns_hook)
+        {
+            t_test_context = 0x1a46e;
+            cc::file_access::set_context_hook([] { return t_test_context; });
+        }
+        cc::large_allocations::start_tracking();
+    }
     ~tracking_scope()
     {
         if (!was)
             cc::large_allocations::stop_tracking();
+        if (owns_hook)
+        {
+            cc::file_access::set_context_hook(nullptr);
+            t_test_context = 0;
+        }
     }
 };
 
@@ -44,7 +62,7 @@ void deallocate(byte* p, isize bytes)
 }
 } // namespace
 
-// Exclusive of everything: without a runner's hook every test shares context 0, so another test's large block would land in the same books.
+// Exclusive of everything, so no other test's large block lands in this thread's books.
 TEST("large allocations - a large block is booked while alive and credited back when freed", exclusive())
 {
     auto const scope = tracking_scope();
