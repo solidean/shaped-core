@@ -134,6 +134,15 @@ public:
     [[nodiscard]] cc::result<metal_texture_handle> create_metal_texture(sg::texture_description const& desc,
                                                                         sg::allocation_info const& alloc);
 
+    /// An sg texture over an MTLTexture someone else created, such as Compositor Services' drawable.
+    ///
+    /// The texture retains it and releases it once no recorded work uses it, so the owner's own release is unaffected.
+    /// Metal has no layouts to hand back, and the texture is resident while sg holds it.
+    /// Its views are made in `desc.format`, which must be the texture's own unless it allows pixel-format views.
+    /// Errors where the texture's shape is not `desc`'s, or it lacks a usage `desc.usage` needs.
+    [[nodiscard]] cc::result<metal_texture_handle> wrap_metal_texture(MTL::Texture* texture,
+                                                                      sg::texture_description const& desc);
+
     /// The backend-typed heap create, which the sg::context virtual forwards to.
     [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes,
                                                                                 sg::memory_heap_contents contents);

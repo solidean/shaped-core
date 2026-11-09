@@ -95,6 +95,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/metal-barrier-test.cc
         tests/metal-binding-test.cc
+        tests/metal-wrap-texture-test.cc
         tests/metal-compute-test.cc
         tests/metal-native-scope-test.cc
         tests/metal-present-test.cc

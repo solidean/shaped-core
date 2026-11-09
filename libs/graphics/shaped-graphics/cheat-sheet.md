@@ -286,6 +286,9 @@ dx12::requested_d3d12_runtime() / runs_agility_runtime()  // what was asked for 
 dx12_ctx.wrap_dx12_texture(ID3D12Resource*, desc)  // -> result<dx12_texture_handle>; refuses a shape or flag mismatch
 //   GOTCHA: only a resource in COMMON at every submit — sg's enhanced barriers meet a legacy state nowhere else, so an
 //   OpenXR D3D12 image (legacy RENDER_TARGET) is filled from a dx12_native_scope with legacy ResourceBarrier calls instead
+#include <shaped-graphics/backends/metal/metal_context.hh>   // Apple only
+metal_ctx.wrap_metal_texture(MTL::Texture*, desc)  // -> result<metal_texture_handle>; retains it, so the owner may release at once
+//   refuses a shape, a usage it lacks, or a format other than its own (unless it allows pixel-format views); no layouts to hand back
 // GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
 //   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it
