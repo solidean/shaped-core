@@ -3,6 +3,8 @@ created: 2026-11-05
 priority: normal
 tags: [xr]
 parent: epic-xr
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-09T11:20Z
 ---
 
 # Several views per draw on metal and webgpu
