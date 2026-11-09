@@ -70,16 +70,16 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   Memory too short for the access has no index or offset that is safe, so the access does not run.
   A read and a `bytes` load are zero of their type, a store is dropped, and an atomic gives zero and changes nothing.
   Its operands still run, in their order, as WGSL's bounded access evaluates them.
-* **LEGAL-69** (G1) Those profiles shadow a compute stage's workgroup memory with a bit per scalar, set where one is stored and tested where one is read (EVAL-92).
+* **LEGAL-69** (G1) Those profiles shadow a compute, task or mesh stage's workgroup memory with a bit per scalar, set where one is stored and tested where one is read (EVAL-92).
   A scalar is a leaf of a member's type, counted in the order the members are listed: a `float3` is three, an atomic one, whatever its width.
   A store and an atomic set the bits of the scalars they reach once they ran; every read, an atomic's but a store's included, tests them first.
   A uniform load tests them after its barrier, which is what makes another invocation's store visible to it.
   A failed test ends the invocation as a guard does, and `report` names the place with its indices: ``workgroup memory `tile.values[2]` is read before any invocation stored it``.
   A swizzle tests each field it reads, and each index of the place is pinned once, so the test and the access read the same element.
   A read that races a store, with no barrier between, may or may not be reported.
-  The shadow takes a word per 32 scalars beside the memory it shadows, in CHK-294's 16384 bytes; where it would not fit, no read is tested.
+  The shadow takes a word per 32 scalars beside the memory it shadows, in CHK-294's 16384 bytes.
+  Where it would not fit no read is tested, and the compile warns `workgroup-unshadowed`, naming the bytes it left out.
   The profile `define` shadows nothing and zeroes workgroup memory before the body instead, WGSL's value (LEGAL-71).
-  A task and a mesh stage's workgroup memory is not shadowed yet.
 * **LEGAL-71** The last step writes the shadow and its prologue as statements of the finished core tree, so no route knows of either.
   A read of the shadow is an atomic `load` of its word, and a mark an atomic `bit_or`, each on a place no source can name, which the target declares `sgl_written` (EMIT-229).
   Which bits a range of scalars takes is arithmetic in the tree, a whole word its own case, since no target shifts by 32.

@@ -14,9 +14,6 @@ using namespace sgl::check::impl;
 
 namespace
 {
-/// A guard nests its operands a level deeper; one that would pass the limit every later walk stops at is not written.
-constexpr int k_guard_depth_reserve = 4;
-
 /// One numeric shape: a scalar, or a vector of `width` scalars of `element`.
 struct shape
 {
@@ -1875,7 +1872,7 @@ i32 workgroup_bytes_of(checked_module const& m, type_id type)
     return measure(measure, type).size;
 }
 
-/// LEGAL-69: the shadow of a compute stage's workgroup memory where the profile tests reads, or its zeroing under
+/// LEGAL-69: the shadow of a compute, task or mesh stage's workgroup memory where the profile tests reads, or its zeroing under
 /// `define`, and the invocation's index in its workgroup that LEGAL-71's prologue strides by.
 void prepare_workgroup(flat_builder& out, guarder& g)
 {
@@ -1900,6 +1897,9 @@ void prepare_workgroup(flat_builder& out, guarder& g)
     // the shadow takes a word per 32 scalars, beside the memory it shadows, in the budget CHK-294 holds every stage to
     constexpr auto k_portable_workgroup_bytes = 16384;
     auto const shadows = !g.defines && bytes + 4 * words <= k_portable_workgroup_bytes;
+    // a compile says so rather than testing nothing in silence
+    if (!members.empty() && !g.defines && !shadows)
+        e.unshadowed_bytes = bytes;
     if (members.empty() || (!g.defines && !shadows))
         return;
 
@@ -1931,7 +1931,10 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
                      .guards_buffers = options.guards_buffers,
                      .defines = options.guards_undefined == undefined_guard::define,
                      .lowers_asserts = options.lowers_asserts};
-    if (g.guards && out.e.entry_stage == stage::compute)
+    // the stages that have workgroup memory: a compute stage, and a task and a mesh stage, which are dispatched alike
+    auto const has_workgroup
+        = out.e.entry_stage == stage::compute || out.e.entry_stage == stage::task || out.e.entry_stage == stage::mesh;
+    if (g.guards && has_workgroup)
         prepare_workgroup(out, g);
 
     // The last statement of the body that holds a barrier, a derivative or a subgroup operation, which an invocation

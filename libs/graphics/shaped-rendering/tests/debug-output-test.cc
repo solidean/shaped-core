@@ -95,6 +95,34 @@ cc::shared_async<guarded_compute> guarded_compute_of(sg::context& ctx,
     co_return guarded_compute{.pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = layout}),
                               .group = ctx.persistent.create_binding_group(group_layout, named)};
 }
+/// `source`'s entry point `entry`, a `stage`, compiled for `ctx` under `guard`.
+cc::shared_async<sg::compiled_shader> guarded_stage_of(sg::context& ctx,
+                                                       cc::string source,
+                                                       cc::string entry,
+                                                       sg::shader_stage stage,
+                                                       cc::string label,
+                                                       slib::sgl_undefined_guard guard)
+{
+    auto const compiler = slib::create_sgl_compiler(
+        inner_compiler_for(ctx), {.persistent_cache = nullptr, .diagnostics = true, .guards_undefined = guard});
+    auto desc = slib::shader_source_description{.source = cc::move(source),
+                                                .entry_point = cc::move(entry),
+                                                .stage = stage,
+                                                .label = cc::move(label)};
+    slib::add_context_options(desc.options, ctx);
+    auto preprocessed = compiler->preprocess(desc, [](cc::string_view) { return cc::optional<cc::string>(); });
+    REQUIRE(preprocessed.has_value());
+    REQUIRE(preprocessed.value().stated.has_value());
+    auto shader = preprocessed.value().stated.value();
+    desc.source = preprocessed.value().source;
+    desc.bytecode = cc::move(preprocessed.value().bytecode);
+    if (!preprocessed.value().entry_point.empty())
+        desc.entry_point = preprocessed.value().entry_point;
+    auto const compiled = co_await compiler->compile(desc);
+    shader.bytecode = compiled.bytecode;
+    shader.compiler = compiled.compiler;
+    co_return shader;
+}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its values, once its epoch completes",
@@ -453,6 +481,75 @@ ASYNC_INVOCABLE_TEST("sr - define runs a load of more words than the memory hold
     CHECK(data[1] == 42);
     CHECK(data[2] == 0);
     CHECK(data[3] == 42);
+
+    co_await ctx.idle_completion();
+    co_await ctx.idle_completion();
+    ctx.process_completed_epochs();
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sr - a mesh stage's read of workgroup memory no invocation stored is reported where it would "
+                     "have "
+                     "run (LEGAL-69)",
+                     (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+    if (inner_compiler_for(ctx) == nullptr)
+        SKIP("sg binds no debug window on this backend yet");
+    if (!ctx.supports(sg::feature::mesh_shader))
+        SKIP("this context draws no mesh stage");
+    // invocation 2 stores nothing, so invocation 1 reads a hole, after the barrier that would have shown it a store
+    nx::expect_error("mesh_shadow.sgl:13: assert failed: workgroup memory `tile.values[2]` is read before any "
+                     "invocation stored it",
+                     nx::exactly(1));
+
+    auto const source = cc::string("require mesh_shader\n"
+                                   "struct corner:\n"
+                                   "    @position position: hpos4\n"
+                                   "@pixel struct shaded:\n"
+                                   "    color: float4\n"
+                                   "@workgroup binding tile:\n"
+                                   "    values: float[4]\n"
+                                   "@mesh(4, vertices = 4, triangles = 2)\n"
+                                   "fun ms(@local_thread_index k: int, output: mut mesh_output[corner]){tile}:\n"
+                                   "    if k != 2:\n"
+                                   "        tile.values[k] = float(k)\n"
+                                   "    workgroup_barrier()\n"
+                                   "    let v = tile.values[(k + 1) % 4]\n"
+                                   "    output.set_counts(4u, 2u)\n"
+                                   "    let x = ((k & 1) as float) * 2.0 - 1.0 + v * 0.0\n"
+                                   "    let y = ((k >> 1) as float) * 2.0 - 1.0\n"
+                                   "    output.vertex(k as uint, {position = hpos4(x, y, 0.0, 1.0)})\n"
+                                   "    if k == 0:\n"
+                                   "        output.triangle(0u, uint3(0u, 1u, 2u))\n"
+                                   "        output.triangle(1u, uint3(1u, 3u, 2u))\n"
+                                   "@pixel fun ps(c: corner) -> shaded:\n"
+                                   "    return {color = float4(1.0)}\n");
+    auto const guard = slib::sgl_undefined_guard::report;
+    auto const mesh = co_await guarded_stage_of(ctx, source, "ms", sg::shader_stage::mesh, "mesh_shadow.sgl", guard);
+    auto const pixel = co_await guarded_stage_of(ctx, source, "ps", sg::shader_stage::fragment, "mesh_shadow.sgl", guard);
+
+    auto desc = sg::raster_pipeline_description{
+        .layout = ctx.uncached.create_pipeline_layout({}),
+        .fragment_shader = pixel,
+        .mesh_shader = mesh,
+        .rasterization = {.cull = sg::cull_mode::none},
+    };
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
+    auto const pipeline = ctx.uncached.create_raster_pipeline(desc);
+    auto const target = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba8_unorm, .width = 4, .height = 4, .usage = sg::texture_usage::render_target});
+
+    auto cmd = ctx.create_command_list();
+    {
+        auto pass = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0))}});
+        pass.bind_pipeline(*pipeline);
+        pass.draw_mesh_tasks(1);
+    }
+    ctx.submit_command_list(cc::move(cmd));
+    co_await ctx.epochs_in_flight_completion(2);
+    ctx.advance_epoch();
 
     co_await ctx.idle_completion();
     co_await ctx.idle_completion();

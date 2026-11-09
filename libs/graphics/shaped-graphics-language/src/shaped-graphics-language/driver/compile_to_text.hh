@@ -134,6 +134,8 @@ struct sgl::emitted_source
     check::float_level float_guarantee = check::float_level::fast;
     /// The function that raised the entry point's guarantee, by name; empty at `fast`.
     cc::string float_raised_by;
+    /// LEGAL-69: the bytes of workgroup memory the profile could not shadow, whose reads it tests not; 0 where it did.
+    i32 unshadowed_bytes = 0;
     /// The options the entry point reaches, by name, in declaration order (CHK-355).
     cc::vector<cc::string> options;
     /// What the entry point's code does to each binding it lists, keyed by host name; a slot it never touches is absent.
