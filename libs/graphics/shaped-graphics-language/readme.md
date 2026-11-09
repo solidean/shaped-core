@@ -111,9 +111,11 @@ To uninstall, delete the link and reload.
 It is the spacing within a line: one space where tokens stand apart, a space after a comma and a colon, around an arrow and around a binary operator, none inside brackets or before a comma or a colon.
 So a type is `name: type` everywhere, `let x: T = …` included.
 The trailing comments of consecutive lines line up one space past the longest code, unless that moves a comment more than 16 columns, which starts a new run.
-Indentation and line breaks are the line tree's, comment text and strings are content, and all of them stay as written.
+Code is indented four spaces a level of the line tree, a tab in the indentation included.
+The lines a comment or a multi-line string owns move with it, so the comment keeps its layout and the string its value.
+Line breaks, comment text and strings are content, and stay as written.
 A syntax error leaves its block and the block's siblings as written, with a warning naming the error, and the rest of the file is formatted; at the top level, its declaration stays.
-An operator without its spaces, `a+b`, is no such error: it has one reading, which the formatter spaces.
+An operator without its spaces, `a+b`, and a tab in the indentation are no such errors: each has one reading, which the formatter fixes.
 Its output always parses to the tree its input did, which it checks; a line whose formatting would not is left as written and named, as a bug of the formatter.
 
 ### The language server

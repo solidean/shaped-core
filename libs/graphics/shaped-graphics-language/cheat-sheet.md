@@ -191,6 +191,7 @@ sgl::outline_of(pf, ast)                   // -> vector<outline_entry { name, ki
 sgl::folds_of(pf)                          // -> vector<fold_range { first_line, last_line, is_comment }>: the line tree's blocks
 sgl::format_source(source)                 // -> formatted_source { text, skipped, unformatted_lines }
                                            // spacing within lines, `name: type`, trailing comments aligned within 16 columns
+                                           // indentation: 4 spaces a level; comment- and string-owned lines move along
                                            // skipped: the block and siblings around each syntax error, left as written
                                            // the output parses to the same tree, checked; unformatted_lines are formatter bugs
 ```

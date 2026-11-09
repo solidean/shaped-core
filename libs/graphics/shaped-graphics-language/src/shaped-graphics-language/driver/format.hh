@@ -37,8 +37,10 @@ inline constexpr i32 max_comment_alignment_shift = 16;
 /// around an arrow and around a binary operator, none inside brackets or before a comma or a colon.
 /// The trailing comments of consecutive lines line up one space past the longest code among them, within
 /// `max_comment_alignment_shift`.
-/// Indentation, line breaks, comment text and strings stay as written, a token that touches its neighbour keeps touching
-/// it unless the spacing above says otherwise, and trailing whitespace and blank lines at the end go.
+/// Code is indented four spaces per level of the line tree, a tab included; a line a comment or a string owns moves with
+/// its owner, so the comment keeps its layout and the string its value.
+/// Line breaks, comment text and strings stay as written, a token that touches its neighbour keeps touching it unless
+/// the spacing above says otherwise, and trailing whitespace and blank lines at the end go.
 /// A syntax error leaves its block and that block's siblings as written, and the whole declaration where it stands at the
 /// top level; everything else is formatted, since the line tree keeps an error to its block.
 /// An operator that touches both operands is no such error, since it has one reading: the formatter spaces it.

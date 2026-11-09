@@ -108,3 +108,16 @@ TEST("sgl format - the prelude is formatted already")
     for (auto const& f : sgl::prelude_files())
         CHECK(formatted(f.source) == f.source).dump("file", f.name);
 }
+
+TEST("sgl format - code is indented four spaces a level, a tab included, and what a comment or string owns moves along")
+{
+    CHECK(formatted("fun f(a: float) -> float:\n  if a > 0.0:\n     return a\n  return 0.0\n")
+          == "fun f(a: float) -> float:\n    if a > 0.0:\n        return a\n    return 0.0\n");
+    // a tab in the indentation is an error with one reading, which the formatter fixes
+    CHECK(formatted("fun f() -> float:\n\treturn 0.0\n") == "fun f() -> float:\n    return 0.0\n");
+    // a comment's own lines keep their place below it, and a string's content its value (STR-16)
+    CHECK(formatted("fun f() -> float:\n  // a note\n    continued\n  let s = \"\n      hi\n        deeper\n  \"\n"
+                    "  return 0.0\n")
+          == "fun f() -> float:\n    // a note\n      continued\n    let s = \"\n        hi\n          deeper\n    \"\n"
+             "    return 0.0\n");
+}
