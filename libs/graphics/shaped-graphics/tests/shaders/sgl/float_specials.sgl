@@ -2,7 +2,7 @@
 // The inputs arrive in a buffer, so no compiler sees a constant to fold before the GPU's own does.
 
 binding float_specials:
-    // 0.0, 1.0 and 1.0e30
+    // 0.0, 1.0, 1.0e30, 1.0e-38, the least denormal and 1.0e-3
     inputs: buffer[float]
     results: mut buffer[float]
     comparisons: mut buffer[uint]
@@ -26,3 +26,9 @@ binding float_specials:
     float_specials.comparisons[1] = if nan == nan => 1u else 0u
     float_specials.comparisons[2] = if nan < one or nan >= one => 1u else 0u
     float_specials.comparisons[3] = if inf > big => 1u else 0u
+    // denormals, which `.specials` lets a device flush and only `.ieee` keeps
+    let denormal = float_specials.inputs[4]
+    float_specials.results[7] = float_specials.inputs[3] * float_specials.inputs[5]
+    float_specials.results[8] = denormal * big
+    float_specials.results[9] = denormal
+    float_specials.comparisons[4] = if denormal > zero => 1u else 0u
