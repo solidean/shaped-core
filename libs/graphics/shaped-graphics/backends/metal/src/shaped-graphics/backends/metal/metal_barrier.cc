@@ -7,13 +7,14 @@ MTL::Stages stages_of(sg::pipeline_stage_flag stage)
     switch (stage)
     {
     case sg::pipeline_stage_flag::vertex:
-        return MTL::StageVertex;
+        // every stage before the rasterizer, as dx12's and vulkan's vertex shading is: a mesh pipeline's object and mesh
+        return MTL::StageVertex | MTL::StageObject | MTL::StageMesh;
 
     case sg::pipeline_stage_flag::draw_indirect:
-        // Metal has no indirect-argument stage: an indirect draw's arguments are fetched by the vertex stage, and an
-        // indirect dispatch's by the dispatch one.
-        // Both, because the flag alone does not say which kind of indirect this was.
-        return MTL::StageVertex | MTL::StageDispatch;
+        // Metal has no indirect-argument stage: an indirect draw's arguments are fetched by the vertex stage, a mesh
+        // draw's by its first stage, and an indirect dispatch's by the dispatch one.
+        // All of them, because the flag alone does not say which kind of indirect this was.
+        return MTL::StageVertex | MTL::StageObject | MTL::StageMesh | MTL::StageDispatch;
 
     case sg::pipeline_stage_flag::fragment:
     case sg::pipeline_stage_flag::render_target:

@@ -404,7 +404,7 @@ if(SC_BUILD_TESTS)
         # The one tier-1 test that executes raster shaders, for the hazard only a running GPU shows.
         target_sources(shaped-graphics-test PRIVATE tests/command_list/fragment-write-hazard-test.cc)
 
-        # The mesh and task stages, which no SGL entry point writes yet.
+        # The mesh and task stages from HLSL; tests/pipeline/sgl-mesh-test.cc draws SGL's on every backend.
         target_sources(shaped-graphics-test PRIVATE tests/pipeline/mesh-test.cc)
 
         # The render-routine framework tests are backend-agnostic invocables like the rest of the tier-1
@@ -463,6 +463,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/texture-shapes-test.cc
             tests/pipeline/stages-test.cc
             tests/pipeline/ray-query-test.cc
+            tests/pipeline/sgl-mesh-test.cc
             tests/pipeline/software-trace-test.cc
             tests/pipeline/raytracing-pipeline-test.cc
             # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.

@@ -43,7 +43,7 @@ enum class sg::feature
 
     /// The mesh stage exists, and the task stage that launches it, so a raster pipeline may draw from workgroups rather than vertices.
     /// D3D12 grants it with mesh shader tier 1, Vulkan with VK_EXT_mesh_shader's `meshShader` and `taskShader`.
-    /// Metal's object and mesh stages are not wired up yet, and WebGPU has neither.
+    /// Metal grants it with its object and mesh stages, and WebGPU has neither.
     mesh_shader,
 
     /// A binding may be an array (`count > 1`), and so `staging_binding_group` and `bindless_array` work.

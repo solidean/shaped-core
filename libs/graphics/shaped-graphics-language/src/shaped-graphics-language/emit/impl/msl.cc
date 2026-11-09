@@ -107,6 +107,9 @@ public:
                                                                : "center",
                               i.kind == kind::linear ? "no_perspective" : "perspective");
         }
+        // EMIT-209: what a mesh stage writes per primitive, its locations past the stage link's
+        case struct_role::primitive_link:
+            return cc::format("user(sgl{})", member.location);
         case struct_role::render_targets:
             switch (member.output)
             {
@@ -124,7 +127,6 @@ public:
             return cc::format("color({})", member.location);
         // MSL refuses the tessellation stages (EMIT-122), so no struct of theirs reaches it
         case struct_role::patch_constants:
-        case struct_role::primitive_link:
         case struct_role::plain:
             break;
         }
@@ -661,8 +663,56 @@ public:
             return;
         }
         auto parameters = cc::vector<cc::string>();
-        if (check::is_valid(p.e.input))
+        // CHK-489: a pixel stage's second struct, what a mesh stage wrote per primitive, arrives in one stage input
+        // beside the link, as Metal hands a mesh pipeline's fragment both
+        auto per_primitive = isize(-1);
+        if (p.e.entry_stage == stage::pixel && check::is_valid(p.e.input))
+            for (auto i = isize(1); i < p.e.locals.size(); ++i)
+            {
+                auto const& local = p.e.locals[i];
+                auto is_input = false;
+                for (auto const& s : p.e.stage_inputs)
+                    is_input = is_input || index_of(s.local) == i;
+                if (local.kind == check::local_kind::parameter && !is_input
+                    && p.m.at(local.type).kind == type_kind::structure && local.type != p.e.input)
+                    per_primitive = i;
+            }
+        if (per_primitive >= 0)
+        {
+            out.appendf("struct sgl_stage_in\n{{\n    {} link;\n    {} primitive;\n}};\n\n",
+                        type_text(p, *this, p.e.input), type_text(p, *this, p.e.locals[per_primitive].type));
+            parameters.push_back("sgl_stage_in sgl_in [[stage_in]]");
+        }
+        else if (check::is_valid(p.e.input) && p.e.entry_stage != stage::mesh && p.e.entry_stage != stage::task)
             parameters.push_back(cc::format("{} {} [[stage_in]]", type_text(p, *this, p.e.input), p.locals[0]));
+        // EMIT-206: a mesh stage's output is Metal's mesh object, and the struct it is handed its object stage's payload
+        if (p.e.entry_stage == stage::mesh)
+            for (auto i = isize(0); i < p.e.locals.size(); ++i)
+            {
+                auto const& local = p.e.locals[i];
+                auto is_input = false;
+                for (auto const& s : p.e.stage_inputs)
+                    is_input = is_input || index_of(s.local) == i;
+                if (local.kind != check::local_kind::parameter || is_input)
+                    continue;
+                auto const& t = p.m.at(local.type);
+                auto const& mesh = p.m.functions[p.m.at(p.e.function).info];
+                if (t.kind == type_kind::stream && t.count == 0)
+                    parameters.push_back(cc::format(
+                        "metal::mesh<{}, {}, {}, {}, metal::topology::{}> {}", type_text(p, *this, t.element),
+                        check::is_valid(t.primitive) ? cc::string(type_text(p, *this, t.primitive)) : cc::string("void"),
+                        mesh.max_vertices, mesh.max_primitives, mesh.is_line_mesh ? "line" : "triangle", p.locals[i]));
+                else if (t.kind == type_kind::structure)
+                    parameters.push_back(cc::format("const object_data {}& {} [[payload]]",
+                                                    type_text(p, *this, local.type), p.locals[i]));
+            }
+        // EMIT-207: an object stage writes its payload and its grid of mesh workgroups from its first invocation
+        if (p.e.entry_stage == stage::task)
+        {
+            parameters.push_back(cc::format("object_data {}& sgl_payload [[payload]]", payload_type(p)));
+            parameters.push_back("mesh_grid_properties sgl_grid");
+            parameters.push_back("uint sgl_thread [[thread_index_in_threadgroup]]");
+        }
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
@@ -699,10 +749,19 @@ public:
         // EMIT-59: MSL states no threadgroup shape, so a kernel carries none; SGL's stated one is what reaches sg
         if (p.e.entry_stage == stage::compute)
             out.appendf("kernel void {}({})\n{{\n", p.entry_name, list);
+        else if (p.e.entry_stage == stage::mesh || p.e.entry_stage == stage::task)
+            out.appendf("[[{}]] void {}({})\n{{\n", p.e.entry_stage == stage::mesh ? "mesh" : "object", p.entry_name,
+                        list);
         else
             out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
                         type_text(p, *this, p.e.result), p.entry_name, list);
         write_bound_resources(out, p);
+        if (per_primitive >= 0)
+        {
+            out.appendf("    const {} {} = sgl_in.link;\n", type_text(p, *this, p.e.input), p.locals[0]);
+            out.appendf("    const {} {} = sgl_in.primitive;\n", type_text(p, *this, p.e.locals[per_primitive].type),
+                        p.locals[per_primitive]);
+        }
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             if (!p.stage_input_read[i])
@@ -711,6 +770,17 @@ public:
             out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
                         stage_input_value(p, i));
         }
+    }
+
+    /// The payload an object stage hands its mesh workgroups: the struct its `dispatch_mesh` passes (EMIT-207).
+    [[nodiscard]] cc::string payload_type(plan const& p) const
+    {
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<check::flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                    record != nullptr && record->name == "dispatch_mesh" && p.e.at(call->arguments).size() > 3)
+                    return cc::string(type_text(p, *this, p.e.at(p.e.at(call->arguments)[3]).type));
+        CC_UNREACHABLE("a task stage launches its mesh workgroups once (CHK-485)");
     }
 
     /// Whether the entry point walks a structure in software, which reads sg's pool and roots (EMIT-135).

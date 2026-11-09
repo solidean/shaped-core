@@ -10,7 +10,8 @@ namespace mtl = sg::backend::metal;
 
 TEST("sg metal - every sg pipeline stage maps onto MTLStages")
 {
-    CHECK(mtl::stages_of(sg::pipeline_stage_flag::vertex) == MTL::StageVertex);
+    // every stage before the rasterizer, a mesh pipeline's object and mesh stages too
+    CHECK(mtl::stages_of(sg::pipeline_stage_flag::vertex) == (MTL::StageVertex | MTL::StageObject | MTL::StageMesh));
     CHECK(mtl::stages_of(sg::pipeline_stage_flag::fragment) == MTL::StageFragment);
     CHECK(mtl::stages_of(sg::pipeline_stage_flag::compute) == MTL::StageDispatch);
     CHECK(mtl::stages_of(sg::pipeline_stage_flag::copy) == MTL::StageBlit);
@@ -21,7 +22,8 @@ TEST("sg metal - every sg pipeline stage maps onto MTLStages")
     CHECK(mtl::stages_of(sg::pipeline_stage_flag::render_target) == MTL::StageFragment);
     CHECK(mtl::stages_of(sg::pipeline_stage_flag::depth_stencil_target) == MTL::StageFragment);
     CHECK(mtl::stages_of(sg::pipeline_stage_flag::raytracing) == MTL::StageDispatch);
-    CHECK(mtl::stages_of(sg::pipeline_stage_flag::draw_indirect) == (MTL::StageVertex | MTL::StageDispatch));
+    CHECK(mtl::stages_of(sg::pipeline_stage_flag::draw_indirect)
+          == (MTL::StageVertex | MTL::StageObject | MTL::StageMesh | MTL::StageDispatch));
 }
 
 TEST("sg metal - an empty stage set is every stage, not none")
@@ -35,7 +37,8 @@ TEST("sg metal - an empty stage set is every stage, not none")
 TEST("sg metal - a stage set folds into one mask")
 {
     auto const set = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment | sg::pipeline_stage_flag::copy;
-    CHECK(mtl::stages_of(set) == (MTL::StageVertex | MTL::StageFragment | MTL::StageBlit));
+    CHECK(mtl::stages_of(set)
+          == (MTL::StageVertex | MTL::StageObject | MTL::StageMesh | MTL::StageFragment | MTL::StageBlit));
 }
 
 TEST("sg metal - only a write needs caches flushed")

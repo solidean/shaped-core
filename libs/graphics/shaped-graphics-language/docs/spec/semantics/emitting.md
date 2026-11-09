@@ -202,7 +202,10 @@ const light_kind_sun: i32 = 2;
   `F`'s locations follow the vertex struct's, in the one space the pixel stage reads both from, and the pixel stage takes it as a parameter of its own.
   There its members are `nointerpolation`; for vulkan each also carries SPIR-V's `PerPrimitiveEXT`, as `[[vk::ext_decorate(5271)]]`.
   The entry point then declares `SPV_EXT_mesh_shader` and its `MeshShadingEXT` capability, which DXC leaves out of a pixel stage.
-* **EMIT-206** `msl` refuses a mesh and a task entry point as `target-lacks-feature`, since sg's metal backend does not build a mesh pipeline yet; WGSL refuses both by EMIT-109.
+* **EMIT-206** MSL writes a mesh entry point as a `[[mesh]]` function of a `metal::mesh<V, F, N, M, topology>` output, F `void` where nothing is written per primitive.
+  It writes a task entry point as an `[[object]]` function; WGSL refuses both by EMIT-109.
+  Metal counts the primitives alone, so `set_counts` is `set_primitive_count` of its second argument, and `triangle` and `line` set one index per corner.
+  The object stage writes its payload and its grid of mesh workgroups from its first invocation, and a pixel stage's per-primitive struct arrives in one `[[stage_in]]` beside the link.
 * **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
   * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
   * a control stage is a passthrough hull function that returns `patch[point_index]`, named by its `domain`, `partitioning`, `outputtopology`, `outputcontrolpoints` and `patchconstantfunc`;

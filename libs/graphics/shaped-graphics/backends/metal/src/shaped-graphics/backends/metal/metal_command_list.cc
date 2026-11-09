@@ -1606,6 +1606,43 @@ void metal_command_list::raster_draw(draw_config const& config)
     ++_draws_in_render_encoder;
 }
 
+void metal_command_list::raster_draw_mesh_tasks(int x, int y, int z)
+{
+    CC_ASSERT(in_rendering_scope(), "a mesh draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr && _bound_raster->is_mesh(), "a mesh draw needs a bound mesh pipeline");
+    if (x == 0 || y == 0 || z == 0)
+        return;
+
+    declare_raster_draw(false);
+    resume_render_encoder();
+    // the workgroups of the first stage: the object stage's where it has one, the mesh stage's otherwise
+    _render_encoder->drawMeshThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
+                                          _bound_raster->object_threads(), _bound_raster->mesh_threads());
+    ++_draws_in_render_encoder;
+}
+
+void metal_command_list::raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(in_rendering_scope(), "an indirect mesh draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr && _bound_raster->is_mesh(), "a mesh draw needs a bound mesh pipeline");
+    static_assert(sizeof(sg::dispatch_args) == sizeof(MTL::DispatchThreadgroupsIndirectArguments));
+
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw(false);
+    resume_render_encoder();
+
+    // MTL4 draws one record per call, each a grid of workgroups as a dispatch's is
+    auto const& mtl_buffer = static_cast<metal_buffer const&>(*args);
+    auto const stride = u64(sizeof(sg::dispatch_args));
+    for (auto i = isize(0); i < count; ++i)
+    {
+        _render_encoder->drawMeshThreadgroups(
+            MTL::GPUAddress(mtl_buffer.gpu_address() + u64(offset_in_bytes) + u64(i) * stride),
+            _bound_raster->object_threads(), _bound_raster->mesh_threads());
+        ++_draws_in_render_encoder;
+    }
+}
+
 void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pipeline)
 {
     // Nothing is bound to an encoder here: which compute pipeline state runs is decided by the raygen shader the

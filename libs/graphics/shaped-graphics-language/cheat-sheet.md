@@ -885,7 +885,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   A vertex input's host struct keeps the member whole, and its layout names an attribute per piece; a pixel output takes neither.
 - **`scope:` opens a block whose locals end with it** (AST-156), transparent to `break`, `yield` and `return`; it flattens into its parent.
 - **`floatN(…)`, `intN(…)` and `uintN(…)` convert a scalar of another of those kinds**, as `as` would (CHK-421); `vec3` and `pos3` never do.
-- **`@mesh(x, y, z, vertices = N, triangles = M)` is the mesh stage** (CHK-480 to CHK-483), under `require mesh_shader`: dx12 and vulkan, refused on WGSL and MSL.
+- **`@mesh(x, y, z, vertices = N, triangles = M)` is the mesh stage** (CHK-480 to CHK-483), under `require mesh_shader`: dx12, vulkan and metal, refused on WGSL.
   Its last parameter is `output: mut mesh_output[T]`; `output.set_counts(v, t)` in uniform control flow, then `output.vertex(i, v)` and `output.triangle(i, uint3)`.
   A `pipeline` names it as `mesh = f` in the vertex stage's place, and the host draws it with `draw_mesh_tasks`.
 - **`@task(x, y, z)` launches mesh workgroups** (CHK-484 to CHK-487): its body ends in `dispatch_mesh(x, y, z, payload)`, once, in uniform control flow.

@@ -254,17 +254,6 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         return result;
     }
 
-    // EMIT-206: sg's metal backend does not wire Metal's mesh stage up yet, so no MSL text writes one
-    if (t == target::msl && e.features.has(check::feature::mesh_shader))
-    {
-        result.errors.push_back({.kind = error_kind::target_lacks_feature,
-                                 .symbol = e.function,
-                                 .detail = cc::format("{} is a {} stage and needs mesh_shader, which the metal target "
-                                                      "does not write yet",
-                                                      e.name, check::stage_name(e.entry_stage))});
-        return result;
-    }
-
     // EMIT-192: Metal has no double, and its 64-bit atomics are a ulong's min and max alone, in a buffer
     if (t == target::msl)
         for (auto const f : {check::feature::shader_f64, check::feature::shader_int64_atomics,
