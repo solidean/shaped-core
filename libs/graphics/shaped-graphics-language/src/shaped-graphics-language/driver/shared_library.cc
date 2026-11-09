@@ -42,7 +42,7 @@ using layer_ptr = cc::shared_ptr<sgl::check::checked_prelude const>;
 cc::mutex<cc::map<cc::hash128, cc::shared_ptr<shared_library const>>> g_libraries;
 /// Few, since an editor's every keystroke in a module file is another library; each holds the chain it reads.
 constexpr isize k_max_libraries = 4;
-/// The library made last under each list of names, which the next one made under the same names is an edit of.
+/// The library made or found last under each list of names, which the next one made under the same names is an edit of.
 cc::mutex<cc::map<cc::hash128, cc::shared_ptr<shared_library const>>> g_last_libraries;
 constexpr isize k_max_name_lists = 16;
 
@@ -179,7 +179,11 @@ link_ptr chain_of(shared_library const& library,
         if (link == nullptr)
         {
             auto made = cc::optional<sgl::check::checked_prelude>();
-            if (!moved.empty())
+            // only a link of these very files moves: relocating another's would check this module as that one's text
+            auto is_same_module = !moved.empty() && old_chain[position]->units.size() == module.files.size();
+            for (auto i = isize(0); is_same_module && i < module.files.size(); ++i)
+                is_same_module = old_chain[position]->units[i] == library.units[module.files[i]];
+            if (is_same_module)
             {
                 CC_RECORD_SCOPE("sgl.relocate_module");
                 made = sgl::check::relocate_link(*old_chain[position]->layer, moved);
@@ -257,8 +261,27 @@ cc::shared_ptr<shared_library const> sgl::shared_library_of(cc::span<library_fil
         b.add_string(f->source);
     }
     auto const key = cc::hash128::create(b.written_bytes(), 0);
+    // what changed from the library last used under the same names is what an editor is typing in
+    auto& names = cc::byte_stream_builder::thread_local_scratch();
+    for (auto const* f : handed)
+        names.add_string(f->name);
+    auto const names_key = cc::hash128::create(names.written_bytes(), 0);
+    auto const remember = [&](cc::shared_ptr<shared_library const> const& library)
+    {
+        g_last_libraries.lock(
+            [&](cc::map<cc::hash128, cc::shared_ptr<shared_library const>>& m)
+            {
+                if (m.size() >= k_max_name_lists && !m.contains(names_key))
+                    m.clear();
+                m[names_key] = library;
+            });
+    };
+    // a library found again is the one the next edit starts from, as much as one just made
     if (auto known = found_in(g_libraries, key); known != nullptr)
+    {
+        remember(known);
         return known;
+    }
 
     CC_RECORD_SCOPE("sgl.parse_library");
     auto made = cc::make_shared<shared_library>();
@@ -277,11 +300,6 @@ cc::shared_ptr<shared_library const> sgl::shared_library_of(cc::span<library_fil
         made->units.push_back(cc::move(unit));
         made->names.push_back(cc::string(f->name));
     }
-    // what changed from the library made last under the same names is what an editor is typing in
-    auto& names = cc::byte_stream_builder::thread_local_scratch();
-    for (auto const& n : made->names)
-        names.add_string(n);
-    auto const names_key = cc::hash128::create(names.written_bytes(), 0);
     if (auto const last = found_in(g_last_libraries, names_key); last != nullptr)
     {
         for (auto i = isize(0); i < made->files.size(); ++i)
@@ -292,13 +310,7 @@ cc::shared_ptr<shared_library const> sgl::shared_library_of(cc::span<library_fil
         made->previous = last;
     }
     auto shared = kept_in(g_libraries, key, cc::shared_ptr<shared_library const>(cc::move(made)), k_max_libraries);
-    g_last_libraries.lock(
-        [&](cc::map<cc::hash128, cc::shared_ptr<shared_library const>>& m)
-        {
-            if (m.size() >= k_max_name_lists && !m.contains(names_key))
-                m.clear();
-            m[names_key] = shared;
-        });
+    remember(shared);
     return shared;
 }
 
