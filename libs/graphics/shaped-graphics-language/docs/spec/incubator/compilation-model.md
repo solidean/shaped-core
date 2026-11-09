@@ -293,7 +293,8 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
    A host fetches the keys' bytes before a compile, asynchronously, and hands them in; a compile loads a link from them where it would check it, and reads nothing else.
    A key is the compiler's build, the module's name and its files' sources, so it holds nothing of the modules it uses.
    shaped-viewer's 10 links load in 8.6 ms from 1.4 MB, where checking them takes 27.9 ms (release), each load copying the tables below it as a check does.
-   No host keeps them yet: slib's persistent cache is where one would.
+   *slib is the first host, on 2026-11-09:* `sgl_compiler_options::keeps_module_artifacts`, off by default, keeps them in its persistent cache.
+   It fetches them when a package or a module directory is added, never during a compile, and `shader_library::prefetch_modules` is that fetch to await.
 10. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
 
 ### Open in this design

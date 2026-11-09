@@ -30,6 +30,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
     src/shaped-shader-library/impl/sgl_emit_cache.cc
+    src/shaped-shader-library/impl/sgl_module_artifacts.cc
     src/shaped-shader-library/impl/shader_bundle.cc
 )
 
@@ -71,6 +72,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/impl/pipeline_fields.hh
     src/shaped-shader-library/impl/sgl_library.hh
     src/shaped-shader-library/impl/sgl_emit_cache.hh
+    src/shaped-shader-library/impl/sgl_module_artifacts.hh
     src/shaped-shader-library/impl/shader_bundle.hh
 )
 
@@ -196,6 +198,7 @@ if(SC_BUILD_TESTS)
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
         tests/sgl_emit_cache-test.cc
+        tests/sgl_module_artifacts-test.cc
         tests/sgl_options-test.cc
         tests/sgl_layout-test.cc
         tests/sgl_file_namespaces-test.cc

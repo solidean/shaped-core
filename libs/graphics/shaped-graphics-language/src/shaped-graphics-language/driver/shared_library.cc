@@ -243,8 +243,14 @@ link_ptr chain_of(shared_library const& library,
                 made = sgl::check::check_next_module(base, library.files, module.name, own_options);
                 if (made.has_value() && is_keeping && !artifact_key.empty())
                     if (auto bytes = sgl::check::save_link_artifact(made.value(), base, artifact_key); bytes.has_value())
-                        g_artifacts.lock([&](artifact_shelf& s)
-                                         { s.made.push_back({.key = artifact_key, .bytes = cc::move(bytes.value())}); });
+                        g_artifacts.lock(
+                            [&](artifact_shelf& s)
+                            {
+                                // a host that never takes them keeps the newest few
+                                if (s.made.size() >= k_max_offered)
+                                    s.made.remove_at(0);
+                                s.made.push_back({.key = artifact_key, .bytes = cc::move(bytes.value())});
+                            });
             }
             if (!made.has_value())
                 return {};

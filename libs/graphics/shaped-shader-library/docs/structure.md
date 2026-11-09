@@ -128,6 +128,11 @@ The shape the seam is built for, and what is still `[planned]`:
   **Neither fingerprint covers clean-core**, though it shapes the text too: SGL writes its numeric literals through `cc::to_string`.
   So a clean-core change that alters SGL's output needs `SC_SG_COLD=shaders`, or a wiped cache, before a run shows it.
   `SC_SG_COLD=shaders` turns the persistent tier off as it does DXC's.
+  **The same store can keep SGL's checked modules**, under `sgl_compiler_options::keeps_module_artifacts`, which is off.
+  Then a process loads each module's checked layer rather than checking it, where the modules it uses keep their interfaces.
+  A compile reads nothing but its arguments, so the library fetches the modules' artifacts ahead of it: adding a package, a module directory or an SGL compiler starts the fetch.
+  `shader_library::prefetch_modules` is the same fetch as something to await, so the process's first compiles find them; a compile that comes first checks its modules.
+  What a compile checked rather than loaded is put into the store after it.
   It is off on wasm and under `SC_THREADS=OFF` as well: a lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
   A failed preprocess is never stored.
   **A stored result keeps SGL's warnings**, so a hit is not silent where the miss warned.

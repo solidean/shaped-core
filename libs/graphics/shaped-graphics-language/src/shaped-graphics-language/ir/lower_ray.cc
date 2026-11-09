@@ -133,7 +133,7 @@ void lowering::trace_ray(flat_call const& c)
     if (!trace_operands(arguments, storage::ray_output, operands))
         return;
     add(op::trace_ray, type_ref::none, operands);
-    handed_back(arguments[10], value_ref(operands[10]));
+    handed_back(arguments[arguments.size() - 1], value_ref(operands[10]));
 }
 
 value_ref lowering::hit_object_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record)
