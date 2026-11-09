@@ -107,6 +107,7 @@ To uninstall, delete the link and reload.
 ### The formatter
 
 `sgl format FILE…` writes SGL's spacing into each file in place; `--check` changes nothing and exits 2 where a file would change.
+`dev.py check` holds every tracked `.sgl` file to it through the `sgl-format` gate, which `--fix` formats.
 It is the spacing within a line: one space where tokens stand apart, a space after a comma and a colon, around an arrow and around a binary operator, none inside brackets or before a comma or a colon.
 So a type is `name: type` everywhere, `let x: T = …` included.
 The trailing comments of consecutive lines line up one space past the longest code, unless that moves a comment more than 16 columns, which starts a new run.

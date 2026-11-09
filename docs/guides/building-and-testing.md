@@ -515,6 +515,7 @@ Registered checks (`check --list` shows what each watches); the fixers run in th
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
 | `abspaths`   | No compile definition or generated source of the default preset's build carries an absolute source or build path ([where a binary finds the source tree](#where-a-binary-finds-the-source-tree)). Known exceptions name their issue in [abspaths.py](../../tools/dev/lib/quality/abspaths.py). | no (report only) |
 | `sgl-prelude`| SGL's committed `prelude/builtins.sgl` and slib's `impl/pipeline_fields.hh` are what `sgl` generates. Builds the `sgl` tool. | yes (rewrites the files) |
+| `sgl-format`| Every tracked `.sgl` file is what `sgl format` writes; a block around a syntax error passes as written. Builds the `sgl` tool. | yes (formats the files) |
 | `sgl-native-size` | SGL's own SPIR-V and DXIL of the repo's shaders stay within 2% of the committed baseline in operations ([native-parity](../../libs/graphics/shaped-graphics-language/docs/native-parity.md#how-to-measure)). Builds the `sgl` tool; DXIL is counted where DXC is fetched. | no (report only) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
 
@@ -587,11 +588,12 @@ The step runs the generator with `--check`, or `--write` under `--fix`, and pass
 The generator formats its own output with it, so a regenerated file is already what `format` would leave, and standing ahead of `format` is the ordinary place for a fixer.
 [its docstring](../../libs/base/typed-geometry/tools/gen-fixed-int.py) has the rule that picks what is generated.
 
-**`sgl-prelude` needs the `sgl` tool, and it is the one fixer that stands behind `format`.**
+**`sgl-prelude` and `sgl-format` need the `sgl` tool, and they are the fixers that stand behind `format`.**
 SGL's builtins live in a C++ registry, and `libs/graphics/shaped-graphics-language/prelude/builtins.sgl` is that registry written out and committed.
 slib's `libs/graphics/shaped-shader-library/src/shaped-shader-library/impl/pipeline_fields.hh` is the prelude's mirror of sg's raster pipeline description, written out the same way.
 The step declares `sgl` in `builds` and runs `sgl prelude --check` and `sgl pipeline-fields --check` on the two files; under `--fix` it runs `--write` instead.
 Standing behind `format` breaks nothing: `builtins.sgl` is SGL, which no other gate reads, and the C++ file opens with `// clang-format off`, so the ordering argument above does not reach either.
+`sgl-format` runs `sgl format --check` over every tracked `.sgl` file, and `sgl format` under `--fix`; what it writes is SGL too, and the prelude it may follow is already a fixpoint of it.
 Where the tool cannot be built — `SC_BUILD_TOOLS` off, or an emscripten preset — the step says so and passes, and the library's own test still compares the two texts.
 [adding-a-builtin.md](../../libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md) is what the registry is.
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -315,6 +316,51 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ok = False
         return ok
 
+    def check_sgl_format(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # Every tracked .sgl file is what `sgl format` writes; --fix formats them in place.
+        # The tool is the formatter itself, so the gate cannot disagree with Format Document in the editor.
+        # Repo-wide, since a formatter change reaches files nobody touched; 250 files take well under a second.
+        # A block around a syntax error is left as written by the tool, and passes: a corpus file may hold one on purpose.
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        preset = presets[0]
+        has_tool = any(t.name == "sgl" and t.kind == "EXECUTABLE" for t in ctx.discover(preset))
+        if not has_tool or preset.is_emscripten:
+            reason = "is an emscripten preset" if has_tool else "has no `sgl` target (SC_BUILD_TOOLS is off)"
+            dev.ui.write_line(f"sgl-format: skipped -- preset {preset.name!r} {reason}")
+            return True
+        artifact = next((t.artifact for t in ctx.discover(preset) if t.name == "sgl" and t.artifact), None)
+        if artifact is None:
+            dev.ui.write_line(console.red(f"sgl-format: target 'sgl' has no built artifact for preset {preset.name!r}"))
+            return False
+
+        listed = subprocess.run(["git", "ls-files", "*.sgl"], cwd=ctx.root, capture_output=True, text=True, check=False)
+        if listed.returncode != 0:
+            dev.ui.write_line(console.red(f"sgl-format: git ls-files failed: {listed.stderr.strip()}"))
+            return False
+        files = [f for f in listed.stdout.splitlines() if f]
+
+        # in batches, which keep each command line well inside Windows' limit
+        ok = True
+        batch = 80
+        for start in range(0, len(files), batch):
+            result = dev.run_step(
+                [str(artifact), "format", *([] if fix else ["--check"]), *files[start:start + batch]],
+                step_type="lint", name=f"sgl-format-{start // batch}",
+                build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            if result.ok:
+                continue
+            for log in (result.stdout_log, result.stderr_log):
+                text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                if text and not mirror:
+                    dev.ui.write_line(text)
+            ok = False
+        if ok:
+            dev.ui.write_line(f"sgl-format: {len(files)} .sgl file(s) {'formatted' if fix else 'are formatted'}")
+        else:
+            dev.ui.write_line(console.red("sgl-format: run `uv run dev.py check sgl-format --fix` to format them"))
+        return ok
+
     def check_sgl_native_size(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # SGL's own SPIR-V and DXIL of the repo's real shaders, counted in operations against a committed baseline.
         # A change that grows an entry past it fails here, before a benchmark would notice; libs/graphics/shaped-graphics-language/docs/native-parity.md says why size is a lead.
@@ -582,6 +628,12 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   True, check_sgl_prelude,
                   watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-shader-library/**",
                            "libs/graphics/shaped-graphics/**"),
+                  builds=("sgl",)),
+        dev.Check("sgl-format",
+                  "every tracked .sgl file is what `sgl format` writes (--fix formats them)",
+                  True, check_sgl_format,
+                  watches=("**/*.sgl", "libs/graphics/shaped-graphics-language/src/shaped-graphics-language/driver/format.*",
+                           "libs/graphics/shaped-graphics-language/tools/sgl/format_command.cc"),
                   builds=("sgl",)),
         dev.Check("sgl-native-size",
                   "SGL's own SPIR-V and DXIL of the repo's shaders stay within 2% of native-size-baseline.json, in operations",
