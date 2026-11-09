@@ -3,6 +3,8 @@ created: 2026-11-03
 tags: [metal]
 refs:
   - file: libs/graphics/shaped-viewer/tests/metal-entry.cc:30
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-09T14:47Z
 ---
 
 # sv's metal tests lose the device once in a sanitized check on an M4
