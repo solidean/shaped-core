@@ -263,6 +263,27 @@ bool sgl::check::reaches_the_same_modules(checked_prelude const& layer,
         && plan_matches(plan_modules(library, program), layer._library_order, layer._modules);
 }
 
+bool sgl::check::layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options)
+{
+    if (options.empty())
+        return true;
+    // An option is the const whose value the compile sets, which is how its own constant names it.
+    // A module's is set as `module.name`, named here by its file's module: a layer has no program to be foreign to.
+    auto const& out = layer._state->out;
+    for (auto s = isize(0); s < out.symbols.size(); ++s)
+    {
+        auto const& symbol = out.symbols[s];
+        if (symbol.kind != symbol_kind::constant || out.constants[symbol.info].option != symbol_id(s)
+            || symbol.file < layer._prelude_count || symbol.file >= i32(out.file_modules.size()))
+            continue;
+        auto const name = cc::format("{}.{}", out.file_modules[symbol.file], symbol.name);
+        for (auto const& given : options)
+            if (given.name == name)
+                return false;
+    }
+    return true;
+}
+
 checked_module sgl::check::check(checked_prelude const& prelude,
                                  cc::span<module_file const> library,
                                  module_file program,
@@ -274,6 +295,7 @@ checked_module sgl::check::check(checked_prelude const& prelude,
                      library, program);
     CC_ASSERT(prelude._library_order.empty() || plan_matches(planned.plan, prelude._library_order, prelude._modules),
               "a program continues from a layer of modules only where it reaches exactly those");
+    CC_ASSERT(layer_serves_options(prelude, options), "a compile that sets a layered module's option checks it itself");
     auto c = *prelude._state;
     c.files = planned.files;
     apply_plan(c, planned.plan, prelude._prelude_count);

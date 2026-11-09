@@ -94,6 +94,8 @@ sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file co
 sgl::prelude_file_of(path)                 // -> i32: which prelude file a path or file:// uri is, else -1; only a file in
                                            // a shaped-graphics-language/prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
+sgl::check::layer_serves_options(layer, options)  // -> bool: false where an option names a layered module's own,
+                                           // which the layer checked at its default: check beside the library instead
 
 #include <shaped-graphics-language/check/artifact.hh>
 sgl::check::save_artifact(layer, key)      // -> optional<vector<byte>>: the prelude's layer or one of modules as bytes

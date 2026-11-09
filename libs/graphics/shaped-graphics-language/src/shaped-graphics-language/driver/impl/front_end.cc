@@ -195,7 +195,8 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     auto const* const checked = own >= 0 ? nullptr : checked_prelude();
 
     // Behind the checked prelude, the library is parsed once for the process, and its modules are checked once per set
-    // of them a program reaches: `check_modules` makes that layer, and a compile that sets options checks them itself.
+    // of them a program reaches: `check_modules` makes that layer, and a compile that sets one of their options checks
+    // them itself.
     auto library_files = cc::vector<check::module_file>();
     auto library_names = cc::vector<cc::string_view>();
     CC_RECORD_SCOPE_BEGIN("sgl.parse");
@@ -206,8 +207,9 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
         library_files = shared_library->files;
         for (auto const& name : shared_library->names)
             library_names.push_back(name);
-        if (options.empty())
-            result.layer = layer_of(*shared_library, *checked, user);
+        if (auto layer = layer_of(*shared_library, *checked, user);
+            layer != nullptr && check::layer_serves_options(*layer, options))
+            result.layer = cc::move(layer);
         result.library = cc::move(shared_library);
     }
     else

@@ -182,6 +182,10 @@ The files are parsed from source, since the flat trees read the AST: a parse rea
 * A compile that sets options checks again, from source and in its own layer, exactly the declarations that reach an option it sets; those shadow the artifact's.
 * So every permutation slib compiles shares one artifact per module, and each pays only for what its options change.
 
+*A first form landed on 2026-11-09:* a compile that sets only its own program's options continues from its modules' layer (`check::layer_serves_options`).
+No module sees its program, so those options change nothing the layer checked; one that sets a module's option still checks every module itself.
+Every module in the tree declares no option today, so this first form is all a compile here needs.
+
 Two artifacts pay for themselves first:
 
 * **The prelude's**, so a process starts without parsing or checking it.
@@ -226,7 +230,9 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    shaped-viewer's tracer pipeline: its modules' layer is a 3.9 ms load against a 16 ms check, and a whole `sgl describe` fell from about 120 to 90 ms.
    No process keeps it since 2026-11-09 (see [artifacts](#artifacts)).
    What it does not do is share one module between two sets, or cut a dependent off from an edit of a body: imports and relocation are those.
-6. **Option overlays**, so a compile that sets options continues from the artifacts too.
+6. **Option overlays**, so a compile that sets options continues from its modules' layers too.
+   *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layer, which is every compile in the tree.
+   What is left is a module's own option, which re-checks only the declarations that reach it.
 7. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
 
 ### Open in this design

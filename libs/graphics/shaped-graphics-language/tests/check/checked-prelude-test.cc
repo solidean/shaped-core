@@ -464,3 +464,45 @@ TEST("sgl modules artifact - one module's source changed is a miss, and so is a 
     }
     FAIL("no corpus file reaches a module");
 }
+
+TEST("sgl checked modules - a compile that sets its own options continues from its modules' layer, one that sets "
+     "theirs does not")
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const module_file = sgl::parse("module tuned\n"
+                                        "@option const width = 2\n"
+                                        "fun scale(x: float) -> float => x * (width as float)\n");
+    auto const module_ast = sgl::ast::build(module_file);
+    auto const library = cc::vector<sgl::check::module_file>{{.file = module_file, .ast = module_ast}};
+    auto const program_file = sgl::parse("use tuned\n"
+                                         "@option const taps = 4\n"
+                                         "fun spread() -> float[taps] => float[taps].filled(tuned.scale(1.0))\n"
+                                         "test spread().length == taps and spread()[0] == 2.0\n");
+    auto const program_ast = sgl::ast::build(program_file);
+    auto const user = sgl::check::module_file{.file = program_file, .ast = program_ast};
+
+    auto const layer = sgl::check::check_modules(*checked, library, user);
+    REQUIRE(layer.has_value());
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto const& f : sgl::parsed_prelude())
+        files.push_back({.file = f.file, .ast = f.ast});
+    files.push_back(library[0]);
+    files.push_back(user);
+
+    // the program's own options, a name no option has, and one given twice: behind the layer as beside it
+    using options = cc::vector<sgl::check::option_value>;
+    for (auto const& set : {options{{.name = "taps", .value = "3"}}, options{{.name = "nope", .value = "1"}},
+                            options{{.name = "taps", .value = "3"}, {.name = "taps", .value = "5"}}})
+    {
+        CHECK(sgl::check::layer_serves_options(layer.value(), set));
+        auto const beside = sgl::check::check(*checked, library, user, set);
+        auto const behind = sgl::check::check(layer.value(), library, user, set);
+        CHECK(observed(behind, files) == observed(beside, files));
+        CHECK(behind.diagnostics.size() == beside.diagnostics.size());
+    }
+    // a module's option was checked at its default in the layer, so setting it takes the whole check
+    CHECK(!sgl::check::layer_serves_options(layer.value(), options{{.name = "tuned.width", .value = "3"}}));
+    CHECK(!sgl::check::layer_serves_options(
+        layer.value(), options{{.name = "taps", .value = "3"}, {.name = "tuned.width", .value = "3"}}));
+}

@@ -88,11 +88,16 @@ namespace sgl::check
 /// The prelude and the library modules `program` reaches, checked once as one layer behind `prelude`, for every program
 /// that reaches the same ones: the compilation model's checked layers, with the modules a program uses as one layer.
 /// None where the module plan or the modules report anything, so a caller falls back to `check` with the library.
-/// The layer is the modules' check with no options given; a compile that sets options does not continue from it.
+/// The layer is the modules' check with no options given, so a compile that sets an option of one of its modules does
+/// not continue from it; one that sets only its own program's options does (`layer_serves_options`).
 /// `library` and `prelude` must outlive the result, and a program continues from it with the same `library`.
 [[nodiscard]] cc::optional<checked_prelude> check_modules(checked_prelude const& prelude,
                                                           cc::span<module_file const> library,
                                                           module_file program);
+
+/// Whether a compile setting `options` may continue from `layer`: none of them names an option of the layer's modules.
+/// A program's own options change nothing a layer of modules checked, since no module sees its program.
+[[nodiscard]] bool layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options);
 
 /// Whether `program` reaches modules of `library` that `check_modules` may make a layer of: some, cleanly, and none of
 /// them the program's own module.
@@ -162,6 +167,7 @@ private:
     friend cc::optional<checked_prelude> check_modules(checked_prelude const& prelude,
                                                        cc::span<module_file const> library,
                                                        module_file program);
+    friend bool layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options);
     friend bool reaches_the_same_modules(checked_prelude const& layer,
                                          cc::span<module_file const> library,
                                          module_file program);
