@@ -13,7 +13,7 @@ binding placing:
     points: mut buffer[float4]
     written: mut buffer[affine3]
 
-@compute(4) fun place(@thread_id id: int3){placing}:
+@compute fun place(@thread_id id: int3){placing}:
     let i = id.x
     let a = placing.xfs[i]
     let b = placing.items[i].xf
