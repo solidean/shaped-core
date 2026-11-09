@@ -369,6 +369,7 @@ struct located_diagnostic;
 struct checked_module;
 struct module_file;
 struct chained_module;
+struct moved_link;
 struct checked_prelude;
 template <class T>
 class layered;

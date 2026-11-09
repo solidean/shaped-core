@@ -26,6 +26,8 @@ struct sgl::shared_library
     /// One layer of the library's chain of modules, and what it reads: the links before it, and its own files.
     struct chain_link
     {
+        /// The module the link adds; empty for a layer of the modules a program reaches, which is no chain's.
+        cc::string module;
         cc::shared_ptr<check::checked_prelude const> layer;
         cc::shared_ptr<chain_link const> before;
         cc::vector<cc::shared_ptr<parsed_unit const>> units;
@@ -40,6 +42,8 @@ struct sgl::shared_library
     /// where none does: what is being edited, whose modules its chain puts as late as the modules using them allow.
     /// So every keystroke in a module after the first checks it and the modules using it again, and nothing else.
     cc::vector<i32> late_files;
+    /// The library made before it under the same names, whose chain an edit's links are relocated from.
+    cc::weak_ptr<shared_library const> previous;
 
     struct layers
     {

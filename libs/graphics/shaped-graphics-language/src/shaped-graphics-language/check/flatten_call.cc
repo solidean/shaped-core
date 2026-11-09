@@ -621,6 +621,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
         bindings.push_back(concrete(type_arguments[i + 1]));
     }
     judge_stage(call, callee);
+    c.note_body_read(callee);
     auto const& s = c.out.at(callee);
     auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
     for (auto const& f : frames)

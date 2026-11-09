@@ -93,8 +93,7 @@ On a Ryzen 9 7950X3D, release build:
 On a Ryzen 9 9950X3D2, release build, 2026-11-09:
 
 * **A keystroke in shaped-viewer's `tracer_pipeline.sgl`** is a 3.6 ms analysis: the module directories read, and the document checked behind its modules' layer.
-  A keystroke in a module it uses checks that module and the ones after it in the library's chain again: 6.0 ms in its last, 27.8 ms in its first, `scene`, which most modules use.
-  The chain puts a module being edited as late as the modules using it allow, so that is what every keystroke after the first pays.
+  A keystroke in a module it uses checks that module again, and relocates the ones after it in the library's chain where its interface stands: 6.1 ms in its last, 13.3 ms in its first, `scene`.
 * **A test that runs to its fuel limit**, a million steps, takes 57 ms; that is what made the interpreter read the stop flag itself.
 
 `uv run dev.py benchmark "sgl lsp"` reproduces both.
@@ -129,8 +128,8 @@ Recorded so they are not re-derived:
   An edit to an open module file, and its opening and closing, checks every other open document again.
   A relative directory is resolved against the first workspace folder only, which leaves a multi-root workspace and per-folder settings open.
   An error in a module a document reaches is shown once, on the document's `use` of that module, with the module's own location beside it.
-* **An edit of a module file checks every module after it in the chain again**, whether or not its interface changed.
-  Early cutoff would cut that ([the compilation model](spec/incubator/compilation-model.md#separate-compilation-checked-layers)).
+* **An edit that changes what a module declares checks every module after it that names anything of it again**, its unchanged part included.
+  Keeping what did not change is the next cut ([the compilation model](spec/incubator/compilation-model.md#separate-compilation-checked-layers)).
 * **Completion from the last analysis that checked**, so `x.` completes `x` by its checked type even where the line under edit breaks its function's check.
   Today the name is looked up again by its text, which knows locals, parameters and module-level names, and not `a.b.` chains.
 * **Occurrences from an index**: `occurrences_at` resolves every name of the right text, which is fine at a document's size and would want an index across many modules.

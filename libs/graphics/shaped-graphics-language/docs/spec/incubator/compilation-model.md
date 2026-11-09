@@ -67,7 +67,7 @@ That needs no multi-file compilation.
 
 ## Separate compilation: checked layers
 
-*Decided with the maintainer on 2026-11-08, and its remaining steps on 2026-11-09; steps 1 to 6 are built in a first form, the rest is not.*
+*Decided with the maintainer on 2026-11-08, and its remaining steps on 2026-11-09; steps 1 to 8 are built in a first form, the rest is not.*
 
 ### What it costs today
 
@@ -263,6 +263,15 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
 7. **Early cutoff, through relocation.** A layer splits into its interface and its bodies, and a dependent's layer names its imports' interfaces.
    An edit that leaves a module's interface alone relocates the layers after it onto the new one rather than checking them again.
    That is the import table and the relocation pass of [ids](#ids), and what a dependent's key is made of.
+   *Landed on 2026-11-09, in the chain's terms:* `check::relocate_link` moves a link checked over the old links onto the new ones.
+   A link's part of every list is contiguous, so an id below the first changed part stays, and one in a moved part moves with it.
+   A link's interface is its part once every signature and default is checked, before any body: a watermark, hashed with no place in a file in it.
+   An id into what a changed link no longer holds refuses, and so does a link that inlined or instantiated a changed link's function (`bodies_read`).
+   So does an entry a fresh check would have found in the new link instead, an interned type the new link holds under the same spelling.
+   A link checked again into what it was, positions aside, keeps every entry, so one refusal does not cascade.
+   A test holds every relocated link to the very bytes a fresh check writes, over shaped-viewer's modules and a library made to refuse, past three kinds of edit.
+   shaped-viewer: past an edit of `scene` that keeps its interface, the 9 links after it relocate in 3.7 ms where checking them took 23 ms; a keystroke there is a 13.3 ms analysis, against 27.8 ms.
+   What it does not do yet: keep the part of a changed interface that did not change, relocate a chain checked with a module's option, or move a link without copying the tables below it.
 8. **Options as a second layer** (see [artifacts](#artifacts)): a compile that sets a module's option checks only what reaches it.
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers, which is every compile in the tree.
    *A second, on 2026-11-09, in the chain's terms:* a link is checked with the values a compile gives its own module's options, and they are part of its key.

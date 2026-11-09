@@ -104,6 +104,12 @@ sgl::check::check_next_module(base, library, name, options = {})  // -> optional
                                            // over the prelude's layer or the link before; a program reaching only its
                                            // modules continues it; `options`: the values for name's own options alone
 sgl::check::options_of_module(options, name)  // -> vector<option_value>: those named `name.x`, in the order given
+sgl::check::relocate_link(link, moved)     // -> optional<checked_prelude>: `link` moved past an edit without checking it,
+                                           // `moved` = moved_link{before, after} for every link from the first changed
+                                           // one to link's base; none where a fresh check could differ: check it then
+layer.is_relocated()                       // -> bool: relocate_link made it
+sgl::check::layer_difference(a, b)         // -> string: the field path where two layers' states first differ, "" if
+                                           // none; what a test or a debugger names a relocation's mistake by
 sgl::check::may_continue_from(layer, library, program)  // -> bool: a layer of its very modules, or the library's
 m.is_reached_file(file)                    // -> bool: false for a module the program does not use, which a layer of the
                                            // whole library holds; ASK IT in any pass over every symbol or pipeline

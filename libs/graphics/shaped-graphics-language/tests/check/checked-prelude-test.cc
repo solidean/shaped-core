@@ -834,6 +834,201 @@ TEST("sgl checked modules - behind a layer of the whole library a program checks
 
 // What checking every module once saves a process against checking each set of modules a program reaches.
 // Manual, since it measures rather than asserts: `uv run dev.py test "sgl checked modules - shaped-viewer" --manual`.
+namespace
+{
+/// `source` with a comment line behind its `module` line: every place in the file moves, and nothing it declares.
+cc::string with_comment_line(cc::string_view source)
+{
+    auto const at = source.find("module ");
+    auto const end = at < 0 ? isize(0) : source.subview(at).find('\n');
+    auto const split = at < 0 || end < 0 ? isize(0) : at + end + 1;
+    return cc::format("{}// moved by an edit\n{}", source.subview({.start = 0, .end = split}), source.subview(split));
+}
+
+/// `source` with the first float literal of an arrow body that states its result type made another value of the type:
+/// the body changes, and nothing a user of the module sees; `source` itself where it has no such literal.
+cc::string with_body_literal_changed(cc::string_view source)
+{
+    for (auto line_start = isize(0); line_start < source.size();)
+    {
+        auto line_end = source.subview(line_start).find('\n');
+        line_end = line_end < 0 ? source.size() : line_start + line_end;
+        auto const line = source.subview({.start = line_start, .end = line_end});
+        auto const arrow = line.find("=> ");
+        if (line.find(" -> ") >= 0 && arrow >= 0 && line.find("//") < 0)
+            for (auto i = arrow; i + 2 < line.size(); ++i)
+                if (line[i] >= '0' && line[i] <= '9' && line[i + 1] == '.' && line[i + 2] >= '0' && line[i + 2] <= '9'
+                    && (i == 0 || !(line[i - 1] >= 'a' && line[i - 1] <= 'z')))
+                {
+                    auto end = i + 2;
+                    while (end < line.size() && line[end] >= '0' && line[end] <= '9')
+                        ++end;
+                    auto const at = line_start + end;
+                    return cc::format("{}1{}", source.subview({.start = 0, .end = at}), source.subview(at));
+                }
+        line_start = line_end + 1;
+    }
+    return cc::string(source);
+}
+
+/// `source` with a function more at its end: what the module declares changes, so no user of it moves past the edit.
+cc::string with_function_added(cc::string_view source)
+{
+    return cc::format("{}\nfun added_by_an_edit() -> int => 1\n", source);
+}
+
+/// Where `a` and `b` first differ, -1 where they do not.
+isize first_difference(cc::span<sgl::byte const> a, cc::span<sgl::byte const> b)
+{
+    for (auto i = isize(0); i < a.size() && i < b.size(); ++i)
+        if (a[i] != b[i])
+            return i;
+    return a.size() == b.size() ? -1 : cc::min(a.size(), b.size());
+}
+} // namespace
+
+namespace
+{
+/// Every module of `library` edited three ways, and every link after it relocated past the edit where it may be: each
+/// one must be the very link a fresh check makes over the edited one, byte for byte as an artifact writes it.
+/// The chain is the links that build; a module that reports ends it, since nothing is relocated past what failed.
+void check_relocations(cc::span<sgl::check::module_file const> library, bool expects_relocation)
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto order = sgl::check::library_chain(library);
+    REQUIRE(!order.empty());
+
+    // the chain before any edit, of the modules that check: one that reports is left out, and so is one using it
+    auto before = cc::vector<sgl::check::checked_prelude>();
+    auto kept = cc::vector<sgl::check::chained_module>();
+    for (auto const& module : order)
+    {
+        auto next = sgl::check::check_next_module(before.empty() ? *checked : before.back(), library, module.name);
+        if (!next.has_value())
+            continue;
+        before.push_back(cc::move(next.value()));
+        kept.push_back(module);
+    }
+    order = cc::move(kept);
+    cc::println("{} of the library's modules make a chain", order.size());
+
+    using edit_fn = cc::string (*)(cc::string_view);
+    struct edit
+    {
+        char const* name;
+        edit_fn apply;
+        bool keeps_interface;
+    };
+    auto const edits = cc::vector<edit>{
+        {.name = "a comment line", .apply = &with_comment_line, .keeps_interface = true},
+        {.name = "a body's literal", .apply = &with_body_literal_changed, .keeps_interface = true},
+        {.name = "a function added", .apply = &with_function_added, .keeps_interface = false},
+    };
+    for (auto const& e : edits)
+    {
+        auto relocated = 0;
+        auto refused = 0;
+        for (auto k = isize(0); k < order.size(); ++k)
+        {
+            // the edited library: module k's files with a comment line each
+            auto edited_parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
+            auto edited_built = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
+            auto files = cc::vector<sgl::check::module_file>();
+            for (auto i = isize(0); i < library.size(); ++i)
+            {
+                auto is_edited = false;
+                for (auto const e : order[k].files)
+                    is_edited = is_edited || e == i;
+                if (!is_edited)
+                {
+                    files.push_back(library[i]);
+                    continue;
+                }
+                edited_parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(e.apply(library[i].file.source))));
+                edited_built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*edited_parsed.back())));
+                files.push_back({.file = *edited_parsed.back(), .ast = *edited_built.back()});
+            }
+
+            auto after = cc::vector<sgl::check::checked_prelude>();
+            auto const base_of = [&](isize j) -> sgl::check::checked_prelude const&
+            {
+                if (j == 0)
+                    return *checked;
+                return j - 1 < k ? before[j - 1] : after[j - 1 - k];
+            };
+            auto edited = sgl::check::check_next_module(base_of(k), files, order[k].name);
+            // a literal changed may break what the module checks, which leaves nothing to relocate onto
+            if (!edited.has_value())
+                continue;
+            after.push_back(cc::move(edited.value()));
+            for (auto j = k + 1; j < order.size(); ++j)
+            {
+                auto moved = cc::vector<sgl::check::moved_link>();
+                for (auto i = k; i < j; ++i)
+                    moved.push_back({.before = &before[i], .after = &after[i - k]});
+                auto fresh = sgl::check::check_next_module(base_of(j), files, order[j].name);
+                // an interface changed may break a module using it, after which nothing is relocated
+                if (!fresh.has_value())
+                    break;
+                auto moved_link = sgl::check::relocate_link(before[j], moved);
+                if (!moved_link.has_value())
+                {
+                    ++refused;
+                    after.push_back(cc::move(fresh.value()));
+                    continue;
+                }
+                ++relocated;
+                auto const fresh_bytes = sgl::check::save_artifact(fresh.value(), "oracle");
+                auto const moved_bytes = sgl::check::save_artifact(moved_link.value(), "oracle");
+                REQUIRE(fresh_bytes.has_value());
+                REQUIRE(moved_bytes.has_value());
+                auto const at = first_difference(fresh_bytes.value(), moved_bytes.value());
+                if (at >= 0)
+                    FAIL(cc::format("{} relocated past {} in {} differs from its fresh check at byte {} of {}: {}",
+                                    order[j].name, e.name, order[k].name, at, fresh_bytes.value().size(),
+                                    sgl::check::layer_difference(fresh.value(), moved_link.value())));
+                after.push_back(cc::move(moved_link.value()));
+            }
+        }
+        cc::println("{}: relocated {}, checked again {}", e.name, relocated, refused);
+        CHECK((e.keeps_interface && expects_relocation ? relocated > 0 : true));
+    }
+}
+} // namespace
+
+TEST("sgl checked modules - a link relocated past an edit of a module is the link a fresh check makes there")
+{
+    check_relocations(viewer_modules().files, true);
+}
+
+TEST("sgl checked modules - a link that instantiates, evaluates or inlines an edited module's function is checked "
+     "again, and every other one relocated is a fresh check's")
+{
+    // a generic and a template a later module instantiates, a function a const evaluates, and one a test inlines
+    auto const sources = cc::vector<cc::string>{
+        "module base\n\nstruct box[T = float]:\n    value: T\n\nfun twice[T](x: T) -> T => x + x\n"
+        "fun scale(x: float) -> float => x * 2.0\nfun sum_to(n: int) -> int => n * (n + 1) / 2\n\n"
+        "test scale(1.0) == 2.0\n",
+        "module mid\n\nuse base\n\nfun boxed(x: float) -> float => base.box(value = x).value\n"
+        "fun doubled(x: float) -> float => base.twice(x)\nconst triangle = base.sum_to(4)\n\n"
+        "test base.scale(2.0) == 4.0\n",
+        "module other\n\nfun half(x: float) -> float => x * 0.5\n",
+        "module top\n\nuse mid\nuse other\n\nfun both(x: float) -> float => mid.doubled(x) + other.half(x)\n",
+    };
+    auto parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
+    auto built = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
+    auto library = cc::vector<sgl::check::module_file>();
+    for (auto const& source : sources)
+    {
+        parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(source)));
+        built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*parsed.back())));
+        library.push_back({.file = *parsed.back(), .ast = *built.back()});
+    }
+    REQUIRE(sgl::check::check_library(*sgl::checked_prelude(), library).has_value());
+    check_relocations(library, true);
+}
+
 TEST("sgl checked modules - shaped-viewer's sets of modules, checked each, against every module checked once",
      nx::config::manual)
 {
@@ -933,4 +1128,90 @@ TEST("sgl checked modules - shaped-viewer's chain of module layers, and what an 
         edited += suffix;
     }
     cc::println("an edit of a module placed late, on average: {:.1f} ms", edited / double(order.size()) * 1000);
+
+    // An edit of the first module that changes none of what it declares: it is checked again, and the links after it
+    // relocated rather than checked.
+    auto chain = cc::vector<sgl::check::checked_prelude>();
+    for (auto const& module : order)
+    {
+        auto next = sgl::check::check_next_module(chain.empty() ? *checked : chain.back(), library.files, module.name);
+        REQUIRE(next.has_value());
+        chain.push_back(cc::move(next.value()));
+    }
+    auto edited_parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
+    auto edited_built = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < library.files.size(); ++i)
+    {
+        auto is_edited = false;
+        for (auto const e : order[0].files)
+            is_edited = is_edited || e == i;
+        if (!is_edited)
+        {
+            files.push_back(library.files[i]);
+            continue;
+        }
+        edited_parsed.push_back(
+            cc::make_unique<sgl::parsed_file>(sgl::parse(with_comment_line(library.files[i].file.source))));
+        edited_built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*edited_parsed.back())));
+        files.push_back({.file = *edited_parsed.back(), .ast = *edited_built.back()});
+    }
+    auto moved_chain = cc::vector<sgl::check::checked_prelude>();
+    auto started = cc::current_time_steady_secs();
+    auto first = sgl::check::check_next_module(*checked, files, order[0].name);
+    REQUIRE(first.has_value());
+    moved_chain.push_back(cc::move(first.value()));
+    auto const checked_secs = cc::current_time_steady_secs() - started;
+    auto relocated_secs = 0.0;
+    for (auto j = isize(1); j < order.size(); ++j)
+    {
+        auto moved = cc::vector<sgl::check::moved_link>();
+        for (auto i = isize(0); i < j; ++i)
+            moved.push_back({.before = &chain[i], .after = &moved_chain[i]});
+        started = cc::current_time_steady_secs();
+        auto next = sgl::check::relocate_link(chain[j], moved);
+        relocated_secs += cc::current_time_steady_secs() - started;
+        REQUIRE(next.has_value());
+        moved_chain.push_back(cc::move(next.value()));
+    }
+    cc::println("an edit of {} that keeps its interface: {:.1f} ms checking it, {:.1f} ms relocating the {} after it",
+                order[0].name, checked_secs * 1000, relocated_secs * 1000, order.size() - 1);
+}
+
+TEST("sgl checked modules - relocating shaped-viewer's chain past an edit of its first module, many times over",
+     nx::config::manual)
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const& library = viewer_modules();
+    auto const order = sgl::check::library_chain(library.files);
+    auto chain = cc::vector<sgl::check::checked_prelude>();
+    for (auto const& module : order)
+    {
+        auto next = sgl::check::check_next_module(chain.empty() ? *checked : chain.back(), library.files, module.name);
+        REQUIRE(next.has_value());
+        chain.push_back(cc::move(next.value()));
+    }
+    auto edited = sgl::check::check_next_module(*checked, library.files, order[0].name);
+    REQUIRE(edited.has_value());
+    auto const started = cc::current_time_steady_secs();
+    for (auto round = 0; round < 40; ++round)
+    {
+        auto moved_chain = cc::vector<sgl::check::checked_prelude const*>();
+        auto kept = cc::vector<sgl::check::checked_prelude>();
+        kept.reserve(order.size());
+        moved_chain.push_back(&edited.value());
+        for (auto j = isize(1); j < order.size(); ++j)
+        {
+            auto moved = cc::vector<sgl::check::moved_link>();
+            for (auto i = isize(0); i < j; ++i)
+                moved.push_back({.before = &chain[i], .after = moved_chain[i]});
+            auto next = sgl::check::relocate_link(chain[j], moved);
+            REQUIRE(next.has_value());
+            kept.push_back(cc::move(next.value()));
+            moved_chain.push_back(&kept.back());
+        }
+    }
+    cc::println("relocating {} links: {:.2f} ms a round", order.size() - 1,
+                (cc::current_time_steady_secs() - started) * 1000 / 40);
 }
