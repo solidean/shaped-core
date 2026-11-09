@@ -134,7 +134,8 @@ void checker::judge_option_values()
         for (auto s = isize(0); s < out.symbols.size(); ++s)
         {
             auto const& symbol = out.symbols[s];
-            if (is_prelude_file(symbol.file) || symbol.kind != symbol_kind::constant || !ast::is_valid(symbol.declaration)
+            if (is_prelude_file(symbol.file) || !out.is_reached_file(symbol.file)
+                || symbol.kind != symbol_kind::constant || !ast::is_valid(symbol.declaration)
                 || find_attribute(symbol.file, ast_of(symbol.file).at(symbol.declaration).attributes, "option") == nullptr)
                 continue;
             auto const name = out.qualified_name_of(symbol_id(s));

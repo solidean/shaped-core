@@ -161,7 +161,8 @@ cc::optional<signature_help> sgl::signature_help_at(cc::span<check::module_file 
         for (auto i = isize(0); i < m.symbols.size(); ++i)
         {
             auto const& s = m.symbols[i];
-            if (s.kind != check::symbol_kind::function || s.name != name || !s.operator_spelling.empty())
+            if (s.kind != check::symbol_kind::function || s.name != name || !s.operator_spelling.empty()
+                || !m.is_reached_file(s.file))
                 continue;
             auto const is_constructor = s.role == check::function_role::constructor;
             if (check::is_valid(resolved) && !(is_constructor && s.owner == resolved))

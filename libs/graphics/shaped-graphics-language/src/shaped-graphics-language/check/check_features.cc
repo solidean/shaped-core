@@ -306,7 +306,7 @@ void checker::mark_requires_used(cc::span<symbol_id const> functions, feature_se
 void checker::report_unused_requires()
 {
     for (auto const& line : require_lines)
-        if (!line.is_used)
+        if (!line.is_used && out.is_reached_file(line.file))
             report(diagnostic_kind::unused_require, line.file, line.where,
                    cc::format("nothing in {} needs {} of it",
                               out.at(line.owner).name.empty() ? cc::string_view("the test")

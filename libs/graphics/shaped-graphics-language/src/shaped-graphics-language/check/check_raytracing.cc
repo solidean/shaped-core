@@ -873,7 +873,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
         {
             auto const table = symbol_id(i);
             auto const& t = out.at(table);
-            if (t.kind != symbol_kind::pipeline || !ast::is_valid(t.declaration)
+            if (t.kind != symbol_kind::pipeline || !ast::is_valid(t.declaration) || !out.is_reached_file(t.file)
                 || !ast_of(t.file).at(t.declaration).node.as<ast::pipeline_decl>().is_callables)
                 continue;
             if (demand(table, file, span_of(file, decl)) == symbol_state::checked)
@@ -1187,10 +1187,12 @@ void checker::judge_callables()
     // tables pack in declaration order, so a table the host appends to is the last one
     auto last = symbol_id::none;
     for (auto const& p : out.pipelines)
-        if (p.kind == pipeline_kind::callables && (!is_valid(last) || index_of(p.symbol) > index_of(last)))
+        if (p.kind == pipeline_kind::callables && out.is_reached_file(out.at(p.symbol).file)
+            && (!is_valid(last) || index_of(p.symbol) > index_of(last)))
             last = p.symbol;
     for (auto const& p : out.pipelines)
-        if (p.kind == pipeline_kind::callables && p.has_host_callables && p.symbol != last)
+        if (p.kind == pipeline_kind::callables && p.has_host_callables && p.symbol != last
+            && out.is_reached_file(out.at(p.symbol).file))
             report(diagnostic_kind::invalid_pipeline, out.at(p.symbol).file,
                    span_of(out.at(p.symbol).file, out.at(p.symbol).declaration),
                    cc::format("{} takes the host's callables, so it is the module's last callables table: the host's "

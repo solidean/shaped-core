@@ -280,8 +280,13 @@ struct sgl::check::checked_module
     /// How many of `files` are the prelude's.
     i32 prelude_files = 0;
     /// Parallel to the files between the prelude and the program: each one's position in the library `check` was given.
-    /// A library file no `use` reaches is not checked, and has no entry.
+    /// A library file no `use` reaches is not checked, and has no entry, unless the check continued from a layer of the
+    /// whole library (`check_library`), which holds every module.
     cc::vector<i32> library_files;
+    /// The library files the program reaches through `use`, as positions in the library, in the order they are checked.
+    /// What an edit of a library file changes the program for; it is `library_files` unless the check continued from a
+    /// layer of the whole library, whose other files are checked and are none of the program's.
+    cc::vector<i32> reached_library_files;
     /// Parallel to `files`: the module each file belongs to; empty for the prelude's and for a program that names none.
     cc::vector<cc::string> file_modules;
 
@@ -314,6 +319,21 @@ struct sgl::check::checked_module
     [[nodiscard]] i32 prelude_file_count() const { return prelude_files; }
     /// The program's file, which is always the last.
     [[nodiscard]] i32 program_file() const { return i32(files.size()) - 1; }
+    /// Whether `file` is the prelude's, the program's or a library file the program reaches.
+    /// Behind a layer of the whole library, a module the program never uses is checked too, and is nothing of its:
+    /// a pass over every symbol, pipeline or require line asks this first, so the program reads as it does beside the
+    /// modules it reaches alone.
+    [[nodiscard]] bool is_reached_file(i32 file) const
+    {
+        if (file < prelude_files || file >= prelude_files + i32(library_files.size())
+            || reached_library_files.size() == library_files.size())
+            return true;
+        auto const position = library_files[file - prelude_files];
+        for (auto const r : reached_library_files)
+            if (r == position)
+                return true;
+        return false;
+    }
     /// The module the program names `id` through, as `m.name` (CHK-348): empty for a symbol of the prelude and of the
     /// program's own module.
     [[nodiscard]] cc::string_view foreign_module_of(symbol_id id) const

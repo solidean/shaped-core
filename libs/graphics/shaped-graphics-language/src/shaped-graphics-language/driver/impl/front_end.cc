@@ -116,9 +116,44 @@ cc::shared_ptr<parsed_library> library_of(cc::span<sgl::library_file const* cons
 
 using layer_ptr = cc::shared_ptr<sgl::check::checked_prelude const>;
 
-/// The layer of `library`'s modules that `program` reaches, made on first need; null where none can be made.
+/// The layer of every module of `library`, made on first need; null where it cannot be made.
+layer_ptr library_layer_of(parsed_library& library, sgl::check::checked_prelude const& prelude)
+{
+    auto const tried = library.checked.lock(
+        [&](parsed_library::layers& l) -> cc::optional<layer_ptr>
+        {
+            if (l.has_tried_library)
+                return l.library;
+            return {};
+        });
+    if (tried.has_value())
+        return tried.value();
+    CC_RECORD_SCOPE("sgl.check_library");
+    auto made = sgl::check::check_library(prelude, library.files);
+    return library.checked.lock(
+        [&](parsed_library::layers& l) -> layer_ptr
+        {
+            // another compile may have made it meanwhile, and the first one is the one everyone shares
+            if (!l.has_tried_library)
+            {
+                l.has_tried_library = true;
+                if (made.has_value())
+                    l.library = cc::make_shared<sgl::check::checked_prelude const>(cc::move(made.value()));
+            }
+            return l.library;
+        });
+}
+
+/// The layer `program` continues from: the whole library's, or else that of the modules it reaches, made on first
+/// need; null where none can be made.
 layer_ptr layer_of(parsed_library& library, sgl::check::checked_prelude const& prelude, sgl::check::module_file program)
 {
+    // a program that reaches no module, or its own module's files, checks beside the library, which is no failure
+    if (!sgl::check::reaches_modules_to_layer(library.files, program))
+        return {};
+    if (auto whole = library_layer_of(library, prelude); whole != nullptr)
+        return whole;
+
     auto const found = library.checked.lock(
         [&](parsed_library::layers& l) -> cc::optional<layer_ptr>
         {
@@ -131,9 +166,6 @@ layer_ptr layer_of(parsed_library& library, sgl::check::checked_prelude const& p
         });
     if (found.has_value())
         return found.value();
-    // a program that reaches no module, or its own module's files, checks beside the library, which is no failure
-    if (!sgl::check::reaches_modules_to_layer(library.files, program))
-        return {};
 
     CC_RECORD_SCOPE("sgl.check_modules");
     auto made = sgl::check::check_modules(prelude, library.files, program);
@@ -232,6 +264,8 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     CC_RECORD_SCOPE_END("sgl.check");
 
     // The files as the check placed them: the prelude, the library files the source reached, then the source.
+    for (auto const i : result.module.reached_library_files)
+        result.reached_library_names.push_back(library_names[i]);
     for (auto const i : result.module.library_files)
     {
         result.files.push_back(&library_files[i].file);

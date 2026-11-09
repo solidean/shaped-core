@@ -214,6 +214,14 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    The driver keeps one per set of modules, beside the library it parsed once for the process, for compiles that set no options.
    A shaped-viewer hit group's `describe` went from 81 to 54 ms, and its check from 71 to 23 ms.
    What it does not do is share a module between two sets that both reach it, which is what ids naming their layer would buy.
+   *Since 2026-11-09 the library is one layer, `check::check_library`, which every program reaching any of its modules continues from.*
+   Ids stay positions: a module the program does not use is checked into the layer too, and nothing of the program sees it.
+   A pass over every symbol, pipeline or require line asks `checked_module::is_reached_file` first, and so does a name an emitted name must avoid.
+   `reached_library_files` stays what the program reaches, which is what an edit of a library file changes it for.
+   shaped-viewer's 12 programs reach 10 distinct sets of its 10 modules: checked a set at a time 139 ms in a process, the library once 27 ms (relwithdebinfo).
+   A test holds every one of those programs to checking as it does beside the modules it reaches alone, the emitted text of every target included.
+   Where a module reports anything the library makes no layer, and the driver keeps one per set of modules as before.
+   An edit of any module checks the library again, about 27 ms there; one layer per module, with relocation and early cutoff, is what would cut that.
 3. **The prelude's artifact.** *Landed on 2026-11-08: the prelude's 5.8 ms check is a 0.68 ms load of 1.6 MB, in a release build.*
    `check::save_artifact` and `load_artifact` write and read the checker's whole state after the prelude, bodies included, under a host's key.
    In a fresh `sgl` process the load was 2.3 ms with a file's read, and 8 ms from blob-cache with its open; the prelude's parse, about 13 ms there, is what a process still pays.

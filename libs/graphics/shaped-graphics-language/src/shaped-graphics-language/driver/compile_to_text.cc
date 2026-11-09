@@ -251,7 +251,7 @@ void add_source_facts(cc::result<emitted_source, cc::string>& text,
 {
     if (!text.has_value())
         return;
-    for (auto const name : front.library_names)
+    for (auto const name : front.reached_library_names)
         text.value().library_files.push_back(cc::string(name));
     text.value().warnings = front.warnings_of(e.function);
 }

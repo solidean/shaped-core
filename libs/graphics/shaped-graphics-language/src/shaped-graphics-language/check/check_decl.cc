@@ -2449,7 +2449,7 @@ type_id checker::pixel_targets_of(symbol_id entry, type_id color)
     {
         auto is_taken = false;
         for (auto const& s : out.symbols)
-            is_taken = is_taken || s.name == name;
+            is_taken = is_taken || (s.name == name && out.is_reached_file(s.file));
         if (!is_taken)
             break;
         name = cc::format("{}_target{}", out.at(entry).name, n);

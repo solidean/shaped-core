@@ -94,6 +94,12 @@ sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file co
 sgl::prelude_file_of(path)                 // -> i32: which prelude file a path or file:// uri is, else -1; only a file in
                                            // a shaped-graphics-language/prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
+sgl::check::check_library(prelude, library)  // -> optional<checked_prelude>: every module once, one layer for every
+                                           // program reaching any of them; none where a module reports anything
+sgl::check::may_continue_from(layer, library, program)  // -> bool: a layer of its very modules, or the library's
+m.is_reached_file(file)                    // -> bool: false for a module the program does not use, which a layer of the
+                                           // whole library holds; ASK IT in any pass over every symbol or pipeline
+m.reached_library_files                    // what the program reaches; library_files is what was checked, in file order
 sgl::check::layer_serves_options(layer, options)  // -> bool: false where an option names a layered module's own,
                                            // which the layer checked at its default: check beside the library instead
 

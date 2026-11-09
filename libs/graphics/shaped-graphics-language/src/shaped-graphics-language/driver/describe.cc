@@ -345,7 +345,7 @@ cc::string baked_samplers(check::checked_module const& m, cc::span<u8 const> is_
         if (is_reached[i] != 0)
             result += cc::format("{}{}#{}@{}", result.empty() ? "" : ", ", m.qualified_name_of(check::symbol_id(i)),
                                  sampler_index, check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
-        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler && m.is_reached_file(m.symbols[i].file) ? 1 : 0;
     }
     return result;
 }
@@ -453,7 +453,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
     // CHK-343: every table of the module, packed in declaration order
     auto tables = cc::vector<check::pipeline_info const*>();
     for (auto const& t : m.pipelines)
-        if (t.kind == check::pipeline_kind::callables)
+        if (t.kind == check::pipeline_kind::callables && m.is_reached_file(m.at(t.symbol).file))
             tables.push_back(&t);
     for (auto i = isize(0); i < tables.size(); ++i)
         for (auto j = i + 1; j < tables.size(); ++j)
@@ -547,7 +547,8 @@ described_callables describe_callables(check::checked_module const& m, check::pi
     for (auto const entry : m.at(p.records))
         result.entries.push_back(m.at(entry).name);
     for (auto const& t : m.pipelines)
-        if (t.kind == check::pipeline_kind::callables && index_of(t.symbol) < index_of(p.symbol))
+        if (t.kind == check::pipeline_kind::callables && index_of(t.symbol) < index_of(p.symbol)
+            && m.is_reached_file(m.at(t.symbol).file))
             result.offset += i32(t.records.count);
     return result;
 }
@@ -821,7 +822,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             }
         }
     };
-    if (is_module && m.library_files.empty())
+    if (is_module && m.reached_library_files.empty())
         return cc::error(
             cc::format("{}: error: no file of the library declares module {}\n", program_name, request.module));
     auto errors = cc::vector<emit::error>();
@@ -839,7 +840,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     {
         auto const id = check::symbol_id(i);
         auto const& s = m.at(id);
-        if (s.state != check::symbol_state::checked)
+        // a module the program does not use is checked behind a layer of the whole library, and is nothing of its
+        if (s.state != check::symbol_state::checked || !m.is_reached_file(s.file))
             continue;
         // an option of a module the source uses is the source's to set too, by its qualified name (CHK-354)
         auto const is_option = s.kind == check::symbol_kind::constant && m.constants[s.info].option == id;

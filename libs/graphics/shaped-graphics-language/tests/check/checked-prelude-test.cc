@@ -78,10 +78,14 @@ cc::vector<program> written_programs()
 }
 
 /// What a caller can observe of `m` that no id shows through: diagnostics, entry points, their text, and the tests.
-cc::string observed(sgl::check::checked_module const& m, cc::span<sgl::check::module_file const> files)
+/// `observed`, with each file named by `names`, parallel to `files`, rather than by its position.
+/// A test of a file the program does not reach is left out, as it is from every driver.
+cc::string observed_as(sgl::check::checked_module const& m,
+                       cc::span<sgl::check::module_file const> files,
+                       cc::span<cc::string const> names)
 {
     auto out = cc::string();
-    auto const name_of = [&](sgl::i32 file) { return cc::format("file{}", file); };
+    auto const name_of = [&](sgl::i32 file) { return names[file]; };
     for (auto const& d : m.diagnostics)
     {
         out += sgl::format_diagnostic(name_of(d.file), files[d.file].file.source, d.what, d.detail);
@@ -110,10 +114,20 @@ cc::string observed(sgl::check::checked_module const& m, cc::span<sgl::check::mo
     for (auto const& r : sgl::test::run_tests(m, files))
     {
         auto const& t = m.tests[r.test];
-        out.appendf("test at {}:{} ({}): {}, {} checks\n", t.file, t.where.offset, t.scope_path,
+        if (!m.is_reached_file(t.file))
+            continue;
+        out.appendf("test at {}:{} ({}): {}, {} checks\n", name_of(t.file), t.where.offset, t.scope_path,
                     sgl::test::to_string(r.status), r.checks_run);
     }
     return out;
+}
+
+cc::string observed(sgl::check::checked_module const& m, cc::span<sgl::check::module_file const> files)
+{
+    auto names = cc::vector<cc::string>();
+    for (auto i = isize(0); i < files.size(); ++i)
+        names.push_back(cc::format("file{}", i));
+    return observed_as(m, files, names);
 }
 
 /// Every place a program's check changed the prelude's part of a table: `functions[12]`, or `symbols: shorter` where it
@@ -508,94 +522,195 @@ TEST("sgl checked modules - a compile that sets its own options continues from i
         layer.value(), options{{.name = "taps", .value = "3"}, {.name = "tuned.width", .value = "3"}}));
 }
 
-// What a module checked once for every set that reaches it would save a process: shaped-viewer's entries each reach a
-// set of modules, and today each distinct set is a layer of its own, checked whole.
+namespace
+{
+/// The module a source's first `module` line names; empty for a source of no module.
+cc::string module_name_of(cc::string_view source)
+{
+    for (auto at = isize(0); at < source.size();)
+    {
+        auto end = at;
+        while (end < source.size() && source[end] != '\n' && source[end] != '\r')
+            ++end;
+        auto const line = source.subview({.start = at, .end = end});
+        if (line.starts_with("module "))
+            return cc::string(line.subview(7));
+        at = end + 1;
+    }
+    return {};
+}
+
+/// shaped-viewer's shader library as its packages hand it in, its and shaped-rendering's modules, and the programs of
+/// its packages and its tests, parsed once.
+struct viewer_library
+{
+    cc::vector<program> programs;
+    cc::vector<cc::unique_ptr<sgl::parsed_file>> parsed;
+    cc::vector<cc::unique_ptr<sgl::ast::file_ast>> built;
+    cc::vector<sgl::check::module_file> files;
+    /// Parallel to `files`.
+    cc::vector<cc::string> names;
+    cc::vector<cc::string> modules;
+};
+
+viewer_library const& viewer_modules()
+{
+    static auto const result = []
+    {
+        auto out = viewer_library();
+        auto sources = cc::vector<program>();
+        add_files_under(sources, "sv", nx::source_path(SGL_SV_SHADERS_DIR));
+        add_files_under(sources, "sr", nx::source_path(SGL_SR_SHADERS_DIR) + "/modules");
+        add_files_under(out.programs, "sv-tests", nx::source_path(SGL_SV_TEST_SHADERS_DIR));
+        for (auto const& s : sources)
+        {
+            auto const name = module_name_of(s.source);
+            if (name.empty())
+            {
+                // an entry of a package, which no module directory holds
+                if (!s.name.subview(3).contains('/'))
+                    out.programs.push_back(s);
+                continue;
+            }
+            out.parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(s.source)));
+            out.built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*out.parsed.back())));
+            out.files.push_back({.file = *out.parsed.back(), .ast = *out.built.back()});
+            out.names.push_back(s.name);
+            auto is_named = false;
+            for (auto const& n : out.modules)
+                is_named = is_named || n == name;
+            if (!is_named)
+                out.modules.push_back(name);
+        }
+        return out;
+    }();
+    return result;
+}
+
+/// The files `m` was checked over, the prelude's, the library's it placed and the program, and each one's name.
+struct placed_files
+{
+    cc::vector<sgl::check::module_file> files;
+    cc::vector<cc::string> names;
+};
+
+placed_files placed(sgl::check::checked_module const& m,
+                    cc::span<sgl::check::module_file const> library,
+                    cc::span<cc::string const> library_names,
+                    sgl::check::module_file program)
+{
+    auto out = placed_files();
+    for (auto const& f : sgl::parsed_prelude())
+    {
+        out.names.push_back(cc::format("prelude{}", out.files.size()));
+        out.files.push_back({.file = f.file, .ast = f.ast});
+    }
+    for (auto const i : m.library_files)
+    {
+        out.files.push_back(library[i]);
+        out.names.push_back(library_names[i]);
+    }
+    out.files.push_back(program);
+    out.names.push_back("program");
+    return out;
+}
+} // namespace
+
+TEST("sgl checked modules - behind a layer of the whole library a program checks as beside the modules it reaches")
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const& library = viewer_modules();
+    auto const whole = sgl::check::check_library(*checked, library.files);
+    REQUIRE(whole.has_value());
+
+    auto continued = isize(0);
+    for (auto const& p : library.programs)
+    {
+        auto const file = sgl::parse(p.source);
+        auto const ast = sgl::ast::build(file);
+        auto const user = sgl::check::module_file{.file = file, .ast = ast};
+        if (!sgl::check::may_continue_from(whole.value(), library.files, user))
+            continue;
+        ++continued;
+        // every program under --thorough; by default one of each shape: a trace with callables, the hybrid, a raster
+        // pass, and a probe whose local names the library's other modules declare too
+        auto const is_default = p.name == "sv/tracer_pipeline.sgl" || p.name == "sv/hybrid_pass.sgl"
+                             || p.name == "sv/raster_pass.sgl" || p.name == "sv-tests/bsdf_probe.sgl";
+        if (!nx::is_thorough() && !is_default)
+            continue;
+        auto const beside = sgl::check::check(*checked, library.files, user);
+        auto const behind = sgl::check::check(whole.value(), library.files, user);
+        REQUIRE(behind.reached_library_files.size() == beside.library_files.size());
+        for (auto i = isize(0); i < beside.library_files.size(); ++i)
+            CHECK(behind.reached_library_files[i] == beside.library_files[i]);
+        auto const at_beside = placed(beside, library.files, library.names, user);
+        auto const at_behind = placed(behind, library.files, library.names, user);
+        auto const said_beside = observed_as(beside, at_beside.files, at_beside.names);
+        auto const said_behind = observed_as(behind, at_behind.files, at_behind.names);
+        if (said_behind != said_beside)
+        {
+            // the first line that differs, and the line on each side
+            auto line_start = isize(0);
+            auto at = isize(0);
+            while (at < said_beside.size() && at < said_behind.size() && said_beside[at] == said_behind[at])
+            {
+                if (said_beside[at] == '\n')
+                    line_start = at + 1;
+                ++at;
+            }
+            auto const line_of = [&](cc::string_view text)
+            {
+                auto end = line_start;
+                while (end < text.size() && text[end] != '\n')
+                    ++end;
+                return cc::string(text.subview({.start = cc::min(line_start, text.size()), .end = end}));
+            };
+            FAIL(cc::format("{} reads otherwise behind the whole library:\n  beside: {}\n  behind: {}", p.name,
+                            line_of(said_beside), line_of(said_behind)));
+        }
+    }
+    CHECK(continued >= 8);
+}
+
+// What checking every module once saves a process against checking each set of modules a program reaches.
 // Manual, since it measures rather than asserts: `uv run dev.py test "sgl checked modules - shaped-viewer" --manual`.
 TEST("sgl checked modules - shaped-viewer's sets of modules, checked each, against every module checked once",
      nx::config::manual)
 {
     auto const* const checked = sgl::checked_prelude();
     REQUIRE(checked != nullptr);
-    auto const module_name = [](cc::string_view source) -> cc::string
-    {
-        // the first line that is a `module` declaration, up to its end
-        for (auto at = isize(0); at < source.size();)
-        {
-            auto end = at;
-            while (end < source.size() && source[end] != '\n' && source[end] != '\r')
-                ++end;
-            auto const line = source.subview({.start = at, .end = end});
-            if (line.starts_with("module "))
-                return cc::string(line.subview(7));
-            at = end + 1;
-        }
-        return {};
-    };
+    auto const& library = viewer_modules();
 
-    auto sources = cc::vector<program>();
-    add_files_under(sources, "sv", nx::source_path(SGL_SV_SHADERS_DIR));
-    add_files_under(sources, "sr", nx::source_path(SGL_SR_SHADERS_DIR) + "/modules");
-    auto programs = cc::vector<program>();
-    add_files_under(programs, "sv-tests", nx::source_path(SGL_SV_TEST_SHADERS_DIR));
-    auto parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
-    auto built = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
-    auto library = cc::vector<sgl::check::module_file>();
-    auto names = cc::vector<cc::string>();
-    for (auto const& s : sources)
-    {
-        auto const name = module_name(s.source);
-        if (name.empty())
-        {
-            // an entry of the package, which no module dir holds
-            if (!s.name.subview(3).contains('/'))
-                programs.push_back(s);
-            continue;
-        }
-        parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(s.source)));
-        built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*parsed.back())));
-        library.push_back({.file = *parsed.back(), .ast = *built.back()});
-        auto is_named = false;
-        for (auto const& n : names)
-            is_named = is_named || n == name;
-        if (!is_named)
-            names.push_back(name);
-    }
-
-    // each distinct set once, as the driver keeps them
+    // each distinct set once, as the driver kept them before the library was one layer
     auto layers = cc::vector<sgl::check::checked_prelude>();
     auto sets_secs = 0.0;
-    for (auto const& p : programs)
+    for (auto const& p : library.programs)
     {
         auto const file = sgl::parse(p.source);
         auto const ast = sgl::ast::build(file);
         auto const user = sgl::check::module_file{.file = file, .ast = ast};
-        if (!sgl::check::reaches_modules_to_layer(library, user))
+        if (!sgl::check::reaches_modules_to_layer(library.files, user))
             continue;
         auto is_known = false;
         for (auto const& l : layers)
-            is_known = is_known || sgl::check::reaches_the_same_modules(l, library, user);
+            is_known = is_known || sgl::check::reaches_the_same_modules(l, library.files, user);
         if (is_known)
             continue;
         auto const started = cc::current_time_steady_secs();
-        auto layer = sgl::check::check_modules(*checked, library, user);
+        auto layer = sgl::check::check_modules(*checked, library.files, user);
         sets_secs += cc::current_time_steady_secs() - started;
         REQUIRE(layer.has_value());
         layers.push_back(cc::move(layer.value()));
     }
 
-    // every module once: a program that uses them all
-    auto everything = cc::string();
-    for (auto const& n : names)
-        everything.appendf("use {}\n", n);
-    auto const all_file = sgl::parse(everything);
-    auto const all_ast = sgl::ast::build(all_file);
     auto const started = cc::current_time_steady_secs();
-    auto const all = sgl::check::check_modules(*checked, library, {.file = all_file, .ast = all_ast});
+    auto const whole = sgl::check::check_library(*checked, library.files);
     auto const once_secs = cc::current_time_steady_secs() - started;
-    REQUIRE(all.has_value());
+    REQUIRE(whole.has_value());
 
-    cc::println("{} programs, {} modules in {} files, {} distinct sets", programs.size(), names.size(), library.size(),
-                layers.size());
-    cc::println("every set checked once: {:.1f} ms; every module checked once: {:.1f} ms", sets_secs * 1000,
+    cc::println("{} programs, {} modules in {} files, {} distinct sets", library.programs.size(),
+                library.modules.size(), library.files.size(), layers.size());
+    cc::println("every set checked once: {:.1f} ms; the whole library checked once: {:.1f} ms", sets_secs * 1000,
                 once_secs * 1000);
 }

@@ -28,6 +28,11 @@ struct parsed_library
 
     struct layers
     {
+        /// Every module of the library as one layer (`check::check_library`), which every compile continues from.
+        /// Null once it could not be made, a module that reports anything among the reasons; `made` serves then.
+        cc::shared_ptr<check::checked_prelude const> library;
+        bool has_tried_library = false;
+        /// One layer per set of modules a program reaches, where the library makes none of its own.
         cc::vector<cc::shared_ptr<check::checked_prelude const>> made;
         /// Set once a set of this library's modules failed to make a layer, after which its compiles check it whole.
         bool has_failed = false;
@@ -55,8 +60,11 @@ struct front_end
     /// The file the source is: behind the prelude and the library files it reaches, or the prelude's own file when it
     /// is one (`prelude_file_of`).
     i32 program = 0;
-    /// Parallel to the files between the prelude and the program: the name of each reached library file.
+    /// Parallel to the files between the prelude and the program: the name of each library file checked.
     cc::vector<cc::string_view> library_names;
+    /// The names of the library files the program reaches through `use`, which an edit of any of them changes it for.
+    /// `library_names` unless the compile continued from a layer of the whole library, which checks every file.
+    cc::vector<cc::string_view> reached_library_names;
     /// Every error of every phase, one formatted diagnostic per line and its notes under it; empty when there is none.
     /// A diagnostic a test's `@expect` names is in neither this nor `warnings`, and neither is one of `entry_diagnostics`.
     cc::string errors;

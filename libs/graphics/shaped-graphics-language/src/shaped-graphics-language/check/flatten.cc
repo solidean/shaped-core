@@ -1254,7 +1254,8 @@ void checker::flatten_metal_traversals()
     auto is_any = false;
     for (auto const& p : out.pipelines)
     {
-        if (p.kind != pipeline_kind::hit_group && p.kind != pipeline_kind::raytracing)
+        if ((p.kind != pipeline_kind::hit_group && p.kind != pipeline_kind::raytracing)
+            || !out.is_reached_file(out.at(p.symbol).file))
             continue;
         is_any = true;
         if (p.kind != pipeline_kind::hit_group || !p.is_procedural || out.at(p.symbol).file != i32(out.files.size()) - 1)

@@ -33,8 +33,10 @@ The steps, each a child issue when it is taken up, in this order:
 2. **The parse in the artifact.** *Tried on 2026-11-08 and not kept:* a parse is twenty times its source, and reading 9.6 MB back cost what parsing does.
    The compilation model's step 4 has the numbers; the per-process parse is [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.
 3. **Module artifacts.** *A first form landed on 2026-11-08:* one artifact per set of modules, the whole layer, so a 16 ms check is a 3.9 ms load; kept by no process, as the prelude's.
+   *Since 2026-11-09 the library is one layer* (`check::check_library`), so a module is checked once per process whatever reaches it: shaped-viewer's 139 ms of sets is 27 ms.
    What is left is in memory, since no process keeps a layer for another:
-   imports and relocation, so a module is one layer shared by every set that reaches it, and early cutoff, so an edit re-checks only what it changed.
+   one layer per module, with imports and relocation, and early cutoff, so an edit re-checks only what it changed rather than the library.
+   It pays once a library is large enough that checking it whole after an edit is felt.
 4. **Option overlays,** so a compile that sets options continues from its modules' layers too.
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options does, which is every compile in the tree today.
    A module's own option still re-checks the whole set.

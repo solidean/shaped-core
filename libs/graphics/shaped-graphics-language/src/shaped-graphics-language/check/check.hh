@@ -1,9 +1,13 @@
 #pragma once
 
+#include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/features.hh>
@@ -95,6 +99,19 @@ namespace sgl::check
                                                           cc::span<module_file const> library,
                                                           module_file program);
 
+/// Every module of `library` checked once as one layer behind `prelude`, for every program that reaches any of them.
+/// A program behind it checks as it does beside the modules it reaches alone: a module it does not use is checked, and
+/// nothing of the program sees it (`checked_module::is_reached_file`).
+/// None where a module, or the plan of them, reports anything; a caller then falls back to `check_modules`.
+/// `library` and `prelude` must outlive the result, and a program continues from it with the same `library`.
+[[nodiscard]] cc::optional<checked_prelude> check_library(checked_prelude const& prelude,
+                                                          cc::span<module_file const> library);
+
+/// Whether `program` may continue from `layer`: a layer of its very modules, or one of the whole library it reaches into.
+[[nodiscard]] bool may_continue_from(checked_prelude const& layer,
+                                     cc::span<module_file const> library,
+                                     module_file program);
+
 /// Whether a compile setting `options` may continue from `layer`: none of them names an option of the layer's modules.
 /// A program's own options change nothing a layer of modules checked, since no module sees its program.
 [[nodiscard]] bool layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options);
@@ -151,6 +168,11 @@ private:
     cc::vector<i32> _library_order;
     /// The modules of that layer, by name, the program's own first.
     cc::vector<cc::string> _modules;
+    /// Whether the layer is `check_library`'s, of every module, which a program reaching any of them continues from.
+    bool _is_library = false;
+    /// For a layer of the whole library: the names an emitted name must not take, those of the prelude and of the files
+    /// a program reaches, made once per set of reached files and shared by every program reaching the same ones.
+    cc::unique_ptr<cc::mutex<cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>>> _names_by_reach;
     cc::unique_ptr<impl::checker> _state;
     /// How much of each list the prelude filled, which a program's check starts behind.
     impl::resume_point _resume;
@@ -168,6 +190,9 @@ private:
                                                        cc::span<module_file const> library,
                                                        module_file program);
     friend bool layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options);
+    friend cc::optional<checked_prelude> check_library(checked_prelude const& prelude,
+                                                       cc::span<module_file const> library);
+    friend bool may_continue_from(checked_prelude const& layer, cc::span<module_file const> library, module_file program);
     friend bool reaches_the_same_modules(checked_prelude const& layer,
                                          cc::span<module_file const> library,
                                          module_file program);

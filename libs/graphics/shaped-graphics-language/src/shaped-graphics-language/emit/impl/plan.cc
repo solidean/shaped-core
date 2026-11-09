@@ -869,9 +869,10 @@ sgl::i32 sgl::emit::impl::sampler_of(plan const& p, check::symbol_id symbol)
 
 sgl::i32 sgl::emit::impl::file_sampler_index(check::checked_module const& m, check::symbol_id symbol)
 {
+    // a sampler of a module the program does not use takes no index, as it would not exist beside its modules alone
     auto index = 0;
     for (auto i = isize(0); i < index_of(symbol); ++i)
-        index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+        index += m.symbols[i].kind == check::symbol_kind::sampler && m.is_reached_file(m.symbols[i].file) ? 1 : 0;
     return index;
 }
 
@@ -1165,6 +1166,8 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
                     continue;
                 for (auto const& info : m.bindings)
                 {
+                    if (!m.is_reached_file(m.at(info.symbol).file))
+                        continue;
                     auto theirs = cc::vector<check::type_id>();
                     collect_placed_structs(m, info.symbol, other, theirs);
                     if (!contains(theirs, type))
@@ -1840,7 +1843,7 @@ sgl::check::symbol_id sgl::emit::impl::ray_set_of(check::checked_module const& m
         return check::symbol_id::none;
     for (auto const& p : m.pipelines)
     {
-        if (!check::is_valid(p.ray_set))
+        if (!check::is_valid(p.ray_set) || !m.is_reached_file(m.at(p.symbol).file))
             continue;
         for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
             if (ray.type == e.input)

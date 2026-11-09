@@ -37,6 +37,7 @@ void apply_plan(checker& c, module_plan& plan, i32 prelude_count)
     c.prelude_count = prelude_count;
     c.out.prelude_files = prelude_count;
     c.out.library_files = plan.library_order;
+    c.out.reached_library_files = plan.library_order;
     c.out.file_modules = {};
     for (auto i = i32(0); i < prelude_count; ++i)
         c.out.file_modules.push_back({});
@@ -263,6 +264,50 @@ bool sgl::check::reaches_the_same_modules(checked_prelude const& layer,
         && plan_matches(plan_modules(library, program), layer._library_order, layer._modules);
 }
 
+cc::optional<checked_prelude> sgl::check::check_library(checked_prelude const& prelude,
+                                                        cc::span<module_file const> library)
+{
+    // the layer of a program that uses every module, each once, by its own name
+    auto uses = cc::string();
+    auto named = cc::vector<cc::string>();
+    for (auto const& f : library)
+        for (auto const id : f.ast.at(f.ast.declarations))
+            if (auto const* const m = f.ast.at(id).node.try_as<ast::module_decl>();
+                m != nullptr && ast::is_valid(m->path))
+                if (auto const* const n = f.ast.at(m->path).node.try_as<ast::name>(); n != nullptr)
+                {
+                    auto const name = f.file.text_of(n->where);
+                    auto is_named = false;
+                    for (auto const& earlier : named)
+                        is_named = is_named || earlier == name;
+                    if (!is_named)
+                    {
+                        named.push_back(cc::string(name));
+                        uses.appendf("use {}\n", name);
+                    }
+                }
+    if (named.empty())
+        return {};
+    auto const every_file = parse(uses);
+    auto const every_ast = ast::build(every_file);
+    auto layer = check_modules(prelude, library, {.file = every_file, .ast = every_ast});
+    if (layer.has_value())
+    {
+        layer.value()._is_library = true;
+        layer.value()._names_by_reach
+            = cc::make_unique<cc::mutex<cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>>>();
+    }
+    return layer;
+}
+
+bool sgl::check::may_continue_from(checked_prelude const& layer, cc::span<module_file const> library, module_file program)
+{
+    if (!layer._is_library)
+        return reaches_the_same_modules(layer, library, program);
+    // every module is in the layer, so a program that may continue from any layer of modules may from this one
+    return may_layer(plan_modules(library, program));
+}
+
 bool sgl::check::layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options)
 {
     if (options.empty())
@@ -290,12 +335,56 @@ checked_module sgl::check::check(checked_prelude const& prelude,
                                  cc::span<option_value const> options,
                                  compile_target const& target)
 {
+    CC_ASSERT(layer_serves_options(prelude, options), "a compile that sets a layered module's option checks it itself");
+    if (prelude._is_library)
+    {
+        // The layer's modules stay as the layer planned them; the program joins as module 0 and uses them by name.
+        auto plan = plan_modules(library, program);
+        CC_ASSERT(may_layer(plan), "a program continues from a layer of the whole library only where it may layer");
+        auto files = prelude._files;
+        files.push_back(program);
+        auto c = *prelude._state;
+        c.files = files;
+        // the layer dropped its empty program's entries, so the program's are appended where they stood
+        c.modules[0] = plan.modules[0];
+        c.file_module.push_back(0);
+        c.out.file_modules.push_back(plan.modules[0]);
+        auto program_uses = cc::vector<module_use>();
+        for (auto const& u : plan.uses.back())
+            for (auto i = isize(1); i < c.modules.size(); ++i)
+                if (c.modules[i] == plan.modules[u.module])
+                    program_uses.push_back({.name = u.name, .module = i32(i), .where = u.where});
+        c.uses.push_back(cc::move(program_uses));
+        c.out.reached_library_files = plan.library_order;
+        // A name of a module the program does not use is free to take, as it is beside the modules it reaches alone.
+        auto key = cc::string();
+        for (auto const r : plan.library_order)
+            key.appendf("{},", r);
+        c.module_names_below = prelude._names_by_reach->lock(
+            [&](cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>& by_reach)
+            {
+                if (auto const* const known = by_reach.get_ptr(key); known != nullptr)
+                    return *known;
+                auto names = cc::make_shared<cc::set<cc::string>>();
+                for (auto i = isize(0); i < c.module_names_below_count; ++i)
+                {
+                    auto const& s = c.out.symbols[i];
+                    if (!s.name.empty() && !takes_no_emitted_name(s) && c.out.is_reached_file(s.file))
+                        (void)names->insert(s.name);
+                }
+                by_reach[key] = names;
+                return names;
+            });
+        c.options = options;
+        c.compiled_target = target;
+        c.run(prelude._resume);
+        return cc::move(c.out);
+    }
     auto planned
         = plan_files(cc::span<module_file const>(prelude._files).subspan({.offset = 0, .size = prelude._prelude_count}),
                      library, program);
     CC_ASSERT(prelude._library_order.empty() || plan_matches(planned.plan, prelude._library_order, prelude._modules),
               "a program continues from a layer of modules only where it reaches exactly those");
-    CC_ASSERT(layer_serves_options(prelude, options), "a compile that sets a layered module's option checks it itself");
     auto c = *prelude._state;
     c.files = planned.files;
     apply_plan(c, planned.plan, prelude._prelude_count);
