@@ -184,8 +184,8 @@ enum class sg::feature
     /// SGL's `@view_index` reads.
     /// What a stereo frame wants on a tiled GPU, where the driver bins both views together: layered rendering through
     /// `vertex_layer_output` rasterises them separately.
-    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
-    /// yet, and WebGPU has no such thing.
+    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`, Metal with vertex amplification of two views,
+    /// and WebGPU has no such thing.
     view_instancing,
 
     /// Not a capability: this device's driver may write nothing for a draw of several views whose pixel stage ignores the view.

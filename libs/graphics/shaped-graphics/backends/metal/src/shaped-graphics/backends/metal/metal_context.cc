@@ -160,8 +160,8 @@ bool metal_context::supports(sg::feature f) const
         // whether safe math keeps denormals is not known
         return false;
     case sg::feature::view_instancing:
-        // vertex amplification would grant it, and is not wired up yet
-        return false;
+        // vertex amplification, which SGL's `@view_index` reads as `[[amplification_id]]`
+        return _device != nullptr && _device->supportsVertexAmplificationCount(2);
     case sg::feature::pixel_view_read_workaround:
         return false;
     case sg::feature::ray_tracing_motion_blur:

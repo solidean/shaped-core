@@ -1338,8 +1338,9 @@ void metal_command_list::open_render_encoder(bool force_load)
     auto const layers = !info.color_targets.empty() ? info.color_targets[0].view.range().array_range
                       : info.depth_stencil_target.has_value() ? info.depth_stencil_target.value().view.range().array_range
                                                               : cc::start_end{.start = 0, .end = 1};
-    if (layers.end - layers.start > 1)
-        descriptor->setRenderTargetArrayLength(NS::UInteger(layers.end - layers.start));
+    if (layers.end - layers.start > 1 || info.view_count > 1)
+        descriptor->setRenderTargetArrayLength(
+            NS::UInteger(cc::max(isize(layers.end - layers.start), isize(info.view_count))));
     // **Retained, because it outlives the pool this function opened.**
     // `renderCommandEncoder` hands back an autoreleased object, and the scope above drains when this returns — so an
     // unretained encoder is deallocated the moment `begin_rendering` exits, and `end_rendering` then messages freed
@@ -1353,6 +1354,16 @@ void metal_command_list::open_render_encoder(bool force_load)
     descriptor->release();
     CC_ASSERT(_render_encoder != nullptr, "metal refused a render command encoder");
     _draws_in_render_encoder = 0;
+
+    // Several views per draw: amplification `i` renders into layer `i` of every target, which the mapping adds to
+    // the layer the vertex function writes, none, so that a stage need not write it.
+    if (info.view_count > 1)
+    {
+        auto mappings = cc::vector<MTL::VertexAmplificationViewMapping>();
+        for (auto view = 0; view < info.view_count; ++view)
+            mappings.push_back({.viewportArrayIndexOffset = 0, .renderTargetArrayIndexOffset = u32(view)});
+        _render_encoder->setVertexAmplificationCount(NS::UInteger(info.view_count), mappings.data());
+    }
 
     // Every encoder is ordered against the queue on open, the same as the compute one.
     _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
