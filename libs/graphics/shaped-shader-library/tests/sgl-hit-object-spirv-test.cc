@@ -381,7 +381,7 @@ TEST("sgl hit object spirv - no raygen of the repo that holds a hit object copie
     if (compiler.has_error())
         SKIP("no DXC");
     auto const here = nx::source_path(SLIB_SOURCE_DIR);
-    auto const root = fs::path(here.data(), here.data() + here.size()) / ".." / ".." / "..";
+    auto const root = (fs::path(here.data(), here.data() + here.size()) / ".." / ".." / "..").lexically_normal();
     auto found = 0;
     auto holding = 0;
     for (auto const& e : fs::recursive_directory_iterator(root / "libs"))

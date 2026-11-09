@@ -359,7 +359,7 @@ TEST("sgl signature - DXIL's packer places every element of the repo's SGL as DX
         SKIP("no DXC");
 
     auto const here = nx::source_path(SLIB_SOURCE_DIR);
-    auto const root = fs::path(here.data(), here.data() + here.size()) / ".." / ".." / "..";
+    auto const root = (fs::path(here.data(), here.data() + here.size()) / ".." / ".." / "..").lexically_normal();
     auto files = sources_under(root / "libs");
     for (auto const& f : sources_under(root / "examples"))
         files.push_back(f);
