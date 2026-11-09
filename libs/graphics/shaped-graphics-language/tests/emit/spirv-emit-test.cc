@@ -6,6 +6,8 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_parallel_for.hh>
+#include <nexus/async-test.hh>
 #include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 
@@ -297,10 +299,12 @@ TEST("sgl spirv - a patch's links take the locations after the control point's p
     CHECK(e.value().text.contains("[[vk::location(3)]] float scale"));
 }
 
-TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-val calls valid")
+// A task per file, since each module is a spirv-val process, and those one after another were the binary's critical path.
+ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-val calls valid")
 {
 #if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
     SKIP("this platform runs no spirv-val, and has no std::system to start one with");
+    co_return;
 #else
     // dev.py puts the pinned Vulkan SDK's tools on the path
 #if defined(CC_OS_WINDOWS)
@@ -311,14 +315,110 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
     if (std::system(probe) != 0)
         SKIP("no spirv-val on the path");
 
-    auto const module_path = cc::format("{}/sgl-spirv-emit-test.spv", cc::temp_directory_path());
-    auto const command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
-    auto command_text = cc::vector<char>::create_copy_of(cc::span<char const>(command.data(), command.size()));
-    command_text.push_back('\0');
     auto files = files_under(nx::source_path(SGL_SG_SHADERS_DIR));
     files.push_back_range(files_under(cc::format("{}/../sgl_mixed", nx::source_path(SGL_SG_SHADERS_DIR))));
     files.push_back_range(files_under(nx::source_path(SGL_SR_SHADERS_DIR)));
     REQUIRE(!files.empty());
+
+    struct lowered_counts
+    {
+        int compute = 0;
+        int raster = 0;
+        int primitive = 0;
+        int mesh = 0;
+        int ray = 0;
+        int recording = 0;
+        int guarded = 0;
+    };
+    auto counts = cc::vector<lowered_counts>::create_defaulted(files.size());
+    co_await cc::async_parallel_for(
+        files.size(),
+        [&](isize file_index)
+        {
+            auto const& file = files[file_index];
+            auto& n = counts[file_index];
+            auto const module_path = cc::format("{}/sgl-spirv-emit-test-{}.spv", cc::temp_directory_path(), file_index);
+            auto const validates = [&](cc::span<u32 const> words)
+            {
+                write_words(module_path, words);
+                auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
+                return std::system(command.c_str_materialize()) == 0;
+            };
+            // every eighth module is sampled, counted from the file's index so a file of fewer still has its turn
+            auto lined_modules = file_index;
+
+            auto const source = read_all(file);
+            // what names a module of another directory is the module tests', and this one reads a file alone
+            auto const all = sgl::compile_all_to_text({.source = source, .targets = {sgl::emit::target::hlsl_vulkan}});
+            if (all.has_error())
+                return;
+            for (auto const& entry : all.value())
+            {
+                auto const e = sgl::compile_to_text(
+                    {.source = source,
+                     .entry_point = entry.entry_point,
+                     .target = sgl::emit::target::hlsl_vulkan,
+                     .diagnostics = true,
+                     .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                     .native = sgl::emit::native_route::prefer});
+                if (e.has_error() || e.value().spirv.empty())
+                    continue;
+                auto const stage = e.value().stage;
+                auto const is_raster = stage == sgl::check::stage::vertex || stage == sgl::check::stage::pixel;
+                auto const is_primitive = stage == sgl::check::stage::geometry
+                                       || stage == sgl::check::stage::tessellation_control
+                                       || stage == sgl::check::stage::tessellation_evaluation;
+                auto const is_mesh = stage == sgl::check::stage::mesh || stage == sgl::check::stage::task;
+                auto const is_ray = stage >= sgl::check::stage::raygen;
+                ++(is_ray ? n.ray : is_mesh ? n.mesh : is_primitive ? n.primitive : is_raster ? n.raster : n.compute);
+                n.recording += e.value().debug_sites.empty() ? 0 : 1;
+                CHECK(validates(e.value().spirv)).dump("file", file).dump("entry", entry.entry_point);
+
+                // EMIT-257: the line table is SPIR-V spirv-val takes too, every eighth module, and each under --thorough
+                if (nx::is_thorough() || lined_modules++ % 8 == 0)
+                {
+                    auto const lined = sgl::compile_to_text(
+                        {.source = source,
+                         .source_name = file,
+                         .entry_point = entry.entry_point,
+                         .target = sgl::emit::target::hlsl_vulkan,
+                         .diagnostics = true,
+                         .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                         .native = sgl::emit::native_route::prefer,
+                         .native_line_table = true});
+                    REQUIRE(lined.has_value());
+                    CHECK(validates(lined.value().spirv))
+                        .dump("file", file)
+                        .dump("entry", entry.entry_point)
+                        .dump("with", "its line table");
+                }
+
+                // each profile, nothing here running what it guards; a report writes through the debug buffer
+                for (auto const guard : {sgl::check::undefined_guard::abort, sgl::check::undefined_guard::report,
+                                         sgl::check::undefined_guard::define})
+                {
+                    auto const profile = sgl::compile_to_text(
+                        {.source = source,
+                         .entry_point = entry.entry_point,
+                         .target = sgl::emit::target::hlsl_vulkan,
+                         .diagnostics = true,
+                         .guards_undefined = guard,
+                         .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                         .native = sgl::emit::native_route::prefer});
+                    if (profile.has_error() || profile.value().spirv.empty())
+                        continue;
+                    ++n.guarded;
+                    // a process per module, so a default run validates every eighth and --thorough takes them all
+                    if (!nx::is_thorough() && (file_index + n.guarded) % 8 != 0)
+                        continue;
+                    CHECK(validates(profile.value().spirv))
+                        .dump("file", file)
+                        .dump("entry", entry.entry_point)
+                        .dump("guard", int(guard));
+                }
+            }
+        },
+        {.grain = 1});
 
     auto lowered = 0;
     auto raster_lowered = 0;
@@ -327,87 +427,19 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
     auto ray_lowered = 0;
     auto recording = 0;
     auto guarded = 0;
-    auto lined_modules = 0;
-    for (auto const& file : files)
+    for (auto const& n : counts)
     {
-        auto const source = read_all(file);
-        // what names a module of another directory is the module tests', and this one reads a file alone
-        auto const all = sgl::compile_all_to_text({.source = source, .targets = {sgl::emit::target::hlsl_vulkan}});
-        if (all.has_error())
-            continue;
-        for (auto const& entry : all.value())
-        {
-            auto const e = sgl::compile_to_text(
-                {.source = source,
-                 .entry_point = entry.entry_point,
-                 .target = sgl::emit::target::hlsl_vulkan,
-                 .diagnostics = true,
-                 .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
-                 .native = sgl::emit::native_route::prefer});
-            if (e.has_error() || e.value().spirv.empty())
-                continue;
-            auto const stage = e.value().stage;
-            auto const is_raster = stage == sgl::check::stage::vertex || stage == sgl::check::stage::pixel;
-            auto const is_primitive = stage == sgl::check::stage::geometry
-                                   || stage == sgl::check::stage::tessellation_control
-                                   || stage == sgl::check::stage::tessellation_evaluation;
-            auto const is_mesh = stage == sgl::check::stage::mesh || stage == sgl::check::stage::task;
-            auto const is_ray = stage >= sgl::check::stage::raygen;
-            ++(is_ray         ? ray_lowered
-               : is_mesh      ? mesh_lowered
-               : is_primitive ? primitive_lowered
-               : is_raster    ? raster_lowered
-                              : lowered);
-            recording += e.value().debug_sites.empty() ? 0 : 1;
-            write_words(module_path, e.value().spirv);
-            CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
-
-            // EMIT-257: the line table is SPIR-V spirv-val takes too, every eighth module, and each under --thorough
-            if (nx::is_thorough() || lined_modules++ % 8 == 0)
-            {
-                auto const lined = sgl::compile_to_text(
-                    {.source = source,
-                     .source_name = file,
-                     .entry_point = entry.entry_point,
-                     .target = sgl::emit::target::hlsl_vulkan,
-                     .diagnostics = true,
-                     .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
-                     .native = sgl::emit::native_route::prefer,
-                     .native_line_table = true});
-                REQUIRE(lined.has_value());
-                write_words(module_path, lined.value().spirv);
-                CHECK(std::system(command_text.data()) == 0)
-                    .dump("file", file)
-                    .dump("entry", entry.entry_point)
-                    .dump("with", "its line table");
-            }
-
-            // each profile, nothing here running what it guards; a report writes through the debug buffer
-            for (auto const guard : {sgl::check::undefined_guard::abort, sgl::check::undefined_guard::report,
-                                     sgl::check::undefined_guard::define})
-            {
-                auto const profile = sgl::compile_to_text(
-                    {.source = source,
-                     .entry_point = entry.entry_point,
-                     .target = sgl::emit::target::hlsl_vulkan,
-                     .diagnostics = true,
-                     .guards_undefined = guard,
-                     .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
-                     .native = sgl::emit::native_route::prefer});
-                if (profile.has_error() || profile.value().spirv.empty())
-                    continue;
-                ++guarded;
-                // a process per module, so a default run validates every eighth and --thorough takes them all
-                if (!nx::is_thorough() && guarded % 8 != 0)
-                    continue;
-                write_words(module_path, profile.value().spirv);
-                CHECK(std::system(command_text.data()) == 0)
-                    .dump("file", file)
-                    .dump("entry", entry.entry_point)
-                    .dump("guard", int(guard));
-            }
-        }
+        lowered += n.compute;
+        raster_lowered += n.raster;
+        primitive_lowered += n.primitive;
+        mesh_lowered += n.mesh;
+        ray_lowered += n.ray;
+        recording += n.recording;
+        guarded += n.guarded;
     }
+
+    auto const module_path = cc::format("{}/sgl-spirv-emit-test.spv", cc::temp_directory_path());
+    auto command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
     // what no fixture prints: every family a record holds, and a vertex stage's
     constexpr cc::string_view records
         = "require shader_f16\n"
@@ -436,7 +468,7 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
         REQUIRE(e.has_value());
         CHECK(e.value().debug_sites.size() == 1);
         write_words(module_path, e.value().spirv);
-        CHECK(std::system(command_text.data()) == 0).dump("entry", entry);
+        CHECK(std::system(command.c_str_materialize()) == 0).dump("entry", entry);
     }
 
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
