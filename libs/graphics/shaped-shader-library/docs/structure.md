@@ -124,6 +124,7 @@ The shape the seam is built for, and what is still `[planned]`:
   shaped-viewer's stages take about a second each on `debug-clang`: `shaped-viewer-test` there ran the front end 79 to 85 times, for about 80 s of compute across threads, and took 62 to 70 s.
   With the persistent tier warm it ran the front end not at all, and took 27.5 s.
   The default tier keeps SGL's checked layers too (`sgl::set_artifact_store`), the prelude's and each set of modules', so a process reads them back rather than checking them.
+  The `sgl` tool keeps them under the same keys, so a build's `sgl describe` and a later compile share them.
   `sgl::describe`'s memo is in memory only, and a store passed explicitly keeps no layer, since it may be gone before the first compile.
   [epic-sgl-prelude-check-cost](../../shaped-graphics-language/docs/issues/epic-sgl-prelude-check-cost.md) has what that check costs and the next cuts.
   **Neither fingerprint covers clean-core**, though it shapes the text too: SGL writes its numeric literals through `cc::to_string`.

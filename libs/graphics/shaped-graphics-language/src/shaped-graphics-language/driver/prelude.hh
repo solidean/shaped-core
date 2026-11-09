@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -26,17 +27,17 @@ struct sgl::parsed_prelude_file
 
 /// Where checked layers are kept between processes, so a process reads one back rather than checking it again: the
 /// prelude's, and one per set of modules a program reaches (`check/artifact.hh`).
-/// sgl opens no file, so the store is its host's: slib's persistent cache, the `sgl` tool's directory, or none.
-/// A name is a slot, and an artifact saved under it replaces the one before: `prelude`, or `modules.` and the modules'
-/// names, so an edit to a module's source overwrites its set's entry rather than adding one.
-/// What `load` hands back is checked against this build's key and the sources before it is used, so a store may lose,
-/// cut short or corrupt an entry, or hand back another build's, and the compile then checks as it would without one.
+/// sgl opens no file, so the store is its host's: blob-cache's default cache for slib and the `sgl` tool, or none.
+/// An entry is named by its content's id, this build's key and every source the layer holds (`check::artifact_id`),
+/// so an id is saved under once and never replaced: an edit makes a new one, and a store evicts whichever it likes.
+/// What `load` hands back is checked against the key and the sources before it is used, so a store may lose, cut
+/// short or corrupt an entry, and the compile then checks as it would without one.
 struct sgl::artifact_store
 {
-    /// The bytes `save` last kept under `name`, or none.
-    cc::unique_function<cc::optional<cc::vector<byte>>(cc::string_view name)> load;
-    /// Keeps `bytes` under `name` for a later process, in place of what it kept there, or drops them.
-    cc::unique_function<void(cc::string_view name, cc::span<byte const> bytes)> save;
+    /// The bytes `save` kept under `id`, or none.
+    cc::unique_function<cc::optional<cc::vector<byte>>(cc::hash128 id)> load;
+    /// Keeps `bytes` under `id` for a later process, or drops them.
+    cc::unique_function<void(cc::hash128 id, cc::span<byte const> bytes)> save;
 };
 
 namespace sgl
@@ -82,10 +83,10 @@ namespace sgl::impl
 {
 /// What every artifact this build writes is keyed on: the compiler's fingerprint.
 [[nodiscard]] cc::string artifact_key();
-/// The bytes the store `set_artifact_store` set keeps under `name`; none without a store.
-[[nodiscard]] cc::optional<cc::vector<byte>> load_artifact_bytes(cc::string_view name);
-/// Hands `bytes` to that store under `name`; nothing without one.
-void save_artifact_bytes(cc::string_view name, cc::span<byte const> bytes);
+/// The bytes the store `set_artifact_store` set keeps under `id`; none without a store.
+[[nodiscard]] cc::optional<cc::vector<byte>> load_artifact_bytes(cc::hash128 id);
+/// Hands `bytes` to that store under `id`; nothing without one.
+void save_artifact_bytes(cc::hash128 id, cc::span<byte const> bytes);
 
 /// Both defined by the file CMake generates from `prelude/core.sgl`.
 [[nodiscard]] cc::string_view embedded_core_prelude();

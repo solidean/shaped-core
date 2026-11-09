@@ -357,28 +357,27 @@ void slib::impl::keep_sgl_layers_in(cc::optional<bcache::blob_cache*> chosen)
         return;
     static auto const kept = [store]
     {
-        // a slot, which a later artifact of it replaces: the artifact checks sgl's build and the sources when it is read
-        auto const key_of = [](cc::string_view name) -> bcache::cache_key
+        // the key the `sgl` tool keeps layers under too, so a build's `describe` and this process share them
+        auto const key_of = [](cc::hash128 id) -> bcache::cache_key
         {
-            return {.space = bcache::cache_namespace("slib.sgl.layer"),
-                    .key = bcache::logical_key::create_from_hash(cc::hash256::create(name.as_bytes())),
+            return {.space = bcache::cache_namespace("sgl.layer"),
+                    .key = bcache::logical_key::create_from_hash(
+                        cc::hash256::create(cc::span<cc::hash128 const>(&id, 1).as_bytes())),
                     .version = bcache::version(1)};
         };
         sgl::set_artifact_store({
-            .load = [store, key_of](cc::string_view name) -> cc::optional<cc::vector<byte>>
+            .load = [store, key_of](cc::hash128 id) -> cc::optional<cc::vector<byte>>
             {
-                auto const hit = passive_get(*store, key_of(name), k_sgl_lookup_patience_secs);
+                auto const hit = passive_get(*store, key_of(id), k_sgl_lookup_patience_secs);
                 if (!hit.has_value())
                     return {};
                 return cc::vector<byte>::create_copy_of(hit.value().data.span());
             },
             .save =
-                [store, key_of](cc::string_view name, cc::span<byte const> bytes)
+                [store, key_of](cc::hash128 id, cc::span<byte const> bytes)
             {
-                // The first writer wins, so a stale entry is invalidated first; the store takes messages in order.
-                // Fire and forget: a lost write is a later process checking the layer again.
-                (void)store->invalidate(key_of(name));
-                (void)store->put(key_of(name), cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes)),
+                // fire and forget: a lost write is a later process checking the layer again
+                (void)store->put(key_of(id), cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes)),
                                  {.compute_time_secs = 0.01});
             },
         });

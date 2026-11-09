@@ -64,24 +64,24 @@ cc::string sgl::impl::artifact_key()
     return cc::format("sgl.{}", compiler_fingerprint());
 }
 
-cc::optional<cc::vector<sgl::byte>> sgl::impl::load_artifact_bytes(cc::string_view name)
+cc::optional<cc::vector<sgl::byte>> sgl::impl::load_artifact_bytes(cc::hash128 id)
 {
     return artifact_store_slot().lock(
         [&](cc::optional<artifact_store>& store) -> cc::optional<cc::vector<sgl::byte>>
         {
             if (!store.has_value() || !store.value().load)
                 return {};
-            return store.value().load(name);
+            return store.value().load(id);
         });
 }
 
-void sgl::impl::save_artifact_bytes(cc::string_view name, cc::span<sgl::byte const> bytes)
+void sgl::impl::save_artifact_bytes(cc::hash128 id, cc::span<sgl::byte const> bytes)
 {
     artifact_store_slot().lock(
         [&](cc::optional<artifact_store>& store)
         {
             if (store.has_value() && store.value().save)
-                store.value().save(name, bytes);
+                store.value().save(id, bytes);
         });
 }
 
@@ -94,14 +94,15 @@ sgl::check::checked_prelude const* sgl::checked_prelude()
             files.push_back({.file = f.file, .ast = f.ast});
         // the compilation model's artifacts: a layer this process never checked, keyed by the compiler's build
         auto const key = impl::artifact_key();
-        if (auto const bytes = impl::load_artifact_bytes("prelude"); bytes.has_value())
+        auto const id = check::artifact_id(key, files);
+        if (auto const bytes = impl::load_artifact_bytes(id); bytes.has_value())
             if (auto loaded = check::load_artifact(bytes.value(), key, files, builtins::default_registry());
                 loaded.has_value())
                 return loaded;
         auto made = check::check_prelude(files, builtins::default_registry());
         if (made.has_value())
             if (auto const bytes = check::save_artifact(made.value(), key); bytes.has_value())
-                impl::save_artifact_bytes("prelude", bytes.value());
+                impl::save_artifact_bytes(id, bytes.value());
         return made;
     }();
     return checked.has_value() ? &checked.value() : nullptr;

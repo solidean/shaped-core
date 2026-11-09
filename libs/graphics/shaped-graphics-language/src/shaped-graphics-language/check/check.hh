@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -98,10 +99,6 @@ namespace sgl::check
 /// them the program's own module.
 [[nodiscard]] bool reaches_modules_to_layer(cc::span<module_file const> library, module_file program);
 
-/// The modules of `library` a layer for `program` would hold, by name, in the order `check_modules` checks them; empty
-/// where `reaches_modules_to_layer` is false.
-[[nodiscard]] cc::vector<cc::string> modules_to_layer(cc::span<module_file const> library, module_file program);
-
 /// Whether `program` reaches exactly the modules of `library` that `layer` holds, so it may continue from it.
 [[nodiscard]] bool reaches_the_same_modules(checked_prelude const& layer,
                                             cc::span<module_file const> library,
@@ -180,4 +177,8 @@ private:
                                                                cc::span<module_file const> library,
                                                                module_file program,
                                                                builtins::registry const& builtins);
+    friend cc::optional<cc::hash128> modules_artifact_id(cc::string_view key,
+                                                         checked_prelude const& prelude,
+                                                         cc::span<module_file const> library,
+                                                         module_file program);
 };

@@ -82,7 +82,8 @@ It stays one pass because nothing the prelude checks depends on the program: a l
 `tests/check/checked-prelude-test.cc` compares the two paths over the corpus, the samples and sg's shaders.
 
 **A process reads checked layers back where its host keeps them** (`check/artifact.hh`, `sgl::set_artifact_store`).
-The prelude's is one, and each set of modules a program reaches is another, in the slot the modules' names give.
+The prelude's is one, and each set of modules a program reaches is another.
+A store keeps each under its id, the key and every source it holds (`check::artifact_id`), so an entry is never replaced: an edit is a new id.
 `save_artifact` writes the checker's state after the prelude as bytes, and `load_artifact` makes that state again, a copy rather than a check.
 One walk does both, and it walks each struct by its fields (`check/impl/fields.hh`), so a field added to the checker's state is in every artifact with nothing listed.
 Such a struct is an aggregate with no C array field, and one the walk cannot take fails to compile there.

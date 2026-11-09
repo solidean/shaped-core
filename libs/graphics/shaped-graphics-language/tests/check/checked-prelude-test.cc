@@ -454,13 +454,41 @@ TEST("sgl modules artifact - one module's source changed is a miss, and so is a 
         CHECK(!sgl::check::load_modules_artifact(saved.value(), artifact_key, *sgl::checked_prelude(), changed, user,
                                                  registry)
                    .has_value());
+
+        // a store keeps entries by id: the same for the same layer, another for another key or any source edited
+        auto const id = sgl::check::modules_artifact_id(artifact_key, *sgl::checked_prelude(), library, user);
+        REQUIRE(id.has_value());
+        CHECK(sgl::check::modules_artifact_id(artifact_key, *sgl::checked_prelude(), library, user) == id);
+        CHECK(sgl::check::modules_artifact_id("another key", *sgl::checked_prelude(), library, user) != id);
+        CHECK(sgl::check::modules_artifact_id(artifact_key, *sgl::checked_prelude(), changed, user) != id);
+        CHECK(id != sgl::check::artifact_id(artifact_key, prelude_modules()));
         // a program of no module reaches no layer
         auto const none = sgl::parse("fun f() -> int => 1\n");
         auto const none_ast = sgl::ast::build(none);
         CHECK(!sgl::check::load_modules_artifact(saved.value(), artifact_key, *sgl::checked_prelude(), library,
                                                  {.file = none, .ast = none_ast}, registry)
                    .has_value());
+        CHECK(!sgl::check::modules_artifact_id(artifact_key, *sgl::checked_prelude(), library,
+                                               {.file = none, .ast = none_ast})
+                   .has_value());
         return;
     }
     FAIL("no corpus file reaches a module");
+}
+
+TEST("sgl prelude artifact - its id is the key and every source, so an edit is another entry rather than a replaced "
+     "one")
+{
+    auto const files = prelude_modules();
+    auto const id = sgl::check::artifact_id(artifact_key, files);
+    CHECK(sgl::check::artifact_id(artifact_key, files) == id);
+    CHECK(sgl::check::artifact_id("another key", files) != id);
+
+    auto const edited = sgl::parse(cc::string(files.back().file.source) + "\n// edited\n");
+    auto const edited_ast = sgl::ast::build(edited);
+    auto changed = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i + 1 < files.size(); ++i)
+        changed.push_back(files[i]);
+    changed.push_back({.file = edited, .ast = edited_ast});
+    CHECK(sgl::check::artifact_id(artifact_key, changed) != id);
 }

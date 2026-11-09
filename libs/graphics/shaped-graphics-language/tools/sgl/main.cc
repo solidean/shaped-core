@@ -1,7 +1,7 @@
-#include <clean-core/bytes/hash128.hh>
-#include <clean-core/platform/file_path.hh>
-#include <clean-core/streams/file_stream.hh>
-#include <clean-core/string/format.hh>
+#include <blob-cache/blob_cache.hh>
+#include <blob-cache/default_cache.hh>
+#include <clean-core/bytes/hash256.hh>
+#include <clean-core/thread/async.hh>
 #include <nexus/run.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 
@@ -12,34 +12,35 @@ using namespace cc::primitive_defines;
 // A new tool of the toolchain - a formatter, a linter, the language server - is one more file with one more COMMAND.
 int main(int argc, char** argv)
 {
-    // Checked layers, one file per slot for every later run: a build of another compiler overwrites its slot rather than
-    // adding a file, and the key is inside, so a file of another build or one cut short is a miss that checks instead.
-    auto const path_of = [](cc::string_view name)
+    // Checked layers live in the user's blob cache under slib's key, so a build's `describe` and an app's compile share them.
+    // Only a command uses it: this binary's tests and listings are selected by a flag, and stay off the user's cache.
+    if (argc > 1 && argv[1][0] != '-')
     {
-        return cc::format("{}/sgl-{:016x}.layer", cc::temp_directory_path(), cc::hash128::create(name.as_bytes(), 0).low);
-    };
-    sgl::set_artifact_store({
-        .load = [path_of](cc::string_view name) -> cc::optional<cc::vector<byte>>
+        auto const key_of = [](cc::hash128 id) -> bcache::cache_key
         {
-            auto opened = cc::file_read_stream_adapter::open(path_of(name));
-            if (!opened.has_value())
-                return {};
-            cc::read_stream stream = opened.value().stream();
-            auto bytes = stream.read_all();
-            if (!bytes.has_value())
-                return {};
-            return cc::move(bytes.value());
-        },
-        .save =
-            [path_of](cc::string_view name, cc::span<byte const> bytes)
-        {
-            auto opened = cc::file_write_stream_adapter::create(path_of(name));
-            if (!opened.has_value())
-                return;
-            cc::write_stream stream = opened.value().stream();
-            if (stream.write(bytes).has_value())
-                (void)stream.flush();
-        },
-    });
+            return {.space = bcache::cache_namespace("sgl.layer"),
+                    .key = bcache::logical_key::create_from_hash(
+                        cc::hash256::create(cc::span<cc::hash128 const>(&id, 1).as_bytes())),
+                    .version = bcache::version(1)};
+        };
+        sgl::set_artifact_store({
+            .load = [key_of](cc::hash128 id) -> cc::optional<cc::vector<byte>>
+            {
+                // no answer within a second is a miss, so another process holding the file never stalls a build
+                auto const got = cc::try_async_blocking_get_for(bcache::default_cache().get(key_of(id)), 1000);
+                if (!got.has_value() || !got.value().has_value() || !got.value().value().has_value())
+                    return {};
+                return cc::vector<byte>::create_copy_of(got.value().value().value().data.span());
+            },
+            // fire and forget: the default cache drains what it accepted as the process ends
+            .save =
+                [key_of](cc::hash128 id, cc::span<byte const> bytes)
+            {
+                (void)bcache::default_cache().put(key_of(id),
+                                                  cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes)),
+                                                  {.compute_time_secs = 0.01});
+            },
+        });
+    }
     return nx::run(argc, argv);
 }

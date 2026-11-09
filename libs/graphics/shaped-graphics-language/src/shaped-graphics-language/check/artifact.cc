@@ -470,6 +470,28 @@ cc::vector<byte> framed(cc::span<byte const> payload, cc::string_view key, cc::s
     return out;
 }
 
+/// The id an artifact of `sources` under `key` is stored by.
+cc::hash128 id_of(cc::string_view key, cc::span<cc::string_view const> sources)
+{
+    auto const s = sources_hash(sources);
+    return cc::hash128::create(key.as_bytes(), s.low ^ (s.high * 31));
+}
+
+/// The files of the layer of modules `program` reaches, the prelude's first, as `check_modules` plans them.
+cc::optional<cc::pair<cc::vector<module_file>, module_plan>> modules_layer_files(cc::span<module_file const> prelude,
+                                                                                 cc::span<module_file const> library,
+                                                                                 module_file program)
+{
+    auto plan = plan_modules(library, program);
+    if (!may_layer(plan))
+        return {};
+    auto files = cc::vector<module_file>();
+    files.push_back_range(prelude);
+    for (auto const i : plan.library_order)
+        files.push_back(library[i]);
+    return cc::pair{cc::move(files), cc::move(plan)};
+}
+
 /// Whether `bytes` are an artifact written under `key` for `sources`, whole and unchanged.
 bool is_framed(cc::span<byte const> bytes, cc::string_view key, cc::span<cc::string_view const> sources)
 {
@@ -483,6 +505,22 @@ bool is_framed(cc::span<byte const> bytes, cc::string_view key, cc::span<cc::str
         && h.payload_size == u64(payload.size()) && h.payload == cc::hash128::create(payload, h.payload_size);
 }
 } // namespace
+
+cc::hash128 sgl::check::artifact_id(cc::string_view key, cc::span<module_file const> prelude)
+{
+    return id_of(key, sources_of(prelude));
+}
+
+cc::optional<cc::hash128> sgl::check::modules_artifact_id(cc::string_view key,
+                                                          checked_prelude const& prelude,
+                                                          cc::span<module_file const> library,
+                                                          module_file program)
+{
+    auto const layer = modules_layer_files(prelude._files, library, program);
+    if (!layer.has_value())
+        return {};
+    return id_of(key, sources_of(layer.value().first));
+}
 
 cc::optional<cc::vector<byte>> sgl::check::save_artifact(checked_prelude const& layer, cc::string_view key)
 {
@@ -526,13 +564,10 @@ cc::optional<checked_prelude> sgl::check::load_modules_artifact(cc::span<byte co
 {
     CC_ASSERT(prelude._library_order.empty(), "a layer of modules stands on the prelude's layer");
     // what the program reaches, planned as `check_modules` plans it: the same files in the same order are the same ids
-    auto plan = plan_modules(library, program);
-    if (!may_layer(plan))
+    auto layer = modules_layer_files(prelude._files, library, program);
+    if (!layer.has_value())
         return {};
-    auto files = cc::vector<module_file>();
-    files.push_back_range(cc::span<module_file const>(prelude._files));
-    for (auto const i : plan.library_order)
-        files.push_back(library[i]);
+    auto& [files, plan] = layer.value();
     auto const sources = sources_of(files);
     if (!is_framed(bytes, key, sources))
         return {};

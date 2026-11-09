@@ -255,18 +255,6 @@ bool sgl::check::reaches_modules_to_layer(cc::span<module_file const> library, m
     return may_layer(plan_modules(library, program));
 }
 
-cc::vector<cc::string> sgl::check::modules_to_layer(cc::span<module_file const> library, module_file program)
-{
-    auto plan = plan_modules(library, program);
-    auto out = cc::vector<cc::string>();
-    if (!may_layer(plan))
-        return out;
-    // module 0 is the program's own, which no layer holds
-    for (auto i = isize(1); i < plan.modules.size(); ++i)
-        out.push_back(cc::move(plan.modules[i]));
-    return out;
-}
-
 bool sgl::check::reaches_the_same_modules(checked_prelude const& layer,
                                           cc::span<module_file const> library,
                                           module_file program)
