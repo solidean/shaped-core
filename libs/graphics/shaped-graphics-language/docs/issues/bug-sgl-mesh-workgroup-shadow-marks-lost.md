@@ -1,12 +1,11 @@
 ---
 created: 2026-11-09
 refs:
+  - file: docs/bugs-external/nvidia-mesh-groupshared-atomics-lost/readme.md
   - test: "sr - a mesh stage's read of workgroup memory no invocation stored is reported where it would have run (LEGAL-69)"
 ---
 
 # A mesh stage's workgroup-memory shadow loses other invocations' marks on an RTX
-
-What is wrong or wanted, and what is already known.
 
 The LEGAL-69 test, new in `08b6c1f9e`, fails on an RTX 5070 Ti on dx12 and vulkan, by DXC's route and the native one alike, and passes on WARP.
 Invocation 2 stores nothing, so the one hole is `tile.values[2]`, which invocation 1 reads and which is reported as expected.
@@ -21,5 +20,9 @@ Measured on 2026-11-09:
 * The compute twin of the test, `shadow.sgl`, passes on the same GPU.
 
 So the same text loses groupshared atomics of some lanes in a mesh stage on NVIDIA's driver, and keeps them on WARP.
-Hypothesis only: NVIDIA's mesh stage keeps groupshared and its outputs in one allocation, and an output write or the lanes past the four declared ones disturb `sgl_written`.
-Next: the DXIL and the SPIR-V side by side with the compute twin's, and the same test on an AMD or Intel GPU.
+
+Reduced on 2026-11-09 to twenty lines of HLSL through the stock DXC, in [nvidia-mesh-groupshared-atomics-lost](../../../../../docs/bugs-external/nvidia-mesh-groupshared-atomics-lost/readme.md).
+The trigger is the `aborted` flag the index guards set: a phi out of the divergent store branch, live across the barrier, read by the `return` after `SetMeshOutputCounts`.
+Returning on the same condition spelled again, `-Od`, or the compute stage each keep every mark.
+
+Left to decide: skip LEGAL-69 on NVIDIA, or end an aborted mesh invocation without a flag live across a barrier in what SGL emits.
