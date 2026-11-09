@@ -1,7 +1,7 @@
 """Sites: resolve the opaque source sites a failed test printed, `module+0xoffset`, to file, line and function.
 
 Below `SC_SOURCE_SITES=FULL` a check, an assert or a test names its site by code address alone (docs/platforms.md, "Source sites").
-After a failed run this reads the binary's logs, resolves every site of a module beside the binary through `llvm-symbolizer` and the build's debug info,
+After a failed run this reads the binary's logs, resolves every site of a module beside the binary through `llvm-symbolizer` (atos for a Mach-O) and the build's debug info,
 and prints each as `file:line (function)` with the source line there, since an assert below FULL carries no condition text.
 The frames of clean-core's `source_location.hh` are skipped: it takes the address, so its frames are inlined innermost into every site.
 
@@ -107,8 +107,85 @@ def find_symbolizer(build_dir: Path) -> str | None:
     return shutil.which("llvm-symbolizer")
 
 
+_MH_MAGIC_64 = 0xFEEDFACF
+_LC_SEGMENT_64 = 0x19
+
+
+def macho_text_vmaddr(module: Path) -> int | None:
+    """`__TEXT`'s vmaddr in a 64-bit Mach-O, or None for any other file.
+
+    A Mach-O module's offset is from its header, which is `__TEXT`'s first byte, while its symbols are keyed on vmaddr.
+    """
+    try:
+        with open(module, "rb") as f:
+            head = f.read(32)
+            if len(head) < 32 or int.from_bytes(head[0:4], "little") != _MH_MAGIC_64:
+                return None
+            ncmds = int.from_bytes(head[16:20], "little")
+            commands = f.read(int.from_bytes(head[20:24], "little"))
+    except OSError:
+        return None
+    at = 0
+    for _ in range(ncmds):
+        cmd = int.from_bytes(commands[at:at + 4], "little")
+        size = int.from_bytes(commands[at + 4:at + 8], "little")
+        if cmd == _LC_SEGMENT_64 and commands[at + 8:at + 24].rstrip(b"\0") == b"__TEXT":
+            return int.from_bytes(commands[at + 24:at + 32], "little")
+        if size <= 0:
+            break
+        at += size
+    return None
+
+
+# `function (in module) (/path/file.cc:42)`; a frame without line info ends `(in module) + 12` or is a bare address
+_ATOS_FRAME = re.compile(r"^(.*?) \(in [^)]*\)(?: \((.*):(\d+)\))?")
+
+
+def parse_atos(stdout: str, count: int) -> list[list[Frame]]:
+    """atos -i's answer, one block per address, as frames innermost first.
+
+    A block is its frame lines and then one blank line; an address atos has no symbol for still takes one empty line first.
+    """
+    blocks: list[list[Frame]] = []
+    lines = stdout.split("\n")
+    i = 0
+    while i < len(lines) and len(blocks) < count:
+        frames: list[Frame] = []
+        first = True
+        while i < len(lines) and (first or lines[i].strip()):
+            line = lines[i].strip()
+            i += 1
+            first = False
+            if not line:
+                continue
+            m = _ATOS_FRAME.match(line)
+            if m is None:
+                frames.append(Frame(function=line, file="??", line=0))
+            else:
+                frames.append(Frame(function=m.group(1), file=m.group(2) or "??", line=int(m.group(3) or 0)))
+        if i < len(lines) and not lines[i].strip():
+            i += 1  # the blank line closing the block
+        blocks.append(frames)
+    return (blocks + [[] for _ in range(count)])[:count]
+
+
+def _symbolize_macho(module: Path, vmaddr: int, offsets: list[int]) -> list[list[Frame]]:
+    """atos, which reads the debug map into the objects; llvm-symbolizer finds no lines in a Mach-O without a dSYM."""
+    xcrun = shutil.which("xcrun")
+    if xcrun is None:
+        raise RuntimeError("xcrun not found, which runs atos")
+    cmd = [xcrun, "atos", "-fullPath", "-i", "-o", str(module), "-l", f"{vmaddr:#x}"] + [f"{vmaddr + o:#x}" for o in offsets]
+    completed = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=_SYMBOLIZER_TIMEOUT_S, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or f"exit code {completed.returncode}")
+    return parse_atos(completed.stdout, len(offsets))
+
+
 def _symbolize(symbolizer: str, module: Path, offsets: list[int]) -> list[list[Frame]]:
     """One symbolizer process for all of a module's offsets."""
+    if (vmaddr := macho_text_vmaddr(module)) is not None:
+        return _symbolize_macho(module, vmaddr, offsets)
     cmd = [symbolizer, f"--obj={module}", "--inlining", "--demangle", "--functions=linkage"]
     # A COFF module's offset is an RVA; an ELF one is already the address its DWARF is keyed on, for a PIE loaded at its bias.
     if module.suffix.lower() in (".exe", ".dll"):
@@ -214,6 +291,9 @@ def report(logs: list[Path | None], artifact: Path, build_dir: Path, root: Path)
     modules = {n: p for n, p in modules.items() if any(s[0] == n for s in sites)}
 
     symbolizer = find_symbolizer(build_dir)
+    # Mach-O modules go through atos, which needs no llvm-symbolizer
+    if symbolizer is None and all(macho_text_vmaddr(p) is not None for p in modules.values()):
+        symbolizer = ""
     if symbolizer is None:
         lines = [f"  {m}+{o:#x}" for m, o in sites]
         lines.append("  llvm-symbolizer not found beside the compiler or on PATH; set LLVM_SYMBOLIZER to resolve these")

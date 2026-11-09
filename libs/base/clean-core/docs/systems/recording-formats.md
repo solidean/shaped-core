@@ -151,6 +151,8 @@ So an unreachable path does not fail at load — it costs a network timeout per 
 **The identity matters as much as the base.**
 Two builds of the same path are different binaries, and resolving against the wrong one produces confident nonsense rather than an error.
 On Windows it is the PE `TimeDateStamp` and `SizeOfImage` as hex — literally the key a symbol server URL is built from.
+On macOS it is the image's LC_UUID, which is what a dSYM is matched on.
+macOS resolves such a table to modules and offsets alone, since `dladdr` knows only this process's images; `atos` names the rest offline.
 
 The two writers gather it at different times, for the same reason they differ everywhere else.
 `cc::rec::serialize` enumerates the modules when it writes, once per process.

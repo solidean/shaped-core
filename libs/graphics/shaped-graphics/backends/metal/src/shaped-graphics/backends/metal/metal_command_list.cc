@@ -24,6 +24,10 @@ namespace sg::backend::metal
 {
 namespace
 {
+/// Every stage of a render pipeline, the object and mesh stages included: a stage left out reads no binding at all.
+constexpr auto all_render_stages
+    = MTL::RenderStageVertex | MTL::RenderStageFragment | MTL::RenderStageObject | MTL::RenderStageMesh;
+
 [[nodiscard]] MTL::LoadAction load_action_of(sg::target_op op)
 {
     switch (op)
@@ -1479,7 +1483,7 @@ void metal_command_list::resume_render_encoder()
         _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
         _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
 
-        _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+        _render_encoder->setArgumentTable(argument_table(), all_render_stages);
     }
 
     if (_scope_stencil_reference.has_value())
@@ -1554,7 +1558,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
     _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
 
-    _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+    _render_encoder->setArgumentTable(argument_table(), all_render_stages);
 }
 
 void metal_command_list::raster_bind_group(int group_index, binding_group const& group)

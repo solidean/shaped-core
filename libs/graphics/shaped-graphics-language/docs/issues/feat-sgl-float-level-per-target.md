@@ -11,7 +11,8 @@ refs:
 Done on 2026-11-05: dx12; metal, whose safe math keeps up to `precise`; and vulkan at every level.
 For SPIR-V DXC's `-Gis` writes `SignedZeroInfNanPreserve` and `NoContraction` on every float operation, and `-denorm preserve` writes `DenormPreserve`.
 Each stands behind sg's `float_specials` and `float_denormals`, the device's float controls.
-Left: whether metal's safe math keeps denormals, which decides whether metal keeps `ieee`.
+Measured on 2026-11-09 on an M4: metal's safe math flushes denormals, read and written, so metal keeps up to `precise` and never `ieee`.
+A denormal read in arithmetic counts as zero, a denormal result is zero, and only a copy keeps one; the float-specials test pins it.
 
 dx12: `-Gis` from `specials` on, and `-denorm preserve` for `ieee`, handed to DXC by slib's SGL edge per entry point.
 metal: safe math from `specials` on, which sg sets today for every compile and would set per pipeline instead.

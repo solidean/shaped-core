@@ -321,7 +321,8 @@
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_COVERAGE": "ON"
+                "SC_COVERAGE": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -436,7 +437,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "SANITIZE": "address,undefined",
-                "SC_MIMALLOC": "OFF"
+                "SC_MIMALLOC": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -449,7 +451,8 @@
                 "SANITIZE": "thread",
                 "SC_MIMALLOC": "OFF",
                 "CMAKE_EXE_LINKER_FLAGS": "",
-                "CMAKE_SHARED_LINKER_FLAGS": ""
+                "CMAKE_SHARED_LINKER_FLAGS": "",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -484,7 +487,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
-                "SC_SIMD_EXHAUSTIVE_TESTS": "ON"
+                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -502,7 +506,8 @@
             "description": "Optimized build with debug symbols",
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
