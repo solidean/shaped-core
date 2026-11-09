@@ -261,6 +261,10 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
    That is the import table and the relocation pass of [ids](#ids), and what a dependent's key is made of.
 8. **Options as a second layer** (see [artifacts](#artifacts)): a compile that sets a module's option checks only what reaches it.
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers, which is every compile in the tree.
+   *A second, on 2026-11-09, in the chain's terms:* a link is checked with the values a compile gives its own module's options, and they are part of its key.
+   So a compile that sets one shares every link before that module's, checks it and the links after it with its values, and a permutation compiled again finds them.
+   The chain puts a module with an option as late as the modules using it allow, so few links come after it.
+   What is left is the declaration's grain, which needs no link after the module's to be checked again: that is relocation's (step 7).
 9. **Per-module artifacts, kept where a host asks:** each module's first layer, keyed by its sources and its imports' interfaces, relocated on load.
    The host's seam is async, and a compile is handed loaded layers.
 10. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.

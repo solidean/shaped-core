@@ -99,21 +99,24 @@ sgl::check::check_library(prelude, library)  // -> optional<checked_prelude>: ev
                                            // a file's parse error included; the chain below, from scratch
 sgl::check::library_chain(library)         // -> vector<chained_module> { name, files }: dependencies first, a module
                                            // nothing uses last; empty where the library makes no chain
-sgl::check::check_next_module(base, library, name)  // -> optional<checked_prelude>: the next link, over the prelude's
-                                           // layer or the link before; a program reaching only its modules continues it
+sgl::check::check_next_module(base, library, name, options = {})  // -> optional<checked_prelude>: the next link,
+                                           // over the prelude's layer or the link before; a program reaching only its
+                                           // modules continues it; `options`: the values for name's own options alone
+sgl::check::options_of_module(options, name)  // -> vector<option_value>: those named `name.x`, in the order given
 sgl::check::may_continue_from(layer, library, program)  // -> bool: a layer of its very modules, or the library's
 m.is_reached_file(file)                    // -> bool: false for a module the program does not use, which a layer of the
                                            // whole library holds; ASK IT in any pass over every symbol or pipeline
 m.reached_library_files                    // what the program reaches; library_files is what was checked, in file order
-sgl::check::layer_serves_options(layer, options)  // -> bool: false where an option names a layered module's own,
-                                           // which the layer checked at its default: check beside the library instead
+sgl::check::layer_serves_options(layer, options)  // -> bool: the values given the layer's modules' options are the
+                                           // very ones it was checked with; a program's own options never matter
 
 #include <shaped-graphics-language/driver/shared_library.hh>
 sgl::shared_library_of(library, source_name)  // -> shared_ptr<shared_library const>: the module files parsed ONCE per
                                            // process, keyed on every name and source; null where none declares a module
-sgl::layer_of(*shared, program)            // -> shared_ptr<checked_prelude const>: the layer to continue from, made once
-                                           // and kept in `shared`; null where none serves. HOLD IT as long as the module
-                                           // checked behind it, which reads the layer's tables in place
+sgl::layer_of(*shared, program, options = {})  // -> shared_library::link_ptr: link->layer is what to continue from,
+                                           // made once and kept in `shared`; null where none serves. HOLD THE LINK as
+                                           // long as the module checked behind it: it keeps the files below alive
+                                           // a module's option set: a chain with its values, the links before shared
                                            // its chain's links are shared with every library holding the same modules
                                            // before them, so an edit checks its module and those after it alone
 

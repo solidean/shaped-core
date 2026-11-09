@@ -30,6 +30,7 @@ struct sgl::shared_library
         cc::shared_ptr<chain_link const> before;
         cc::vector<cc::shared_ptr<parsed_unit const>> units;
     };
+    using link_ptr = cc::shared_ptr<chain_link const>;
 
     cc::vector<cc::shared_ptr<parsed_unit const>> units;
     /// Each file as the check pass takes it, and the name it was handed in under.
@@ -43,10 +44,14 @@ struct sgl::shared_library
         /// A link is shared with every library that holds the same modules before it, so an edit of a module checks
         /// it and the modules after it again, and none before.
         /// Null once it could not be made, a module that reports anything among the reasons; `made` serves then.
-        cc::shared_ptr<chain_link const> library;
+        link_ptr library;
         bool has_tried_library = false;
-        /// One layer per set of modules a program reaches, where the library makes none of its own.
-        cc::vector<cc::shared_ptr<check::checked_prelude const>> made;
+        /// The chains of the permutations compiled most recently, each with the values a compile gave its modules'
+        /// options; the links before the first module it sets are `library`'s.
+        cc::vector<link_ptr> with_options;
+        /// One layer per set of modules a program reaches, where the library makes none of its own, as a link of no
+        /// chain.
+        cc::vector<link_ptr> made;
         /// Set once a set of this library's modules failed to make a layer, after which its compiles check it whole.
         bool has_failed = false;
     };
@@ -63,11 +68,13 @@ namespace sgl
 [[nodiscard]] cc::shared_ptr<shared_library const> shared_library_of(cc::span<library_file const> library,
                                                                      cc::string_view source_name);
 
-/// The layer `program` continues from behind `checked_prelude()`: the whole library's, or else that of the modules it
-/// reaches, made on first need and kept in `library`.
+/// The link `program` continues from behind `checked_prelude()`: the whole library's chain, or else a layer of the
+/// modules it reaches, made on first need and kept in `library`.
+/// A compile that sets a module's option continues from a chain checked with its values, which shares every link
+/// before that module's with the others; a layer of the modules a program reaches serves the defaults alone.
 /// Null where none serves: no checked prelude, a program reaching no module or its own module's files, a failed layer.
-/// A layer is checked at the modules' defaults, so a compile that sets one of their options asks
-/// `check::layer_serves_options` before it continues from it.
-[[nodiscard]] cc::shared_ptr<check::checked_prelude const> layer_of(shared_library const& library,
-                                                                    check::module_file program);
+/// Hold the link as long as anything checked behind its layer: it keeps the files of the links before it alive.
+[[nodiscard]] shared_library::link_ptr layer_of(shared_library const& library,
+                                                check::module_file program,
+                                                cc::span<check::option_value const> options = {});
 } // namespace sgl

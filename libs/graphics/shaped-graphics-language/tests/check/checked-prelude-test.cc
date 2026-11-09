@@ -5,6 +5,7 @@
 #include <clean-core/string/print.hh>
 #include <shaped-graphics-language/check/artifact.hh>
 #include <shaped-graphics-language/check/footprint.hh>
+#include <shaped-graphics-language/driver/shared_library.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 #include <shaped-graphics-language/source/format_diagnostic.hh>
@@ -646,6 +647,122 @@ placed_files placed(sgl::check::checked_module const& m,
     return out;
 }
 } // namespace
+
+TEST("sgl checked modules - a chain puts a module with options late, and its link checked with a compile's values "
+     "serves that compile as a check beside the library does")
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const sources = cc::vector<cc::string>{
+        "module tuned\n@option const width = 2\nfun scale(x: float) -> float => x * (width as float)\n",
+        "module blur\nuse tuned\nfun wide() -> float => tuned.scale(2.0)\n",
+        "module plain\nfun one() -> float => 1.0\n",
+    };
+    auto parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
+    auto built = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
+    auto library = cc::vector<sgl::check::module_file>();
+    for (auto const& s : sources)
+    {
+        parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(s)));
+        built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*parsed.back())));
+        library.push_back({.file = *parsed.back(), .ast = *built.back()});
+    }
+    auto const names = cc::vector<cc::string>{"tuned.sgl", "blur.sgl", "plain.sgl"};
+
+    // `plain` has no option, so it comes before `tuned` though `blur` needs `tuned` first
+    auto const order = sgl::check::library_chain(library);
+    REQUIRE(order.size() == 3);
+    CHECK(order[0].name == "plain");
+    CHECK(!order[0].has_options);
+    CHECK(order[1].name == "tuned");
+    CHECK(order[1].has_options);
+    CHECK(order[2].name == "blur");
+
+    using options = cc::vector<sgl::check::option_value>;
+    auto const set = options{{.name = "taps", .value = "3"}, {.name = "tuned.width", .value = "3"}};
+    auto const of_tuned = sgl::check::options_of_module(set, "tuned");
+    REQUIRE(of_tuned.size() == 1);
+    CHECK(of_tuned[0].name == "tuned.width");
+    CHECK(sgl::check::options_of_module(set, "tune").empty());
+    CHECK(sgl::check::options_of_module(set, "blur").empty());
+
+    auto const first = sgl::check::check_next_module(*checked, library, "plain");
+    REQUIRE(first.has_value());
+    auto const tuned
+        = sgl::check::check_next_module(first.value(), library, "tuned", sgl::check::options_of_module(set, "tuned"));
+    REQUIRE(tuned.has_value());
+    auto const last = sgl::check::check_next_module(tuned.value(), library, "blur");
+    REQUIRE(last.has_value());
+    auto const defaults = sgl::check::check_library(*checked, library);
+    REQUIRE(defaults.has_value());
+
+    // a layer serves exactly the module values it was checked with, whatever the program's own are
+    CHECK(sgl::check::layer_serves_options(last.value(), set));
+    CHECK((sgl::check::layer_serves_options(last.value(), options{{.name = "tuned.width", .value = "3"}})));
+    CHECK((!sgl::check::layer_serves_options(last.value(), options{{.name = "taps", .value = "3"}})));
+    CHECK((!sgl::check::layer_serves_options(last.value(), options{{.name = "tuned.width", .value = "4"}})));
+    CHECK(!sgl::check::layer_serves_options(defaults.value(), set));
+    CHECK((sgl::check::layer_serves_options(defaults.value(), options{{.name = "taps", .value = "3"}})));
+    // a layer holding no option the compile sets serves it
+    CHECK(sgl::check::layer_serves_options(first.value(), set));
+
+    auto const program_file = sgl::parse("use blur\nuse plain\n@option const taps = 1\n"
+                                         "fun total() -> float => blur.wide() + plain.one() * (taps as float)\n"
+                                         "test total() == 9.0\n");
+    auto const program_ast = sgl::ast::build(program_file);
+    auto const user = sgl::check::module_file{.file = program_file, .ast = program_ast};
+    auto const beside = sgl::check::check(*checked, library, user, set);
+    auto const behind = sgl::check::check(last.value(), library, user, set);
+    CHECK(beside.diagnostics.empty());
+    auto const at_beside = placed(beside, library, names, user);
+    auto const at_behind = placed(behind, library, names, user);
+    CHECK(observed_as(behind, at_behind.files, at_behind.names) == observed_as(beside, at_beside.files, at_beside.names));
+    // the module's option has the value the compile gave, and so does what the program's test reads: 2 * 3 + 1 * 3
+    auto width = 0;
+    for (auto const& symbol : behind.symbols)
+        if (symbol.name == "width" && symbol.kind == sgl::check::symbol_kind::constant)
+            width = behind.constants[symbol.info].integer;
+    CHECK(width == 3);
+    for (auto const& r : sgl::test::run_tests(behind, at_behind.files))
+        CHECK(r.status == sgl::test::test_status::passed);
+}
+
+TEST("sgl shared library - a compile that sets a module's option shares every link before that module's, and a "
+     "permutation compiled again finds its own")
+{
+    auto const library = cc::vector<sgl::library_file>{
+        {.name = "tuned.sgl",
+         .source = "module tuned\n@option const width = 2\nfun scale(x: float) -> float => x * (width as float)\n"},
+        {.name = "plain.sgl", .source = "module plain\nfun one() -> float => 1.0\n"},
+    };
+    auto const shared = sgl::shared_library_of(library, "program.sgl");
+    REQUIRE(shared != nullptr);
+    auto const program_file = sgl::parse("use tuned\nuse plain\nfun f() -> float => tuned.scale(plain.one())\n");
+    auto const program_ast = sgl::ast::build(program_file);
+    auto const user = sgl::check::module_file{.file = program_file, .ast = program_ast};
+
+    using options = cc::vector<sgl::check::option_value>;
+    auto const defaults = sgl::layer_of(*shared, user);
+    auto const three = sgl::layer_of(*shared, user, options{{.name = "tuned.width", .value = "3"}});
+    auto const four = sgl::layer_of(*shared, user, options{{.name = "tuned.width", .value = "4"}});
+    auto const three_again = sgl::layer_of(*shared, user, options{{.name = "tuned.width", .value = "3"}});
+    // the program's own options are no module's, so they continue from the defaults' chain
+    auto const own = sgl::layer_of(*shared, user, options{{.name = "taps", .value = "3"}});
+    REQUIRE(defaults != nullptr);
+    REQUIRE(three != nullptr);
+    REQUIRE(four != nullptr);
+    CHECK(three != defaults);
+    CHECK(four != three);
+    CHECK(three_again == three);
+    CHECK(own == defaults);
+    // `plain` has no option, so it is the first link, and every chain holds the same one
+    REQUIRE(defaults->before != nullptr);
+    CHECK(three->before == defaults->before);
+    CHECK(four->before == defaults->before);
+    CHECK((sgl::check::layer_serves_options(*three->layer, options{{.name = "tuned.width", .value = "3"}})));
+    // a value the option does not take reports, so that compile has no link and checks beside the library
+    CHECK((sgl::layer_of(*shared, user, options{{.name = "tuned.width", .value = "wide"}}) == nullptr));
+}
 
 TEST("sgl checked modules - behind a layer of the whole library a program checks as beside the modules it reaches")
 {

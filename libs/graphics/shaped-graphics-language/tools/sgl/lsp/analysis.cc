@@ -162,7 +162,7 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
         }
     auto const library = a->library != nullptr ? cc::span<sgl::check::module_file const>(a->library->files)
                                                : cc::span<sgl::check::module_file const>();
-    a->module = a->layer != nullptr ? sgl::check::check(*a->layer, library, behind)
+    a->module = a->layer != nullptr ? sgl::check::check(*a->layer->layer, library, behind)
               : checked != nullptr  ? sgl::check::check(*checked, library, behind)
                                     : sgl::check::check(files, library, behind, sgl::builtins::default_registry());
     for (auto const i : a->module.library_files)
