@@ -4,6 +4,8 @@ priority: someday
 refs:
   - file: CMakePresets.json
   - file: tools/dev/lib/pipeline/sites.py
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-09T16:22Z
 ---
 
 # The MSVC, GCC, macOS, iOS and Android development presets still build at SC_SOURCE_SITES=FULL
