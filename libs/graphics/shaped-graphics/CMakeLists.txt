@@ -478,6 +478,7 @@ if(SC_BUILD_TESTS)
             MODULE_DIRS tests/shaders/sgl/modules
             SHADERS
                 module:marking
+                module:marking.tints
                 module_marking.sgl:*
                 module_tinting.sgl:*
                 double_values.sgl:*

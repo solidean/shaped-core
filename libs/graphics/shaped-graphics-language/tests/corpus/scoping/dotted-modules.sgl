@@ -1,0 +1,15 @@
+// A dotted module name is one module's whole name, and `use` binds its last part (CHK-346, CHK-347).
+use shading.lamps
+use studio.lamps as stage
+use shading
+
+test lamps.glow(2.0) == 6.0
+test stage.glow(2.0) == 3.0
+
+// `shading` is another module, which holds nothing of `shading.lamps`
+@expect(error = "unknown-name")
+test shading.glow(2.0) == 6.0
+
+// the path binds its last part alone
+@expect(error = "unknown-name")
+test studio.glow(2.0) == 3.0

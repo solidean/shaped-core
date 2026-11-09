@@ -279,9 +279,10 @@ namespace
 /// A program that uses each of `names` once, by its own name and in order.
 cc::string uses_of(cc::span<cc::string const> names)
 {
+    // each under a name of its own, since two modules' names may end alike, `a.scene` and `b.scene`
     auto text = cc::string();
-    for (auto const& name : names)
-        text.appendf("use {}\n", name);
+    for (auto i = isize(0); i < names.size(); ++i)
+        text.appendf("use {} as linked_module_{}\n", names[i], i);
     return text;
 }
 
@@ -303,12 +304,8 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
         // a parse error checks as no diagnostic, and only a program reaching the file may report it
         if (!f.file.diagnostics.empty() || !f.ast.diagnostics.empty())
             return {};
-        for (auto const id : f.ast.at(f.ast.declarations))
-            if (auto const* const m = f.ast.at(id).node.try_as<ast::module_decl>();
-                m != nullptr && ast::is_valid(m->path))
-                if (auto const* const n = f.ast.at(m->path).node.try_as<ast::name>();
-                    n != nullptr && !contains(named, f.file.text_of(n->where)))
-                    named.push_back(cc::string(f.file.text_of(n->where)));
+        if (auto name = impl::module_name_of(f); !name.empty() && !contains(named, name))
+            named.push_back(cc::move(name));
     }
     if (named.empty())
         return {};
@@ -316,14 +313,11 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
     auto with_options = cc::vector<cc::string>();
     for (auto const& f : library)
     {
-        auto module = cc::string_view();
+        auto const module = impl::module_name_of(f);
         auto has_option = false;
         for (auto const id : f.ast.at(f.ast.declarations))
         {
             auto const& d = f.ast.at(id);
-            if (auto const* const m = d.node.try_as<ast::module_decl>(); m != nullptr && ast::is_valid(m->path))
-                if (auto const* const n = f.ast.at(m->path).node.try_as<ast::name>(); n != nullptr)
-                    module = f.file.text_of(n->where);
             if (d.node.is<ast::const_decl>())
                 for (auto const& a : f.ast.at(d.attributes))
                     has_option = has_option || f.file.text_of(a.name) == "option";

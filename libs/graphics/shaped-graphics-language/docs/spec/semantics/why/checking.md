@@ -28,6 +28,12 @@ A `use` brings in the module's name only, so a foreign name is always written qu
 It is the file's own, as an import is in most languages: a file's dependencies read from its head, and deleting a `use` cannot break a sibling.
 Both are the strict end of their choice: a wildcard import, and a `use` shared across a module's files, would each add to what compiles and break nothing.
 
+*Decided with the maintainer on 2026-11-09:* a dotted module name is flat.
+`sv.scene` is one name, which keeps two libraries' `scene` modules apart and nests nothing.
+So a module `sv` and its declarations are no part of `sv.scene`, and a module's place in a directory says nothing of its name.
+`use sv.scene` binds `scene` because code names the module it uses by its own name, as it did before names had dots; `as` is there for the clash.
+Nesting modules was set aside: it raises what `use sv` checks and reaches, which nothing so far needs.
+
 ## CHK-349
 
 Within one pass a loop of modules would check, since compilation is demand-driven per symbol.

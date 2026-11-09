@@ -81,6 +81,9 @@ sc_add_shader_package(
 #   a module nobody exports fails as a missing <sgl_modules/view.hh>, whose include line names the entry to add.
 # every module file is embedded; a new one in a module dir re-runs configure and the generator on the next build.
 # a module is exported by one package; a second `module:view` anywhere in the build is a configure error.
+# a dotted module `module:post.blur` writes <sgl_modules/post/blur.hh>, its types reached as sgl_modules::post::blur::frame.
+#   one package exports a module and those under its name, `post` and `post.blur`: two packages exporting them is a
+#   configure error, since `sgl_modules::post` is an alias the other cannot reopen.
 ```
 
 ```cpp

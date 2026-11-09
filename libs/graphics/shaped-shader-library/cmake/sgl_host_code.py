@@ -106,15 +106,21 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
         if o["type"] not in OPTION_TYPES:
             continue
         if "." in o["name"]:
-            module, name = o["name"].split(".", 1)
+            module, name = split_module_name(o["name"])
             modules.setdefault(module, []).append((name, o))
         else:
             own.append((o["name"], o))
-    clash = sorted({name for name, _ in own} & set(modules))
+    clash = sorted({name for name, _ in own} & {m.split(".", 1)[0] for m in modules})
     if clash:
         raise HostCodeError(
             f"shader package '{package}': '{path}' has an option '{clash[0]}', and the options of module "
             f"'{clash[0]}' nest under that name in its options struct; rename the option")
+    for module, fields in modules.items():
+        for name, _ in fields:
+            if f"{module}.{name}" in modules:
+                raise HostCodeError(
+                    f"shader package '{package}': '{path}' reaches option '{name}' of module '{module}', and module "
+                    f"'{module}.{name}' nests its options under that name; rename the option")
 
     def field(name: str, option: dict, indent: str, of: str) -> str:
         cpp, spell = OPTION_TYPES[option["type"]]
@@ -130,12 +136,31 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
     out.append(f"struct {struct_name}\n{{\n")
     for name, option in own:
         out.append(field(name, option, "    ", ""))
+    # a dotted module's options nest by the parts of its name, so a field is reached as the compile names it
+    tree: dict = {}
     for module, fields in modules.items():
-        out.append(f"    /// The options of module `{module}`, which a compile sets as `{module}.<name>`.\n")
-        out.append("    struct\n    {\n")
-        for name, option in fields:
-            out.append(field(name, option, "        ", f" of module `{module}`"))
-        out.append(f"    }} {module};\n")
+        node = tree
+        for part in module.split("."):
+            node = node.setdefault(part, {})
+        node[None] = (module, fields)
+
+    def nested(node: dict, prefix: str, indent: str) -> None:
+        for part, child in node.items():
+            if part is None:
+                continue
+            leaf = child.get(None)
+            if leaf is not None:
+                out.append(f"{indent}/// The options of module `{leaf[0]}`, which a compile sets as `{leaf[0]}.<name>`.\n")
+            else:
+                out.append(f"{indent}/// The options of the modules named `{prefix}{part}.<module>`.\n")
+            out.append(f"{indent}struct\n{indent}{{\n")
+            if leaf is not None:
+                for name, option in leaf[1]:
+                    out.append(field(name, option, indent + "    ", f" of module `{leaf[0]}`"))
+            nested(child, f"{prefix}{part}.", indent + "    ")
+            out.append(f"{indent}}} {part};\n")
+
+    nested(tree, "", "    ")
     out.append("\n")
     out.append("    /// The values as an acquire takes them, each by the name the compile sets it by.\n")
     out.append("    [[nodiscard]] cc::vector<slib::shader_option> values() const\n    {\n")
@@ -243,13 +268,29 @@ def cpp_name(sgl_name: str, namespace: str = "") -> str:
     where one is given.
     """
     if "." in sgl_name:
-        module, name = sgl_name.split(".", 1)
-        return f"::{MODULES_NAMESPACE}::{module}::{name}"
+        module, name = split_module_name(sgl_name)
+        return f"::{MODULES_NAMESPACE}::{module_cpp(module)}::{name}"
     return f"{namespace}::{sgl_name}" if namespace else sgl_name
 
 
+def split_module_name(sgl_name: str) -> tuple[str, str]:
+    """`m.x` as module `m` and its name `x`; a module's name may be dotted, `a.b.x`, and a declaration's never is."""
+    module, name = sgl_name.rsplit(".", 1)
+    return module, name
+
+
+def module_cpp(module: str) -> str:
+    """A module's name as the C++ namespace under `sgl_modules` it generates into: `a.b` is `a::b`."""
+    return module.replace(".", "::")
+
+
+def module_path(module: str) -> str:
+    """A module's name as the path of its header under `sgl_modules/`: `a.b` is `a/b`."""
+    return module.replace(".", "/")
+
+
 def module_header(module: str) -> str:
-    return f"<{MODULES_NAMESPACE}/{module}.hh>"
+    return f"<{MODULES_NAMESPACE}/{module_path(module)}.hh>"
 
 
 def modules_used(entries: SglEntries) -> list[str]:
@@ -259,7 +300,7 @@ def modules_used(entries: SglEntries) -> list[str]:
         names += p["layout"] + [p["inline"], p["vertex_input"], p["target_set"]]
     for _, p in entries.raytracing_pipelines:
         names += p["layout"] + [p["inline"]]
-    modules = [n.split(".", 1)[0] for n in names if n and "." in n]
+    modules = [split_module_name(n)[0] for n in names if n and "." in n]
     modules += [m for m, _ in entries.foreign_structs.values()]
     return sorted(set(modules) - ({entries.module} if entries.module else set()))
 
@@ -968,7 +1009,7 @@ def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
     for file, struct in entries.render_targets:
         space = file_namespace(namespace, entries, file.path)
         # a module's target set is named after its module, which the runtime names a module's shader by too
-        identity = f"{MODULES_NAMESPACE}::{entries.module}" if entries.module else space
+        identity = f"{MODULES_NAMESPACE}::{module_cpp(entries.module)}" if entries.module else space
         out.append(emit_render_target(package, space, file, struct, identity))
     return "".join(out)
 

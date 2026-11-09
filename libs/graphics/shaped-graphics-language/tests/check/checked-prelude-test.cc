@@ -738,6 +738,37 @@ TEST("sgl checked modules - a chain puts a module with options late, and its lin
         CHECK(r.status == sgl::test::test_status::passed);
 }
 
+TEST("sgl shared library - modules of dotted names whose last parts are alike make one chain, and an option of one is "
+     "set by its whole name")
+{
+    auto const library = cc::vector<sgl::library_file>{
+        {.name = "palette/warm.sgl",
+         .source = "module palette.warm\n@option const gain = 2\nfun tone() -> float => "
+                   "gain as float\n"},
+        {.name = "heat/warm.sgl", .source = "module heat.warm\nfun tone() -> float => 3.0\n"},
+    };
+    auto const shared = sgl::shared_library_of(library, "program.sgl");
+    REQUIRE(shared != nullptr);
+    auto const program_file = sgl::parse("use palette.warm\nuse heat.warm as hot\n"
+                                         "test warm.tone() + hot.tone() == 5.0\n");
+    auto const program_ast = sgl::ast::build(program_file);
+    auto const user = sgl::check::module_file{.file = program_file, .ast = program_ast};
+
+    using options = cc::vector<sgl::check::option_value>;
+    auto const defaults = sgl::layer_of(*shared, user);
+    REQUIRE(defaults != nullptr);
+    REQUIRE(defaults->before != nullptr);
+    auto const behind = sgl::check::check(*defaults->layer, shared->files, user);
+    CHECK(behind.diagnostics.empty());
+    auto const set = options{{.name = "palette.warm.gain", .value = "4"}};
+    auto const four = sgl::layer_of(*shared, user, set);
+    REQUIRE(four != nullptr);
+    CHECK(four != defaults);
+    CHECK(sgl::check::layer_serves_options(*four->layer, set));
+    auto const with_four = sgl::check::check(*four->layer, shared->files, user, set);
+    CHECK(with_four.diagnostics.empty());
+}
+
 TEST("sgl shared library - a compile that sets a module's option shares every link before that module's, and a "
      "permutation compiled again finds its own")
 {

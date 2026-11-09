@@ -68,7 +68,7 @@ The normative half of this is [CHK-138](../semantics/checking.md#the-files-of-th
 * Several files may declare one module, and they see each other unqualified.
 * `use m` brings in the name `m` alone, for the file that writes it: a foreign name is always written `m.name`.
 * A file without a `module` line is a module of its own, which no `use` can name.
-* A module's name is one identifier; a dotted one is `unsupported-yet`, which leaves nesting open.
+* A module's name may be dotted, `sv.scene`, and is then one flat name; `use sv.scene` binds `scene`, and modules do not nest.
 * Modules that `use` each other in a loop are an error.
 
 ## Already fixed by the syntax
@@ -83,6 +83,5 @@ The normative half of this is [CHK-138](../semantics/checking.md#the-files-of-th
 * How "unrelated code cannot add to a module" holds once several files declare one: today any file of a module directory can.
 * Whether a file without a module may be the target of a `use` at all, for example by path.
 * How `private` is spelled: a keyword, an attribute, or a naming convention.
-* Whether modules nest, and what a dotted module name would mean.
 * What exactly the prelude holds, and how much of `builtins.sgl` moves into `core.sgl` once generics can write a family once.
 * Whether the prelude is itself an ordinary module, which `use` could then name.
