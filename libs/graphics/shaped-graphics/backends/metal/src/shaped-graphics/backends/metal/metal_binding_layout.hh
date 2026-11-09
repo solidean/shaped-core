@@ -32,6 +32,10 @@ public:
 
     /// Slots the argument buffer needs: one past the highest index any binding occupies.
     [[nodiscard]] isize argument_slot_count() const;
+
+    /// The slot of the unbounded binding, which is the layout's last and takes one slot holding its table's address;
+    /// -1 where the layout has none.
+    [[nodiscard]] isize unbounded_slot() const;
 };
 
 /// Metal implementation of sg::pipeline_layout.

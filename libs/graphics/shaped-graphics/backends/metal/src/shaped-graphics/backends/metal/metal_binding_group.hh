@@ -77,16 +77,31 @@ public:
                         isize hit_offsets_at = -1);
     ~metal_binding_group() override;
 
-    /// Where a group's argument buffer holds what follows its 8-byte slots.
-    /// Each slot's byte length comes first, a `u32` each and zero for anything but a buffer, which SGL's MSL reads as `sgl_lengths` (EMIT-195).
-    /// The hit-offsets mirror comes after them, where a slot holds a TLAS.
-    struct argument_layout
+    /// What a group's argument buffer is written from, slot for slot of its layout.
+    struct argument_contents
     {
-        isize lengths_at = 0;
-        isize mirror_at = -1;
-        isize byte_size = 0;
+        /// One per slot, and behind the last one the further elements of an unbounded binding.
+        cc::span<u64 const> slots;
+        /// Each slot's byte length, parallel to `slots`: a buffer view's, zero for anything else.
+        cc::span<u32 const> lengths;
+        /// The slot of the layout's unbounded binding, its last; -1 where it has none.
+        isize unbounded_at = -1;
+        cc::span<u64 const> mirror;
     };
-    [[nodiscard]] static argument_layout argument_layout_of(isize slot_count, isize mirror_count);
+    struct created_arguments
+    {
+        MTL::Buffer* buffer = nullptr;
+        isize hit_offsets_at = -1;
+    };
+
+    /// A group's argument buffer: its 8-byte slots, each slot's byte length as a `u32`, which SGL's MSL reads as
+    /// `sgl_lengths` (EMIT-195), the hit-offsets mirror where a slot holds a TLAS, and an unbounded binding's table.
+    /// That binding's slot holds the table's address: its element count, a slot per element and a length per element,
+    /// since Metal sizes no argument buffer member per group.
+    /// The buffer is resident and owned by the caller; an error means the device refused it.
+    [[nodiscard]] static cc::result<created_arguments> create_arguments(metal_context& ctx,
+                                                                        cc::string_view label,
+                                                                        argument_contents const& contents);
 
     /// The bytes a buffer view makes visible, which is what its slot's length holds.
     [[nodiscard]] static u32 byte_length_of(sg::raw_buffer_view const& view);

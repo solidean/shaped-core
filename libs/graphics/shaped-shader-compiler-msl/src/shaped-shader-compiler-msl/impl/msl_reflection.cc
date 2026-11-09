@@ -220,6 +220,8 @@ struct argument_buffer
 [[nodiscard]] cc::vector<argument_buffer> collect_argument_buffers(cc::string_view text)
 {
     auto buffers = cc::vector<argument_buffer>();
+    // EMIT-211: an unbounded array's table, by its struct's name, and the declaration of its entries
+    auto tables = cc::vector<declaration>();
 
     for (auto at = find_word(text, "struct"); at >= 0; at = find_word(text, "struct", at + 1))
     {
@@ -249,9 +251,25 @@ struct argument_buffer
         auto const body = text.subview({.start = i + 1, .end = body_end - 1});
         for (auto const member_text : split_top_level(body, ';'))
         {
-            auto const member = parse_declaration(trimmed(member_text));
+            auto member = parse_declaration(trimmed(member_text));
             if (!member.has_value())
                 continue;
+
+            // a table's entries: what a member pointing at it binds, with as many elements as each group gives it
+            if (name.ends_with("_table") && member.value().name == "entries")
+            {
+                auto entries = member.value();
+                entries.name = cc::string(name);
+                entries.count = 0;
+                tables.push_back(cc::move(entries));
+                continue;
+            }
+            for (auto const& table : tables)
+                if (has_word(member.value().type, table.name))
+                {
+                    member.value().type = table.type;
+                    member.value().count = 0;
+                }
 
             auto const id = attribute_index(member.value().attributes, "id");
             if (id < 0)

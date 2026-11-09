@@ -1248,7 +1248,11 @@ struct writer
         for (auto const& a : p.argument_buffers)
             if (a.group == r.group)
                 parameter = a.parameter;
-        auto const stored = cc::format("{}.sgl_lengths[{}{}]", parameter, r.slot, element);
+        // EMIT-211: an unbounded array's lengths follow its table's entries
+        auto const stored
+            = r.count == 0 ? cc::format("reinterpret_cast<constant uint*>(&{0}.{1}->entries[{0}.{1}->count])[{2}]",
+                                        parameter, r.name, element.empty() ? cc::string_view("0") : element.subview(3))
+                           : cc::format("{}.sgl_lengths[{}{}]", parameter, r.slot, element);
         if (is_bytes)
             return stored;
         return cc::format("({} / uint(sizeof({}[0])))", stored, wrapped(expr(buffer), level::primary));

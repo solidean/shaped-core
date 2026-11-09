@@ -26,16 +26,49 @@ metal_binding_group::metal_binding_group(metal_context& ctx,
 {
 }
 
-metal_binding_group::argument_layout metal_binding_group::argument_layout_of(isize slot_count, isize mirror_count)
+cc::result<metal_binding_group::created_arguments> metal_binding_group::create_arguments(metal_context& ctx,
+                                                                                         cc::string_view label,
+                                                                                         argument_contents const& contents)
 {
+    auto const slot_count = contents.unbounded_at >= 0 ? contents.unbounded_at + 1 : contents.slots.size();
+    auto const elements = contents.unbounded_at >= 0 ? contents.slots.size() - contents.unbounded_at : isize(0);
+    auto const aligned = [](isize n) { return (n + 7) / 8 * 8; };
+
     auto const lengths_at = slot_count * isize(sizeof(u64));
-    // the mirror's addresses stay 8-byte aligned behind an odd count of lengths
-    auto const lengths_end = (lengths_at + slot_count * isize(sizeof(u32)) + 7) / 8 * 8;
-    auto const end = lengths_end + mirror_count * isize(sizeof(u64));
+    auto const mirror_at = aligned(lengths_at + slot_count * isize(sizeof(u32)));
+    auto const table_at = mirror_at + contents.mirror.size() * isize(sizeof(u64));
+    auto const end = contents.unbounded_at >= 0
+                       ? table_at + 2 * isize(sizeof(u32)) + elements * isize(sizeof(u64) + sizeof(u32))
+                       : table_at;
     // an empty layout still gets a buffer: an argument table binds an address, and a null one is not a legal binding
-    return {.lengths_at = lengths_at,
-            .mirror_at = mirror_count > 0 ? lengths_end : isize(-1),
-            .byte_size = cc::max(isize(sizeof(u64)), end)};
+    auto* const buffer
+        = ctx.device()->newBuffer(NS::UInteger(cc::max(isize(sizeof(u64)), end)),
+                                  MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
+    if (buffer == nullptr)
+        return cc::error(cc::format("{}: the metal device refused the argument buffer", label));
+    buffer->setLabel(ns_string(label));
+
+    auto* const bytes = static_cast<byte*>(buffer->contents());
+    cc::memcpy(bytes, contents.slots.data(), size_t(slot_count * isize(sizeof(u64))));
+    cc::memcpy(bytes + lengths_at, contents.lengths.data(), size_t(slot_count * isize(sizeof(u32))));
+    if (!contents.mirror.empty())
+        cc::memcpy(bytes + mirror_at, contents.mirror.data(), size_t(contents.mirror.size() * isize(sizeof(u64))));
+    if (contents.unbounded_at >= 0)
+    {
+        auto const table_address = u64(buffer->gpuAddress()) + u64(table_at);
+        cc::memcpy(bytes + contents.unbounded_at * isize(sizeof(u64)), &table_address, sizeof(u64));
+        auto const no_length = u32(0);
+        cc::memcpy(bytes + lengths_at + contents.unbounded_at * isize(sizeof(u32)), &no_length, sizeof(u32));
+        u32 const header[2] = {u32(elements), 0u};
+        cc::memcpy(bytes + table_at, header, sizeof(header));
+        auto const entries_at = table_at + 2 * isize(sizeof(u32));
+        cc::memcpy(bytes + entries_at, contents.slots.data() + contents.unbounded_at,
+                   size_t(elements * isize(sizeof(u64))));
+        cc::memcpy(bytes + entries_at + elements * isize(sizeof(u64)), contents.lengths.data() + contents.unbounded_at,
+                   size_t(elements * isize(sizeof(u32))));
+    }
+    ctx.residency().add(buffer);
+    return created_arguments{.buffer = buffer, .hit_offsets_at = contents.mirror.empty() ? isize(-1) : mirror_at};
 }
 
 u32 metal_binding_group::byte_length_of(sg::raw_buffer_view const& view)

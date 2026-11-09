@@ -258,11 +258,7 @@ public:
         if (block != nullptr)
             write_block_struct(out, p, *block);
 
-        auto const group = block != nullptr ? block->group : buffers[0].group;
-        out.appendf("struct {}\n{{\n", argument_buffer_of(p, group).struct_name);
-        if (block != nullptr)
-            out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, block->block_name, block->name, block->slot);
-        for (auto const& b : buffers)
+        auto const type_of = [&](planned_resource const& b)
         {
             auto type = b.element_form.has_value()
                           ? cc::format("{}device {}*", b.is_mut ? "" : "const ", b.element_form.value().name)
@@ -273,7 +269,27 @@ public:
                 type = cc::format("device coherent(device) {}", type.subview({.start = 7, .end = type.size()}));
             else if (b.is_coherent && type.ends_with(">"))
                 type = cc::format("{}, memory_coherence_device>", type.subview({.start = 0, .end = type.size() - 1}));
-            out.appendf("{}{} {} [[id({})]]", k_indent, type, b.name, b.slot);
+            return type;
+        };
+        // EMIT-211: an unbounded array is a table its group sizes, at the address its slot holds, since no member of an
+        // argument buffer is unsized: its count, its entries, and their byte lengths behind them
+        for (auto const& b : buffers)
+            if (b.count == 0)
+                out.appendf("struct {}\n{{\n{}uint count;\n{}uint sgl_pad;\n{}{} entries[1];\n}};\n\n", table_of(b),
+                            k_indent, k_indent, k_indent, type_of(b));
+
+        auto const group = block != nullptr ? block->group : buffers[0].group;
+        out.appendf("struct {}\n{{\n", argument_buffer_of(p, group).struct_name);
+        if (block != nullptr)
+            out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, block->block_name, block->name, block->slot);
+        for (auto const& b : buffers)
+        {
+            if (b.count == 0)
+            {
+                out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, table_of(b), b.name, b.slot);
+                continue;
+            }
+            out.appendf("{}{} {} [[id({})]]", k_indent, type_of(b), b.name, b.slot);
             if (b.count > 1)
                 out.appendf("[{}]", b.count);
             out += ";\n";
@@ -281,10 +297,13 @@ public:
         // EMIT-195: each slot's byte length, which sg writes behind the slots, a buffer's and zero for anything else
         auto slots = block != nullptr ? block->slot + 1 : 0;
         for (auto const& b : buffers)
-            slots = cc::max(slots, b.slot + b.count);
+            slots = cc::max(slots, b.slot + cc::max(b.count, 1));
         out.appendf("{}uint sgl_lengths [[id({})]][{}];\n", k_indent, slots, slots);
         out += "};\n\n";
     }
+
+    /// EMIT-211: the struct of an unbounded array's table.
+    [[nodiscard]] static cc::string table_of(planned_resource const& b) { return cc::format("{}_table", b.name); }
 
     [[nodiscard]] static planned_argument_buffer const& argument_buffer_of(plan const& p, i32 group)
     {
@@ -689,7 +708,13 @@ public:
             out.appendf("    constant auto& {} = *{}.{};\n", block.name, argument_buffer_of(p, block.group).parameter,
                         block.name);
         for (auto const& r : p.resources)
-            if (!r.is_reserved)
+            if (r.is_reserved)
+                continue;
+            // EMIT-211: an unbounded array is read through its table's entries
+            else if (r.count == 0)
+                out.appendf("    auto const {} = &{}.{}->entries[0];\n", r.name,
+                            argument_buffer_of(p, r.group).parameter, r.name);
+            else
                 out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
     }
 };

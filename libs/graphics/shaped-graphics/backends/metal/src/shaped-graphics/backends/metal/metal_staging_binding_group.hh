@@ -32,7 +32,8 @@ public:
     metal_staging_binding_group(metal_context& ctx,
                                 sg::binding_group_layout_handle layout,
                                 cc::vector<int> descriptor_offsets,
-                                isize slot_count);
+                                isize slot_count,
+                                int unbounded_capacity = 0);
 
 private:
     void write_view_descriptors(int first_descriptor, sg::binding const& b, cc::span<sg::raw_view const> views) override;

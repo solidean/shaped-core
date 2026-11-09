@@ -838,7 +838,8 @@ TEST("sgl emit - an unbounded array's length is a constant of its binding, which
     CHECK(!dx12.contains("unread_data")).dump("text", dx12);
 }
 
-TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, and WGSL and MSL refuse it (EMIT-210, EMIT-211)")
+TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, a table its group sizes in MSL, and WGSL refuses it "
+     "(EMIT-210, EMIT-211)")
 {
     constexpr auto arrays = "require binding_arrays, unbounded_binding_arrays\n"
                             "\n"
@@ -862,5 +863,12 @@ TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, and WGSL and MS
     auto const vulkan = text_of(arrays, target::hlsl_vulkan);
     CHECK(vulkan.contains("Texture2D<float4> scene_albedo[];\n")).dump("text", vulkan);
     CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
-    CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::msl)).contains("unbounded_binding_arrays"));
+    // no argument buffer member is unsized, so the member's slot holds the address of a table each group sizes
+    auto const msl = text_of(arrays, target::msl);
+    CHECK(msl.contains("struct scene_albedo_table\n{\n    uint count;\n    uint sgl_pad;\n    texture2d<float> "
+                       "entries[1];\n};\n"))
+        .dump("text", msl);
+    CHECK(msl.contains("    constant scene_albedo_table* scene_albedo [[id(1)]];\n")).dump("text", msl);
+    CHECK(msl.contains("    auto const scene_albedo = &scene_group.scene_albedo->entries[0];\n")).dump("text", msl);
+    CHECK(msl.contains("scene_albedo[p.material].sample(")).dump("text", msl);
 }

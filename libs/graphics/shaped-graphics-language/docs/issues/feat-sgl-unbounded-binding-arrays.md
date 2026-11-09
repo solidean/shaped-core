@@ -21,7 +21,7 @@ sg sizes it per binding group by the views it is given: dx12 at resource binding
 HLSL writes `name[]` (EMIT-210), slib's generated field is a `cc::vector` of views, and sg's compute test reads five buffers through one on both.
 Left:
 
-* metal, through an argument buffer, which sg's metal backend does not lay out yet (EMIT-211).
+* ~~metal~~: landed 2026-11-09, as a table each group sizes behind its argument buffer, since MSL takes no unsized argument buffer member (EMIT-211).
 * A binding array of more than one dimension, and an unbounded array of samplers.
 
 ## Also done on 2026-11-05

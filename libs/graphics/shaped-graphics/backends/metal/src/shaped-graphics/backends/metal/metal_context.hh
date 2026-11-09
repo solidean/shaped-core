@@ -158,7 +158,8 @@ public:
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<staging_binding_group_handle> create_metal_staging_binding_group(
         sg::binding_group_layout_handle layout,
-        sg::lifetime_scope scope);
+        sg::lifetime_scope scope,
+        int unbounded_capacity = 0);
     [[nodiscard]] cc::result<metal_binding_group_handle> create_metal_binding_group(
         sg::binding_group_layout_handle const& layout,
         cc::span<sg::named_view const> views,
