@@ -22,10 +22,12 @@ Decided with the maintainer on 2026-11-08, and written into the compilation mode
 - **Sections as wasm's:** imports, interface, contributions, impls, names, so a reader loads the interface without a body.
 - **In memory, ids stay positions,** and an artifact is relocated once per load through its import table.
 - **Artifacts carry their bodies checked,** and load whole.
-- **No process keeps one for another, for now** (2026-11-09): a compile stays synchronous and does no I/O, and the gain was a fraction of a short process.
+- **Keeping artifacts is a host's capability, off by default** (2026-11-09): a compile stays synchronous and does no I/O.
+  A host that keeps them fetches them asynchronously before the compile and hands the loaded layers in.
   Checking a body on demand has nowhere cheap to land under positional ids, as [feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md) found.
 - **Early cutoff:** a dependent's key names its imports' interfaces, so a body edit re-checks no user.
-- **Options are an overlay:** a layer is checked at the defaults, and a compile re-checks only what reaches an option it sets.
+- **Options are a second layer** (2026-11-09): an option never changes the names a module declares, so a module's layer is checked once at the defaults.
+  Whatever reaches an option, types included, is a second layer a compile that sets one checks again over the first.
 
 The steps, each a child issue when it is taken up, in this order:
 
@@ -34,14 +36,13 @@ The steps, each a child issue when it is taken up, in this order:
    The compilation model's step 4 has the numbers; the per-process parse is [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.
 3. **Module artifacts.** *A first form landed on 2026-11-08:* one artifact per set of modules, the whole layer, so a 16 ms check is a 3.9 ms load; kept by no process, as the prelude's.
    *Since 2026-11-09 the library is one layer* (`check::check_library`), so a module is checked once per process whatever reaches it: shaped-viewer's 139 ms of sets is 27 ms.
-   What is left is in memory, since no process keeps a layer for another:
-   one layer per module, with imports and relocation, and early cutoff, so an edit re-checks only what it changed rather than the library.
-   It pays once a library is large enough that checking it whole after an edit is felt.
-4. **Option overlays,** so a compile that sets options continues from its modules' layers too.
-   *A first form landed on 2026-11-09:* a compile that sets only its program's own options does, which is every compile in the tree today.
-   A module's own option still re-checks the whole set.
-5. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
-6. **The language server on layers.** *Landed on 2026-11-09:* an analysis continues from the layer every compile shares, in memory.
-   A keystroke in a shaped-viewer program is 3.6 ms, and one in a module it uses 42.6 ms, which step 3's early cutoff is what would cut.
+4. **A chain of module layers:** the library's modules in one order, dependencies first, each a layer over the one before; an edit re-checks from its module on.
+5. **Early cutoff, through relocation:** an edit that leaves a module's interface alone relocates the layers after it rather than checking them again.
+6. **Options as a second layer:** a compile that sets a module's option checks only what reaches it.
+   *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers.
+7. **Per-module artifacts, kept where a host asks,** relocated on load.
+8. **The language server on layers.** *Landed on 2026-11-09:* an analysis continues from the layers every compile shares.
+   A keystroke in a shaped-viewer program is 3.6 ms, and one in a module it uses 42.6 ms, which steps 4 and 5 cut.
+9. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.

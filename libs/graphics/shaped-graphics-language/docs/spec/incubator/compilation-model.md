@@ -67,7 +67,7 @@ That needs no multi-file compilation.
 
 ## Separate compilation: checked layers
 
-*Decided with the maintainer on 2026-11-08; steps 1 and 2 are built in a first form, the rest is not.*
+*Decided with the maintainer on 2026-11-08, and its remaining steps on 2026-11-09; steps 1 to 5 are built in a first form, the rest is not.*
 
 ### What it costs today
 
@@ -130,6 +130,7 @@ Considered and set aside:
   It comes back if the per-stack relocation shows in a measurement.
 * **Rebase on use:** a pass over the whole layer per compile, which is the copy step 1 removed.
 * **One global order of all modules:** possible in a closed world, and slib's module directories are not one.
+  Within one library it is one, and that is what a chain of module layers stands on before relocation exists (step 6 below).
 
 ### Artifacts
 
@@ -146,12 +147,12 @@ A process that compiles at run time ships the compiler too, so the artifacts it 
 * The compiler writes and reads bytes, and where they are kept is its host's: slib's persistent cache, a table a frozen build embeds, or nowhere.
   sgl depends on clean-core alone, so the store is never sgl's.
 
-**No process keeps an artifact for another, for now.** *Decided with the maintainer on 2026-11-09, after one was kept for a day.*
+**No process keeps an artifact for another by default; keeping them is a capability a host turns on.** *Decided with the maintainer on 2026-11-09.*
 A compile reads nothing but its arguments, which is what makes its result cacheable, and it is synchronous.
-A store behind it is file I/O inside the compile, and done properly that is async end to end, through the compile itself.
-What it bought did not pay for that: about 30 ms of a 120 ms `sgl describe`, in a process whose start dominates anyway.
+So a compile never asks a store: a store behind it would be file I/O inside the compile, and a passive wait on it a workaround.
+A host that keeps artifacts fetches them before the compile, asynchronously, and hands the loaded layers in; it saves what a compile made the same way after.
+By default no host does: what a kept prelude bought was about 30 ms of a 120 ms `sgl describe`, in a process whose start dominates anyway.
 Live editing keeps its layers in memory for the whole process, and a batch mode would pay the prelude once for many sources.
-The format stays, held by its round-trip tests, for a host that one day keeps artifacts through an async seam.
 
 **Its sections follow wasm's, so a reader jumps to the one it needs.**
 
@@ -175,12 +176,18 @@ The files are parsed from source, since the flat trees read the AST: a parse rea
 * An edit to a body that leaves its module's interface alone makes no artifact of a module using it stale.
 * A dependent whose own check read a body of an import, a generic it instantiated or a function it evaluated, names that body's hash in its key too.
 
-**Options are an overlay.**
+**Options are a second layer.** *Decided with the maintainer on 2026-11-09.*
 
-* An artifact is its module checked at its options' defaults.
-* Each declaration records the options it reaches (CHK-355), through other modules' declarations too.
-* A compile that sets options checks again, from source and in its own layer, exactly the declarations that reach an option it sets; those shadow the artifact's.
-* So every permutation slib compiles shares one artifact per module, and each pays only for what its options change.
+* An option never changes the names a module declares: nothing at file scope is conditional, `const if` being a statement (AST-157).
+  What it changes is types, constants and bodies: an array's length, an image format, a workgroup size, a `const` computed from it, a branch on it.
+* So a module's layer is two: the first holds its names and everything that reaches no option, checked once at the defaults.
+  The second is everything that reaches one, a fixed point over the declarations whose types, constants or bodies name an option, through other modules' declarations too (CHK-355).
+* A compile that sets options checks the second layers it reaches again, for its values and over the first layers; the first are never checked again.
+  A module that declares no option, most of them, has an empty second layer.
+* A rule that judges a constant judges the values the compile gives, as it does today (CHK-354): a module's error under one value is found by the compile that gives it.
+* An artifact holds only the first layer, and the early cutoff keys on its interface; a second layer is a compile's own and never kept.
+* Folding an option into a body only when it is inlined, as the target is (CHK-426), would keep such bodies out of the second layer.
+  It is set aside: it covers no type, which a second layer must handle anyway, and few modules declare an option at all.
 
 *A first form landed on 2026-11-09:* a compile that sets only its own program's options continues from its modules' layer (`check::layer_serves_options`).
 No module sees its program, so those options change nothing the layer checked; one that sets a module's option still checks every module itself.
@@ -238,11 +245,20 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    A module's flat test trees are in it too.
    shaped-viewer's tracer pipeline: its modules' layer is a 3.9 ms load against a 16 ms check, and a whole `sgl describe` fell from about 120 to 90 ms.
    No process keeps it since 2026-11-09 (see [artifacts](#artifacts)).
-   What it does not do is share one module between two sets, or cut a dependent off from an edit of a body: imports and relocation are those.
-6. **Option overlays**, so a compile that sets options continues from its modules' layers too.
-   *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layer, which is every compile in the tree.
-   What is left is a module's own option, which re-checks only the declarations that reach it.
-7. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
+
+What is left, decided with the maintainer on 2026-11-09, in this order:
+
+6. **A chain of module layers.** The library's modules in one order, dependencies first, each module a layer over the one before.
+   Within one library that order is fixed, so ids stay positions and nothing is relocated.
+   An edit of a module checks it and the modules after it again, and none before: the order puts a module nothing else uses last.
+7. **Early cutoff, through relocation.** A layer splits into its interface and its bodies, and a dependent's layer names its imports' interfaces.
+   An edit that leaves a module's interface alone relocates the layers after it onto the new one rather than checking them again.
+   That is the import table and the relocation pass of [ids](#ids), and what a dependent's key is made of.
+8. **Options as a second layer** (see [artifacts](#artifacts)): a compile that sets a module's option checks only what reaches it.
+   *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers, which is every compile in the tree.
+9. **Per-module artifacts, kept where a host asks:** each module's first layer, keyed by its sources and its imports' interfaces, relocated on load.
+   The host's seam is async, and a compile is handed loaded layers.
+10. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
 
 ### Open in this design
 
