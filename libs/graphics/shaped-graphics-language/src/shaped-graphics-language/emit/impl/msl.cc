@@ -51,7 +51,7 @@ public:
     bool has_line_directives() const override { return true; }
 
     // a ray-tracing stage is a visible function, which takes no buffer of its own
-    // a Metal buffer is a pointer, and emit refuses a length before any text is written (EMIT-195)
+    // a Metal buffer is a pointer, so the writer reads its length from its group's `sgl_lengths` instead (EMIT-195)
     cc::string buffer_length(cc::string_view, bool) const override { return "0u"; }
     /// MSL's is a function; whether it terminates or demotes the pixel is for the metal backend's tests to pin.
     [[nodiscard]] cc::string_view discard_statement() const override { return "discard_fragment();"; }
@@ -278,6 +278,11 @@ public:
                 out.appendf("[{}]", b.count);
             out += ";\n";
         }
+        // EMIT-195: each slot's byte length, which sg writes behind the slots, a buffer's and zero for anything else
+        auto slots = block != nullptr ? block->slot + 1 : 0;
+        for (auto const& b : buffers)
+            slots = cc::max(slots, b.slot + b.count);
+        out.appendf("{}uint sgl_lengths [[id({})]][{}];\n", k_indent, slots, slots);
         out += "};\n\n";
     }
 

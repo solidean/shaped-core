@@ -46,6 +46,8 @@ private:
     /// A zero slot IS the null descriptor — a shader reading through it reads zeroes, which is what sg promises a
     /// vacant element does.
     cc::vector<u64> _slots;
+    /// Each slot's byte length, parallel to `_slots`: a buffer view's, zero for anything else (EMIT-195).
+    cc::vector<u32> _lengths;
 
     /// Set when the device refused a sampler state, which `mint` turns into an error.
     bool _sampler_refused = false;

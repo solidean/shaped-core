@@ -154,6 +154,7 @@ TEST("sgl emit - MSL passes a group's buffers in an argument buffer, a read-only
                        "{\n"
                        "    const device float* work_src [[id(0)]];\n"
                        "    device float* work_dst [[id(1)]];\n"
+                       "    uint sgl_lengths [[id(2)]][2];\n"
                        "};\n"));
     CHECK(msl.contains("fragment frame main_ps(pixel_input p [[stage_in]], constant work_arguments& work_group "
                        "[[buffer(0)]])\n"));

@@ -285,9 +285,6 @@ ASYNC_INVOCABLE_TEST("sr - an index past an element of a binding array is measur
     auto& ctx = *ctx_h;
     if (inner_compiler_for(ctx) == nullptr || !ctx.supports(sg::feature::binding_arrays))
         SKIP("this backend has no binding arrays, or sg binds no debug window on it yet");
-    // issue: feat-sg-metal-buffer-lengths
-    if (ctx.backend() == sg::backend_kind::metal)
-        SKIP("a Metal buffer carries no length, which sg passes in nowhere yet (EMIT-195)");
 
     // thread 2 reads element 3 of a view of 2; thread 3 reads element 4 of a view of 8, which is fine
     constexpr auto source = "require binding_arrays\n"
@@ -355,9 +352,6 @@ ASYNC_INVOCABLE_TEST("sr - the length of a binding array's element at a non-unif
     auto& ctx = *ctx_h;
     if (inner_compiler_for(ctx) == nullptr || !ctx.supports(sg::feature::binding_arrays))
         SKIP("this backend has no binding arrays, or sg binds no debug window on it yet");
-    // issue: feat-sg-metal-buffer-lengths
-    if (ctx.backend() == sg::backend_kind::metal)
-        SKIP("a Metal buffer carries no length, which sg passes in nowhere yet (EMIT-195)");
 
     // AMD's vulkan driver once answered every lane with element 0's length (debt-sgl-vulkan-element-length-asked-at-uniform-indices)
     struct array_kind
@@ -419,9 +413,6 @@ ASYNC_INVOCABLE_TEST("sr - define runs a load of more words than the memory hold
     auto& ctx = *ctx_h;
     if (inner_compiler_for(ctx) == nullptr || !ctx.supports(sg::feature::binding_arrays))
         SKIP("this backend has no binding arrays, or sg binds no debug window on it yet");
-    // issue: feat-sg-metal-buffer-lengths
-    if (ctx.backend() == sg::backend_kind::metal)
-        SKIP("a Metal buffer carries no length, which sg passes in nowhere yet (EMIT-195)");
 
     // the even threads load two words of a view of one
     constexpr auto source = "require binding_arrays\n"

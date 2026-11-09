@@ -1229,6 +1229,31 @@ struct writer
         return cc::format("sgl_ctx.hit_offsets->groups[{}][{}{}].instances", r.group, r.slot, element);
     }
 
+    /// EMIT-195: a Metal buffer is a pointer, so its length is the byte length sg writes into its group's `sgl_lengths`,
+    /// at its slot, plus the element of a binding array; a `bytes` is counted in bytes, anything else in elements.
+    cc::string msl_buffer_length(flat_expr_id buffer, bool is_bytes)
+    {
+        auto named = buffer;
+        auto element = cc::string();
+        if (auto const* const e = p.e.at(buffer).node.try_as<flat_element>())
+        {
+            named = e->object;
+            element = cc::format(" + {}", wrapped(expr(e->index), level::additive));
+        }
+        auto const& member = p.e.at(named).node.as<flat_binding_member>();
+        auto const found = resource_of(p, member.binding, member.member);
+        CC_ASSERT(found >= 0, "a buffer whose length is read is a member the plan placed");
+        auto const& r = p.resources[found];
+        auto parameter = cc::string_view();
+        for (auto const& a : p.argument_buffers)
+            if (a.group == r.group)
+                parameter = a.parameter;
+        auto const stored = cc::format("{}.sgl_lengths[{}{}]", parameter, r.slot, element);
+        if (is_bytes)
+            return stored;
+        return cc::format("({} / uint(sizeof({}[0])))", stored, wrapped(expr(buffer), level::primary));
+    }
+
     /// Every call is written from its registry record; nothing here knows one builtin from another.
     rendered call(flat_call const& c, check::type_id type)
     {
@@ -1368,6 +1393,11 @@ struct writer
             [&](flat_buffer_length const& b)
             {
                 auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
+                if (d.language() == builtins::language::msl)
+                {
+                    result = {.text = msl_buffer_length(b.buffer, is_bytes), .binds = level::primary};
+                    return;
+                }
                 if (auto const* const element = p.e.at(b.buffer).node.try_as<flat_element>())
                     result = {.text = d.buffer_length_at(expr(element->object).text, expr(element->index).text,
                                                          is_nonuniform_mark(element->index)),

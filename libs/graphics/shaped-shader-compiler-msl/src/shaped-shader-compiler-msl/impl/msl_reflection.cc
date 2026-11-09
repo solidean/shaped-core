@@ -256,6 +256,9 @@ struct argument_buffer
             auto const id = attribute_index(member.value().attributes, "id");
             if (id < 0)
                 continue; // a plain struct member: this is only an argument buffer if its members are addressed
+            // each slot's byte length, which sg writes behind the slots and no layout declares (EMIT-195)
+            if (member.value().name == "sgl_lengths")
+                continue;
 
             buffer.members.push_back(member.value());
             buffer.ids.push_back(u32(id));

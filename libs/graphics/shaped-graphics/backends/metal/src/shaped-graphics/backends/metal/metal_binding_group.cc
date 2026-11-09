@@ -26,6 +26,23 @@ metal_binding_group::metal_binding_group(metal_context& ctx,
 {
 }
 
+metal_binding_group::argument_layout metal_binding_group::argument_layout_of(isize slot_count, isize mirror_count)
+{
+    auto const lengths_at = slot_count * isize(sizeof(u64));
+    // the mirror's addresses stay 8-byte aligned behind an odd count of lengths
+    auto const lengths_end = (lengths_at + slot_count * isize(sizeof(u32)) + 7) / 8 * 8;
+    auto const end = lengths_end + mirror_count * isize(sizeof(u64));
+    // an empty layout still gets a buffer: an argument table binds an address, and a null one is not a legal binding
+    return {.lengths_at = lengths_at,
+            .mirror_at = mirror_count > 0 ? lengths_end : isize(-1),
+            .byte_size = cc::max(isize(sizeof(u64)), end)};
+}
+
+u32 metal_binding_group::byte_length_of(sg::raw_buffer_view const& view)
+{
+    return u32(view.shape == sg::view_shape::structured ? view.element_count * view.stride_in_bytes : view.size_in_bytes);
+}
+
 cc::vector<u64> metal_binding_group::hit_offsets_mirror(cc::span<sg::tlas_handle const> tlas_at_slot)
 {
     auto mirror = cc::vector<u64>::create_filled(tlas_at_slot.size(), u64(0));

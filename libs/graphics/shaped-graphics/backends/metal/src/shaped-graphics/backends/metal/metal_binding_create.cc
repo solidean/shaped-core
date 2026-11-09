@@ -148,6 +148,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto bound_textures = cc::vector<metal_binding_group::bound_texture>();
     auto bound_tlases = cc::vector<sg::tlas_handle>();
     auto tlas_at_slot = cc::vector<sg::tlas_handle>::create_defaulted(slot_count);
+    auto lengths = cc::vector<u32>::create_filled(slot_count, u32(0));
     auto array_bindings = cc::vector<metal_binding_group::array_binding>();
 
     auto const find_binding = [&](cc::string_view name) -> isize
@@ -259,6 +260,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             // The address the shader reads through, already offset: MSL indexes from the pointer it is given, so the
             // view's offset has to be folded in here rather than carried alongside.
             slots[slot_of(b, element)] = mtl_buffer.gpu_address() + u64(buffer_view->offset_in_bytes);
+            lengths[slot_of(b, element)] = metal_binding_group::byte_length_of(*buffer_view);
             if (is_array)
                 array.elements.push_back({.buffer = buffer_view->buffer});
             else
@@ -334,12 +336,11 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
         if (filled[i] == char(0))
             return cc::error(cc::format("binding_group: binding '{}' was not provided", bindings[i].name));
 
-    // An empty layout still gets a buffer: an argument table binds an address, and a null one is not a legal binding.
-    // The hit-offsets mirror rides in its tail, so a group holding a TLAS allocates nothing more.
+    // The lengths and the hit-offsets mirror ride behind the slots, so a group allocates one buffer whatever it holds.
     auto const mirror = metal_binding_group::hit_offsets_mirror(tlas_at_slot);
-    auto const hit_offsets_at = mirror.empty() ? isize(-1) : slot_count * k_argument_slot_size;
-    auto const byte_size
-        = cc::max(isize(k_argument_slot_size), slot_count * k_argument_slot_size + mirror.size() * isize(sizeof(u64)));
+    auto const at = metal_binding_group::argument_layout_of(slot_count, mirror.size());
+    auto const hit_offsets_at = at.mirror_at;
+    auto const byte_size = at.byte_size;
     auto* const arguments = _device->newBuffer(
         NS::UInteger(byte_size), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
     if (arguments == nullptr)
@@ -348,6 +349,9 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     arguments->setLabel(ns_string("sg binding group"));
     if (slot_count > 0)
         cc::memcpy(arguments->contents(), slots.data(), size_t(slot_count * k_argument_slot_size));
+    if (slot_count > 0)
+        cc::memcpy(static_cast<byte*>(arguments->contents()) + at.lengths_at, lengths.data(),
+                   size_t(slot_count * isize(sizeof(u32))));
     if (hit_offsets_at >= 0)
         cc::memcpy(static_cast<byte*>(arguments->contents()) + hit_offsets_at, mirror.data(),
                    size_t(mirror.size() * isize(sizeof(u64))));

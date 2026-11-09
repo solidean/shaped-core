@@ -635,6 +635,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-211** An entry point that needs `unbounded_binding_arrays` is `target-lacks-feature` in WGSL, which has no binding arrays.
   So is it in MSL, until sg's metal backend binds one through an argument buffer.
 * **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
+  A Metal buffer is a pointer, so each argument buffer ends in `uint sgl_lengths[n]`, one per slot, which sg fills with the byte length of each slot's buffer view.
+  MSL reads a buffer's length as its slot's entry, plus the element of a binding array, divided by the element's size, and a `bytes`' as the entry itself.
   An element of a binding array takes a helper with the index as its parameter, and one per mark, since `NonUniformResourceIndex` must stand inside it.
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
 * **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so on `hlsl-dx12` and MSL a link's 64-bit scalar crosses as a `uint2` of its words.

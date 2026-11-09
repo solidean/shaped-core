@@ -77,6 +77,20 @@ public:
                         isize hit_offsets_at = -1);
     ~metal_binding_group() override;
 
+    /// Where a group's argument buffer holds what follows its 8-byte slots.
+    /// Each slot's byte length comes first, a `u32` each and zero for anything but a buffer, which SGL's MSL reads as `sgl_lengths` (EMIT-195).
+    /// The hit-offsets mirror comes after them, where a slot holds a TLAS.
+    struct argument_layout
+    {
+        isize lengths_at = 0;
+        isize mirror_at = -1;
+        isize byte_size = 0;
+    };
+    [[nodiscard]] static argument_layout argument_layout_of(isize slot_count, isize mirror_count);
+
+    /// The bytes a buffer view makes visible, which is what its slot's length holds.
+    [[nodiscard]] static u32 byte_length_of(sg::raw_buffer_view const& view);
+
     /// The mirror of an argument buffer, one address per slot, that a ray-tracing kernel finds a closest hit's record by.
     /// Slot `n` holds the per-instance hit-group offsets of `tlas_at_slot[n]`, and zero where that is null.
     /// Empty where no slot holds a TLAS, since nothing could trace through this group then.
