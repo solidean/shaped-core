@@ -3,6 +3,8 @@ created: 2026-10-17
 tags: [rec]
 refs:
   - file: libs/base/clean-core/src/clean-core/record/sampling.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-09T15:54Z
 ---
 
 # A POSIX sampler
