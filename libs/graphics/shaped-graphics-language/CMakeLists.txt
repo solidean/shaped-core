@@ -137,6 +137,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
     src/shaped-graphics-language/legalize/legalize_guards.cc
+    src/shaped-graphics-language/legalize/legalize_lengths.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
     src/shaped-graphics-language/legalize/legalize_lets.cc
     src/shaped-graphics-language/legalize/legalize_onces.cc

@@ -817,9 +817,10 @@ TEST("sgl emit - a file-scope sampler named as a word the target reserves is ren
     CHECK((dx12.bound_names.back() == sgl::emit::bound_name{.emitted = "register_", .host = "register"}));
 }
 
-TEST("sgl emit - an unbounded array's length is a constant of its binding, which a namesake elsewhere does not gain")
+TEST("sgl emit - an unbounded array's length is what sg writes into its reserved block, at the array's position "
+     "(CHK-491)")
 {
-    // CHK-491: the binding whose array's length is read holds it; the other has no constant block at all
+    // no binding holds a constant of it, so neither has a constant block
     constexpr auto arrays = "require binding_arrays, unbounded_binding_arrays\n"
                             "\n"
                             "binding read:\n"
@@ -833,9 +834,17 @@ TEST("sgl emit - an unbounded array's length is a constant of its binding, which
                             "    read.out_values[id.x] = read.sources[nonuniform (id.x % read.sources.length)][0] + "
                             "unread.sources[nonuniform id.x][0]\n";
     auto const dx12 = text_of(arrays, target::hlsl_dx12);
-    CHECK(dx12.contains("struct read_data\n{\n    int sources_length;\n};\n")).dump("text", dx12);
-    CHECK(dx12.contains("read_sources[NonUniformResourceIndex(id.x % read.sources_length)][0]")).dump("text", dx12);
-    CHECK(!dx12.contains("unread_data")).dump("text", dx12);
+    CHECK(!dx12.contains("read_data")).dump("text", dx12);
+    CHECK(dx12.contains("ConstantBuffer<sg_array_lengths_data> sg_array_lengths : register(b1, space12);")).dump("text", dx12);
+    CHECK(dx12.contains("read_sources[NonUniformResourceIndex(id.x % int(sg_array_lengths.values[0].x))][0]"))
+        .dump("text", dx12);
+    auto const vulkan = text_of(arrays, target::hlsl_vulkan);
+    CHECK(vulkan.contains("[[vk::binding(20, 3)]] ConstantBuffer<sg_array_lengths_data> sg_array_lengths;"))
+        .dump("text", vulkan);
+    // metal's table carries its own count
+    auto const msl = text_of(arrays, target::msl);
+    CHECK(msl.contains("int(read_group.read_sources->count)")).dump("text", msl);
+    CHECK(!msl.contains("sg_array_lengths")).dump("text", msl);
 }
 
 TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, a table its group sizes in MSL, and WGSL refuses it "

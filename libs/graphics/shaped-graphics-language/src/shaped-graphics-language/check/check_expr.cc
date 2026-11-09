@@ -925,9 +925,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     auto const find_member = [&](ast::range_of<member_info> range)
     {
         auto const members = out.at(range);
-        // the length of an unbounded array is reached through `.length` alone (CHK-491)
         for (auto i = isize(0); i < members.size(); ++i)
-            if (members[i].name == name && members[i].length_of < 0)
+            if (members[i].name == name)
                 return i;
         return isize(-1);
     };
@@ -1058,7 +1057,7 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // CHK-288: an array's length is a constant of its type, and it has no other member
     if (out.at(object).kind == type_kind::array)
     {
-        // CHK-491: an unbounded array's length is the host's, which its binding holds as a constant
+        // CHK-491: an unbounded array's length is the views a group binds, which sg writes per dispatch or draw
         if (name == "length" && out.at(object).count == 0)
         {
             auto const where = tables_of(file).target_at(member.object);
@@ -1069,14 +1068,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                             "as its binding's member");
                 return error_type;
             }
-            auto const members = out.at(out.bindings[out.at(where.symbol).info].members);
-            for (auto i = isize(0); i < members.size(); ++i)
-                if (members[i].length_of == where.index)
-                {
-                    set_target(file, id, {.kind = target_kind::binding_member, .symbol = where.symbol, .index = i32(i)});
-                    return members[i].type;
-                }
-            return error_type; // its name was taken, which the binding reported
+            set_target(file, id, {.kind = target_kind::buffer_length});
+            return type_of_builtin(builtins::k_int, file, span_of(file, id));
         }
         if (name != "length")
         {

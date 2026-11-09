@@ -142,6 +142,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
     for (auto const& nv : views)
         if (layout->view_slots[nv.slot_index].binding.is_unbounded())
             unbounded_count = int(nv.view->span().size());
+    group->unbounded_length = u32(unbounded_count);
     {
         auto r = alloc_table(ctx._descriptor_heap, layout->descriptor_count + unbounded_count);
         CC_RETURN_IF_ERROR(r);

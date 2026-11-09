@@ -493,7 +493,7 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                  "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
                                  granted))
           == "");
-    // that constant is reached through `.length` alone, and takes a name no member may take beside it
+    // the length is sg's, which no member of the binding holds, so a member may take any name beside it
     CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n\n"
                                  "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t_length\n",
                                  granted))
@@ -502,7 +502,7 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                  "    t: texture_2d[float4][]\n\n"
                                  "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
                                  granted))
-              .contains("duplicate-declaration"));
+          == "");
     // an array of samplers is a binding array like any other, bound per group element by element
     CHECK(reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)) == "");
     // `sampler` is a keyword, and subscripted in a type position it reads as the name does (AST-135)

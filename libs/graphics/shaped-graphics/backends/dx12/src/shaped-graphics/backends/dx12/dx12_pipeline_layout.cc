@@ -144,6 +144,23 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         params.push_back(roots);
     }
 
+    // The unbounded arrays' lengths, in the order of the groups that hold one, which sg writes from the bound groups.
+    auto lengths = isize(0);
+    for (auto const& g : groups)
+        pl->length_bases.push_back(sg::impl::has_unbounded_array(g->bindings()) ? lengths++ : isize(-1));
+    CC_ASSERT(lengths <= sg::impl::array_lengths_capacity, "a pipeline binds at most 16 unbounded binding arrays");
+    if (lengths > 0)
+    {
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Constants.Num32BitValues = UINT(sg::impl::array_lengths_capacity);
+        param.Constants.ShaderRegister = UINT(sg::reserved_array_lengths.dx12_register);
+        param.Constants.RegisterSpace = UINT(sg::reserved_array_lengths.dx12_space);
+        pl->array_lengths_root_param = int(params.size());
+        params.push_back(param);
+    }
+
     pl->has_static_samplers = !static_sampler_descs.empty();
 
     D3D12_ROOT_SIGNATURE_DESC desc = {};

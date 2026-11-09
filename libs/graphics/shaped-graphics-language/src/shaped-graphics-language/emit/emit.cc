@@ -189,6 +189,14 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                                     target t,
                                                     options const& sources)
 {
+    // CHK-491: dx12 and vulkan read an unbounded array's length from the block sg writes per dispatch or draw
+    if ((t == target::hlsl_dx12 || t == target::hlsl_vulkan) && check::reads_array_lengths(m, e))
+    {
+        auto const reading = check::with_reserved_array_lengths(m, e);
+        if (!check::reads_array_lengths(m, reading))
+            return emit_entry_point(m, reading, t, sources);
+    }
+
     auto result = emitted_text();
     impl::validate(m, e, result.errors, sources.diagnostics);
     if (!result.errors.empty())
@@ -390,7 +398,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});
     for (auto const& block : plan.group_blocks)
-        result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
+        if (!block.is_reserved)
+            result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
     for (auto const& buffer : plan.resources)
         if (!buffer.is_reserved)
             result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});

@@ -24,6 +24,10 @@ A table edited on one side alone stops the build.
 | `sg_debug` | `u0, space11`, a root UAV | set 3, binding 19 | group 3, binding 19 | `[[buffer(30)]]` | diagnostics |
 | `sg_acceleration_pool` | `t0, space12`, a root SRV | set 3, binding 17 | group 3, binding 17 | none | a software trace |
 | `sg_acceleration_roots` | `b0, space12`, root constants | set 3, binding 18 | group 3, binding 18 | none | a software trace |
+| `sg_array_lengths` | `b1, space12`, root constants | set 3, binding 20 | none | none, the array's table counts it | an unbounded binding array |
+
+`sg_array_lengths` is a block of 16 lengths, `uint4[4]`, one per unbounded binding array of the bound groups in the order of their groups.
+sg writes it at each dispatch and draw from the groups bound, beside the roots, and an emit for dx12 or vulkan rewrites `xs.length` into a read of it (CHK-491).
 
 ## The debug window
 

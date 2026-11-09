@@ -52,13 +52,17 @@ public:
                        VkPipelineBindPoint bind_point,
                        sg::raw_buffer_handle const& debug_window) const;
 
-    /// Binds set 3 of a layout traced in software, for one op: a transient region of its samplers, the debug window,
-    /// the pool and `roots`.
+    /// Binds set 3 of a layout whose set 3 changes per op, for one op: a transient region of its samplers, the debug
+    /// window, and where they are held, the pool and `roots` and the unbounded arrays' `lengths`.
     void bind_software_trace(VkCommandBuffer buffer,
                              VkPipelineBindPoint bind_point,
                              sg::raw_buffer_handle const& debug_window,
                              sg::impl::software_pool_storage const& pool,
-                             cc::span<u32 const> roots) const;
+                             cc::span<u32 const> roots,
+                             cc::span<u32 const> lengths) const;
+
+    /// Whether set 3 holds values of the op, so each op binds it (bind_software_trace) rather than the pipeline bind.
+    [[nodiscard]] bool binds_set_per_op() const { return _traces_in_software || _has_array_lengths; }
 
     ~vulkan_pipeline_layout() override;
 
@@ -93,6 +97,11 @@ public:
     isize _roots_offset = 0;
     /// Each group's first acceleration member among the roots.
     cc::vector<isize> _acceleration_bases;
+    /// A group holds an unbounded binding array, so set 3 also holds their lengths, each group's at its position.
+    bool _has_array_lengths = false;
+    isize _lengths_offset = 0;
+    /// Each group's position among the lengths, -1 for a group with none.
+    cc::vector<isize> _length_bases;
 
     void write_storage_descriptor(VkDeviceAddress address, isize size_in_bytes, byte* at) const;
 

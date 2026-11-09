@@ -416,10 +416,6 @@ struct sgl::check::member_info
     padding_kind padding = padding_kind::natural;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
-    /// A constant the check adds to a binding, which no source declares: the length of the unbounded binding array at
-    /// this position among the binding's members, which the host writes per group and `xs.length` reads (CHK-491).
-    /// -1 for every member a source declares.
-    i32 length_of = -1;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
     /// one reads (CHK-279); -1 without one.
     i32 default_sampler = -1;

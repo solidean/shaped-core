@@ -115,7 +115,8 @@ public:
         cc::vector<vulkan_texture_handle> referenced_textures,
         cc::vector<vulkan_hazard_view> hazard_views,
         cc::vector<vulkan_texture_hazard_view> texture_hazard_views,
-        cc::vector<vulkan_array_binding> array_bindings);
+        cc::vector<vulkan_array_binding> array_bindings,
+        u32 unbounded_length = 0);
 
     vulkan_binding_group() = default;
 
@@ -129,6 +130,8 @@ public:
     /// Each acceleration member's root in the software pool, by binding index; 0, the empty TLAS, for a null one.
     /// Filled only by a binding traced in software, and `software_tlases` keeps their regions alive.
     cc::vector<u32> acceleration_roots;
+    /// The length of the layout's unbounded binding array, the views it binds; 0 where it holds none.
+    u32 unbounded_length = 0;
     cc::vector<sg::tlas_handle> software_tlases;
 
     cc::vector<vulkan_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives

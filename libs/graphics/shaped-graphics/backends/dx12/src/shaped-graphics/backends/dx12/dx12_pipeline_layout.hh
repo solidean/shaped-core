@@ -51,6 +51,10 @@ public:
 
     /// Each group's first acceleration member among the roots.
     cc::vector<isize> acceleration_bases;
+    /// Root-parameter index of the unbounded arrays' lengths, 16 root constants, -1 unless a group holds such an array.
+    int array_lengths_root_param = -1;
+    /// Each group's position among those lengths, -1 for a group with no unbounded array.
+    cc::vector<isize> length_bases;
 
     /// Whether the root signature carries a static sampler, a group's or the layout's own.
     /// **A pipeline over one neither restores from a cached blob nor hands one out.**
