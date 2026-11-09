@@ -5,6 +5,8 @@ tags: [metal]
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/registry.hh
   - symbol: SGL_MSL_MOTION_TAGS
+claimed-by: Claude (for Julius)
+claimed-at: 2026-11-09T22:41Z
 ---
 
 # Metal's motion tags double every pipeline trace, moving scene or not
