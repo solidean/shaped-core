@@ -37,4 +37,4 @@ struct pixel_input:
     let band = clamp(cell, int2(0, 0), int2(7, 7))
     let spread = abs(cell - int2(4, 4))
     let pair = max(uint2(band.x as uint, band.y as uint), uint2(1, 1))
-    return { color = float4(band.x as float, band.y as float, (spread.x + spread.y) as float, pair.x as float) }
+    return {color = float4(band.x as float, band.y as float, (spread.x + spread.y) as float, pair.x as float)}

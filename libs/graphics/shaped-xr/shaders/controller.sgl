@@ -29,4 +29,4 @@ fun corner(vertex: int, mask: int) -> float:
 
 @pixel fun main_ps(p: pixel_input, @view_index view: int){constants} -> target:
     require view_instancing
-    return { color = float4(..(constants.color.xyz * p.shade * keep_view(view)), constants.color.w) }
+    return {color = float4(..(constants.color.xyz * p.shade * keep_view(view)), constants.color.w)}

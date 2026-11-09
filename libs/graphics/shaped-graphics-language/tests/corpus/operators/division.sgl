@@ -57,4 +57,4 @@ struct pixel_input:
     let y = p.position.y as int
     let square = (column_of(x, 8) + row_of(y, 8)) % 2
     let stripe = p.position.x % 3.5
-    return { color = float4(square as float, stripe, 0.0, 1.0) }
+    return {color = float4(square as float, stripe, 0.0, 1.0)}

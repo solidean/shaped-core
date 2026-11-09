@@ -61,4 +61,4 @@ struct pixel_input:
     let y = p.position.y as int
     let bits = (x ^ y) & 7
     let shifted = (bits << 2) + (x >> 1)
-    return { color = float4(bits as float, shifted as float, ~bits as float, 1.0) }
+    return {color = float4(bits as float, shifted as float, ~bits as float, 1.0)}

@@ -44,7 +44,7 @@ enum curve_kind:
 
 @slider(0.0, max = 16.0, step = 0.25)
 const exposure = 1.0
-const max_bounces : int = 0x10
+const max_bounces: int = 0x10
 const tint = #ff00bb
 const fog_scale = 2.0 @range(0, 4)
 type curve = (float) -> float
@@ -56,7 +56,7 @@ type curve = (float) -> float
 struct tonemapper:
     kind: curve_kind
     white_point: float = 4.0
-    apply_to : (float) -> float
+    apply_to: (float) -> float
 
     shoulder =>:
         let w = white_point * white_point
@@ -92,7 +92,7 @@ fun accumulate(weights: span[float], t: tonemapper) -> vec3:
     let twice = fun [T](g: (T) -> T, x: T) => g(g(x))
 
     let mut total = vec3(0.0)
-    for i in 0..<4:
+    for i in 0 ..< 4:
         if i == 2 or not t.kind.is_builtin => continue
         total += twice(safe, weights[i])
     for _ in 1 ..= 3:
@@ -108,7 +108,7 @@ fun accumulate(weights: span[float], t: tonemapper) -> vec3:
     while bounce > 0 and not done:
         bounce -= 1
 
-    assert bounce in 0..=max_bounces, "bounced $bounce times"
+    assert bounce in 0 ..= max_bounces, "bounced $bounce times"
     print "total: $total.x of $(max(bounce, 1) * 2) steps, which costs $$5\t\u{1F600}"
     print "
         a multi-line string: $bounce interpolates, and a \ backslash escapes nothing

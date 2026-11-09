@@ -121,7 +121,7 @@ struct pixel_input:
     let side = select(p.position.xy > float2(32.0, 32.0), float2(1.0), float2(0.25))
     let band = select(x > 16.0, 3u, 1u)
     let lift = select(tone > 0.5, float3(0.25), float3(0.0))
-    return { color = float4(tone + lift.x, edge, side.x * (band as float), side.y) }
+    return {color = float4(tone + lift.x, edge, side.x * (band as float), side.y)}
 
 // a jump in front of an `if` value takes the whole `if`, its `else if` chain included (AST-155)
 fun sign_of(x: int) -> int:

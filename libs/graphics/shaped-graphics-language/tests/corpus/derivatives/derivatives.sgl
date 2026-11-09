@@ -95,4 +95,3 @@ binding gradients:
 
 // a loop of any kind runs forward, where nothing has to be kept
 test fwd_diff(until_small, 5.0, 1.0) == 0.125
-

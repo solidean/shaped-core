@@ -16,10 +16,10 @@ struct staged:
     color: float4
 
 @vertex fun corner_vs(v: stage_corner) -> control_point:
-    return { position = v.position }
+    return {position = v.position}
 
 @pixel fun staged_ps(p: staged) -> stage_target:
-    return { color = p.color }
+    return {color = p.color}
 
 // A triangle patch cut four times along each edge, whose evaluation stage writes its domain location as a color.
 struct tri_factors:
@@ -28,16 +28,16 @@ struct tri_factors:
 
 @tessellation_control(partitioning = .integer, winding = .counter_clockwise)
 fun ccw_tc(patch: control_point[3]) -> tri_factors:
-    return { edges = [4.0, 4.0, 4.0], inside = 4.0 }
+    return {edges = [4.0, 4.0, 4.0], inside = 4.0}
 
 @tessellation_control(partitioning = .integer, winding = .clockwise)
 fun cw_tc(patch: control_point[3]) -> tri_factors:
-    return { edges = [4.0, 4.0, 4.0], inside = 4.0 }
+    return {edges = [4.0, 4.0, 4.0], inside = 4.0}
 
 // An edge factor of zero culls the whole patch.
 @tessellation_control(partitioning = .integer, winding = .counter_clockwise)
 fun culled_tc(patch: control_point[3]) -> tri_factors:
-    return { edges = [0.0, 4.0, 4.0], inside = 4.0 }
+    return {edges = [0.0, 4.0, 4.0], inside = 4.0}
 
 @tessellation_evaluation
 fun domain_te(patch: control_point[3], f: tri_factors, @domain_location uvw: float3) -> staged:
@@ -85,7 +85,7 @@ fun twice_gs(tri: staged[3], stream: mut triangle_stream[staged]):
     stream.end_strip()
     for i in 0 ..< 3:
         let p = tri[i].position
-        stream.emit({ position = hpos4(p.x + 1.0, p.y, p.z, p.w), color = tri[i].color })
+        stream.emit({position = hpos4(p.x + 1.0, p.y, p.z, p.w), color = tri[i].color})
     stream.end_strip()
 
 pipeline doubled:
@@ -103,11 +103,11 @@ struct primitive_tagged:
 @geometry(max_vertices = 3)
 fun tag_gs(tri: staged[3], @primitive_id primitive: int, stream: mut triangle_stream[primitive_tagged]):
     for i in 0 ..< 3:
-        stream.emit({ position = tri[i].position, primitive = primitive })
+        stream.emit({position = tri[i].position, primitive = primitive})
     stream.end_strip()
 
 @pixel fun primitive_ps(p: primitive_tagged) -> stage_target:
-    return { color = float4(p.primitive as float, 0.0, 0.0, 1.0) }
+    return {color = float4(p.primitive as float, 0.0, 0.0, 1.0)}
 
 pipeline primitive_ids:
     vertex = white_vs
@@ -123,11 +123,11 @@ struct quad_factors:
 
 @tessellation_control(partitioning = .integer, winding = .counter_clockwise)
 fun quad_ccw_tc(patch: control_point[4]) -> quad_factors:
-    return { edges = [4.0, 4.0, 4.0, 4.0], inside = [4.0, 4.0] }
+    return {edges = [4.0, 4.0, 4.0, 4.0], inside = [4.0, 4.0]}
 
 @tessellation_control(partitioning = .integer, winding = .clockwise)
 fun quad_cw_tc(patch: control_point[4]) -> quad_factors:
-    return { edges = [4.0, 4.0, 4.0, 4.0], inside = [4.0, 4.0] }
+    return {edges = [4.0, 4.0, 4.0, 4.0], inside = [4.0, 4.0]}
 
 @tessellation_evaluation
 fun quad_te(patch: control_point[4], f: quad_factors, @domain_location uv: float2) -> staged:

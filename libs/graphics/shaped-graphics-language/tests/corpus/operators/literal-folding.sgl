@@ -39,5 +39,5 @@ struct pixel_input:
 @pixel fun folded_ps(p: pixel_input) -> target:
     let scale = 1.0 / 255
     if 2 < 3:
-        return { color = float4(p.position.x * scale, 255 * 4 - 1, 0.0, 1.0) }
-    return { color = float4(0.0) }
+        return {color = float4(p.position.x * scale, 255 * 4 - 1, 0.0, 1.0)}
+    return {color = float4(0.0)}

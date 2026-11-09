@@ -344,7 +344,7 @@ fun secondary_of(bounced: bounce, followed: bool) -> secondary:
     surface.specular_roughness = if followed => bounced.roughness else max(bounced.roughness, secondary_roughness_floor)
     let f = openpbr.make_frame(bounced.n)
     let wo_local = if bounced.hit => openpbr.to_local(f, -bounced.wi) else float3(0.0, 0.0, -1.0)
-    return { b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local }
+    return {b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local}
 
 /// Whether the surface `bounced` met is followed by a bounce of its own, `bounce_plain`, and so lit as a primary hit is.
 /// Where the layer asks for two bounces, `render_settings::hybrid_bounces`, which `frame_constants::max_bounces` carries.

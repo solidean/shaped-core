@@ -28,7 +28,7 @@ test weighted(float4(1.0, 1.0, 1.0, 1.0), uint4(1, 2, 3, 4)).x == 3.0
     }
 
 @pixel fun mesh_ps(p: varyings) -> target:
-    return { color = p.color * (p.material as float) }
+    return {color = p.color * (p.material as float)}
 
 pipeline mesh:
     vertex = mesh_vs

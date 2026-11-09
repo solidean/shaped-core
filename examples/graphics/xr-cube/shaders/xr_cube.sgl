@@ -37,7 +37,7 @@ fun shade(color: float3, normal: vec3) -> float3:
 // opaque, so where the room shows through only the cube covers it
 @pixel fun main_ps(p: pixel_input, @view_index view: int) -> target:
     require view_instancing
-    return { color = float4(..(shade(p.color, p.normal) * keep_view(view)), 1.0) }
+    return {color = float4(..(shade(p.color, p.normal) * keep_view(view)), 1.0)}
 
 pipeline:
     vertex = main_vs

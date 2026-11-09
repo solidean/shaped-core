@@ -44,7 +44,7 @@ struct varyings:
 @pixel fun edge_ps(p: varyings, @subgroup_size size: int) -> target:
     let across = p.uv.x - quad_swap_x(p.uv.x)
     let votes = subgroup_ballot(across > 0.0)
-    return { color = float4(across, count_bits(votes.x) as float, size as float, 1.0) }
+    return {color = float4(across, count_bits(votes.x) as float, size as float, 1.0)}
 
 // a test is one invocation, whose uniform load reads what it stored
 test:

@@ -326,7 +326,7 @@ fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, 
     if supplied_tangent_frame:
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(to_world_vector(inst, local.t)), normalize(to_world_vector(inst, local.b)), normalize(to_world_vector(inst, local.n)))
-    return { n = n, exiting = exiting, authored = authored }
+    return {n = n, exiting = exiting, authored = authored}
 
 /// The face of a quadric whose object-space outward normal at the world point `world` is `object_normal`, as `face_of` describes a triangle's.
 fun quadric_face_of(inst: scene.instance, object_normal: float3, world: float3, eye: float3, surface: openpbr.surface, supplied_tangent_frame: bool) -> pixel_face:
@@ -338,7 +338,7 @@ fun quadric_face_of(inst: scene.instance, object_normal: float3, world: float3, 
     if supplied_tangent_frame:
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(to_world_vector(inst, local.t)), normalize(to_world_vector(inst, local.b)), normalize(to_world_vector(inst, local.n)))
-    return { n = n, exiting = exiting, authored = authored }
+    return {n = n, exiting = exiting, authored = authored}
 
 /// Shades the pixel `p` covers, whose material evaluated to `surface_in` through `ctx` as `pixel_context` made it, and writes every target.
 ///

@@ -23,14 +23,14 @@ struct marked:
 @vertex fun cover_vs(@vertex_index v: int) -> marked:
     let x = ((v & 1) as float) * 4.0 - 1.0
     let y = ((v >> 1) as float) * 4.0 - 1.0
-    return { position = hpos4(x, y, 0.0, 1.0) }
+    return {position = hpos4(x, y, 0.0, 1.0)}
 
 @pixel fun marked_ps(p: marked) -> marked_target:
     let x = p.position.x as int
     let y = p.position.y as int
     print "pixel $x, $y"
     assert not (x == 1 and y == 2), "pixel ($x, $y) of the target"
-    return { color = float4(1.0, 0.0, 0.0, 1.0) }
+    return {color = float4(1.0, 0.0, 0.0, 1.0)}
 
 pipeline marked_pixels:
     vertex = cover_vs

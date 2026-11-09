@@ -84,7 +84,7 @@ struct long_varyings:
     crossed.words[6] = (p.quad.w >> 44) as uint
     crossed.words[7] = (p.quad.w & 0xffffffffu64) as uint
     crossed.words[8] = p.tag
-    return { color = float4(1.0, 0.0, 0.0, 1.0) }
+    return {color = float4(1.0, 0.0, 0.0, 1.0)}
 
 pipeline long_crossing:
     vertex = long_vs

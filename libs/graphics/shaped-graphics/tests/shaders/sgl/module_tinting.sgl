@@ -3,10 +3,10 @@
 use marking as m
 
 @vertex fun tint_vs(c: m.corner){m.marks} -> m.varyings:
-    return { position = m.to_clip(c) }
+    return {position = m.to_clip(c)}
 
 @pixel fun tint_ps(p: m.varyings){m.marks} -> m.target:
-    return { color = m.marks.tint }
+    return {color = m.marks.tint}
 
 pipeline tinting:
     vertex = tint_vs

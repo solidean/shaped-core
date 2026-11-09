@@ -149,7 +149,7 @@ struct line_patch:
 
 @tessellation_control(partitioning = .integer, winding = .clockwise)
 fun line_tc(patch: control_link[2]) -> line_patch:
-    return { edges = [3.0, patch[1].weight] }
+    return {edges = [3.0, patch[1].weight]}
 
 @tessellation_evaluation
 fun line_te(patch: control_link[2], f: line_patch, @domain_location uv: float2) -> primitive_link:

@@ -30,7 +30,7 @@ test tint(5) == 0.25
     }
 
 @pixel fun ids_ps(p: varyings) -> target:
-    return { color = float4(tint(p.primitive), p.instance as float, p.screen_uv.x, p.color.w) }
+    return {color = float4(tint(p.primitive), p.instance as float, p.screen_uv.x, p.color.w)}
 
 pipeline ids:
     vertex = corners_vs
