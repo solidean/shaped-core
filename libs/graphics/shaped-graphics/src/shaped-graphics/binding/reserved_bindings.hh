@@ -40,7 +40,8 @@ inline constexpr reserved_binding_address reserved_acceleration_pool = {.name = 
                                                                         .vulkan_set = 3,
                                                                         .vulkan_binding = 17,
                                                                         .webgpu_group = 3,
-                                                                        .webgpu_binding = 17};
+                                                                        .webgpu_binding = 17,
+                                                                        .metal_buffer = 28};
 inline constexpr reserved_binding_address reserved_acceleration_roots
     = {.name = "sg_acceleration_roots",
        .reflected_name = "sg_acceleration_roots_block",
@@ -49,7 +50,8 @@ inline constexpr reserved_binding_address reserved_acceleration_roots
        .vulkan_set = 3,
        .vulkan_binding = 18,
        .webgpu_group = 3,
-       .webgpu_binding = 18};
+       .webgpu_binding = 18,
+       .metal_buffer = 29};
 
 inline constexpr reserved_binding_address reserved_bindings[]
     = {reserved_debug_window, reserved_acceleration_pool, reserved_acceleration_roots};

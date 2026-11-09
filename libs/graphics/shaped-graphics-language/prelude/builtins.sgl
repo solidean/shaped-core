@@ -5000,11 +5000,11 @@ struct exchange_result[T]:
 /// A query nothing traced yet.
 @builtin @internal fun ray_query_begin() -> ray_query
 /// Starts the trace of a ray.
-@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, time: float)
 /// Starts the trace of a ray.
-@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, time: float)
 /// Starts the trace of a ray.
-@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, time: float)
 /// Traverses to the next candidate the shader decides, and false once there is none.
 @builtin @internal fun ray_query_proceed(q: ray_query) -> bool
 /// Whether the candidate is a non-opaque triangle rather than a procedural primitive's box.

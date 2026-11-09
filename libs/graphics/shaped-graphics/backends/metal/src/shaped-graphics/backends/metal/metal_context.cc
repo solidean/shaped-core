@@ -165,8 +165,8 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::pixel_view_read_workaround:
         return false;
     case sg::feature::ray_tracing_motion_blur:
-        // Metal's motion acceleration structures are not wired up yet
-        return false;
+        // motion acceleration structures, which a pipeline's trace takes natively
+        return true;
     case sg::feature::vertex_pipeline_stores:
         // a vertex function writes a device buffer on every Apple GPU
         return true;
@@ -585,6 +585,7 @@ void metal_context::shutdown()
     }
 
     // After the drain above, so nothing in flight still names these bytes.
+    _software_pool.shutdown();
     _upload_ring.shutdown();
     _download_ring.shutdown();
     _samplers.shutdown();

@@ -74,7 +74,8 @@ public:
                         cc::vector<bound_texture> bound_textures = {},
                         cc::vector<sg::tlas_handle> bound_tlases = {},
                         cc::vector<array_binding> array_bindings = {},
-                        isize hit_offsets_at = -1);
+                        isize hit_offsets_at = -1,
+                        cc::vector<u32> acceleration_roots = {});
     ~metal_binding_group() override;
 
     /// What a group's argument buffer is written from, slot for slot of its layout.
@@ -133,6 +134,10 @@ public:
     /// The acceleration structures this group names — a trace against one declares `accel_read` on it.
     [[nodiscard]] cc::span<sg::tlas_handle const> bound_tlases() const { return _bound_tlases; }
 
+    /// The software walk's root of each acceleration member traced in software, by its position among the group's
+    /// acceleration members, zero for one traced natively (EMIT-135).
+    [[nodiscard]] cc::span<u32 const> acceleration_roots() const { return _acceleration_roots; }
+
     /// The array bindings this group holds, each keeping its elements alive as the scalar lists do theirs.
     [[nodiscard]] cc::span<array_binding const> array_bindings() const { return _array_bindings; }
 
@@ -146,4 +151,5 @@ private:
     cc::vector<bound_texture> _bound_textures;
     cc::vector<sg::tlas_handle> _bound_tlases;
     cc::vector<array_binding> _array_bindings;
+    cc::vector<u32> _acceleration_roots;
 };

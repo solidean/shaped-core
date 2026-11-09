@@ -75,7 +75,8 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 12, .slot = 0, .stages = k_every_stage},
          {.group = 3, .slot = 17, .stages = k_every_stage},
          {.group = 3, .slot = 17, .stages = k_every_stage},
-         {},
+         // beside the debug window, past the vertex buffers; a ray-tracing stage takes no buffer
+         {.group = -1, .slot = 28, .stages = k_raster_and_compute_stages},
      }},
     {.name = "sg_acceleration_roots",
      .enabled_by = reserved_use::software_trace,
@@ -83,7 +84,7 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 12, .slot = 0, .stages = k_every_stage},
          {.group = 3, .slot = 18, .stages = k_every_stage},
          {.group = 3, .slot = 18, .stages = k_every_stage},
-         {},
+         {.group = -1, .slot = 29, .stages = k_raster_and_compute_stages},
      }},
 };
 

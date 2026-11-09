@@ -24,6 +24,7 @@ struct native_buffer_access;
 class metal_epoch_system;
 class metal_swapchain;
 class metal_transfer_system;
+class metal_software_pool;       // the software walk's pool, which an opted-in package's inline traces read
 class metal_staging_ring;        // CPU-visible bytes an inline transfer stages through (see metal_staging_ring.hh)
 struct metal_counter_heap_lease; // one MTL4 counter heap while a list holds it (see metal_query.hh)
 class metal_query_system;        // the GPU-timestamp tier behind cmd.query (see metal_query.hh)

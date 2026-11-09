@@ -163,8 +163,13 @@ inline constexpr int k_debug_window_buffer_index = sg::reserved_debug_window.met
 /// vertex-input slot, and the debug window in the last of Metal's 31.
 inline constexpr int k_argument_table_buffer_count = k_debug_window_buffer_index + 1;
 
-static_assert(k_vertex_buffer_base_index + sg::max_vertex_buffers <= k_debug_window_buffer_index,
-              "the vertex-input slots reach the debug window's");
+/// The MSL buffer indices an inline trace of an opted-in package finds the software walk's pool and roots at (EMIT-135).
+inline constexpr int k_acceleration_pool_buffer_index = sg::reserved_acceleration_pool.metal_buffer;
+inline constexpr int k_acceleration_roots_buffer_index = sg::reserved_acceleration_roots.metal_buffer;
+
+static_assert(k_vertex_buffer_base_index + sg::max_vertex_buffers <= k_acceleration_pool_buffer_index,
+              "the vertex-input slots reach the software walk's");
+static_assert(k_acceleration_roots_buffer_index < k_debug_window_buffer_index, "the reserved slots overlap");
 static_assert(k_argument_table_buffer_count <= 31, "the metal argument table has 31 buffer slots");
 
 /// The sampler slots one command list's argument table holds, which is where each `bound_sampler` goes.

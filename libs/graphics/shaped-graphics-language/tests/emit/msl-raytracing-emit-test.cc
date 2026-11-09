@@ -76,10 +76,12 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
               .contains("[[visible]] void sky(thread uint4* sgl_payload, thread sgl_hit_record const& "
                         "sgl_hit, thread sgl_context const& sgl_ctx)\n"));
     CHECK(text_of(stages, "cutout")
-              .contains("[[intersection(triangle, triangle_data, instancing, world_space_data)]]\nsgl_triangle_result "
+              .contains("[[intersection(triangle, triangle_data, instancing, world_space_data, instance_motion, "
+                        "primitive_motion)]]\nsgl_triangle_result "
                         "cutout("));
     CHECK(text_of(stages, "sgl_spheres_surface")
-              .contains("[[intersection(bounding_box, triangle_data, instancing, world_space_data)]]\nsgl_box_result "
+              .contains("[[intersection(bounding_box, triangle_data, instancing, world_space_data, instance_motion, "
+                        "primitive_motion)]]\nsgl_box_result "
                         "sgl_spheres_surface("));
     // a traversal's payload is the ray set's, which only the ray data carries into it
     CHECK(text_of(stages, "sgl_spheres_occlusion").contains("ray_data sgl_ray_data& sgl_data [[payload]]"));
@@ -170,13 +172,18 @@ TEST("sgl emit - a program name starting with sgl_ is renamed on every target, a
 struct instancing:
     v: float
 
+struct instance_motion:
+    w: float
+
 binding frame:
     output: mut buffer[float]
 
 @raygen fun start(@launch_id id: int3){frame}:
     let mut sgl_data = instancing((id.x as float) + 1.0)
     if id.x == 0 => sgl_data.v = 0.5
-    frame.output[id.x] = sgl_data.v * 2.0
+    let mut moved = instance_motion(id.x as float)
+    if id.x == 1 => moved.w = 3.0
+    frame.output[id.x] = sgl_data.v * 2.0 + moved.w
 )");
     auto unrenamed = cc::string();
     for (auto const t : sgl::emit::all_targets())
@@ -191,8 +198,10 @@ binding frame:
     CHECK(unrenamed == "");
     auto const msl = emit_source(source, 0, target::msl);
     CHECK(msl.text.contains("struct instancing_\n"));
-    // the tag itself is still Metal's own, in the tables every stage declares
-    CHECK(msl.text.contains("intersection_function_table<triangle_data, instancing, world_space_data>"));
+    CHECK(msl.text.contains("struct instance_motion_\n"));
+    // the tags themselves are still Metal's own, in the tables every stage declares
+    CHECK(msl.text.contains("intersection_function_table<triangle_data, instancing, world_space_data, instance_motion, "
+                            "primitive_motion>"));
 }
 
 TEST("sgl emit msl - an any hit two hit groups of differently sized ray sets hold is ray-data-conflict")

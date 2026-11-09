@@ -95,6 +95,10 @@ struct sgl::builtins::helper_context
     u32 data = 0;
 };
 
+/// MSL's motion tags, which every intersector, query, function table and intersection function of a compile shares.
+/// A ray's time places what moves (EVAL-130); a structure built without motion is traced as it stands.
+#define SGL_MSL_MOTION_TAGS "instance_motion, primitive_motion"
+
 namespace sgl::builtins
 {
 using custom_writer = written (*)(call_context const&);
@@ -327,6 +331,8 @@ struct sgl::builtins::function_record
     /// Takes, past its signature, the position of its acceleration-structure argument among the acceleration members
     /// of the entry point's binding list, which flatten appends as an int: the emulated trace's root (CHK-325).
     bool takes_acceleration_index = false;
+    /// Takes, past its signature and ahead of its payload, the ray's time, which MSL places what moves at (EVAL-130).
+    bool takes_ray_time = false;
     /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
     /// The call itself writes nothing, and a local it initializes is never copied.
     bool declares_only = false;

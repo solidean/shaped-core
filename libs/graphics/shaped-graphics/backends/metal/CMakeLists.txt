@@ -36,6 +36,7 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_raster_state.cc
     src/shaped-graphics/backends/metal/metal_residency.cc
     src/shaped-graphics/backends/metal/metal_staging_binding_group.cc
+    src/shaped-graphics/backends/metal/metal_software_pool.cc
     src/shaped-graphics/backends/metal/metal_staging_ring.cc
     src/shaped-graphics/backends/metal/metal_stream.cc
     src/shaped-graphics/backends/metal/metal_swapchain.cc
@@ -71,6 +72,7 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_raster_state.hh
     src/shaped-graphics/backends/metal/metal_residency.hh
     src/shaped-graphics/backends/metal/metal_staging_binding_group.hh
+    src/shaped-graphics/backends/metal/metal_software_pool.hh
     src/shaped-graphics/backends/metal/metal_staging_ring.hh
     src/shaped-graphics/backends/metal/metal_swapchain.hh
 )

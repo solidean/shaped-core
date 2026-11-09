@@ -20,6 +20,7 @@
 #include <shaped-graphics/backends/metal/metal_raster_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_residency.hh>
 #include <shaped-graphics/backends/metal/metal_sampler_cache.hh>
+#include <shaped-graphics/backends/metal/metal_software_pool.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_stream.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
@@ -114,6 +115,8 @@ public:
 
     /// The rings inline transfers stage through, guarded because a list may record on any thread.
     [[nodiscard]] metal_staging_ring& upload_ring() { return _upload_ring; }
+    [[nodiscard]] sg::impl::software_acceleration_pool* software_pool() override { return &_software_pool; }
+    [[nodiscard]] metal_software_pool& metal_pool() { return _software_pool; }
     [[nodiscard]] metal_staging_ring& download_ring() { return _download_ring; }
 
     /// The fence a native scope hands foreign code (see metal_native_scope.hh).
@@ -373,6 +376,7 @@ private:
     metal_stream_system _streams;
     metal_query_system _queries;
     metal_texture_view_cache _texture_views;
+    metal_software_pool _software_pool = metal_software_pool(*this);
     MTL4::Compiler* _compiler = nullptr;
     /// Serializes finalize, commit and signal on the direct queue, so a token's order is the order its work is
     /// signalled in.

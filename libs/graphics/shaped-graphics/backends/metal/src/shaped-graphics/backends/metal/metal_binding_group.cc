@@ -14,7 +14,8 @@ metal_binding_group::metal_binding_group(metal_context& ctx,
                                          cc::vector<bound_texture> bound_textures,
                                          cc::vector<sg::tlas_handle> bound_tlases,
                                          cc::vector<array_binding> array_bindings,
-                                         isize hit_offsets_at)
+                                         isize hit_offsets_at,
+                                         cc::vector<u32> acceleration_roots)
   : _ctx(ctx),
     _layout(cc::move(layout)),
     _arguments(arguments),
@@ -22,7 +23,8 @@ metal_binding_group::metal_binding_group(metal_context& ctx,
     _bound_buffers(cc::move(bound_buffers)),
     _bound_textures(cc::move(bound_textures)),
     _bound_tlases(cc::move(bound_tlases)),
-    _array_bindings(cc::move(array_bindings))
+    _array_bindings(cc::move(array_bindings)),
+    _acceleration_roots(cc::move(acceleration_roots))
 {
 }
 

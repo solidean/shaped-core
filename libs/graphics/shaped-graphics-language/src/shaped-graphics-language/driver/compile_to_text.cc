@@ -175,7 +175,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     // The check pass writes the structured form, and a target prints the core form.
     // WebGPU traces through the emulated form of a trace, and every other target through its native query, unless the
     // compile asks for software on HLSL (EMIT-135).
-    auto const software_trace = asks_software_trace && target != emit::target::msl;
+    auto const software_trace = asks_software_trace;
     // LEGAL-63, LEGAL-64: without diagnostics the text holds no print and no assert, and with them both write a record
     auto const files = driver::impl::module_files_of(front);
     auto names = cc::vector<cc::string_view>();

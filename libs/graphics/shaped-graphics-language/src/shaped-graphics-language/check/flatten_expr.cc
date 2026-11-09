@@ -629,6 +629,8 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         values.push_back(hint);
         values.push_back(hint_bits);
     }
+    // the ray's time, past the signature ahead of the payload, which stays last: MSL places what moves at it
+    values.push_back(field(4));
     values.push_back(payload);
     auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
     if (!entry.traced_rays.values().any([&](flat_traced_ray const& r) { return r == traced_ray; }))

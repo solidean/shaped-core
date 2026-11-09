@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/metal/metal_staging_binding_group.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 // Building binding group layouts, pipeline layouts and binding groups.
 //
@@ -165,6 +166,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto tlas_at_slot = cc::vector<sg::tlas_handle>::create_defaulted(slot_count);
     auto lengths = cc::vector<u32>::create_filled(slot_count, u32(0));
     auto array_bindings = cc::vector<metal_binding_group::array_binding>();
+    auto acceleration_roots = cc::vector<u32>();
 
     auto const find_binding = [&](cc::string_view name) -> isize
     {
@@ -239,6 +241,25 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 if (mtl_tlas.storage().accel() == nullptr)
                     return cc::error(
                         cc::format("binding_group: '{}' — the bound acceleration structure has expired", b.name));
+
+                // a native trace of an inline query sees no motion, so a tlas that moves takes the software walk
+                auto const software = sg::impl::software_region_of(mtl_tlas);
+                if (software.is_moving && !b.traced_in_software)
+                    return cc::error(cc::format("binding_group: '{}' binds a tlas that moves, which an inline trace "
+                                                "sees only through the software walk: the shader's package takes "
+                                                "SOFTWARE_TRACE in sc_add_shader_package",
+                                                b.name));
+                if (b.traced_in_software)
+                {
+                    if (software.pool == nullptr)
+                        return cc::error(cc::format("binding_group: '{}' is traced in software, so its tlas is built "
+                                                    "with accel_build_flag::software_trace",
+                                                    b.name));
+                    auto const position = sg::impl::acceleration_position(bindings, b.index);
+                    while (acceleration_roots.size() <= position)
+                        acceleration_roots.push_back(0);
+                    acceleration_roots[position] = software.unit;
+                }
 
                 slots[slot_of(b, element)] = mtl_tlas.storage().resource_id()._impl;
                 tlas_at_slot[slot_of(b, element)] = tlas_view->tlas;
@@ -361,8 +382,9 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     if (arguments.has_error())
         return cc::error(cc::move(arguments.error()));
 
-    return std::make_shared<metal_binding_group const>(
-        *this, cc::move(typed_layout), arguments.value().buffer, cc::move(bound_buffers), cc::move(bound_textures),
-        cc::move(bound_tlases), cc::move(array_bindings), arguments.value().hit_offsets_at);
+    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments.value().buffer,
+                                                       cc::move(bound_buffers), cc::move(bound_textures),
+                                                       cc::move(bound_tlases), cc::move(array_bindings),
+                                                       arguments.value().hit_offsets_at, cc::move(acceleration_roots));
 }
 } // namespace sg::backend::metal

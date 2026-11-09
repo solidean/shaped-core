@@ -217,7 +217,8 @@ struct validator
                 auto const* const record = m.builtin_function(c->intrinsic);
                 auto const expected = record == nullptr ? -1
                                                         : record->parameters.size() + (record->takes_element ? 1 : 0)
-                                                              + (record->takes_acceleration_index ? 1 : 0);
+                                                              + (record->takes_acceleration_index ? 1 : 0)
+                                                              + (record->takes_ray_time ? 1 : 0);
                 if (record == nullptr || expected != e.at(c->arguments).size())
                     report(
                         error_kind::malformed_tree, e.function,

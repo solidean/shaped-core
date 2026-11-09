@@ -251,6 +251,9 @@ private:
     /// Every op that runs with it bound declares it, as a bound group's members are declared.
     void bind_debug_window(sg::impl::pipeline_footprint const& footprint);
 
+    /// Binds sg's pool and the bound groups' roots where the bound layout traces in software, for the op about to run.
+    void bind_software_trace();
+
     /// Forget which group each slot binds, at the start and end of a rendering scope and of the recording.
     /// The groups stay retained by `_bound_keep_alive`; only the slots are cleared, and that ends no array declaration.
     void clear_bound_groups();

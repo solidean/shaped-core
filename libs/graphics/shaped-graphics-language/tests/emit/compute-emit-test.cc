@@ -584,10 +584,14 @@ TEST("sgl emit - a software trace writes the emulated form on HLSL, and reads sg
     CHECK(vulkan.contains("[[vk::binding(17, 3)]] StructuredBuffer<uint4> sg_acceleration_pool;"));
     CHECK(vulkan.contains("[[vk::binding(18, 3)]] cbuffer sg_acceleration_roots_block"));
 
-    // without it HLSL stays native, and a Metal text has no pool to read
+    // without it HLSL stays native
     CHECK(text_at(target::hlsl_dx12, false).contains("RayQuery<"));
     CHECK(!text_at(target::hlsl_dx12, false).contains("sg_acceleration_pool"));
-    CHECK(!text_at(target::msl, true).contains("sg_acceleration_pool"));
+    // MSL walks too, so a pipeline's native motion and an inline trace's walk agree; the pool and roots are parameters
+    auto const msl = text_at(target::msl, true);
+    CHECK(msl.contains("const device uint4* sg_acceleration_pool [[buffer(28)]]")).dump("text", msl);
+    CHECK(msl.contains("constant uint4* sg_acceleration_roots [[buffer(29)]]")).dump("text", msl);
+    CHECK(!msl.contains("intersection_query")).dump("text", msl);
 }
 
 TEST("sgl emit - a library calls back into its shader, whose callback reads bindings the library never names")
