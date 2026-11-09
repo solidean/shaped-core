@@ -543,6 +543,41 @@ TEST("sgl lsp - an edit of a module checks it and the modules after it again, an
     CHECK(before_of(*edited->library) == kept);
 }
 
+TEST("sgl lsp - an edit of a module that leaves what it declares alone moves the modules using it rather than checking "
+     "them again",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\ntest shading.lit(4.0) == 2.0\n");
+    auto const first = sgl_lsp::analyze(doc);
+    // `noise` comes first, since `shading` uses it; its body changes, and nothing it declares
+    auto const noise_uri = lsp::uri_of_path(dir + "/noise.sgl");
+    auto const edited_text
+        = cc::string("module noise\n\n// a line more\nfun grain(x: float) -> float => x * 0.25 + 0.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = noise_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer != first->layer);
+    CHECK(edited->layer->module == "shading");
+    CHECK(edited->layer->layer->is_relocated());
+    CHECK(!edited->layer->before->layer->is_relocated());
+    // the document's test reads the module as it moved, and still passes
+    CHECK(edited->module.tests.size() == first->module.tests.size());
+}
+
 TEST("sgl lsp - a module file open in the editor is what the documents using it are checked against", main_thread)
 {
     sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_MODULES_DIR)});

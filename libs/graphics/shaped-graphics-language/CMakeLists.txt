@@ -96,6 +96,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/dxil/impl/writer_stage.cc
 
     src/shaped-graphics-language/check/artifact.cc
+    src/shaped-graphics-language/check/relocate.cc
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc

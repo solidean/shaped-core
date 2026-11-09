@@ -7,6 +7,7 @@
 #include <clean-core/string/from_string.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/impl/relocate.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -120,6 +121,12 @@ impl::resume_point freeze_layer(checker& c, i32 files)
     c.file_module.remove_back();
     c.uses.remove_back();
     c.out.file_modules.remove_back();
+    return seal_layer(c, files);
+}
+} // namespace
+
+impl::resume_point sgl::check::impl::seal_layer(checker& c, i32 files)
+{
     c.open_types_below.clear();
     for (auto i = isize(0); i < c.out.types.size(); ++i)
         if (c.is_open(type_id(i)))
@@ -159,6 +166,8 @@ impl::resume_point freeze_layer(checker& c, i32 files)
     };
 }
 
+namespace
+{
 /// Whether `plan` reaches the modules `layer` holds, in the same order and under the same names.
 /// The program's own module is not the layer's, and may be named anything.
 bool plan_matches(module_plan const& plan, cc::span<i32 const> library_order, cc::span<cc::string const> modules)
@@ -461,8 +470,10 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
     c.files = files;
     apply_plan(c, plan, base._prelude_count);
     c.options = options;
+    c.records_interface = true;
     c.run(base._resume);
     c.options = {};
+    c.records_interface = false;
 
     // An unused `require` is judged after the program's entry points are flattened, which the program's check does.
     auto kept = cc::vector<located_diagnostic>();
@@ -473,6 +484,7 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
         return {};
     c.out.diagnostics = {};
     result._resume = freeze_layer(c, i32(result._files.size()));
+    c.part_digest = impl::interface_hash(c, c.run_start, impl::sizes_of(c));
     return result;
 }
 
@@ -586,6 +598,7 @@ checked_module sgl::check::check(checked_prelude const& prelude,
             });
         c.options = options;
         c.compiled_target = target;
+        c.records_interface = false;
         c.run(prelude._resume);
         return cc::move(c.out);
     }
@@ -599,6 +612,7 @@ checked_module sgl::check::check(checked_prelude const& prelude,
     apply_plan(c, planned.plan, prelude._prelude_count);
     c.options = options;
     c.compiled_target = target;
+    c.records_interface = false;
     c.run(prelude._resume);
     return cc::move(c.out);
 }

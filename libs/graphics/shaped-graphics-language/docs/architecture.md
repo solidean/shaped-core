@@ -72,9 +72,12 @@ A diagnostic, an origin and a side table all name a file that way, and the front
 **Modules are planned before anything is declared** (`check/check_modules.cc`).
 The library's files are grouped by their `module` line, the program's `use` lines are followed to the modules it reaches, and a loop among them is reported.
 Each module then has a scope of its own over the prelude's, and `m.name` looks into it through the `use` that named `m`.
-Everything reached is checked in one pass with the program; there are no interfaces yet, which is [the compilation model](spec/incubator/compilation-model.md)'s next step.
-Behind the driver, the whole library is one layer instead (`check::check_library`), so each module is checked once per process.
-A module the program does not use is in that layer too, so a pass over every symbol, pipeline or require line asks `checked_module::is_reached_file` before it counts one.
+Checked beside the library, everything reached is checked in one pass with the program.
+Behind the driver, the library is a chain of layers instead, one per module (`check::library_chain`, `check::check_next_module`), so each module is checked once per process.
+A module the program does not use is in the chain too, so a pass over every symbol, pipeline or require line asks `checked_module::is_reached_file` before it counts one.
+An edit of a module checks its layer again and moves the ones after it (`check/relocate.cc`); [the compilation model](spec/incubator/compilation-model.md) has the rules.
+**A new list or a new raw position in a record of the check pass is one the relocation must know**: an id names a table by its type, and an integer `relocator` reads by hand.
+The test "a link relocated past an edit of a module" holds every relocated link to a fresh check's bytes, and `check::layer_difference` names the field where one goes wrong.
 
 **The library's prelude is checked once per process.**
 `sgl::checked_prelude()` is `check::check_prelude` over `parsed_prelude()`: the checker's whole state after the prelude, behind an empty program file.

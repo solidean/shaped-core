@@ -139,6 +139,31 @@ namespace sgl::check
                                                               cc::string_view module,
                                                               cc::span<option_value const> options = {});
 
+} // namespace sgl::check
+
+/// One link of a chain as it was before an edit, and as it is after; the same one where it did not change.
+struct sgl::check::moved_link
+{
+    checked_prelude const* before = nullptr;
+    checked_prelude const* after = nullptr;
+};
+
+namespace sgl::check
+{
+
+/// `link`, checked over `moved.back().before`, as `check_next_module` would make it over `moved.back().after`, without
+/// checking it again: the compilation model's early cutoff.
+/// `moved` holds every link from the first one an edit changed up to the one `link` stands on, each before and after.
+/// None where a fresh check could differ: `link` names what a changed link's interface does not hold, read the body of
+/// a changed link's function, or holds an entry a fresh check would have found in a changed link instead.
+/// Every link of `moved` must outlive the result, and so must the files `link` and they were checked from.
+[[nodiscard]] cc::optional<checked_prelude> relocate_link(checked_prelude const& link, cc::span<moved_link const> moved);
+
+/// Where the states of `a` and `b` first differ, as the artifact's walk writes them: a path of field positions and
+/// element indices from the checker down, `.3.0[12].5`; empty where they are the same.
+/// For a test and for debugging, which name what a relocation got otherwise than a fresh check.
+[[nodiscard]] cc::string layer_difference(checked_prelude const& a, checked_prelude const& b);
+
 /// The values of `options` that name an option of `module`, `module.name`, in the order given.
 [[nodiscard]] cc::vector<option_value> options_of_module(cc::span<option_value const> options, cc::string_view module);
 
@@ -193,6 +218,9 @@ struct sgl::check::checked_prelude
     /// The prelude's own tables, the part of every table a program's check behind it starts with.
     [[nodiscard]] checked_module const& module() const;
 
+    /// Whether `relocate_link` made the layer rather than a check.
+    [[nodiscard]] bool is_relocated() const { return _is_relocated; }
+
 private:
     checked_prelude();
 
@@ -209,6 +237,8 @@ private:
     bool _is_library = false;
     /// The values the layer's modules' options were checked with, each link's after the ones before; none at the defaults.
     cc::vector<option_value> _options;
+    /// Whether `relocate_link` made the layer, whose part of every list is an earlier check's, moved whole.
+    bool _is_relocated = false;
     /// For a layer of the whole library: the names an emitted name must not take, those of the prelude and of the files
     /// a program reaches, made once per set of reached files and shared by every program reaching the same ones.
     cc::unique_ptr<cc::mutex<cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>>> _names_by_reach;
@@ -236,6 +266,8 @@ private:
                                                            cc::string_view module,
                                                            cc::span<option_value const> options);
     friend bool may_continue_from(checked_prelude const& layer, cc::span<module_file const> library, module_file program);
+    friend cc::string layer_difference(checked_prelude const& a, checked_prelude const& b);
+    friend cc::optional<checked_prelude> relocate_link(checked_prelude const& link, cc::span<moved_link const> moved);
     friend bool reaches_the_same_modules(checked_prelude const& layer,
                                          cc::span<module_file const> library,
                                          module_file program);

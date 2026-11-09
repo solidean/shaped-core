@@ -134,10 +134,31 @@ link_ptr chain_of(shared_library const& library,
     auto const order = sgl::check::library_chain(library.files, library.late_files);
     if (order.empty())
         return {};
+    // The previous library's chain, where it holds these modules in this order: once a link differs from its own, the
+    // ones after it are relocated from it rather than checked again where they may be (the compilation model's early
+    // cutoff), each refused relocation checking its module afresh.
+    auto old_chain = cc::vector<link_ptr>();
+    if (auto const previous = library.previous.lock(); previous != nullptr && options.empty())
+    {
+        auto const last = previous->checked.lock([](shared_library::layers& l) { return l.library; });
+        auto backwards = cc::vector<link_ptr>();
+        for (auto link = last; link != nullptr; link = link->before)
+            backwards.push_back(link);
+        for (auto i = backwards.size() - 1; i >= 0; --i)
+            old_chain.push_back(backwards[i]);
+        auto is_same_order = old_chain.size() == order.size();
+        for (auto i = isize(0); is_same_order && i < order.size(); ++i)
+            is_same_order = old_chain[i]->module == order[i].name;
+        if (!is_same_order)
+            old_chain = {};
+    }
+    auto moved = cc::vector<sgl::check::moved_link>();
+
     auto before = link_ptr();
     auto key = cc::hash128();
-    for (auto const& module : order)
+    for (auto position = isize(0); position < order.size(); ++position)
     {
+        auto const& module = order[position];
         auto const own_options = sgl::check::options_of_module(options, module.name);
         auto& b = cc::byte_stream_builder::thread_local_scratch();
         b.add_pod(key);
@@ -157,18 +178,31 @@ link_ptr chain_of(shared_library const& library,
         auto link = live_link(key);
         if (link == nullptr)
         {
-            CC_RECORD_SCOPE("sgl.check_module");
-            auto made = sgl::check::check_next_module(before != nullptr ? *before->layer : prelude, library.files,
-                                                      module.name, own_options);
+            auto made = cc::optional<sgl::check::checked_prelude>();
+            if (!moved.empty())
+            {
+                CC_RECORD_SCOPE("sgl.relocate_module");
+                made = sgl::check::relocate_link(*old_chain[position]->layer, moved);
+            }
+            if (!made.has_value())
+            {
+                CC_RECORD_SCOPE("sgl.check_module");
+                made = sgl::check::check_next_module(before != nullptr ? *before->layer : prelude, library.files,
+                                                     module.name, own_options);
+            }
             if (!made.has_value())
                 return {};
             auto own = cc::make_shared<shared_library::chain_link>();
+            own->module = module.name;
             own->layer = cc::make_shared<sgl::check::checked_prelude const>(cc::move(made.value()));
             own->before = before;
             for (auto const i : module.files)
                 own->units.push_back(library.units[i]);
             link = keep_link(key, link_ptr(cc::move(own)));
         }
+        // from the first link that differs from the old chain's on, every link is one a later relocation moves past
+        if (!old_chain.empty() && (!moved.empty() || link != old_chain[position]))
+            moved.push_back({.before = old_chain[position]->layer.get(), .after = link->layer.get()});
         before = cc::move(link);
     }
     return before;
@@ -255,6 +289,7 @@ cc::shared_ptr<shared_library const> sgl::shared_library_of(cc::span<library_fil
                 made->late_files.push_back(i32(i));
         if (made->late_files.empty())
             made->late_files = last->late_files;
+        made->previous = last;
     }
     auto shared = kept_in(g_libraries, key, cc::shared_ptr<shared_library const>(cc::move(made)), k_max_libraries);
     g_last_libraries.lock(

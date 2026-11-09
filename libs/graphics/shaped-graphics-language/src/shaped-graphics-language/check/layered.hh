@@ -69,6 +69,12 @@ public:
     /// How many entries the shared lower layer holds.
     [[nodiscard]] isize shared_size() const { return _base_size; }
 
+    /// Whether both are the one frozen table, neither with entries of its own: what a layer that added nothing shares.
+    [[nodiscard]] bool shares_all_with(layered const& other) const
+    {
+        return _own.empty() && other._own.empty() && _base == other._base && _base_size == other._base_size;
+    }
+
     struct iterator
     {
         layered const* table = nullptr;

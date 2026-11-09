@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
@@ -382,6 +383,34 @@ struct module_plan
 /// A library file of the program's module shares the program's scope, which a program's check starts afresh.
 [[nodiscard]] bool may_layer(module_plan const& plan);
 
+/// How long each list is that an id or a position of the check pass names, at one moment of a check.
+/// A chain's link is relocated by these: an id below a link's start stays, one in a later link's part moves with it.
+struct table_sizes
+{
+    isize symbols = 0;
+    isize types = 0;
+    isize members = 0;
+    isize enum_cases = 0;
+    isize functions = 0;
+    isize parameters = 0;
+    isize bindings = 0;
+    isize binding_lists = 0;
+    isize type_lists = 0;
+    isize samplers = 0;
+    isize pipelines = 0;
+    isize pipeline_settings = 0;
+    isize constants = 0;
+    isize call_records = 0;
+    isize written_arguments = 0;
+    isize call_slots = 0;
+    isize function_instances = 0;
+    isize target_texts = 0;
+    isize literals = 0;
+    isize function_arguments = 0;
+
+    constexpr bool operator==(table_sizes const&) const = default;
+};
+
 /// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {
@@ -543,6 +572,25 @@ struct checker
     cc::vector<footprint_pin> footprint_pins;
     /// Every access of a binding array by index, in each entry point that reaches it.
     cc::vector<index_use> index_uses;
+
+    // ---- what a link of a chain records for its relocation (relocate.cc) --------------------------------------------
+
+    /// Set while a link of a library's chain is checked.
+    bool records_interface = false;
+    /// The files the layers below declared, which a body read from is another layer's.
+    i32 run_from_files = 0;
+    /// The lists' sizes when this check began, and once every signature and default was checked, before any body:
+    /// what lies between is the link's interface, which `interface_digest` hashes with no place in a file in it.
+    table_sizes run_start;
+    table_sizes interface_end;
+    cc::hash128 interface_digest;
+    /// The same over the link's whole part once it is checked: a link checked again into the same is kept whole.
+    cc::hash128 part_digest;
+    /// The functions of lower layers whose bodies this layer inlined or instantiated: an edit of one checks it again.
+    mutable cc::vector<symbol_id> bodies_read;
+    /// Where this check's own entries of `bodies_read` begin.
+    isize bodies_read_from = 0;
+    void note_body_read(symbol_id function) const;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 

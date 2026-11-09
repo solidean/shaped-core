@@ -6,6 +6,7 @@
 #include <clean-core/string/from_string.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/impl/relocate.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -15,6 +16,9 @@ using namespace sgl::check::impl;
 
 void checker::run(resume_point from)
 {
+    run_from_files = from.files;
+    bodies_read_from = bodies_read.size();
+    run_start = sizes_of(*this);
     if (from.files == 0)
     {
         out.types.push_back({.kind = type_kind::error});
@@ -64,6 +68,12 @@ void checker::run(resume_point from)
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_defaults(symbol_id(i));
+    // what a later link of a chain may name of this one, before a body adds anything
+    if (records_interface)
+    {
+        interface_end = sizes_of(*this);
+        interface_digest = interface_hash(*this, run_start, interface_end);
+    }
 
     // A call needs a signature only, so each body is checked once, after every signature is known.
     // That is what lets a function call one declared below it.
