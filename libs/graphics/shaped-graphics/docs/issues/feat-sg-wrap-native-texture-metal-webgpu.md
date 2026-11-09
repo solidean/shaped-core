@@ -3,6 +3,8 @@ created: 2026-11-05
 priority: normal
 tags: [xr]
 parent: epic-xr
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-09T14:32Z
 ---
 
 # Wrap a native image as an sg texture on metal and webgpu
