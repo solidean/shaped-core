@@ -444,14 +444,15 @@ written write_trace_ray_msl(call_context const& ctx)
     lines.push_back(cc::format("{}.world_direction = {};", data, a[2].text));
     lines.push_back(cc::format("{}.context = sgl_ctx;", data));
     lines.push_back(
-        cc::format("intersector<triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS "> {};", traversal));
+        cc::format("intersector<triangle_data, instancing, world_space_data" SGL_MSL_MOTION_TAGS "> {};", traversal));
     lines.push_back(cc::format("sgl_configure({}, uint({}));", traversal, a[5].text));
     lines.push_back(cc::format("ray {}({}, {}, {}, {});", r, a[1].text, a[2].text, a[3].text, a[4].text));
-    // The ray's time, just ahead of the payload, places what moves.
+    // The ray's time, just ahead of the payload, places what moves; an intersector without the motion tags takes none.
     // A member is the plain structure an inline query takes, which Metal's query has no motion form of; the same
     // resource id read as the motion form is what the intersector takes.
     lines.push_back(cc::format("auto const {} = {}.intersect({}, reinterpret_cast<constant acceleration_structure<"
-                               "instancing, " SGL_MSL_MOTION_TAGS "> const&>({}), uint({}), {}, sgl_t.hit_{}, {});",
+                               "instancing" SGL_MSL_MOTION_TAGS "> const&>({}), uint({}) sgl_motion_time({}), "
+                               "sgl_t.hit_{}, {});",
                                found, traversal, r, a[0].text, a[6].text, a[a.size() - 2].text, a[7].text, data));
     lines.push_back(cc::format("sgl_hit_record {} = sgl_record_of({}, {}, {});", record, found, r, data));
     lines.push_back(cc::format("if ({}.type == intersection_type::none)", found));
@@ -470,7 +471,7 @@ cc::string msl_trace_helper(helper_context const& ctx)
 {
     if (ctx.target != language::msl)
         return {};
-    return "void sgl_configure(thread intersector<triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS
+    return "void sgl_configure(thread intersector<triangle_data, instancing, world_space_data" SGL_MSL_MOTION_TAGS
            ">& i, uint flags)\n"
            "{\n"
            "    i.accept_any_intersection((flags & 4u) != 0u);\n"
@@ -493,7 +494,7 @@ cc::string msl_trace_helper(helper_context const& ctx)
            "}\n"
            "\n"
            "sgl_hit_record sgl_record_of(intersection_result<triangle_data, instancing, "
-           "world_space_data, " SGL_MSL_MOTION_TAGS "> h, ray r, "
+           "world_space_data" SGL_MSL_MOTION_TAGS "> h, ray r, "
            "thread sgl_ray_data const& d)\n"
            "{\n"
            "    sgl_hit_record rec;\n"
@@ -797,6 +798,7 @@ constexpr cc::string_view k_trace_ray_reordered_hlsl[]
 constexpr cc::string_view k_trace_ray_msl[] = {
     "sgl_configure",
     "sgl_record_of",
+    "sgl_motion_time",
     "intersector",
     "sgl_ctx",
     "sgl_t",

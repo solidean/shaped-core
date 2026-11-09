@@ -718,11 +718,13 @@ def bound_samplers(where: str, samplers: list[dict], names: list[str], indent: s
 
 
 def mark_software_trace(entries: SglEntries) -> None:
-    """A package's SOFTWARE_TRACE, on each acceleration member of its bindings and of the modules it exports."""
+    """A package's SOFTWARE_TRACE, on each acceleration member of its bindings, on its ray-tracing pipelines, and in the modules it exports."""
     for _, binding in entries.bindings:
         for member in binding["members"]:
             if member["kind"] == "acceleration_structure":
                 member["software_trace"] = True
+    for _, pipeline in entries.raytracing_pipelines:
+        pipeline["software_trace"] = True
     for unit in entries.modules.values():
         mark_software_trace(unit)
 
@@ -1733,6 +1735,8 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
             out.append(f"        .hit_groups = k_{key}_groups,\n")
         if p["host_hit_groups"]:
             out.append("        .has_host_hit_groups = true,\n")
+        if p.get("software_trace"):
+            out.append("        .software_trace = true,\n")
         if p["callables"]:
             out.append(f"        .callables = k_{key}_callables,\n")
         if p["host_callables"]:

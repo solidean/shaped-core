@@ -95,9 +95,11 @@ struct sgl::builtins::helper_context
     u32 data = 0;
 };
 
-/// MSL's motion tags, which every intersector, query, function table and intersection function of a compile shares.
-/// A ray's time places what moves (EVAL-130); a structure built without motion is traced as it stands.
-#define SGL_MSL_MOTION_TAGS "instance_motion, primitive_motion"
+/// What every intersector, function table and intersection function of an MSL compile closes its tags with.
+/// The file defines `sgl_motion` once (EMIT-139): the motion tags in a package that takes `SOFTWARE_TRACE`, and nothing elsewhere.
+/// `sgl_motion_time(t)` beside it is the time argument a tagged `intersect` takes, and nothing where the tags are.
+/// The tags double a static scene's traversal on Apple GPUs, and only such a package is bound a structure that moves.
+#define SGL_MSL_MOTION_TAGS " sgl_motion"
 
 namespace sgl::builtins
 {

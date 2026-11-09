@@ -21,4 +21,4 @@ What a run should cover:
 Measured on 2026-11-09 on an M4: the pipeline's kernel-then-call shape costs nothing against an inline trace.
 An intersector with `world_space_data` and an intersection table over opaque geometry, calling closest hit and miss through visible function tables,
 ran 3.7% faster than an inline `intersection_query` shading the same.
-Its motion tags are the cost instead, twice the traversal on a static scene: [perf-sgl-msl-motion-tags-double-static-traces](perf-sgl-msl-motion-tags-double-static-traces.md).
+Its motion tags were the cost instead, twice the traversal on a static scene, and are now written only into a package that takes `SOFTWARE_TRACE`.

@@ -243,6 +243,8 @@ struct plan
     /// The text writes prints and asserts into sg's debug window (EMIT-183), which a metal raygen hands every stage it
     /// calls through its context, whether it prints itself or not.
     bool diagnostics = false;
+    /// MSL: the package takes `SOFTWARE_TRACE`, so a structure that moves may be bound, and a native trace takes motion tags.
+    bool sees_motion = false;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;

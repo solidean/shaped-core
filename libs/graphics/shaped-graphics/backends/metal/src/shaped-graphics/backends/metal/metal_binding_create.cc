@@ -242,12 +242,12 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                     return cc::error(
                         cc::format("binding_group: '{}' — the bound acceleration structure has expired", b.name));
 
-                // a native trace of an inline query sees no motion, so a tlas that moves takes the software walk
+                // An inline trace sees motion only through the software walk, and a pipeline's trace only with the
+                // motion tags, which SGL writes into a package that takes SOFTWARE_TRACE alone.
                 auto const software = sg::impl::software_region_of(mtl_tlas);
-                if (software.is_moving && !b.traced_in_software)
-                    return cc::error(cc::format("binding_group: '{}' binds a tlas that moves, which an inline trace "
-                                                "sees only through the software walk: the shader's package takes "
-                                                "SOFTWARE_TRACE in sc_add_shader_package",
+                if ((software.is_moving || mtl_tlas.reaches_motion()) && !b.traced_in_software)
+                    return cc::error(cc::format("binding_group: '{}' binds a tlas that moves, which only a shader "
+                                                "whose package takes SOFTWARE_TRACE in sc_add_shader_package traces",
                                                 b.name));
                 if (b.traced_in_software)
                 {

@@ -39,6 +39,9 @@ struct slib::compile_source_options
 
     /// what a source of the host's compiles with: for a context's, `add_context_options`
     cc::span<shader_option const> options = {};
+
+    /// SGL: compile as a package that takes `SOFTWARE_TRACE` does, as a host's hit group of such a package's pipeline must
+    bool software_trace = false;
 };
 
 /// How the reload watcher runs.

@@ -297,6 +297,9 @@ Metal has no shader table: a kernel intersects with its own intersector and call
 One table holds the miss and closest-hit functions of every ray type, so they share one signature, and the payload travels as words each function reads as its own type.
 DXR finds a closest hit's record from the instance's hit-group offset, which Metal's intersection result does not carry, so sg binds each instance's offset beside the tables.
 A procedural group's intersection and its any hit are one function on metal, since Metal runs no any hit after a box's intersection, which is why CHK-345 fuses them.
+The motion tags double a static scene's traversal on an M4, nearly all of it `instance_motion`'s, so only a compile that may be bound a structure that moves takes them.
+That is a package with `SOFTWARE_TRACE`: sg refuses a moving structure to every other, so a trace without the tags never meets one.
+One macro rather than a flag per site keeps every function of a pipeline alike, since each is compiled apart and must link.
 
 ## EMIT-142
 

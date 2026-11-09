@@ -412,7 +412,13 @@ public:
     {
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
         if (uses_ray_tracing(p))
+        {
             out += "#include <metal_raytracing>\nusing namespace raytracing;\n\n";
+            // EMIT-139: what closes every native trace's tags, motion only where a structure that moves can be bound
+            out += p.sees_motion ? "#define sgl_motion , instance_motion, primitive_motion\n"
+                                   "#define sgl_motion_time(t) , t\n\n"
+                                 : "#define sgl_motion\n#define sgl_motion_time(t)\n\n";
+        }
         write_enum_constants(out, p, *this);
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
@@ -521,14 +527,14 @@ public:
         // sg's reserved group: ray type 0's intersection table at id 0, then miss, closest hit and callable, then the
         // other ray types' intersection tables from id 4
         out += "struct sgl_tables\n{\n"
-               "    intersection_function_table<triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS
+               "    intersection_function_table<triangle_data, instancing, world_space_data" SGL_MSL_MOTION_TAGS
                "> hit_0 [[id(0)]];\n"
                "    visible_function_table<sgl_hit_function> miss [[id(1)]];\n"
                "    visible_function_table<sgl_hit_function> closest_hit [[id(2)]];\n"
                "    visible_function_table<sgl_callable_function> callable [[id(3)]];\n";
         for (auto r = isize(1); r < ray_count; ++r)
             out.appendf("    intersection_function_table<triangle_data, instancing, "
-                        "world_space_data, " SGL_MSL_MOTION_TAGS "> hit_{} "
+                        "world_space_data" SGL_MSL_MOTION_TAGS "> hit_{} "
                         "[[id({})]];\n",
                         r, 3 + r);
         out += "};\n\n";
@@ -622,7 +628,7 @@ public:
         {
             // an any hit decides a triangle, and a procedural group's traversal reports a box's primitive
             auto const is_triangle = stage_of == stage::any_hit;
-            out.appendf("[[intersection({}, triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS ")]]\n",
+            out.appendf("[[intersection({}, triangle_data, instancing, world_space_data" SGL_MSL_MOTION_TAGS ")]]\n",
                         is_triangle ? "triangle" : "bounding_box");
             out.appendf("{} {}(", is_triangle ? "sgl_triangle_result" : "sgl_box_result", p.entry_name);
             if (is_triangle)

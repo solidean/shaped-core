@@ -5,8 +5,8 @@ tags: [metal]
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/registry.hh
   - symbol: SGL_MSL_MOTION_TAGS
-claimed-by: Claude (for Julius)
-claimed-at: 2026-11-09T22:41Z
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # Metal's motion tags double every pipeline trace, moving scene or not
@@ -35,3 +35,11 @@ The fix is to write the tags only where a moving scene can reach the trace, whic
 - `primitive_motion` alone is the cheap one, so a gate may keep it and drop `instance_motion` only.
 
 Measured on one scene with trivial shading; a heavier hit group or another GPU may move the ratio, and that is a hypothesis until measured.
+
+## Resolved
+
+The gate is the package option already there: MSL writes the tags only into a compile with `software_trace` (EMIT-139's `sgl_motion`).
+That is sound because metal now refuses a structure that moves to every other package, built natively or for the walk, as dx12 and vulkan did already.
+A host's hit group or callable compiles with its pipeline's flag (`raytracing_pipeline_definition::software_trace`), so a pipeline's functions still link.
+Pinned by `sg - a package that did not opt in is refused a tlas that moves natively` and the MSL emit tests; the opted-in native motion pipeline test still passes on the M4.
+The in-tree speedup was not measured: sv's tracing benchmarks need Sponza or Bistro, and the 2x stands on the standalone measurement above.

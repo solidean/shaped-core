@@ -162,6 +162,9 @@ Preserve these; the rest is tuning:
 - **A TLAS also keeps each instance's `hit_group_offset` in a buffer of its own**, `metal_tlas::hit_group_offsets()`, one `u32` per instance.
   A pipeline's kernel reads it to find a closest hit's record, since Metal's intersection result names the instance and not its offset.
   [raytracing-pipeline](raytracing-pipeline.md#metal-maps-it-onto-a-compute-pipeline-because-a-raygen-shader-is-the-kernel) says how it is bound.
+- **A structure that moves is a motion structure**, which a pipeline's trace reads natively and an inline query cannot read at all.
+  Only a shader whose package takes `SOFTWARE_TRACE` is bound one: SGL writes the motion tags there alone, since they double a static scene's traversal.
+  Its inline traces take the walk below, from builds with `accel_build_flag::software_trace`; its pipeline traces need no flag.
 
 ## dx12 and vulkan: the software walk, on request
 

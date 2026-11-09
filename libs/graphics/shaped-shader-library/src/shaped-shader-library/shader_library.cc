@@ -536,7 +536,7 @@ sg::async_compiled_shader slib::shader_library::compile_source(cc::string_view s
 {
     compile_outcome outcome;
     _compile_text(outcome, cc::string::create_copy_of(source), opts.label, opts.include_dir, cc::string_view(),
-                  cc::string_view(), opts.language, stage, entry_point, format, opts.options);
+                  cc::string_view(), opts.language, stage, entry_point, format, opts.options, opts.software_trace);
     return cc::move(outcome.shader);
 }
 

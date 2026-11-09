@@ -98,7 +98,7 @@ sg::blas_handle metal_command_list::build_blas_common(MTL4::PrimitiveAcceleratio
     auto* const accel = build_accel_common(descriptor, size, build_scratch, update_scratch);
 
     auto const result = std::make_shared<metal_blas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
-                                                     geometry_count);
+                                                     geometry_count, descriptor->motionKeyframeCount() > 1);
 
     auto const scratch_raw
         = _metal_context.transient.create_raw_buffer(build_scratch, sg::buffer_usage::readwrite_buffer);
@@ -376,8 +376,13 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
     // A TLAS of which an instance moves is a motion structure: every instance takes its transform at time 0 and at
     // time 1 from a buffer of its own, a still one the same twice.
     auto moves = false;
+    auto reaches_motion = false;
     for (auto const& inst : instances)
+    {
         moves = moves || inst.transform_at_end.has_value();
+        reaches_motion = reaches_motion || static_cast<metal_blas const&>(*inst.blas).is_moving();
+    }
+    reaches_motion = reaches_motion || moves;
     auto motion_descs = cc::vector<MTL::IndirectAccelerationStructureMotionInstanceDescriptor>();
     auto transforms = cc::vector<MTL::PackedFloat4x3>();
     if (moves)
@@ -457,9 +462,9 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
         sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
     upload_bytes_to_buffer(hit_group_offsets, cc::as_bytes(cc::span<u32 const>(offsets)), 0);
 
-    auto const result
-        = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
-                                       int(instances.size()), cc::move(referenced_blases), hit_group_offsets);
+    auto const result = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
+                                                     int(instances.size()), cc::move(referenced_blases),
+                                                     hit_group_offsets, reaches_motion);
 
     auto const scratch_raw
         = _metal_context.transient.create_raw_buffer(build_scratch, sg::buffer_usage::readwrite_buffer);

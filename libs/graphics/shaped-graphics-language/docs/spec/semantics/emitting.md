@@ -611,7 +611,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   In HLSL and MSL the member would hide the type from the members after it, so `ray: ray` is written `ray ray_;`.
 * **EMIT-135** A trace's native form is what HLSL and MSL write, and its emulated form what WGSL writes: the legalizer keeps the one its target has ([why](why/emitting.md#emit-135)).
   A compile with `software_trace` keeps the emulated form on HLSL and MSL too, an MSL entry point taking the pool and the roots at their argument-table slots.
-  An MSL pipeline trace stays native, with the motion tags and its ray's time, since Metal's intersector places what moves and its query does not.
+  An MSL pipeline trace stays native, with the motion tags (EMIT-139) and its ray's time, since Metal's intersector places what moves and its query does not.
   An acceleration member is `RaytracingAccelerationStructure` in HLSL and `instance_acceleration_structure` in MSL, and WGSL declares none: it keeps its slot and takes no binding.
   An entry point whose code reads sg's acceleration pool declares it and the dispatch's roots in sg's reserved group, beside the inline constants:
   `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
@@ -724,6 +724,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
     A shader that traces or stands in traversal, held by two whose sets' payloads differ, is `ray-data-conflict`, since one text cannot agree with both.
   * Every table, intersection function and intersector carries `world_space_data`, the tag under which Metal hands over the instance's transforms.
     A closest hit's object ray is the world ray through the world-to-object transform.
+  * Every one closes its tags with `sgl_motion`, which a file that traces defines once after `<metal_raytracing>`.
+    A compile with `software_trace` defines it as `, instance_motion, primitive_motion`, and every other compile as nothing.
+    `sgl_motion_time(t)` beside it passes a trace's time to `intersect` under the tags, and nothing where there are none.
 
 ## Subgroups, coherence and image atomics
 

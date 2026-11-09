@@ -76,9 +76,11 @@ public:
                isize build_scratch_size_in_bytes,
                isize update_scratch_size_in_bytes,
                sg::accel_build_flags build_flags,
-               int geometry_count)
+               int geometry_count,
+               bool is_moving)
       : sg::blas(size_in_bytes, build_scratch_size_in_bytes, update_scratch_size_in_bytes, build_flags, geometry_count),
-        _storage(ctx, accel, size_in_bytes)
+        _storage(ctx, accel, size_in_bytes),
+        _is_moving(is_moving)
     {
     }
 
@@ -86,10 +88,14 @@ public:
 
     [[nodiscard]] metal_accel_storage const& storage() const { return _storage; }
 
+    /// A motion structure: its vertices take a pose per keyframe.
+    [[nodiscard]] bool is_moving() const { return _is_moving; }
+
 private:
     void on_expired() const override { _storage.release(_finalizers); }
 
     metal_accel_storage _storage;
+    bool _is_moving = false;
 };
 
 /// Metal top-level acceleration structure, the same shape as metal_blas.
@@ -105,7 +111,8 @@ public:
                sg::accel_build_flags build_flags,
                int instance_count,
                cc::vector<sg::blas_handle> referenced_blases,
-               sg::raw_buffer_handle hit_group_offsets)
+               sg::raw_buffer_handle hit_group_offsets,
+               bool reaches_motion)
       : sg::tlas(size_in_bytes,
                  build_scratch_size_in_bytes,
                  update_scratch_size_in_bytes,
@@ -113,7 +120,8 @@ public:
                  instance_count,
                  cc::move(referenced_blases)),
         _storage(ctx, accel, size_in_bytes),
-        _hit_group_offsets(cc::move(hit_group_offsets))
+        _hit_group_offsets(cc::move(hit_group_offsets)),
+        _reaches_motion(reaches_motion)
     {
     }
 
@@ -125,9 +133,13 @@ public:
     /// closest hit's record: see `k_hit_group_offsets_buffer_index`.
     [[nodiscard]] sg::raw_buffer_handle const& hit_group_offsets() const { return _hit_group_offsets; }
 
+    /// An instance moves, or a BLAS of one does: only a trace with motion tags may read it.
+    [[nodiscard]] bool reaches_motion() const { return _reaches_motion; }
+
 private:
     void on_expired() const override { _storage.release(_finalizers); }
 
     metal_accel_storage _storage;
     sg::raw_buffer_handle _hit_group_offsets;
+    bool _reaches_motion = false;
 };

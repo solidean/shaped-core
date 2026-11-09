@@ -255,6 +255,43 @@ ASYNC_INVOCABLE_TEST("sg - a package that did not opt in is refused a tlas that 
     co_await ctx->idle_completion();
 }
 
+// A pipeline's trace sees native motion only with the motion tags, which SGL writes into an opted-in package alone.
+ASYNC_INVOCABLE_TEST("sg - a package that did not opt in is refused a tlas that moves natively",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (ctx->implementation_of(sg::feature::ray_tracing_motion_blur) != sg::feature_implementation::native)
+        SKIP("a structure that moves without the software walk is built where motion is native");
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    auto cmd = ctx->create_command_list();
+    auto const scene = build_scene(*ctx, *cmd, {});
+    auto const usage = sg::buffer_usage::readwrite_buffer;
+    auto const hits = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(1), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(1), usage);
+
+    namespace native = sg::test::sgl_shaders::raytracing;
+    auto const layout = ctx->cached.acquire_binding_group_layout<native::scene>();
+    auto refused = cc::string();
+    try
+    {
+        (void)ctx->transient.create_binding_group(*cmd, layout,
+                                                  native::scene{.world = scene.tlas->as_view(),
+                                                                .hits = hits.as_readwrite_buffer(),
+                                                                .ids = ids.as_readwrite_buffer()});
+    }
+    catch (sg::binding_group_exception const& e)
+    {
+        refused = cc::string(e.message());
+    }
+    CHECK(refused.contains("SOFTWARE_TRACE"));
+    ctx->submit_command_list(cc::move(cmd));
+    co_await ctx->idle_completion();
+}
+
 ASYNC_INVOCABLE_TEST("sg - a pipeline's trace meets what moves at its ray's time, where motion is native",
                      (sg::context_handle const& ctx))
 {
