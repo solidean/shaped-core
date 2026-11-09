@@ -51,7 +51,7 @@ Narrowed further the same evening:
 
 
 Settled the same night: it is NVIDIA's driver, and the annotations are the trigger.
-[nvidia-reorder-payload-qualifiers-across-pipelines](../../../../../../../docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines/readme.md) reproduces it.
+[nvidia-reorder-payload-qualifiers-across-pipelines](../../../../../../../../docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines/readme.md) reproduces it.
 It takes 40 lines of HLSL and stock DXC.
 Two pipelines on one device, one compiled with payload access qualifiers and one with `-disable-payload-qualifiers`, raygens that reorder: the second loses its closest hit's payload write.
 In sg, compiling the DXC route with `-disable-payload-qualifiers` too made this test pass on both contexts, five runs of five.
