@@ -27,6 +27,8 @@ A table edited on one side alone stops the build.
 | `sg_array_lengths` | `b1, space12`, root constants | set 3, binding 20 | none | none, the array's table counts it | an unbounded binding array |
 | `sg_dispatch_grid` | `b2, space12`, root constants | set 3, binding 21 | group 3, binding 21 | none, metal dispatches the grid's threads | a bare `@compute` |
 
+On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and hands it every stage it calls through `sgl_context` (EMIT-183).
+
 `sg_array_lengths` is a block of 16 lengths, `uint4[4]`, one per unbounded binding array of the bound groups in the order of their groups.
 sg writes it at each dispatch and draw from the groups bound, beside the roots, and an emit for dx12 or vulkan rewrites `xs.length` into a read of it (CHK-491).
 
