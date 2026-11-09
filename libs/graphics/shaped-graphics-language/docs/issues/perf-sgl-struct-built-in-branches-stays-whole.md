@@ -2,6 +2,8 @@
 created: 2026-10-22
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_lets.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-09T15:55Z
 ---
 
 # A struct a function returns from two branches is built whole, all of whose fields MSL fetches one element at a time
