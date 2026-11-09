@@ -34,6 +34,7 @@ struct interface_binding;
 struct prelude_file;
 struct library_file;
 struct shared_library;
+struct module_artifact;
 struct parsed_prelude_file;
 
 enum class token_class : u8;
@@ -369,7 +370,6 @@ struct located_diagnostic;
 struct checked_module;
 struct module_file;
 struct chained_module;
-struct moved_link;
 struct checked_prelude;
 template <class T>
 class layered;

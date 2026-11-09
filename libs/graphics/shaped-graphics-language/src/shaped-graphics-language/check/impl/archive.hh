@@ -32,6 +32,44 @@ inline constexpr bool is_checked_element_v
    || std::is_same_v<T, flat_stmt_id> || std::is_same_v<T, flat_arm> || std::is_same_v<T, call_site>
    || std::is_same_v<T, flat_check_node>;
 
+template <class T>
+inline constexpr bool is_vector_v = false;
+template <class T>
+inline constexpr bool is_vector_v<cc::vector<T>> = true;
+
+template <class T>
+inline constexpr bool is_layered_v = false;
+template <class T>
+inline constexpr bool is_layered_v<layered<T>> = true;
+
+template <class T>
+inline constexpr bool is_layered_map_v = false;
+template <class K, class V>
+inline constexpr bool is_layered_map_v<layered_map<K, V>> = true;
+
+template <class T>
+inline constexpr bool is_map_v = false;
+template <class K, class V>
+inline constexpr bool is_map_v<cc::map<K, V>> = true;
+
+template <class T>
+inline constexpr bool is_set_v = false;
+template <class K>
+inline constexpr bool is_set_v<cc::set<K>> = true;
+
+template <class T>
+inline constexpr bool is_shared_ptr_v = false;
+template <class T>
+inline constexpr bool is_shared_ptr_v<cc::shared_ptr<T>> = true;
+
+/// The member of `other` at the place `field` has in `root`, both of one type.
+template <class F, class R>
+F const& same_member(F const& field, R const& root, R const& other)
+{
+    auto const offset = reinterpret_cast<char const*>(&field) - reinterpret_cast<char const*>(&root);
+    return *reinterpret_cast<F const*>(reinterpret_cast<char const*>(&other) + offset);
+}
+
 /// The entries of a map in the order of their keys, so a layer is the same bytes whatever order its maps were filled in.
 template <class Key, class Value, class Map>
 cc::vector<cc::pair<Key const*, Value const*>> sorted_entries(Map const& m)
@@ -60,6 +98,9 @@ struct archive
     isize at = 0;
     /// The sources of the layer's files, which a string view of the layer points into.
     cc::span<cc::string_view const> sources;
+    /// The sources of other layers' files, which an edit may have moved: a view into one is written as its place and its
+    /// text, and read back as that place where the text there is still the same.
+    cc::span<cc::string_view const> elsewhere;
     /// Reading: where a string view in none of `sources` keeps its text.
     cc::vector<cc::unique_ptr<cc::string>>* texts = nullptr;
     builtins::registry const* registry = nullptr;
@@ -68,15 +109,14 @@ struct archive
     /// Writing only: every place in a file written as nothing, and every string view as its text, so two layers that
     /// differ in where their declarations stand alone are the same bytes; what a layer's interface is hashed by.
     bool positionless = false;
+    /// Writing only: every string view as its text, so two layers whose views point into two copies of one text are the
+    /// same bytes; what a test compares a moved layer with a checked one by.
+    bool views_as_text = false;
 
     void raw(void* data, isize size)
     {
         if constexpr (Writing)
-        {
-            auto const* const bytes = static_cast<byte const*>(data);
-            for (auto i = isize(0); i < size; ++i)
-                out->push_back(bytes[i]);
-        }
+            out->push_back_range(cc::span<byte const>(static_cast<byte const*>(data), size));
         else
         {
             if (failed || at + size > in.size())
@@ -118,25 +158,31 @@ struct archive
 
     void io(cc::string_view& v)
     {
-        // 0: empty; 1: a place in a source; 2: its own text
+        // 0: empty; 1: a place in a source; 2: its own text; 3: a place elsewhere, and its text
         auto tag = u8(0);
         auto source = i32(-1);
         auto offset = i64(0);
         auto size = i64(v.size());
         if constexpr (Writing)
         {
+            auto const find = [&](cc::span<cc::string_view const> in, u8 found)
+            {
+                for (auto i = isize(0); i < in.size() && tag == 2; ++i)
+                    if (v.data() >= in[i].data() && v.data() + v.size() <= in[i].data() + in[i].size())
+                    {
+                        tag = found;
+                        source = i32(i);
+                        offset = v.data() - in[i].data();
+                    }
+            };
             if (!v.empty())
             {
                 tag = 2;
-                if (!positionless)
-                    for (auto i = isize(0); i < sources.size(); ++i)
-                        if (v.data() >= sources[i].data() && v.data() + v.size() <= sources[i].data() + sources[i].size())
-                        {
-                            tag = 1;
-                            source = i32(i);
-                            offset = v.data() - sources[i].data();
-                            break;
-                        }
+                if (!positionless && !views_as_text)
+                {
+                    find(sources, 1);
+                    find(elsewhere, 3);
+                }
             }
         }
         raw(&tag, sizeof(tag));
@@ -164,6 +210,11 @@ struct archive
             }
             return;
         }
+        if (tag == 3)
+        {
+            raw(&source, sizeof(source));
+            raw(&offset, sizeof(offset));
+        }
         if constexpr (Writing)
         {
             auto text = cc::string(v);
@@ -173,10 +224,17 @@ struct archive
         {
             auto text = cc::make_unique<cc::string>();
             io(*text);
-            v = cc::string_view(*text);
-            texts->push_back(cc::move(text));
+            if (tag == 3 && !failed && source >= 0 && source < elsewhere.size() && offset >= 0
+                && offset + text->size() <= elsewhere[source].size()
+                && elsewhere[source].subview({.offset = offset, .size = text->size()}) == cc::string_view(*text))
+                v = elsewhere[source].subview({.offset = offset, .size = text->size()});
+            else
+            {
+                v = cc::string_view(*text);
+                texts->push_back(cc::move(text));
+            }
         }
-        if (tag > 2)
+        if (tag > 3)
             failed = true;
     }
 

@@ -41,15 +41,19 @@ The steps, each a child issue when it is taken up, in this order:
    Each link copies the tables below it ([perf-sgl-layer-freeze-copies](perf-sgl-layer-freeze-copies.md)).
    The order follows the edit: a module being edited goes as late as the modules using it allow, 8.6 ms an edit on average there.
 5. **Early cutoff, through relocation:** an edit that leaves a module's interface alone relocates the layers after it rather than checking them again.
-   *Landed on 2026-11-09:* `check::relocate_link`, held byte for byte to a fresh check by a test; past an edit of shaped-viewer's `scene`, the 9 links after it move in 3.7 ms.
+   *Landed on 2026-11-09:* `check::relocate_link`, held field for field to a fresh check by a test; past an edit of shaped-viewer's `scene`, the 9 links after it move in 4.5 ms.
    A changed interface still checks every link naming anything of its module, the part of it that did not change included.
 6. **Options as a second layer:** a compile that sets a module's option checks only what reaches it.
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers.
    *A second, the same day:* a link is checked with its module's values, so a compile that sets one checks that module's link and those after it, and shares the rest.
    The declaration's grain waits for relocation (step 5).
 7. **Per-module artifacts, kept where a host asks,** relocated on load.
+   *Landed on 2026-11-09:* `check::save_link_artifact` and `load_link_artifact`, the second moving a link past what changed below it, as relocation does.
+   A move in memory goes through the same bytes, so the relocation test holds every load to a fresh check too.
+   The driver loads a link from the artifacts a host handed in (`sgl::offer_module_artifacts`) where it would check it; shaped-viewer's 10 links load in 8.6 ms, against 27.9 ms.
+   No host keeps them yet, and slib's persistent cache is where one would.
 8. **The language server on layers.** *Landed on 2026-11-09:* an analysis continues from the layers every compile shares.
-   A keystroke in a shaped-viewer program is 3.6 ms; in a module it uses 6.1 to 13.3 ms by its place in the chain.
+   A keystroke in a shaped-viewer program is 3.6 ms; in a module it uses 5.8 to 9.6 ms by its place in the chain.
 9. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.

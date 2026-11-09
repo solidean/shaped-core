@@ -104,12 +104,13 @@ sgl::check::check_next_module(base, library, name, options = {})  // -> optional
                                            // over the prelude's layer or the link before; a program reaching only its
                                            // modules continues it; `options`: the values for name's own options alone
 sgl::check::options_of_module(options, name)  // -> vector<option_value>: those named `name.x`, in the order given
-sgl::check::relocate_link(link, moved)     // -> optional<checked_prelude>: `link` moved past an edit without checking it,
-                                           // `moved` = moved_link{before, after} for every link from the first changed
-                                           // one to link's base; none where a fresh check could differ: check it then
-layer.is_relocated()                       // -> bool: relocate_link made it
-sgl::check::layer_difference(a, b)         // -> string: the field path where two layers' states first differ, "" if
-                                           // none; what a test or a debugger names a relocation's mistake by
+sgl::check::relocate_link(link, old_base, new_base) // -> optional<checked_prelude>: `link`, checked over `old_base`,
+                                           // moved onto `new_base` without checking it; the bases are chains of the same
+                                           // modules and files, any of them changed; none where a fresh check could
+                                           // differ: check it then
+layer.is_relocated()                       // -> bool: relocate_link or load_link_artifact made it
+sgl::check::layer_difference(a, b)         // -> string: the field path where two layers' states first differ, strings
+                                           // by their text, "" if none; what a test names a relocation's mistake by
 sgl::check::may_continue_from(layer, library, program)  // -> bool: a layer of its very modules, or the library's
 m.is_reached_file(file)                    // -> bool: false for a module the program does not use, which a layer of the
                                            // whole library holds; ASK IT in any pass over every symbol or pipeline
@@ -126,6 +127,12 @@ sgl::layer_of(*shared, program, options = {})  // -> shared_library::link_ptr: l
                                            // a module's option set: a chain with its values, the links before shared
                                            // its chain's links are shared with every library holding the same modules
                                            // before them, so an edit checks its module and those after it alone
+sgl::module_artifact_keys(library, source_name)  // -> vector<string>: one per module; what a host keeping artifacts
+                                           // fetches, ASYNCHRONOUSLY and before the compile, which reads nothing itself
+sgl::keep_module_artifacts(true)           // off by default; off again drops what was handed in or made
+sgl::offer_module_artifacts(artifacts)     // span<module_artifact{key, bytes}>: a compile loads a link from them where it
+                                           // would check it, if it loads over the modules before it as they stand
+sgl::take_module_artifacts()               // -> vector<module_artifact>: made since the last call, for the host to keep
 
 #include <shaped-graphics-language/check/artifact.hh>
 sgl::check::save_artifact(layer, key)      // -> optional<vector<byte>>: the prelude's layer or one of modules as bytes
@@ -133,6 +140,10 @@ sgl::check::load_modules_artifact(bytes, key, prelude, library, program, registr
                                            // the layer of the modules `program` reaches, planned as check_modules plans it
 sgl::check::load_artifact(bytes, key, prelude_files, registry)  // -> optional<checked_prelude>: none for another key,
                                            // other prelude sources, or bytes cut short or changed: a miss, never an error
+sgl::check::save_link_artifact(link, base, key)  // -> optional<vector<byte>>: a link of a chain, at its defaults, as
+                                           // its own part and where its chain's parts lay
+sgl::check::load_link_artifact(bytes, key, base, library, module)  // -> optional<checked_prelude>: that link over `base`
+                                           // as it stands, moved past what changed below it; a miss where it may not
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes

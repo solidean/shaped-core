@@ -139,25 +139,16 @@ namespace sgl::check
                                                               cc::string_view module,
                                                               cc::span<option_value const> options = {});
 
-} // namespace sgl::check
-
-/// One link of a chain as it was before an edit, and as it is after; the same one where it did not change.
-struct sgl::check::moved_link
-{
-    checked_prelude const* before = nullptr;
-    checked_prelude const* after = nullptr;
-};
-
-namespace sgl::check
-{
-
-/// `link`, checked over `moved.back().before`, as `check_next_module` would make it over `moved.back().after`, without
-/// checking it again: the compilation model's early cutoff.
-/// `moved` holds every link from the first one an edit changed up to the one `link` stands on, each before and after.
+/// `link`, checked over `old_base`, as `check_next_module` would make it over `new_base`, without checking it again:
+/// the compilation model's early cutoff.
+/// The two bases are links of chains of the same modules, with the same files each, in the same order; any of them may
+/// have changed, and `link`'s options must be the defaults.
 /// None where a fresh check could differ: `link` names what a changed link's interface does not hold, read the body of
 /// a changed link's function, or holds an entry a fresh check would have found in a changed link instead.
-/// Every link of `moved` must outlive the result, and so must the files `link` and they were checked from.
-[[nodiscard]] cc::optional<checked_prelude> relocate_link(checked_prelude const& link, cc::span<moved_link const> moved);
+/// `new_base` and `link`'s own files must outlive the result; `old_base` need not.
+[[nodiscard]] cc::optional<checked_prelude> relocate_link(checked_prelude const& link,
+                                                          checked_prelude const& old_base,
+                                                          checked_prelude const& new_base);
 
 /// Where the states of `a` and `b` first differ, as the artifact's walk writes them: a path of field positions and
 /// element indices from the checker down, `.3.0[12].5`; empty where they are the same.
@@ -190,6 +181,7 @@ namespace sgl::check
 namespace sgl::check::impl
 {
 struct checker;
+struct layer_maker;
 /// How far a check got: the files it declared, and the length of each list a later step walks only past what it held.
 struct resume_point
 {
@@ -267,7 +259,18 @@ private:
                                                            cc::span<option_value const> options);
     friend bool may_continue_from(checked_prelude const& layer, cc::span<module_file const> library, module_file program);
     friend cc::string layer_difference(checked_prelude const& a, checked_prelude const& b);
-    friend cc::optional<checked_prelude> relocate_link(checked_prelude const& link, cc::span<moved_link const> moved);
+    friend cc::optional<checked_prelude> relocate_link(checked_prelude const& link,
+                                                       checked_prelude const& old_base,
+                                                       checked_prelude const& new_base);
+    friend cc::optional<cc::vector<cc::byte>> save_link_artifact(checked_prelude const& link,
+                                                                 checked_prelude const& base,
+                                                                 cc::string_view key);
+    friend cc::optional<checked_prelude> load_link_artifact(cc::span<cc::byte const> bytes,
+                                                            cc::string_view key,
+                                                            checked_prelude const& base,
+                                                            cc::span<module_file const> library,
+                                                            cc::string_view module);
+    friend struct impl::layer_maker;
     friend bool reaches_the_same_modules(checked_prelude const& layer,
                                          cc::span<module_file const> library,
                                          module_file program);

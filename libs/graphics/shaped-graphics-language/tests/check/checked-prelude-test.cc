@@ -775,6 +775,58 @@ TEST("sgl shared library - a compile that sets a module's option shares every li
     CHECK((sgl::layer_of(*shared, user, options{{.name = "tuned.width", .value = "wide"}}) == nullptr));
 }
 
+TEST("sgl shared library - a host keeps each module's link as an artifact, and a process that never checked a module "
+     "loads its link from it")
+{
+    // sources no other test holds, so no other test's compile makes or shares these links
+    auto const library = cc::vector<sgl::library_file>{
+        {.name = "kept_base.sgl",
+         .source = "module kept_base\nfun kept_twice(x: float) -> float => x + x\nfun kept_scale(x: float) -> float "
+                   "=> x * 3.0\n"},
+        {.name = "kept_top.sgl",
+         .source = "module kept_top\nuse kept_base\nfun kept_both(x: float) -> float => kept_base.kept_twice(x) + "
+                   "kept_base.kept_scale(x)\n"},
+    };
+    auto const program_file = sgl::parse("use kept_top\nfun f() -> float => kept_top.kept_both(1.0)\n");
+    auto const program_ast = sgl::ast::build(program_file);
+    auto const user = sgl::check::module_file{.file = program_file, .ast = program_ast};
+    auto const keys = sgl::module_artifact_keys(library, "program.sgl");
+    REQUIRE(keys.size() == 2);
+
+    sgl::keep_module_artifacts(true);
+    auto const shared = sgl::shared_library_of(library, "program.sgl");
+    REQUIRE(shared != nullptr);
+    auto const checked = sgl::layer_of(*shared, user);
+    REQUIRE(checked != nullptr);
+    // other tests may compile meanwhile, and what they make is theirs
+    auto made = cc::vector<sgl::module_artifact>();
+    for (auto& a : sgl::take_module_artifacts())
+        if (a.key == keys[0] || a.key == keys[1])
+            made.push_back(cc::move(a));
+    CHECK(made.size() == 2);
+    CHECK(!checked->layer->is_relocated());
+
+    // Another process, as far as these links go: the same sources under other names are another library, which shares
+    // no link with this one, and reads each module's link from the artifact a host handed in.
+    auto renamed = library;
+    renamed[0].name = "elsewhere/kept_base.sgl";
+    renamed[1].name = "elsewhere/kept_top.sgl";
+    sgl::offer_module_artifacts(made);
+    auto const other = sgl::shared_library_of(renamed, "program.sgl");
+    REQUIRE(other != nullptr);
+    auto const loaded = sgl::layer_of(*other, user);
+    REQUIRE(loaded != nullptr);
+    CHECK(loaded != checked);
+    CHECK(loaded->layer->is_relocated());
+    CHECK(loaded->before->layer->is_relocated());
+    for (auto const& a : sgl::take_module_artifacts())
+        CHECK((a.key != keys[0] && a.key != keys[1]));
+    CHECK(sgl::check::layer_difference(*checked->layer, *loaded->layer).empty());
+    auto const behind = sgl::check::check(*loaded->layer, other->files, user);
+    CHECK(behind.diagnostics.empty());
+    sgl::keep_module_artifacts(false);
+}
+
 TEST("sgl checked modules - behind a layer of the whole library a program checks as beside the modules it reaches")
 {
     auto const* const checked = sgl::checked_prelude();
@@ -876,21 +928,13 @@ cc::string with_function_added(cc::string_view source)
 {
     return cc::format("{}\nfun added_by_an_edit() -> int => 1\n", source);
 }
-
-/// Where `a` and `b` first differ, -1 where they do not.
-isize first_difference(cc::span<sgl::byte const> a, cc::span<sgl::byte const> b)
-{
-    for (auto i = isize(0); i < a.size() && i < b.size(); ++i)
-        if (a[i] != b[i])
-            return i;
-    return a.size() == b.size() ? -1 : cc::min(a.size(), b.size());
-}
 } // namespace
 
 namespace
 {
 /// Every module of `library` edited three ways, and every link after it relocated past the edit where it may be: each
-/// one must be the very link a fresh check makes over the edited one, byte for byte as an artifact writes it.
+/// one must be the very link a fresh check makes over the edited one, field for field.
+/// So must the link's artifact, saved before the edit and loaded after it, which loads exactly where it relocates.
 /// The chain is the links that build; a module that reports ends it, since nothing is relocated past what failed.
 void check_relocations(cc::span<sgl::check::module_file const> library, bool expects_relocation)
 {
@@ -964,31 +1008,37 @@ void check_relocations(cc::span<sgl::check::module_file const> library, bool exp
             after.push_back(cc::move(edited.value()));
             for (auto j = k + 1; j < order.size(); ++j)
             {
-                auto moved = cc::vector<sgl::check::moved_link>();
-                for (auto i = k; i < j; ++i)
-                    moved.push_back({.before = &before[i], .after = &after[i - k]});
                 auto fresh = sgl::check::check_next_module(base_of(j), files, order[j].name);
                 // an interface changed may break a module using it, after which nothing is relocated
                 if (!fresh.has_value())
                     break;
-                auto moved_link = sgl::check::relocate_link(before[j], moved);
-                if (!moved_link.has_value())
+                auto const* const old_base = &before[j - 1];
+                auto moved = sgl::check::relocate_link(before[j], *old_base, base_of(j));
+                // the same link kept as an artifact before the edit, and loaded after it
+                auto const kept_bytes = sgl::check::save_link_artifact(before[j], *old_base, "oracle");
+                REQUIRE(kept_bytes.has_value());
+                auto loaded
+                    = sgl::check::load_link_artifact(kept_bytes.value(), "oracle", base_of(j), files, order[j].name);
+                CHECK(loaded.has_value() == moved.has_value());
+                if (!moved.has_value())
                 {
                     ++refused;
                     after.push_back(cc::move(fresh.value()));
                     continue;
                 }
                 ++relocated;
-                auto const fresh_bytes = sgl::check::save_artifact(fresh.value(), "oracle");
-                auto const moved_bytes = sgl::check::save_artifact(moved_link.value(), "oracle");
-                REQUIRE(fresh_bytes.has_value());
-                REQUIRE(moved_bytes.has_value());
-                auto const at = first_difference(fresh_bytes.value(), moved_bytes.value());
-                if (at >= 0)
-                    FAIL(cc::format("{} relocated past {} in {} differs from its fresh check at byte {} of {}: {}",
-                                    order[j].name, e.name, order[k].name, at, fresh_bytes.value().size(),
-                                    sgl::check::layer_difference(fresh.value(), moved_link.value())));
-                after.push_back(cc::move(moved_link.value()));
+                auto const difference = sgl::check::layer_difference(fresh.value(), moved.value());
+                if (!difference.empty())
+                    FAIL(cc::format("{} relocated past {} in {} differs from its fresh check: {}", order[j].name,
+                                    e.name, order[k].name, difference));
+                if (loaded.has_value())
+                {
+                    auto const loaded_difference = sgl::check::layer_difference(fresh.value(), loaded.value());
+                    if (!loaded_difference.empty())
+                        FAIL(cc::format("{} loaded past {} in {} differs from its fresh check: {}", order[j].name,
+                                        e.name, order[k].name, loaded_difference));
+                }
+                after.push_back(cc::move(moved.value()));
             }
         }
         cc::println("{}: relocated {}, checked again {}", e.name, relocated, refused);
@@ -1165,17 +1215,54 @@ TEST("sgl checked modules - shaped-viewer's chain of module layers, and what an 
     auto relocated_secs = 0.0;
     for (auto j = isize(1); j < order.size(); ++j)
     {
-        auto moved = cc::vector<sgl::check::moved_link>();
-        for (auto i = isize(0); i < j; ++i)
-            moved.push_back({.before = &chain[i], .after = &moved_chain[i]});
         started = cc::current_time_steady_secs();
-        auto next = sgl::check::relocate_link(chain[j], moved);
+        auto next = sgl::check::relocate_link(chain[j], chain[j - 1], moved_chain[j - 1]);
         relocated_secs += cc::current_time_steady_secs() - started;
         REQUIRE(next.has_value());
         moved_chain.push_back(cc::move(next.value()));
     }
     cc::println("an edit of {} that keeps its interface: {:.1f} ms checking it, {:.1f} ms relocating the {} after it",
                 order[0].name, checked_secs * 1000, relocated_secs * 1000, order.size() - 1);
+}
+
+TEST("sgl checked modules - shaped-viewer's chain loaded from its links' artifacts, against checking it",
+     nx::config::manual)
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const& library = viewer_modules();
+    auto const order = sgl::check::library_chain(library.files);
+    auto chain = cc::vector<sgl::check::checked_prelude>();
+    auto const check_started = cc::current_time_steady_secs();
+    for (auto const& module : order)
+    {
+        auto next = sgl::check::check_next_module(chain.empty() ? *checked : chain.back(), library.files, module.name);
+        REQUIRE(next.has_value());
+        chain.push_back(cc::move(next.value()));
+    }
+    auto const checked_secs = cc::current_time_steady_secs() - check_started;
+    auto artifacts = cc::vector<cc::vector<sgl::byte>>();
+    auto bytes = isize(0);
+    for (auto i = isize(0); i < chain.size(); ++i)
+    {
+        auto saved = sgl::check::save_link_artifact(chain[i], i == 0 ? *checked : chain[i - 1], order[i].name);
+        REQUIRE(saved.has_value());
+        bytes += saved.value().size();
+        artifacts.push_back(cc::move(saved.value()));
+    }
+    auto loaded = cc::vector<sgl::check::checked_prelude>();
+    auto const load_started = cc::current_time_steady_secs();
+    for (auto i = isize(0); i < chain.size(); ++i)
+    {
+        auto next = sgl::check::load_link_artifact(
+            artifacts[i], order[i].name, loaded.empty() ? *checked : loaded.back(), library.files, order[i].name);
+        REQUIRE(next.has_value());
+        loaded.push_back(cc::move(next.value()));
+    }
+    auto const loaded_secs = cc::current_time_steady_secs() - load_started;
+    CHECK(sgl::check::layer_difference(chain.back(), loaded.back()).empty());
+    cc::println("{} links: {:.1f} ms checking them, {:.1f} ms loading them from {:.0f} kB of artifacts", chain.size(),
+                checked_secs * 1000, loaded_secs * 1000, double(bytes) / 1024);
 }
 
 TEST("sgl checked modules - relocating shaped-viewer's chain past an edit of its first module, many times over",
@@ -1203,10 +1290,7 @@ TEST("sgl checked modules - relocating shaped-viewer's chain past an edit of its
         moved_chain.push_back(&edited.value());
         for (auto j = isize(1); j < order.size(); ++j)
         {
-            auto moved = cc::vector<sgl::check::moved_link>();
-            for (auto i = isize(0); i < j; ++i)
-                moved.push_back({.before = &chain[i], .after = moved_chain[i]});
-            auto next = sgl::check::relocate_link(chain[j], moved);
+            auto next = sgl::check::relocate_link(chain[j], chain[j - 1], *moved_chain[j - 1]);
             REQUIRE(next.has_value());
             kept.push_back(cc::move(next.value()));
             moved_chain.push_back(&kept.back());

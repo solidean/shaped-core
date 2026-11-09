@@ -41,4 +41,25 @@ namespace sgl::check
                                                                   cc::span<module_file const> library,
                                                                   module_file program,
                                                                   builtins::registry const& builtins);
+
+/// The link `link` adds to its chain as bytes, under `key`: its own part, and where the parts of the links it was
+/// checked over lay, which a load moves it past.
+/// `base` is the link it was checked over, or the prelude's layer for the chain's first.
+/// None for a layer that is no link of a chain, one checked with an option's value, or one holding what no artifact
+/// carries yet.
+[[nodiscard]] cc::optional<cc::vector<byte>> save_link_artifact(checked_prelude const& link,
+                                                                checked_prelude const& base,
+                                                                cc::string_view key);
+
+/// What `save_link_artifact` wrote under `key` for `module` of `library`, read back as the link `check_next_module`
+/// makes of it over `base`, moved past every link of `base`'s chain that changed since (`relocate_link`).
+/// None where `bytes` are anything else: another key, other sources of the module's files or the prelude's, or bytes
+/// cut short or changed; and where `base` is a chain of other modules, or one a fresh check of the module could read
+/// otherwise.
+/// `base` and the library's files must outlive the result, as they must `check_next_module`'s.
+[[nodiscard]] cc::optional<checked_prelude> load_link_artifact(cc::span<byte const> bytes,
+                                                               cc::string_view key,
+                                                               checked_prelude const& base,
+                                                               cc::span<module_file const> library,
+                                                               cc::string_view module);
 } // namespace sgl::check
