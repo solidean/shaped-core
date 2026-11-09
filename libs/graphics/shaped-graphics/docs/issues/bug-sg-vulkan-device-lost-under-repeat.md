@@ -146,3 +146,10 @@ It was the first GPU run of a change that rewrote most native shaders, so the dr
 Again later that day, in `dev.py ship`'s test step: the stream tests' readbacks failed 6 s in, then `vkCreateSemaphore` asserted and the process faulted.
 It was again the first GPU run after native shaders changed, `hoist_common_chains` on every SGL module, with the drivers' caches cold.
 Two whole runs of the same binary straight after passed all 1980 tests.
+
+## Seen again on 2026-11-09
+
+In `dev.py ship`'s test step, on the first GPU run after SGL's ray-tracing lowering changed: `trace_ray`'s payload is read back from its last argument now.
+So every native ray-tracing shader compiled anew.
+`software-trace-test.cc`'s motion readbacks read zeros 4 s in, a fuzz run's wait reported `VK_ERROR_DEVICE_LOST`, and every vulkan test after it failed.
+The `sg vulkan backend` tests then passed twice in a row on their own, and the next `ship` passed whole.
