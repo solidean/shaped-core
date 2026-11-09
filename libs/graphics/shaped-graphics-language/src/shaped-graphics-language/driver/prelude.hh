@@ -1,10 +1,6 @@
 #pragma once
 
-#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
-#include <clean-core/container/vector.hh>
-#include <clean-core/error/optional.hh>
-#include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/fwd.hh>
@@ -25,27 +21,8 @@ struct sgl::parsed_prelude_file
     ast::file_ast ast;
 };
 
-/// Where checked layers are kept between processes, so a process reads one back rather than checking it again: the
-/// prelude's, and one per set of modules a program reaches (`check/artifact.hh`).
-/// sgl opens no file, so the store is its host's: blob-cache's default cache for slib and the `sgl` tool, or none.
-/// An entry is named by its content's id, this build's key and every source the layer holds (`check::artifact_id`),
-/// so an id is saved under once and never replaced: an edit makes a new one, and a store evicts whichever it likes.
-/// What `load` hands back is checked against the key and the sources before it is used, so a store may lose, cut
-/// short or corrupt an entry, and the compile then checks as it would without one.
-struct sgl::artifact_store
-{
-    /// The bytes `save` kept under `id`, or none.
-    cc::unique_function<cc::optional<cc::vector<byte>>(cc::hash128 id)> load;
-    /// Keeps `bytes` under `id` for a later process, or drops them.
-    cc::unique_function<void(cc::hash128 id, cc::span<byte const> bytes)> save;
-};
-
 namespace sgl
 {
-/// The store every compile from now on reads checked layers from, and keeps them in after checking one on a miss.
-/// The prelude is read once per process, at the first `checked_prelude()`, so a host sets it before its first compile.
-void set_artifact_store(artifact_store store);
-
 /// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, then `raytracing.sgl`.
 ///
 /// `builtins.sgl` is `builtins::default_registry().prelude_text()`: generated in memory, so the library never opens the committed file.
@@ -81,13 +58,6 @@ void set_artifact_store(artifact_store store);
 
 namespace sgl::impl
 {
-/// What every artifact this build writes is keyed on: the compiler's fingerprint.
-[[nodiscard]] cc::string artifact_key();
-/// The bytes the store `set_artifact_store` set keeps under `id`; none without a store.
-[[nodiscard]] cc::optional<cc::vector<byte>> load_artifact_bytes(cc::hash128 id);
-/// Hands `bytes` to that store under `id`; nothing without one.
-void save_artifact_bytes(cc::hash128 id, cc::span<byte const> bytes);
-
 /// Both defined by the file CMake generates from `prelude/core.sgl`.
 [[nodiscard]] cc::string_view embedded_core_prelude();
 /// `prelude/raytracing.sgl`: the types and the functions of a trace, and the software traversal webgpu runs.

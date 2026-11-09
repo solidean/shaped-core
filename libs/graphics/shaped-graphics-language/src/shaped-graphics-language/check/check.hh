@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -177,8 +176,4 @@ private:
                                                                cc::span<module_file const> library,
                                                                module_file program,
                                                                builtins::registry const& builtins);
-    friend cc::optional<cc::hash128> modules_artifact_id(cc::string_view key,
-                                                         checked_prelude const& prelude,
-                                                         cc::span<module_file const> library,
-                                                         module_file program);
 };

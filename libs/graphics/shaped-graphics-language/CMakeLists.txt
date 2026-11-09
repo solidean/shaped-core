@@ -417,8 +417,8 @@ if(SC_BUILD_TOOLS)
     else()
         sc_nexus_binary(sgl KINDS tool)
     endif()
-    # babel-data writes `describe`'s JSON, and blob-cache keeps checked layers; the tool may take them, the library must not.
-    target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data blob-cache nexus)
+    # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
+    target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
     sc_target_source_paths(sgl PRIVATE
         SGL_SAMPLES_DIR tests/samples
         SGL_PRELUDE_DIR prelude

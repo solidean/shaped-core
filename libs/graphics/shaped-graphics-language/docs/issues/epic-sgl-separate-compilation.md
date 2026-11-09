@@ -22,16 +22,17 @@ Decided with the maintainer on 2026-11-08, and written into the compilation mode
 - **Sections as wasm's:** imports, interface, contributions, impls, names, so a reader loads the interface without a body.
 - **In memory, ids stay positions,** and an artifact is relocated once per load through its import table.
 - **Artifacts carry their bodies checked,** and load whole.
+- **No process keeps one for another, for now** (2026-11-09): a compile stays synchronous and does no I/O, and the gain was a fraction of a short process.
   Checking a body on demand has nowhere cheap to land under positional ids, as [feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md) found.
 - **Early cutoff:** a dependent's key names its imports' interfaces, so a body edit re-checks no user.
 - **Options are an overlay:** an artifact is checked at the defaults, and a compile re-checks only what reaches an option it sets.
 
 The steps, each a child issue when it is taken up, in this order:
 
-1. **The prelude's artifact.** *Landed on 2026-11-08:* the 5.8 ms check is a 0.68 ms load, kept by the `sgl` tool and by slib's default cache.
+1. **The prelude's artifact.** *Landed on 2026-11-08:* the 5.8 ms check is a 0.68 ms load; no process keeps it for another since 2026-11-09.
 2. **The parse in the artifact.** *Tried on 2026-11-08 and not kept:* a parse is twenty times its source, and reading 9.6 MB back cost what parsing does.
    The compilation model's step 4 has the numbers; the per-process parse is [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.
-3. **Module artifacts.** *A first form landed on 2026-11-08:* one artifact per set of modules, the whole layer, so a 16 ms check is a 3.9 ms load.
+3. **Module artifacts.** *A first form landed on 2026-11-08:* one artifact per set of modules, the whole layer, so a 16 ms check is a 3.9 ms load; kept by no process, as the prelude's.
    Still to do: imports and relocation, so one module is shared between sets, and keys with early cutoff.
 4. **Option overlays,** so a compile that sets options continues from the artifacts too.
 5. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.

@@ -146,6 +146,13 @@ A process that compiles at run time ships the compiler too, so the artifacts it 
 * The compiler writes and reads bytes, and where they are kept is its host's: slib's persistent cache, a table a frozen build embeds, or nowhere.
   sgl depends on clean-core alone, so the store is never sgl's.
 
+**No process keeps an artifact for another, for now.** *Decided with the maintainer on 2026-11-09, after one was kept for a day.*
+A compile reads nothing but its arguments, which is what makes its result cacheable, and it is synchronous.
+A store behind it is file I/O inside the compile, and done properly that is async end to end, through the compile itself.
+What it bought did not pay for that: about 30 ms of a 120 ms `sgl describe`, in a process whose start dominates anyway.
+Live editing keeps its layers in memory for the whole process, and a batch mode would pay the prelude once for many sources.
+The format stays, held by its round-trip tests, for a host that one day keeps artifacts through an async seam.
+
 **Its sections follow wasm's, so a reader jumps to the one it needs.**
 
 * **Imports:** each declaration of another layer it names, by module, name, kind and a hash of its signature.
@@ -205,8 +212,8 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    What it does not do is share a module between two sets that both reach it, which is what ids naming their layer would buy.
 3. **The prelude's artifact.** *Landed on 2026-11-08: the prelude's 5.8 ms check is a 0.68 ms load of 1.6 MB, in a release build.*
    `check::save_artifact` and `load_artifact` write and read the checker's whole state after the prelude, bodies included, under a host's key.
-   `sgl::set_artifact_store` is where a host keeps it: the `sgl` tool and slib alike in blob-cache's default cache, where they share it.
-   In a fresh `sgl` process the load is 2.3 ms with the file's read; the prelude's parse, about 13 ms there, is what a process still pays.
+   In a fresh `sgl` process the load was 2.3 ms with a file's read, and 8 ms from blob-cache with its open; the prelude's parse, about 13 ms there, is what a process still pays.
+   No process keeps it since 2026-11-09 (see [artifacts](#artifacts)).
 4. **The parse in the artifact.** *Tried on 2026-11-08 and not kept: reading a parse back costs what parsing it does.*
    A parse is some twenty times its source: the prelude's files took the artifact from 1.6 MB to 9.6 MB.
    In a fresh `sgl` process that file's read was 5.0 ms and its walk 3.6 ms, against about 1 ms to parse the two files beside `builtins.sgl`.
@@ -215,8 +222,9 @@ Each step stands on its own and is measured by the `sgl profile` tests.
 5. **Module artifacts.** *A first form landed on 2026-11-08: the layer of one set of modules, the prelude's part included, as one artifact.*
    Within one build the same modules in the same order make the same ids, so it needs neither imports nor relocation.
    `check::load_modules_artifact` plans the program's modules as `check_modules` does and reads the layer back for them.
-   A store keeps it under its id, the key and every file's source, so an edit is a new entry and the cache evicts the old one; a module's flat test trees are in it too.
-   shaped-viewer's tracer pipeline: its modules' layer is a 3.9 ms load against a 16 ms check, and a whole `sgl describe` fell from about 100 to 65 ms.
+   A module's flat test trees are in it too.
+   shaped-viewer's tracer pipeline: its modules' layer is a 3.9 ms load against a 16 ms check, and a whole `sgl describe` fell from about 120 to 90 ms.
+   No process keeps it since 2026-11-09 (see [artifacts](#artifacts)).
    What it does not do is share one module between two sets, or cut a dependent off from an edit of a body: imports and relocation are those.
 6. **Option overlays**, so a compile that sets options continues from the artifacts too.
 7. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.

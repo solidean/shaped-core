@@ -12,7 +12,7 @@ The prelude is checked once per process, and every compile then continues from t
 Both halves still carry work that is not the program's own.
 The children name each cut, with what it costs today and the test that measures it.
 
-Since 2026-11-08 a host may keep the checked prelude between processes (`sgl::set_artifact_store`), which the `sgl` tool and slib's default cache do; the parse is still paid once per process.
+The checked prelude can be written as an artifact and read back, but no process keeps one for another, so each still checks it once.
 
 ## Measured, 2026-11-06
 

@@ -34,7 +34,6 @@ struct interface_binding;
 struct prelude_file;
 struct library_file;
 struct parsed_prelude_file;
-struct artifact_store;
 
 enum class token_class : u8;
 struct classified_span;

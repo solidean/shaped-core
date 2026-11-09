@@ -184,7 +184,6 @@ public:
         _diagnostics(diagnostics),
         _guards_undefined(guards_undefined)
     {
-        slib::impl::keep_sgl_layers_in(persistent_cache);
     }
 
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::sgl; }

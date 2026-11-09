@@ -63,10 +63,4 @@ inline constexpr double k_sgl_lookup_patience_secs = 1.0;
 
 /// Forgets `key` in the in-memory tier, so a test can tell the persistent tier's answer from it.
 void forget_sgl_emit(cc::hash128 key);
-
-/// Keeps SGL's checked layers, the prelude's and each set of modules', in the persistent tier an edge created with
-/// `chosen` uses, so a later process reads them back rather than checking them (`sgl::set_artifact_store`).
-/// Only the default tier, which lives as long as the process: a store given explicitly may be gone by the first compile.
-/// Once per process, and only before that compile; a later call changes nothing.
-void keep_sgl_layers_in(cc::optional<bcache::blob_cache*> chosen);
 } // namespace slib::impl

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -18,17 +17,6 @@
 /// The bytes hold the interface and the bodies alike, and the files' parses are not among them: a load takes them.
 namespace sgl::check
 {
-/// What names the artifact of the prelude of `prelude` under `key`: the key and every source it holds.
-/// Equal ids are the same artifact, so a store keeps entries under it and never replaces one.
-[[nodiscard]] cc::hash128 artifact_id(cc::string_view key, cc::span<module_file const> prelude);
-
-/// What names the artifact of the layer of modules `program` reaches in `library` over `prelude`, as `artifact_id`.
-/// None where `program` reaches no modules a layer holds.
-[[nodiscard]] cc::optional<cc::hash128> modules_artifact_id(cc::string_view key,
-                                                            checked_prelude const& prelude,
-                                                            cc::span<module_file const> library,
-                                                            module_file program);
-
 /// `layer` as bytes, under `key`; none where it holds what no artifact carries yet.
 /// The prelude's layer and one of modules (`check_modules`) alike; a test's flat tree among them keeps no names its
 /// mint did not take itself, which only an emitter would read.
