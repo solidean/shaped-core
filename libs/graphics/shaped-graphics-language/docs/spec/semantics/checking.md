@@ -1123,10 +1123,10 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-490** A binding member `T[]` of a texture, an image, a buffer or `bytes` is an **unbounded binding array**, whose length each binding group decides.
   It needs `binding_arrays` and `unbounded_binding_arrays`, and is its binding's last member, or it is `member-not-allowed-here`: both APIs size only a group's last binding.
   An index into it is judged as one into any binding array (CHK-300).
-* **CHK-491** `xs.length` of an unbounded binding array is an `int` the binding holds as a constant of its own, `xs_length`, which the host writes per group and no source declares.
-  No target reads the length back, which is why it travels in the binding.
-  The constant exists where some `.length` of a member of that name stands in the module, and a member of the binding already named `xs_length` is then `duplicate-declaration`.
-  It is reached through `xs.length` alone, so `b.xs_length` is `unknown-member`.
+* **CHK-491** `xs.length` of an unbounded binding array is an `int`: how many views its group binds, or a staging group's capacity, a vacant element among them.
+  sg writes it at each dispatch or draw from the groups bound, so no binding holds it and the host never sets it; [reserved-bindings.md](../../reserved-bindings.md) has where.
+  dx12 and vulkan read it from the reserved `sg_array_lengths`, at the array's position among the entry point's unbounded arrays, and metal from the array's table.
+  A pipeline binds at most 16 unbounded arrays, one to a group.
 * **CHK-300** An index into a binding array that the uniformity pass proves the same in every invocation needs no mark ([why](why/checking.md#chk-300)).
   Any other is marked `uniform i` or `nonuniform i`.
   Unmarked, an index the pass proves varying (CHK-399) is `non-uniform-index`, and one it proves neither way is `unproven-index`, whose detail offers both marks.

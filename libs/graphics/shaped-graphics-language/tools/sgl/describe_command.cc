@@ -88,8 +88,6 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         {
             mo.write("offset", m.offset);
             mo.write("size", m.size);
-            if (!m.length_of.empty())
-                mo.write("length_of", cc::string_view(m.length_of));
             continue;
         }
         mo.write("access", cc::string_view(m.access));

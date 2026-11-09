@@ -259,6 +259,9 @@ cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
     {
         auto const& s = _dx_layout->view_slots[slot];
         auto const binding = _dx_layout->binding_of_view_slot(slot);
+        // a staging group's unbounded array is as long as its capacity, a vacant element a null descriptor
+        if (s.binding.is_unbounded())
+            group->unbounded_length = u32(element_count(s.binding));
         if (s.binding.is_array())
         {
             auto ab = dx12_array_binding{.name = s.binding.name,

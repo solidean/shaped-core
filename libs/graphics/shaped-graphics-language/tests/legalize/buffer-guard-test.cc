@@ -271,8 +271,8 @@ TEST("sgl emit - metal bounds a binding array's own index by its size, and reads
     REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
 }
 
-TEST("sgl guards - an unbounded array's index is bounded by the length its code reads, and otherwise by nothing "
-     "(LEGAL-65)")
+TEST("sgl guards - an unbounded array's index is bounded by its length, whether or not its code reads it (LEGAL-65, "
+     "CHK-491)")
 {
     constexpr auto program = "require binding_arrays, unbounded_binding_arrays\n"
                              "\n"
@@ -300,6 +300,6 @@ TEST("sgl guards - an unbounded array's index is bounded by the length its code 
                 pieces += piece;
         return pieces;
     };
-    CHECK(!dump_of("").contains("outside a binding array"));
+    CHECK(dump_of("").contains("outside a binding array"));
     CHECK(dump_of(" + int(work.views.length)").contains("outside a binding array"));
 }

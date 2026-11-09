@@ -602,7 +602,32 @@ struct planner
             auto const* const entry = check::reserved_binding_named(s.name);
             CC_ASSERT(entry != nullptr, "the tree reaches a binding the reserved table does not hold");
             auto const& on = entry->targets[u8(p.which)];
-            auto const& member = p.m.at(p.m.bindings[s.info].members)[0];
+            auto const& b = p.m.bindings[s.info];
+            // an entry of plain members is a constant block of its own, sg's root constants or uniform
+            if (auto const plain = plain_members_of(p.m, b); !plain.empty())
+            {
+                auto planned = planned_constants{
+                    .symbol = id,
+                    .name = cc::string(s.name),
+                    .host_name = cc::string(s.name),
+                    .block_name = p.names.mint(cc::format("{}_data", s.name)),
+                    .members = members_of(plain, false),
+                    .group = on.group,
+                    .slot = on.slot,
+                    .is_reserved = true,
+                };
+                auto const placed = place_block(p.m, plain, block_space(b));
+                for (auto i = isize(0); i < planned.members.size(); ++i)
+                {
+                    planned.members[i].offset = placed.offsets[i];
+                    planned.members[i].size = placed.sizes[i];
+                }
+                for (auto i = isize(0); i < plain.size(); ++i)
+                    planned.block_member_of.push_back(i32(i));
+                p.group_blocks.push_back(cc::move(planned));
+                continue;
+            }
+            auto const& member = p.m.at(b.members)[0];
             auto const& t = p.m.at(member.type);
             p.resources.push_back({.binding = id,
                                    .member = 0,
@@ -1778,7 +1803,8 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
     if (p.constants.has_value())
         block(p.constants.value());
     for (auto const& c : p.group_blocks)
-        block(c);
+        if (!c.is_reserved)
+            block(c);
     for (auto const& r : p.resources)
     {
         if (p.m.at(r.type).kind != type_kind::buffer || r.is_reserved)

@@ -565,8 +565,6 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         array = ((lambda view: f"cc::vector<{view}>") if count == 0
                  else (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1
                  else (lambda view: view))
-        if member["kind"] == "constant" and member.get("length_of"):
-            continue  # an unbounded array's length, which write_constants takes from its views
         if member["kind"] == "constant":
             cpp = sized_host_type(package, memory, where, member["type"], member["size"])
             out.append(f"    {cpp} {member['name']}; ///< `{member['type']}`, "
@@ -837,11 +835,6 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
     out = []
     for member in binding["members"]:
         if member["kind"] != "constant":
-            continue
-        if member.get("length_of"):
-            # the views the group binds, which is the length the shader reads
-            out.append(f"    auto const {member['name']} = cc::i32(this->{member['length_of']}.size());\n")
-            out.append(f"    cc::memcpy(block.data() + {member['offset']}, &{member['name']}, 4);\n")
             continue
         cpp = sized_host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'",
                               member["type"], member["size"])

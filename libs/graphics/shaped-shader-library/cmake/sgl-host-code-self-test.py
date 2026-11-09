@@ -226,21 +226,6 @@ def a_sampler_array_is_a_fixed_array_gathered_an_element_at_a_time():
               "each element, naming its element")
 
 
-@test
-def an_unbounded_arrays_length_has_no_field_and_is_written_from_its_views():
-    group = {"name": "parts", "inline": False, "block_size": 4, "block_slot": 0, "block_host_name": "parts",
-             "members": [
-                 {"kind": "buffer", "name": "sources", "type": "int", "access": "read", "slot": 1, "stride": 4,
-                  "count": 0, "host_name": "parts.sources"},
-                 {"kind": "constant", "name": "sources_length", "type": "int", "offset": 0, "size": 4,
-                  "length_of": "sources"}]}
-    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, group)
-    expect_not_in("sources_length;", header, "a field for the length the host never sets")
-    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FILE, group)
-    expect_in("auto const sources_length = cc::i32(this->sources.size());", source, "the length taken from the views")
-    expect_in("cc::memcpy(block.data() + 0, &sources_length, 4);", source, "written at its offset")
-
-
 ARRAYS = {
     "name": "materials",
     "inline": False,

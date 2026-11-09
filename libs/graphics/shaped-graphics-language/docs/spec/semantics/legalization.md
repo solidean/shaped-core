@@ -39,7 +39,6 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort`, `report` or `define` (LEGAL-68).
   That is an integer `/` or `%` whose divisor is no literal that cannot fail (EVAL-84), and an array index that is no literal (EVAL-90).
   A binding array's own index is one, whatever element it names, a mark staying on the index: by its `N`, or where it is unbounded by CHK-491's length.
-  That constant exists only where the shader reads it, so an unbounded array whose length no code reads is not guarded.
   The guard is a block in the operation's place that binds the operands, tests them, and only then runs the operation, so every later rule keeps its order and its short circuits.
   A failed test ends the invocation as an `assert` of LEGAL-64 does, and `report` first prints the operation and its operands as that `assert`'s message.
   Where a barrier, a derivative or a subgroup operation may still follow, every invocation must reach it, so the end waits:

@@ -734,8 +734,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
                                   .kind = described_member_kind::constant,
                                   .type = host_spelling(m, member.type),
                                   .offset = placed.offsets[next_constant],
-                                  .size = placed.sizes[next_constant],
-                                  .length_of = member.length_of >= 0 ? members[member.length_of].name : cc::string()});
+                                  .size = placed.sizes[next_constant]});
         ++next_constant;
     }
     return result;

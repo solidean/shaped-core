@@ -662,8 +662,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                                                     bool is_struct,
                                                     bool is_target_struct,
                                                     bool is_vertex_struct,
-                                                    bool is_workgroup,
-                                                    cc::string_view binding_name)
+                                                    bool is_workgroup)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -1100,64 +1099,6 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         m.default_sampler = i32(found);
     }
 
-    // CHK-491: an unbounded array's length is the host's per group, which no target reads back, so it rides in the
-    // binding's constants, where some `b.name.length` or `m.b.name.length` of the module reads it.
-    // A binding array is named only as its binding's member, so the scan cannot miss a read; a binding of the same
-    // name in another module costs this one an unread constant.
-    auto const names_binding = [&](i32 f, ast::expr_id e)
-    {
-        if (!ast::is_valid(e))
-            return false;
-        auto const& node = ast_of(f).at(e).node;
-        if (auto const* const n = node.try_as<ast::name>())
-            return text_of(f, n->where) == binding_name;
-        if (auto const* const m = node.try_as<ast::member>())
-            return text_of(f, m->name) == binding_name;
-        return false;
-    };
-    auto const reads_length_of = [&](cc::string_view name)
-    {
-        for (auto f = i32(0); f < i32(files.size()); ++f)
-        {
-            auto const& a = ast_of(f);
-            for (auto const& e : a.exprs)
-            {
-                auto const* const outer = e.node.try_as<ast::member>();
-                if (outer == nullptr || text_of(f, outer->name) != "length" || !ast::is_valid(outer->object))
-                    continue;
-                auto const* const inner = a.at(outer->object).node.try_as<ast::member>();
-                if (inner != nullptr && text_of(f, inner->name) == name && names_binding(f, inner->object))
-                    return true;
-            }
-        }
-        return false;
-    };
-    if (!is_struct && !is_workgroup)
-    {
-        auto const declared = collected.size();
-        for (auto i = isize(0); i < declared; ++i)
-        {
-            auto const type = collected[i].type;
-            if (type == checked_module::error_type || out.at(type).kind != type_kind::array || out.at(type).count != 0)
-                continue;
-            if (!reads_length_of(collected[i].name))
-                continue;
-            auto const name = collected[i].name + "_length";
-            auto is_taken = false;
-            for (auto const& other : collected)
-                is_taken = is_taken || other.name == name;
-            if (is_taken)
-            {
-                report(diagnostic_kind::duplicate_declaration, file, ast.at(collected[i].field).name,
-                       cc::format("{} is an unbounded binding array, whose length the binding holds as {}",
-                                  collected[i].name, name));
-                continue;
-            }
-            collected.push_back({.name = name,
-                                 .type = type_of_builtin(builtins::k_int, file, ast.at(collected[i].field).name),
-                                 .length_of = i32(i)});
-        }
-    }
 
     auto const range = ast::range_of<member_info>{.first = u32(out.members.size()), .count = u32(collected.size())};
     out.members.push_back_range(collected);
@@ -1816,7 +1757,7 @@ void checker::compile_binding(symbol_id id)
     auto used = feature_set();
     granted = declared;
     used_features = &used;
-    auto const members = compile_members(file, b.members, false, false, false, is_workgroup, out.at(id).name);
+    auto const members = compile_members(file, b.members, false, false, false, is_workgroup);
     granted = {};
     used_features = nullptr;
 

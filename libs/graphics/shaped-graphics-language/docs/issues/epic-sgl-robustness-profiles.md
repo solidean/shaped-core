@@ -42,7 +42,7 @@ LEGAL-69 shadows a compute stage's workgroup memory with a bit per scalar, set b
 
 ## Binding arrays and memory that holds nothing (2026-11-06)
 
-A binding array's own index is guarded by its `N`, or by CHK-491's length where the shader reads it, and an element of one has its own `length`.
+A binding array's own index is guarded by its `N`, or by CHK-491's length, and an element of one has its own `length`.
 An access through an element is a block that pins that index once, tests the buffer index against that element, and then runs (LEGAL-66).
 `define` needs the same shape for every buffer access, since no index is safe in memory too short for the access: a read is zero, a store is dropped, and an atomic gives zero (LEGAL-68).
 
@@ -56,7 +56,6 @@ The later passes walk 44 levels against a program's 40 (CHK-268), so a guard's 4
 
 The children, and:
 
-- An unbounded binding array's index is guarded only where the shader reads its length, since that is what gives the binding the constant (CHK-491).
 
 - Turning `report` on by default in a dev build, once the suite has run under it.
 - Range facts that drop a guard proven to hold, such as a `for` index into an array of its own length.

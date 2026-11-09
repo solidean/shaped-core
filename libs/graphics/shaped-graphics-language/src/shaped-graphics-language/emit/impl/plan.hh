@@ -154,6 +154,8 @@ struct planned_constants
     /// The block as its target has to declare it to reach SGL's offsets, named `block_name`; absent where it declares
     /// the members as they are.
     cc::optional<memory_form> form;
+    /// A reserved binding's block, at the reserved table's address, which reaches no host list and no layout.
+    bool is_reserved = false;
 };
 
 /// A resource member of a binding — a buffer, a texture, an image or a sampler — rather than a field of a block.

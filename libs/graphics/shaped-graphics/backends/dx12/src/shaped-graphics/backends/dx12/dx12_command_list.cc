@@ -17,6 +17,7 @@
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/barrier/access_inference.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::dx12
@@ -84,6 +85,20 @@ void dx12_command_list::bind_software_trace(dx12_pipeline_layout const& layout,
                                             cc::span<dx12_binding_group const* const> groups,
                                             bool is_graphics)
 {
+    // each unbounded binding array's length, from the group bound at its slot
+    if (layout.array_lengths_root_param >= 0)
+    {
+        u32 lengths[sg::impl::array_lengths_capacity] = {};
+        for (isize g = 0; g < groups.size() && g < layout.length_bases.size(); ++g)
+            if (groups[g] != nullptr && layout.length_bases[g] >= 0)
+                lengths[layout.length_bases[g]] = groups[g]->unbounded_length;
+        if (is_graphics)
+            _list->SetGraphicsRoot32BitConstants(UINT(layout.array_lengths_root_param),
+                                                 UINT(sg::impl::array_lengths_capacity), lengths, 0);
+        else
+            _list->SetComputeRoot32BitConstants(UINT(layout.array_lengths_root_param),
+                                                UINT(sg::impl::array_lengths_capacity), lengths, 0);
+    }
     if (layout.software_pool_root_param < 0)
         return;
     u32 roots[sg::impl::software_trace_roots] = {};

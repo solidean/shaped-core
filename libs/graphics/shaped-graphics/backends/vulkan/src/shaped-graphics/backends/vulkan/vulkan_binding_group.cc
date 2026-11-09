@@ -138,6 +138,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
     for (auto const& nv : views)
         if (layout->bindings()[nv.slot].is_unbounded())
             unbounded_count = nv.view->span().size();
+    group->unbounded_length = u32(unbounded_count);
     {
         auto r = allocate_range(ctx, layout->group_size_in_bytes(unbounded_count), group->transient);
         CC_RETURN_IF_ERROR(r);
@@ -339,7 +340,8 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     cc::vector<vulkan_texture_handle> referenced_textures,
     cc::vector<vulkan_hazard_view> hazard_views,
     cc::vector<vulkan_texture_hazard_view> texture_hazard_views,
-    cc::vector<vulkan_array_binding> array_bindings)
+    cc::vector<vulkan_array_binding> array_bindings,
+    u32 unbounded_length)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
     CC_ASSERT(image.size() <= layout->_size_in_bytes, "the descriptor image is one set, its unbounded binding cut "
@@ -348,6 +350,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     auto group = std::make_shared<vulkan_binding_group>();
     group->_ctx = &ctx;
     group->layout = layout;
+    group->unbounded_length = unbounded_length;
     group->creation_epoch = ctx.current_epoch();
 
     {
