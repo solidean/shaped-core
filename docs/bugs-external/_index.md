@@ -41,7 +41,7 @@ So each entry carries the answer as something runnable.
 | [vulkan-concurrent-device-lifecycle-deadlock](vulkan-concurrent-device-lifecycle-deadlock/readme.md) | NVIDIA Vulkan driver 591.86 | not yet filed, worked around in shaped-graphics |
 | [nvidia-raytracing-device-lifecycle-cross-api-deadlock](nvidia-raytracing-device-lifecycle-cross-api-deadlock/readme.md) | NVIDIA driver 591.86, Vulkan and D3D12 | not yet filed, worked around in shaped-graphics |
 | [nvidia-device-create-vs-pending-wait-deadlock](nvidia-device-create-vs-pending-wait-deadlock/readme.md) | NVIDIA Vulkan driver, RTX 5070 Ti | not yet filed, worked around in shaped-graphics |
-| [nvidia-mesh-groupshared-atomics-lost](nvidia-mesh-groupshared-atomics-lost/readme.md) | NVIDIA D3D12 driver 621.01, RTX 5070 Ti | reproduced standalone, not yet filed, not worked around |
+| [nvidia-mesh-groupshared-atomics-lost](nvidia-mesh-groupshared-atomics-lost/readme.md) | NVIDIA D3D12 driver 621.01, RTX 5070 Ti | reproduced standalone, not yet filed, its one test skipped on NVIDIA in shaped-rendering |
 | [d3d12-cached-pso-static-sampler-mixup](d3d12-cached-pso-static-sampler-mixup/readme.md) | NVIDIA D3D12 driver 32.0.15.9186, RTX 5070 Ti | not yet filed, worked around in shaped-graphics |
 | [intel-d3d12-cached-pso-draws-nothing](intel-d3d12-cached-pso-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, its tests skipped in shaped-viewer |
 | [intel-d3d12-view-instancing-draws-nothing](intel-d3d12-view-instancing-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, worked around in the shaders that draw by view |

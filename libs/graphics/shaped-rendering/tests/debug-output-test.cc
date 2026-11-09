@@ -499,6 +499,9 @@ ASYNC_INVOCABLE_TEST("sr - a mesh stage's read of workgroup memory no invocation
         SKIP("sg binds no debug window on this backend yet");
     if (!ctx.supports(sg::feature::mesh_shader))
         SKIP("this context draws no mesh stage");
+    if (auto const& adapter = ctx.metrics.adapter(); adapter.vendor_id == 0x10de && !adapter.is_software)
+        SKIP("NVIDIA's driver loses the shadow marks of invocations 1 and 3; see "
+             "docs/bugs-external/nvidia-mesh-groupshared-atomics-lost");
     // invocation 2 stores nothing, so invocation 1 reads a hole, after the barrier that would have shown it a store
     nx::expect_error("mesh_shadow.sgl:13: assert failed: workgroup memory `tile.values[2]` is read before any "
                      "invocation stored it",

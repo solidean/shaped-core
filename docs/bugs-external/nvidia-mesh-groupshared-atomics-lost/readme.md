@@ -1,6 +1,6 @@
 # NVIDIA: a mesh stage loses groupshared `InterlockedOr` results when a late return reads a flag set before the barrier
 
-**Status:** open, reproduced standalone, not yet filed upstream, not worked around; measured on 2026-11-09.
+**Status:** open, reproduced standalone, not yet filed upstream, its one test skipped on NVIDIA in shaped-rendering; measured on 2026-11-09.
 **Affects:** NVIDIA D3D12 driver 621.01, GeForce RTX 5070 Ti, Windows 11; DXC 1.8.2502.11 from the Windows SDK 10.0.26100.
 **Found by:** the shaped-rendering test `sr - a mesh stage's read of workgroup memory no invocation stored is reported where it would have run (LEGAL-69)`.
 It fails there on dx12 and vulkan alike, by DXC's route and SGL's native one; the standalone reproduction is D3D12 alone.
@@ -96,11 +96,11 @@ REPRODUCED: the mesh stage loses groupshared InterlockedOr results when a late r
 
 ## What we do about it
 
-Nothing yet: the LEGAL-69 test fails on NVIDIA.
-The issue `bug-sgl-mesh-workgroup-shadow-marks-lost` tracks the choice between skipping that test on NVIDIA and changing what SGL emits.
-One option for the emitted code is to end an aborted mesh invocation without a flag live across a barrier.
+The LEGAL-69 mesh test in [debug-output-test.cc](../../../libs/graphics/shaped-rendering/tests/debug-output-test.cc) skips on an NVIDIA hardware adapter, dx12 and vulkan alike, naming this directory.
+SGL still emits the flag, so a robustness-profile mesh shader on NVIDIA can still report a read of workgroup memory that another invocation stored.
+Ending an aborted mesh invocation without a flag live across a barrier would avoid the bug; that is not done.
 
 ## What to re-check
 
 On a driver update, run `run.py` on an NVIDIA GPU.
-Exit 0 retires this entry, and with it whatever the issue settled on.
+Exit 0 retires this entry and the skip with it.
