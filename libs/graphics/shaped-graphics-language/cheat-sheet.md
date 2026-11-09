@@ -97,8 +97,9 @@ sgl::prelude_file_of(path)                 // -> i32: which prelude file a path 
 sgl::check::check_library(prelude, library)  // -> optional<checked_prelude>: every module once, one layer for every
                                            // program reaching any of them; none where a module reports anything,
                                            // a file's parse error included; the chain below, from scratch
-sgl::check::library_chain(library)         // -> vector<chained_module> { name, files }: dependencies first, a module
-                                           // nothing uses last; empty where the library makes no chain
+sgl::check::library_chain(library, late_files = {})  // -> vector<chained_module> { name, files, has_options }:
+                                           // dependencies first; the modules of late_files (being edited), then those
+                                           // with options, as late as allowed; empty where the library makes no chain
 sgl::check::check_next_module(base, library, name, options = {})  // -> optional<checked_prelude>: the next link,
                                            // over the prelude's layer or the link before; a program reaching only its
                                            // modules continues it; `options`: the values for name's own options alone

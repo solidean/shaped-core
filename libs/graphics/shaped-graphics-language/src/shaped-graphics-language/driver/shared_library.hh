@@ -36,6 +36,10 @@ struct sgl::shared_library
     /// Each file as the check pass takes it, and the name it was handed in under.
     cc::vector<check::module_file> files;
     cc::vector<cc::string> names;
+    /// The files whose sources differ from those of the library made before it under the same names, or that one's
+    /// where none does: what is being edited, whose modules its chain puts as late as the modules using them allow.
+    /// So every keystroke in a module after the first checks it and the modules using it again, and nothing else.
+    cc::vector<i32> late_files;
 
     struct layers
     {

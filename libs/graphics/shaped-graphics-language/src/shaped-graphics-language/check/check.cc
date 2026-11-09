@@ -285,7 +285,7 @@ bool contains(cc::span<cc::string const> names, cc::string_view name)
 }
 } // namespace
 
-cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const> library)
+cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const> library, cc::span<i32 const> late_files)
 {
     // the modules the library declares, each once, in the library's order
     auto named = cc::vector<cc::string>();
@@ -356,6 +356,12 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
     }
     // Every module after the ones it uses; of those that may come next, the one more modules reach first, so a module
     // nothing uses comes last and an edit of it checks it alone.
+    // the modules of the files being edited
+    auto is_late = cc::vector<u8>::create_filled(count, 0);
+    for (auto i = isize(0); i < plan.library_order.size(); ++i)
+        for (auto const f : late_files)
+            if (plan.library_order[i] == f)
+                is_late[plan.file_module[i]] = 1;
     auto order = cc::vector<chained_module>();
     auto placed = cc::vector<u8>::create_filled(count, 0);
     for (auto step = isize(1); step < count; ++step)
@@ -375,9 +381,12 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
                 best = m;
                 continue;
             }
+            auto const late_m = is_late[m] != 0;
+            auto const late_best = is_late[best] != 0;
             auto const options_m = contains(with_options, plan.modules[m]);
             auto const options_best = contains(with_options, plan.modules[best]);
-            if (options_m != options_best           ? !options_m
+            if (late_m != late_best                 ? !late_m
+                : options_m != options_best         ? !options_m
                 : dependents[m] != dependents[best] ? dependents[m] > dependents[best]
                                                     : plan.modules[m] < plan.modules[best])
                 best = m;

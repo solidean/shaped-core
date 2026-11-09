@@ -119,10 +119,12 @@ namespace sgl::check
                                                           cc::span<module_file const> library);
 
 /// The modules of `library` in the order a chain of layers checks them: each after every module it uses.
-/// Of those that may come next, one with no option first, so a compile that sets one checks as few links again as it
-/// can; then the one more modules reach, so a module nothing uses comes last.
+/// Of those that may come next, one with none of `late_files` first, positions in `library` of the files an editor is
+/// changing, so an edit of one checks as few links again as the modules using it allow; then one with no option, for a
+/// compile that sets one; then the one more modules reach.
 /// Empty where the library makes no chain: no module, a file that does not parse, or a plan that reports.
-[[nodiscard]] cc::vector<chained_module> library_chain(cc::span<module_file const> library);
+[[nodiscard]] cc::vector<chained_module> library_chain(cc::span<module_file const> library,
+                                                       cc::span<i32 const> late_files = {});
 
 /// `base`, the prelude's layer or one of the chain over it, with `module` of `library` checked over it: the next layer.
 /// The layer before must hold every module `module` uses, which `library_chain`'s order does.

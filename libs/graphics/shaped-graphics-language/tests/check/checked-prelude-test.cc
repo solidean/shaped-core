@@ -677,6 +677,17 @@ TEST("sgl checked modules - a chain puts a module with options late, and its lin
     CHECK(order[1].name == "tuned");
     CHECK(order[1].has_options);
     CHECK(order[2].name == "blur");
+    // a module being edited goes as late as the modules using it allow: `plain` after them all, `tuned` before `blur`
+    auto const plain_late = cc::vector<sgl::i32>{2};
+    auto const editing_plain = sgl::check::library_chain(library, plain_late);
+    REQUIRE(editing_plain.size() == 3);
+    CHECK(editing_plain[0].name == "tuned");
+    CHECK(editing_plain[2].name == "plain");
+    auto const tuned_late = cc::vector<sgl::i32>{0};
+    auto const editing_tuned = sgl::check::library_chain(library, tuned_late);
+    REQUIRE(editing_tuned.size() == 3);
+    CHECK(editing_tuned[0].name == "plain");
+    CHECK(editing_tuned[2].name == "blur");
 
     using options = cc::vector<sgl::check::option_value>;
     auto const set = options{{.name = "taps", .value = "3"}, {.name = "tuned.width", .value = "3"}};
@@ -898,4 +909,28 @@ TEST("sgl checked modules - shaped-viewer's chain of module layers, and what an 
     }
     cc::println("the chain whole: {:.1f} ms; an edit of a module, on average: {:.1f} ms", total * 1000,
                 edits / double(order.size()) * 1000);
+
+    // While a module is edited the chain puts it as late as the modules using it allow, so every keystroke after the
+    // first checks it and those after it again.
+    auto edited = 0.0;
+    for (auto const& module : order)
+    {
+        auto const late = sgl::check::library_chain(library.files, module.files);
+        auto base = cc::optional<sgl::check::checked_prelude>();
+        auto suffix = 0.0;
+        auto is_after = false;
+        for (auto const& m : late)
+        {
+            is_after = is_after || m.name == module.name;
+            auto const started = cc::current_time_steady_secs();
+            auto next = sgl::check::check_next_module(base.has_value() ? base.value() : *checked, library.files, m.name);
+            if (is_after)
+                suffix += cc::current_time_steady_secs() - started;
+            REQUIRE(next.has_value());
+            base = cc::move(next);
+        }
+        cc::println("{:<24} late: an edit of it {:6.1f} ms", module.name, suffix * 1000);
+        edited += suffix;
+    }
+    cc::println("an edit of a module placed late, on average: {:.1f} ms", edited / double(order.size()) * 1000);
 }

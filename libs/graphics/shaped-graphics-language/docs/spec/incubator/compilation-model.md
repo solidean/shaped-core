@@ -256,6 +256,10 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
    shaped-viewer's chain is 24.7 ms whole (release); an edit of its first module checks it all, of its last 1.4 ms, 13.8 ms on average.
    In the language server a keystroke in its last module is a 5.9 ms analysis, and in its first 31.7 ms.
    Every link holds a whole copy of the tables below it, which [perf-sgl-layer-freeze-copies](../../issues/perf-sgl-layer-freeze-copies.md) is.
+   *Since 2026-11-09 the order follows the edit:* a library made under the same names as the one before marks the files whose sources changed.
+   Their modules go as late as the modules using them allow, so every keystroke after the first checks the module and the ones after it, those using it among them.
+   shaped-viewer: an edit of a module so placed is 8.6 ms on average, against 13.6 ms in the order of the chain alone; of `scene`, 14.4 ms against 24.3 ms.
+   What remains is checking the modules using it again when its interface did not change, which is early cutoff (step 7).
 7. **Early cutoff, through relocation.** A layer splits into its interface and its bodies, and a dependent's layer names its imports' interfaces.
    An edit that leaves a module's interface alone relocates the layers after it onto the new one rather than checking them again.
    That is the import table and the relocation pass of [ids](#ids), and what a dependent's key is made of.

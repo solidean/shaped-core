@@ -42,6 +42,9 @@ using layer_ptr = cc::shared_ptr<sgl::check::checked_prelude const>;
 cc::mutex<cc::map<cc::hash128, cc::shared_ptr<shared_library const>>> g_libraries;
 /// Few, since an editor's every keystroke in a module file is another library; each holds the chain it reads.
 constexpr isize k_max_libraries = 4;
+/// The library made last under each list of names, which the next one made under the same names is an edit of.
+cc::mutex<cc::map<cc::hash128, cc::shared_ptr<shared_library const>>> g_last_libraries;
+constexpr isize k_max_name_lists = 16;
 
 using link_ptr = shared_library::link_ptr;
 using unit_ptr = cc::shared_ptr<shared_library::parsed_unit const>;
@@ -127,7 +130,8 @@ link_ptr chain_of(shared_library const& library,
                   sgl::check::checked_prelude const& prelude,
                   cc::span<sgl::check::option_value const> options)
 {
-    auto const order = sgl::check::library_chain(library.files);
+    // the modules of the files being edited go late
+    auto const order = sgl::check::library_chain(library.files, library.late_files);
     if (order.empty())
         return {};
     auto before = link_ptr();
@@ -239,7 +243,28 @@ cc::shared_ptr<shared_library const> sgl::shared_library_of(cc::span<library_fil
         made->units.push_back(cc::move(unit));
         made->names.push_back(cc::string(f->name));
     }
-    return kept_in(g_libraries, key, cc::shared_ptr<shared_library const>(cc::move(made)), k_max_libraries);
+    // what changed from the library made last under the same names is what an editor is typing in
+    auto& names = cc::byte_stream_builder::thread_local_scratch();
+    for (auto const& n : made->names)
+        names.add_string(n);
+    auto const names_key = cc::hash128::create(names.written_bytes(), 0);
+    if (auto const last = found_in(g_last_libraries, names_key); last != nullptr)
+    {
+        for (auto i = isize(0); i < made->files.size(); ++i)
+            if (last->units[i] != made->units[i])
+                made->late_files.push_back(i32(i));
+        if (made->late_files.empty())
+            made->late_files = last->late_files;
+    }
+    auto shared = kept_in(g_libraries, key, cc::shared_ptr<shared_library const>(cc::move(made)), k_max_libraries);
+    g_last_libraries.lock(
+        [&](cc::map<cc::hash128, cc::shared_ptr<shared_library const>>& m)
+        {
+            if (m.size() >= k_max_name_lists && !m.contains(names_key))
+                m.clear();
+            m[names_key] = shared;
+        });
+    return shared;
 }
 
 sgl::shared_library::link_ptr sgl::layer_of(shared_library const& library,
