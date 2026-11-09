@@ -362,6 +362,9 @@ void metal_command_list::flush_barriers()
     MTL::Stages before = 0;
     auto visibility = MTL4::VisibilityOptions(MTL4::VisibilityOptionNone);
     auto any = false;
+    // the resources whose hazard this op settles, counted as dx12 and vulkan count one barrier each
+    auto buffers_ordered = isize(0);
+    auto textures_ordered = isize(0);
 
     for (auto const& buffer : _pending_buffers)
     {
@@ -373,6 +376,7 @@ void metal_command_list::flush_barriers()
             continue;
 
         any = true;
+        ++buffers_ordered;
         after |= translated.after_stages;
         before |= translated.before_stages;
         visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
@@ -388,6 +392,7 @@ void metal_command_list::flush_barriers()
             continue;
 
         any = true;
+        ++textures_ordered;
         after |= translated.after_stages;
         before |= translated.before_stages;
         visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
@@ -425,6 +430,8 @@ void metal_command_list::flush_barriers()
     ++_barriers_emitted;
     _stats.add(sg::stat::global_barriers);
     _stats.add(sg::stat::barrier_calls);
+    _stats.add(sg::stat::buffer_barriers, buffers_ordered);
+    _stats.add(sg::stat::texture_barriers, textures_ordered);
 
     if (_render_encoder == nullptr)
     {

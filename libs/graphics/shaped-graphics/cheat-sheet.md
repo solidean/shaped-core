@@ -174,7 +174,7 @@ sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total
                                                    //   Windows reads the GPU Engine perf counters; elsewhere it refuses
                                                    //   see docs/concepts/gpu-metrics.md
 auto const d = ctx.metrics.stats() - before;       // sg::stats — monotone i64 totals per sg::stat; subtract two readings for "per frame"
-d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no per-resource ones
+d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no layout transitions
 d[sg::stat::blas_builds] / d[sg::stat::tlas_builds] //   acceleration structures built, counted at the facade on every backend
                                                    //   a list counts at its SUBMIT, a transfer at its ENQUEUE; see docs/concepts/metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
