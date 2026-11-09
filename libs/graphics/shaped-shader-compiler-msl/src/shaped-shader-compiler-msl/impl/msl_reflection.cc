@@ -493,8 +493,9 @@ cc::result<cc::string_view> ssc::msl::impl::entry_qualifier_for(sg::shader_stage
     case sg::shader_stage::geometry:
         return cc::error("metal has no geometry stage at all");
     case sg::shader_stage::task:
+        return cc::string_view("object");
     case sg::shader_stage::mesh:
-        return cc::error("metal's object and mesh stages are not wired up yet");
+        return cc::string_view("mesh");
     }
     return cc::error("unknown shader stage");
 }

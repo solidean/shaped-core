@@ -188,8 +188,8 @@ bool metal_context::supports(sg::feature f) const
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
         return false;
     case sg::feature::mesh_shader:
-        // Metal has object and mesh stages, which this backend does not wire up yet.
-        return false;
+        // object and mesh stages, which every Metal 4 device has
+        return true;
     case sg::feature::unaligned_block_compression:
         // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;

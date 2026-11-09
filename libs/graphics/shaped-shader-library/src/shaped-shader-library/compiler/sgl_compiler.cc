@@ -407,7 +407,8 @@ private:
                 shader.bindings.push_back(binding);
             result.declared_bindings.push_back(cc::move(binding));
         }
-        if (stage == sgl::check::stage::compute)
+        // a mesh and a task stage's workgroup too, which Metal's mesh draw states and no MSL text does
+        if (stage == sgl::check::stage::compute || stage == sgl::check::stage::mesh || stage == sgl::check::stage::task)
             shader.workgroup_size
                 = sg::compute_dimensions{.x = emitted.workgroup[0], .y = emitted.workgroup[1], .z = emitted.workgroup[2]};
         if (emitted.preferred_subgroup_size > 0)

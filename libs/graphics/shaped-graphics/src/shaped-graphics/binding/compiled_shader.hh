@@ -71,7 +71,7 @@ struct sg::compiled_shader
     /// The resource bindings the code uses — a flat list; per-set grouping is derived by the consumer.
     cc::vector<binding> bindings;
 
-    /// Compute workgroup size, present only for a compute `stage`.
+    /// The workgroup size of a compute, mesh or task `stage`, which Metal states at the dispatch or the mesh draw.
     cc::optional<compute_dimensions> workgroup_size;
     /// The subgroup size a compute shader runs best at, which a backend asks the device for where it can and ignores
     /// where it cannot: a preference, never a requirement, so no pipeline is refused for it.

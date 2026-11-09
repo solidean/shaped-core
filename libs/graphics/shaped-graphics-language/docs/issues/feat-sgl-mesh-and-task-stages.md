@@ -29,7 +29,8 @@ The task stage and per-triangle values are done too (2026-11-05): `@task(x, y, z
 sg's mesh-test.cc draws a task stage launching two mesh workgroups, and a quad of two differently tinted triangles, on dx12 and vulkan.
 Left:
 
-* metal, once sg's metal backend builds a mesh pipeline.
+* ~~metal~~: landed 2026-11-09, as `[[object]]` and `[[mesh]]` functions over Metal 4's mesh render pipeline (EMIT-206).
+  sg's SGL mesh tests run on metal from tests/pipeline/sgl-mesh-test.cc, which no longer waits for DXC.
 * Points, which D3D12's mesh stage cannot write; vulkan alone has them.
 
 ## Lines and an indirect draw (2026-11-06)

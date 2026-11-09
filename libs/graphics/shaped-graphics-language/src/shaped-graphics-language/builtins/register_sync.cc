@@ -780,6 +780,27 @@ written write_stream(call_context const& ctx)
 written write_mesh_output(call_context const& ctx)
 {
     auto const& o = ctx.arguments[0].text;
+    // EMIT-206: Metal's mesh object takes the primitives' count alone, and a primitive's corners index by index
+    if (ctx.target == language::msl)
+    {
+        if (ctx.data == 0)
+            return {.text = cc::format("{}.set_primitive_count({})", o, ctx.arguments[2].text)};
+        if (ctx.data == 1)
+            return {.text = cc::format("{}.set_vertex({}, {})", o, ctx.arguments[1].text, ctx.arguments[2].text)};
+        if (ctx.data == 3)
+            return {.text = cc::format("{}.set_primitive({}, {})", o, ctx.arguments[1].text, ctx.arguments[2].text)};
+        auto const corners = ctx.data == 2 ? 3 : 2;
+        auto const mint = [&](cc::string_view name) { return ctx.mint.is_valid() ? ctx.mint(name) : cc::string(name); };
+        auto const first = mint("sgl_first");
+        auto const indices = mint("sgl_indices");
+        auto result = written();
+        result.lines.push_back(cc::format("const uint {} = ({}) * {}u;", first, ctx.arguments[1].text, corners));
+        result.lines.push_back(cc::format("const uint{} {} = {};", corners, indices, ctx.arguments[2].text));
+        constexpr char lanes[] = {'x', 'y', 'z'};
+        for (auto c = 0; c < corners; ++c)
+            result.lines.push_back(cc::format("{}.set_index({} + {}u, {}.{});", o, first, c, indices, lanes[c]));
+        return result;
+    }
     if (ctx.data == 0)
         return {.text = cc::format("SetMeshOutputCounts({}, {})", ctx.arguments[1].text, ctx.arguments[2].text)};
     auto const array = ctx.data == 1 ? "vertices"
@@ -792,9 +813,21 @@ written write_mesh_output(call_context const& ctx)
 /// EMIT-207: HLSL hands a payload over from groupshared memory alone, so the call stores it there first.
 written write_dispatch_mesh(call_context const& ctx)
 {
+    // EMIT-207: Metal's object stage writes its payload and its grid, once, from its first invocation
+    if (ctx.target == language::msl)
+    {
+        auto result = written();
+        result.lines.push_back("if (sgl_thread == 0u)");
+        result.lines.push_back("{");
+        result.lines.push_back(cc::format("    sgl_payload = {};", ctx.arguments[3].text));
+        result.lines.push_back(cc::format("    sgl_grid.set_threadgroups_per_grid(uint3({}, {}, {}));",
+                                          ctx.arguments[0].text, ctx.arguments[1].text, ctx.arguments[2].text));
+        result.lines.push_back("}");
+        return result;
+    }
     auto result = written{.text = cc::format("DispatchMesh({}, {}, {}, sgl_payload)", ctx.arguments[0].text,
                                              ctx.arguments[1].text, ctx.arguments[2].text)};
-    // no WGSL or MSL text writes a task stage, which the feature refuses
+    // no WGSL text writes a task stage, which the feature refuses
     if (ctx.target == language::hlsl)
         result.lines.push_back(cc::format("sgl_payload = {};", ctx.arguments[3].text));
     return result;
@@ -812,6 +845,16 @@ bool is_hlsl_text(language l)
 {
     return l == language::hlsl;
 }
+
+bool is_hlsl_or_msl_text(language l)
+{
+    return l == language::hlsl || l == language::msl;
+}
+
+bool is_msl_text(language l)
+{
+    return l == language::msl;
+}
 } // namespace
 
 void sgl::builtins::register_sync(registry& r)
@@ -827,7 +870,7 @@ void sgl::builtins::register_sync(registry& r)
         .write = {.kind = spelling_kind::custom,
                   .custom = write_dispatch_mesh,
                   .helper = dispatch_mesh_helper,
-                  .writes_lines = is_hlsl_text,
+                  .writes_lines = is_hlsl_or_msl_text,
                   .hlsl_names = k_dispatch_mesh_hlsl,
                   .wgsl_names = k_dispatch_mesh_hlsl,
                   .msl_names = k_dispatch_mesh_hlsl},
@@ -846,7 +889,7 @@ void sgl::builtins::register_sync(registry& r)
         .write = {.kind = spelling_kind::custom,
                   .custom = write_mesh_output,
                   .data = 0,
-                  // no WGSL or MSL text writes a mesh stage, and the name stays the target's alike
+                  // no WGSL text writes a mesh stage, and the name stays the target's alike
                   .hlsl_names = k_mesh_output_hlsl,
                   .wgsl_names = k_mesh_output_hlsl,
                   .msl_names = k_mesh_output_hlsl},
@@ -871,13 +914,13 @@ void sgl::builtins::register_sync(registry& r)
         .signature = "@stages(.mesh) fun triangle(o: mut mesh_output, i: uint, t: uint3)",
         .doc = "/// Writes the triangle at `i`, of the three vertices `t` indexes.",
         .evaluate = nothing,
-        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 2},
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .writes_lines = is_msl_text, .data = 2},
     });
     r.add(function_record{
         .signature = "@stages(.mesh) fun line(o: mut mesh_output, i: uint, l: uint2)",
         .doc = "/// Writes the line at `i`, of the two vertices `l` indexes, in a mesh stage of `lines = M`.",
         .evaluate = nothing,
-        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 4},
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .writes_lines = is_msl_text, .data = 4},
     });
 
     r.add_comment("// A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which "
