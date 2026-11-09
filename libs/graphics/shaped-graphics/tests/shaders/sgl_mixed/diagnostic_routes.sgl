@@ -8,7 +8,7 @@ enum tone:
 binding checked:
     values: mut buffer[int]
 
-@compute(4) fun stamped(@thread_id id: int3){checked}:
+@compute fun stamped(@thread_id id: int3){checked}:
     let v = checked.values[id.x]
     print "thread $(id.x) holds $v"
     assert v != 3, "int $v, uint $(v as uint), float $(v as float), lanes $(int2(v, 7)), near $(float3(0.5, 2.0, v as float)), bool $(v > 2), tone $(tone.high)"

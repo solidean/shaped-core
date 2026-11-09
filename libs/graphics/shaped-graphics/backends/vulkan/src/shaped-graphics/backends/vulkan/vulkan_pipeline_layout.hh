@@ -37,8 +37,10 @@ public:
                            VkPipelineLayout layout,
                            cc::vector<sg::binding_group_layout_handle> groups,
                            cc::optional<sg::binding> inline_constants,
-                           int inline_constants_bytes)
-      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants)),
+                           int inline_constants_bytes,
+                           bool dispatch_grid,
+                           cc::span<sg::bound_sampler const> static_samplers)
+      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants), dispatch_grid, static_samplers),
         _ctx(ctx),
         _layout(layout),
         _groups(cc::move(groups)),
@@ -52,13 +54,22 @@ public:
                        VkPipelineBindPoint bind_point,
                        sg::raw_buffer_handle const& debug_window) const;
 
-    /// Binds set 3 of a layout traced in software, for one op: a transient region of its samplers, the debug window,
-    /// the pool and `roots`.
+    /// Binds set 3 of a layout whose set 3 changes per op, for one op: a transient region of its samplers, the debug
+    /// window, and where they are held, the pool and `roots`, the unbounded arrays' `lengths` and the `grid` of a
+    /// dispatch by threads.
     void bind_software_trace(VkCommandBuffer buffer,
                              VkPipelineBindPoint bind_point,
                              sg::raw_buffer_handle const& debug_window,
                              sg::impl::software_pool_storage const& pool,
-                             cc::span<u32 const> roots) const;
+                             cc::span<u32 const> roots,
+                             cc::span<u32 const> lengths,
+                             cc::span<u32 const> grid) const;
+
+    /// Whether set 3 holds values of the op, so each op binds it (bind_software_trace) rather than the pipeline bind.
+    [[nodiscard]] bool binds_set_per_op() const
+    {
+        return _traces_in_software || _has_array_lengths || has_dispatch_grid();
+    }
 
     ~vulkan_pipeline_layout() override;
 
@@ -93,6 +104,12 @@ public:
     isize _roots_offset = 0;
     /// Each group's first acceleration member among the roots.
     cc::vector<isize> _acceleration_bases;
+    /// A group holds an unbounded binding array, so set 3 also holds their lengths, each group's at its position.
+    bool _has_array_lengths = false;
+    isize _lengths_offset = 0;
+    isize _grid_offset = 0;
+    /// Each group's position among the lengths, -1 for a group with none.
+    cc::vector<isize> _length_bases;
 
     void write_storage_descriptor(VkDeviceAddress address, isize size_in_bytes, byte* at) const;
 

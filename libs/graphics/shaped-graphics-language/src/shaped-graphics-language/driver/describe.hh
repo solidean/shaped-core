@@ -77,9 +77,6 @@ struct sgl::described_binding_member
     i32 offset = -1;
     /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
-    /// The unbounded binding array whose length this constant holds, which no source declares and the host fills from
-    /// the views it binds (CHK-491); empty for every other member.
-    cc::string length_of;
     /// A resource's position among its binding's resources; -1 for a constant.
     /// A binding array takes `count` consecutive slots from this one.
     i32 slot = -1;
@@ -193,6 +190,8 @@ struct sgl::described_entry_point
     check::stage stage = check::stage::none;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// A bare @compute's: the compile chose `workgroup`, so the host dispatches it by threads alone (CHK-520).
+    bool is_dispatched_by_threads = false;
     /// The subgroup size a compute entry point prefers (CHK-371); 0 where it prefers none.
     i32 preferred_subgroup_size = 0;
     /// The strictest `@float` it reaches (CHK-435), and the function that stated it, by name; empty at `fast`.

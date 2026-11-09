@@ -67,6 +67,7 @@ void command_list_compute_scope::bind_pipeline(compute_pipeline const& pipeline)
     _bound_wg_x = wg.x;
     _bound_wg_y = wg.y;
     _bound_wg_z = wg.z;
+    _bound_by_threads = pipeline.is_dispatched_by_threads();
     _cmd.bind_compute_pipeline(pipeline);
 }
 
@@ -77,14 +78,24 @@ void command_list_compute_scope::bind_group(int group_index, binding_group const
 
 void command_list_compute_scope::dispatch_groups(int x, int y, int z)
 {
+    CC_ASSERT(!_bound_by_threads,
+              "the bound pipeline's workgroup size is its compiler's choice, so it is dispatched by "
+              "threads alone: dispatch_threads");
     _cmd._stats.add(stat::dispatches);
     _cmd.dispatch(x, y, z);
 }
 
 void command_list_compute_scope::dispatch_threads(int x, int y, int z)
 {
+    CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch thread counts must be non-negative");
     _cmd._stats.add(stat::dispatches);
+    _cmd._dispatch_grid[0] = x;
+    _cmd._dispatch_grid[1] = y;
+    _cmd._dispatch_grid[2] = z;
     _cmd.dispatch(ceil_div(x, _bound_wg_x), ceil_div(y, _bound_wg_y), ceil_div(z, _bound_wg_z));
+    _cmd._dispatch_grid[0] = 0;
+    _cmd._dispatch_grid[1] = 0;
+    _cmd._dispatch_grid[2] = 0;
 }
 
 void command_list_compute_scope::dispatch_groups_indirect(buffer<dispatch_args> const& args, isize index)
@@ -95,6 +106,9 @@ void command_list_compute_scope::dispatch_groups_indirect(buffer<dispatch_args> 
 
 void command_list_compute_scope::dispatch_groups_indirect_bytes(raw_buffer_handle const& args, isize offset_in_bytes)
 {
+    CC_ASSERT(!_bound_by_threads,
+              "the bound pipeline's workgroup size is its compiler's choice, so it is dispatched by "
+              "threads alone: dispatch_threads");
     _cmd._stats.add(stat::dispatches);
     _cmd.dispatch_indirect(args, offset_in_bytes);
 }

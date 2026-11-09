@@ -1229,6 +1229,20 @@ struct writer
         return cc::format("sgl_ctx.hit_offsets->groups[{}][{}{}].instances", r.group, r.slot, element);
     }
 
+    /// CHK-491: an unbounded array's length on metal, the count sg writes into the array's table.
+    cc::string msl_array_length(flat_expr_id array)
+    {
+        auto const& member = p.e.at(array).node.as<flat_binding_member>();
+        auto const found = resource_of(p, member.binding, member.member);
+        CC_ASSERT(found >= 0, "an unbounded array whose length is read is a member the plan placed");
+        auto const& r = p.resources[found];
+        auto parameter = cc::string_view();
+        for (auto const& a : p.argument_buffers)
+            if (a.group == r.group)
+                parameter = a.parameter;
+        return cc::format("int({}.{}->count)", parameter, r.name);
+    }
+
     /// EMIT-195: a Metal buffer is a pointer, so its length is the byte length sg writes into its group's `sgl_lengths`,
     /// at its slot, plus the element of a binding array; a `bytes` is counted in bytes, anything else in elements.
     cc::string msl_buffer_length(flat_expr_id buffer, bool is_bytes)
@@ -1397,6 +1411,14 @@ struct writer
             [&](flat_buffer_length const& b)
             {
                 auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
+                // CHK-491: an unbounded binding array's length; dx12 and vulkan read sg's reserved block instead
+                if (p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::array)
+                {
+                    CC_ASSERT(d.language() == builtins::language::msl, "only metal reads an unbounded array's length "
+                                                                       "from its table");
+                    result = {.text = msl_array_length(b.buffer), .binds = level::primary};
+                    return;
+                }
                 if (d.language() == builtins::language::msl)
                 {
                     result = {.text = msl_buffer_length(b.buffer, is_bytes), .binds = level::primary};
@@ -1846,6 +1868,9 @@ void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect cons
         d.write_group(
             out, p, nullptr,
             cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = p.resources.size() - first}));
+    for (auto const& block : p.group_blocks)
+        if (block.is_reserved)
+            d.write_group(out, p, &block, {});
     for (auto const& s : p.samplers)
         d.write_file_sampler(out, p, s);
     if (!p.samplers.empty())

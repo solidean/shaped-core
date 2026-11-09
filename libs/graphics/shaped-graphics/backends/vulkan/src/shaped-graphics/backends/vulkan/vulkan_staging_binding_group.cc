@@ -168,9 +168,13 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
 
     auto const bindings = _vk_layout->bindings();
     int flat = 0;
+    // a staging group's unbounded array is as long as its capacity, a vacant element a null descriptor
+    auto unbounded_length = u32(0);
     for (isize i = 0; i < bindings.size(); ++i)
     {
         auto const& b = bindings[i];
+        if (b.is_unbounded())
+            unbounded_length = u32(element_count(b));
         if (sg::is_sampler(b.type))
         {
             flat += element_count(b);
@@ -209,9 +213,9 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
         flat += element_count(b);
     }
 
-    auto r = vulkan_binding_group::create_from_image(_ctx, _vk_layout, _image, cc::move(referenced),
-                                                     cc::move(referenced_textures), cc::move(hazard_views),
-                                                     cc::move(texture_hazard_views), cc::move(array_bindings));
+    auto r = vulkan_binding_group::create_from_image(
+        _ctx, _vk_layout, _image, cc::move(referenced), cc::move(referenced_textures), cc::move(hazard_views),
+        cc::move(texture_hazard_views), cc::move(array_bindings), unbounded_length);
     CC_RETURN_IF_ERROR(r);
     return sg::binding_group_handle(cc::move(r.value()));
 }

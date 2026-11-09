@@ -17,6 +17,7 @@
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/barrier/access_inference.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::dx12
@@ -84,6 +85,20 @@ void dx12_command_list::bind_software_trace(dx12_pipeline_layout const& layout,
                                             cc::span<dx12_binding_group const* const> groups,
                                             bool is_graphics)
 {
+    // each unbounded binding array's length, from the group bound at its slot
+    if (layout.array_lengths_root_param >= 0)
+    {
+        u32 lengths[sg::impl::array_lengths_capacity] = {};
+        for (isize g = 0; g < groups.size() && g < layout.length_bases.size(); ++g)
+            if (groups[g] != nullptr && layout.length_bases[g] >= 0)
+                lengths[layout.length_bases[g]] = groups[g]->unbounded_length;
+        if (is_graphics)
+            _list->SetGraphicsRoot32BitConstants(UINT(layout.array_lengths_root_param),
+                                                 UINT(sg::impl::array_lengths_capacity), lengths, 0);
+        else
+            _list->SetComputeRoot32BitConstants(UINT(layout.array_lengths_root_param),
+                                                UINT(sg::impl::array_lengths_capacity), lengths, 0);
+    }
     if (layout.software_pool_root_param < 0)
         return;
     u32 roots[sg::impl::software_trace_roots] = {};
@@ -411,6 +426,12 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
     bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
+    // the threads dispatch_threads asked for, which a pipeline dispatched by threads alone returns past
+    if (_bound_pipeline_layout->dispatch_grid_root_param >= 0)
+    {
+        u32 const grid[4] = {u32(_dispatch_grid[0]), u32(_dispatch_grid[1]), u32(_dispatch_grid[2]), 0};
+        _list->SetComputeRoot32BitConstants(UINT(_bound_pipeline_layout->dispatch_grid_root_param), 4, grid, 0);
+    }
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.

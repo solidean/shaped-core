@@ -32,5 +32,6 @@ sg's compute test sets five buffers of a capacity of 16, replaces one in place, 
 An array of samplers on dx12, vulkan and metal: `sampler[N]` in SGL, `named_sampler::element` and `set_sampler_element` in sg, and a `cc::fixed_array<sg::sampler, N>` field in the generated host code.
 sg's sampler test reads one texture through three samplers, through a group and through a staging group whose element 0 it replaces.
 
-`xs.length` of an unbounded array (CHK-491): a constant of its binding, which the generated host code writes from the views it binds.
+`xs.length` of an unbounded array (CHK-491): the views its group binds, which sg writes per dispatch or draw.
+dx12 and vulkan read it from the reserved `sg_array_lengths`, and metal from the array's table.
 sg's compute test wraps its index by it with three views and then four, on dx12 and vulkan.

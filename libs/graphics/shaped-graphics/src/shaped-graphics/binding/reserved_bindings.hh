@@ -1,7 +1,9 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// What sg binds itself, by name and by each backend's address.
@@ -53,8 +55,40 @@ inline constexpr reserved_binding_address reserved_acceleration_roots
        .webgpu_binding = 18,
        .metal_buffer = 29};
 
+/// The length of each unbounded binding array of the bound groups, which sg writes at each dispatch or draw from the
+/// groups it binds; metal's argument tables carry their own, so it has none.
+inline constexpr reserved_binding_address reserved_array_lengths
+    = {.name = "sg_array_lengths", .dx12_space = 12, .dx12_register = 1, .vulkan_set = 3, .vulkan_binding = 20};
+
+/// The threads `dispatch_threads` asked for, `uint4`, which a shader sg dispatches by threads alone reads to return
+/// past the grid; metal dispatches exactly those threads, so it has none.
+inline constexpr reserved_binding_address reserved_dispatch_grid = {.name = "sg_dispatch_grid",
+                                                                    .dx12_space = 12,
+                                                                    .dx12_register = 2,
+                                                                    .vulkan_set = 3,
+                                                                    .vulkan_binding = 21,
+                                                                    .webgpu_group = 3,
+                                                                    .webgpu_binding = 21};
+
 inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window, reserved_acceleration_pool, reserved_acceleration_roots};
+    = {reserved_debug_window, reserved_acceleration_pool, reserved_acceleration_roots, reserved_array_lengths,
+       reserved_dispatch_grid};
+
+namespace impl
+{
+/// How many unbounded binding arrays a pipeline's bound groups may hold: `uint4[4]` of 32-bit lengths, one root
+/// constant each on dx12.
+inline constexpr isize array_lengths_capacity = 16;
+
+/// Whether `bindings`, a group's, end in an unbounded binding array, which is the most a group holds.
+[[nodiscard]] constexpr bool has_unbounded_array(cc::span<binding const> bindings)
+{
+    for (auto const& b : bindings)
+        if (b.is_unbounded())
+            return true;
+    return false;
+}
+} // namespace impl
 
 /// A debug window's header, in words: where the next record goes, how many words it holds, how many records were lost.
 inline constexpr int debug_cursor_word = 0;

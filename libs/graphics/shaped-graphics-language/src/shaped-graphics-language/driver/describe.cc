@@ -299,6 +299,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
+    result.is_dispatched_by_threads = e.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     result.float_guarantee = e.float_guarantee;
     if (check::is_valid(e.float_raised_by))
@@ -734,8 +735,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
                                   .kind = described_member_kind::constant,
                                   .type = host_spelling(m, member.type),
                                   .offset = placed.offsets[next_constant],
-                                  .size = placed.sizes[next_constant],
-                                  .length_of = member.length_of >= 0 ? members[member.length_of].name : cc::string()});
+                                  .size = placed.sizes[next_constant]});
         ++next_constant;
     }
     return result;

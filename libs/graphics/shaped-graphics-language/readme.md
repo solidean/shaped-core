@@ -32,6 +32,8 @@ What a target lacks is the exception: WGSL's emulated ray tracing pays for being
 `uv run dev.py benchmark "sr - SGL against the HLSL it was ported from"` measures it on dx12, with sr's shaders against the hand-written HLSL they were ported from.
 On an RTX 5070 Ti in October 2026 SGL took 0.99x to 1.00x the HLSL's GPU time for à-trous, 0.99x for the network's convolution, and 1.02x for SVGF's filter.
 On an Intel Arc B580 in November 2026 it took 0.99x to 1.00x of it on dx12, and 0.97x to 0.99x on vulkan, where both go through DXC's SPIR-V backend.
+`uv run dev.py benchmark "sr - SGL against the same kernels written in MSL, on metal"` measures the same kernels against MSL ports of that HLSL.
+On an Apple M4 in November 2026 SGL's minima were 0.99x to 1.05x the MSL's for à-trous, 0.97x to 1.12x for SVGF's filter, and 1.00x to 1.02x for the convolution.
 `uv run dev.py benchmark "written in WGSL" --preset emscripten-webgpu-relwithdebinfo` measures WebGPU, against the same kernels written by hand in WGSL.
 On the same Arc it took 1.00x for à-trous and SVGF's filter under node's Dawn and deno's wgpu alike, and 0.81x and 0.52x for the convolution.
 The convolution is faster because SGL unrolls the loops the HLSL marks `[unroll]`, which WGSL cannot ask for.

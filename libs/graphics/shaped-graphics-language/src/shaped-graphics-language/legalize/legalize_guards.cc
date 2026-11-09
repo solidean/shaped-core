@@ -365,22 +365,20 @@ struct guarder
                                             .text = call.text});
     }
 
-    /// CHK-491's constant of the unbounded binding array `object` names, as a `uint`; `none` where its binding holds none.
+    /// CHK-491's length of the unbounded binding array `object` names, as a `uint`; `none` where it names none.
     flat_expr_id unbounded_length_of(flat_expr_id object)
     {
         auto const* const b = out.e.at(object).node.try_as<flat_binding_member>();
         if (b == nullptr)
             return flat_expr_id::none;
         auto const named = *b;
-        auto const members = out.m.at(out.m.bindings[out.m.at(named.binding).info].members);
-        for (auto i = isize(0); i < members.size(); ++i)
-            if (members[i].length_of == named.member)
-            {
-                flat_expr_id const held[]
-                    = {out.add_expr(members[i].type, flat_binding_member{.binding = named.binding, .member = i32(i)})};
-                return out.call("convert_int_to_uint", held);
-            }
-        return flat_expr_id::none;
+        flat_expr_id const held[]
+            = {out.add_expr(out.type_named(builtins::k_int),
+                            flat_buffer_length{.buffer = out.add_expr(out.e.at(object).type, flat_binding_member{
+                                                                                                 .binding = named.binding,
+                                                                                                 .member = named.member,
+                                                                                             })})};
+        return out.call("convert_int_to_uint", held);
     }
 
     /// The test that the pinned `i` of shape `s` is outside `0 ..< length`, a pinned `uint`.

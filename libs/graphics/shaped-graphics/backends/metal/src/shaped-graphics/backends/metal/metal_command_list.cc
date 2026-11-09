@@ -24,6 +24,10 @@ namespace sg::backend::metal
 {
 namespace
 {
+/// Every stage of a render pipeline, the object and mesh stages included: a stage left out reads no binding at all.
+constexpr auto all_render_stages
+    = MTL::RenderStageVertex | MTL::RenderStageFragment | MTL::RenderStageObject | MTL::RenderStageMesh;
+
 [[nodiscard]] MTL::LoadAction load_action_of(sg::target_op op)
 {
     switch (op)
@@ -850,8 +854,14 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
     bind_software_trace();
 
     auto const size = _bound_compute->workgroup_size();
-    compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
-                                            MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    auto const group = MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z));
+    // a pipeline dispatched by threads alone runs exactly the grid's threads, which its last workgroups are cut to
+    if (_bound_compute->is_dispatched_by_threads())
+        compute_encoder()->dispatchThreads(
+            MTL::Size(NS::UInteger(_dispatch_grid[0]), NS::UInteger(_dispatch_grid[1]), NS::UInteger(_dispatch_grid[2])),
+            group);
+    else
+        compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)), group);
 }
 
 void metal_command_list::compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes)
@@ -1473,7 +1483,7 @@ void metal_command_list::resume_render_encoder()
         _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
         _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
 
-        _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+        _render_encoder->setArgumentTable(argument_table(), all_render_stages);
     }
 
     if (_scope_stencil_reference.has_value())
@@ -1548,7 +1558,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
     _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
 
-    _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+    _render_encoder->setArgumentTable(argument_table(), all_render_stages);
 }
 
 void metal_command_list::raster_bind_group(int group_index, binding_group const& group)

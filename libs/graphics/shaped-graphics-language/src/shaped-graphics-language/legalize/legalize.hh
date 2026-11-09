@@ -85,4 +85,18 @@ namespace sgl::check
 [[nodiscard]] flat_entry_point legalize(checked_module const& m,
                                         flat_entry_point const& e,
                                         legalize_options const& options = {});
+/// Whether `e` reads the length of an unbounded binding array (CHK-491).
+[[nodiscard]] bool reads_array_lengths(checked_module const& m, flat_entry_point const& e);
+
+/// `e` with every such length read from the reserved `sg_array_lengths`, which sg writes at each dispatch or draw, at
+/// the array's position among the entry point's unbounded arrays; what dx12 and vulkan read, and metal does not.
+[[nodiscard]] flat_entry_point with_reserved_array_lengths(checked_module const& m, flat_entry_point const& e);
+
+/// Whether `e` lists the reserved `sg_dispatch_grid`, which `with_dispatch_grid_guard` adds.
+[[nodiscard]] bool guards_dispatch_grid(checked_module const& m, flat_entry_point const& e);
+
+/// A bare @compute's `e` whose threads past the grid return before its body, against the grid sg writes at each
+/// dispatch_threads into `sg_dispatch_grid` (CHK-520); what dx12, vulkan and WebGPU read, and metal does not.
+[[nodiscard]] flat_entry_point with_dispatch_grid_guard(checked_module const& m, flat_entry_point const& e);
+
 } // namespace sgl::check

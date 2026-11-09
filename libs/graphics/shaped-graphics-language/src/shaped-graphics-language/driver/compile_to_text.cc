@@ -235,6 +235,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
             result.target_struct = cc::format("{}.{}", module, result.target_struct);
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
+    result.is_dispatched_by_threads = e.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     result.unshadowed_bytes = legal.unshadowed_bytes;
     result.float_guarantee = float_guarantee;

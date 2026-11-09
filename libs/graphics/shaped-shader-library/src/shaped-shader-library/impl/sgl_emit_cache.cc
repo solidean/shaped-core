@@ -21,7 +21,7 @@ namespace
 {
 /// The layout revision `encode_preprocessed` writes; bump it with any change to what it writes.
 /// sg's codec version rides in the persistent key beside it, since a stated shader and its bindings are written in that codec.
-constexpr u32 k_codec_version = 5;
+constexpr u32 k_codec_version = 6;
 
 /// How many results the in-memory tier holds before it starts over; each is a few dozen kilobytes of text.
 constexpr isize k_memory_capacity = 512;
@@ -214,6 +214,7 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
         put_string(out, s.target_set);
         put_u32(out, s.required_features.has_value() ? 1 : 0);
         put_u64(out, u64(s.required_features.has_value() ? s.required_features.value().bits : 0));
+        put_u32(out, s.is_dispatched_by_threads ? 1 : 0);
     }
     return out;
 }
@@ -273,7 +274,8 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
         auto target_set = r.get_string();
         auto const has_features = r.get_u32();
         auto const features = r.get_u64();
-        if (!r.ok || !stated.has_value() || has_subgroup > 1 || has_features > 1)
+        auto const by_threads = r.get_u32();
+        if (!r.ok || !stated.has_value() || has_subgroup > 1 || has_features > 1 || by_threads > 1)
             return {};
         auto& s = stated.value();
         if (has_subgroup == 1)
@@ -281,6 +283,7 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
         s.target_set = cc::move(target_set);
         if (has_features == 1)
             s.required_features = sg::feature_set::create_from_bits(sg::feature_set::storage_type(features));
+        s.is_dispatched_by_threads = by_threads == 1;
         result.stated = cc::move(s);
     }
 

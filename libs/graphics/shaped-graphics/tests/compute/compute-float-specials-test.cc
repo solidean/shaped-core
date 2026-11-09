@@ -31,10 +31,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::float_specials::float_specials>();
 
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
-    auto const inputs = ctx->persistent.create_buffer_from_data(cc::vector<float>{0.0f, 1.0f, 1.0e30f},
-                                                                sg::buffer_usage::readonly_buffer);
-    auto const results = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_defaulted(7), usage);
-    auto const comparisons = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(4), usage);
+    auto const least_denormal = cc::bit_cast<float>(u32(1));
+    auto const inputs = ctx->persistent.create_buffer_from_data(
+        cc::vector<float>{0.0f, 1.0f, 1.0e30f, 1.0e-38f, least_denormal, 1.0e-3f}, sg::buffer_usage::readonly_buffer);
+    auto const results = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_defaulted(10), usage);
+    auto const comparisons = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(5), usage);
 
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
@@ -50,7 +51,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     ctx->submit_command_list(cc::move(cmd));
 
     auto const got = co_await results_back.data();
-    REQUIRE(got.size() == 7);
+    REQUIRE(got.size() == 10);
     auto const bits = [&](isize i) { return cc::bit_cast<u32>(got[i]); };
     CHECK(bits(0) == 0x7f800000u);
     CHECK(cc::is_nan(got[1]));
@@ -67,7 +68,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     CHECK(bits(6) == 0xff800000u);
 
     auto const compared = co_await comparisons_back.data();
-    REQUIRE(compared.size() == 4);
+    REQUIRE(compared.size() == 5);
     // nan != nan
     CHECK(compared[0] == 1u);
     // nan == nan
@@ -76,4 +77,15 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     CHECK(compared[2] == 0u);
     // inf > 1e30
     CHECK(compared[3] == 1u);
+
+    // A copy keeps a denormal's bits on every device.
+    CHECK(bits(9) == 1u);
+    // Metal's safe math flushes them, read and written, measured on an M4: why metal reports no float_denormals.
+    // A device that kept them would fail here, and could then report the feature and keep `.ieee`.
+    if (ctx->backend() == sg::backend_kind::metal)
+    {
+        CHECK(bits(7) == 0u);
+        CHECK(bits(8) == 0u);
+        CHECK(compared[4] == 0u);
+    }
 }

@@ -139,4 +139,6 @@ private:
     int _bound_wg_x = 1;
     int _bound_wg_y = 1;
     int _bound_wg_z = 1;
+    // The bound pipeline is dispatched by threads alone (compiled_shader::is_dispatched_by_threads).
+    bool _bound_by_threads = false;
 };

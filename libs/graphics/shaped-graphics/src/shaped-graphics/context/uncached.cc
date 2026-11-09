@@ -34,6 +34,19 @@ cc::optional<cc::string> misfit_of(sg::compiled_shader const& shader, sg::pipeli
     return cc::format("the shader '{}' does not fit its pipeline layout:\n{}", shader.entry_point, misfit);
 }
 
+/// `desc` over the twin of its layout that holds the grid, where its shader is dispatched by threads alone, which
+/// reads it; `desc` itself otherwise.
+sg::compute_pipeline_description over_grid(sg::context& ctx, sg::compute_pipeline_description const& desc)
+{
+    if (!desc.shader.is_dispatched_by_threads || desc.layout == nullptr || desc.layout->has_dispatch_grid())
+        return desc;
+    auto twin = desc.layout->description();
+    twin.dispatch_grid = true;
+    return {.shader = desc.shader,
+            .layout = ctx.cached.acquire_pipeline_layout(twin),
+            .cached_pipeline = desc.cached_pipeline};
+}
+
 /// Why a compute pipeline of `desc` cannot be built on a device with `supported`, or nothing when it can.
 cc::optional<cc::string> refusal_of(sg::compute_pipeline_description const& desc, sg::feature_set supported)
 {
@@ -240,10 +253,13 @@ cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_p
 }
 
 cc::shared_async<sg::compute_pipeline_handle> with_footprint(cc::shared_async<sg::compute_pipeline_handle> built,
-                                                             sg::impl::pipeline_footprint footprint)
+                                                             sg::impl::pipeline_footprint footprint,
+                                                             bool is_dispatched_by_threads)
 {
     auto pipeline = co_await built;
     sg::impl::set_footprint(*pipeline, cc::move(footprint));
+    if (is_dispatched_by_threads)
+        sg::impl::set_dispatched_by_threads(*pipeline);
     co_return pipeline;
 }
 } // namespace
@@ -347,8 +363,9 @@ compute_pipeline_handle context_uncached_scope::create_compute_pipeline(compute_
 }
 
 cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_pipeline(
-    compute_pipeline_description const& desc)
+    compute_pipeline_description const& given)
 {
+    auto const desc = over_grid(_ctx, given);
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
     _ctx._stats.add(stat::pipelines_created);
@@ -357,6 +374,8 @@ cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_p
     {
         add_debug_sites(_ctx._debug_windows, desc);
         impl::set_footprint(*r.value(), footprint_of(desc));
+        if (desc.shader.is_dispatched_by_threads)
+            impl::set_dispatched_by_threads(*r.value());
     }
     return r;
 }
@@ -388,14 +407,16 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
 }
 
 cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute_pipeline_async(
-    compute_pipeline_description const& desc)
+    compute_pipeline_description const& given)
 {
+    auto const desc = over_grid(_ctx, given);
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::make_async_from_error<compute_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
     _ctx._stats.add(stat::pipelines_created);
     add_debug_sites(_ctx._debug_windows, desc);
-    return with_footprint(_ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent), footprint_of(desc));
+    return with_footprint(_ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent), footprint_of(desc),
+                          desc.shader.is_dispatched_by_threads);
 }
 
 cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_pipeline_async(

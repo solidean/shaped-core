@@ -662,8 +662,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                                                     bool is_struct,
                                                     bool is_target_struct,
                                                     bool is_vertex_struct,
-                                                    bool is_workgroup,
-                                                    cc::string_view binding_name)
+                                                    bool is_workgroup)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -1100,64 +1099,6 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         m.default_sampler = i32(found);
     }
 
-    // CHK-491: an unbounded array's length is the host's per group, which no target reads back, so it rides in the
-    // binding's constants, where some `b.name.length` or `m.b.name.length` of the module reads it.
-    // A binding array is named only as its binding's member, so the scan cannot miss a read; a binding of the same
-    // name in another module costs this one an unread constant.
-    auto const names_binding = [&](i32 f, ast::expr_id e)
-    {
-        if (!ast::is_valid(e))
-            return false;
-        auto const& node = ast_of(f).at(e).node;
-        if (auto const* const n = node.try_as<ast::name>())
-            return text_of(f, n->where) == binding_name;
-        if (auto const* const m = node.try_as<ast::member>())
-            return text_of(f, m->name) == binding_name;
-        return false;
-    };
-    auto const reads_length_of = [&](cc::string_view name)
-    {
-        for (auto f = i32(0); f < i32(files.size()); ++f)
-        {
-            auto const& a = ast_of(f);
-            for (auto const& e : a.exprs)
-            {
-                auto const* const outer = e.node.try_as<ast::member>();
-                if (outer == nullptr || text_of(f, outer->name) != "length" || !ast::is_valid(outer->object))
-                    continue;
-                auto const* const inner = a.at(outer->object).node.try_as<ast::member>();
-                if (inner != nullptr && text_of(f, inner->name) == name && names_binding(f, inner->object))
-                    return true;
-            }
-        }
-        return false;
-    };
-    if (!is_struct && !is_workgroup)
-    {
-        auto const declared = collected.size();
-        for (auto i = isize(0); i < declared; ++i)
-        {
-            auto const type = collected[i].type;
-            if (type == checked_module::error_type || out.at(type).kind != type_kind::array || out.at(type).count != 0)
-                continue;
-            if (!reads_length_of(collected[i].name))
-                continue;
-            auto const name = collected[i].name + "_length";
-            auto is_taken = false;
-            for (auto const& other : collected)
-                is_taken = is_taken || other.name == name;
-            if (is_taken)
-            {
-                report(diagnostic_kind::duplicate_declaration, file, ast.at(collected[i].field).name,
-                       cc::format("{} is an unbounded binding array, whose length the binding holds as {}",
-                                  collected[i].name, name));
-                continue;
-            }
-            collected.push_back({.name = name,
-                                 .type = type_of_builtin(builtins::k_int, file, ast.at(collected[i].field).name),
-                                 .length_of = i32(i)});
-        }
-    }
 
     auto const range = ast::range_of<member_info>{.first = u32(out.members.size()), .count = u32(collected.size())};
     out.members.push_back_range(collected);
@@ -1816,7 +1757,7 @@ void checker::compile_binding(symbol_id id)
     auto used = feature_set();
     granted = declared;
     used_features = &used;
-    auto const members = compile_members(file, b.members, false, false, false, is_workgroup, out.at(id).name);
+    auto const members = compile_members(file, b.members, false, false, false, is_workgroup);
     granted = {};
     used_features = nullptr;
 
@@ -2263,7 +2204,12 @@ void checker::compile_function(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     auto const* const compute = find_attribute(file, d.attributes, "compute");
     auto const mesh_limits = mesh != nullptr ? mesh_of(file, *mesh) : mesh_shape();
-    auto const workgroup = mesh != nullptr ? mesh_limits.workgroup : workgroup_of(file, task != nullptr ? task : compute);
+    // CHK-520: a bare `@compute` leaves its size to the compile, which flattening chooses from the body's indexing
+    auto const is_auto_workgroup
+        = compute != nullptr && task == nullptr && mesh == nullptr && ast_of(file).at(compute->arguments).empty();
+    auto const workgroup = mesh != nullptr   ? mesh_limits.workgroup
+                         : is_auto_workgroup ? cc::fixed_array<i32, 3>{64, 1, 1}
+                                             : workgroup_of(file, task != nullptr ? task : compute);
     auto const preferred_subgroup_size = preferred_subgroup_size_of(
         file, find_attribute(file, d.attributes, "preferred_subgroup_size"), compute != nullptr);
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : mesh_limits.vertices;
@@ -2280,6 +2226,7 @@ void checker::compile_function(symbol_id id)
                          : stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr, control != nullptr,
                                     is_evaluation, mesh != nullptr, task != nullptr),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
+        .is_auto_workgroup = is_auto_workgroup,
         .preferred_subgroup_size = preferred_subgroup_size,
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .is_barrier = find_attribute(file, d.attributes, "barrier") != nullptr,
@@ -2507,6 +2454,22 @@ void checker::judge_entry_point(symbol_id id)
     if (workgroup_bytes > k_portable_workgroup_bytes)
         invalid(cc::format("its @workgroup bindings hold {} bytes, and a workgroup has {} on every target",
                            workgroup_bytes, k_portable_workgroup_bytes));
+
+    // CHK-520: a bare @compute reads nothing of the group it runs in, whose size the compile chooses
+    if (info.is_auto_workgroup)
+    {
+        auto const stated = cc::string_view("so it states its size, `@compute(64)`");
+        for (auto const binding : out.at(info.bindings))
+            if (out.bindings[out.at(binding).info].is_workgroup)
+                invalid(cc::format("a bare @compute chooses its own workgroup size, and {} is memory of the workgroup, "
+                                   "{}",
+                                   out.at(binding).name, stated));
+        for (auto const& parameter : parameters)
+            if (reads_group(parameter.input))
+                invalid(cc::format("a bare @compute chooses its own workgroup size, and @{} reads where an invocation "
+                                   "stands in it, {}",
+                                   info_of(parameter.input).name, stated));
+    }
 
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
     // CHK-397 first: a value of function bodies alone is what the detail names, rather than an array holding it

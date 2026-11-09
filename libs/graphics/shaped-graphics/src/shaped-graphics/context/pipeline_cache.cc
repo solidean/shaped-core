@@ -28,7 +28,7 @@ namespace
 /// Bumped when what goes into a persistent pipeline entry changes shape.
 /// The adapter and driver live in the key itself; this is only ever about OUR encoding.
 /// That includes what a backend derives from a layout: a root signature that grew a parameter makes every blob stale.
-constexpr auto k_pipeline_blob_version = bcache::version(2);
+constexpr auto k_pipeline_blob_version = bcache::version(3);
 
 /// The namespace fragment naming a backend, so two backends' blobs can never answer each other's lookups.
 /// backend_kind is explicitly not a closed set, so an unnamed one shares the "unknown" partition rather than silently
@@ -148,6 +148,8 @@ void add_shader(cc::byte_stream_builder& b, compiled_shader const& s)
     // On vulkan no text states it, so two acquires of one SPIR-V at two sizes differ here alone.
     b.add_bool(s.preferred_subgroup_size.has_value());
     b.add_pod(i32(s.preferred_subgroup_size.value_or(0)));
+    // and its pipeline reads the grid, from a layout the plain one is not
+    b.add_bool(s.is_dispatched_by_threads);
 }
 
 void add_optional_shader(cc::byte_stream_builder& b, cc::optional<compiled_shader> const& s)

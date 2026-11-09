@@ -59,7 +59,7 @@ binding texel_shapes_of:
 
 // Each invocation owns its texels, so what every atomic gives back and leaves behind is known exactly.
 // A layer or a depth of its own beside each one shows the coordinate reached the texel it names.
-@compute(8) fun texel_shapes(@thread_id id: int3){texel_shapes_of}:
+@compute fun texel_shapes(@thread_id id: int3){texel_shapes_of}:
     let i = id.x
     let u = i as uint
     let at = i * 10

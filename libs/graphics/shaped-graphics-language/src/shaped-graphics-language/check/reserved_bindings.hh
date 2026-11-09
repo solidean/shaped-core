@@ -16,6 +16,10 @@ enum class sgl::check::reserved_use : sgl::u8
     diagnostics,
     /// An inline trace written as its software walk (EMIT-135).
     software_trace,
+    /// The length of an unbounded binding array (CHK-491).
+    array_lengths,
+    /// A bare @compute, whose threads past the grid return (CHK-520).
+    dispatch_grid,
 };
 
 /// Where one target finds an entry.
@@ -85,6 +89,28 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 3, .slot = 18, .stages = k_every_stage},
          {.group = 3, .slot = 18, .stages = k_every_stage},
          {.group = -1, .slot = 29, .stages = k_raster_and_compute_stages},
+     }},
+    // 16 lengths as sg's root constants and uniform hold them; WebGPU has no binding arrays, and metal's tables carry
+    // their own count
+    {.name = "sg_array_lengths",
+     .declaration = "@internal binding sg_array_lengths:\n    values: uint4[4]\n",
+     .enabled_by = reserved_use::array_lengths,
+     .targets = {
+         {.group = 12, .slot = 1, .stages = k_every_stage},
+         {.group = 3, .slot = 20, .stages = k_every_stage},
+         {},
+         {},
+     }},
+    // the threads `dispatch_threads` asked for, which a bare @compute's past the grid return before (CHK-520); metal
+    // dispatches exactly those threads, and needs none
+    {.name = "sg_dispatch_grid",
+     .declaration = "@internal binding sg_dispatch_grid:\n    threads: uint4\n",
+     .enabled_by = reserved_use::dispatch_grid,
+     .targets = {
+         {.group = 12, .slot = 2, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 21, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 21, .stages = stage_bit(stage::compute)},
+         {},
      }},
 };
 

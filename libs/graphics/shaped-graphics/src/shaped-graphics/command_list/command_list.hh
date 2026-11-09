@@ -81,6 +81,10 @@ public:
 protected:
     command_list(sg::context& ctx, epoch created_in);
 
+    /// The threads of the `dispatch_threads` being recorded, which a backend writes where the bound layout holds the
+    /// grid and metal dispatches exactly; zero for a dispatch by groups.
+    int _dispatch_grid[3] = {};
+
     // Backend seams the seven scopes forward to; each op's contract is documented on its scope.
     // They are friends so the scopes can reach these.
     friend class command_list_upload_scope;

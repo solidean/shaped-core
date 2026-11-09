@@ -137,6 +137,8 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
     src/shaped-graphics-language/legalize/legalize_guards.cc
+    src/shaped-graphics-language/legalize/legalize_grid.cc
+    src/shaped-graphics-language/legalize/legalize_lengths.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
     src/shaped-graphics-language/legalize/legalize_lets.cc
     src/shaped-graphics-language/legalize/legalize_onces.cc
@@ -509,6 +511,7 @@ if(SC_BUILD_TESTS)
         tests/emit/buffer-emit-test.cc
         tests/emit/bytes-emit-test.cc
         tests/emit/texture-emit-test.cc
+        tests/emit/auto-workgroup-test.cc
         tests/emit/compute-emit-test.cc
         tests/emit/subgroup-emit-test.cc
         tests/emit/image-emit-test.cc

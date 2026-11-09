@@ -157,7 +157,7 @@ bool metal_context::supports(sg::feature f) const
         // every compile of this backend runs in safe math
         return true;
     case sg::feature::float_denormals:
-        // whether safe math keeps denormals is not known
+        // safe math flushes them, read and written: measured on an M4, pinned by the float-specials test
         return false;
     case sg::feature::view_instancing:
         // vertex amplification, which SGL's `@view_index` reads as `[[amplification_id]]`

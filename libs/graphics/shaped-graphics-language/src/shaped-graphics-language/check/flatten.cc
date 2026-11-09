@@ -103,6 +103,9 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
     }
     if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
         quad_calls.push_back({.file = file(), .call = call, .callee = callee});
+    if (record != nullptr && entry.entry_stage == stage::compute
+        && (record->is_barrier || record->is_uniform_load || record->is_subgroup_operation || record->is_quad_operation))
+        group_calls.push_back({.file = file(), .call = call, .callee = callee});
     // CHK-404: a decision runs as often as the traversal asks it, whichever stage's loop asks
     if (auto const decision = decision_stage();
         decision != stage::none && record != nullptr
@@ -621,6 +624,76 @@ void sgl::check::impl::flattener::flatten_swizzle_assign(origin from, ast::assig
 
 namespace
 {
+/// CHK-520: the axes of its thread id a tree reads, counted to the highest.
+/// 0 for none, 1 for `id.x` alone, 2 where it reads `id.y`, and 3 where it reads `id.z` or hands the vector on whole.
+i32 thread_id_axes(flat_entry_point const& e)
+{
+    auto id = local_id::none;
+    for (auto const& input : e.stage_inputs)
+        if (input.input == stage_input::thread_id)
+            id = input.local;
+    if (!is_valid(id))
+        return 0;
+    auto const names_id = [&](flat_expr_id x)
+    {
+        auto const* const ref = is_valid(x) ? e.at(x).node.try_as<flat_local_ref>() : nullptr;
+        return ref != nullptr && ref->local == id;
+    };
+    auto is_read_by_axis = cc::vector<u8>::create_filled(e.exprs.size(), 0);
+    auto axes = 0;
+    for (auto const& x : e.exprs)
+    {
+        auto const* const member = x.node.try_as<flat_member>();
+        if (member == nullptr || !names_id(member->object))
+            continue;
+        is_read_by_axis[index_of(member->object)] = 1;
+        auto const highest = [&]
+        {
+            if (!member->is_swizzle())
+                return i32(member->member);
+            auto result = 0;
+            for (auto k = 0; k < member->letters.count; ++k)
+                result = cc::max(result, i32(member->letters.fields[k]));
+            return result;
+        }();
+        axes = cc::max(axes, highest + 1);
+    }
+    for (auto i = isize(0); i < e.exprs.size(); ++i)
+        if (names_id(flat_expr_id(i)) && is_read_by_axis[i] == 0)
+            return 3;
+    return axes;
+}
+
+/// CHK-521: why a stated workgroup size wastes what a bare @compute would not, which would choose `chosen`; none where
+/// it wastes nothing, and never for one thread, a serial kernel's size.
+cc::optional<cc::string> stated_workgroup_waste(cc::fixed_array<i32, 3> const& size,
+                                                cc::fixed_array<i32, 3> const& chosen,
+                                                i32 axes)
+{
+    auto const total = size[0] * size[1] * size[2];
+    auto const stated
+        = cc::format("@compute({}, {}, {}) runs {} threads to a workgroup", size[0], size[1], size[2], total);
+    auto const instead = chosen[1] == 1 ? cc::format("{}", chosen[0])
+                       : chosen[2] == 1 ? cc::format("{}, {}", chosen[0], chosen[1])
+                                        : cc::format("{}, {}, {}", chosen[0], chosen[1], chosen[2]);
+    auto const bare = cc::format("a bare @compute would choose ({}) here", instead);
+    if (total == 1)
+        return {};
+    if (total < 32)
+        return cc::format("{}, less than a wave of any GPU, which idles the rest of it; {}", stated, bare);
+    if (total % 32 != 0)
+        return cc::format("{}, which leaves a partial wave in every workgroup; {}", stated, bare);
+    if (total > 256 || size[0] > 256 || size[1] > 256 || size[2] > 64)
+        return cc::format("{}, which no webgpu device runs: it has 256 threads, at most (256, 256, 64) along the axes; "
+                          "{}",
+                          stated, bare);
+    if (axes == 1 && (size[1] > 1 || size[2] > 1))
+        return cc::format("{} along more than one axis, and the body reads the thread id's x alone, so on a grid of "
+                          "one row every row of a workgroup but the first runs past it; {}",
+                          stated, bare);
+    return {};
+}
+
 /// CHK-436: a float compared with itself, `x != x` or `x == x`, which a fast-math compiler folds.
 /// `is_nan` and `is_inf` test the bits on every target, which no such compiler can fold, so they are no such test.
 bool is_special_value_test(flat_entry_point const& e, flat_call const& call)
@@ -866,6 +939,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];
+    f.entry.is_auto_workgroup = info.is_auto_workgroup;
     f.entry.preferred_subgroup_size = info.preferred_subgroup_size;
     f.entry.features = info.features;
     for (auto const binding : out.at(info.bindings))
@@ -1149,6 +1223,13 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                    "{}, "
                                    "{})",
                                    out.at(q.callee).name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
+    // CHK-520: what a bare @compute reaches reads nothing of the group whose size the compile chooses
+    for (auto const& g :
+         info.is_auto_workgroup ? cc::span<stage_violation const>(f.group_calls) : cc::span<stage_violation const>())
+        report_of_entry(diagnostic_kind::invalid_entry_point, g.file, span_of(g.file, g.call),
+                        cc::format("{} reads the workgroup it runs in, and {} is a bare @compute, which chooses its "
+                                   "own workgroup size; it states one, `@compute(64)`",
+                                   out.at(g.callee).name, s.name));
     auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
     for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
         report_of_entry(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
@@ -1181,10 +1262,31 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                                      check::stage_name(info.entry_stage), s.name)});
         }
     }
-    if (f.is_failed || !f.stage_violations.empty() || reaches_discard
-        || (info.stages & stage_bit(info.entry_stage)) == 0 || (!is_linear && !f.quad_calls.empty()))
+    if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0
+        || (!is_linear && !f.quad_calls.empty()) || (info.is_auto_workgroup && !f.group_calls.empty()))
         return;
     f.entry.body = f.root_body();
+
+    // CHK-520: a bare @compute's size follows the axes of its thread id the body reads, each a multiple of 64
+    if (info.entry_stage == stage::compute)
+    {
+        auto const axes = thread_id_axes(f.entry);
+        auto const chosen = axes >= 3 ? cc::fixed_array<i32, 3>{4, 4, 4}
+                          : axes == 2 ? cc::fixed_array<i32, 3>{8, 8, 1}
+                                      : cc::fixed_array<i32, 3>{64, 1, 1};
+        // CHK-521: a stated size a bare @compute could have chosen is habit rather than the algorithm's, and is judged
+        auto is_group_read = !f.group_calls.empty();
+        for (auto const binding : out.at(info.bindings))
+            is_group_read = is_group_read || out.bindings[out.at(binding).info].is_workgroup;
+        for (auto const& parameter : parameters)
+            is_group_read = is_group_read || check::reads_group(parameter.input);
+        if (info.is_auto_workgroup)
+            f.entry.workgroup = chosen;
+        else if (auto detail = stated_workgroup_waste(info.workgroup, chosen, axes); detail.has_value() && !is_group_read)
+            report_of_entry(diagnostic_kind::workgroup_wastes_lanes, s.file,
+                            find_attribute(s.file, ast_of(s.file).at(s.declaration).attributes, "compute")->name,
+                            cc::move(detail.value()));
+    }
 
     // CHK-485: a task stage launches its mesh workgroups once, as the last thing its body does
     if (info.entry_stage == stage::task)

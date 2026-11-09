@@ -913,7 +913,7 @@ TEST("sgl check - a ray query's hit differs where its ray does, or where the inv
                                       "    results: mut buffer[uint]\n"
                                       "    tables: bytes[8]\n"
                                       "    origin_x: float\n\n"
-                                      "@compute(8, 8) fun cs(@thread_id id: int3){{scene}}:\n"
+                                      "@compute(64) fun cs(@thread_id id: int3){{scene}}:\n"
                                       "    let h = {}\n"
                                       "    scene.results[id.x] = scene.tables[{}].load(0u)\n",
                                       traced, index));
@@ -952,7 +952,7 @@ TEST("sgl check - a note on a local set under a branch of the prelude names the 
                                       "    results: mut buffer[uint]\n"
                                       "    tables: bytes[8]\n"
                                       "    origin_x: float\n\n"
-                                      "@compute(8, 8) fun cs(@thread_id id: int3){{scene}}:\n"
+                                      "@compute(64) fun cs(@thread_id id: int3){{scene}}:\n"
                                       "{}",
                                       body));
     };
@@ -1059,7 +1059,7 @@ TEST("sgl check - a note on a branch of the prelude names the program's call tha
                                       "binding scene:\n"
                                       "    world: acceleration_structure[.triangles]\n"
                                       "    results: mut buffer[uint]\n\n"
-                                      "@compute(8, 8) fun cs(@thread_id id: int3){{scene}}:\n"
+                                      "@compute(64) fun cs(@thread_id id: int3){{scene}}:\n"
                                       "{}",
                                       body));
     };
