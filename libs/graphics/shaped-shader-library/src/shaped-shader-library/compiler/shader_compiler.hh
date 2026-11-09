@@ -7,6 +7,7 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/compiler/block_layout.hh>
@@ -205,5 +206,15 @@ public:
     {
         (void)shader;
         return {};
+    }
+
+    /// Starts fetching what this compiler keeps across runs of the modules `read` reads, where it keeps anything, so
+    /// a compile of them that comes after continues from it; it never waits, and neither does a compile.
+    /// Ready once every fetch answered, a miss included; at once, and without calling `read`, for a compiler that
+    /// keeps nothing.
+    [[nodiscard]] virtual cc::shared_async<cc::unit> prefetch_modules(cc::function_ref<module_library()> read) const
+    {
+        (void)read;
+        return cc::make_async_from_value(cc::unit{});
     }
 };

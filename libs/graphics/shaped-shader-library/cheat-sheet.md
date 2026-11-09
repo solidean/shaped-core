@@ -115,6 +115,9 @@ lib.read_modules();                         // -> module_library { paths, texts,
                                             //    directory by directory as added, each sorted by name; files() views the two vectors
 // an SGL package adds its own module dirs; every SGL compile, compile_source and compile_hit_group included, sees all of them.
 // a module file a compile reached is a dependency like an include: editing it reloads the shader.
+lib.prefetch_modules();                     // -> cc::shared_async<cc::unit>: fetches the SGL compilers' kept modules
+                                            //    (keeps_module_artifacts) ahead of compiles; AWAIT it while loading so
+                                            //    the first compiles load their modules; adding a package starts it anyway
 lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts); does nothing in a frozen build
 // Frozen builds (SC_FROZEN_SHADERS): no source dir mounted, no reload — docs/frozen-shaders.md.
 // SC_SHADER_RECORD=<file> makes a run write a bundle of every shader it obtains; sc_embed_shader_bundle(TARGET exe) embeds
@@ -224,7 +227,10 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_o
                                    //   {.name = slib::k_weakens_float_option, .value = "true"}, which compiles at .fast and warns
                                    //   every target's text carries its final addresses, so the binding pass never runs behind it
                                    //   preprocess is cached under everything it reads: in memory, and in a persistent store
-slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; }
+slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; bool diagnostics;
+                                   //   sgl_undefined_guard guards_undefined; bool keeps_module_artifacts; }
+                                   //   keeps_module_artifacts: each SGL module's checked layer kept in that store too,
+                                   //   so a later process loads its modules rather than checking them; off by default
                                    //   unset = bcache::default_cache(), looked up per compile, off under SC_SG_COLD=shaders
                                    //   nullptr = memory only (a test off the user's cache); a store given must outlive the edge
                                    //   no persistent tier on wasm or without threads, whatever is given

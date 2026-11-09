@@ -296,6 +296,8 @@ void slib::shader_library::add_compiler(std::unique_ptr<shader_compiler> compile
         }
     }
     _compilers.push_back(std::shared_ptr<shader_compiler const>(cc::move(compiler)));
+    if (language == shader_language::sgl && !_module_dirs.empty())
+        (void)prefetch_modules();
 }
 
 slib::shader_compiler const* slib::shader_library::find_compiler(shader_language language, sg::shader_format format) const
@@ -341,6 +343,33 @@ void slib::shader_library::add_module_dir(cc::string_view virtual_dir)
             return;
     _module_dirs.push_back(cc::move(normalized.value()));
     _module_sources.push_back({});
+    (void)prefetch_modules();
+}
+
+namespace
+{
+cc::shared_async<cc::unit> all_of(cc::vector<cc::shared_async<cc::unit>> nodes)
+{
+    co_await cc::async_all(cc::span<cc::shared_async<cc::unit> const>(nodes));
+    co_return;
+}
+} // namespace
+
+cc::shared_async<cc::unit> slib::shader_library::prefetch_modules() const
+{
+    // read once, and only where a compiler keeps anything
+    auto read = cc::optional<module_library>();
+    auto const read_once = [&]() -> module_library
+    {
+        if (!read.has_value())
+            read = read_modules();
+        return read.value();
+    };
+    auto fetches = cc::vector<cc::shared_async<cc::unit>>();
+    for (auto const& compiler : _compilers)
+        if (compiler->source_language() == shader_language::sgl)
+            fetches.push_back(compiler->prefetch_modules(read_once));
+    return all_of(cc::move(fetches));
 }
 
 slib::module_library slib::shader_library::read_modules() const
@@ -416,6 +445,8 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
             _module_dirs.push_back(cc::move(virtual_dir.value()));
             _module_sources.push_back(cc::string::create_copy_of(dir.source_dir));
         }
+    if (package.language == shader_language::sgl && !package.module_dirs.empty())
+        (void)prefetch_modules();
 
     for (auto const& definition : package.definitions)
     {

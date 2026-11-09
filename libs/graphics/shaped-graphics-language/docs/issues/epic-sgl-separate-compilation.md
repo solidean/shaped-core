@@ -51,7 +51,7 @@ The steps, each a child issue when it is taken up, in this order:
    *Landed on 2026-11-09:* `check::save_link_artifact` and `load_link_artifact`, the second moving a link past what changed below it, as relocation does.
    A move in memory goes through the same bytes, so the relocation test holds every load to a fresh check too.
    The driver loads a link from the artifacts a host handed in (`sgl::offer_module_artifacts`) where it would check it; shaped-viewer's 10 links load in 8.6 ms, against 27.9 ms.
-   No host keeps them yet, and slib's persistent cache is where one would.
+   slib keeps them in its persistent cache where asked (`sgl_compiler_options::keeps_module_artifacts`), fetched ahead of its compiles.
 8. **The language server on layers.** *Landed on 2026-11-09:* an analysis continues from the layers every compile shares.
    A keystroke in a shaped-viewer program is 3.6 ms; in a module it uses 5.8 to 9.6 ms by its place in the chain.
 9. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.

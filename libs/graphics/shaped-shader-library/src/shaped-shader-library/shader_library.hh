@@ -113,6 +113,13 @@ public:
     /// library never depends on the filesystem's order.
     [[nodiscard]] module_library read_modules() const;
 
+    /// Starts fetching what each SGL compiler keeps across runs of the modules `read_modules` reads, where one keeps
+    /// anything (`sgl_compiler_options::keeps_module_artifacts`); adding a package, a module directory or a compiler
+    /// starts it too.
+    /// Ready once every fetch answered: what an app awaits, while it loads, so its first compiles load their modules
+    /// rather than check them; a compile never waits for it.
+    [[nodiscard]] cc::shared_async<cc::unit> prefetch_modules() const;
+
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
     /// Call after every add_package: the watcher walks the asset list, which registration grows.
     /// A frozen build (`SLIB_FROZEN_SHADERS`) has nothing on disk to watch, so there this does nothing.

@@ -12,6 +12,7 @@
 #include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
 #include <shaped-shader-library/impl/sgl_emit_cache.hh>
 #include <shaped-shader-library/impl/sgl_library.hh>
+#include <shaped-shader-library/impl/sgl_module_artifacts.hh>
 
 using namespace cc::primitive_defines;
 
@@ -176,13 +177,15 @@ public:
     sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
                         cc::optional<bcache::blob_cache*> persistent_cache,
                         bool diagnostics,
-                        sgl::check::undefined_guard guards_undefined)
+                        sgl::check::undefined_guard guards_undefined,
+                        bool keeps_module_artifacts)
       : _inner(cc::move(inner)),
         _format(_inner != nullptr ? _inner->target_format() : sg::shader_format::spirv),
         _target(target_of(_format)),
         _persistent_cache(persistent_cache),
         _diagnostics(diagnostics),
-        _guards_undefined(guards_undefined)
+        _guards_undefined(guards_undefined),
+        _keeps_module_artifacts(keeps_module_artifacts)
     {
     }
 
@@ -221,6 +224,15 @@ public:
             // `coherent(device)` and texture atomics, which a metallib compiles from MSL 3.2 on
             inner.metal_language_version = "metal3.2";
         return _inner->compile(inner);
+    }
+
+    [[nodiscard]] cc::shared_async<cc::unit> prefetch_modules(cc::function_ref<slib::module_library()> read) const override
+    {
+        auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
+        if (store == nullptr)
+            return cc::make_async_from_value(cc::unit{});
+        auto const modules = read();
+        return slib::impl::prefetch_sgl_modules(modules.files(), *store);
     }
 
     [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
@@ -377,6 +389,10 @@ private:
              .device_features = device_features,
              .native = native,
              .native_line_table = native_line_table});
+        // what the front end checked rather than loaded, kept for the next process
+        if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
+            store != nullptr)
+            slib::impl::keep_made_sgl_modules(*store);
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
@@ -486,6 +502,7 @@ private:
     cc::optional<bcache::blob_cache*> _persistent_cache = {};
     bool _diagnostics = false;
     sgl::check::undefined_guard _guards_undefined = sgl::check::undefined_guard::none;
+    bool _keeps_module_artifacts = false;
 };
 } // namespace
 
@@ -530,11 +547,13 @@ std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
     return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics,
-                                                 sgl::check::undefined_guard(options.guards_undefined));
+                                                 sgl::check::undefined_guard(options.guards_undefined),
+                                                 options.keeps_module_artifacts);
 }
 
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_spirv_compiler(sgl_compiler_options const& options)
 {
     return std::make_unique<sgl_shader_compiler>(nullptr, options.persistent_cache, options.diagnostics,
-                                                 sgl::check::undefined_guard(options.guards_undefined));
+                                                 sgl::check::undefined_guard(options.guards_undefined),
+                                                 options.keeps_module_artifacts);
 }
