@@ -137,3 +137,52 @@ TEST("sgl ir - a robustness report writes through the same record")
         CHECK(e.value().text.contains("sg_debug"));
     }
 }
+
+// An unpack takes one word whatever its result's width, so the call's scalar is never splatted to the result.
+TEST("sgl ir - an unpack of a word lowers to SPIR-V, and the DXIL writer declines it for the text route")
+{
+    constexpr auto source = cc::string_view("binding work:\n"
+                                            "    words: buffer[uint]\n"
+                                            "    out_values: mut buffer[float4]\n"
+                                            "\n"
+                                            "@compute(1) fun cs(@thread_id id: int3){work}:\n"
+                                            "    let w = work.words[id.x]\n"
+                                            "    let h = unpack_half2x16(w)\n"
+                                            "    work.out_values[id.x] = float4(h.x, h.y, unpack_unorm4x8(w).x, "
+                                            "unpack_snorm4x8(w).x)\n");
+    for (auto const t : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = t, .native = sgl::emit::native_route::prefer});
+        REQUIRE(e.has_value());
+        if (t == sgl::emit::target::hlsl_vulkan)
+            CHECK(!e.value().spirv.empty());
+        else
+            CHECK(e.value().dxil.empty()); // the text route, where DXC writes the unpack
+    }
+}
+
+// An if whose branches all return leaves its merge unreached, and a nested one's merge then reaches only that: a block
+// with predecessors and no dominator, which the simplifier must step over.
+TEST("sgl ir - an entry point that returns from every branch of a nested if lowers")
+{
+    constexpr auto source = cc::string_view("struct v:\n"
+                                            "    @position position: hpos4\n"
+                                            "    uv: float2\n"
+                                            "@pixel struct target:\n"
+                                            "    color: float4\n"
+                                            "@pixel fun ps(p: v) -> target:\n"
+                                            "    if p.uv.x > 0.0:\n"
+                                            "        return {color = float4(1.0)}\n"
+                                            "    else:\n"
+                                            "        if p.uv.y > 0.0:\n"
+                                            "            return {color = float4(0.5)}\n"
+                                            "        else:\n"
+                                            "            return {color = float4(0.25)}\n");
+    auto const e = sgl::compile_to_text({.source = source,
+                                         .entry_point = "ps",
+                                         .target = sgl::emit::target::hlsl_vulkan,
+                                         .native = sgl::emit::native_route::prefer});
+    REQUIRE(e.has_value());
+    CHECK(!e.value().spirv.empty());
+}

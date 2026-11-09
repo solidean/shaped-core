@@ -250,8 +250,11 @@ private:
         for (auto k = isize(0); k < _order.size(); ++k)
         {
             auto const b = isize(_order[k]);
-            if (k > 0 && !predecessors[k].empty())
-                _immediate[b] = u32(_order[isize(tree.immediate(u32(k)))]);
+            // a block whose predecessors are all unreached, as the merge after two branches that each return, has
+            // predecessors and no dominator
+            if (auto const idom = k > 0 && !predecessors[k].empty() ? tree.immediate(u32(k)) : k_no_target;
+                idom < u32(_order.size()))
+                _immediate[b] = u32(_order[isize(idom)]);
             if (predecessors[k].size() == 1)
                 _only_from[b] = u32(_order[isize(predecessors[k][0])]);
         }

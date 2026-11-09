@@ -1112,12 +1112,15 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
                                          : step == 1 ? math::sclamp
                                                      : math::uclamp);
         }
-        // a scalar beside vectors stands for a vector of it, where the call gives one
+        // a scalar beside vectors stands for a vector of it, where the call gives one;
+        // an unpack's word is one scalar whatever its result, and refract's ratio is one too
+        auto const takes_scalar = fn == math::refract || fn == math::unpack_half2x16 || fn == math::unpack_snorm4x8
+                               || fn == math::unpack_unorm4x8;
         auto operands = cc::vector<u32>();
         auto const lanes = lanes_of(result);
         for (auto const a : args)
         {
-            auto const is_short = lanes > 1 && lanes_of(_out.type_of(a)) == 1 && fn != math::refract;
+            auto const is_short = lanes > 1 && lanes_of(_out.type_of(a)) == 1 && !takes_scalar;
             operands.push_back(u32(is_short ? splat(a, result) : a));
         }
         return add(op::math, result, operands, u8(fn));
