@@ -746,7 +746,8 @@ written write_texel_atomic(call_context const& ctx)
         case atomic_op::load:
             return {.text = cc::format("{}.atomic_load({}).x", image, coordinate)};
         case atomic_op::store:
-            return {.text = cc::format("{}.atomic_store({}, {}({}))", image, coordinate, vector, v)};
+            // the value first, as `write` takes it, where every other texel atomic takes the coordinate first
+            return {.text = cc::format("{}.atomic_store({}({}), {})", image, vector, v, coordinate)};
         case atomic_op::exchange:
             return {.text = cc::format("{}.atomic_exchange({}, {}({})).x", image, coordinate, vector, v)};
         default:
