@@ -261,6 +261,7 @@ TEST("symbolize - a recorded module table resolves addresses this process did no
     CHECK(!local.is_foreign());
 
     auto agreed = 0;
+    auto placed_alike = 0;
     auto with_module = 0;
     for (isize i = 0; i < count; ++i)
     {
@@ -271,13 +272,19 @@ TEST("symbolize - a recorded module table resolves addresses this process did no
             ++with_module;
         if (f.has_function() && f.function == l.function)
             ++agreed;
+        if (!f.module.empty() && f.module == l.module && f.module_offset == l.module_offset)
+            ++placed_alike;
     }
 
     // A module for every frame comes from the TABLE alone, so it holds even where no debug info could be loaded.
     CHECK(with_module == count);
+    // and the table puts each frame where this process's own lookup does, which is what an offline resolve is keyed on
+    CHECK(placed_alike == count);
 
+#if !defined(__APPLE__) // macOS resolves a foreign table to modules alone: dladdr knows only this process's images
     if (build_has_symbols())
         CHECK(agreed > 0); // and where there are symbols, the two sessions say the same thing
+#endif
 }
 
 TEST("symbolize - a module table with no usable binaries still names the module")

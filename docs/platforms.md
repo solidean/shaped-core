@@ -144,14 +144,15 @@ Below `FULL`, `file_name()` and `function_name()` are `""` and `line()` and `col
 `CC_SITE_TEXT(text)` is `text` at `FULL` and `""` below it: always-on checks lose their condition text, and an unnamed `cc::rec` scope its default name.
 `cc::describe_site` prints a site at every level, `module+0xoffset` at `OPAQUE`.
 
-**An `OPAQUE` site resolves through the build's debug info**, offline: the PDB on Windows, the DWARF or split debug file elsewhere.
+**An `OPAQUE` site resolves through the build's debug info**, offline: the PDB on Windows, the objects' DWARF through the debug map on macOS, the DWARF or split debug file elsewhere.
 `llvm-symbolizer --inlining --obj=<module>` on the module's address plus the offset names it, inlined sites included.
+On macOS the offset is from the Mach-O header, so `atos -fullPath -i -o <module> -l <vmaddr>` on `__TEXT`'s vmaddr plus the offset names it; `llvm-symbolizer` finds no line there without a dSYM.
 The innermost frames are `source_location.hh`'s own, since the address is taken by an instruction inlined into the site; the first frame outside it is the site.
 On clang and GCC that instruction is one `lea` (`adr` on arm64), the cost of `std::source_location`'s capture; cl.exe has no inline assembly there, so it is a call.
 A site evaluated in a constant expression has no code address, so it is unnamed below `FULL`: `cc::rec`'s descriptors are the case.
 wasm has no address to take either, so there `OPAQUE` keeps nothing, as `OFF` does.
 
-**`dev.py test` resolves the sites a failed run printed**: one `llvm-symbolizer` per binary, from the compiler's own LLVM install, against its PDB or DWARF.
+**`dev.py test` resolves the sites a failed run printed**: one `llvm-symbolizer` per binary, from the compiler's own LLVM install, against its PDB or DWARF, and `atos` for a Mach-O.
 It prints each as `file:line (function)` with the source line there, which stands in for the condition text an assert drops below `FULL`.
 Without a symbolizer it prints the raw sites and how to point it at one, and the run's result is untouched.
 `LLVM_SYMBOLIZER` names a specific one.
@@ -160,11 +161,11 @@ A test's own site, below `FULL`, is the entry of its body, which resolves to the
 nexus keeps a test's source file at every level, so test selection by file and the listings work below `FULL` too; the listings' line is 0 there.
 
 A whole-build switch, never per-target: `cc::source_location`'s layout changes with it.
-**The clang development presets on Windows and Linux build at `OPAQUE`**: `debug`, `relwithdebinfo`, `coverage` and `sanitize-*`.
+**The clang development presets on Windows, Linux and macOS build at `OPAQUE`**: `debug`, `relwithdebinfo`, `coverage` and `sanitize-*`.
 There an edit that only moves lines, a comment or a reformat, changes the objects' debug info and nothing else, since no line or column is in code or data.
 `release-*`, `pgo-*` and `frozen` keep the default.
 The `singlethreaded-*` presets build at `FULL`, so `check --all-presets` still exercises it with assertions on; a test reading what only `FULL` keeps skips below it.
-The MSVC, GCC, macOS, iOS, Android and wasm presets stay at `FULL`: wasm has no address to take, and the others have not been verified below it.
+The MSVC, GCC, iOS, Android and wasm presets stay at `FULL`: wasm has no address to take, and the others have not been verified below it.
 
 ## x86-64 feature level (`SC_X64_LEVEL`)
 

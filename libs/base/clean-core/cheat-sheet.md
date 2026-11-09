@@ -1233,7 +1233,8 @@ hot.self_ratio_of("render_frame") > 0.3;             // the assertion form: a re
 
 #include <clean-core/platform/module_table.hh>   // which binaries were mapped where
 cc::enumerate_loaded_modules();              // -> cc::vector<cc::loaded_module>{base, size, path, identity}
-loaded_module::identity                      // the exact BUILD (PE TimeDateStamp+SizeOfImage), not just the path
+loaded_module::identity                      // the exact BUILD (PE TimeDateStamp+SizeOfImage, Mach-O LC_UUID), not just the path
+// Windows and macOS enumerate; empty elsewhere (cc::module_enumeration_available())
 loaded_module::contains(addr), .name()       // which module an address fell in; "app.exe", not its install dir
 // Serializing captures this for you; recording.modules() is empty when the recording is this process's own.
 
