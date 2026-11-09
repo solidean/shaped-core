@@ -43,7 +43,8 @@ Left:
   * ~~metal~~: landed 2026-11-09 on an M4.
     A pipeline's trace takes its ray's time natively over motion acceleration structures, keyframed vertices and instance transforms.
     Metal's query has no motion, so an inline trace of an opted-in package takes the software walk, its pool and roots at argument-table slots 28 and 29.
-    The motion tags are on every MSL intersector, which tests clean on static scenes; what they cost there is not measured yet.
+    The motion tags are on every MSL intersector, which tests clean on static scenes and doubles their traversal.
+    That is [perf-sgl-msl-motion-tags-double-static-traces](perf-sgl-msl-motion-tags-double-static-traces.md).
   * **dx12:** DXR has no motion at all, so it stays with the software walk until it does.
 * **SRT keyframes**, which interpolate a rotation, rather than two matrices mixed element by element.
   A large rotation shrinks an instance partway through under the mix.
