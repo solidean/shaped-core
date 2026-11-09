@@ -96,7 +96,11 @@ sgl::prelude_file_of(path)                 // -> i32: which prelude file a path 
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
 sgl::check::check_library(prelude, library)  // -> optional<checked_prelude>: every module once, one layer for every
                                            // program reaching any of them; none where a module reports anything,
-                                           // a file's parse error included
+                                           // a file's parse error included; the chain below, from scratch
+sgl::check::library_chain(library)         // -> vector<chained_module> { name, files }: dependencies first, a module
+                                           // nothing uses last; empty where the library makes no chain
+sgl::check::check_next_module(base, library, name)  // -> optional<checked_prelude>: the next link, over the prelude's
+                                           // layer or the link before; a program reaching only its modules continues it
 sgl::check::may_continue_from(layer, library, program)  // -> bool: a layer of its very modules, or the library's
 m.is_reached_file(file)                    // -> bool: false for a module the program does not use, which a layer of the
                                            // whole library holds; ASK IT in any pass over every symbol or pipeline
@@ -110,6 +114,8 @@ sgl::shared_library_of(library, source_name)  // -> shared_ptr<shared_library co
 sgl::layer_of(*shared, program)            // -> shared_ptr<checked_prelude const>: the layer to continue from, made once
                                            // and kept in `shared`; null where none serves. HOLD IT as long as the module
                                            // checked behind it, which reads the layer's tables in place
+                                           // its chain's links are shared with every library holding the same modules
+                                           // before them, so an edit checks its module and those after it alone
 
 #include <shaped-graphics-language/check/artifact.hh>
 sgl::check::save_artifact(layer, key)      // -> optional<vector<byte>>: the prelude's layer or one of modules as bytes

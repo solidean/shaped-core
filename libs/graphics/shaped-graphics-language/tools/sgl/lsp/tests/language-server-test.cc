@@ -498,10 +498,49 @@ TEST("sgl lsp - every edit of a document continues from one parse and one check 
     CHECK(edited->library == first->library);
     CHECK(edited->layer == first->layer);
     CHECK(other->layer == first->layer);
-    // the layer holds both modules, and each document reaches only the one it uses
-    REQUIRE(first->module.reached_library_files.size() == 1);
-    CHECK(first->library->names[first->module.reached_library_files[0]].ends_with("shading.sgl"));
+    // the layer holds both modules, and each document reaches only what it uses
+    CHECK(first->module.reached_library_files.size() == 2);
+    REQUIRE(other->module.reached_library_files.size() == 1);
+    CHECK(other->library->names[other->module.reached_library_files[0]].ends_with("noise.sgl"));
     CHECK(first->text_of(first->module.prelude_file_count()).contains("module "));
+}
+
+TEST("sgl lsp - an edit of a module checks it and the modules after it again, and keeps the layers of those before",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\nfun g() -> float => shading.lit(1.0)\n");
+    auto const first = sgl_lsp::analyze(doc);
+    // `shading` uses `noise`, so it comes after it in the chain; an unsaved edit of it is a new last layer
+    auto const shading_uri = lsp::uri_of_path(dir + "/shading.sgl");
+    auto const edited_text
+        = cc::string("module shading\n\nuse noise\n\nfun lit(x: float) -> float => noise.grain(x) * 3.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = shading_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(first->layer != nullptr);
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer != first->layer);
+    auto const before_of = [](sgl::shared_library const& library)
+    {
+        return library.checked.lock([](sgl::shared_library::layers& l)
+                                    { return l.library != nullptr ? l.library->before : nullptr; });
+    };
+    auto const kept = before_of(*first->library);
+    REQUIRE(kept != nullptr);
+    CHECK(before_of(*edited->library) == kept);
 }
 
 TEST("sgl lsp - a module file open in the editor is what the documents using it are checked against", main_thread)

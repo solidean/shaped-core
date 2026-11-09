@@ -111,14 +111,19 @@ cc::string observed_as(sgl::check::checked_module const& m,
                 out.appendf("error {}: {}\n", sgl::emit::to_string(error.kind), error.detail);
         }
     }
+    // which module's tests come first follows the order the modules were checked in, which no reader depends on
+    auto tests = cc::vector<cc::string>();
     for (auto const& r : sgl::test::run_tests(m, files))
     {
         auto const& t = m.tests[r.test];
         if (!m.is_reached_file(t.file))
             continue;
-        out.appendf("test at {}:{} ({}): {}, {} checks\n", name_of(t.file), t.where.offset, t.scope_path,
-                    sgl::test::to_string(r.status), r.checks_run);
+        tests.push_back(cc::format("test at {}:{} ({}): {}, {} checks\n", name_of(t.file), t.where.offset, t.scope_path,
+                                   sgl::test::to_string(r.status), r.checks_run));
     }
+    cc::sort(tests);
+    for (auto const& t : tests)
+        out += t;
     return out;
 }
 
@@ -739,4 +744,41 @@ TEST("sgl checked modules - shaped-viewer's sets of modules, checked each, again
                 library.modules.size(), library.files.size(), layers.size());
     cc::println("every set checked once: {:.1f} ms; the whole library checked once: {:.1f} ms", sets_secs * 1000,
                 once_secs * 1000);
+}
+
+TEST("sgl checked modules - shaped-viewer's chain of module layers, and what an edit of each module checks again",
+     nx::config::manual)
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const& library = viewer_modules();
+    auto const order = sgl::check::library_chain(library.files);
+    REQUIRE(!order.empty());
+
+    auto step_secs = cc::vector<double>();
+    auto layer = cc::optional<sgl::check::checked_prelude>();
+    for (auto const& module : order)
+    {
+        auto const started = cc::current_time_steady_secs();
+        auto next
+            = sgl::check::check_next_module(layer.has_value() ? layer.value() : *checked, library.files, module.name);
+        step_secs.push_back(cc::current_time_steady_secs() - started);
+        REQUIRE(next.has_value());
+        layer = cc::move(next);
+    }
+    // an edit of a module checks its layer and every one after it again
+    auto total = 0.0;
+    for (auto const s : step_secs)
+        total += s;
+    auto after = total;
+    auto edits = 0.0;
+    for (auto i = isize(0); i < order.size(); ++i)
+    {
+        cc::println("{:>2} {:<24} {:6.1f} ms, an edit of it {:6.1f} ms", i, order[i].name, step_secs[i] * 1000,
+                    after * 1000);
+        edits += after;
+        after -= step_secs[i];
+    }
+    cc::println("the chain whole: {:.1f} ms; an edit of a module, on average: {:.1f} ms", total * 1000,
+                edits / double(order.size()) * 1000);
 }

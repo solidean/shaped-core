@@ -21,6 +21,13 @@ struct sgl::check::module_file
     ast::file_ast const& ast;
 };
 
+/// One module of a library's chain: its name, and its files as positions in the library, in the library's order.
+struct sgl::check::chained_module
+{
+    cc::string name;
+    cc::vector<i32> files;
+};
+
 namespace sgl::check
 {
 /// Name resolution, type checking and evaluation of `program`, behind the files of `prelude` and the modules of
@@ -99,7 +106,8 @@ namespace sgl::check
                                                           cc::span<module_file const> library,
                                                           module_file program);
 
-/// Every module of `library` checked once as one layer behind `prelude`, for every program that reaches any of them.
+/// Every module of `library` checked once behind `prelude`, for every program that reaches any of them: the last layer
+/// of the chain `library_chain` orders, each made by `check_next_module`.
 /// A program behind it checks as it does beside the modules it reaches alone: a module it does not use is checked, and
 /// nothing of the program sees it (`checked_module::is_reached_file`).
 /// None where a module, or the plan of them, reports anything; a caller then falls back to `check_modules`.
@@ -108,7 +116,21 @@ namespace sgl::check
 [[nodiscard]] cc::optional<checked_prelude> check_library(checked_prelude const& prelude,
                                                           cc::span<module_file const> library);
 
-/// Whether `program` may continue from `layer`: a layer of its very modules, or one of the whole library it reaches into.
+/// The modules of `library` in the order a chain of layers checks them: each after every module it uses, and of those
+/// that may come next the one more modules reach, so a module nothing uses comes last.
+/// Empty where the library makes no chain: no module, a file that does not parse, or a plan that reports.
+[[nodiscard]] cc::vector<chained_module> library_chain(cc::span<module_file const> library);
+
+/// `base`, the prelude's layer or one of the chain over it, with `module` of `library` checked over it: the next layer.
+/// The layer before must hold every module `module` uses, which `library_chain`'s order does.
+/// None where it does not, and where the module reports anything.
+/// A program reaching only the modules a layer holds may continue from it (`may_continue_from`).
+/// `library` and `base` must outlive the result.
+[[nodiscard]] cc::optional<checked_prelude> check_next_module(checked_prelude const& base,
+                                                              cc::span<module_file const> library,
+                                                              cc::string_view module);
+
+/// Whether `program` may continue from `layer`: a layer of its very modules, or one of the chain holding them all.
 [[nodiscard]] bool may_continue_from(checked_prelude const& layer,
                                      cc::span<module_file const> library,
                                      module_file program);
@@ -169,7 +191,8 @@ private:
     cc::vector<i32> _library_order;
     /// The modules of that layer, by name, the program's own first.
     cc::vector<cc::string> _modules;
-    /// Whether the layer is `check_library`'s, of every module, which a program reaching any of them continues from.
+    /// Whether the layer is one of the chain `check_next_module` makes, which a program reaching only its modules
+    /// continues from; the chain's last is `check_library`'s.
     bool _is_library = false;
     /// For a layer of the whole library: the names an emitted name must not take, those of the prelude and of the files
     /// a program reaches, made once per set of reached files and shared by every program reaching the same ones.
@@ -193,6 +216,9 @@ private:
     friend bool layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options);
     friend cc::optional<checked_prelude> check_library(checked_prelude const& prelude,
                                                        cc::span<module_file const> library);
+    friend cc::optional<checked_prelude> check_next_module(checked_prelude const& base,
+                                                           cc::span<module_file const> library,
+                                                           cc::string_view module);
     friend bool may_continue_from(checked_prelude const& layer, cc::span<module_file const> library, module_file program);
     friend bool reaches_the_same_modules(checked_prelude const& layer,
                                          cc::span<module_file const> library,

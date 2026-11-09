@@ -67,7 +67,7 @@ That needs no multi-file compilation.
 
 ## Separate compilation: checked layers
 
-*Decided with the maintainer on 2026-11-08, and its remaining steps on 2026-11-09; steps 1 to 5 are built in a first form, the rest is not.*
+*Decided with the maintainer on 2026-11-08, and its remaining steps on 2026-11-09; steps 1 to 6 are built in a first form, the rest is not.*
 
 ### What it costs today
 
@@ -229,7 +229,7 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    A test holds every one of those programs to checking as it does beside the modules it reaches alone, the emitted text of every target included.
    Where a module reports anything the library makes no layer, and the driver keeps one per set of modules as before.
    An edit of any module checks the library again, about 27 ms there; one layer per module, with relocation and early cutoff, is what would cut that.
-   The language server continues from the same layers, `sgl::layer_of`, so a keystroke in a shaped-viewer program is a 3.6 ms analysis and one in a module 42.6 ms (release).
+   The language server continues from the same layers, `sgl::layer_of`, so a keystroke in a shaped-viewer program is a 3.6 ms analysis (release).
 3. **The prelude's artifact.** *Landed on 2026-11-08: the prelude's 5.8 ms check is a 0.68 ms load of 1.6 MB, in a release build.*
    `check::save_artifact` and `load_artifact` write and read the checker's whole state after the prelude, bodies included, under a host's key.
    In a fresh `sgl` process the load was 2.3 ms with a file's read, and 8 ms from blob-cache with its open; the prelude's parse, about 13 ms there, is what a process still pays.
@@ -251,6 +251,11 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
 6. **A chain of module layers.** The library's modules in one order, dependencies first, each module a layer over the one before.
    Within one library that order is fixed, so ids stay positions and nothing is relocated.
    An edit of a module checks it and the modules after it again, and none before: the order puts a module nothing else uses last.
+   *Landed on 2026-11-09:* `check::library_chain` orders them, `check::check_next_module` checks one over the layer before, and `check_library` is the chain whole.
+   The driver keeps each link under a key of the modules up to it, so a library that changed a module finds the links before it.
+   shaped-viewer's chain is 24.7 ms whole (release); an edit of its first module checks it all, of its last 1.4 ms, 13.8 ms on average.
+   In the language server a keystroke in its last module is a 5.9 ms analysis, and in its first 31.7 ms.
+   Every link holds a whole copy of the tables below it, which [perf-sgl-layer-freeze-copies](../../issues/perf-sgl-layer-freeze-copies.md) is.
 7. **Early cutoff, through relocation.** A layer splits into its interface and its bodies, and a dependent's layer names its imports' interfaces.
    An edit that leaves a module's interface alone relocates the layers after it onto the new one rather than checking them again.
    That is the import table and the relocation pass of [ids](#ids), and what a dependent's key is made of.

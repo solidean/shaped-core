@@ -71,15 +71,22 @@ BENCHMARK("sgl lsp - a keystroke in a shaped-viewer program, and in one of the m
 
     nx::bench::run("keystroke in the program", [&] { nx::bench::sink(sgl_lsp::analyze(doc)->module.symbols.size()); });
     // an open module file whose text differs every time, as typing in it makes it
-    auto module_text = cc::string(first->text_of(first->module.prelude_file_count()));
-    auto const module_uri = first->uri_of(first->module.prelude_file_count());
-    nx::bench::run("keystroke in a module it uses",
-                   [&]
-                   {
-                       module_text += " ";
-                       auto const open = cc::vector<sgl_lsp::open_text>{{.uri = module_uri, .text = module_text}};
-                       nx::bench::sink(sgl_lsp::analyze(doc, open)->module.symbols.size());
-                   });
+    // The library is a chain of layers, so an edit of its first module checks every one again, and of its last that one.
+    auto const first_file = first->module.prelude_file_count();
+    auto const last_file = first_file + i32(first->module.library_files.size()) - 1;
+    for (auto const [label, file] : {cc::pair{"keystroke in the chain's first module", first_file},
+                                     cc::pair{"keystroke in the chain's last module", last_file}})
+    {
+        auto module_text = cc::string(first->text_of(file));
+        auto const module_uri = first->uri_of(file);
+        nx::bench::run(label,
+                       [&]
+                       {
+                           module_text += " ";
+                           auto const open = cc::vector<sgl_lsp::open_text>{{.uri = module_uri, .text = module_text}};
+                           nx::bench::sink(sgl_lsp::analyze(doc, open)->module.symbols.size());
+                       });
+    }
     sgl_lsp::set_module_dirs({});
 }
 

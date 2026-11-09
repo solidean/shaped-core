@@ -37,12 +37,14 @@ The steps, each a child issue when it is taken up, in this order:
 3. **Module artifacts.** *A first form landed on 2026-11-08:* one artifact per set of modules, the whole layer, so a 16 ms check is a 3.9 ms load; kept by no process, as the prelude's.
    *Since 2026-11-09 the library is one layer* (`check::check_library`), so a module is checked once per process whatever reaches it: shaped-viewer's 139 ms of sets is 27 ms.
 4. **A chain of module layers:** the library's modules in one order, dependencies first, each a layer over the one before; an edit re-checks from its module on.
+   *Landed on 2026-11-09:* an edit of shaped-viewer's last module checks 1.4 ms of its 24.7 ms chain, of its first all of it.
+   Each link copies the tables below it ([perf-sgl-layer-freeze-copies](perf-sgl-layer-freeze-copies.md)).
 5. **Early cutoff, through relocation:** an edit that leaves a module's interface alone relocates the layers after it rather than checking them again.
 6. **Options as a second layer:** a compile that sets a module's option checks only what reaches it.
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers.
 7. **Per-module artifacts, kept where a host asks,** relocated on load.
 8. **The language server on layers.** *Landed on 2026-11-09:* an analysis continues from the layers every compile shares.
-   A keystroke in a shaped-viewer program is 3.6 ms, and one in a module it uses 42.6 ms, which steps 4 and 5 cut.
+   A keystroke in a shaped-viewer program is 3.6 ms; in a module it uses 5.9 to 31.7 ms by its place in the chain, which step 5 cuts.
 9. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.
