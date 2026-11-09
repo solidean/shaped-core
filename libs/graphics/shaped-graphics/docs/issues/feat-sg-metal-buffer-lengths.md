@@ -2,6 +2,8 @@
 created: 2026-11-09
 refs:
   - test: "sg - an SGL buffer's length and a bytes' length are what the bound memory holds (CHK-460)"
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-09T10:40Z
 ---
 
 # Buffer lengths reach Metal shaders (EMIT-195)
