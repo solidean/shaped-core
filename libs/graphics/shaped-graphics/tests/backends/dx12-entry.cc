@@ -43,7 +43,8 @@ ASYNC_TEST("sg dx12 warp backend")
         (void)sg_test::shader_fixtures(); // alive before any child acquires through it
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
-        co_await nx::async_invoke_tests_in_sequence("dx12-warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "dx12-warp", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -71,7 +72,8 @@ ASYNC_TEST("sg dx12 hardware backend")
         (void)sg_test::shader_fixtures();
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
-        co_await nx::async_invoke_tests_in_sequence("dx12-hw", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "dx12-hw", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -97,7 +99,9 @@ ASYNC_TEST("sg dx12 native-dxil backend")
         (void)sg_test::shader_fixtures();
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true);
-        co_await nx::async_invoke_tests_in_sequence("dx12-native-dxil", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "dx12-native-dxil", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())},
+            ctx.value());
         auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
         dx.poll_device_removal();
         CHECK(!dx.is_device_lost())
@@ -126,7 +130,9 @@ ASYNC_TEST("sg dx12 never-block backend")
         (void)sg_test::shader_fixtures();
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
-        co_await nx::async_invoke_tests_in_sequence("dx12-never-block", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "dx12-never-block", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())},
+            ctx.value());
 
         // Nothing here can wait, so what the tests left running is awaited before the context goes.
         co_await cc::async_settled(ctx.value()->backlog.settled());

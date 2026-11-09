@@ -189,6 +189,7 @@ ASYNC_INVOCABLE_TEST("sr - a shader's division by zero is reported as a failed a
         cmd->compute.bind_pipeline(*pipeline);
         cmd->compute.dispatch_threads(4);
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         co_await ctx.idle_completion();
@@ -258,6 +259,7 @@ ASYNC_INVOCABLE_TEST("sr - a read of workgroup memory no invocation stored is re
         cmd->compute.bind_pipeline(*pipeline);
         cmd->compute.dispatch_threads(4);
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         co_await ctx.idle_completion();
@@ -318,6 +320,7 @@ ASYNC_INVOCABLE_TEST("sr - an index past an element of a binding array is measur
         cmd->compute.dispatch_threads(4);
         auto const future = cmd->download.data_from_buffer(written);
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         auto const data = co_await future.data();
@@ -380,6 +383,7 @@ ASYNC_INVOCABLE_TEST("sr - the length of a binding array's element at a non-unif
         cmd->compute.dispatch_threads(4);
         auto const future = cmd->download.data_from_buffer(written);
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         auto const data = co_await future.data();

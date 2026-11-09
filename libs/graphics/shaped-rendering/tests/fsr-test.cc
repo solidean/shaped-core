@@ -86,6 +86,7 @@ cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options opti
         if (frame + 1 == options.frames)
             readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
         result.last_shift = shift;
     }

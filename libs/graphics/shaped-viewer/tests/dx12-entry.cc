@@ -1,3 +1,5 @@
+#include "sv_backends.hh"
+
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -48,7 +50,8 @@ ASYNC_TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
         SKIP("no dx12 WARP device");
     else
     {
-        co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "warp", nx::invocation_options{.after_each = sv_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -72,7 +75,8 @@ ASYNC_TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
         SKIP("no dx12 hardware device");
     else
     {
-        co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "hardware", nx::invocation_options{.after_each = sv_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the

@@ -206,6 +206,7 @@ inline cc::shared_async<denoised_result> run_denoised(sg::context& ctx,
         if (frame + 1 == frames)
             readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
     }
 

@@ -3233,12 +3233,14 @@ struct planned_child
 };
 } // namespace
 
-cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::string name,
-                                                                          cc::vector<std::type_index> signature,
-                                                                          cc::vector<nx::typed_value> boxes,
-                                                                          bool in_parallel,
-                                                                          isize max_concurrent,
-                                                                          cc::thread_bound_scheduler* home)
+cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(
+    cc::string name,
+    cc::vector<std::type_index> signature,
+    cc::vector<nx::typed_value> boxes,
+    bool in_parallel,
+    isize max_concurrent,
+    cc::thread_bound_scheduler* home,
+    cc::unique_function<cc::shared_async<cc::unit>()> after_each)
 {
     // Everything below runs on first poll, which inherits the awaiting body's ambient — so this is the driver's context.
     auto* const parent_ctx = current_context();
@@ -3401,7 +3403,11 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
 
         runs.push_back(run_invoked_child(cc::move(node), &child.decl->test_config, locks, permits.get()));
         if (!in_parallel)
+        {
             co_await runs.back();
+            if (after_each.is_valid())
+                co_await after_each();
+        }
     }
 
     if (in_parallel && !runs.empty())

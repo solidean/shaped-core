@@ -411,10 +411,12 @@ ASYNC_TEST("sg dx12 backend")                        // only an ASYNC body can a
     auto const r = co_await nx::async_invoke_tests_in_sequence("dx12", ctx);  // one child at a time, match order
     co_await nx::async_invoke_tests_in_parallel("dx12", {.max_concurrent = 4}, ctx);   // fan-out; serial under -j1
     co_await nx::async_invoke_tests_in_sequence("webgpu", {.inherit_home = true}, ctx); // children on the DRIVER's home
-    // ^ nx::invocation_options {max_concurrent, inherit_home}. inherit_home is OFF by default and for a thread-BOUND
+    // ^ nx::invocation_options {max_concurrent, inherit_home, after_each}. inherit_home is OFF by default and for a thread-BOUND
     //   subject only (a webgpu device): it homes each child BODY where the driver is homed, and nothing else — the
     //   child's helper coroutines go to compute as any homed body's do. The driver must be homed — main_thread does it.
     //   A child's own main_thread still wins.
+    //   after_each: a cc::unique_function<cc::shared_async<cc::unit>()> a SEQUENCE awaits after every child; ignored in parallel.
+    //   For a subject the children share, e.g. a GPU context sweeping the epochs a test left in flight.
 }
 ```
 
