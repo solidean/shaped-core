@@ -194,8 +194,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                         .workgroup_starts_zeroed = target == emit::target::wgsl,
                                         .files = files,
                                         .names = names,
-                                        .guards_undefined = guards_undefined,
-                                        .guards_buffers = target != emit::target::msl});
+                                        .guards_undefined = guards_undefined});
     auto emitted = emit::emit_entry_point(m, legal, target,
                                           {.files = files,
                                            .names = names,

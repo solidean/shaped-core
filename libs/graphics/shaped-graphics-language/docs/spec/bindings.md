@@ -308,7 +308,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
 | filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
 | `T[N]` of a resource | `sg::feature::binding_arrays`, which WebGPU lacks ([Binding arrays](#binding-arrays)) |
-| `T[]` of a resource | `sg::feature::unbounded_binding_arrays`, which WebGPU lacks and sg's metal backend does not grant yet |
+| `T[]` of a resource | `sg::feature::unbounded_binding_arrays`, which WebGPU lacks |
 | `acceleration_structure[.geometry]` | `sg::feature::ray_query`, or `raytracing_pipeline` in a file that grants that one |
 | a call that traces inline, `world.trace(r)` | `sg::feature::ray_query`, emulated on WebGPU; counted where the entry point reaches the call (CHK-322) |
 | a ray-tracing stage, a trace of a ray type, a callable's call | `sg::feature::raytracing_pipeline`, which WebGPU lacks |
@@ -709,8 +709,6 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 
 ## Open
 
-* `values.length` on metal: HLSL and WGSL read it (CHK-460, EMIT-195), and a Metal buffer argument is a pointer that carries no length.
-  sg would pass the lengths in, as a buffer of sizes beside the argument table; until it does, a metal compile that reads one is refused.
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).

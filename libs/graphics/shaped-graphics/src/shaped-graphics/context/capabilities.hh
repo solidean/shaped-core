@@ -184,8 +184,8 @@ enum class sg::feature
     /// SGL's `@view_index` reads.
     /// What a stereo frame wants on a tiled GPU, where the driver bins both views together: layered rendering through
     /// `vertex_layer_output` rasterises them separately.
-    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
-    /// yet, and WebGPU has no such thing.
+    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`, Metal with vertex amplification of two views,
+    /// and WebGPU has no such thing.
     view_instancing,
 
     /// Not a capability: this device's driver may write nothing for a draw of several views whose pixel stage ignores the view.
@@ -215,7 +215,7 @@ enum class sg::feature
     /// A binding of `count == 0`, an array whose length each binding group decides by the views it is given.
     /// It is the last binding of its layout, and of its kind's table, which is where both APIs allow one.
     /// D3D12 grants it at resource binding tier 3, Vulkan with `descriptorBindingVariableDescriptorCount`.
-    /// Metal would reach it through an argument buffer, which is not wired up yet, and WebGPU has no binding arrays.
+    /// Metal reaches it through a table each group sizes behind its argument buffer, and WebGPU has no binding arrays.
     unbounded_binding_arrays,
 
     /// A shader may update a 64-bit integer of workgroup memory atomically (SGL's `atomic[long]` in a `@workgroup` binding).

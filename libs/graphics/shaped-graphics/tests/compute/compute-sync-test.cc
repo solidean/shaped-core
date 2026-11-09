@@ -543,8 +543,6 @@ ASYNC_INVOCABLE_TEST("sg - an SGL buffer's length and a bytes' length are what t
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (ctx->backend() == sg::backend_kind::metal)
-        SKIP("a Metal buffer carries no length, which sg passes in nowhere yet (EMIT-195)");
 
     auto const pipeline = co_await shaders::bytes::measure.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::bytes::measured>();

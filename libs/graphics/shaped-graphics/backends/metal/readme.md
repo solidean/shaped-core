@@ -91,6 +91,11 @@ Each of these is a fact about Metal rather than a gap in the backend.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
   Groups at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
   `dispatch_rays` borrows 5, `k_hit_group_offsets_buffer_index`, for the bound groups' hit-offsets mirrors, since a kernel draws no vertices.
+  The debug window shader diagnostics write is at 30, the last of Metal's 31, where a compute or raster pipeline is bound.
+- **A group's argument buffer is its 8-byte slots, then each slot's byte length, then its hit-offsets mirror.**
+  SGL's MSL reads a buffer's length from its slot's entry, `sgl_lengths`, since a Metal buffer is a pointer and carries none (EMIT-195).
+  The mirror is there only where a slot holds a TLAS, and `dispatch_rays` hands the kernel its address, so no shader knows where it sits.
+  An unbounded binding, the layout's last, takes one slot holding the address of a table behind those: its element count, a slot per element and a length per element (EMIT-211).
   An `[[attribute(n)]]` index is the attribute's position in `vertex_input_layout::attributes`, which is the workaround the vulkan backend already states for its SPIR-V locations.
   Both are a workaround for the same missing field: sg names a vertex input by an HLSL semantic, and neither MSL nor SPIR-V has one.
   **Nothing below checks any of it.**

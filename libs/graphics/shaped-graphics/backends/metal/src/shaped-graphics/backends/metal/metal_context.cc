@@ -160,8 +160,8 @@ bool metal_context::supports(sg::feature f) const
         // whether safe math keeps denormals is not known
         return false;
     case sg::feature::view_instancing:
-        // vertex amplification would grant it, and is not wired up yet
-        return false;
+        // vertex amplification, which SGL's `@view_index` reads as `[[amplification_id]]`
+        return _device != nullptr && _device->supportsVertexAmplificationCount(2);
     case sg::feature::pixel_view_read_workaround:
         return false;
     case sg::feature::ray_tracing_motion_blur:
@@ -211,8 +211,8 @@ bool metal_context::supports(sg::feature f) const
         // MSL 3.1's atomic_ulong min and max, which Apple's feature set tables give from Apple8; run on an M4
         return _device != nullptr && _device->supportsFamily(MTL::GPUFamilyApple8);
     case sg::feature::unbounded_binding_arrays:
-        // an argument buffer would hold one, which this backend does not lay out yet
-        return false;
+        // one slot holding the address of a table each group sizes, since no argument buffer member is unsized
+        return true;
     case sg::feature::image_atomics:
         // Inferred from the floor rather than probed: texture atomics need Apple7, below every Metal 4 device.
         return true;
@@ -548,6 +548,8 @@ void metal_context::shutdown()
     // Close the final epoch and drain, so every deferred release runs while the device is still alive.
     advance_epoch();
     drain_at_shutdown();
+    // the final epoch's records are decoded while the download path still runs
+    release_debug_windows();
 
     // The waiter may be parked on both timelines, so it is joined before they go.
     if (_completion_waiter != nullptr)
@@ -1090,9 +1092,6 @@ cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_b
                                                                                              int unbounded_capacity,
                                                                                              lifetime_scope scope)
 {
-    // metal grants no unbounded binding arrays yet, so no layout it made has one
-    if (unbounded_capacity != 0)
-        return cc::error("staging_binding_group: metal has no unbounded binding arrays yet");
-    return create_metal_staging_binding_group(cc::move(layout), scope);
+    return create_metal_staging_binding_group(cc::move(layout), scope, unbounded_capacity);
 }
 } // namespace sg::backend::metal

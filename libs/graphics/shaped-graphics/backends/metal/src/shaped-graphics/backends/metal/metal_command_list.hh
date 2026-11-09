@@ -247,6 +247,10 @@ private:
     /// It does not flush: the op does, once, after adding whatever else it reads.
     void declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint);
 
+    /// Binds the recording epoch's debug window at its slot, for a compute or raster pipeline about to run.
+    /// Every op that runs with it bound declares it, as a bound group's members are declared.
+    void bind_debug_window(sg::impl::pipeline_footprint const& footprint);
+
     /// Forget which group each slot binds, at the start and end of a rendering scope and of the recording.
     /// The groups stay retained by `_bound_keep_alive`; only the slots are cleared, and that ends no array declaration.
     void clear_bound_groups();
@@ -484,6 +488,8 @@ private:
     /// The layout of whichever pipeline was bound last, and what every group bound after it is checked against.
     /// One member for all three kinds: a bind replaces it, which is the same rule the encoders follow.
     metal_pipeline_layout const* _bound_layout = nullptr;
+    /// The window `bind_debug_window` bound, until a ray-tracing pipeline replaces what is bound.
+    raw_buffer_handle _bound_debug_window;
 
     /// The ray-tracing pipeline a dispatch_rays must have had its table built for.
     /// Nothing is bound to an encoder at bind time: which compute state runs is decided by the raygen the dispatch

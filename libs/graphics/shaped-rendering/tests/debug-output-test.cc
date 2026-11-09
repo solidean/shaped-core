@@ -2,6 +2,9 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#if SLIB_HAS_METAL
+#include <shaped-shader-library/compiler/metal_compiler.hh>
+#endif
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
@@ -26,6 +29,10 @@ std::unique_ptr<slib::shader_compiler> inner_compiler_for(sg::context const& ctx
 {
     if (ctx.backend() == sg::backend_kind::webgpu)
         return slib::create_wgsl_compiler();
+#if SLIB_HAS_METAL
+    if (ctx.backend() == sg::backend_kind::metal)
+        return slib::create_metal_compiler();
+#endif
 #if SLIB_HAS_DXC
     if (ctx.backend() == sg::backend_kind::dx12 || ctx.backend() == sg::backend_kind::vulkan)
     {

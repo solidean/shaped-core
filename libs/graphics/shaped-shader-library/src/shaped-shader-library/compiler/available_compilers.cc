@@ -15,12 +15,10 @@
 namespace
 {
 // SC_SHADER_DIAGNOSTICS: SGL writes print and assert records exactly where sg binds a window for them.
-// metal's buffer(30) binds none yet, so its edge writes none (issue: feat-sgl-gpu-print-and-assert).
 // SC_SHADER_UNDEFINED: what an operation with no value does, which without a window to report into is at most abort.
 constexpr auto k_guard = slib::sgl_undefined_guard(SLIB_SHADER_UNDEFINED);
 constexpr auto k_sgl_options
     = slib::sgl_compiler_options{.diagnostics = SG_SHADER_DIAGNOSTICS != 0, .guards_undefined = k_guard};
-constexpr auto k_sgl_options_without_window = slib::sgl_compiler_options{.guards_undefined = k_guard};
 } // namespace
 
 void slib::add_available_compilers(shader_library& lib)
@@ -58,6 +56,6 @@ void slib::add_available_compilers(shader_library& lib)
 
 #if SLIB_HAS_METAL
     lib.add_compiler(create_metal_compiler());
-    lib.add_compiler(create_sgl_compiler(create_metal_compiler(), k_sgl_options_without_window));
+    lib.add_compiler(create_sgl_compiler(create_metal_compiler(), k_sgl_options));
 #endif
 }

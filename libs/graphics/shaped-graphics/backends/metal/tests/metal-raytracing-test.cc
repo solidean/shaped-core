@@ -231,9 +231,10 @@ ASYNC_TEST("sg metal - a binding group encodes a tlas as a resource id")
     REQUIRE(group.value()->bound_tlases().size() == 1);
     CHECK(group.value()->bound_tlases()[0] == tlas);
 
-    // The hit-offsets mirror is the argument buffer's tail, one address past the one slot, so the group owns one buffer.
+    // The hit-offsets mirror is the argument buffer's tail, past the one slot and its length padded to an address, so
+    // the group owns one buffer.
     CHECK(group.value()->argument_address() != 0);
-    CHECK(group.value()->hit_offsets_address() == group.value()->argument_address() + sizeof(u64));
+    CHECK(group.value()->hit_offsets_address() == group.value()->argument_address() + 2 * sizeof(u64));
 }
 
 // ---------------------------------------------------------------------------------------------------------------

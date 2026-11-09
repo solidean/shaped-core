@@ -174,7 +174,7 @@ sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total
                                                    //   Windows reads the GPU Engine perf counters; elsewhere it refuses
                                                    //   see docs/concepts/gpu-metrics.md
 auto const d = ctx.metrics.stats() - before;       // sg::stats — monotone i64 totals per sg::stat; subtract two readings for "per frame"
-d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no per-resource ones
+d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no layout transitions
 d[sg::stat::blas_builds] / d[sg::stat::tlas_builds] //   acceleration structures built, counted at the facade on every backend
                                                    //   a list counts at its SUBMIT, a transfer at its ENQUEUE; see docs/concepts/metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
@@ -878,7 +878,7 @@ sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_s
                                   //   optional<compiled_shader> mesh_shader, task_shader (need mesh_shader; mesh replaces vertex stage + vertex input; one view);
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
                                   //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1;
-                                  //   int view_count=1 (>1 needs view_instancing: view i into layer i, SGL's @view_index; dx12 caps it at 4);
+                                  //   int view_count=1 (>1 needs view_instancing: view i into layer i, SGL's @view_index; dx12 caps it at 4, metal at what the device amplifies);
                                   //   pinned_data cached_pipeline={}; string target_set }
                                   //   depth/stencil state with no depth_stencil_format warns at creation: it would draw without either
                                   //   creation refuses a stage whose reflection does not fit `layout` (sg::describe_layout_misfit, binding/layout_fit.hh),

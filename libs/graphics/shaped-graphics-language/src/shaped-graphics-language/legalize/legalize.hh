@@ -46,7 +46,7 @@ struct sgl::check::legalize_options
     cc::span<cc::string_view const> names;
     /// LEGAL-65: what an integer division by zero, or an array index outside the array, does in the text.
     undefined_guard guards_undefined = undefined_guard::none;
-    /// The target reads a buffer's length, so a guard also bounds a buffer index (LEGAL-66); MSL's buffers carry none.
+    /// A guard also bounds a buffer index by the buffer's length (LEGAL-66); off only to isolate the other guards.
     bool guards_buffers = true;
 };
 

@@ -11,4 +11,12 @@ isize metal_binding_group_layout::argument_slot_count() const
         slots = cc::max(slots, isize(b.index) + cc::max(isize(1), isize(b.count)));
     return slots;
 }
+
+isize metal_binding_group_layout::unbounded_slot() const
+{
+    for (auto const& b : bindings())
+        if (b.count == 0)
+            return isize(b.index);
+    return -1;
+}
 } // namespace sg::backend::metal

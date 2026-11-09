@@ -13,10 +13,12 @@ namespace sg::backend::metal
 metal_staging_binding_group::metal_staging_binding_group(metal_context& ctx,
                                                          sg::binding_group_layout_handle layout,
                                                          cc::vector<int> descriptor_offsets,
-                                                         isize slot_count)
-  : sg::staging_binding_group(cc::move(layout), cc::move(descriptor_offsets)),
+                                                         isize slot_count,
+                                                         int unbounded_capacity)
+  : sg::staging_binding_group(cc::move(layout), cc::move(descriptor_offsets), unbounded_capacity),
     _ctx(ctx),
     _slots(cc::vector<u64>::create_filled(slot_count, u64(0))),
+    _lengths(cc::vector<u32>::create_filled(slot_count, u32(0))),
     _resources(cc::vector<sg::raw_buffer_handle>::create_defaulted(slot_count)),
     _texture_resources(cc::vector<sg::raw_texture_handle>::create_defaulted(slot_count)),
     _tlas_resources(cc::vector<sg::tlas_handle>::create_defaulted(slot_count))
@@ -39,6 +41,7 @@ void metal_staging_binding_group::write_view_descriptors(int first_descriptor,
         {
             auto const* const mtl_tlas = static_cast<metal_tlas const*>(tlas_view->tlas.get());
             _slots[slot] = mtl_tlas != nullptr ? mtl_tlas->storage().resource_id()._impl : u64(0);
+            _lengths[slot] = 0;
             _resources[slot] = nullptr;
             _texture_resources[slot] = nullptr;
             _tlas_resources[slot] = tlas_view->tlas;
@@ -49,6 +52,7 @@ void metal_staging_binding_group::write_view_descriptors(int first_descriptor,
         {
             auto* const bound = _ctx.texture_views().acquire(*texture_view);
             _slots[slot] = bound != nullptr ? bound->gpuResourceID()._impl : u64(0);
+            _lengths[slot] = 0;
             _resources[slot] = nullptr;
             _texture_resources[slot] = texture_view->texture;
             continue;
@@ -64,6 +68,7 @@ void metal_staging_binding_group::write_view_descriptors(int first_descriptor,
         // Offset folded into the address: MSL indexes from the pointer it is handed, so a view's offset cannot be
         // carried alongside it the way a descriptor's would be.
         _slots[slot] = mtl_buffer.gpu_address() + u64(buffer_view->offset_in_bytes);
+        _lengths[slot] = metal_binding_group::byte_length_of(*buffer_view);
         _resources[slot] = buffer_view->buffer;
         _texture_resources[slot] = nullptr;
     }
@@ -78,6 +83,7 @@ void metal_staging_binding_group::clear_view_descriptors(int first_descriptor, s
         CC_ASSERT(slot >= 0 && slot < _slots.size(), "a staging descriptor index is out of the group's range");
 
         _slots[slot] = 0;
+        _lengths[slot] = 0;
         _resources[slot] = nullptr; // releasing the reference is half of what clearing means
         _texture_resources[slot] = nullptr;
     }
@@ -110,19 +116,6 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 
     auto const& typed_layout = static_cast<metal_binding_group_layout const&>(*layout());
 
-    // A fresh buffer per snapshot, which is what makes snapshots independent of the builder and of each other: a
-    // caller holding an old one keeps the descriptors it was minted with, whatever the builder does next.
-    // The hit-offsets mirror rides in its tail, so a group holding a TLAS allocates nothing more.
-    auto const mirror = metal_binding_group::hit_offsets_mirror(_tlas_resources);
-    auto const hit_offsets_at = mirror.empty() ? isize(-1) : _slots.size() * isize(sizeof(u64));
-    auto const byte_size = cc::max(isize(sizeof(u64)), (_slots.size() + mirror.size()) * isize(sizeof(u64)));
-    auto* const arguments = _ctx.device()->newBuffer(
-        NS::UInteger(byte_size), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
-    if (arguments == nullptr)
-        return cc::error("staging_binding_group: the metal device refused the argument buffer");
-
-    arguments->setLabel(ns_string("sg staging snapshot"));
-
     auto slots = _slots;
 
     // The layout's static samplers are not staged — they have no descriptor a setter could reach — so they are written
@@ -139,11 +132,18 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
                 slots[isize(b.index)] = state->gpuResourceID()._impl;
             }
 
-    if (!slots.empty())
-        cc::memcpy(arguments->contents(), slots.data(), size_t(slots.size() * isize(sizeof(u64))));
-    if (hit_offsets_at >= 0)
-        cc::memcpy(static_cast<byte*>(arguments->contents()) + hit_offsets_at, mirror.data(),
-                   size_t(mirror.size() * isize(sizeof(u64))));
+    // A fresh buffer per snapshot, which is what makes snapshots independent of the builder and of each other: a
+    // caller holding an old one keeps the descriptors it was minted with, whatever the builder does next.
+    auto const layout_slots = typed_layout.argument_slot_count();
+    auto const mirror
+        = metal_binding_group::hit_offsets_mirror(cc::span<sg::tlas_handle const>(_tlas_resources).first_n(layout_slots));
+    auto created = metal_binding_group::create_arguments(
+        _ctx, "sg staging snapshot",
+        {.slots = slots, .lengths = _lengths, .unbounded_at = typed_layout.unbounded_slot(), .mirror = mirror});
+    if (created.has_error())
+        return cc::error(cc::move(created.error()));
+    auto* const arguments = created.value().buffer;
+    auto const hit_offsets_at = created.value().hit_offsets_at;
 
     // Everything the snapshot names, deduplicated only by being a handle each: the group has to outlive the builder's
     // next mutation.
@@ -174,7 +174,7 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         if (sg::is_sampler(b.type))
             continue;
         auto const shape = sg::shape_of(b.type);
-        auto const count = isize(b.count < 1 ? 1 : b.count);
+        auto const count = isize(element_count(b) < 1 ? 1 : element_count(b));
         auto const is_array = b.is_array() && shape != sg::view_shape::acceleration_structure;
 
         if (!is_array)
@@ -209,8 +209,6 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
     for (auto const& r : _tlas_resources)
         if (r != nullptr)
             bound_tlases.push_back(r);
-
-    _ctx.residency().add(arguments);
 
     auto typed = std::static_pointer_cast<metal_binding_group_layout const>(layout());
     return sg::binding_group_handle(std::make_shared<metal_binding_group const>(

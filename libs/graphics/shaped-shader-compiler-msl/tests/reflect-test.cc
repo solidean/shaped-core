@@ -416,3 +416,43 @@ kernel void go(constant real& r [[buffer(0)]]) { (void)r; }
     CHECK(r.value().bindings.size() == 1);
     CHECK(binding_named(r.value().bindings, "used") != nullptr);
 }
+
+TEST("ssc::msl reflect - a member pointing at a table reflects as an unbounded array of its entries, and the lengths "
+     "as "
+     "nothing (EMIT-195, EMIT-211)")
+{
+    // what SGL writes for `merged: mut buffer[int]` and `sources: texture_2d[float4][]`
+    constexpr char const* text = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct parts_sources_table
+{
+    uint count;
+    uint sgl_pad;
+    texture2d<float> entries[1];
+};
+
+struct parts_arguments
+{
+    device int* parts_merged [[id(0)]];
+    constant parts_sources_table* parts_sources [[id(1)]];
+    uint sgl_lengths [[id(2)]][2];
+};
+
+kernel void gather(constant parts_arguments& parts_group [[buffer(0)]], uint i [[thread_position_in_grid]])
+{
+    (void)parts_group; (void)i;
+}
+)";
+    auto r = ssc::msl::impl::reflect(text, "gather", sg::shader_stage::compute);
+    REQUIRE(r.has_value()).context(r.has_error() ? r.error().to_string() : cc::string());
+    auto const& bindings = r.value().bindings;
+    CHECK(bindings.size() == 2);
+    auto const* sources = binding_named(bindings, "parts_sources");
+    REQUIRE(sources != nullptr);
+    CHECK(sources->type == sg::binding_type::texture);
+    CHECK(sources->count == 0);
+    CHECK(sources->index == 1);
+    CHECK(binding_named(bindings, "sgl_lengths") == nullptr);
+}

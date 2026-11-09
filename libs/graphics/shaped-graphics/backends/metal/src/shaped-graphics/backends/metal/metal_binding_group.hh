@@ -77,6 +77,35 @@ public:
                         isize hit_offsets_at = -1);
     ~metal_binding_group() override;
 
+    /// What a group's argument buffer is written from, slot for slot of its layout.
+    struct argument_contents
+    {
+        /// One per slot, and behind the last one the further elements of an unbounded binding.
+        cc::span<u64 const> slots;
+        /// Each slot's byte length, parallel to `slots`: a buffer view's, zero for anything else.
+        cc::span<u32 const> lengths;
+        /// The slot of the layout's unbounded binding, its last; -1 where it has none.
+        isize unbounded_at = -1;
+        cc::span<u64 const> mirror;
+    };
+    struct created_arguments
+    {
+        MTL::Buffer* buffer = nullptr;
+        isize hit_offsets_at = -1;
+    };
+
+    /// A group's argument buffer: its 8-byte slots, each slot's byte length as a `u32`, which SGL's MSL reads as
+    /// `sgl_lengths` (EMIT-195), the hit-offsets mirror where a slot holds a TLAS, and an unbounded binding's table.
+    /// That binding's slot holds the table's address: its element count, a slot per element and a length per element,
+    /// since Metal sizes no argument buffer member per group.
+    /// The buffer is resident and owned by the caller; an error means the device refused it.
+    [[nodiscard]] static cc::result<created_arguments> create_arguments(metal_context& ctx,
+                                                                        cc::string_view label,
+                                                                        argument_contents const& contents);
+
+    /// The bytes a buffer view makes visible, which is what its slot's length holds.
+    [[nodiscard]] static u32 byte_length_of(sg::raw_buffer_view const& view);
+
     /// The mirror of an argument buffer, one address per slot, that a ray-tracing kernel finds a closest hit's record by.
     /// Slot `n` holds the per-instance hit-group offsets of `tlas_at_slot[n]`, and zero where that is null.
     /// Empty where no slot holds a TLAS, since nothing could trace through this group then.

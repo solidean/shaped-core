@@ -116,12 +116,13 @@ ASYNC_INVOCABLE_TEST("sg - a backend says which stats it cannot count", (sg::con
     // WebGPU tracks usage itself, so a zero there would be a barrier count nobody measured.
     if (ctx->backend() == sg::backend_kind::webgpu)
         CHECK(!s.is_counted(sg::stat::buffer_barriers));
-    // Metal's barriers name stages and never a resource.
+    // Metal's barriers name stages, so each counts the resources whose hazard it settled; it has no layouts to transition.
     if (ctx->backend() == sg::backend_kind::metal)
     {
-        CHECK(!s.is_counted(sg::stat::buffer_barriers));
-        CHECK(!s.is_counted(sg::stat::texture_barriers));
+        CHECK(s.is_counted(sg::stat::buffer_barriers));
+        CHECK(s.is_counted(sg::stat::texture_barriers));
         CHECK(s.is_counted(sg::stat::global_barriers));
+        CHECK(!s.is_counted(sg::stat::texture_transitions));
     }
     if (ctx->backend() == sg::backend_kind::dx12 || ctx->backend() == sg::backend_kind::vulkan)
         CHECK(s.counted() == sg::all_stats);

@@ -131,6 +131,9 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
         return cc::error("raster_pipeline: the metal backend has no tessellation stages");
     if (desc.mesh_shader.has_value())
         return cc::error("raster_pipeline: the metal backend does not wire up object and mesh stages yet");
+    if (desc.view_count > 1 && !_device->supportsVertexAmplificationCount(NS::UInteger(desc.view_count)))
+        return cc::error(
+            cc::format("raster_pipeline: this metal device amplifies no draw into {} views", desc.view_count));
 
     auto const scope = autorelease_scope();
 
@@ -176,6 +179,9 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
         descriptor->setVertexDescriptor(vertex_descriptor.value());
 
     descriptor->setInputPrimitiveTopology(topology_class_of(desc.topology));
+    // several views per draw are vertex amplification, one amplification a view
+    if (desc.view_count > 1)
+        descriptor->setMaxVertexAmplificationCount(NS::UInteger(desc.view_count));
     descriptor->setRasterSampleCount(NS::UInteger(desc.sample_count < 1 ? 1 : desc.sample_count));
 
     // Rasterization is left on with no fragment stage: that is a depth-only pass, and Metal runs one correctly from

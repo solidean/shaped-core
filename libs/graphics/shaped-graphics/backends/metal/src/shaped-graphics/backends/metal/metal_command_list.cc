@@ -17,6 +17,7 @@
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/barrier/access_inference.hh> // shader_access_of
+#include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
 
 namespace sg::backend::metal
@@ -361,6 +362,9 @@ void metal_command_list::flush_barriers()
     MTL::Stages before = 0;
     auto visibility = MTL4::VisibilityOptions(MTL4::VisibilityOptionNone);
     auto any = false;
+    // the resources whose hazard this op settles, counted as dx12 and vulkan count one barrier each
+    auto buffers_ordered = isize(0);
+    auto textures_ordered = isize(0);
 
     for (auto const& buffer : _pending_buffers)
     {
@@ -372,6 +376,7 @@ void metal_command_list::flush_barriers()
             continue;
 
         any = true;
+        ++buffers_ordered;
         after |= translated.after_stages;
         before |= translated.before_stages;
         visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
@@ -387,6 +392,7 @@ void metal_command_list::flush_barriers()
             continue;
 
         any = true;
+        ++textures_ordered;
         after |= translated.after_stages;
         before |= translated.before_stages;
         visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
@@ -424,6 +430,8 @@ void metal_command_list::flush_barriers()
     ++_barriers_emitted;
     _stats.add(sg::stat::global_barriers);
     _stats.add(sg::stat::barrier_calls);
+    _stats.add(sg::stat::buffer_barriers, buffers_ordered);
+    _stats.add(sg::stat::texture_barriers, textures_ordered);
 
     if (_render_encoder == nullptr)
     {
@@ -772,6 +780,7 @@ void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
+    bind_debug_window(mtl_pipeline.footprint());
 
     auto* const encoder = compute_encoder();
     encoder->setComputePipelineState(mtl_pipeline.state());
@@ -1153,8 +1162,24 @@ void metal_command_list::raster_draw_indexed_indirect(raw_buffer_handle const& a
     }
 }
 
+void metal_command_list::bind_debug_window(sg::impl::pipeline_footprint const& footprint)
+{
+    if (!sg::impl::debug_windows::k_enabled)
+        return;
+    _bound_debug_window = _metal_context.debug_windows().window_for_recording(!footprint.debug_stages().is_empty());
+    auto const& window = static_cast<metal_buffer const&>(*_bound_debug_window);
+    argument_table()->setAddress(window.gpu_address(), NS::UInteger(k_debug_window_buffer_index));
+}
+
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
 {
+    // every op declares it, so none starts while the window is still being reset, and appends never wait on each other
+    if (_bound_debug_window != nullptr)
+    {
+        auto const writing = footprint != nullptr ? footprint->debug_stages() : pipeline_stage_flags{};
+        declare_buffer(_bound_debug_window, writing.is_empty() ? stages : writing, sg::access_flag::shader_append);
+    }
+
     // **Each binding is declared with what the code does to it**, which is what makes a read after a read free and
     // an untouched binding cost nothing.
     // Without a footprint that is its view class, as if every writable view were written.
@@ -1313,8 +1338,9 @@ void metal_command_list::open_render_encoder(bool force_load)
     auto const layers = !info.color_targets.empty() ? info.color_targets[0].view.range().array_range
                       : info.depth_stencil_target.has_value() ? info.depth_stencil_target.value().view.range().array_range
                                                               : cc::start_end{.start = 0, .end = 1};
-    if (layers.end - layers.start > 1)
-        descriptor->setRenderTargetArrayLength(NS::UInteger(layers.end - layers.start));
+    if (layers.end - layers.start > 1 || info.view_count > 1)
+        descriptor->setRenderTargetArrayLength(
+            NS::UInteger(cc::max(isize(layers.end - layers.start), isize(info.view_count))));
     // **Retained, because it outlives the pool this function opened.**
     // `renderCommandEncoder` hands back an autoreleased object, and the scope above drains when this returns — so an
     // unretained encoder is deallocated the moment `begin_rendering` exits, and `end_rendering` then messages freed
@@ -1328,6 +1354,16 @@ void metal_command_list::open_render_encoder(bool force_load)
     descriptor->release();
     CC_ASSERT(_render_encoder != nullptr, "metal refused a render command encoder");
     _draws_in_render_encoder = 0;
+
+    // Several views per draw: amplification `i` renders into layer `i` of every target, which the mapping adds to
+    // the layer the vertex function writes, none, so that a stage need not write it.
+    if (info.view_count > 1)
+    {
+        auto mappings = cc::vector<MTL::VertexAmplificationViewMapping>();
+        for (auto view = 0; view < info.view_count; ++view)
+            mappings.push_back({.viewportArrayIndexOffset = 0, .renderTargetArrayIndexOffset = u32(view)});
+        _render_encoder->setVertexAmplificationCount(NS::UInteger(info.view_count), mappings.data());
+    }
 
     // Every encoder is ordered against the queue on open, the same as the compute one.
     _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
@@ -1458,6 +1494,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
+    bind_debug_window(mtl_pipeline.footprint());
 
     // A suspended scope's resume replays all of the below from `_bound_raster`.
     if (_render_encoder == nullptr)
@@ -1543,6 +1580,7 @@ void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pip
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get());
+    _bound_debug_window = nullptr;
 }
 
 void metal_command_list::raytracing_bind_group(int group_index, binding_group const& group)

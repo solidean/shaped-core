@@ -42,6 +42,18 @@ target_include_directories(shaped-shader-compiler-msl
 # shaped-graphics provides sg::compiled_shader, which is this library's whole output type.
 target_link_libraries(shaped-shader-compiler-msl PUBLIC shaped-graphics)
 
+# What the persistent shader cache keys on beside the toolchain: a stored shader holds this library's reflection, so an
+# edit to it has to miss, and sg's binding headers too, since the stored bytes hold their enums by number.
+file(GLOB_RECURSE _ssc_msl_fingerprinted CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/binding/*.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/binding/impl/*.hh")
+sc_add_source_fingerprint(shaped-shader-compiler-msl
+    FUNCTION ssc::msl::impl::source_fingerprint
+    HEADER shaped-shader-compiler-msl/shader_cache.hh
+    FILES ${_ssc_msl_fingerprinted})
+
 # Test binary. Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)
     add_executable(shaped-shader-compiler-msl-test
