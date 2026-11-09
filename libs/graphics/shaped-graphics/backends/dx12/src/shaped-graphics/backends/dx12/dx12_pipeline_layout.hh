@@ -16,8 +16,10 @@ class sg::backend::dx12::dx12_pipeline_layout final : public sg::pipeline_layout
 public:
     dx12_pipeline_layout(cc::hash128 structural_hash,
                          cc::span<sg::binding_group_layout_handle const> groups,
-                         cc::optional<sg::binding> inline_constants)
-      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants))
+                         cc::optional<sg::binding> inline_constants,
+                         bool dispatch_grid,
+                         cc::span<sg::bound_sampler const> static_samplers)
+      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants), dispatch_grid, static_samplers)
     {
     }
 
@@ -38,7 +40,8 @@ public:
         ID3D12Device* device,
         cc::span<sg::binding_group_layout_handle const> groups,
         cc::span<sg::bound_sampler const> static_samplers,
-        cc::optional<sg::binding> const& inline_constants);
+        cc::optional<sg::binding> const& inline_constants,
+        bool dispatch_grid);
 
     ComPtr<ID3D12RootSignature> root_signature;
     cc::vector<group_slot> groups; // one per bind slot, in order
@@ -55,6 +58,8 @@ public:
     int array_lengths_root_param = -1;
     /// Each group's position among those lengths, -1 for a group with no unbounded array.
     cc::vector<isize> length_bases;
+    /// Root-parameter index of the grid `dispatch_threads` writes, 4 root constants, -1 unless the layout holds it.
+    int dispatch_grid_root_param = -1;
 
     /// Whether the root signature carries a static sampler, a group's or the layout's own.
     /// **A pipeline over one neither restores from a cached blob nor hands one out.**

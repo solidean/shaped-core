@@ -60,8 +60,19 @@ inline constexpr reserved_binding_address reserved_acceleration_roots
 inline constexpr reserved_binding_address reserved_array_lengths
     = {.name = "sg_array_lengths", .dx12_space = 12, .dx12_register = 1, .vulkan_set = 3, .vulkan_binding = 20};
 
+/// The threads `dispatch_threads` asked for, `uint4`, which a shader sg dispatches by threads alone reads to return
+/// past the grid; metal dispatches exactly those threads, so it has none.
+inline constexpr reserved_binding_address reserved_dispatch_grid = {.name = "sg_dispatch_grid",
+                                                                    .dx12_space = 12,
+                                                                    .dx12_register = 2,
+                                                                    .vulkan_set = 3,
+                                                                    .vulkan_binding = 21,
+                                                                    .webgpu_group = 3,
+                                                                    .webgpu_binding = 21};
+
 inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window, reserved_acceleration_pool, reserved_acceleration_roots, reserved_array_lengths};
+    = {reserved_debug_window, reserved_acceleration_pool, reserved_acceleration_roots, reserved_array_lengths,
+       reserved_dispatch_grid};
 
 namespace impl
 {

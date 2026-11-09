@@ -148,6 +148,8 @@ void add_shader(cc::byte_stream_builder& b, compiled_shader const& s)
     // On vulkan no text states it, so two acquires of one SPIR-V at two sizes differ here alone.
     b.add_bool(s.preferred_subgroup_size.has_value());
     b.add_pod(i32(s.preferred_subgroup_size.value_or(0)));
+    // and its pipeline reads the grid, from a layout the plain one is not
+    b.add_bool(s.is_dispatched_by_threads);
 }
 
 void add_optional_shader(cc::byte_stream_builder& b, cc::optional<compiled_shader> const& s)

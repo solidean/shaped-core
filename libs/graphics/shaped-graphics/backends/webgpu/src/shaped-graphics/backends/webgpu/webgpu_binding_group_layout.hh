@@ -98,7 +98,11 @@ public:
     /// Where the roots start in the reserved block.
     [[nodiscard]] isize roots_offset_in_block() const { return _roots_offset_in_block; }
 
-    /// The block a list places per dispatch or draw: the inline constants, then the roots; 0 when there is neither.
+    /// Where the grid of a dispatch by threads starts in the reserved block; meaningful where the layout holds it.
+    [[nodiscard]] isize grid_offset_in_block() const { return _grid_offset_in_block; }
+
+    /// The block a list places per dispatch or draw: the inline constants, then the roots, then the grid; 0 when there
+    /// is none of them.
     [[nodiscard]] isize reserved_block_bytes() const { return _reserved_block_bytes; }
 
     /// Whether group 3 exists at all.
@@ -127,6 +131,7 @@ private:
     bool _has_acceleration = false;
     cc::vector<isize> _acceleration_bases;
     isize _roots_offset_in_block = 0;
+    isize _grid_offset_in_block = 0;
     isize _reserved_block_bytes = 0;
     cc::vector<WGPUBindGroupLayoutEntry> _reserved_entries;
 

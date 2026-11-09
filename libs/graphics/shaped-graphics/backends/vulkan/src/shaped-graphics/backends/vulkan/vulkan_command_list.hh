@@ -257,6 +257,7 @@ public:
     vulkan_pipeline_layout const* _software_set_layout = nullptr;
     u64 _software_set_pool = 0;
     u32 _software_set_roots[16] = {};
+    u32 _software_set_grid[4] = {};
     u32 _software_set_lengths[16] = {};
 
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,

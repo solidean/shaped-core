@@ -44,6 +44,10 @@ public:
     /// The shader's workgroup size (`[numthreads]` / `local_size`) — drives `cmd.compute.dispatch_threads`.
     [[nodiscard]] compute_dimensions workgroup_size() const { return _workgroup_size; }
 
+    /// Whether its shader's compiler chose that size (`compiled_shader::is_dispatched_by_threads`), so it is dispatched
+    /// by threads alone, `cmd.compute.dispatch_threads`, and its layout holds the grid.
+    [[nodiscard]] bool is_dispatched_by_threads() const { return _is_dispatched_by_threads; }
+
     /// The backend's serialized PSO blob, for persisting and feeding back via compute_pipeline_description::cached_pipeline.
     /// Empty if the backend does not support it.
     [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;
@@ -79,6 +83,8 @@ protected:
 
 private:
     friend void impl::set_footprint(compute_pipeline const& pipeline, impl::pipeline_footprint footprint);
+    friend void impl::set_dispatched_by_threads(compute_pipeline const& pipeline);
 
     impl::pipeline_footprint _footprint;
+    bool _is_dispatched_by_threads = false;
 };

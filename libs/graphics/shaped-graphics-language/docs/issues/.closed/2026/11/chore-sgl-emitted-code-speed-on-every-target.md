@@ -50,7 +50,7 @@ Each `.metal` file ports the HLSL line for line and declares SGL's argument buff
 Six runs, the wall-clock method, batches of 128; the medians spread about ±25% run to run, as the GPU's clocks move both contenders together.
 The minima are the steady figure: SGL is even with hand-written MSL on all three.
 SGL's compile takes `-std=metal3.2` and the hand-written one the toolchain's default; both are `-O2 -fmetal-math-mode=safe`.
-Timestamps read 0 on metal under this load: [bug-sg-metal-timestamp-heaps-exhausted](../../../../../shaped-graphics/docs/issues/bug-sg-metal-timestamp-heaps-exhausted.md).
+Timestamps read 0 on metal under this load: [bug-sg-metal-timestamp-heaps-exhausted](../../../../../../shaped-graphics/docs/issues/bug-sg-metal-timestamp-heaps-exhausted.md).
 
 ## What the optimizing epic should take from it
 

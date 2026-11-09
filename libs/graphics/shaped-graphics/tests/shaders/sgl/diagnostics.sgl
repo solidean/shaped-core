@@ -4,7 +4,7 @@
 binding checked:
     values: mut buffer[int]
 
-@compute(4) fun double_checked(@thread_id id: int3){checked}:
+@compute fun double_checked(@thread_id id: int3){checked}:
     let v = checked.values[id.x]
     assert v >= 0, "a negative input $v"
     checked.values[id.x] = v * 2

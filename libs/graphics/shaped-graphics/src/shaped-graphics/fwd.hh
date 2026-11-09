@@ -377,6 +377,8 @@ void set_targets(raster_pipeline const& pipeline,
 // records what a pipeline's code does to each binding; defined beside each pipeline kind
 void set_footprint(compute_pipeline const& pipeline, pipeline_footprint footprint);
 void set_footprint(raster_pipeline const& pipeline, pipeline_footprint footprint);
+// records that a compute pipeline's shader is dispatched by threads alone; defined in compute/compute_pipeline.cc
+void set_dispatched_by_threads(compute_pipeline const& pipeline);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.

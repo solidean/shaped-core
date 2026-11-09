@@ -94,3 +94,13 @@ binding marked:
 
 @compute(64) fun mark_ran(@thread_id id: int3){marked}:
     marked.marks[id.x] = marked.marks[id.x] + 1
+
+// A bare @compute's size is its compile's, so its threads past the grid return before they write, in a row and in a tile.
+binding filled:
+    cells: mut buffer[int]
+
+@compute fun fill_row(@thread_id id: int3){filled}:
+    filled.cells[id.x] = id.x + 1
+
+@compute fun fill_tile(@thread_id id: int3){filled}:
+    filled.cells[id.x + id.y * 10] = 1000 + id.x + id.y * 10

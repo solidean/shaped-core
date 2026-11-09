@@ -854,8 +854,14 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
     bind_software_trace();
 
     auto const size = _bound_compute->workgroup_size();
-    compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
-                                            MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    auto const group = MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z));
+    // a pipeline dispatched by threads alone runs exactly the grid's threads, which its last workgroups are cut to
+    if (_bound_compute->is_dispatched_by_threads())
+        compute_encoder()->dispatchThreads(
+            MTL::Size(NS::UInteger(_dispatch_grid[0]), NS::UInteger(_dispatch_grid[1]), NS::UInteger(_dispatch_grid[2])),
+            group);
+    else
+        compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)), group);
 }
 
 void metal_command_list::compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes)

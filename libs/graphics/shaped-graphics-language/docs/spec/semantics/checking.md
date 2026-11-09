@@ -930,6 +930,21 @@ fun f() -> float:
   `sample` without a `level` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
 * **CHK-370** Each workgroup size of `@compute(x, y, z)` is an `int` literal, or names an `int` `const`, an option included; each is at least 1, or it is `invalid-attribute-arguments`.
+  More than three sizes is `invalid-attribute-arguments` too, and none is CHK-520's.
+* **CHK-520** A bare `@compute` states no size, and the compile chooses one from the axes of `@thread_id` its inlined body reads.
+  That is 64 where it reads `id.x` alone or no thread id, 8 × 8 where it reads `id.y`, and 4 × 4 × 4 where it reads `id.z` or hands the vector on whole.
+  Each is a multiple of 64, which fills a wave of 32 and of 64, and Intel's modes of 8 and 16 lanes.
+  Nothing the entry point reaches may read the group it runs in, so no size is observable.
+  A barrier, a uniform load, a subgroup or quad operation the inlined body reaches is `invalid-entry-point` at that call.
+  So is a `@workgroup` binding it lists, and `@local_thread_id`, `@local_thread_index`, `@workgroup_id`, `@subgroup_size` or `@subgroup_invocation_id` among its inputs.
+  The host dispatches it by threads alone, and a thread past the grid sg writes returns before the body; sg refuses a dispatch by groups.
+  dx12, vulkan and WebGPU read the grid from the reserved `sg_dispatch_grid`, and metal dispatches exactly the grid's threads ([reserved-bindings.md](../../reserved-bindings.md)).
+* **CHK-521** A stated size whose entry point a bare `@compute` could have sized warns `workgroup-wastes-lanes` where it wastes what that one would not.
+  Such a size is habit rather than its algorithm's, which a barrier, workgroup memory or an input of CHK-520's would make it, and only then is it judged.
+  It wastes lanes below 32 threads but for 1, a serial kernel's, and at a total that is no multiple of 32.
+  So does one past WebGPU's 256 threads, or 256, 256 and 64 along the axes.
+  And so does a group along more than one axis over a body that reads `id.x` alone, whose rows but the first lie past a grid of one row.
+  The detail names the size a bare `@compute` would choose.
 * **CHK-371** `@preferred_subgroup_size(n)` on a `@compute` entry point asks for subgroups of `n` invocations where the device runs that size, and promises nothing ([why](why/checking.md#chk-371)).
   The shader is correct at any size, reads the size it got through `@subgroup_size`, and needs no feature.
   `n` is a power of two from 4 to 128, written as an `int` literal or as an `int` `const`.
@@ -1795,7 +1810,8 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
-They are `unreachable-code`, `no-effect`, `unused-require`, `pixel-stage-ignores-view`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
+They are `unreachable-code`, `no-effect`, `unused-require`, `pixel-stage-ignores-view`, `needless-nonuniform` and `unroll-too-long`.
+`generic-not-instantiated`, `nan-test-at-fast` and `workgroup-wastes-lanes` are warnings too.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -1824,6 +1840,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unreachable-code` | CHK-126, CHK-162, CHK-430 |
 | `no-effect` | CHK-225 |
 | `nan-test-at-fast` | CHK-436 |
+| `workgroup-wastes-lanes` | CHK-521 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488 |
@@ -1840,7 +1857,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520 |
 | `nesting-too-deep` | CHK-268 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |

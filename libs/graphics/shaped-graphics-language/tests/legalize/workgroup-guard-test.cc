@@ -103,7 +103,7 @@ TEST("sgl guards - no profile, and a stage without workgroup memory, shadow noth
     auto const plain = legalize_one("binding work:\n"
                                     "    result: mut buffer[int]\n"
                                     "\n"
-                                    "@compute(4) fun cs(@thread_id id: int3){work}:\n"
+                                    "@compute(64) fun cs(@thread_id id: int3){work}:\n"
                                     "    work.result[id.x] = 7 / id.x\n",
                                     undefined_guard::report);
     CHECK(plain.core.written_words == 0);

@@ -2204,7 +2204,12 @@ void checker::compile_function(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     auto const* const compute = find_attribute(file, d.attributes, "compute");
     auto const mesh_limits = mesh != nullptr ? mesh_of(file, *mesh) : mesh_shape();
-    auto const workgroup = mesh != nullptr ? mesh_limits.workgroup : workgroup_of(file, task != nullptr ? task : compute);
+    // CHK-520: a bare `@compute` leaves its size to the compile, which flattening chooses from the body's indexing
+    auto const is_auto_workgroup
+        = compute != nullptr && task == nullptr && mesh == nullptr && ast_of(file).at(compute->arguments).empty();
+    auto const workgroup = mesh != nullptr   ? mesh_limits.workgroup
+                         : is_auto_workgroup ? cc::fixed_array<i32, 3>{64, 1, 1}
+                                             : workgroup_of(file, task != nullptr ? task : compute);
     auto const preferred_subgroup_size = preferred_subgroup_size_of(
         file, find_attribute(file, d.attributes, "preferred_subgroup_size"), compute != nullptr);
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : mesh_limits.vertices;
@@ -2221,6 +2226,7 @@ void checker::compile_function(symbol_id id)
                          : stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr, control != nullptr,
                                     is_evaluation, mesh != nullptr, task != nullptr),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
+        .is_auto_workgroup = is_auto_workgroup,
         .preferred_subgroup_size = preferred_subgroup_size,
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .is_barrier = find_attribute(file, d.attributes, "barrier") != nullptr,
@@ -2448,6 +2454,22 @@ void checker::judge_entry_point(symbol_id id)
     if (workgroup_bytes > k_portable_workgroup_bytes)
         invalid(cc::format("its @workgroup bindings hold {} bytes, and a workgroup has {} on every target",
                            workgroup_bytes, k_portable_workgroup_bytes));
+
+    // CHK-520: a bare @compute reads nothing of the group it runs in, whose size the compile chooses
+    if (info.is_auto_workgroup)
+    {
+        auto const stated = cc::string_view("so it states its size, `@compute(64)`");
+        for (auto const binding : out.at(info.bindings))
+            if (out.bindings[out.at(binding).info].is_workgroup)
+                invalid(cc::format("a bare @compute chooses its own workgroup size, and {} is memory of the workgroup, "
+                                   "{}",
+                                   out.at(binding).name, stated));
+        for (auto const& parameter : parameters)
+            if (reads_group(parameter.input))
+                invalid(cc::format("a bare @compute chooses its own workgroup size, and @{} reads where an invocation "
+                                   "stands in it, {}",
+                                   info_of(parameter.input).name, stated));
+    }
 
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
     // CHK-397 first: a value of function bodies alone is what the detail names, rather than an array holding it

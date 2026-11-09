@@ -3,6 +3,8 @@ created: 2026-11-09
 priority: next
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # A bare @compute chooses its own workgroup size where nothing in it depends on the group, and a size that wastes a wave warns
@@ -31,6 +33,13 @@ A bare `@compute` should choose a good one, so nobody has to think about it and 
 - A total above 256, or a dimension past WebGPU's 256, 256 and 64: no webgpu device runs it; a webgpu compile refuses it already.
 - A group shaped against the body's indexing: a 1D group over `id.xy`, or a 2D group where only `id.x` is read.
 - A size where `auto` would be legal is no warning: stating one stays a legitimate choice.
+
+*As built:* the warnings judge only an entry point `auto` would be legal for, whose size is habit rather than its algorithm's.
+The tests' group-feature kernels run 4 or 16 threads on purpose, and a warning on them would only be declared away.
+A 1D group over `id.xy` is no warning: a row of 64 over a 2D grid is coalesced, and fired on fixtures for no waste.
+A body that reads no thread id says nothing of its shape either.
+`@subgroup_size` and `@subgroup_invocation_id` count as group inputs too, beside the local id, the local index and the group id.
+Tuning and the open questions moved to `feat-sgl-compute-auto-tuning`.
 
 ## Measured on 2026-11-09
 
