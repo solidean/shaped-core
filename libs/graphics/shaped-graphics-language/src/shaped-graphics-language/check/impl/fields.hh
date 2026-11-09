@@ -3,6 +3,7 @@
 #include <shaped-graphics-language/fwd.hh>
 
 #include <type_traits>
+#include <utility>
 
 /// Every field of an aggregate, visited in declaration order, which is how a checked layer is written as bytes and read
 /// back without a list of fields per struct (the compilation model's artifacts).
@@ -20,23 +21,48 @@ struct any_field
 
 inline constexpr isize k_max_fields = 128;
 
+template <class T, std::size_t... I>
+[[nodiscard]] consteval bool takes_fields(std::index_sequence<I...>)
+{
+    return requires { T{(void(I), any_field{})...}; };
+}
+
+template <class T, std::size_t N>
+inline constexpr bool takes_n_fields = takes_fields<T>(std::make_index_sequence<N>());
+
+/// The fewest `any_field`s from `N` on that `T` takes: more than none only for a reference field without a default.
+template <class T, std::size_t N>
+[[nodiscard]] consteval std::size_t fewest_fields()
+{
+    if constexpr (N > std::size_t(k_max_fields) || takes_n_fields<T, N>)
+        return N;
+    else
+        return fewest_fields<T, N + 1>();
+}
+
+/// The most `any_field`s in [Lo, Hi] that `T` takes, given that it takes `Lo`.
+/// A binary search, since the counts an aggregate takes are one run: a probe per count is too much for MSVC (C1202).
+template <class T, std::size_t Lo, std::size_t Hi>
+[[nodiscard]] consteval std::size_t most_fields()
+{
+    if constexpr (Lo == Hi)
+        return Lo;
+    else if constexpr (takes_n_fields<T, (Lo + Hi + 1) / 2>)
+        return most_fields<T, (Lo + Hi + 1) / 2, Hi>();
+    else
+        return most_fields<T, Lo, (Lo + Hi + 1) / 2 - 1>();
+}
+
 /// How many fields the aggregate `T` has: the most `any_field`s it can be brace-initialized from, -1 for none.
 /// The most, not the first count that fails: a reference field without a default takes no fewer than every field up to it.
-template <class T, class... Fields>
+template <class T>
 [[nodiscard]] consteval isize field_count()
 {
-    if constexpr (sizeof...(Fields) > k_max_fields)
+    constexpr auto fewest = fewest_fields<T, 0>();
+    if constexpr (fewest > std::size_t(k_max_fields))
         return -1;
     else
-    {
-        constexpr auto more = field_count<T, Fields..., any_field>();
-        if constexpr (more >= 0)
-            return more;
-        else if constexpr (requires { T{Fields{}...}; })
-            return isize(sizeof...(Fields));
-        else
-            return -1;
-    }
+        return isize(most_fields<T, fewest, std::size_t(k_max_fields)>());
 }
 
 /// Calls `f` with each field of `t` in declaration order; `T` may be const, and each field is then const too.
