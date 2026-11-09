@@ -256,11 +256,19 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
    shaped-viewer's chain is 24.7 ms whole (release); an edit of its first module checks it all, of its last 1.4 ms, 13.8 ms on average.
    In the language server a keystroke in its last module is a 5.9 ms analysis, and in its first 31.7 ms.
    Every link holds a whole copy of the tables below it, which [perf-sgl-layer-freeze-copies](../../issues/perf-sgl-layer-freeze-copies.md) is.
+   *Since 2026-11-09 the order follows the edit:* a library made under the same names as the one before marks the files whose sources changed.
+   Their modules go as late as the modules using them allow, so every keystroke after the first checks the module and the ones after it, those using it among them.
+   shaped-viewer: an edit of a module so placed is 8.6 ms on average, against 13.6 ms in the order of the chain alone; of `scene`, 14.4 ms against 24.3 ms.
+   What remains is checking the modules using it again when its interface did not change, which is early cutoff (step 7).
 7. **Early cutoff, through relocation.** A layer splits into its interface and its bodies, and a dependent's layer names its imports' interfaces.
    An edit that leaves a module's interface alone relocates the layers after it onto the new one rather than checking them again.
    That is the import table and the relocation pass of [ids](#ids), and what a dependent's key is made of.
 8. **Options as a second layer** (see [artifacts](#artifacts)): a compile that sets a module's option checks only what reaches it.
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers, which is every compile in the tree.
+   *A second, on 2026-11-09, in the chain's terms:* a link is checked with the values a compile gives its own module's options, and they are part of its key.
+   So a compile that sets one shares every link before that module's, checks it and the links after it with its values, and a permutation compiled again finds them.
+   The chain puts a module with an option as late as the modules using it allow, so few links come after it.
+   What is left is the declaration's grain, which needs no link after the module's to be checked again: that is relocation's (step 7).
 9. **Per-module artifacts, kept where a host asks:** each module's first layer, keyed by its sources and its imports' interfaces, relocated on load.
    The host's seam is async, and a compile is handed loaded layers.
 10. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.

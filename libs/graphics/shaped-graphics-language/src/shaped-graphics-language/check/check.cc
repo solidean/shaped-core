@@ -1,5 +1,6 @@
 #include "check.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -284,7 +285,7 @@ bool contains(cc::span<cc::string const> names, cc::string_view name)
 }
 } // namespace
 
-cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const> library)
+cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const> library, cc::span<i32 const> late_files)
 {
     // the modules the library declares, each once, in the library's order
     auto named = cc::vector<cc::string>();
@@ -302,6 +303,25 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
     }
     if (named.empty())
         return {};
+    // the modules a file of which declares an option
+    auto with_options = cc::vector<cc::string>();
+    for (auto const& f : library)
+    {
+        auto module = cc::string_view();
+        auto has_option = false;
+        for (auto const id : f.ast.at(f.ast.declarations))
+        {
+            auto const& d = f.ast.at(id);
+            if (auto const* const m = d.node.try_as<ast::module_decl>(); m != nullptr && ast::is_valid(m->path))
+                if (auto const* const n = f.ast.at(m->path).node.try_as<ast::name>(); n != nullptr)
+                    module = f.file.text_of(n->where);
+            if (d.node.is<ast::const_decl>())
+                for (auto const& a : f.ast.at(d.attributes))
+                    has_option = has_option || f.file.text_of(a.name) == "option";
+        }
+        if (has_option && !module.empty() && !contains(with_options, module))
+            with_options.push_back(cc::string(module));
+    }
     auto const every_file = parse(uses_of(named));
     auto const every_ast = ast::build(every_file);
     auto const plan = plan_modules(library, {.file = every_file, .ast = every_ast});
@@ -336,6 +356,12 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
     }
     // Every module after the ones it uses; of those that may come next, the one more modules reach first, so a module
     // nothing uses comes last and an edit of it checks it alone.
+    // the modules of the files being edited
+    auto is_late = cc::vector<u8>::create_filled(count, 0);
+    for (auto i = isize(0); i < plan.library_order.size(); ++i)
+        for (auto const f : late_files)
+            if (plan.library_order[i] == f)
+                is_late[plan.file_module[i]] = 1;
     auto order = cc::vector<chained_module>();
     auto placed = cc::vector<u8>::create_filled(count, 0);
     for (auto step = isize(1); step < count; ++step)
@@ -348,15 +374,28 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
             auto is_ready = true;
             for (auto const u : uses[m])
                 is_ready = is_ready && placed[u] != 0;
-            if (is_ready
-                && (best < 0 || dependents[m] > dependents[best]
-                    || (dependents[m] == dependents[best] && plan.modules[m] < plan.modules[best])))
+            if (!is_ready)
+                continue;
+            if (best < 0)
+            {
+                best = m;
+                continue;
+            }
+            auto const late_m = is_late[m] != 0;
+            auto const late_best = is_late[best] != 0;
+            auto const options_m = contains(with_options, plan.modules[m]);
+            auto const options_best = contains(with_options, plan.modules[best]);
+            if (late_m != late_best                 ? !late_m
+                : options_m != options_best         ? !options_m
+                : dependents[m] != dependents[best] ? dependents[m] > dependents[best]
+                                                    : plan.modules[m] < plan.modules[best])
                 best = m;
         }
         // the plan reported a loop otherwise, and `may_layer` refused it
         CC_ASSERT(best >= 0, "a library's modules use each other without a loop");
         placed[best] = 1;
-        auto& next = order.emplace_back(chained_module{.name = plan.modules[best]});
+        auto& next = order.emplace_back(
+            chained_module{.name = plan.modules[best], .has_options = contains(with_options, plan.modules[best])});
         for (auto i = isize(0); i < plan.library_order.size(); ++i)
             if (plan.file_module[i] == best)
                 next.files.push_back(plan.library_order[i]);
@@ -364,9 +403,19 @@ cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const>
     return order;
 }
 
+cc::vector<option_value> sgl::check::options_of_module(cc::span<option_value const> options, cc::string_view module)
+{
+    auto result = cc::vector<option_value>();
+    for (auto const& o : options)
+        if (o.name.size() > module.size() && o.name.starts_with(module) && o.name[module.size()] == '.')
+            result.push_back(o);
+    return result;
+}
+
 cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude const& base,
                                                             cc::span<module_file const> library,
-                                                            cc::string_view module)
+                                                            cc::string_view module,
+                                                            cc::span<option_value const> options)
 {
     CC_ASSERT(base._library_order.empty() || base._is_library, "a chain continues the prelude or a layer of its own");
     // the modules of the layers before, then this one: a program using them all, in the chain's order
@@ -400,6 +449,8 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
     result._library_order = plan.library_order;
     result._modules = plan.modules;
     result._is_library = true;
+    result._options = base._options;
+    result._options.push_back_range(options);
     result._names_by_reach = cc::make_unique<cc::mutex<cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>>>();
     auto files = result._files;
     files.push_back({.file = empty_file, .ast = empty_ast});
@@ -409,7 +460,9 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
     auto& c = *result._state;
     c.files = files;
     apply_plan(c, plan, base._prelude_count);
+    c.options = options;
     c.run(base._resume);
+    c.options = {};
 
     // An unused `require` is judged after the program's entry points are flattened, which the program's check does.
     auto kept = cc::vector<located_diagnostic>();
@@ -456,22 +509,32 @@ bool sgl::check::may_continue_from(checked_prelude const& layer, cc::span<module
 
 bool sgl::check::layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options)
 {
-    if (options.empty())
-        return true;
     // An option is the const whose value the compile sets, which is how its own constant names it.
     // A module's is set as `module.name`, named here by its file's module: a layer has no program to be foreign to.
+    auto given = cc::vector<option_value>();
     auto const& out = layer._state->out;
-    for (auto s = isize(0); s < out.symbols.size(); ++s)
-    {
-        auto const& symbol = out.symbols[s];
-        if (symbol.kind != symbol_kind::constant || out.constants[symbol.info].option != symbol_id(s)
-            || symbol.file < layer._prelude_count || symbol.file >= i32(out.file_modules.size()))
-            continue;
-        auto const name = cc::format("{}.{}", out.file_modules[symbol.file], symbol.name);
-        for (auto const& given : options)
-            if (given.name == name)
-                return false;
-    }
+    for (auto const& o : options)
+        for (auto s = isize(0); s < out.symbols.size(); ++s)
+        {
+            auto const& symbol = out.symbols[s];
+            if (symbol.kind != symbol_kind::constant || out.constants[symbol.info].option != symbol_id(s)
+                || symbol.file < layer._prelude_count || symbol.file >= i32(out.file_modules.size()))
+                continue;
+            if (o.name == cc::format("{}.{}", out.file_modules[symbol.file], symbol.name))
+            {
+                given.push_back(o);
+                break;
+            }
+        }
+    // the same values, whatever order each was given in; a name given twice checks beside the library, which reports it
+    auto held = layer._options;
+    if (given.size() != held.size())
+        return false;
+    cc::sort_by(given, &option_value::name);
+    cc::sort_by(held, &option_value::name);
+    for (auto i = isize(0); i < given.size(); ++i)
+        if (!(given[i] == held[i]) || (i > 0 && given[i].name == given[i - 1].name))
+            return false;
     return true;
 }
 

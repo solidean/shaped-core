@@ -52,7 +52,7 @@ struct sgl_lsp::analysis
     /// `module.library_files` says which of `library->files` each checked file between the prelude and the document is.
     cc::shared_ptr<sgl::shared_library const> library;
     /// The checked modules the document continued from, which `module` reads in place; null where it checked them itself.
-    cc::shared_ptr<sgl::check::checked_prelude const> layer;
+    sgl::shared_library::link_ptr layer;
     /// Parallel to `module.library_files`.
     cc::vector<lsp::text_index> library_indices;
     sgl::check::checked_module module;

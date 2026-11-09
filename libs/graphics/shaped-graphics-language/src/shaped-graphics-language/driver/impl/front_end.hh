@@ -29,8 +29,8 @@ struct front_end
     cc::vector<cc::unique_ptr<ast::file_ast>> owned_asts;
     /// The library files the check read, where they came from the process's cache rather than `owned_files`.
     cc::shared_ptr<shared_library const> library;
-    /// The layer the check continued from, which `module` reads in place.
-    cc::shared_ptr<check::checked_prelude const> layer;
+    /// The link whose layer the check continued from, which `module` reads in place.
+    shared_library::link_ptr layer;
     check::checked_module module;
     cc::string_view source_name;
     /// The file the source is: behind the prelude and the library files it reaches, or the prelude's own file when it

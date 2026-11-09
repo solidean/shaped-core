@@ -555,8 +555,7 @@ if(SC_BUILD_TESTS)
         tests/samples/matrices-sample-test.cc
         tests/samples/samples-test.cc
     )
-    # A debug build runs it in about a minute, mostly on one core.
-    sc_nexus_binary(shaped-graphics-language-test KINDS tests TIMEOUT 120)
+    sc_nexus_binary(shaped-graphics-language-test KINDS tests)
 
     # The spec's `sgl` fences are test input, read from the source tree so an edited example needs no reconfigure.
     sc_target_source_paths(shaped-graphics-language-test

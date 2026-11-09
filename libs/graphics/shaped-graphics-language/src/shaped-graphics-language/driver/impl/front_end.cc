@@ -71,7 +71,7 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     auto const* const checked = own >= 0 ? nullptr : checked_prelude();
 
     // The library is parsed once for the process, and behind the checked prelude its modules are checked once too: a
-    // compile that sets one of their options checks them itself.
+    // compile that sets one of their options checks that module's link and those after it with its values.
     auto library_files = cc::vector<check::module_file>();
     auto library_names = cc::vector<cc::string_view>();
     CC_RECORD_SCOPE_BEGIN("sgl.parse");
@@ -82,9 +82,8 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
             library_files = shared->files;
             for (auto const& name : shared->names)
                 library_names.push_back(name);
-            if (auto layer = checked != nullptr ? layer_of(*shared, user) : nullptr;
-                layer != nullptr && check::layer_serves_options(*layer, options))
-                result.layer = cc::move(layer);
+            if (checked != nullptr)
+                result.layer = layer_of(*shared, user, options);
             result.library = cc::move(shared);
         }
     CC_RECORD_SCOPE_END("sgl.parse");
@@ -94,7 +93,7 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
         modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
     CC_RECORD_SCOPE_BEGIN("sgl.check");
     // CHK-426: a layer holds no const of the target, so a compile for any target continues from one
-    result.module = result.layer != nullptr ? check::check(*result.layer, library_files, user, options, target)
+    result.module = result.layer != nullptr ? check::check(*result.layer->layer, library_files, user, options, target)
                   : checked != nullptr
                       ? check::check(*checked, library_files, user, options, target)
                       : check::check(modules, library_files, user, builtins::default_registry(), options, target);
