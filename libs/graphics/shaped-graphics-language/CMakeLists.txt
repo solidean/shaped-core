@@ -563,7 +563,10 @@ if(SC_BUILD_TESTS)
         SGL_PRELUDE_DIR prelude
         # sg's metal ray-tracing shaders, whose MSL text is checked here on every box, while only a Mac runs them
         SGL_SG_SHADERS_DIR ../shaped-graphics/tests/shaders/sgl
-        SGL_SR_SHADERS_DIR ../shaped-rendering/shaders)
+        SGL_SR_SHADERS_DIR ../shaped-rendering/shaders
+        # shaped-viewer's package entries and their modules, whose sets of modules a measurement compares
+        SGL_SV_SHADERS_DIR ../shaped-viewer/shaders
+        SGL_SV_TEST_SHADERS_DIR ../shaped-viewer/tests/shaders)
 
     target_link_libraries(shaped-graphics-language-test
         PRIVATE

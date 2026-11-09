@@ -1,6 +1,7 @@
 #include "check-test-support.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-graphics-language/check/artifact.hh>
 #include <shaped-graphics-language/check/footprint.hh>
@@ -505,4 +506,96 @@ TEST("sgl checked modules - a compile that sets its own options continues from i
     CHECK(!sgl::check::layer_serves_options(layer.value(), options{{.name = "tuned.width", .value = "3"}}));
     CHECK(!sgl::check::layer_serves_options(
         layer.value(), options{{.name = "taps", .value = "3"}, {.name = "tuned.width", .value = "3"}}));
+}
+
+// What a module checked once for every set that reaches it would save a process: shaped-viewer's entries each reach a
+// set of modules, and today each distinct set is a layer of its own, checked whole.
+// Manual, since it measures rather than asserts: `uv run dev.py test "sgl checked modules - shaped-viewer" --manual`.
+TEST("sgl checked modules - shaped-viewer's sets of modules, checked each, against every module checked once",
+     nx::config::manual)
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const module_name = [](cc::string_view source) -> cc::string
+    {
+        // the first line that is a `module` declaration, up to its end
+        for (auto at = isize(0); at < source.size();)
+        {
+            auto end = at;
+            while (end < source.size() && source[end] != '\n' && source[end] != '\r')
+                ++end;
+            auto const line = source.subview({.start = at, .end = end});
+            if (line.starts_with("module "))
+                return cc::string(line.subview(7));
+            at = end + 1;
+        }
+        return {};
+    };
+
+    auto sources = cc::vector<program>();
+    add_files_under(sources, "sv", nx::source_path(SGL_SV_SHADERS_DIR));
+    add_files_under(sources, "sr", nx::source_path(SGL_SR_SHADERS_DIR) + "/modules");
+    auto programs = cc::vector<program>();
+    add_files_under(programs, "sv-tests", nx::source_path(SGL_SV_TEST_SHADERS_DIR));
+    auto parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
+    auto built = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
+    auto library = cc::vector<sgl::check::module_file>();
+    auto names = cc::vector<cc::string>();
+    for (auto const& s : sources)
+    {
+        auto const name = module_name(s.source);
+        if (name.empty())
+        {
+            // an entry of the package, which no module dir holds
+            if (!s.name.subview(3).contains('/'))
+                programs.push_back(s);
+            continue;
+        }
+        parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(s.source)));
+        built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*parsed.back())));
+        library.push_back({.file = *parsed.back(), .ast = *built.back()});
+        auto is_named = false;
+        for (auto const& n : names)
+            is_named = is_named || n == name;
+        if (!is_named)
+            names.push_back(name);
+    }
+
+    // each distinct set once, as the driver keeps them
+    auto layers = cc::vector<sgl::check::checked_prelude>();
+    auto sets_secs = 0.0;
+    for (auto const& p : programs)
+    {
+        auto const file = sgl::parse(p.source);
+        auto const ast = sgl::ast::build(file);
+        auto const user = sgl::check::module_file{.file = file, .ast = ast};
+        if (!sgl::check::reaches_modules_to_layer(library, user))
+            continue;
+        auto is_known = false;
+        for (auto const& l : layers)
+            is_known = is_known || sgl::check::reaches_the_same_modules(l, library, user);
+        if (is_known)
+            continue;
+        auto const started = cc::current_time_steady_secs();
+        auto layer = sgl::check::check_modules(*checked, library, user);
+        sets_secs += cc::current_time_steady_secs() - started;
+        REQUIRE(layer.has_value());
+        layers.push_back(cc::move(layer.value()));
+    }
+
+    // every module once: a program that uses them all
+    auto everything = cc::string();
+    for (auto const& n : names)
+        everything.appendf("use {}\n", n);
+    auto const all_file = sgl::parse(everything);
+    auto const all_ast = sgl::ast::build(all_file);
+    auto const started = cc::current_time_steady_secs();
+    auto const all = sgl::check::check_modules(*checked, library, {.file = all_file, .ast = all_ast});
+    auto const once_secs = cc::current_time_steady_secs() - started;
+    REQUIRE(all.has_value());
+
+    cc::println("{} programs, {} modules in {} files, {} distinct sets", programs.size(), names.size(), library.size(),
+                layers.size());
+    cc::println("every set checked once: {:.1f} ms; every module checked once: {:.1f} ms", sets_secs * 1000,
+                once_secs * 1000);
 }
