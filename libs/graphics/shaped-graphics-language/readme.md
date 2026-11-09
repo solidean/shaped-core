@@ -107,9 +107,12 @@ To uninstall, delete the link and reload.
 ### The formatter
 
 `sgl format FILE…` writes SGL's spacing into each file in place; `--check` changes nothing and exits 2 where a file would change.
-It is the spacing within a line: one space where tokens stand apart, a space after a comma, around an arrow and around a binary operator, none inside brackets or before a comma.
-Indentation and line breaks are the line tree's, comments and strings are content, and all of them stay as written.
-It formats a file whose only errors are operators without their spaces, `a+b`, and refuses one with any other syntax error.
+It is the spacing within a line: one space where tokens stand apart, a space after a comma and a colon, around an arrow and around a binary operator, none inside brackets or before a comma or a colon.
+So a type is `name: type` everywhere, `let x: T = …` included.
+The trailing comments of consecutive lines line up one space past the longest code, unless that moves a comment more than 16 columns, which starts a new run.
+Indentation and line breaks are the line tree's, comment text and strings are content, and all of them stay as written.
+A syntax error leaves its block and the block's siblings as written, with a warning naming the error, and the rest of the file is formatted; at the top level, its declaration stays.
+An operator without its spaces, `a+b`, is no such error: it has one reading, which the formatter spaces.
 Its output always parses to the tree its input did, which it checks; a line whose formatting would not is left as written and named, as a bug of the formatter.
 
 ### The language server

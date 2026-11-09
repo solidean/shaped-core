@@ -30,7 +30,7 @@ This page is for whoever works on the server.
   A named argument marks the parameter it names; the active signature is the resolved one while it has the argument the cursor is in.
 * **References and rename**: `sgl::occurrences_at`, which resolves the name at the cursor and then every name of the same text in every file, keeping those that resolve to the same declaration.
   A rename refuses a keyword, a word that is no name, and a declaration of the prelude; `prepareRename` answers null for those.
-* **Formatting**: `sgl::format_source`, one edit replacing the whole document; an error where the document has syntax errors.
+* **Formatting**: `sgl::format_source`, one edit replacing the whole document; the blocks around a syntax error stay as written, which their diagnostic already marks.
 * **Outline and folding**: `sgl::outline_of` and `sgl::folds_of`, read from the tree and the line tree alone, so a document whose check fails keeps both.
   An entry's detail is its first line as written.
 * **Workspace symbols**: every open document and every module directory file that is not open, parsed per request, matched by the query's characters in order.

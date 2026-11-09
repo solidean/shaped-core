@@ -200,14 +200,11 @@ lsp::answer<lsp::workspace_edit> sgl_lsp::rename_of(analysis const& a,
 lsp::answer<cc::vector<lsp::text_edit>> sgl_lsp::formatting_of(analysis const& a, lsp::position_encoding e)
 {
     auto const text = a.text_of(a.user_file());
+    // the blocks a syntax error leaves as written carry its diagnostic already, so they need no word of their own
     auto const formatted = sgl::format_source(text);
-    if (formatted.has_error())
-        return lsp::answer<cc::vector<lsp::text_edit>>(cc::error(lsp::response_error{
-            .code = lsp::error_code::request_failed,
-            .message = cc::format("not formatted, since the document has syntax errors: {}", formatted.error())}));
     auto out = cc::vector<lsp::text_edit>();
-    if (formatted.value().text != text)
+    if (formatted.text != text)
         out.push_back({.range = range_of(a, a.user_file(), {.offset = 0, .length = u32(text.size())}, e),
-                       .new_text = formatted.value().text});
+                       .new_text = formatted.text});
     return out;
 }

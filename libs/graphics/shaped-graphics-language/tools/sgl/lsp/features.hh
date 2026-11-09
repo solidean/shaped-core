@@ -82,7 +82,7 @@ namespace sgl_lsp
                                                                        lsp::position_encoding e);
 
 /// The edit that formats the whole document, by `sgl::format_source`; none where it is formatted already.
-/// An error where the document has syntax errors, which a formatter must not guess around.
+/// The blocks around a syntax error stay as written.
 [[nodiscard]] lsp::answer<cc::vector<lsp::text_edit>> formatting_of(analysis const& a, lsp::position_encoding e);
 
 } // namespace sgl_lsp

@@ -49,6 +49,7 @@ struct parameter_label;
 struct call_signature;
 struct signature_help;
 struct formatted_source;
+struct format_skip;
 struct outline_entry;
 struct fold_range;
 

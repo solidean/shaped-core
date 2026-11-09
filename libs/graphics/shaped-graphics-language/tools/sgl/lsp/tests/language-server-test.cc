@@ -717,7 +717,7 @@ TEST("sgl lsp - a hover on an overloaded function lists the rest of the set afte
              "float\n```");
 }
 
-TEST("sgl lsp - formatting replaces the whole document, edits nothing where it is formatted, and refuses errors",
+TEST("sgl lsp - formatting replaces the whole document, edits nothing where it is formatted, and skips around errors",
      main_thread)
 {
     auto const doc = R"({"textDocument":{"uri":"file:///t.sgl"},"options":{"tabSize":4,"insertSpaces":true}})";
@@ -731,8 +731,11 @@ TEST("sgl lsp - formatting replaces the whole document, edits nothing where it i
     auto tidy = session("fun f(a: float, b: float) -> float => a * b\n");
     CHECK(tidy.ask(5, "textDocument/formatting", doc)["result"].size() == 0);
 
-    auto broken = session("fun f() -> float:\n    return (1.0\n");
-    CHECK(broken.ask(5, "textDocument/formatting", doc)["error"]["message"].as_string().contains("syntax errors"));
+    // the block around a syntax error stays as written, and the rest is formatted
+    auto broken = session("fun f(a:float) -> float:\n    return (1.0\n");
+    auto const edits = broken.ask(5, "textDocument/formatting", doc)["result"];
+    REQUIRE(edits.size() == 1);
+    CHECK(edits[0]["newText"].as_string() == "fun f(a: float) -> float:\n    return (1.0\n");
 }
 
 TEST("sgl lsp - the outline is the document's declarations, each holding its members, with its first line as detail",

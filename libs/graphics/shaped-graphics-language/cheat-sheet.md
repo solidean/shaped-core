@@ -189,8 +189,9 @@ sgl::is_keyword(word)                      // -> bool
 #include <shaped-graphics-language/driver/outline.hh>
 sgl::outline_of(pf, ast)                   // -> vector<outline_entry { name, kind, where, name_span, detail, children }>; tree only
 sgl::folds_of(pf)                          // -> vector<fold_range { first_line, last_line, is_comment }>: the line tree's blocks
-sgl::format_source(source)                 // -> result<formatted_source { text, unformatted_lines }, string>
-                                           // spacing within lines only; refuses syntax errors except `a+b`, which it spaces
+sgl::format_source(source)                 // -> formatted_source { text, skipped, unformatted_lines }
+                                           // spacing within lines, `name: type`, trailing comments aligned within 16 columns
+                                           // skipped: the block and siblings around each syntax error, left as written
                                            // the output parses to the same tree, checked; unformatted_lines are formatter bugs
 ```
 

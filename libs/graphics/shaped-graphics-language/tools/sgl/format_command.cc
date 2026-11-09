@@ -8,8 +8,9 @@
 
 namespace
 {
-// 0 = every file is formatted (or, with --check, already was), 1 = bad usage or an IO error, 2 = a file has syntax
-// errors, or with --check would change.
+// 0 = every file is formatted (or, with --check, already was), 1 = bad usage or an IO error, 2 = with --check, a file
+// would change.
+// The blocks around a syntax error are left as written, which is a warning and no failure.
 constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_changes = 2;
@@ -39,16 +40,13 @@ COMMAND("format")
             return exit_usage;
         }
         auto const formatted = sgl::format_source(source.value());
-        if (formatted.has_error())
-        {
-            cc::eprintln("{}: not formatted, since it has syntax errors: {}", path, formatted.error());
-            code = exit_changes;
-            continue;
-        }
-        for (auto const l : formatted.value().unformatted_lines)
+        for (auto const& s : formatted.skipped)
+            cc::eprintln("{}:{}-{}: left as written, around the syntax error at line {}: {}", path, s.first_line + 1,
+                         s.last_line + 1, s.error_line + 1, s.error);
+        for (auto const l : formatted.unformatted_lines)
             cc::eprintln("{}:{}: left as written: formatting it changed what the file means, a bug of the formatter",
                          path, l + 1);
-        if (formatted.value().text == source.value())
+        if (formatted.text == source.value())
             continue;
         if (is_check)
         {
@@ -56,7 +54,7 @@ COMMAND("format")
             code = exit_changes;
             continue;
         }
-        if (auto const w = sgl_tool::write_file(path, formatted.value().text); w.has_error())
+        if (auto const w = sgl_tool::write_file(path, formatted.text); w.has_error())
         {
             cc::eprintln("sgl format: cannot write {}: {}", path, w.error());
             return exit_usage;
