@@ -66,6 +66,13 @@ struct sgl::shared_library
     mutable cc::mutex<layers> checked;
 };
 
+/// One module's link of a library's chain as bytes (`check::save_link_artifact`), under its `module_artifact_keys` key.
+struct sgl::module_artifact
+{
+    cc::string key;
+    cc::vector<cc::byte> bytes;
+};
+
 namespace sgl
 {
 /// The files of `library` a compile of `source_name` checks, parsed once for the process; null where there are none.
@@ -85,4 +92,25 @@ namespace sgl
 [[nodiscard]] shared_library::link_ptr layer_of(shared_library const& library,
                                                 check::module_file program,
                                                 cc::span<check::option_value const> options = {});
+
+/// The keys of the artifacts of the modules of `library`, as `shared_library_of(library, source_name)` reads it: what
+/// a host that keeps artifacts fetches before a compile, from wherever it keeps them, and hands in.
+/// A key names the compiler's build, the module, and its files' sources, and nothing of the modules it uses: an
+/// artifact loads over them as they stand, or is a miss.
+[[nodiscard]] cc::vector<cc::string> module_artifact_keys(cc::span<library_file const> library,
+                                                          cc::string_view source_name);
+
+/// Whether the process makes artifacts of the modules it checks, for a host to keep; off by default, and turning it
+/// off drops every artifact handed in or made.
+void keep_module_artifacts(bool is_on);
+
+/// Hands the process artifacts a host kept, each under its key: a compile then loads a module's link from its
+/// artifact rather than checking it, where it loads over the modules before it as they stand.
+/// A compile reads nothing else, so a host that keeps them fetches them first, and asynchronously.
+/// A few hundred are kept, and every one goes once there are more.
+void offer_module_artifacts(cc::span<module_artifact const> artifacts);
+
+/// The artifacts made since the last call, while `keep_module_artifacts` is on: one per module a compile checked
+/// rather than loaded or moved, at its options' defaults; a host keeps them where it will fetch them from.
+[[nodiscard]] cc::vector<module_artifact> take_module_artifacts();
 } // namespace sgl

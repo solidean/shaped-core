@@ -592,6 +592,23 @@ struct checker
     isize bodies_read_from = 0;
     void note_body_read(symbol_id function) const;
 
+    /// One link of a chain as the links after it were checked over it.
+    struct chain_part
+    {
+        cc::string module;
+        table_sizes start;
+        table_sizes interface_end;
+        table_sizes end;
+        /// How many files the layers up to this one declared.
+        i32 files = 0;
+        cc::hash128 interface_digest;
+        cc::hash128 part_digest;
+        /// The sources of the link's own files: an inlined body is read from its AST, which no table holds.
+        cc::hash128 sources_digest;
+    };
+    /// Every link of the chain up to this one, the first first: what a later link is moved past an edit by.
+    cc::vector<chain_part> chain;
+
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
     [[nodiscard]] parsed_file const& file_of(i32 file) const { return files[file].file; }

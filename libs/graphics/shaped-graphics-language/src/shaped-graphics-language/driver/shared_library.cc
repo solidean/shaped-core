@@ -5,7 +5,10 @@
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/string/format.hh>
 #include <shaped-graphics-language/ast/build.hh>
+#include <shaped-graphics-language/check/artifact.hh>
+#include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 
 using namespace cc::primitive_defines;
@@ -123,42 +126,84 @@ cc::shared_ptr<T const> kept_in(cc::mutex<cc::map<cc::hash128, cc::shared_ptr<T 
         });
 }
 
+/// The key a host keeps `module`'s link of `library` under: the compiler's build, the module's name, and its files'
+/// sources, in their order; not their names, which no link holds.
+cc::string artifact_key_of(shared_library const& library, sgl::check::chained_module const& module)
+{
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_string(sgl::compiler_fingerprint());
+    b.add_string(module.name);
+    for (auto const i : module.files)
+        b.add_string(library.files[i].file.source);
+    auto const h = cc::hash128::create(b.written_bytes(), 0);
+    return cc::format("sgl-link-{:016x}{:016x}", h.high, h.low);
+}
+
+/// What hosts keep of the process's links: the artifacts handed in, and those made since a host last took them.
+struct artifact_shelf
+{
+    bool is_keeping = false;
+    cc::map<cc::string, cc::vector<byte>> offered;
+    cc::vector<sgl::module_artifact> made;
+};
+cc::mutex<artifact_shelf> g_artifacts;
+/// Few, since an artifact is a module's whole own part; every one goes once there are more.
+constexpr isize k_max_offered = 256;
+
+/// The link `module` adds over `base` from the artifact a host handed in under `key`, where one loads there.
+cc::optional<sgl::check::checked_prelude> loaded_link(shared_library const& library,
+                                                      sgl::check::checked_prelude const& base,
+                                                      cc::string_view module,
+                                                      cc::string_view key)
+{
+    // the bytes are copied out, so a load never holds the shelf
+    auto const bytes = g_artifacts.lock(
+        [&](artifact_shelf& s) -> cc::optional<cc::vector<byte>>
+        {
+            if (auto const* const p = s.offered.get_ptr(cc::string(key)); p != nullptr)
+                return *p;
+            return {};
+        });
+    if (!bytes.has_value())
+        return {};
+    CC_RECORD_SCOPE("sgl.load_module");
+    return sgl::check::load_link_artifact(bytes.value(), key, base, library.files, module);
+}
+
 /// The last link of `library`'s chain, each link found or checked over the one before; null where a module reports.
 /// Each link is checked with the values `options` give its module's options, which are part of its key, so the links
 /// before the first module a compile sets an option of are the ones every compile shares.
+/// A link not made yet is moved rather than checked where it may be: `moved_from`'s link of its module, checked over
+/// links that differ from this chain's since (the compilation model's early cutoff), or a host's artifact of it.
 link_ptr chain_of(shared_library const& library,
                   sgl::check::checked_prelude const& prelude,
-                  cc::span<sgl::check::option_value const> options)
+                  cc::span<sgl::check::option_value const> options,
+                  link_ptr const& moved_from)
 {
     // the modules of the files being edited go late
     auto const order = sgl::check::library_chain(library.files, library.late_files);
     if (order.empty())
         return {};
-    // The previous library's chain, where it holds these modules in this order: once a link differs from its own, the
-    // ones after it are relocated from it rather than checked again where they may be (the compilation model's early
-    // cutoff), each refused relocation checking its module afresh.
-    auto old_chain = cc::vector<link_ptr>();
-    if (auto const previous = library.previous.lock(); previous != nullptr && options.empty())
+    auto old_links = cc::map<cc::string, link_ptr>();
+    for (auto link = moved_from; link != nullptr; link = link->before)
+        old_links[link->module] = link;
+    // an old link of a module is this chain's only where it was checked from the very sources this library holds
+    auto const holds_same_files = [&](shared_library::chain_link const& old, sgl::check::chained_module const& module)
     {
-        auto const last = previous->checked.lock([](shared_library::layers& l) { return l.library; });
-        auto backwards = cc::vector<link_ptr>();
-        for (auto link = last; link != nullptr; link = link->before)
-            backwards.push_back(link);
-        for (auto i = backwards.size() - 1; i >= 0; --i)
-            old_chain.push_back(backwards[i]);
-        auto is_same_order = old_chain.size() == order.size();
-        for (auto i = isize(0); is_same_order && i < order.size(); ++i)
-            is_same_order = old_chain[i]->module == order[i].name;
-        if (!is_same_order)
-            old_chain = {};
-    }
-    auto moved = cc::vector<sgl::check::moved_link>();
+        if (old.units.size() != module.files.size())
+            return false;
+        for (auto i = isize(0); i < old.units.size(); ++i)
+            if (old.units[i] != library.units[module.files[i]]
+                && old.units[i]->file.source != library.files[module.files[i]].file.source)
+                return false;
+        return true;
+    };
+    auto const is_keeping = g_artifacts.lock([](artifact_shelf& s) { return s.is_keeping; });
 
     auto before = link_ptr();
     auto key = cc::hash128();
-    for (auto position = isize(0); position < order.size(); ++position)
+    for (auto const& module : order)
     {
-        auto const& module = order[position];
         auto const own_options = sgl::check::options_of_module(options, module.name);
         auto& b = cc::byte_stream_builder::thread_local_scratch();
         b.add_pod(key);
@@ -178,21 +223,28 @@ link_ptr chain_of(shared_library const& library,
         auto link = live_link(key);
         if (link == nullptr)
         {
+            auto const& base = before != nullptr ? *before->layer : prelude;
             auto made = cc::optional<sgl::check::checked_prelude>();
-            // only a link of these very files moves: relocating another's would check this module as that one's text
-            auto is_same_module = !moved.empty() && old_chain[position]->units.size() == module.files.size();
-            for (auto i = isize(0); is_same_module && i < module.files.size(); ++i)
-                is_same_module = old_chain[position]->units[i] == library.units[module.files[i]];
-            if (is_same_module)
+            // the old link of the module, where the links before it differ from this chain's
+            if (auto const* const old = old_links.get_ptr(module.name);
+                own_options.empty() && old != nullptr && (*old)->before != before && holds_same_files(**old, module))
             {
                 CC_RECORD_SCOPE("sgl.relocate_module");
-                made = sgl::check::relocate_link(*old_chain[position]->layer, moved);
+                made = sgl::check::relocate_link(*(*old)->layer,
+                                                 (*old)->before != nullptr ? *(*old)->before->layer : prelude, base);
             }
+            auto const artifact_key
+                = own_options.empty() && options.empty() ? artifact_key_of(library, module) : cc::string();
+            if (!made.has_value() && !artifact_key.empty())
+                made = loaded_link(library, base, module.name, artifact_key);
             if (!made.has_value())
             {
                 CC_RECORD_SCOPE("sgl.check_module");
-                made = sgl::check::check_next_module(before != nullptr ? *before->layer : prelude, library.files,
-                                                     module.name, own_options);
+                made = sgl::check::check_next_module(base, library.files, module.name, own_options);
+                if (made.has_value() && is_keeping && !artifact_key.empty())
+                    if (auto bytes = sgl::check::save_link_artifact(made.value(), base, artifact_key); bytes.has_value())
+                        g_artifacts.lock([&](artifact_shelf& s)
+                                         { s.made.push_back({.key = artifact_key, .bytes = cc::move(bytes.value())}); });
             }
             if (!made.has_value())
                 return {};
@@ -204,9 +256,6 @@ link_ptr chain_of(shared_library const& library,
                 own->units.push_back(library.units[i]);
             link = keep_link(key, link_ptr(cc::move(own)));
         }
-        // from the first link that differs from the old chain's on, every link is one a later relocation moves past
-        if (!old_chain.empty() && (!moved.empty() || link != old_chain[position]))
-            moved.push_back({.before = old_chain[position]->layer.get(), .after = link->layer.get()});
         before = cc::move(link);
     }
     return before;
@@ -224,7 +273,11 @@ link_ptr library_chain_of(shared_library const& library, sgl::check::checked_pre
         });
     if (tried.has_value())
         return tried.value();
-    auto made = chain_of(library, prelude, {});
+    // an edit's links move from the library made before it under the same names
+    auto const previous = library.previous.lock();
+    auto const moved_from
+        = previous != nullptr ? previous->checked.lock([](shared_library::layers& l) { return l.library; }) : link_ptr();
+    auto made = chain_of(library, prelude, {}, moved_from);
     return library.checked.lock(
         [&](shared_library::layers& l) -> link_ptr
         {
@@ -329,7 +382,8 @@ sgl::shared_library::link_ptr sgl::layer_of(shared_library const& library,
         // A compile that sets a module's option: the chain with its values, from the first module it sets one of.
         // A value its option does not take reports, so that compile checks beside the library and reports it.
         CC_RECORD_SCOPE("sgl.check_options");
-        auto with = chain_of(library, *prelude, options);
+        // its links after that module move from the defaults' chain where they may
+        auto with = chain_of(library, *prelude, options, whole);
         if (with == nullptr || !check::layer_serves_options(*with->layer, options))
             return {};
         library.checked.lock(
@@ -380,4 +434,45 @@ sgl::shared_library::link_ptr sgl::layer_of(shared_library const& library,
             return l.made.back();
         });
     return link != nullptr && check::layer_serves_options(*link->layer, options) ? link : link_ptr();
+}
+
+cc::vector<cc::string> sgl::module_artifact_keys(cc::span<library_file const> library, cc::string_view source_name)
+{
+    auto const shared = shared_library_of(library, source_name);
+    if (shared == nullptr)
+        return {};
+    auto keys = cc::vector<cc::string>();
+    for (auto const& module : check::library_chain(shared->files))
+        keys.push_back(artifact_key_of(*shared, module));
+    return keys;
+}
+
+void sgl::keep_module_artifacts(bool is_on)
+{
+    g_artifacts.lock(
+        [&](artifact_shelf& s)
+        {
+            s.is_keeping = is_on;
+            if (!is_on)
+                s = {};
+        });
+}
+
+void sgl::offer_module_artifacts(cc::span<module_artifact const> artifacts)
+{
+    g_artifacts.lock(
+        [&](artifact_shelf& s)
+        {
+            for (auto const& a : artifacts)
+            {
+                if (s.offered.size() >= k_max_offered && !s.offered.contains(a.key))
+                    s.offered.clear();
+                s.offered[a.key] = a.bytes;
+            }
+        });
+}
+
+cc::vector<sgl::module_artifact> sgl::take_module_artifacts()
+{
+    return g_artifacts.lock([](artifact_shelf& s) { return cc::move(s.made); });
 }

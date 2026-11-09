@@ -421,10 +421,9 @@ cc::vector<option_value> sgl::check::options_of_module(cc::span<option_value con
     return result;
 }
 
-cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude const& base,
-                                                            cc::span<module_file const> library,
-                                                            cc::string_view module,
-                                                            cc::span<option_value const> options)
+cc::optional<impl::layer_maker::next_link> impl::layer_maker::plan_next(checked_prelude const& base,
+                                                                        cc::span<module_file const> library,
+                                                                        cc::string_view module)
 {
     CC_ASSERT(base._library_order.empty() || base._is_library, "a chain continues the prelude or a layer of its own");
     // the modules of the layers before, then this one: a program using them all, in the chain's order
@@ -448,8 +447,6 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
         if (plan.library_order[i] != base._library_order[i])
             return {};
 
-    auto const empty_file = parse("");
-    auto const empty_ast = ast::build(empty_file);
     auto result = checked_prelude();
     result._files.push_back_range(cc::span<module_file const>(base._files));
     result._prelude_count = base._prelude_count;
@@ -459,8 +456,23 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
     result._modules = plan.modules;
     result._is_library = true;
     result._options = base._options;
-    result._options.push_back_range(options);
     result._names_by_reach = cc::make_unique<cc::mutex<cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>>>();
+    return next_link{.layer = cc::move(result), .plan = cc::move(plan)};
+}
+
+cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude const& base,
+                                                            cc::span<module_file const> library,
+                                                            cc::string_view module,
+                                                            cc::span<option_value const> options)
+{
+    auto next = impl::layer_maker::plan_next(base, library, module);
+    if (!next.has_value())
+        return {};
+    auto result = cc::move(next.value().layer);
+    auto& plan = next.value().plan;
+    result._options.push_back_range(options);
+    auto const empty_file = parse("");
+    auto const empty_ast = ast::build(empty_file);
     auto files = result._files;
     files.push_back({.file = empty_file, .ast = empty_ast});
     plan.uses.back() = {};
@@ -485,6 +497,16 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
     c.out.diagnostics = {};
     result._resume = freeze_layer(c, i32(result._files.size()));
     c.part_digest = impl::interface_hash(c, c.run_start, impl::sizes_of(c));
+    c.chain.push_back({
+        .module = cc::string(module),
+        .start = c.run_start,
+        .interface_end = c.interface_end,
+        .end = impl::sizes_of(c),
+        .files = i32(result._files.size()),
+        .interface_digest = c.interface_digest,
+        .part_digest = c.part_digest,
+        .sources_digest = impl::layer_maker::sources_digest(result._files, base._files.size()),
+    });
     return result;
 }
 

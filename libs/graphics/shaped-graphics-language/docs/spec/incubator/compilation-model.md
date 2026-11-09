@@ -67,7 +67,7 @@ That needs no multi-file compilation.
 
 ## Separate compilation: checked layers
 
-*Decided with the maintainer on 2026-11-08, and its remaining steps on 2026-11-09; steps 1 to 8 are built in a first form, the rest is not.*
+*Decided with the maintainer on 2026-11-08, and its remaining steps on 2026-11-09; steps 1 to 9 are built in a first form, the rest is not.*
 
 ### What it costs today
 
@@ -140,7 +140,8 @@ A checked layer can be written as bytes and read back: a **module artifact**.
 SGL is a development tool, and what ships is compiled shaders.
 A process that compiles at run time ships the compiler too, so the artifacts it needs are that compiler's.
 
-* It is keyed by its module's sources, the interface keys of the artifacts it imports, and the compiler's own build, so a different compiler never reads it.
+* It is keyed by its module's sources and the compiler's own build, so a different compiler never reads it.
+  The interfaces of the modules it uses are checked when it loads rather than named by its key, so one artifact serves every edit of them that keeps their interfaces.
 * So it has no format version and no migration, and its layout follows the checker's tables.
 * A miss, a corrupt artifact and a truncated one all check the module again from source: deleting every artifact never changes a result.
 * Only a module whose check reported nothing has one; a module that reports is checked from source by every compile, which reports it.
@@ -174,7 +175,8 @@ The files are parsed from source, since the flat trees read the AST: a parse rea
 **Early cutoff: a dependent's key names its imports' interfaces, not their sources.**
 
 * An edit to a body that leaves its module's interface alone makes no artifact of a module using it stale.
-* A dependent whose own check read a body of an import, a generic it instantiated or a function it evaluated, names that body's hash in its key too.
+* A dependent whose own check read a body of an import, a generic it instantiated or a function it evaluated, records it.
+  It moves only past an edit that left that import's sources alone; naming the body's own hash would be the finer grain.
 
 **Options are a second layer.** *Decided with the maintainer on 2026-11-09.*
 
@@ -269,9 +271,12 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
    An id into what a changed link no longer holds refuses, and so does a link that inlined or instantiated a changed link's function (`bodies_read`).
    So does an entry a fresh check would have found in the new link instead, an interned type the new link holds under the same spelling.
    A link checked again into what it was, positions aside, keeps every entry, so one refusal does not cascade.
-   A test holds every relocated link to the very bytes a fresh check writes, over shaped-viewer's modules and a library made to refuse, past three kinds of edit.
-   shaped-viewer: past an edit of `scene` that keeps its interface, the 9 links after it relocate in 3.7 ms where checking them took 23 ms; a keystroke there is a 13.3 ms analysis, against 27.8 ms.
-   What it does not do yet: keep the part of a changed interface that did not change, relocate a chain checked with a module's option, or move a link without copying the tables below it.
+   A test holds every relocated link to what a fresh check makes, field for field, over shaped-viewer's modules and a library made to refuse, past three kinds of edit.
+   shaped-viewer: past an edit of `scene` that keeps its interface, the 9 links after it relocate in 4.5 ms where checking them took 23 ms; a keystroke there is a 9.6 ms analysis, against 27.8 ms.
+   *Since step 9* a move writes the link's own part as an artifact's bytes and reads them back over the new links, so every move in memory is an artifact's load too.
+   A compile that sets a module's option moves the links after that module from the defaults' chain where they may.
+   An option's value is part of its module's interface, so a link naming that module is checked again.
+   What it does not do yet: keep the part of a changed interface that did not change, or move a link without copying the tables below it.
 8. **Options as a second layer** (see [artifacts](#artifacts)): a compile that sets a module's option checks only what reaches it.
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options continues from the layers, which is every compile in the tree.
    *A second, on 2026-11-09, in the chain's terms:* a link is checked with the values a compile gives its own module's options, and they are part of its key.
@@ -280,6 +285,15 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
    What is left is the declaration's grain, which needs no link after the module's to be checked again: that is relocation's (step 7).
 9. **Per-module artifacts, kept where a host asks:** each module's first layer, keyed by its sources and its imports' interfaces, relocated on load.
    The host's seam is async, and a compile is handed loaded layers.
+   *Landed on 2026-11-09, in the chain's terms:* `check::save_link_artifact` writes a link's own part and the parts of the chain it was checked over.
+   `check::load_link_artifact` reads it over a chain as it stands now, moved past every link that changed since, by the rules of step 7; a link of other modules or other files is a miss.
+   Each link keeps where the parts of its chain lie, their two digests and a hash of each module's sources, which is what a load matches the chain it lands on against.
+   A string the part holds is a place in its own files or the prelude's, and in another module's file a place and its text, pointed back into that file where the text there is the same.
+   The driver's seam is `sgl::module_artifact_keys`, `offer_module_artifacts` and `take_module_artifacts`, behind `keep_module_artifacts`, which is off.
+   A host fetches the keys' bytes before a compile, asynchronously, and hands them in; a compile loads a link from them where it would check it, and reads nothing else.
+   A key is the compiler's build, the module's name and its files' sources, so it holds nothing of the modules it uses.
+   shaped-viewer's 10 links load in 8.6 ms from 1.4 MB, where checking them takes 27.9 ms (release), each load copying the tables below it as a check does.
+   No host keeps them yet: slib's persistent cache is where one would.
 10. **Parallel layers**, and bodies on demand for a reader that only checks, if a measurement asks for them.
 
 ### Open in this design
