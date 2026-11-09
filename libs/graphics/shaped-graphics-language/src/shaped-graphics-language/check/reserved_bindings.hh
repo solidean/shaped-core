@@ -70,8 +70,9 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 3, .slot = 19, .stages = k_every_stage, .stages_needing_feature = k_vertex_pipeline_stages},
          // WebGPU's vertex stage has no writable storage
          {.group = 3, .slot = 19, .stages = u16(k_every_stage & ~stage_bit(stage::vertex))},
-         // the argument table's last slot, clear of the vertex buffers from 5 up; ray-tracing stages take no buffer
-         {.group = -1, .slot = 30, .stages = k_raster_and_compute_stages},
+         // the argument table's last slot, clear of the vertex buffers from 5 up; a ray-tracing pipeline's raygen
+         // takes it, and hands it every other stage through its context
+         {.group = -1, .slot = 30, .stages = k_every_stage},
      }},
     {.name = "sg_acceleration_pool",
      .enabled_by = reserved_use::software_trace,

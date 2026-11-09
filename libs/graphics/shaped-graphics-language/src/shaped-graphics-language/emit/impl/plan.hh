@@ -240,6 +240,9 @@ struct plan
     /// Every `atomic[float]` is the target's own float atomic, rather than a `uint`'s bits: the device adds floats in one
     /// instruction, and the target can say so (vulkan, metal).
     bool native_float_atomics = false;
+    /// The text writes prints and asserts into sg's debug window (EMIT-183), which a metal raygen hands every stage it
+    /// calls through its context, whether it prints itself or not.
+    bool diagnostics = false;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;

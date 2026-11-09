@@ -568,7 +568,9 @@ fn main_ps(p: pixel_input) -> target_ {
   The window, its record and its address on each target are [the contract with sg](../../reserved-bindings.md).
   A compile declares the window only where a statement reaches it.
   A stage the contract says cannot reach it drops its prints and declares none.
-  That is WebGPU's vertex stage, MSL's ray-tracing stages, and vulkan's vertex, geometry and tessellation stages without `vertex_pipeline_stores`, which no program names.
+  That is WebGPU's vertex stage, and vulkan's vertex, geometry and tessellation stages without `vertex_pipeline_stores`, which no program names.
+  On metal a ray-tracing pipeline's raygen takes the window and hands it on in `sgl_context`, since every other stage of it is a function the raygen calls.
+  It takes it whether it prints or not, and each stage that prints reads it from there.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
 
 

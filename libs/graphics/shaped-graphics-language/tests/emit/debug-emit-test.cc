@@ -1,5 +1,6 @@
 #include "emit-test-support.hh"
 
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 
 using namespace sgl_test;
@@ -236,4 +237,37 @@ TEST("sgl emit - a failed assert ends a patch, a candidate and a box as each sta
                          "    return report(1.0, sphere_hit(float3(0.0, 1.0, 0.0)))\n";
     auto const intersection = compile(box, target::hlsl_dx12, "sphere").text;
     CHECK(intersection.contains("is_hit = false")).dump("text", intersection);
+}
+
+TEST("sgl emit - a metal raygen hands its debug buffer to every ray-tracing stage it calls, which prints through it "
+     "(EMIT-183)")
+{
+    auto const source = read_text(nx::source_path(SGL_SG_SHADERS_DIR) + "/raytracing_pipeline.sgl")
+                      + "\n@miss fun printing_sky(p: mut radiance):\n"
+                        "    print \"missed\"\n"
+                        "    p.is_hit = 0\n"
+                        "\n"
+                        "@closest_hit fun printing_shade(h: triangle_hit, p: mut radiance):\n"
+                        "    assert h.t >= 0.0, \"a hit behind the ray at $(h.t)\"\n"
+                        "    p.is_hit = 1\n";
+    // the raygen takes it whether it prints or not, since a stage it calls may
+    auto const raygen = compile(source, target::msl, "primary").text;
+    CHECK(raygen.contains("device atomic_uint* sg_debug [[buffer(30)]]")).dump("text", raygen);
+    CHECK(raygen.contains("    sgl_ctx.debug = sg_debug;\n")).dump("text", raygen);
+    CHECK(raygen.contains("    device atomic_uint* debug;\n")).dump("text", raygen);
+
+    for (auto const entry : {cc::string_view("printing_sky"), cc::string_view("printing_shade")})
+    {
+        auto const stage = compile(source, target::msl, entry);
+        CHECK(stage.text.contains("    device atomic_uint* sg_debug = sgl_ctx.debug;\n")).dump("text", stage.text);
+        CHECK(stage.debug_sites.size() == 1).context(cc::string(entry));
+    }
+    // a stage that prints nothing reaches no buffer
+    CHECK(!compile(source, target::msl, "sky").text.contains("sg_debug = sgl_ctx.debug"));
+
+    // without diagnostics no raygen takes it, and every stage's context holds none
+    auto const plain = sgl::compile_to_text({.source = source, .entry_point = "primary", .target = target::msl});
+    REQUIRE(plain.has_value());
+    CHECK(!plain.value().text.contains("sg_debug"));
+    CHECK(plain.value().text.contains("    sgl_ctx.debug = nullptr;\n"));
 }

@@ -1662,7 +1662,8 @@ void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pip
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get());
-    _bound_debug_window = nullptr;
+    // the raygen takes the debug window and hands it every stage it calls (EMIT-183)
+    bind_debug_window(_bound_raytracing->footprint());
 }
 
 void metal_command_list::raytracing_bind_group(int group_index, binding_group const& group)

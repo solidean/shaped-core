@@ -479,6 +479,7 @@ public:
                "    constant sgl_hit_offsets_table* hit_offsets;\n"
                "    uint3 launch_id;\n"
                "    uint3 launch_size;\n"
+               "    device atomic_uint* debug;\n"
                "};\n\n";
         out += "struct sgl_hit_record\n{\n"
                "    float t;\n"
@@ -553,6 +554,10 @@ public:
             out.appendf("    constant {0}& {1} = *static_cast<constant {0}*>(sgl_ctx.constants);\n",
                         p.constants.value().block_name, p.constants.value().name);
         out += "    device sgl_tables& sgl_t = *static_cast<device sgl_tables*>(sgl_ctx.tables);\n";
+        // EMIT-183: a stage that prints reaches the window its raygen was handed
+        for (auto const& r : p.resources)
+            if (r.is_reserved && r.name == "sg_debug")
+                out += "    device atomic_uint* sg_debug = sgl_ctx.debug;\n";
     }
 
     /// EMIT-139: a ray-tracing stage as metal runs it: the raygen a kernel, a miss, closest hit or callable a visible
@@ -573,6 +578,11 @@ public:
             parameters.push_back(cc::format("device sgl_tables& sgl_t [[buffer({})]]", k_reserved_group));
             parameters.push_back(
                 cc::format("constant sgl_hit_offsets_table& sgl_hit_offsets [[buffer({})]]", k_hit_offsets_buffer));
+            // EMIT-183: the debug window, which the raygen hands every stage it calls, since none of them is a kernel
+            if (p.diagnostics)
+                parameters.push_back(
+                    cc::format("device atomic_uint* sg_debug [[buffer({})]]",
+                               check::reserved_binding_named("sg_debug")->targets[u8(emit::target::msl)].slot));
             parameters.push_back("uint3 sgl_launch_id [[thread_position_in_grid]]");
             parameters.push_back("uint3 sgl_launch_size [[threads_per_grid]]");
             auto list = cc::string();
@@ -591,6 +601,7 @@ public:
                    "    sgl_ctx.hit_offsets = &sgl_hit_offsets;\n"
                    "    sgl_ctx.launch_id = sgl_launch_id;\n"
                    "    sgl_ctx.launch_size = sgl_launch_size;\n";
+            out.appendf("    sgl_ctx.debug = {};\n", p.diagnostics ? "sg_debug" : "nullptr");
         }
         else if (stage_of == stage::miss || stage_of == stage::closest_hit || stage_of == stage::callable)
         {
