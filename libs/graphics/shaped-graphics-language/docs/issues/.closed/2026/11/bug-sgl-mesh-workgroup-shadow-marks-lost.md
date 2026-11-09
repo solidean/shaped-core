@@ -23,7 +23,8 @@ Measured on 2026-11-09:
 
 So the same text loses groupshared atomics of some lanes in a mesh stage on NVIDIA's driver, and keeps them on WARP.
 
-Reduced on 2026-11-09 to twenty lines of HLSL through the stock DXC, in [nvidia-mesh-groupshared-atomics-lost](../../../../../../../../docs/bugs-external/nvidia-mesh-groupshared-atomics-lost/readme.md).
+Reduced on 2026-11-09 to twenty lines of HLSL through the stock DXC.
+The reproduction is [nvidia-mesh-groupshared-atomics-lost](../../../../../../../../docs/bugs-external/nvidia-mesh-groupshared-atomics-lost/readme.md).
 The trigger is the `aborted` flag the index guards set: a phi out of the divergent store branch, live across the barrier, read by the `return` after `SetMeshOutputCounts`.
 Returning on the same condition spelled again, `-Od`, or the compute stage each keep every mark.
 
