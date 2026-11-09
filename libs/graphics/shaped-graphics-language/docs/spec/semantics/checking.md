@@ -70,14 +70,15 @@ The program is checked with a **library**: the files of the module directories i
 
 * **CHK-346** A library file belongs to the module its `module` line names, and every library file naming one module is a file of it ([why](why/checking.md#chk-346)).
   A library file without a `module` line belongs to no module and is not read.
-  A module's name is one identifier; a dotted one is `unsupported-yet`.
+  A module's name may be dotted, `module sv.scene`, and is then that whole name: no module `sv` holds it, nor is it one of a module `sv` (CHK-347).
   Only the modules the program reaches through `use`, directly or through another module, are checked.
   A program file whose `module` line names a module of the library is checked as one more file of that module.
 * **CHK-347** `use m` binds the name `m`, and `use m as n` the name `n`, to module `m`, in the file that writes it alone ([why](why/checking.md#chk-347)).
   It brings no name of `m` into the file: what `m` declares is reached as `m.name` (CHK-348).
+  `use a.b` binds `b`, the last part of the module's name, so two modules whose names end alike need `as` to be used by one file.
   A module is no value, so its name where a value or a type stands is `wrong-kind-of-name`.
   A `use` of a module no library file declares is `unknown-module`, and one of the file's own module `use-of-own-module`.
-  A dotted path is `unsupported-yet`, and so is `use` in a function body.
+  A `use` in a function body is `unsupported-yet`.
   Two `use` lines binding one name, or a `use` binding a name a declaration of its file's module or of the prelude has, is `duplicate-declaration`, and that `use` binds nothing.
 * **CHK-348** `m.name`, where `m` is a name a `use` of the file binds and no local hides, stands for the module-level name `name` of module `m` wherever a bare name could stand.
   That is a value, a call, a type, an entry of a binding list, a binding member, an enum case and `m.T.f(…)`.

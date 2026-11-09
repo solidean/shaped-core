@@ -1,0 +1,6 @@
+// A module whose name is dotted, exported beside the module its name starts with: its C++ types stand in
+// sgl_modules::marking::tints.
+module marking.tints
+
+binding glow:
+    strength: float

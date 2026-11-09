@@ -5,6 +5,7 @@
 #include <nexus/async-test.hh>
 #include <sg_test_sgl_shaders.hh>
 #include <sgl_modules/marking.hh>
+#include <sgl_modules/marking/tints.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
@@ -76,4 +77,10 @@ ASYNC_INVOCABLE_TEST("sg - one group of a module's binding serves pipelines of t
         CHECK(u8(bytes[i * 4 + 0]) == 0);
         CHECK(u8(bytes[i * 4 + 2]) == 255);
     }
+}
+
+TEST("sg - a module of a dotted name generates its types under each part of its name, beside the module it nests in")
+{
+    auto const glow = sgl_modules::marking::tints::glow{.strength = 2.0f};
+    CHECK(glow.strength == 2.0f);
 }
