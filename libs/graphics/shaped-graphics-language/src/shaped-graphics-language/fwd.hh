@@ -33,6 +33,7 @@ struct emitted_source;
 struct interface_binding;
 struct prelude_file;
 struct library_file;
+struct shared_library;
 struct parsed_prelude_file;
 
 enum class token_class : u8;

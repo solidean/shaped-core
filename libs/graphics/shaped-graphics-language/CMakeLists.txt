@@ -160,6 +160,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/describe.cc
     src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
+    src/shaped-graphics-language/driver/shared_library.cc
     src/shaped-graphics-language/driver/prelude.cc
     src/shaped-graphics-language/driver/classify.cc
     src/shaped-graphics-language/driver/inferred_results.cc
@@ -422,7 +423,10 @@ if(SC_BUILD_TOOLS)
     sc_target_source_paths(sgl PRIVATE
         SGL_SAMPLES_DIR tests/samples
         SGL_PRELUDE_DIR prelude
-        SGL_LSP_TEST_MODULES_DIR tools/sgl/lsp/tests/modules)
+        SGL_LSP_TEST_MODULES_DIR tools/sgl/lsp/tests/modules
+        SGL_LSP_TEST_CLEAN_MODULES_DIR tools/sgl/lsp/tests/clean-modules
+        SGL_LSP_SV_SHADERS_DIR ../shaped-viewer/shaders
+        SGL_LSP_SR_MODULES_DIR ../shaped-rendering/shaders/modules)
 endif()
 
 # Test executable

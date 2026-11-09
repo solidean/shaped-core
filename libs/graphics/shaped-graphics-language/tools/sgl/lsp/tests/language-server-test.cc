@@ -474,6 +474,36 @@ TEST("sgl lsp - an error in a module the document uses is shown on its `use`, po
     CHECK(related["location"]["range"]["start"]["line"].as_double() == 3);
 }
 
+TEST("sgl lsp - every edit of a document continues from one parse and one check of the modules it uses", main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR)});
+    auto const first = sgl_lsp::analyze(document_of("use shading\nfun g() -> float => shading.lit(1.0)\n"));
+    auto const edited = sgl_lsp::analyze(document_of("use shading\nfun g() -> float => shading.lit(2.0)\n"));
+    auto const other = sgl_lsp::analyze(document_of("use noise\nfun h() -> float => noise.grain(1.0)\n"));
+    sgl_lsp::set_module_dirs({});
+
+    REQUIRE(first->layer != nullptr);
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    CHECK(other->diagnostics.empty());
+    CHECK(edited->library == first->library);
+    CHECK(edited->layer == first->layer);
+    CHECK(other->layer == first->layer);
+    // the layer holds both modules, and each document reaches only the one it uses
+    REQUIRE(first->module.reached_library_files.size() == 1);
+    CHECK(first->library->names[first->module.reached_library_files[0]].ends_with("shading.sgl"));
+    CHECK(first->text_of(first->module.prelude_file_count()).contains("module "));
+}
+
 TEST("sgl lsp - a module file open in the editor is what the documents using it are checked against", main_thread)
 {
     sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_MODULES_DIR)});

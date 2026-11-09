@@ -522,6 +522,32 @@ TEST("sgl checked modules - a compile that sets its own options continues from i
         layer.value(), options{{.name = "taps", .value = "3"}, {.name = "tuned.width", .value = "3"}}));
 }
 
+TEST("sgl checked modules - a module file that does not parse makes no layer of the whole library, and a program "
+     "using the others still continues from theirs")
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const clean_file = sgl::parse("module clean\nfun half(x: float) -> float => x * 0.5\n");
+    auto const clean_ast = sgl::ast::build(clean_file);
+    auto const broken_file = sgl::parse("module broken\nfun f(x: float -> float => x\n");
+    auto const broken_ast = sgl::ast::build(broken_file);
+    // a parse error is the parser's or the AST's to report, and the check of what it left reports nothing
+    REQUIRE((!broken_file.diagnostics.empty() || !broken_ast.diagnostics.empty()));
+    auto const library = cc::vector<sgl::check::module_file>{{.file = clean_file, .ast = clean_ast},
+                                                             {.file = broken_file, .ast = broken_ast}};
+    auto const program_file = sgl::parse("use clean\ntest clean.half(2.0) == 1.0\n");
+    auto const program_ast = sgl::ast::build(program_file);
+    auto const user = sgl::check::module_file{.file = program_file, .ast = program_ast};
+
+    CHECK(!sgl::check::check_library(*checked, library).has_value());
+    auto const layer = sgl::check::check_modules(*checked, library, user);
+    REQUIRE(layer.has_value());
+    auto const m = sgl::check::check(layer.value(), library, user);
+    CHECK(m.diagnostics.empty());
+    REQUIRE(m.library_files.size() == 1);
+    CHECK(m.library_files[0] == 0);
+}
+
 namespace
 {
 /// The module a source's first `module` line names; empty for a source of no module.

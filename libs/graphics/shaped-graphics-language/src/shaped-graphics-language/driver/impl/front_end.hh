@@ -6,40 +6,16 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
-#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/driver/library_file.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
+#include <shaped-graphics-language/driver/shared_library.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
 namespace sgl::driver::impl
 {
-/// A library's module files parsed once, shared by every compile in the process that hands in the same files.
-/// It also keeps the checked layers of the module sets those compiles reach, so a module's body is checked once per set.
-struct parsed_library
-{
-    cc::vector<cc::unique_ptr<parsed_file>> parsed;
-    cc::vector<cc::unique_ptr<ast::file_ast>> built;
-    /// Each file as the check pass takes it, and the name it was handed in under.
-    cc::vector<check::module_file> files;
-    cc::vector<cc::string> names;
-
-    struct layers
-    {
-        /// Every module of the library as one layer (`check::check_library`), which every compile continues from.
-        /// Null once it could not be made, a module that reports anything among the reasons; `made` serves then.
-        cc::shared_ptr<check::checked_prelude const> library;
-        bool has_tried_library = false;
-        /// One layer per set of modules a program reaches, where the library makes none of its own.
-        cc::vector<cc::shared_ptr<check::checked_prelude const>> made;
-        /// Set once a set of this library's modules failed to make a layer, after which its compiles check it whole.
-        bool has_failed = false;
-    };
-    cc::mutex<layers> checked;
-};
-
 /// One source checked against the prelude, which is what every driver starts from.
 ///
 /// `module` refers into `files` and `asts`, so the three move together and are never copied apart.
@@ -52,7 +28,7 @@ struct front_end
     cc::vector<cc::unique_ptr<parsed_file>> owned_files;
     cc::vector<cc::unique_ptr<ast::file_ast>> owned_asts;
     /// The library files the check read, where they came from the process's cache rather than `owned_files`.
-    cc::shared_ptr<parsed_library const> library;
+    cc::shared_ptr<shared_library const> library;
     /// The layer the check continued from, which `module` reads in place.
     cc::shared_ptr<check::checked_prelude const> layer;
     check::checked_module module;

@@ -222,6 +222,7 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    A test holds every one of those programs to checking as it does beside the modules it reaches alone, the emitted text of every target included.
    Where a module reports anything the library makes no layer, and the driver keeps one per set of modules as before.
    An edit of any module checks the library again, about 27 ms there; one layer per module, with relocation and early cutoff, is what would cut that.
+   The language server continues from the same layers, `sgl::layer_of`, so a keystroke in a shaped-viewer program is a 3.6 ms analysis and one in a module 42.6 ms (release).
 3. **The prelude's artifact.** *Landed on 2026-11-08: the prelude's 5.8 ms check is a 0.68 ms load of 1.6 MB, in a release build.*
    `check::save_artifact` and `load_artifact` write and read the checker's whole state after the prelude, bodies included, under a host's key.
    In a fresh `sgl` process the load was 2.3 ms with a file's read, and 8 ms from blob-cache with its open; the prelude's parse, about 13 ms there, is what a process still pays.
@@ -247,7 +248,6 @@ Each step stands on its own and is measured by the `sgl profile` tests.
 
 * Whether the per-stack relocation shows, which would bring back ids that name their layer.
 * How a declaration records an option it reaches through another module's declaration, which the overlay needs across artifacts.
-* Whether the language server, which keeps its own parse of the prelude, moves onto artifacts.
 
 ## What it touches
 

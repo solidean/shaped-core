@@ -89,7 +89,11 @@ The command owns the recorder, since nexus's console listener would write info l
 On a Ryzen 9 7950X3D, release build:
 
 * **Analyzing `tests/samples/helpers.sgl`** takes 0.30 ms with the prelude's parse cached, and 0.88 ms when the prelude is parsed again, which the server therefore never does.
-  The prelude is still checked with every document, since `check` cannot reuse a checked one.
+
+On a Ryzen 9 9950X3D2, release build, 2026-11-09:
+
+* **A keystroke in shaped-viewer's `tracer_pipeline.sgl`** is a 3.6 ms analysis: the module directories read, and the document checked behind its modules' layer.
+  A keystroke in a module it uses is 42.6 ms, since every document using the library parses and checks it again.
 * **A test that runs to its fuel limit**, a million steps, takes 57 ms; that is what made the interpreter read the stop flag itself.
 
 `uv run dev.py benchmark "sgl lsp"` reproduces both.
@@ -119,11 +123,13 @@ Recorded so they are not re-derived:
 * **Generating the LSP types** from the specification's `metaModel.json`, once the hand-written subset in `protocol/types.hh` becomes a chore.
 * **Module directories** come from the `sgl.moduleDirs` setting, which the extension resolves against the workspace folder and hands over at initialization.
   Changing the setting restarts the server, which the extension does, so the directories are read anew.
-  An analysis reads and parses every file of them anew each time, and a module file open in the editor is read as its open text, unsaved edits and all.
+  An analysis reads every file of them anew each time, and a module file open in the editor is read as its open text, unsaved edits and all.
+  What it reads is parsed and checked once for the process, `sgl::shared_library_of` and `sgl::layer_of` as every compile has them, so an edit of the document checks it alone.
   An edit to an open module file, and its opening and closing, checks every other open document again.
   A relative directory is resolved against the first workspace folder only, which leaves a multi-root workspace and per-folder settings open.
   An error in a module a document reaches is shown once, on the document's `use` of that module, with the module's own location beside it.
-* **Reusing a checked prelude and checked modules** across analyses, which waits for the compilation model's interfaces.
+* **An edit of a module file checks the whole library again** for each document using it.
+  One layer per module with early cutoff would cut that ([the compilation model](spec/incubator/compilation-model.md#separate-compilation-checked-layers)).
 * **Completion from the last analysis that checked**, so `x.` completes `x` by its checked type even where the line under edit breaks its function's check.
   Today the name is looked up again by its text, which knows locals, parameters and module-level names, and not `a.b.` chains.
 * **Occurrences from an index**: `occurrences_at` resolves every name of the right text, which is fine at a document's size and would want an index across many modules.

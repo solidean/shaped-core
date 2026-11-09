@@ -103,6 +103,7 @@ namespace sgl::check
 /// A program behind it checks as it does beside the modules it reaches alone: a module it does not use is checked, and
 /// nothing of the program sees it (`checked_module::is_reached_file`).
 /// None where a module, or the plan of them, reports anything; a caller then falls back to `check_modules`.
+/// A file's parse or AST diagnostic counts too, which no check reports and only a program reaching the file may.
 /// `library` and `prelude` must outlive the result, and a program continues from it with the same `library`.
 [[nodiscard]] cc::optional<checked_prelude> check_library(checked_prelude const& prelude,
                                                           cc::span<module_file const> library);

@@ -271,6 +271,10 @@ cc::optional<checked_prelude> sgl::check::check_library(checked_prelude const& p
     auto uses = cc::string();
     auto named = cc::vector<cc::string>();
     for (auto const& f : library)
+    {
+        // a parse error checks as no diagnostic, and only a program reaching the file may report it
+        if (!f.file.diagnostics.empty() || !f.ast.diagnostics.empty())
+            return {};
         for (auto const id : f.ast.at(f.ast.declarations))
             if (auto const* const m = f.ast.at(id).node.try_as<ast::module_decl>();
                 m != nullptr && ast::is_valid(m->path))
@@ -286,6 +290,7 @@ cc::optional<checked_prelude> sgl::check::check_library(checked_prelude const& p
                         uses.appendf("use {}\n", name);
                     }
                 }
+    }
     if (named.empty())
         return {};
     auto const every_file = parse(uses);

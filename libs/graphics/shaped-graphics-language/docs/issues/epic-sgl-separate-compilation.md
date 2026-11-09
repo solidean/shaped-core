@@ -41,6 +41,7 @@ The steps, each a child issue when it is taken up, in this order:
    *A first form landed on 2026-11-09:* a compile that sets only its program's own options does, which is every compile in the tree today.
    A module's own option still re-checks the whole set.
 5. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
-6. **The language server on artifacts.**
+6. **The language server on layers.** *Landed on 2026-11-09:* an analysis continues from the layer every compile shares, in memory.
+   A keystroke in a shaped-viewer program is 3.6 ms, and one in a module it uses 42.6 ms, which step 3's early cutoff is what would cut.
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.
