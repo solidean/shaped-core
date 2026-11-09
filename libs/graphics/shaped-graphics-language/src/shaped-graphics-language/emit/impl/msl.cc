@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 namespace
@@ -517,12 +518,14 @@ public:
         // sg's reserved group: ray type 0's intersection table at id 0, then miss, closest hit and callable, then the
         // other ray types' intersection tables from id 4
         out += "struct sgl_tables\n{\n"
-               "    intersection_function_table<triangle_data, instancing, world_space_data> hit_0 [[id(0)]];\n"
+               "    intersection_function_table<triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS
+               "> hit_0 [[id(0)]];\n"
                "    visible_function_table<sgl_hit_function> miss [[id(1)]];\n"
                "    visible_function_table<sgl_hit_function> closest_hit [[id(2)]];\n"
                "    visible_function_table<sgl_callable_function> callable [[id(3)]];\n";
         for (auto r = isize(1); r < ray_count; ++r)
-            out.appendf("    intersection_function_table<triangle_data, instancing, world_space_data> hit_{} "
+            out.appendf("    intersection_function_table<triangle_data, instancing, "
+                        "world_space_data, " SGL_MSL_MOTION_TAGS "> hit_{} "
                         "[[id({})]];\n",
                         r, 3 + r);
         out += "};\n\n";
@@ -606,7 +609,7 @@ public:
         {
             // an any hit decides a triangle, and a procedural group's traversal reports a box's primitive
             auto const is_triangle = stage_of == stage::any_hit;
-            out.appendf("[[intersection({}, triangle_data, instancing, world_space_data)]]\n",
+            out.appendf("[[intersection({}, triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS ")]]\n",
                         is_triangle ? "triangle" : "bounding_box");
             out.appendf("{} {}(", is_triangle ? "sgl_triangle_result" : "sgl_box_result", p.entry_name);
             if (is_triangle)
@@ -681,6 +684,14 @@ public:
         for (auto const& r : p.resources)
             if (r.is_reserved)
                 parameters.push_back(cc::format("{} {} [[buffer({})]]", resource_text(p, r.type), r.name, r.slot));
+        // EMIT-135: an emulated trace reads sg's pool and the dispatch's roots, at their slots of the argument table
+        if (traces_in_software(p))
+        {
+            auto const& pool = check::reserved_binding_named("sg_acceleration_pool")->targets[u8(emit::target::msl)];
+            auto const& roots = check::reserved_binding_named("sg_acceleration_roots")->targets[u8(emit::target::msl)];
+            parameters.push_back(cc::format("const device uint4* sg_acceleration_pool [[buffer({})]]", pool.slot));
+            parameters.push_back(cc::format("constant uint4* sg_acceleration_roots [[buffer({})]]", roots.slot));
+        }
         auto list = cc::string();
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
@@ -700,6 +711,17 @@ public:
             out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
                         stage_input_value(p, i));
         }
+    }
+
+    /// Whether the entry point walks a structure in software, which reads sg's pool and roots (EMIT-135).
+    [[nodiscard]] static bool traces_in_software(plan const& p)
+    {
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<check::flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                    record != nullptr && (record->takes_acceleration_index || record->name == "acceleration_pool_load"))
+                    return true;
+        return false;
     }
 
     static void write_bound_resources(cc::string& out, plan const& p)

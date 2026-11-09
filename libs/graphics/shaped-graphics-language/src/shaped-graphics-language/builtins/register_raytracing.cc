@@ -263,7 +263,7 @@ written write_query(call_context const& ctx)
         return {};
     case query_op::trace:
     {
-        // (q, world, origin, direction, t_min, t_max, flags, mask)
+        // (q, world, origin, direction, t_min, t_max, flags, mask, time)
         auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
         auto result = written();
         if (is_hlsl)
@@ -439,15 +439,20 @@ written write_trace_ray_msl(call_context const& ctx)
     auto result = written();
     auto& lines = result.lines;
     lines.push_back(cc::format("sgl_ray_data {};", data));
-    lines.push_back(cc::format("sgl_store({}.payload, {});", data, a[10].text));
+    lines.push_back(cc::format("sgl_store({}.payload, {});", data, a[a.size() - 1].text));
     lines.push_back(cc::format("{}.world_origin = {};", data, a[1].text));
     lines.push_back(cc::format("{}.world_direction = {};", data, a[2].text));
     lines.push_back(cc::format("{}.context = sgl_ctx;", data));
-    lines.push_back(cc::format("intersector<triangle_data, instancing, world_space_data> {};", traversal));
+    lines.push_back(
+        cc::format("intersector<triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS "> {};", traversal));
     lines.push_back(cc::format("sgl_configure({}, uint({}));", traversal, a[5].text));
     lines.push_back(cc::format("ray {}({}, {}, {}, {});", r, a[1].text, a[2].text, a[3].text, a[4].text));
-    lines.push_back(cc::format("auto const {} = {}.intersect({}, {}, uint({}), sgl_t.hit_{}, {});", found, traversal, r,
-                               a[0].text, a[6].text, a[7].text, data));
+    // The ray's time, just ahead of the payload, places what moves.
+    // A member is the plain structure an inline query takes, which Metal's query has no motion form of; the same
+    // resource id read as the motion form is what the intersector takes.
+    lines.push_back(cc::format("auto const {} = {}.intersect({}, reinterpret_cast<constant acceleration_structure<"
+                               "instancing, " SGL_MSL_MOTION_TAGS "> const&>({}), uint({}), {}, sgl_t.hit_{}, {});",
+                               found, traversal, r, a[0].text, a[6].text, a[a.size() - 2].text, a[7].text, data));
     lines.push_back(cc::format("sgl_hit_record {} = sgl_record_of({}, {}, {});", record, found, r, data));
     lines.push_back(cc::format("if ({}.type == intersection_type::none)", found));
     lines.push_back(cc::format("    sgl_t.miss[uint({})]({}.payload, {}, sgl_ctx);", a[9].text, data, record));
@@ -456,7 +461,7 @@ written write_trace_ray_msl(call_context const& ctx)
                                "uint({1}) + "
                                "uint({2})]({3}.payload, {4}, sgl_ctx);",
                                found, a[8].text, a[7].text, data, record, offsets));
-    result.text = cc::format("sgl_load({}, {}.payload)", a[10].text, data);
+    result.text = cc::format("sgl_load({}, {}.payload)", a[a.size() - 1].text, data);
     return result;
 }
 
@@ -465,7 +470,8 @@ cc::string msl_trace_helper(helper_context const& ctx)
 {
     if (ctx.target != language::msl)
         return {};
-    return "void sgl_configure(thread intersector<triangle_data, instancing, world_space_data>& i, uint flags)\n"
+    return "void sgl_configure(thread intersector<triangle_data, instancing, world_space_data, " SGL_MSL_MOTION_TAGS
+           ">& i, uint flags)\n"
            "{\n"
            "    i.accept_any_intersection((flags & 4u) != 0u);\n"
            "    if ((flags & 1u) != 0u)\n"
@@ -486,7 +492,8 @@ cc::string msl_trace_helper(helper_context const& ctx)
            "        i.assume_geometry_type(geometry_type::triangle);\n"
            "}\n"
            "\n"
-           "sgl_hit_record sgl_record_of(intersection_result<triangle_data, instancing, world_space_data> h, ray r, "
+           "sgl_hit_record sgl_record_of(intersection_result<triangle_data, instancing, "
+           "world_space_data, " SGL_MSL_MOTION_TAGS "> h, ray r, "
            "thread sgl_ray_data const& d)\n"
            "{\n"
            "    sgl_hit_record rec;\n"
@@ -536,7 +543,7 @@ written write_trace_ray(call_context const& ctx)
     ray_desc_lines(ctx, desc, result);
     result.text = cc::format("TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})", ctx.arguments[0].text,
                              ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text, ctx.arguments[8].text,
-                             ctx.arguments[9].text, desc, ctx.arguments[10].text);
+                             ctx.arguments[9].text, desc, ctx.arguments[ctx.arguments.size() - 1].text);
     return result;
 }
 
@@ -667,9 +674,9 @@ written write_trace_hit_ray(call_context const& ctx)
     auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
     auto result = written();
     ray_desc_lines(ctx, desc, result);
-    result.text = cc::format("dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})",
-                             ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
-                             ctx.arguments[8].text, ctx.arguments[9].text, desc, ctx.arguments[10].text);
+    result.text = cc::format("dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})", ctx.arguments[0].text,
+                             ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text, ctx.arguments[8].text,
+                             ctx.arguments[9].text, desc, ctx.arguments[ctx.arguments.size() - 1].text);
     return result;
 }
 
@@ -906,6 +913,7 @@ void sgl::builtins::register_raytracing(registry& r)
         .declaration = "struct ray_query",
         .doc = "/// One trace in flight, which only raytracing.sgl steps through.",
         .hlsl = "RayQuery<RAY_FLAG_NONE>",
+        // Metal's query takes no motion tags, so an inline trace sees the scene as it stands
         .msl = "intersection_query<triangle_data, instancing>",
         // the template's flags are ORed with the trace's, and a driver may specialize on them
         .hlsl_flagged = hlsl_ray_query_type,
@@ -932,7 +940,7 @@ void sgl::builtins::register_raytracing(registry& r)
     add("fun ray_query_begin() -> ray_query", nothing, query_op::begin, "/// A query nothing traced yet.");
     for (auto const geometry : {"triangles", "procedural", "mixed"})
         add(cc::format("fun ray_query_trace(q: ray_query, world: acceleration_structure[.{}], origin: pos3, "
-                       "direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)",
+                       "direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, time: float)",
                        geometry),
             nothing, query_op::trace, "/// Starts the trace of a ray.");
     add("fun ray_query_proceed(q: ray_query) -> bool", no_bool, query_op::proceed,
@@ -993,6 +1001,7 @@ void sgl::builtins::register_raytracing(registry& r)
                       .msl_names = k_trace_ray_msl},
             .writes_through = written_argument::element,
             .takes_element = true,
+            .takes_ray_time = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
 
@@ -1018,6 +1027,7 @@ void sgl::builtins::register_raytracing(registry& r)
                           .hlsl_names = k_trace_ray_reordered_hlsl},
                 .writes_through = written_argument::element,
                 .takes_element = true,
+                .takes_ray_time = true,
                 // shader execution reordering too, which the trace that chose it records as the device's grant
                 .features = check::feature_set(check::feature::raytracing_pipeline),
             });
@@ -1049,6 +1059,7 @@ void sgl::builtins::register_raytracing(registry& r)
                       .hlsl_names = k_hit_object_hlsl},
             .writes_through = written_argument::element,
             .takes_element = true,
+            .takes_ray_time = true,
             .features = ser,
         });
     for (auto i = u32(0); i < u32(sizeof(k_hit_object_reads) / sizeof(k_hit_object_reads[0])); ++i)

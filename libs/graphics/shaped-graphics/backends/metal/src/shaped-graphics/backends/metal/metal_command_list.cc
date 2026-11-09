@@ -847,6 +847,7 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
     declare_array_accesses(&_bound_compute->footprint(), _bound_compute, sg::pipeline_stage_flag::compute,
                            _compute_arrays);
     flush_barriers();
+    bind_software_trace();
 
     auto const size = _bound_compute->workgroup_size();
     compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
@@ -865,6 +866,7 @@ void metal_command_list::compute_dispatch_indirect(raw_buffer_handle const& args
     declare_array_accesses(&_bound_compute->footprint(), _bound_compute, sg::pipeline_stage_flag::compute,
                            _compute_arrays);
     flush_barriers();
+    bind_software_trace();
 
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*args);
     auto const size = _bound_compute->workgroup_size();
@@ -1171,6 +1173,38 @@ void metal_command_list::bind_debug_window(sg::impl::pipeline_footprint const& f
     argument_table()->setAddress(window.gpu_address(), NS::UInteger(k_debug_window_buffer_index));
 }
 
+void metal_command_list::bind_software_trace()
+{
+    if (_bound_layout == nullptr || !_bound_layout->traces_in_software())
+        return;
+    u32 roots[sg::impl::software_trace_roots] = {};
+    auto const bases = _bound_layout->acceleration_bases();
+    for (auto g = isize(0); g < bases.size() && g < isize(sg::max_binding_groups); ++g)
+        if (_bound_groups[g] != nullptr)
+            for (auto k = isize(0); k < _bound_groups[g]->acceleration_roots().size(); ++k)
+            {
+                auto const at = bases[g] + k;
+                CC_ASSERT(at < sg::impl::software_trace_roots, "a pipeline traces at most 16 acceleration members in "
+                                                               "software");
+                roots[at] = _bound_groups[g]->acceleration_roots()[k];
+            }
+
+    // the pool is host-written at record time and never moves, so its address is all a dispatch needs of it
+    argument_table()->setAddress(_metal_context.metal_pool().storage().gpu_address,
+                                 NS::UInteger(k_acceleration_pool_buffer_index));
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(roots)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed, "the software walk's roots could "
+                                                                                     "not be staged");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), roots, sizeof(roots));
+    argument_table()->setAddress(staging.buffer->gpuAddress() + u64(staging.offset),
+                                 NS::UInteger(k_acceleration_roots_buffer_index));
+}
+
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
 {
     // every op declares it, so none starts while the window is still being reset, and appends never wait on each other
@@ -1235,6 +1269,7 @@ void metal_command_list::declare_raster_draw(bool indexed)
         declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::vertex, sg::access_flag::index_read);
 
     flush_barriers();
+    bind_software_trace();
 }
 
 void metal_command_list::raster_begin_rendering(rendering_info const& info)

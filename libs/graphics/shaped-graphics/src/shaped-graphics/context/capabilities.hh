@@ -230,7 +230,7 @@ enum class sg::feature
     /// over the frame, and a trace places them at its ray's time.
     /// **Emulated wherever it is offered**: webgpu through its polyfill, dx12 and vulkan through a package's SOFTWARE_TRACE.
     /// A native trace sees none of it, since DXR has no motion and vulkan's VK_NV_ray_tracing_motion_blur reaches no ray query.
-    /// metal does not offer it yet.
+    /// metal offers it natively to a pipeline's trace, and through the software walk to an inline one, whose query has no motion.
     ray_tracing_motion_blur,
 };
 

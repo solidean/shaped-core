@@ -93,7 +93,10 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_triangles co
 {
     CC_ASSERT(hit_record_stride >= 1, "build_blas: hit_record_stride must be >= 1");
     auto* const pool = flags.has(accel_build_flag::software_trace) ? _cmd.context().software_pool() : nullptr;
-    auto const has_native_trace = _cmd.context().implementation_of(feature::ray_query) == feature_implementation::native;
+    // a native trace that sees no motion leaves it to the software walk, whose structure only a flagged build writes
+    auto const has_native_trace
+        = _cmd.context().implementation_of(feature::ray_query) == feature_implementation::native
+       && _cmd.context().implementation_of(feature::ray_tracing_motion_blur) != feature_implementation::native;
     auto micromaps = cc::vector<micromap_handle>();
     for (auto const& g : geometries)
     {
@@ -159,7 +162,10 @@ tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance con
 {
     _cmd._stats.add(stat::tlas_builds);
     auto* const pool = flags.has(accel_build_flag::software_trace) ? _cmd.context().software_pool() : nullptr;
-    auto const has_native_trace = _cmd.context().implementation_of(feature::ray_query) == feature_implementation::native;
+    // a native trace that sees no motion leaves it to the software walk, whose structure only a flagged build writes
+    auto const has_native_trace
+        = _cmd.context().implementation_of(feature::ray_query) == feature_implementation::native
+       && _cmd.context().implementation_of(feature::ray_tracing_motion_blur) != feature_implementation::native;
     for (auto const& instance : instances)
     {
         CC_ASSERT(!instance.transform_at_end.has_value() || _cmd.context().supports(feature::ray_tracing_motion_blur),

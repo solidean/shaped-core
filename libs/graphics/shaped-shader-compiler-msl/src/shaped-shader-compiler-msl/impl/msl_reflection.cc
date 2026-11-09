@@ -580,8 +580,12 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
             continue;
 
         // sg's own addresses, which the backend binds and no layout declares: the reserved group (a raygen's function
-        // tables), the debug window shader diagnostics write, and a raygen's hit-group offsets.
-        if (buffer_index == sg::reserved_binding_group || buffer_index == sg::reserved_debug_window.metal_buffer)
+        // tables), every reserved binding's slot (the debug window, the software walk's pool and roots), and a
+        // raygen's hit-group offsets.
+        auto is_reserved = buffer_index == sg::reserved_binding_group;
+        for (auto const& r : sg::reserved_bindings)
+            is_reserved = is_reserved || (r.metal_buffer >= 0 && buffer_index == r.metal_buffer);
+        if (is_reserved)
             continue;
         if (buffer_index == k_hit_group_offsets_buffer_index && stage == sg::shader_stage::raygen)
             continue;

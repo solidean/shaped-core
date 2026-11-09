@@ -605,6 +605,7 @@ if(SC_BUILD_TESTS)
             SOFTWARE_TRACE
             SHADERS
                 software_trace.sgl:*
+                pipeline_motion.sgl:*
         )
     endif()
 

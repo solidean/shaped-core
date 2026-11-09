@@ -1,0 +1,43 @@
+// A pipeline's trace of the moving scene, at its ray's time, where a backend traces motion natively.
+// A file of its own, since its require would ask every entry point of software_trace.sgl for a pipeline.
+
+require raytracing_pipeline
+
+binding moving:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+
+struct probe:
+    t: float
+    instance: int
+
+rays midway_rays:
+    marker: probe
+
+// One ray per cell of an 8 x 8 grid, as software_trace.sgl's midway_ray, halfway through the frame's interval.
+@raygen fun trace_midway_pipeline(@launch_id id: int3){moving}:
+    let mut p = probe(-1.0, -1)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+        t_max = 100.0
+        time = 0.5
+    )
+    trace(moving.world, r, midway_rays.marker, mut p)
+    moving.hits[id.x + id.y * 8] = float4(p.t, p.instance as float, 0.0, 0.0)
+
+@miss fun missed_midway(p: mut probe):
+    p.t = -1.0
+
+@closest_hit fun hit_midway(h: triangle_hit, p: mut probe):
+    p.t = h.t
+    p.instance = h.instance_id
+
+hit_group midway_hits for midway_rays:
+    marker = (closest_hit = hit_midway)
+
+@raytracing pipeline midway_path:
+    rays = midway_rays
+    raygen = trace_midway_pipeline
+    miss.marker = missed_midway
+    hit_groups = (midway_hits)

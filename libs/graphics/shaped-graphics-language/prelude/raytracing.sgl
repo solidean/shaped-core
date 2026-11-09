@@ -614,7 +614,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 ) -> triangle_hit:
     let q = ray_query_begin()
     // a structure of triangles holds no box, and the target skips the procedural path whole
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_procedural, mask)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_procedural, mask, r.time)
     // Forced opaque, every candidate is committed by the target itself, and the query is only stepped to its end.
     if flags.has(ray_flags.force_opaque):
         while ray_query_proceed(q) => continue
@@ -685,7 +685,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let q = ray_query_begin()
     // a structure of boxes holds no triangle, and the target skips the triangle path whole
     let kept = without_facing(flags)
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, kept | ray_flags.skip_triangles, mask)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, kept | ray_flags.skip_triangles, mask, r.time)
     // the query keeps the committed box's distance and ids, and the trace keeps what it reported
     let mut best: procedural_hit[A] = procedural_hit.none(r)
     while ray_query_proceed(q):
@@ -716,7 +716,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let q = ray_query_begin()
     let mut given = flags
     if flags.has(ray_flags.skip_triangles) => given = without_facing(flags)
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, given, mask)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, given, mask, r.time)
     // the query keeps the committed hit's distance and ids, and the trace keeps what the last committed box reported
     let mut best: procedural_hit[A] = procedural_hit.none(r)
     while ray_query_proceed(q):

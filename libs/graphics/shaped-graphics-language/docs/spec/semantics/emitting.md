@@ -603,7 +603,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-138** A member whose name is the name of a struct type one of its struct's members has is minted with trailing underscores, on every target ([why](why/emitting.md#emit-138)).
   In HLSL and MSL the member would hide the type from the members after it, so `ray: ray` is written `ray ray_;`.
 * **EMIT-135** A trace's native form is what HLSL and MSL write, and its emulated form what WGSL writes: the legalizer keeps the one its target has ([why](why/emitting.md#emit-135)).
-  A compile with `software_trace` keeps the emulated form on HLSL too, and MSL stays native since sg's metal backend keeps no pool.
+  A compile with `software_trace` keeps the emulated form on HLSL and MSL too, an MSL entry point taking the pool and the roots at their argument-table slots.
+  An MSL pipeline trace stays native, with the motion tags and its ray's time, since Metal's intersector places what moves and its query does not.
   An acceleration member is `RaytracingAccelerationStructure` in HLSL and `instance_acceleration_structure` in MSL, and WGSL declares none: it keeps its slot and takes no binding.
   An entry point whose code reads sg's acceleration pool declares it and the dispatch's roots in sg's reserved group, beside the inline constants:
   `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
