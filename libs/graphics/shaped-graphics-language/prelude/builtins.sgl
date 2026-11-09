@@ -3609,6 +3609,10 @@
     values: uint4[4]
 
 
+@internal binding sg_dispatch_grid:
+    threads: uint4
+
+
 /// What a weak compare-exchange read, and whether it stored `desired`.
 struct exchange_result[T]:
     old: T

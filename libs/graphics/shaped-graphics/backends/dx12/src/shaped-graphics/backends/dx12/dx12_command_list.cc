@@ -426,6 +426,12 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
     bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
+    // the threads dispatch_threads asked for, which a pipeline dispatched by threads alone returns past
+    if (_bound_pipeline_layout->dispatch_grid_root_param >= 0)
+    {
+        u32 const grid[4] = {u32(_dispatch_grid[0]), u32(_dispatch_grid[1]), u32(_dispatch_grid[2]), 0};
+        _list->SetComputeRoot32BitConstants(UINT(_bound_pipeline_layout->dispatch_grid_root_param), 4, grid, 0);
+    }
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.

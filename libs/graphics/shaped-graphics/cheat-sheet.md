@@ -854,6 +854,8 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups; each count ASSERTS <= sg::max_dispatch_groups_per_dimension (65535)
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis, under the same 65535 cap: nothing splits a larger 1D range
+                                         //   a pipeline whose compiler chose its size (is_dispatched_by_threads(), a bare SGL @compute) takes this alone,
+                                         //   and its threads past (x, y, z) return; dispatch_groups and indirect ASSERT on it
 cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group counts buffer<sg::dispatch_args> element `index` holds, read by the GPU at the dispatch
                                          //   sg::dispatch_args { u32 x = 0, y = 1, z = 1 } — a shader's own uint3 struct re-types with reinterpret_as<sg::dispatch_args>()
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)

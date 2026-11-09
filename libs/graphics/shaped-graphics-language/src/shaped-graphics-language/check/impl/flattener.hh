@@ -54,6 +54,9 @@ struct flattener
     cc::vector<stage_violation> ray_stage_calls;
     /// A compute entry point's calls of a quad operation, whose workgroup then forms its quads along one axis (CHK-380).
     cc::vector<stage_violation> quad_calls;
+    /// A compute entry point's calls of a barrier or a subgroup operation, which read its group: a bare `@compute`
+    /// reaches none (CHK-520), and one that reaches one has a size no warning judges (CHK-521).
+    cc::vector<stage_violation> group_calls;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).

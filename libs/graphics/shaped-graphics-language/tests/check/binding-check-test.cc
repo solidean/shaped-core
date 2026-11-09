@@ -329,8 +329,13 @@ TEST("sgl check - a compute entry point takes the thread id and returns nothing"
                         "    return 1\n")
               .contains("a @compute fun returns nothing"));
 
+    // CHK-520: a bare @compute chooses its own size, and more than three are none
     CHECK(reports_for(cc::string(work)
                       + "@compute fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+          == "");
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(4, 4, 4, 4) fun go(@thread_id id: int3){work}:\n"
                         "    work.values[0] = 1.0\n")
               .contains("@compute takes one to three workgroup sizes"));
 

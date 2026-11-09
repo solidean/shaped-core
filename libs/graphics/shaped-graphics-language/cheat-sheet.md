@@ -765,6 +765,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   `register_transforms.cc` holds it, `m * p`, `m * v`, `m * float4`, `m * m`, `determinant(m) -> float` (EVAL-98) and `transpose(m)` of a `mat4`, a `mat3` or a `mat2`, every target's own function.
   `a + b`, `a - b`, `-m`, `m * s` and `s * m` act on each element of any of the three (EVAL-109).
   A `driver_bindings` matrix is 16 floats column by column too; `sgl test` alone sees a binding's matrix as zero.
+- **A bare `@compute` chooses its own size** (CHK-520): 64, 8 × 8 or 4 × 4 × 4, by the axes of `@thread_id` it reads.
+  It reaches no barrier, workgroup memory, subgroup operation or group input, is dispatched by threads alone, and returns past the grid sg writes.
+  A stated size it could have chosen warns `workgroup-wastes-lanes` where it idles lanes (CHK-521).
 - **Stage inputs are parameters** (CHK-271): the stage struct first, then `@vertex_index i: int`, `@is_front_facing f: bool`, `@thread_id id: int3`, ….
   `flat_entry_point::input` is `none` for a vertex stage without a vertex buffer, and `stage_inputs` holds each input's local; `run_inputs::stage_inputs` gives them values.
 - **Geometry and tessellation stages** (CHK-301 to CHK-307): `@geometry(max_vertices = N)` takes `tri: varyings[3]` first and `stream: mut triangle_stream[varyings]` last.

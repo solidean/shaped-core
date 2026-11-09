@@ -256,6 +256,14 @@ namespace sgl::check
 [[nodiscard]] cc::span<stage_input_info const> stage_inputs();
 /// The one of `input`; `input` must not be `none`.
 [[nodiscard]] stage_input_info const& info_of(stage_input input);
+/// Whether `input` says where an invocation stands in its workgroup or its subgroup, which a bare @compute, whose size
+/// the compile chooses, never reads (CHK-520).
+[[nodiscard]] constexpr bool reads_group(stage_input input)
+{
+    return input == stage_input::local_thread_id || input == stage_input::local_thread_index
+        || input == stage_input::workgroup_id || input == stage_input::subgroup_size
+        || input == stage_input::subgroup_invocation_id;
+}
 } // namespace sgl::check
 
 /// One canonical type: equal types have equal ids, so type equality is id equality.
@@ -616,6 +624,8 @@ struct sgl::check::function_info
     stage entry_stage = stage::none;
     /// The grid a `@compute` entry point is dispatched in, from `@compute(x, y, z)`; 1 for an axis nobody wrote.
     cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
+    /// A bare `@compute`, whose size the compile chooses from the body's indexing (CHK-520); `workgroup` is then 64.
+    bool is_auto_workgroup = false;
     /// The subgroup size a `@compute` entry point asks for by `@preferred_subgroup_size(n)`; 0 where it asks none.
     i32 preferred_subgroup_size = 0;
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.

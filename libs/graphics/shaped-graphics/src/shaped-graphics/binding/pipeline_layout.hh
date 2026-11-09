@@ -47,6 +47,11 @@ struct sg::pipeline_layout_description
     /// - Beyond 128 bytes: usually a mistake, use inline-uploaded buffers instead.
     /// Reserve inline constants for small data that genuinely varies per invocation.
     cc::optional<binding> inline_constants;
+
+    /// The layout holds the grid `dispatch_threads` writes, reserved `sg_dispatch_grid`, which a shader sg dispatches by
+    /// threads alone reads.
+    /// Pipeline creation sets it for such a shader, so a description rarely does.
+    bool dispatch_grid = false;
 };
 
 /// The binding interface a pipeline is compiled against: an ordered set of binding_group_layouts.
@@ -84,13 +89,32 @@ public:
     /// The description's inline constants binding, if it had one.
     [[nodiscard]] cc::optional<binding> const& inline_constants() const { return _inline_constants; }
 
+    /// Whether the layout holds the grid `dispatch_threads` writes (`pipeline_layout_description::dispatch_grid`).
+    [[nodiscard]] bool has_dispatch_grid() const { return _has_dispatch_grid; }
+
+    /// The description it was created from, which creates it again.
+    [[nodiscard]] pipeline_layout_description description() const
+    {
+        auto result
+            = pipeline_layout_description{.inline_constants = _inline_constants, .dispatch_grid = _has_dispatch_grid};
+        for (auto const& g : _groups)
+            result.groups.push_back(g);
+        result.static_samplers.push_back_range(_static_samplers);
+        return result;
+    }
+
 protected:
     /// `structural_hash` must come from sg::impl::pipeline_layout_hash over the creation arguments.
     pipeline_layout(cc::hash128 structural_hash,
                     cc::span<binding_group_layout_handle const> groups,
-                    cc::optional<binding> inline_constants)
-      : _structural_hash(structural_hash), _inline_constants(cc::move(inline_constants))
+                    cc::optional<binding> inline_constants,
+                    bool dispatch_grid = false,
+                    cc::span<bound_sampler const> static_samplers = {})
+      : _structural_hash(structural_hash),
+        _inline_constants(cc::move(inline_constants)),
+        _has_dispatch_grid(dispatch_grid)
     {
+        _static_samplers.push_back_range(static_samplers);
         for (auto const& group : groups)
             _groups.push_back(group);
     }
@@ -100,4 +124,6 @@ protected:
 private:
     cc::small_vector<binding_group_layout_handle, max_binding_groups> _groups;
     cc::optional<binding> _inline_constants;
+    bool _has_dispatch_grid = false;
+    cc::vector<bound_sampler> _static_samplers;
 };

@@ -196,6 +196,13 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         if (!check::reads_array_lengths(m, reading))
             return emit_entry_point(m, reading, t, sources);
     }
+    // CHK-520: a bare @compute's threads past the grid sg writes return; metal dispatches the grid's threads alone
+    if (e.is_auto_workgroup && t != target::msl && !check::guards_dispatch_grid(m, e))
+    {
+        auto const guarded = check::with_dispatch_grid_guard(m, e);
+        if (check::guards_dispatch_grid(m, guarded))
+            return emit_entry_point(m, guarded, t, sources);
+    }
 
     auto result = emitted_text();
     impl::validate(m, e, result.errors, sources.diagnostics);

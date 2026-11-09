@@ -23,6 +23,8 @@ inline constexpr u32 debug_window_binding = u32(sg::reserved_debug_window.webgpu
 
 /// The roots uniform, `array<vec4u, 4>`: one u32 per acceleration member, so at most 16 of them.
 inline constexpr isize acceleration_roots_bytes = 64;
+/// The grid of a dispatch by threads, `uint4`, which group 3 holds where a layout asks for it.
+inline constexpr isize dispatch_grid_bytes = 16;
 inline constexpr isize max_acceleration_members = acceleration_roots_bytes / 4;
 } // namespace sg::backend::webgpu
 

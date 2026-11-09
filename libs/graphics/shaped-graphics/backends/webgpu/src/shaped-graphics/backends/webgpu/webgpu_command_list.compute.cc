@@ -124,7 +124,7 @@ void webgpu_command_list::apply_compute_state()
     {
         for (auto i = s.groups.size(); i < sg::reserved_binding_group; ++i)
             wgpuComputePassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
-        u32 offsets[2] = {};
+        u32 offsets[3] = {};
         auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
         auto window = sg::raw_buffer_handle();
         if (sg::impl::debug_windows::k_enabled)
@@ -202,6 +202,18 @@ void webgpu_command_list::compute_dispatch(int x, int y, int z)
                sg::max_dispatch_groups_per_dimension);
     CC_ASSERT(!_in_rendering_scope, "dispatch must not be recorded inside a rendering scope; close the scope first");
     bring_pool_writes_forward();
+    // the threads dispatch_threads asked for, which a pipeline dispatched by threads alone returns past
+    if (_compute.layout != nullptr && _compute.layout->has_dispatch_grid())
+    {
+        u32 const grid[4] = {u32(_dispatch_grid[0]), u32(_dispatch_grid[1]), u32(_dispatch_grid[2]), 0};
+        auto* const at = _compute.constants.data() + _compute.layout->grid_offset_in_block();
+        if (cc::memcmp(at, grid, sizeof(grid)) != 0)
+        {
+            cc::memcpy(at, grid, sizeof(grid));
+            _compute.constants_dirty = true;
+            _compute.needs_full_apply = true;
+        }
+    }
     open_compute_pass();
     apply_compute_state();
     wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(x), u32(y), u32(z));

@@ -429,6 +429,7 @@ private:
                 = sg::compute_dimensions{.x = emitted.workgroup[0], .y = emitted.workgroup[1], .z = emitted.workgroup[2]};
         if (emitted.preferred_subgroup_size > 0)
             shader.preferred_subgroup_size = emitted.preferred_subgroup_size;
+        shader.is_dispatched_by_threads = emitted.is_dispatched_by_threads;
         if (emitted.color_targets >= 0)
             shader.color_output_count = emitted.color_targets;
         shader.target_set = emitted.target_struct;

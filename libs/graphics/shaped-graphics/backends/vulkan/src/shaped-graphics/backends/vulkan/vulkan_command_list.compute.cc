@@ -146,6 +146,7 @@ void vulkan_command_list::bind_software_trace(vulkan_pipeline_layout const& layo
     for (isize g = 0; g < groups.size() && g < layout._length_bases.size(); ++g)
         if (groups[g] != nullptr && layout._length_bases[g] >= 0)
             lengths[layout._length_bases[g]] = groups[g]->unbounded_length;
+    u32 const grid[4] = {u32(_dispatch_grid[0]), u32(_dispatch_grid[1]), u32(_dispatch_grid[2]), 0};
     u32 roots[sg::impl::software_trace_roots] = {};
     for (isize g = 0; g < groups.size() && layout._traces_in_software; ++g)
         if (groups[g] != nullptr)
@@ -160,13 +161,15 @@ void vulkan_command_list::bind_software_trace(vulkan_pipeline_layout const& layo
     // a loop of draws under one set of roots and lengths takes one region of the transient heap
     if (_software_set_layout == &layout && _software_set_pool == pool.gpu_address
         && cc::memcmp(_software_set_roots, roots, sizeof(roots)) == 0
-        && cc::memcmp(_software_set_lengths, lengths, sizeof(lengths)) == 0)
+        && cc::memcmp(_software_set_lengths, lengths, sizeof(lengths)) == 0
+        && cc::memcmp(_software_set_grid, grid, sizeof(grid)) == 0)
         return;
-    layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots, lengths);
+    layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots, lengths, grid);
     _software_set_layout = &layout;
     _software_set_pool = pool.gpu_address;
     cc::memcpy(_software_set_roots, roots, sizeof(roots));
     cc::memcpy(_software_set_lengths, lengths, sizeof(lengths));
+    cc::memcpy(_software_set_grid, grid, sizeof(grid));
 }
 
 void vulkan_command_list::declare_debug_window(sg::impl::pipeline_footprint const* footprint,

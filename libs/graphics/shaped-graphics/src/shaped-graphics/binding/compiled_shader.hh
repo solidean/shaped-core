@@ -78,6 +78,10 @@ struct sg::compiled_shader
     /// The shader itself must be correct at any size.
     /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
     cc::optional<i32> preferred_subgroup_size;
+    /// A compute shader whose compiler chose `workgroup_size`, as a bare SGL `@compute` has it: sg dispatches it by
+    /// threads alone, writing the grid its threads past it return before, and refuses a dispatch by groups.
+    /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
+    bool is_dispatched_by_threads = false;
 
     compiler_info compiler;
 
