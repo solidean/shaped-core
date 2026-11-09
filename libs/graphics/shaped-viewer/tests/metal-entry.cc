@@ -1,3 +1,5 @@
+#include "sv_backends.hh"
+
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -24,7 +26,8 @@ ASYNC_TEST("sv metal", nx::config::exclusive("capture-environment"))
         SKIP("no metal 4 device");
     else
     {
-        co_await nx::async_invoke_tests_in_sequence("metal", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "metal", nx::invocation_options{.after_each = sv_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device loss during our own tests is a defect rather than an environment quirk to tolerate.
         CHECK(!ctx.value()->is_device_lost())

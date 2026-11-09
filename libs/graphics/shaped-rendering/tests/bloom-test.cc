@@ -256,6 +256,7 @@ ASYNC_BENCHMARK("sr - bloom, GPU time per image, on dx12")
             auto cmd = ctx.create_command_list();
             cmd->upload.bytes_to_texture(image.raw(), sr_test::packed(format, bright.texels));
             ctx.submit_command_list(cc::move(cmd));
+            co_await ctx.epochs_in_flight_completion(2);
             ctx.advance_epoch();
             co_await ctx.idle_completion();
         }
@@ -269,6 +270,7 @@ ASYNC_BENCHMARK("sr - bloom, GPU time per image, on dx12")
             REQUIRE(out.has_value());
             auto const to = cmd->query.record_gpu_timestamp();
             ctx.submit_command_list(cc::move(cmd));
+            co_await ctx.epochs_in_flight_completion(2);
             ctx.advance_epoch();
             spans.push_back({from, to});
         }

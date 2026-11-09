@@ -402,3 +402,42 @@ ASYNC_TEST("sg metal - async uploads commit while earlier ones settle")
     }
     CHECK(mismatches == 0).context(cc::format("{} of {} uploads landed wrong", mismatches, k_uploads));
 }
+
+ASYNC_TEST("sg metal - advancing reclaims no staging, and a frame loop bounded at two in flight stays inside the ring")
+{
+    // Only a sweep frees an epoch's ring bytes, so a loop that only advances keeps every epoch the GPU already finished.
+    // The same loop awaiting two in flight before each advance sweeps as it goes, which is what a frame loop must do.
+    constexpr auto epochs = 100;
+    constexpr auto upload_size = 65536;
+    for (auto const bounded : {false, true})
+    {
+        auto const ctx = mtl::test::make_context();
+        if (ctx == nullptr)
+            SKIP("no metal 4 device on this host");
+        auto const buffer = ctx->persistent.create_raw_buffer(upload_size, k_copy_both);
+        auto const source = pattern_bytes(1, upload_size);
+        REQUIRE(epochs * upload_size < ctx->upload_ring().capacity()).context("the unbounded loop must fit the ring");
+
+        auto most_held = u64(0);
+        for (auto i = 0; i < epochs; ++i)
+        {
+            auto cmd = ctx->create_command_list();
+            cmd->upload.bytes_to_buffer(buffer, source);
+            ctx->submit_command_list(cc::move(cmd));
+            if (bounded)
+                co_await ctx->epochs_in_flight_completion(2);
+            ctx->advance_epoch();
+            auto const c = ctx->upload_ring().debug_cursor_state();
+            most_held = cc::max(most_held, c.next_pos - c.freed_pos);
+        }
+
+        auto const cursors = ctx->upload_ring().debug_cursor_state();
+        if (bounded)
+            // three epochs in flight past the bound's sweep, and the open one
+            CHECK(most_held <= u64(4 * upload_size)).context(cc::format("held {} bytes", most_held));
+        else
+            CHECK(cursors.checkpoints >= epochs).context("every epoch of the loop is still held");
+        CHECK(ctx->metrics.stats()[sg::stat::bytes_inline_overflow] == 0);
+        co_await ctx->idle_completion();
+    }
+}

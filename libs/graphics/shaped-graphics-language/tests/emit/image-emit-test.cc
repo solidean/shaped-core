@@ -157,7 +157,7 @@ TEST("sgl emit - an atomic image's update is the target's own atomic on the texe
     auto const msl = text_of(k_reduce, target::msl);
     CHECK(msl.contains("    const uint before = set_depth.atomic_fetch_max(uint2(xy / 2), 7u).x;\n"));
     CHECK(msl.contains("    const int shifted = set_offsets.atomic_fetch_add(uint2(xy), uint(1), -3).x;\n"));
-    CHECK(msl.contains("set_depth.atomic_store(uint2(xy), uint4(before + set_depth.atomic_load(uint2(xy)).x));\n"));
+    CHECK(msl.contains("set_depth.atomic_store(uint4(before + set_depth.atomic_load(uint2(xy)).x), uint2(xy));\n"));
 
     // EMIT-109: WebGPU has neither, and an entry point needing both names each
     CHECK(sgl::emit::dump_errors(emit_source(k_reduce, 0, target::wgsl))

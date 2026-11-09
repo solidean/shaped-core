@@ -57,6 +57,10 @@ Metal would map it onto shared events.
 `co_await ctx.epochs_in_flight_completion(N)` settles once at most N remain, and `ctx.try_advance_epoch(N)` declines instead of advancing.
 A windowed renderer awaits the first once a frame with its swapchain's back-buffer count, which is also the frame's one suspension point.
 A caller that would rather do something else with the frame calls the second.
+**Advancing reclaims nothing.**
+An epoch's memory, its inline upload staging above all, is freed only by a retire sweep, which both throttles run.
+A loop that only advances keeps every epoch the GPU already finished, until the upload ring overflows into one-off allocations and warns.
+So every frame loop throttles, two in flight unless it has a reason for more; the GPU test drivers sweep after each test for the same reason.
 
 An epoch fence says nothing about an inline **download** being delivered: the readback CPU copy runs on an actor thread the epoch machinery does not drain.
 So `future.is_ready()` can lag the fence.
