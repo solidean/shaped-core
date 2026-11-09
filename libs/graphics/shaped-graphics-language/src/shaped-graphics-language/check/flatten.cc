@@ -653,8 +653,20 @@ located_diagnostic& report_unroll(checker& c, flattener::unroll_report const& u)
 }
 } // namespace
 
+cc::shared_ptr<cc::set<cc::string>> checker::names_up_to(isize count) const
+{
+    auto names = cc::make_shared<cc::set<cc::string>>();
+    for (auto i = isize(0); i < count; ++i)
+        if (!out.symbols[i].name.empty() && !takes_no_emitted_name(out.symbols[i]))
+            (void)names->insert(out.symbols[i].name);
+    return names;
+}
+
 checker::taken_names checker::module_names()
 {
+    // a link's names below are made where they are first needed (`seal_layer`)
+    if (module_names_below == nullptr && module_names_below_count > 0)
+        module_names_below = names_up_to(module_names_below_count);
     if (own_module_names == nullptr || module_names_for != out.symbols.size())
     {
         auto names = cc::make_shared<cc::set<cc::string>>();

@@ -136,7 +136,7 @@ bool impl::layer_maker::move_onto(checked_prelude& layer,
         .sources_digest = own.sources_digest,
     };
     layer._is_relocated = true;
-    layer._resume = seal_layer(*state, i32(layer._files.size()));
+    layer._resume = seal_layer(*state, i32(layer._files.size()), true);
     layer._state = cc::move(state);
     return true;
 }

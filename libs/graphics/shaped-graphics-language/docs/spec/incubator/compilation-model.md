@@ -258,6 +258,8 @@ What is left, decided with the maintainer on 2026-11-09, in this order:
    shaped-viewer's chain is 24.7 ms whole (release); an edit of its first module checks it all, of its last 1.4 ms, 13.8 ms on average.
    In the language server a keystroke in its last module is a 5.9 ms analysis, and in its first 31.7 ms.
    Every link holds a whole copy of the tables below it, which [perf-sgl-layer-freeze-copies](../../issues/perf-sgl-layer-freeze-copies.md) is.
+   *Since 2026-11-09 a link's lists share what is below it*, as a few segments of geometric size; its maps and the checker's other state are still copied.
+   shaped-viewer's 10 links load in 4.1 ms rather than 8.6, the 9 after `scene` move in 3.0 ms rather than 4.5, and the language server's benchmark peaks at 246 MiB rather than 369.
    *Since 2026-11-09 the order follows the edit:* a library made under the same names as the one before marks the files whose sources changed.
    Their modules go as late as the modules using them allow, so every keystroke after the first checks the module and the ones after it, those using it among them.
    shaped-viewer: an edit of a module so placed is 8.6 ms on average, against 13.6 ms in the order of the chain alone; of `scene`, 14.4 ms against 24.3 ms.

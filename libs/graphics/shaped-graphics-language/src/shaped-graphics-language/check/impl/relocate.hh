@@ -55,8 +55,8 @@ void write_own_part(archive<true>& a, checker const& link, checker const& old_ba
 [[nodiscard]] bool read_own_part(archive<false>& a, checker& state, cc::span<moved_part const> moved);
 
 /// Ends a layer's state: what a program's check behind it starts from, and the lists it walks only past what it holds.
-/// `files` is how many files it declared.
-[[nodiscard]] resume_point seal_layer(checker& c, i32 files);
+/// `files` is how many files it declared; `is_link` is a link of a library's chain.
+[[nodiscard]] resume_point seal_layer(checker& c, i32 files, bool is_link);
 
 /// What makes a layer of a chain without checking it, for the functions that do: `check_next_module`,
 /// `relocate_link` and `load_link_artifact`.

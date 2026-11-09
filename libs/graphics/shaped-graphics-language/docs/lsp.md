@@ -93,7 +93,7 @@ On a Ryzen 9 7950X3D, release build:
 On a Ryzen 9 9950X3D2, release build, 2026-11-09:
 
 * **A keystroke in shaped-viewer's `tracer_pipeline.sgl`** is a 3.6 ms analysis: the module directories read, and the document checked behind its modules' layer.
-  A keystroke in a module it uses checks that module again, and relocates the ones after it in the library's chain where its interface stands: 5.8 ms in its last, 9.6 ms in its first, `scene`.
+  A keystroke in a module it uses checks that module again, and relocates the ones after it in the library's chain where its interface stands: 5.6 ms in its last, 7.4 ms in its first, `scene`.
 * **A test that runs to its fuel limit**, a million steps, takes 57 ms; that is what made the interpreter read the stop flag itself.
 
 `uv run dev.py benchmark "sgl lsp"` reproduces both.

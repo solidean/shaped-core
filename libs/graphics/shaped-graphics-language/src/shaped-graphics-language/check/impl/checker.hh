@@ -1255,6 +1255,8 @@ struct checker
         cc::set<cc::string> const* own = nullptr;
     };
     [[nodiscard]] taken_names module_names();
+    /// The emitted names of the first `count` symbols.
+    [[nodiscard]] cc::shared_ptr<cc::set<cc::string>> names_up_to(isize count) const;
     isize module_names_for = -1;
     cc::set<cc::string> const* own_module_names = nullptr;
     /// The prelude's every module-level name, made once with it and shared by every program's check behind it, and how

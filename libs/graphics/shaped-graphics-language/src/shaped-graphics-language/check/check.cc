@@ -112,7 +112,7 @@ namespace
 /// Ends a layer's check: the empty program behind it goes, its tables are shared from here, and a program's check
 /// resumes after its `files` files.
 /// Every program's check reads the layer's entries in place rather than copying them.
-impl::resume_point freeze_layer(checker& c, i32 files)
+impl::resume_point freeze_layer(checker& c, i32 files, bool is_link = false)
 {
     // The empty file's tables are the program's to replace, and nothing may point into the empty file past here.
     c.files = {};
@@ -121,11 +121,11 @@ impl::resume_point freeze_layer(checker& c, i32 files)
     c.file_module.remove_back();
     c.uses.remove_back();
     c.out.file_modules.remove_back();
-    return seal_layer(c, files);
+    return seal_layer(c, files, is_link);
 }
 } // namespace
 
-impl::resume_point sgl::check::impl::seal_layer(checker& c, i32 files)
+impl::resume_point sgl::check::impl::seal_layer(checker& c, i32 files, bool is_link)
 {
     c.open_types_below.clear();
     for (auto i = isize(0); i < c.out.types.size(); ++i)
@@ -143,13 +143,13 @@ impl::resume_point sgl::check::impl::seal_layer(checker& c, i32 files)
     c.interned_types.freeze();
     c.prelude_visible.freeze();
     c.instances.freeze();
-    // the layer's names, once, for every program behind it; a program's check makes a set of its own names alone
-    auto names = cc::make_shared<cc::set<cc::string>>();
-    for (auto i = isize(0); i < c.out.symbols.size(); ++i)
-        if (!c.out.symbols[i].name.empty() && !takes_no_emitted_name(c.out.symbols[i]))
-            (void)names->insert(c.out.symbols[i].name);
-    c.module_names_below = cc::move(names);
+    // The layer's names, once, for every program behind it; a program's check makes a set of its own names alone.
+    // A program behind a link takes the names of the files it reaches instead, so a link's are made only where its next
+    // link flattens a test (`checker::module_names`).
+    c.module_names_below = nullptr;
     c.module_names_below_count = c.out.symbols.size();
+    if (!is_link)
+        c.module_names_below = c.names_up_to(c.module_names_below_count);
     c.own_module_names = nullptr;
     c.module_names_for = -1;
     c.out.module_names = {};
@@ -495,7 +495,7 @@ cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude cons
     if (!kept.empty())
         return {};
     c.out.diagnostics = {};
-    result._resume = freeze_layer(c, i32(result._files.size()));
+    result._resume = freeze_layer(c, i32(result._files.size()), true);
     c.part_digest = impl::interface_hash(c, c.run_start, impl::sizes_of(c));
     c.chain.push_back({
         .module = cc::string(module),

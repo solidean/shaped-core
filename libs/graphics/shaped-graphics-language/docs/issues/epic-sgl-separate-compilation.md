@@ -38,7 +38,7 @@ The steps, each a child issue when it is taken up, in this order:
    *Since 2026-11-09 the library is one layer* (`check::check_library`), so a module is checked once per process whatever reaches it: shaped-viewer's 139 ms of sets is 27 ms.
 4. **A chain of module layers:** the library's modules in one order, dependencies first, each a layer over the one before; an edit re-checks from its module on.
    *Landed on 2026-11-09:* an edit of shaped-viewer's last module checks 1.4 ms of its 24.7 ms chain, of its first all of it.
-   Each link copies the tables below it ([perf-sgl-layer-freeze-copies](perf-sgl-layer-freeze-copies.md)).
+   Each link shares the lists below it, and still copies the maps and the rest ([perf-sgl-layer-freeze-copies](perf-sgl-layer-freeze-copies.md)).
    The order follows the edit: a module being edited goes as late as the modules using it allow, 8.6 ms an edit on average there.
 5. **Early cutoff, through relocation:** an edit that leaves a module's interface alone relocates the layers after it rather than checking them again.
    *Landed on 2026-11-09:* `check::relocate_link`, held field for field to a fresh check by a test; past an edit of shaped-viewer's `scene`, the 9 links after it move in 4.5 ms.
@@ -53,7 +53,7 @@ The steps, each a child issue when it is taken up, in this order:
    The driver loads a link from the artifacts a host handed in (`sgl::offer_module_artifacts`) where it would check it; shaped-viewer's 10 links load in 8.6 ms, against 27.9 ms.
    slib keeps them in its persistent cache where asked (`sgl_compiler_options::keeps_module_artifacts`), fetched ahead of its compiles.
 8. **The language server on layers.** *Landed on 2026-11-09:* an analysis continues from the layers every compile shares.
-   A keystroke in a shaped-viewer program is 3.6 ms; in a module it uses 5.8 to 9.6 ms by its place in the chain.
+   A keystroke in a shaped-viewer program is 3.8 ms; in a module it uses 5.6 to 7.4 ms by its place in the chain.
 9. **Parallel layers,** and bodies on demand for readers that only check ([feat-sgl-bodies-on-demand](feat-sgl-bodies-on-demand.md)), if a measurement asks.
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.
