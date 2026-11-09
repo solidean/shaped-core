@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/fwd.hh>
 
 namespace
@@ -558,8 +559,8 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
             continue;
 
         // sg's own addresses, which the backend binds and no layout declares: the reserved group (a raygen's function
-        // tables, shader diagnostics) and a raygen's hit-group offsets.
-        if (buffer_index == sg::reserved_binding_group)
+        // tables), the debug window shader diagnostics write, and a raygen's hit-group offsets.
+        if (buffer_index == sg::reserved_binding_group || buffer_index == sg::reserved_debug_window.metal_buffer)
             continue;
         if (buffer_index == k_hit_group_offsets_buffer_index && stage == sg::shader_stage::raygen)
             continue;

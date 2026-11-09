@@ -58,8 +58,8 @@ ASYNC_INVOCABLE_TEST("sg - a vertex stage's failed assert reaches the log, where
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (ctx->backend() != sg::backend_kind::dx12 && ctx->backend() != sg::backend_kind::vulkan)
-        SKIP("sg binds a vertex stage's debug window on dx12 and vulkan alone so far");
+    if (ctx->backend() == sg::backend_kind::webgpu)
+        SKIP("WebGPU's vertex stage writes no storage, so it has no debug window");
     if (!ctx->supports(sg::feature::vertex_pipeline_stores))
         SKIP("this device writes no storage from a vertex stage");
     nx::expect_error("diagnostics.sgl:21: assert failed: vertex 2 of the triangle", nx::exactly(1));

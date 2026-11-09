@@ -17,6 +17,7 @@
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/barrier/access_inference.hh> // shader_access_of
+#include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
 
 namespace sg::backend::metal
@@ -772,6 +773,7 @@ void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
+    bind_debug_window(mtl_pipeline.footprint());
 
     auto* const encoder = compute_encoder();
     encoder->setComputePipelineState(mtl_pipeline.state());
@@ -1153,8 +1155,24 @@ void metal_command_list::raster_draw_indexed_indirect(raw_buffer_handle const& a
     }
 }
 
+void metal_command_list::bind_debug_window(sg::impl::pipeline_footprint const& footprint)
+{
+    if (!sg::impl::debug_windows::k_enabled)
+        return;
+    _bound_debug_window = _metal_context.debug_windows().window_for_recording(!footprint.debug_stages().is_empty());
+    auto const& window = static_cast<metal_buffer const&>(*_bound_debug_window);
+    argument_table()->setAddress(window.gpu_address(), NS::UInteger(k_debug_window_buffer_index));
+}
+
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
 {
+    // every op declares it, so none starts while the window is still being reset, and appends never wait on each other
+    if (_bound_debug_window != nullptr)
+    {
+        auto const writing = footprint != nullptr ? footprint->debug_stages() : pipeline_stage_flags{};
+        declare_buffer(_bound_debug_window, writing.is_empty() ? stages : writing, sg::access_flag::shader_append);
+    }
+
     // **Each binding is declared with what the code does to it**, which is what makes a read after a read free and
     // an untouched binding cost nothing.
     // Without a footprint that is its view class, as if every writable view were written.
@@ -1458,6 +1476,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
+    bind_debug_window(mtl_pipeline.footprint());
 
     // A suspended scope's resume replays all of the below from `_bound_raster`.
     if (_render_encoder == nullptr)
@@ -1543,6 +1562,7 @@ void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pip
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get());
+    _bound_debug_window = nullptr;
 }
 
 void metal_command_list::raytracing_bind_group(int group_index, binding_group const& group)

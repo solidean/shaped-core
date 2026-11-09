@@ -548,6 +548,8 @@ void metal_context::shutdown()
     // Close the final epoch and drain, so every deferred release runs while the device is still alive.
     advance_epoch();
     drain_at_shutdown();
+    // the final epoch's records are decoded while the download path still runs
+    release_debug_windows();
 
     // The waiter may be parked on both timelines, so it is joined before they go.
     if (_completion_waiter != nullptr)

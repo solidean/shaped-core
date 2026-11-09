@@ -322,7 +322,7 @@ A dx12, a vulkan and a webgpu context bind it so far; metal shaders write no rec
 
 `SC_SHADER_UNDEFINED` (default `NONE`) is the robustness profile of every SGL shader slib compiles: what an integer division by zero, or an index outside an array, a buffer or a `bytes`, does.
 `NONE` leaves it the target's undefined behaviour, at no cost.
-`REPORT` logs the operation and its operands as a failed assert, at the `.sgl` line, and ends that invocation; it needs `SC_SHADER_DIAGNOSTICS`, and is `ABORT` without it or on metal.
+`REPORT` logs the operation and its operands as a failed assert, at the `.sgl` line, and ends that invocation; it needs `SC_SHADER_DIAGNOSTICS`, and is `ABORT` without it.
 `ABORT` ends the invocation alone, with no debug window, so a shader that reaches one stops working rather than working by accident.
 `DEFINE` runs the operation on a substitute operand instead and goes on: a divisor of 1, so `x / 0` is `x` and `x % 0` is 0 as in WGSL, and an index of 0.
 It is for a shader that must survive untrusted input, and it hides a bug the other two would show.
