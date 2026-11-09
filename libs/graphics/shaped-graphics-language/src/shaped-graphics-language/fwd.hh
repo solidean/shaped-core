@@ -368,6 +368,7 @@ struct suggested_fix;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;
+struct chained_module;
 struct checked_prelude;
 template <class T>
 class layered;

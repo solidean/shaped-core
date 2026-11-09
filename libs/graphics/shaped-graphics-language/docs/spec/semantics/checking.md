@@ -295,7 +295,7 @@ fun f(x: float) -> float:
   It reaches every option it follows, so an entry point that names it is compiled anew for each value of those.
   A host's options struct holds it unset, as a `cc::optional`, so a host that sets only the option it follows has it follow.
 * **CHK-354** A compile names a value for each option it sets, and the option stands for that value wherever it is named, as CHK-219 has a `const` stand for its own.
-  So every rule that judges a constant judges each set of values on its own.
+  So a compile judges every rule on a constant with the values it gives, and a test with the defaults: no rule judges a value no compile gives.
   An option of the program's own module is named by its name, and one of a module the program uses by its qualified name, `common.taps` (CHK-348) ([why](why/checking.md#chk-354)).
   So a program's `taps` and a module's `common.taps` are two options, each set on its own.
   A value for a name no option is named by, a value of another type than the option's, and a second value for one name are each `invalid-option`, and the detail names it.

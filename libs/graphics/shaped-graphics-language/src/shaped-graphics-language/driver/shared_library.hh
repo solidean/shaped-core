@@ -17,17 +17,33 @@
 /// Immutable but for `checked`, which any thread may fill.
 struct sgl::shared_library
 {
-    cc::vector<cc::unique_ptr<parsed_file>> parsed;
-    cc::vector<cc::unique_ptr<ast::file_ast>> built;
+    /// One file parsed, shared by every library that holds it with the same name, source and place.
+    struct parsed_unit
+    {
+        parsed_file file;
+        ast::file_ast ast;
+    };
+    /// One layer of the library's chain of modules, and what it reads: the links before it, and its own files.
+    struct chain_link
+    {
+        cc::shared_ptr<check::checked_prelude const> layer;
+        cc::shared_ptr<chain_link const> before;
+        cc::vector<cc::shared_ptr<parsed_unit const>> units;
+    };
+
+    cc::vector<cc::shared_ptr<parsed_unit const>> units;
     /// Each file as the check pass takes it, and the name it was handed in under.
     cc::vector<check::module_file> files;
     cc::vector<cc::string> names;
 
     struct layers
     {
-        /// Every module of the library as one layer (`check::check_library`), which every compile continues from.
+        /// Every module of the library checked, the last link of its chain (`check::library_chain`), which every
+        /// compile continues from.
+        /// A link is shared with every library that holds the same modules before it, so an edit of a module checks
+        /// it and the modules after it again, and none before.
         /// Null once it could not be made, a module that reports anything among the reasons; `made` serves then.
-        cc::shared_ptr<check::checked_prelude const> library;
+        cc::shared_ptr<chain_link const> library;
         bool has_tried_library = false;
         /// One layer per set of modules a program reaches, where the library makes none of its own.
         cc::vector<cc::shared_ptr<check::checked_prelude const>> made;

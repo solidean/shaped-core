@@ -23,7 +23,12 @@ void checker::run(resume_point from)
     // A checked layer leaves the scope of its empty program behind, which this check's own module replaces.
     // A layer of modules keeps theirs, since their files are declared already and are not declared again.
     if (from.files > prelude_count)
+    {
         module_scopes[0] = {};
+        // a layer of the chain adds modules behind the ones it continues
+        while (module_scopes.size() < modules.size())
+            module_scopes.push_back({});
+    }
     else
     {
         module_scopes = {};

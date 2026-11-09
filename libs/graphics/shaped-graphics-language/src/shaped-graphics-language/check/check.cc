@@ -264,11 +264,29 @@ bool sgl::check::reaches_the_same_modules(checked_prelude const& layer,
         && plan_matches(plan_modules(library, program), layer._library_order, layer._modules);
 }
 
-cc::optional<checked_prelude> sgl::check::check_library(checked_prelude const& prelude,
-                                                        cc::span<module_file const> library)
+namespace
 {
-    // the layer of a program that uses every module, each once, by its own name
-    auto uses = cc::string();
+/// A program that uses each of `names` once, by its own name and in order.
+cc::string uses_of(cc::span<cc::string const> names)
+{
+    auto text = cc::string();
+    for (auto const& name : names)
+        text.appendf("use {}\n", name);
+    return text;
+}
+
+bool contains(cc::span<cc::string const> names, cc::string_view name)
+{
+    for (auto const& n : names)
+        if (n == name)
+            return true;
+    return false;
+}
+} // namespace
+
+cc::vector<chained_module> sgl::check::library_chain(cc::span<module_file const> library)
+{
+    // the modules the library declares, each once, in the library's order
     auto named = cc::vector<cc::string>();
     for (auto const& f : library)
     {
@@ -278,29 +296,146 @@ cc::optional<checked_prelude> sgl::check::check_library(checked_prelude const& p
         for (auto const id : f.ast.at(f.ast.declarations))
             if (auto const* const m = f.ast.at(id).node.try_as<ast::module_decl>();
                 m != nullptr && ast::is_valid(m->path))
-                if (auto const* const n = f.ast.at(m->path).node.try_as<ast::name>(); n != nullptr)
-                {
-                    auto const name = f.file.text_of(n->where);
-                    auto is_named = false;
-                    for (auto const& earlier : named)
-                        is_named = is_named || earlier == name;
-                    if (!is_named)
-                    {
-                        named.push_back(cc::string(name));
-                        uses.appendf("use {}\n", name);
-                    }
-                }
+                if (auto const* const n = f.ast.at(m->path).node.try_as<ast::name>();
+                    n != nullptr && !contains(named, f.file.text_of(n->where)))
+                    named.push_back(cc::string(f.file.text_of(n->where)));
     }
     if (named.empty())
         return {};
-    auto const every_file = parse(uses);
+    auto const every_file = parse(uses_of(named));
     auto const every_ast = ast::build(every_file);
-    auto layer = check_modules(prelude, library, {.file = every_file, .ast = every_ast});
-    if (layer.has_value())
+    auto const plan = plan_modules(library, {.file = every_file, .ast = every_ast});
+    if (!may_layer(plan))
+        return {};
+
+    // what each module uses, by its index in the plan
+    auto const count = plan.modules.size();
+    auto uses = cc::vector<cc::vector<i32>>();
+    for (auto m = isize(0); m < count; ++m)
+        uses.push_back({});
+    for (auto i = isize(0); i < plan.library_order.size(); ++i)
+        for (auto const& u : plan.uses[i])
+            if (u.module != plan.file_module[i])
+                uses[plan.file_module[i]].push_back(u.module);
+    // how many modules reach each one, through any number of uses
+    auto dependents = cc::vector<i32>::create_filled(count, 0);
+    for (auto from = isize(1); from < count; ++from)
     {
-        layer.value()._is_library = true;
-        layer.value()._names_by_reach
-            = cc::make_unique<cc::mutex<cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>>>();
+        auto seen = cc::vector<u8>::create_filled(count, 0);
+        auto pending = uses[from];
+        while (!pending.empty())
+        {
+            auto const m = pending.back();
+            pending.remove_back();
+            if (seen[m] != 0)
+                continue;
+            seen[m] = 1;
+            ++dependents[m];
+            pending.push_back_range(cc::span<i32 const>(uses[m]));
+        }
+    }
+    // Every module after the ones it uses; of those that may come next, the one more modules reach first, so a module
+    // nothing uses comes last and an edit of it checks it alone.
+    auto order = cc::vector<chained_module>();
+    auto placed = cc::vector<u8>::create_filled(count, 0);
+    for (auto step = isize(1); step < count; ++step)
+    {
+        auto best = -1;
+        for (auto m = i32(1); m < i32(count); ++m)
+        {
+            if (placed[m] != 0)
+                continue;
+            auto is_ready = true;
+            for (auto const u : uses[m])
+                is_ready = is_ready && placed[u] != 0;
+            if (is_ready
+                && (best < 0 || dependents[m] > dependents[best]
+                    || (dependents[m] == dependents[best] && plan.modules[m] < plan.modules[best])))
+                best = m;
+        }
+        // the plan reported a loop otherwise, and `may_layer` refused it
+        CC_ASSERT(best >= 0, "a library's modules use each other without a loop");
+        placed[best] = 1;
+        auto& next = order.emplace_back(chained_module{.name = plan.modules[best]});
+        for (auto i = isize(0); i < plan.library_order.size(); ++i)
+            if (plan.file_module[i] == best)
+                next.files.push_back(plan.library_order[i]);
+    }
+    return order;
+}
+
+cc::optional<checked_prelude> sgl::check::check_next_module(checked_prelude const& base,
+                                                            cc::span<module_file const> library,
+                                                            cc::string_view module)
+{
+    CC_ASSERT(base._library_order.empty() || base._is_library, "a chain continues the prelude or a layer of its own");
+    // the modules of the layers before, then this one: a program using them all, in the chain's order
+    auto names = cc::vector<cc::string>();
+    for (auto i = isize(1); i < base._modules.size(); ++i)
+        names.push_back(base._modules[i]);
+    if (contains(names, module))
+        return {};
+    names.push_back(cc::string(module));
+    auto const every_file = parse(uses_of(names));
+    auto const every_ast = ast::build(every_file);
+    auto plan = plan_modules(library, {.file = every_file, .ast = every_ast});
+    if (!may_layer(plan))
+        return {};
+    // A layer of the chain continues the one before unchanged, and adds exactly its module: one whose uses reach a
+    // module no layer before holds comes too early in the order.
+    auto const before = base._library_order.size();
+    if (plan.modules.size() != names.size() + 1 || plan.library_order.size() <= before)
+        return {};
+    for (auto i = isize(0); i < before; ++i)
+        if (plan.library_order[i] != base._library_order[i])
+            return {};
+
+    auto const empty_file = parse("");
+    auto const empty_ast = ast::build(empty_file);
+    auto result = checked_prelude();
+    result._files.push_back_range(cc::span<module_file const>(base._files));
+    result._prelude_count = base._prelude_count;
+    for (auto i = before; i < plan.library_order.size(); ++i)
+        result._files.push_back(library[plan.library_order[i]]);
+    result._library_order = plan.library_order;
+    result._modules = plan.modules;
+    result._is_library = true;
+    result._names_by_reach = cc::make_unique<cc::mutex<cc::map<cc::string, cc::shared_ptr<cc::set<cc::string>>>>>();
+    auto files = result._files;
+    files.push_back({.file = empty_file, .ast = empty_ast});
+    plan.uses.back() = {};
+
+    result._state = cc::make_unique<checker>(*base._state);
+    auto& c = *result._state;
+    c.files = files;
+    apply_plan(c, plan, base._prelude_count);
+    c.run(base._resume);
+
+    // An unused `require` is judged after the program's entry points are flattened, which the program's check does.
+    auto kept = cc::vector<located_diagnostic>();
+    for (auto& d : c.out.diagnostics)
+        if (d.what.kind != diagnostic_kind::unused_require)
+            kept.push_back(cc::move(d));
+    if (!kept.empty())
+        return {};
+    c.out.diagnostics = {};
+    result._resume = freeze_layer(c, i32(result._files.size()));
+    return result;
+}
+
+cc::optional<checked_prelude> sgl::check::check_library(checked_prelude const& prelude,
+                                                        cc::span<module_file const> library)
+{
+    auto const order = library_chain(library);
+    if (order.empty())
+        return {};
+    auto layer = cc::optional<checked_prelude>();
+    for (auto const& module : order)
+    {
+        auto next = check_next_module(layer.has_value() ? layer.value() : prelude, library, module.name);
+        if (!next.has_value())
+            return {};
+        layer = cc::move(next);
     }
     return layer;
 }
@@ -309,8 +444,14 @@ bool sgl::check::may_continue_from(checked_prelude const& layer, cc::span<module
 {
     if (!layer._is_library)
         return reaches_the_same_modules(layer, library, program);
-    // every module is in the layer, so a program that may continue from any layer of modules may from this one
-    return may_layer(plan_modules(library, program));
+    // a layer of the chain holds some modules whole, so a program reaching only those may continue from it
+    auto const plan = plan_modules(library, program);
+    if (!may_layer(plan))
+        return false;
+    for (auto i = isize(1); i < plan.modules.size(); ++i)
+        if (!contains(layer._modules, plan.modules[i]))
+            return false;
+    return true;
 }
 
 bool sgl::check::layer_serves_options(checked_prelude const& layer, cc::span<option_value const> options)
