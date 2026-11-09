@@ -84,7 +84,7 @@ They are `dx.op.viewID`, `startVertexLocation`, `startInstanceLocation` and `cov
 
 **`discard` terminates on neither target.**
 DXC writes `dx.op.discard(true)` and `OpDemoteToHelperInvocation`, and the code after it goes on running as a helper.
-That is what keeps a neighbour's derivatives whole, and what [feat-sgl-discard-helper-emulation](feat-sgl-discard-helper-emulation.md) pins.
+That is what keeps a neighbour's derivatives whole, and what [feat-sgl-discard-helper-emulation](.closed/2026/11/feat-sgl-discard-helper-emulation.md) pins.
 
 ## The design
 

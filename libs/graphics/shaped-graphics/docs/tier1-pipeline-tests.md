@@ -45,12 +45,8 @@ Two values that could agree on the chosen inputs get a second quad with inputs t
 
 ## SGL semantics that only a GPU pins
 
-`tests/pipeline/pixel-semantics-test.cc` and `draw-params-test.cc` pin each on dx12, vulkan and webgpu.
-What metal still has to be shown doing:
-
-- **A discarded pixel still takes part in its quad's derivatives.**
-  WGSL demotes; MSL's `discard_fragment` may end the pixel.
-  The emulation [feat-sgl-discard-helper-emulation](../../shaped-graphics-language/docs/issues/feat-sgl-discard-helper-emulation.md) describes waits on the test on metal.
+`tests/pipeline/pixel-semantics-test.cc` and `draw-params-test.cc` pin each on dx12, vulkan, webgpu and metal.
+A discarded pixel still takes part in its quad's derivatives on all four: WGSL demotes, and MSL's `discard_fragment` kept the pixel as a helper on an M4.
 
 ## Geometry and tessellation stages
 
