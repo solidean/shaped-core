@@ -3,6 +3,8 @@ created: 2026-11-05
 parent: epic-sgl-robustness-profiles
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_guards.cc
+closed: 2026-11-09
+resolution: fixed
 ---
 
 # Guard buffer element and bytes accesses
