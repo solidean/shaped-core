@@ -662,8 +662,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                                                     bool is_struct,
                                                     bool is_target_struct,
                                                     bool is_vertex_struct,
-                                                    bool is_workgroup,
-                                                    cc::string_view binding_name)
+                                                    bool is_workgroup)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -1758,7 +1757,7 @@ void checker::compile_binding(symbol_id id)
     auto used = feature_set();
     granted = declared;
     used_features = &used;
-    auto const members = compile_members(file, b.members, false, false, false, is_workgroup, out.at(id).name);
+    auto const members = compile_members(file, b.members, false, false, false, is_workgroup);
     granted = {};
     used_features = nullptr;
 
