@@ -4,6 +4,8 @@ tags: [metal]
 refs:
   - file: libs/graphics/shaped-shader-library/cmake/generate_shader_package.py:75
   - file: libs/graphics/shaped-rendering/tests/bench/sgl-against-msl-benchmark.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-10T12:29Z
 ---
 
 # sc_add_shader_package refuses an MSL package, which the docs say exists
