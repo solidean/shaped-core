@@ -10,6 +10,8 @@
 
 #if SLIB_HAS_METAL
 
+#include <slib_test_msl_shaders.hh>
+
 // The metal edge, and the one thing it exists for: an SGL package reaching metal.
 // Both arms of the compiler behind it produce something the metal backend accepts, so these assert what the edge
 // resolves and what comes out, not which arm ran — that is a property of the host, not of the package.
@@ -295,6 +297,27 @@ ASYNC_TEST("slib metal compiler - every texture and image method SGL writes is M
     if (value_of(pixel).format != sg::shader_format::metal_lib)
         SKIP("no Metal toolchain on this host, so nothing compiled the text");
     CHECK(value_of(compute).format == sg::shader_format::metal_lib);
+}
+
+ASYNC_TEST("slib metal compiler - an MSL package's shader compiles through the library and is reflected",
+           exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    lib.add_compiler(slib::create_metal_compiler());
+    lib.add_package(slib_test::msl_shaders::package());
+
+    CHECK(slib_test::msl_shaders::package().language == slib::shader_language::metal);
+    REQUIRE(slib_test::msl_shaders::doubled.compute.main_cs != nullptr);
+    CHECK(slib_test::msl_shaders::doubled.compute.main_cs->virtual_path() == "slib_test_msl_shaders/doubled.metal");
+
+    auto const shader = slib_test::msl_shaders::doubled.compute.main_cs->acquire(sg::shader_format::metal_lib);
+    co_await cc::async_settled(shader);
+    auto const& compiled = value_of(shader);
+    CHECK(compiled.stage == sg::shader_stage::compute);
+    CHECK(compiled.entry_point == "main_cs");
+    REQUIRE(compiled.bindings.size() == 1);
+    CHECK(compiled.bindings[0].name == "values");
+    CHECK(compiled.bindings[0].type == sg::binding_type::buffer);
 }
 
 #endif

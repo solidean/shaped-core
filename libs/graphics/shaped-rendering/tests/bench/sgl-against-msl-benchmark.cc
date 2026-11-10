@@ -1,14 +1,13 @@
 #include "../shader_fixtures.hh"
 #include "bench_support.hh"
 
-#include <clean-core/streams/file_stream.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
-#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <sr_bench_msl_shaders.hh>
 #include <sr_sgl_shaders.hh>
 
 // What sr ships in SGL against the same kernels written by hand in MSL, on metal.
@@ -18,23 +17,10 @@
 // differs.
 // Both go through slib's metal compiler and its flags, but for `-std`: SGL's edge asks for metal3.2, and the MSL takes
 // the toolchain's default.
-// sc_add_shader_package takes no MSL package, so the MSL is read from the source tree and compiled as a source.
 
 namespace
 {
 using namespace sr_bench::impl;
-
-/// What a hand-written shader is read from: `name` under tests/bench/shaders.
-[[nodiscard]] cc::string bench_shader_text(cc::string_view name)
-{
-    auto const path = nx::source_path(SR_BENCH_SHADER_DIR) + "/" + name;
-    auto adapter = cc::file_read_stream_adapter::open(path);
-    REQUIRE(adapter.has_value()).context(path);
-    auto stream = adapter.value().stream();
-    auto const bytes = stream.read_all();
-    REQUIRE(bytes.has_value()).context(path);
-    return cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size()));
-}
 
 /// The pipeline of a hand-written MSL shader under SGL's group layout and SGL's inline constants.
 /// Empty while the shader is still building, and stays empty for one that failed, which `is_ready` then never reports.
@@ -66,14 +52,6 @@ struct msl_pipeline
         return false;
     }
 };
-
-/// `file`'s compute entry point `entry`, compiled from MSL source for metal.
-[[nodiscard]] sg::async_compiled_shader compile_msl(cc::string_view file, cc::string_view entry)
-{
-    return sr_test::shader_fixtures().compile_source(bench_shader_text(file), sg::shader_stage::compute, entry,
-                                                     sg::shader_format::metal_lib,
-                                                     {.language = slib::shader_language::metal, .label = file});
-}
 
 /// SGL's bindings as the MSL names them: an argument buffer's member has no `.` either, so `atrous_images.source` is
 /// `atrous_images_source`, at the same index and of the same type.
@@ -169,8 +147,13 @@ cc::shared_async<cc::unit> compare_on_metal(sg::context& ctx)
 {
     CC_LOG_INFO("metal adapter: {}", ctx.metrics.adapter().name);
 
-    // the library fills in the generated package symbols, so it exists before the first SGL pipeline is acquired
-    (void)sr_test::shader_fixtures();
+    // the library fills in the generated package symbols, so it exists before the first pipeline is acquired
+    static auto const registered = []
+    {
+        sr_test::shader_fixtures().add_package(sr_bench::msl::package());
+        return true;
+    }();
+    (void)registered;
 
     // the convolution's two inputs go up in one list, 32 MiB of features beside the weights
     ctx.upload.set_inline_budget(isize(128) << 20);
@@ -209,7 +192,7 @@ cc::shared_async<cc::unit> compare_on_metal(sg::context& ctx)
         auto const sgl_pipeline = sgl::main_cs.acquire_pipeline(ctx, values);
         auto const msl_layout = ctx.cached.acquire_binding_group_layout(
             msl_named(sgl::atrous_images::declared_bindings(values)), sgl::atrous_images::declared_samplers());
-        auto msl = msl_pipeline{.shader = compile_msl("atrous_denoise.metal", "main_cs"),
+        auto msl = msl_pipeline{.shader = sr_bench::msl::atrous_denoise.compute.main_cs->acquire(ctx),
                                 .group_layout = msl_layout,
                                 .inline_constants = sgl::atrous_constants::inline_binding()};
         auto const record = [&](sg::command_list& cmd, sg::compute_pipeline const& pipeline,
@@ -254,7 +237,7 @@ cc::shared_async<cc::unit> compare_on_metal(sg::context& ctx)
         auto const sgl_pipeline = sgl::atrous_cs.acquire_pipeline(ctx, values);
         auto const msl_layout = ctx.cached.acquire_binding_group_layout(
             msl_named(sgl::svgf_atrous_images::declared_bindings(values)), sgl::svgf_atrous_images::declared_samplers());
-        auto msl = msl_pipeline{.shader = compile_msl("svgf_atrous.metal", "atrous_cs"),
+        auto msl = msl_pipeline{.shader = sr_bench::msl::svgf_atrous.compute.atrous_cs->acquire(ctx),
                                 .group_layout = msl_layout,
                                 .inline_constants = sgl::svgf_atrous_constants::inline_binding()};
         auto const record = [&](sg::command_list& cmd, sg::compute_pipeline const& pipeline,
@@ -330,7 +313,7 @@ cc::shared_async<cc::unit> compare_on_metal(sg::context& ctx)
         auto const sgl_pipeline = sgl::main_cs.acquire_pipeline(ctx);
         auto const msl_layout = ctx.cached.acquire_binding_group_layout(
             msl_named(sgl::nn_conv_buffers::declared_bindings()), sgl::nn_conv_buffers::declared_samplers());
-        auto msl = msl_pipeline{.shader = compile_msl("nn_conv.metal", "main_cs"),
+        auto msl = msl_pipeline{.shader = sr_bench::msl::nn_conv.compute.main_cs->acquire(ctx),
                                 .group_layout = msl_layout,
                                 .inline_constants = sgl::nn_conv_constants::inline_binding()};
         auto const record = [&](sg::command_list& cmd, sg::compute_pipeline const& pipeline,

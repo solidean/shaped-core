@@ -22,7 +22,7 @@ sc_add_shader_package(
     NAME       my_shaders       # package id -> header name <my_shaders.hh>, and the mount point
     NAMESPACE  my::shaders      # where the generated symbols live
     SOURCE_DIR shaders          # relative to the calling CMakeLists (must define TARGET)
-    LANGUAGE   hlsl             # optional, hlsl by default; also wgsl and sgl
+    LANGUAGE   hlsl             # optional, hlsl by default; also wgsl, msl (shader_language::metal) and sgl
     SHADERS
         vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
