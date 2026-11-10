@@ -6,6 +6,7 @@ Every row is judged for a renderer that targets all four, WebGPU in a browser in
 **As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its A7, B2, B3, B6, D3, E4, F7 and G5 as of 2026-11-05.
 Its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F4 as of 2026-11-06, and its B6, D8, F3, F8 and G6 as of 2026-11-08.
 Its B5 and B10 as of 2026-11-09.
+Its E4 as of 2026-11-10, run on a Mac.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
@@ -96,7 +97,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **E1** Shader unit tests without a GPU | ❌ | ✅ CPU target and an interpreter, documented as incomplete | ❌ (WESL tests run on a GPU) | ❌ | ✅ `test` blocks run on the spec's interpreter: buffers, textures, images and samplers, whose texels and state a test states itself or a driver binds, and subgroup operations and derivatives over lanes, at every subgroup size a target has |
 | **E2** Diagnostics | ⚠️ later hops report against IR, once per hop | ⚠️ once against the source; downstream errors per target | ✅ once against the source | ⚠️ SPIRV-Cross errors per target, against SPIR-V | ✅ once against the source, for every target |
 | **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ✅ readable text with SGL's names; `#line` in HLSL and MSL, so DXC, Metal and PIX name the `.sgl` line; webgpu logs Tint's messages at the `.sgl` line and its inlined calls; SGL's own SPIR-V and DXIL carry the line of each operation when asked, DXIL with its inlined calls |
-| **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ⚠️ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation, after any barrier still ahead, and fails a test; a vertex stage's on vulkan where the device lets it store, and never on webgpu, which has no storage there; on metal in every raster and compute stage, and in a ray-tracing pipeline's stages through what its raygen hands them, not yet run on a Mac 🗺️ [chore](../issues/chore-sgl-metal-ray-stage-asserts-on-a-mac.md) |
+| **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ✅ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation, after any barrier still ahead, and fails a test; a vertex stage's on vulkan where the device lets it store, and never on webgpu, which has no storage there; on metal in every raster and compute stage, and in a ray-tracing pipeline's stages through what its raygen hands them |
 | **E5** Normative specification | ⚠️ an Ecma working draft; DXC is the de facto spec | ⚠️ a spec, self-described incomplete | ✅ W3C Candidate Recommendation | ✅ GLSL 4.60 | ✅ normative, with stable rule ids; every example in it is a test |
 
 ## F. Workflow and production
@@ -365,7 +366,7 @@ Per row and column:
   - Slang: SLANG capdef `printf`
   - WGSL: NAGA `debug_printf.rs`
   - GLSL + chain: Khronos registry
-  - SGL: CHK-424, EVAL-103, LEGAL-63, LEGAL-64, LEGAL-65, EMIT-183, sg's `vertex_pipeline_stores` (2026-11-05)
+  - SGL: CHK-424, EVAL-103, LEGAL-63, LEGAL-64, LEGAL-65, EMIT-183, sg's `vertex_pipeline_stores` (2026-11-05); metal's ray-tracing stages run on an M4 (2026-11-10)
 - **E5**
   - HLSL + chain: HLSLSPEC, <https://ecma-international.org/technical-committees/tc57/>
   - Slang: SLANGSPEC
