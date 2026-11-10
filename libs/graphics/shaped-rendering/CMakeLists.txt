@@ -538,12 +538,20 @@ if(SC_BUILD_TESTS)
 
     # SGL against the same three kernels written by hand in MSL, timed on metal.
     # Each MSL file declares SGL's argument buffer and inline constants slot for slot, so one binding group serves both.
-    # sc_add_shader_package takes no MSL, so the benchmark reads the .metal files from the source tree and compiles them.
     # APPLE stands for slib's metal compiler, whose target is added after this directory and so is not one to test for.
     if(APPLE AND TARGET shaped-graphics-metal)
         target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-msl-benchmark.cc)
-        sc_target_source_paths(shaped-rendering-test PRIVATE
-            SR_BENCH_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/bench/shaders")
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_msl_shaders
+            NAMESPACE  sr_bench::msl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   msl
+            SHADERS
+                atrous_denoise.metal:compute:main_cs
+                svgf_atrous.metal:compute:atrous_cs
+                nn_conv.metal:compute:main_cs
+        )
     endif()
 
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.

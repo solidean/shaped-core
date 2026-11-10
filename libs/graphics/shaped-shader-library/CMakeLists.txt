@@ -327,6 +327,19 @@ if(SC_BUILD_TESTS)
             slib_test.sgl:*
     )
 
+    # And one in MSL, which only slib's metal compiler compiles.
+    if(APPLE)
+        sc_add_shader_package(
+            TARGET     shaped-shader-library-test
+            NAME       slib_test_msl_shaders
+            NAMESPACE  slib_test::msl_shaders
+            SOURCE_DIR tests/shaders-msl
+            LANGUAGE   msl
+            SHADERS
+                doubled.metal:compute:main_cs
+        )
+    endif()
+
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-shader-library-test)
 endif()

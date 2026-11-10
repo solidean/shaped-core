@@ -72,7 +72,10 @@ VALID_STAGES = (
     "raygen", "closest_hit", "any_hit", "miss", "intersection", "callable", "task", "mesh",
 )
 
-VALID_LANGUAGES = ("hlsl", "wgsl", "sgl")
+VALID_LANGUAGES = ("hlsl", "wgsl", "msl", "sgl")
+
+# The slib::shader_language enumerator a LANGUAGE names, where the two spellings differ.
+LANGUAGE_ENUMERATORS = {"msl": "metal"}
 
 # The stage words that declare something other than an entry point.
 BINDING_STAGE = "binding"
@@ -310,7 +313,7 @@ def parse_entries(manifest: Manifest, sgl_tool: Path | None = None) -> Entries:
             raise GeneratorError(f"shader package '{name}': entry '{entry}' is declared twice")
         seen.add(entry)
 
-        # These read HLSL's binding attributes; a WGSL module states its own addresses and is reflected at runtime.
+        # These read HLSL's binding attributes; a WGSL or MSL file states its own addresses and is reflected at runtime.
         if stage in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE, CONSTANTS_STAGE) and manifest.language != "hlsl":
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' is a '{stage}' entry, which only an HLSL package has")
@@ -724,8 +727,8 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
     out.append(f"namespace {manifest.namespace}\n{{\n")
 
     # Any other language's file is one object, holding its entry points under their stage.
-    hlsl_or_wgsl_files = files if manifest.language != "sgl" else []
-    for file in hlsl_or_wgsl_files:
+    non_sgl_files = files if manifest.language != "sgl" else []
+    for file in non_sgl_files:
         out.append(f"/// {file.path}\n")
         out.append(f"struct {file.stem}_t\n{{\n")
         for stage, entry_points in file.stages.items():
@@ -992,7 +995,7 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     out.append(f"slib::shader_package const& {manifest.namespace}::package()\n{{\n")
     out.append("    static slib::shader_package const pkg = {\n")
     out.append(f'        .name = "{manifest.name}",\n')
-    out.append(f"        .language = slib::shader_language::{manifest.language},\n")
+    out.append(f"        .language = slib::shader_language::{LANGUAGE_ENUMERATORS.get(manifest.language, manifest.language)},\n")
     out.append(f'        .source_dir = "{manifest.source_dir.as_posix()}",\n')
     out.append("        .embedded_files = k_embedded_files,\n")
     out.append("        .definitions = k_definitions,\n")

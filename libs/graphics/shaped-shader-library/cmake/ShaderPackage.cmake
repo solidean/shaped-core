@@ -46,8 +46,9 @@
 # Stages are spelled exactly as sg::shader_stage (compute / vertex / fragment / raygen / ...), so the
 # generator emits the enumerator instead of a string for C++ to parse back.
 #
-# LANGUAGE is hlsl (the default), wgsl or sgl.
-# The four generating kinds above read HLSL, so a WGSL package that names one is a generator error.
+# LANGUAGE is hlsl (the default), wgsl, msl or sgl.
+# The four generating kinds above read HLSL, so a WGSL or MSL package that names one is a generator error.
+# An MSL package's files are `.metal`, compiled by slib's metal compiler, so only a metal context acquires them.
 #
 # An SGL package spells its stages as SGL does -- `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps` -- and
 # `pixel` is sg's fragment stage.
