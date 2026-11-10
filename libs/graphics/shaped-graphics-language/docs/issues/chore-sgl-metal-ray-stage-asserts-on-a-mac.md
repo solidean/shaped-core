@@ -5,6 +5,8 @@ refs:
   - test: "sg - an SGL ray-tracing pipeline's raygen, closest hit and miss each report a failed assert"
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/msl.cc
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-10T09:31Z
 ---
 
 # A metal ray-tracing pipeline's stages print and assert through what their raygen hands them, run on a Mac
