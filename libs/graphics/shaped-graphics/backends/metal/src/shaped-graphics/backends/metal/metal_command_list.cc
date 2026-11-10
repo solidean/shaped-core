@@ -181,9 +181,11 @@ void metal_command_list::end_encoder()
     // **The producer half of the queue barrier pair, per encoder rather than per list.**
     // An encoder-scoped barrier cannot reach across an encoder boundary, so what orders a dispatch here against a draw
     // in the render encoder that follows is this publish plus that encoder's own `barrierAfterQueueStages` wait.
-    // Without it the pass opens waiting on queue work nothing published, and the draw reads what the dispatch wrote
-    // before it was written.
-    _encoder->barrierAfterStages(k_compute_encoder_stages, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
+    // On an M4 either half alone orders it, and `sg metal - a draw reads the vertex buffer a dispatch in the same list
+    // wrote` fails once both are gone.
+    // **It holds back every later stage, not the compute ones**: a publish to compute stages alone leaves the vertex
+    // stage that reads the buffer free to start, which that test caught on the M4 with the wait removed.
+    _encoder->barrierAfterStages(k_compute_encoder_stages, MTL::StageAll, MTL4::VisibilityOptionDevice);
 
     _encoder->endEncoding();
     _encoder->release();

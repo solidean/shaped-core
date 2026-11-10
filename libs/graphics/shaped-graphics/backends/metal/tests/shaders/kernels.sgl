@@ -37,10 +37,17 @@ binding summed:
 binding quad:
     vertices: mut buffer[float]
 
+// The writes come only after a spin, so a draw not ordered after this dispatch reads the buffer unwritten.
+// On an M4 a spin of 16384 rounds already loses that race now and then; this one is 64 times that, and the test still runs in under 100 ms.
+// The spin feeds the positions, so no compiler can drop it; a scale of 2 still covers the whole target.
 @compute(1) fun emit_quad_main(@thread_id id: int3){quad}:
+    let mut h = (id.x as uint) + 1u
+    for _ in 0 ..< 1048576:
+        h = h * 1664525u + 1013904223u
+    let scale = if h == 0u => 2.0 else 1.0
     let at = id.x * 6
-    quad.vertices[at] = if (id.x % 2) == 1 => 1.0 else -1.0
-    quad.vertices[at + 1] = if id.x >= 2 => 1.0 else -1.0
+    quad.vertices[at] = scale * (if (id.x % 2) == 1 => 1.0 else -1.0)
+    quad.vertices[at + 1] = scale * (if id.x >= 2 => 1.0 else -1.0)
     quad.vertices[at + 2] = 0.25
     quad.vertices[at + 3] = 0.5
     quad.vertices[at + 4] = 0.75
