@@ -561,3 +561,8 @@ if(SC_BUILD_TESTS)
 endif()
 
 add_subdirectory(examples)
+
+# Programs built on sr, shipped as tools rather than run as examples.
+if(SC_BUILD_TOOLS)
+    add_subdirectory(tools/lod-probe)
+endif()
