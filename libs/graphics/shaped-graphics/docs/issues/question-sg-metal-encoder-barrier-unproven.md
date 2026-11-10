@@ -7,6 +7,8 @@ refs:
   - test: sg metal - a draw reads the vertex buffer a dispatch in the same list wrote
   - test: sg metal - a draw sees what the previous draw's fragment shader wrote
   - symbol: metal_command_list::pass_reopens
+claimed-by: Claude (for Julius)
+claimed-at: 2026-11-10T14:32Z
 ---
 
 # The metal encoder-boundary barrier pair is emitted but not proved
