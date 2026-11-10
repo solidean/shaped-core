@@ -1,6 +1,6 @@
 #include "metal_query.hh"
 
-#include <clean-core/record/log.hh>
+#include <clean-core/string/format.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 
 namespace sg::backend::metal
@@ -22,79 +22,85 @@ cc::result<cc::unit> metal_query_system::create(metal_context& ctx)
     //
     // **Probing would cost a heap per context**, and heaps are a device-wide resource with a limit the tier-2 suite
     // reaches on its own — every context paying for a capability most never use is what exhausts it.
-    // So the first heap is made when the first timestamp is recorded, and a device that refuses one then hands the
-    // caller an invalid timestamp, which is the answer an unsupported backend gives anyway.
+    // So the first heap is made when the first timestamp is recorded, and a device that refuses one then reports a
+    // device error and hands the caller an invalid timestamp, which is the answer an unsupported backend gives anyway.
     _supports_timestamps = true;
     return cc::unit{};
 }
 
-cc::unique_ptr<metal_counter_heap_lease> metal_query_system::create_heap()
-{
-    auto* const descriptor = MTL4::CounterHeapDescriptor::alloc()->init();
-    descriptor->setType(MTL4::CounterHeapTypeTimestamp);
-    descriptor->setCount(NS::UInteger(metal_query_system::SlotsPerHeap));
-
-    NS::Error* error = nullptr;
-    auto* const heap = _ctx->device()->newCounterHeap(descriptor, &error);
-    descriptor->release();
-
-    if (heap == nullptr)
-    {
-        CC_LOG_WARNING("the metal device refused a timestamp counter heap: {}",
-                       error != nullptr ? error->localizedDescription()->utf8String() : "no reason given");
-        return nullptr;
-    }
-
-    auto lease = cc::make_unique<metal_counter_heap_lease>();
-    lease->heap = heap;
-    lease->slot_count = metal_query_system::SlotsPerHeap;
-    return lease;
-}
-
-cc::unique_ptr<metal_counter_heap_lease> metal_query_system::acquire_heap()
+cc::unique_ptr<metal_counter_heap_lease> metal_query_system::acquire_lease()
 {
     if (!_supports_timestamps)
         return nullptr;
 
-    auto pooled = _free_list.lock(
-        [](cc::vector<cc::unique_ptr<metal_counter_heap_lease>>& free) -> cc::unique_ptr<metal_counter_heap_lease>
+    // Made under the lock, so lists racing for the last range make one heap between them rather than one each.
+    return _pool.lock(
+        [&](pool& p) -> cc::unique_ptr<metal_counter_heap_lease>
         {
-            if (free.empty())
-                return nullptr;
-            auto lease = cc::move(free.back());
-            free.remove_back();
+            if (p.free.empty())
+            {
+                auto* const descriptor = MTL4::CounterHeapDescriptor::alloc()->init();
+                descriptor->setType(MTL4::CounterHeapTypeTimestamp);
+                descriptor->setCount(NS::UInteger(SlotsPerHeap));
+
+                NS::Error* error = nullptr;
+                auto* const heap = _ctx->device()->newCounterHeap(descriptor, &error);
+                descriptor->release();
+
+                if (heap == nullptr)
+                {
+                    _ctx->report_feedback_error(
+                        sg::device_error_kind::creation_failed,
+                        cc::format("the metal device refused a timestamp counter heap beside the {} this context "
+                                   "holds: {}",
+                                   p.heaps.size(),
+                                   error != nullptr ? error->localizedDescription()->utf8String() : "no reason given"));
+                    return nullptr;
+                }
+
+                p.heaps.push_back(heap);
+                // Pushed last to first, so ranges come out in slot order.
+                for (auto first = SlotsPerHeap - SlotsPerLease; first >= 0; first -= SlotsPerLease)
+                {
+                    auto lease = cc::make_unique<metal_counter_heap_lease>();
+                    lease->heap = heap;
+                    lease->first_slot = first;
+                    lease->slot_count = SlotsPerLease;
+                    p.free.push_back(cc::move(lease));
+                }
+            }
+
+            auto lease = cc::move(p.free.back());
+            p.free.remove_back();
             return lease;
         });
-
-    if (pooled != nullptr)
-        return pooled;
-    return create_heap();
 }
 
-void metal_query_system::release_heap(cc::unique_ptr<metal_counter_heap_lease> lease)
+void metal_query_system::release_lease(cc::unique_ptr<metal_counter_heap_lease> lease)
 {
     if (lease == nullptr)
         return;
 
     // Invalidated rather than left as they are: a resolve of a slot never written reads whatever the last leaseholder
-    // put there, and a heap is reused across lists that have nothing to do with each other.
+    // put there, and a range is reused across lists that have nothing to do with each other.
     if (lease->next_slot > 0)
-        lease->heap->invalidateCounterRange(NS::Range(0, NS::UInteger(lease->next_slot)));
+        lease->heap->invalidateCounterRange(NS::Range(NS::UInteger(lease->first_slot), NS::UInteger(lease->next_slot)));
 
     lease->next_slot = 0;
     lease->shared_future = std::make_shared<sg::data_future<u64>>();
 
-    _free_list.lock([&](cc::vector<cc::unique_ptr<metal_counter_heap_lease>>& free) { free.push_back(cc::move(lease)); });
+    _pool.lock([&](pool& p) { p.free.push_back(cc::move(lease)); });
 }
 
 void metal_query_system::shutdown()
 {
-    _free_list.lock(
-        [](cc::vector<cc::unique_ptr<metal_counter_heap_lease>>& free)
+    _pool.lock(
+        [](pool& p)
         {
-            for (auto& lease : free)
-                lease->heap->release();
-            free.clear();
+            p.free.clear();
+            for (auto* const heap : p.heaps)
+                heap->release();
+            p.heaps.clear();
         });
     _supports_timestamps = false;
 }

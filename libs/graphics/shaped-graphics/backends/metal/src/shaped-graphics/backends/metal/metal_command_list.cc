@@ -1764,9 +1764,9 @@ sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
                                  >= _leased_counter_heaps[_active_timestamp_lease]->slot_count;
     if (needs_fresh)
     {
-        auto lease = queries.acquire_heap();
+        auto lease = queries.acquire_lease();
         if (lease == nullptr)
-            return {}; // the device refused a heap mid-recording; the caller sees an invalid query, as when unsupported
+            return {}; // the device refused a heap, which it reported; the caller sees an invalid query, as when unsupported
         _active_timestamp_lease = int(_leased_counter_heaps.size());
         _leased_counter_heaps.push_back(cc::move(lease));
     }
@@ -1778,7 +1778,7 @@ sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
     // That is also what makes the value meaningful: it is written once everything recorded before it has completed,
     // which is what makes the difference between two of them the duration of the work between.
     end_encoder();
-    _buffer->writeTimestampIntoHeap(lease.heap, NS::UInteger(slot));
+    _buffer->writeTimestampIntoHeap(lease.heap, NS::UInteger(lease.first_slot + slot));
 
     return sg::gpu_timestamp(std::shared_ptr<sg::data_future<u64> const>(lease.shared_future), isize(slot),
                              queries.timestamp_tick_to_seconds());
@@ -1786,10 +1786,10 @@ sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
 
 void metal_command_list::finalize_queries_before_close()
 {
-    // Heaps are leased on demand, so every leased heap holds at least one recorded timestamp.
+    // Ranges are leased on demand, so every leased range holds at least one recorded timestamp.
     for (auto& lease : _leased_counter_heaps)
     {
-        CC_ASSERT(lease->next_slot > 0, "leased a counter heap and recorded nothing into it");
+        CC_ASSERT(lease->next_slot > 0, "leased a counter heap range and recorded nothing into it");
         auto const size_in_bytes = isize(lease->next_slot) * isize(sizeof(u64));
 
         auto const staging = _metal_context.download_ring().reserve(size_in_bytes);
@@ -1805,7 +1805,7 @@ void metal_command_list::finalize_queries_before_close()
         // address rather than a bound resource, so the ring's own buffer is as good a destination as any.
         // No fences: the resolve is ordered by the command buffer it sits in, like every other call here.
         _buffer->resolveCounterHeap(
-            lease->heap, NS::Range(0, NS::UInteger(lease->next_slot)),
+            lease->heap, NS::Range(NS::UInteger(lease->first_slot), NS::UInteger(lease->next_slot)),
             MTL4::BufferRange(staging.buffer->gpuAddress() + u64(staging.offset), u64(size_in_bytes)), nullptr, nullptr);
 
         auto destination = cc::pinned_data<byte>::create_uninitialized(size_in_bytes);
@@ -1826,11 +1826,11 @@ void metal_command_list::finalize_queries_before_close()
             sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion)));
     }
 
-    // Back through the epoch rather than straight away: the resolve just recorded still names each heap, right up
+    // Back through the epoch rather than straight away: the resolve just recorded still names each range, right up
     // until this epoch's work has finished.
     for (auto& lease : _leased_counter_heaps)
         _metal_context.epochs().defer([system = &_metal_context.queries(), held = cc::move(lease)]() mutable
-                                      { system->release_heap(cc::move(held)); });
+                                      { system->release_lease(cc::move(held)); });
     _leased_counter_heaps.clear();
     _active_timestamp_lease = -1;
 }
@@ -1839,7 +1839,7 @@ void metal_command_list::release_queries_on_drop()
 {
     // Straight back rather than through the epoch: nothing was committed, so no pending command names them.
     for (auto& lease : _leased_counter_heaps)
-        _metal_context.queries().release_heap(cc::move(lease));
+        _metal_context.queries().release_lease(cc::move(lease));
     _leased_counter_heaps.clear();
     _active_timestamp_lease = -1;
 }

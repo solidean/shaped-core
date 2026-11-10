@@ -19,8 +19,6 @@
 // Both go through slib's metal compiler and its flags, but for `-std`: SGL's edge asks for metal3.2, and the MSL takes
 // the toolchain's default.
 // sc_add_shader_package takes no MSL package, so the MSL is read from the source tree and compiled as a source.
-// Timed by the wall clock over batches, as on WebGPU: sg's metal backend leases a counter heap per timestamped command
-// list, and on an M4 Metal refused new heaps within the rounds of one kernel, so the timestamps read zero.
 
 namespace
 {
@@ -91,9 +89,6 @@ struct msl_pipeline
     return renamed;
 }
 
-/// Dispatches timed together on the wall clock, from one queue completion to the next.
-constexpr auto k_batch = 128;
-
 /// Whether every contender writes what the first does, within float noise: each records once and its output is read back.
 /// A port that drifted from the original, or a dispatch that wrote nothing, shows here rather than as a time.
 /// The contenders share one target, so `clear` zeroes it before each, or one would read what the other left.
@@ -159,14 +154,14 @@ cc::shared_async<cc::unit> outputs_agree(sg::context& ctx,
     };
 }
 
-/// Each contender timed by the wall clock, then checked against the first.
+/// Each contender timed by GPU timestamps, then checked against the first.
 cc::shared_async<cc::unit> time_and_check(sg::context& ctx,
                                           cc::string_view kernel,
                                           cc::span<contender> contenders,
                                           cc::function_ref<void(sg::command_list&)> clear,
                                           cc::function_ref<sg::bytes_future(sg::command_list&)> read)
 {
-    co_await measure(ctx, kernel, contenders, k_batch, true);
+    co_await measure(ctx, kernel, contenders);
     co_await outputs_agree(ctx, kernel, contenders, clear, read);
 }
 
