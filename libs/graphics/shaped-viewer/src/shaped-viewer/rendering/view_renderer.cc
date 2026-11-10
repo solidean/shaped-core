@@ -553,13 +553,26 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
 /// drawn through the same eye, so the mean it converges to is the image this frame is asking for and no other.
 /// Moving the eye therefore restarts it, and that is the trade — no reprojection to salvage the old samples, and in
 /// exchange no smearing, no per-pixel rejection heuristic, and an uncapped mean that converges to ground truth.
+///
+/// `scope` picks what restarts: the mean's `image`, or a temporal denoiser's `history`.
+/// A history reprojects across motion and rejects per pixel what it cannot follow, so what moves or deforms is left out of it:
+/// every instance's transform, and of a frame mesh everything but its permutation — geometry, attributes, parameter block.
+/// A frame mesh is new content every frame by design, a simulation's body with its normals, and a history exists to follow that.
+/// What the scene is stays in it: how many instances and which shaders, a managed mesh's record, the lights, the background.
+enum class trace_hash_scope : u8
+{
+    image,
+    history,
+};
+
 [[nodiscard]] u64 trace_hash(shaders::tracer::frame_constants fc,
                              background_gpu const& bg,
                              pt_light_table const& lights,
                              traced_decals const& decals,
                              resolved_view const& r,
                              tg::vec2i resolution,
-                             u64 shader_generation)
+                             u64 shader_generation,
+                             trace_hash_scope scope = trace_hash_scope::image)
 {
     // The two fields that legitimately differ every frame; hashing either would restart the estimator forever.
     fc.rng_seed = 0;
@@ -585,6 +598,13 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     {
         auto const& inst = r.instances[i];
         auto const content = r.frame_contents[i];
+        if (scope == trace_hash_scope::history)
+        {
+            h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset));
+            if (content == cc::hash128())
+                h = cc::combine_hash(h, cc::make_hash(inst.blas.get())); // a managed mesh's BLAS is its geometry's identity
+            continue;
+        }
         h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<float const>(inst.transform, 12).as_bytes()));
         if (content == cc::hash128())
             h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
@@ -604,16 +624,27 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     {
         auto anonymized = r.records[i];
         anonymized.param_buffer = 0;
-        if (r.frame_contents[i] != cc::hash128())
+        auto const frame_row = r.frame_contents[i] != cc::hash128();
+        if (frame_row && scope == trace_hash_scope::history)
+            continue; // its permutation, hashed with the instances above, is all of it a history keeps
+        if (frame_row)
         {
             anonymized.vertices = 0;
             anonymized.indices = 0;
         }
+        // the record carries the instance's transform too, which a history leaves out as it does the TLAS instance's
+        if (scope == trace_hash_scope::history)
+        {
+            anonymized.to_world_x = {};
+            anonymized.to_world_y = {};
+            anonymized.to_world_z = {};
+        }
         h = cc::combine_hash(
             h, cc::make_hash_of_bytes(cc::span<shaders::tracer::instance_record const>(&anonymized, 1).as_bytes()));
     }
-    for (auto const block : r.parameter_blocks)
-        h = cc::combine_hash(h, cc::make_hash(u32(block)));
+    for (auto i = isize(0); i < r.parameter_blocks.size(); ++i)
+        if (scope == trace_hash_scope::image || r.frame_contents[i] == cc::hash128())
+            h = cc::combine_hash(h, cc::make_hash(u32(r.parameter_blocks[i])));
 
     // Which shader reads those records is not in them, and a different permutation is a different image.
     for (auto const& key : r.permutations)
@@ -1467,12 +1498,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
                            cc::make_hash(u32(mode), u32(l.settings.hybrid_lighting), slot->stand_in_hash));
 
-    // The same, with the camera left out: what a temporal denoiser's history restarts on.
+    // What a temporal denoiser's history restarts on: the camera left out, and where the geometry sits (trace_hash_scope).
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
     auto scene_fc = fc;
     scene_fc.camera = {};
-    auto const scene_hash
-        = trace_hash(scene_fc, bg_unturned, lights, decals, resolved, tr.resolution, self->_shader_generation);
+    auto const scene_hash = trace_hash(scene_fc, bg_unturned, lights, decals, resolved, tr.resolution,
+                                       self->_shader_generation, trace_hash_scope::history);
 
     // A cut teleports the camera, so nothing from the last frame reprojects: the temporal history describes another
     // part of the scene, and the motion guide would reproject into a camera nothing connects it to.
@@ -1651,8 +1682,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     if (has_temporal)
     {
-        // The temporal member's history restarts on a different SCENE, never on camera motion: carrying history across
-        // camera motion is what it exists for, while the mean restarts on every move.
+        // The temporal member's history restarts on a different SCENE, never on camera or object motion: carrying history
+        // across motion is what it exists for, while the mean restarts on every move.
         if (ds.frame->reset_hash != scene_hash)
         {
             ds.frame->denoise.reset();
