@@ -50,6 +50,7 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [barriers](concepts/barriers.md) — access tracking + GPU barriers: access inferred from each op, the three-timeline minimal-barrier state machine, and the concurrent-command-list slot model.
 - [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
 - [textures](concepts/textures.md) — the `raw_texture` resource vs the typed `texture<Traits>` wrapper, the derived-not-flagged `texture_description` shape, and the restrictive `pixel_format` set.
+- [anisotropic LOD](concepts/anisotropic-lod.md) — why one `sg::sampler` picks the same mip level on dx12 and vulkan, the NVIDIA blend that needed correcting, and how lod-probe measures it.
 - [bindings](concepts/bindings.md) — `compiled_shader` reflection: the backend-agnostic `binding` vocabulary (`binding_type`, `(set, index)`) and how a binding validates a bound `raw_view`.
 - [caches](concepts/caches.md) — the content-addressed get-or-create caches for binding layouts, compute and raytracing pipelines (async), and compiled shaders:
   `ctx.uncached` (raw) vs `ctx.cached`, the keys, and the provider tiers.

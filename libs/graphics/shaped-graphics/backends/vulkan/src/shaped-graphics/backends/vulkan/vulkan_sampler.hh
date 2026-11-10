@@ -45,7 +45,18 @@ namespace sg::backend::vulkan
 /// Anisotropy is off where the device lacks samplerAnisotropy, and max_anisotropy is clamped to maxSamplerAnisotropy.
 /// A comparison sampler sets compareEnable.
 /// The others leave compareOp at NEVER, which Vulkan ignores.
+/// An anisotropic sampler's LOD bias gains `ctx.anisotropic_lod_correction`, so it picks the level dx12 picks.
 [[nodiscard]] VkSamplerCreateInfo to_vk_sampler_info(vulkan_context const& ctx, sg::sampler const& s);
+
+/// What an anisotropic sampler's LOD bias must gain on `adapter` for it to pick the level dx12 picks on the same GPU.
+///
+/// **NVIDIA's vulkan driver blends mips over a different LOD range than its dx12 driver once anisotropy is on.**
+/// Both sharpen the trilinear blend to a slope s — 1.5 from 2x anisotropy, 1.75 from 4x, 2 from 8x — but dx12 centres
+/// that ramp on the half level and vulkan starts it at the integer, so vulkan samples (1 - 1/s) / 2 levels too coarse.
+/// The bias undoes exactly that, on every path: implicit, `sample(bias)`, explicit gradients and an explicit level alike.
+/// Measured by libs/graphics/shaped-rendering/tools/lod-probe, which docs/plans/lod-bias-probe.plan.md records; 0 for
+/// every other vendor, and for anisotropy below 2.
+[[nodiscard]] float anisotropic_lod_correction(sg::adapter_info const& adapter, float max_anisotropy);
 
 /// The Vulkan comparison function for an sg compare_op.
 /// Shared with depth-stencil state.

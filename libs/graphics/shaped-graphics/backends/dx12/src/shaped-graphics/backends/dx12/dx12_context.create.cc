@@ -419,6 +419,23 @@ bool sg::backend::dx12::has_hardware_adapter()
 
 namespace sg
 {
+cc::vector<adapter_info> enumerate_dx12_adapters()
+{
+    auto out = cc::vector<adapter_info>();
+    backend::dx12::ComPtr<IDXGIFactory4> factory;
+    if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
+        return out;
+    backend::dx12::ComPtr<IDXGIAdapter1> adapter;
+    for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    {
+        // A null out-param probes D3D12 support without creating a device.
+        if (SUCCEEDED(backend::dx12::create_d3d12_device(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device),
+                                                         nullptr)))
+            out.push_back(backend::dx12::describe_adapter(adapter.Get()));
+    }
+    return out;
+}
+
 cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config)
 {
     // Adapter selection, device creation and every resource system's setup — tens of milliseconds, and the first

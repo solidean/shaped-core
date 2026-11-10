@@ -9,6 +9,7 @@
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <typed-geometry/scalar/half_float.hh>
 
 using namespace cc::primitive_defines;
 
@@ -174,6 +175,89 @@ ASYNC_INVOCABLE_TEST("sg - each sampler address mode, filter and level clamp rea
         CHECK(near(got[i][0], p.red)).context(cc::format("{}: red {} against {}", p.what, got[i][0], p.red));
         if (p.green >= 0)
             CHECK(near(got[i][1], p.green)).context(cc::format("{}: green {} against {}", p.what, got[i][1], p.green));
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an anisotropic sampler is half way between two mips at the half level, its bias included",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // Mip m holds m, so a sample is m plus the weight of mip m + 1.
+    // A driver may sharpen the blend once anisotropy is on, but at the half level any blend centred on it reads m + 0.5.
+    // NVIDIA's vulkan driver starts its sharpened ramp at the integer instead, and reads up to half a level high here
+    // until sg corrects its bias; see anisotropic_lod_correction in vulkan_sampler.hh.
+    constexpr int size = 16;
+    constexpr int mips = 5;
+    auto const pipeline = co_await shaders::sampling::sample_at.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampling::probe>();
+    auto const source
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba16_float,
+                                             .width = size,
+                                             .height = size,
+                                             .mip_levels = mips,
+                                             .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+
+    struct probe_case
+    {
+        u32 anisotropy;
+        float bias;
+        float level;
+    };
+    auto cases = cc::vector<probe_case>();
+    for (auto const anisotropy : {1u, 2u, 3u, 4u, 8u, 16u})
+        for (auto const bias : {0.0f, -1.0f})
+            for (auto const level : {1.5f, 2.5f})
+                cases.push_back({.anisotropy = anisotropy, .bias = bias, .level = level});
+
+    auto at = cc::vector<tg::vec4f>();
+    for (auto const& c : cases)
+        at.push_back(tg::vec4f(0.5f, 0.5f, c.level, 0));
+    auto const coordinates = ctx->persistent.create_buffer_from_data(cc::move(at), sg::buffer_usage::readonly_buffer);
+
+    auto cmd = ctx->create_command_list();
+    for (auto mip = 0; mip < mips; ++mip)
+    {
+        auto const extent = size >> mip;
+        auto const value = tg::f16(float(mip)).bits();
+        auto const one = tg::f16(1.0f).bits();
+        auto texels = cc::vector<u16>();
+        for (auto i = 0; i < extent * extent; ++i)
+            texels.push_back_range(cc::span<u16 const>({value, value, value, one}));
+        cmd->upload.bytes_to_texture(source.raw(), cc::as_bytes(cc::span<u16 const>(texels)), {.mip_level = mip});
+    }
+    auto futures = cc::vector<sg::data_future<tg::vec4f>>();
+    cmd->compute.bind_pipeline(*pipeline);
+    for (auto const& c : cases)
+    {
+        auto const output
+            = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(cases.size()),
+                                                      sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        auto const group
+            = ctx->transient.create_binding_group(*cmd, layout,
+                                                  shaders::sampling::probe{
+                                                      .source = source.as_texture_view(),
+                                                      .smp = {.mip_lod_bias = c.bias, .max_anisotropy = c.anisotropy},
+                                                      .at = coordinates.as_readonly_buffer(),
+                                                      .values = output.as_readwrite_buffer(),
+                                                  });
+        cmd->compute.bind_group(0, *group);
+        cmd->compute.dispatch_threads(int(cases.size()));
+        futures.push_back(cmd->download.data_from_buffer(output));
+    }
+    ctx->submit_command_list(cc::move(cmd));
+
+    for (auto i = 0; i < cases.size(); ++i)
+    {
+        auto const got = co_await futures[i].data();
+        auto const& c = cases[i];
+        auto const expected = c.level + c.bias;
+        auto const read = got[i][0];
+        auto const within = read - expected < 0.05f && expected - read < 0.05f;
+        CHECK(within).context(cc::format("anisotropy {}, bias {}, level {}: read {} against {}", c.anisotropy, c.bias,
+                                         c.level, read, expected));
     }
 }
 
