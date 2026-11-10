@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_query.cc
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc
   - file: libs/graphics/shaped-rendering/tests/bench/sgl-against-msl-benchmark.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-10T10:29Z
 ---
 
 # metal runs out of counter heaps when many lists take timestamps, and every timestamp reads 0
