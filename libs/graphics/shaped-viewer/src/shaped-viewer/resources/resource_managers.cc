@@ -814,7 +814,7 @@ texture_id texture_manager::acquire(texture_data const& texture)
         auto const& gpu = texture.gpu.value();
         CC_ASSERT(gpu.raw()->format() == texture.format && gpu.width() == texture.width && gpu.height() == texture.height,
                   "an adopted texture has the shape its data names");
-        CC_ASSERT(gpu.mip_levels() == description.mip_levels && gpu.raw()->usage().has(description.usage),
+        CC_ASSERT(gpu.mip_levels() == description.mip_levels && gpu.raw()->usage().has_all(description.usage),
                   "an adopted texture is created from adoptable_texture's description");
 
         // Nothing streams: an empty transfer list is settled and delivered, so the next `collect_settled` reports it

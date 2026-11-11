@@ -155,8 +155,8 @@ struct sv::texture_data
                                             i32 written_mips = 1,
                                             cc::optional<value_summary> summary = {})
     {
-        CC_ASSERT(written_mips >= 1 && written_mips <= texture.mip_levels(),
-                  "an adopted texture has its base level written");
+        CC_ASSERT(written_mips >= 1 && written_mips <= texture.mip_levels(), "an adopted texture has its base level "
+                                                                             "written");
         auto const format = texture.raw()->format();
         auto const width = i32(texture.width());
         auto const height = i32(texture.height());

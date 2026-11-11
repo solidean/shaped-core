@@ -836,6 +836,8 @@ m.table_capacity(table)                     // -> u32 — capacity_of(table), as
 
 // textures + the follow-up work their policy asks for
 sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
+sv::adoptable_texture(ctx, format, w, h) -> texture_2d_description  // full chain + the usage the manager's mips and encode need
+sv::texture_data::adopt(texture_2d, key, written_mips=1, summary={})  // a texture already on the GPU, no pixels; `key` is the caller's content hash
 m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, queues the rest
 m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; residency state; i32 uploaded_mips, total_mips; optional<value_summary> summary; }
 sv::value_summary                                   // { vec4f mean, min, max; bool exact; } — per channel, read on the CPU at acquire; min/max bound every value only where exact
