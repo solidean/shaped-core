@@ -37,6 +37,8 @@ uv run dev.py <command> [options]
 
 `build` and `test` **auto-configure** when CMake inputs or the source listing change (fingerprinted); pass `--no-configure` to skip.
 `test` also builds first; pass `--no-build` to skip.
+It builds `all`, then by name every binary it selected that has an artifact already, so a binary outside `all` never runs stale.
+One outside `all` that was never built stays unbuilt and is reported so; `build -t <target>` builds it.
 
 ### Common invocations
 
