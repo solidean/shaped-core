@@ -125,6 +125,19 @@ def with_fixture(spec: str, **kw):
     return wrap
 
 
+def test_dev_toml_sets_the_project_s_half() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        default = Path("default.exe")
+        assert bs.from_dev_toml(root, client=default) == bs.BuildServer(client=default), "no dev.toml keeps the defaults"
+        (root / "dev.toml").write_text('[build_server]\nenabled = true\nclient = "bin/server.exe"\nship_proof = "yes"\n', encoding="utf-8")
+        c = bs.from_dev_toml(root, client=default, install_hint="hint")
+        assert c.enabled and c.client == root / "bin" / "server.exe" and c.install_hint == "hint", c
+        assert not c.ship_proof and not c.speculative_tests, "only `true` turns a switch on"
+        (root / "dev.toml").write_text("[build_server\n", encoding="utf-8")
+        assert bs.from_dev_toml(root, client=default) == bs.BuildServer(client=default), "a dev.toml that does not parse is ignored"
+
+
 def test_no_server_wins_over_every_other_opt_in() -> None:
     on = bs.BuildServer(client=None, enabled=True)
     assert not bs.enabled(on, flag=False, environ={bs.ENV_ENABLE: "1"})

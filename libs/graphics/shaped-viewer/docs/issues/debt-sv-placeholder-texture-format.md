@@ -15,3 +15,6 @@ A 1x1 `rgba16_float` subresource is 8 bytes and would get 4; an `r8_unorm` one i
 Neither the upload scope nor the backend compares a payload against the region it fills, so nothing catches it in transit.
 A `CC_ASSERT` on the block size holds the line until the encode is written per format.
 The sRGB curve's channel choice is the same assumption: it encodes components 0..2 and not 3, which is rgba.
+
+An adopted `rgba8_snorm` texture, a normal map a producer writes on the GPU, passes the assert but has its placeholder written as unorm bytes.
+It reads wrong only until the adopted texture settles, at the next `collect_settled`.

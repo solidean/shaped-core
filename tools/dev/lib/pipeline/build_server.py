@@ -22,6 +22,7 @@ The client contract, which is all dev.py knows of a server:
 - exit 0 with that object is a proof that holds, 1 one that does not, 10-13 as above.
 
 What opts in, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1|0`, the project's `BuildServer.enabled`.
+A checkout's gitignored `dev.toml` sets the project's half through its `[build_server]` table (`from_dev_toml`): enabled, client, speculative_tests, ship_proof.
 Background test runs are the project's choice alone, off unless `BuildServer.speculative_tests` is set.
 `ship` proves through the server instead of running the gate's build and test steps only with the server opted in and
 `ship --proof` or the project's `BuildServer.ship_proof`; any problem with the server runs the full gate instead.
@@ -29,6 +30,7 @@ Background test runs are the project's choice alone, off unless `BuildServer.spe
 
 Public API:
     BuildServer             the project's half, a Policy field
+    from_dev_toml(root)     the BuildServer a checkout's dev.toml asks for, over the project's defaults
     session(config, flag)   the Session a command builds through, or None when nothing opted in
     Session.build(...)      one build step through the server, or None when the caller must build the plain way
     Session.test(...)       test binaries run through the server, or None when the caller must run them the plain way
@@ -41,6 +43,7 @@ import json
 import os
 import subprocess
 import threading
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
@@ -84,6 +87,39 @@ class BuildServer:
     speculative_tests: bool = False
     # Whether `ship` proves the tree through the server (`proof`) instead of running the gate's build and test steps.
     ship_proof: bool = False
+
+
+# The dev.toml table a checkout sets its build server in.
+DEV_TOML_TABLE = "build_server"
+
+
+def dev_toml_table(root: Path) -> dict:
+    """`<root>/dev.toml`'s `[build_server]` table; empty when the file or the table is absent, or the file does not parse."""
+    try:
+        data = tomllib.loads((root / "dev.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    table = data.get(DEV_TOML_TABLE)
+    return table if isinstance(table, dict) else {}
+
+
+def from_dev_toml(root: Path, *, client: Path | None = None, install_hint: str = _GENERIC_HINT) -> BuildServer:
+    """The BuildServer `<root>/dev.toml`'s `[build_server]` asks for; `client` and `install_hint` are the project's defaults.
+
+    `client = "<path>"` in the table overrides the project's client, a relative path taken from `root`.
+    `enabled`, `speculative_tests` and `ship_proof` are on only when set to `true`; any other value is off.
+    """
+    table = dev_toml_table(root)
+    named = table.get("client")
+    if isinstance(named, str) and named:
+        client = root / Path(named).expanduser()
+    return BuildServer(
+        client=client,
+        install_hint=install_hint,
+        enabled=table.get("enabled") is True,
+        speculative_tests=table.get("speculative_tests") is True,
+        ship_proof=table.get("ship_proof") is True,
+    )
 
 
 @dataclass(frozen=True)

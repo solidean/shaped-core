@@ -7,8 +7,10 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/texture.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/content_hash.hh>
+#include <shaped-viewer/resources/value_summary.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -90,16 +92,26 @@ struct sv::indexed_triangle_data
     }
 };
 
-/// One texture's pixels and the shape to read them as.
+/// One texture's pixels and the shape to read them as, or a texture already on the GPU in their place.
 ///
 /// `pixels` is tightly packed, mip 0 first and each successive mip after it, which is the layout
 /// `cmd.upload.bytes_to_texture` takes a subresource at a time.
 /// `mip_count` says how many are present: 1 is a base level on its own, and the manager is what generates the
 /// rest when its policy asks for them.
+///
+/// An adopted texture (`adopt`) carries no pixels: the manager takes `gpu` as it is, with no upload.
+/// Its levels were written on the manager's own context, in work submitted before any frame that samples it;
+/// sg orders the two by submission, as it orders any two command lists on one context.
 struct sv::texture_data
 {
     cc::pinned_data<byte const> pixels;
     cc::hash128 hash;
+
+    /// The texture to take in place of `pixels`, created from `adoptable_texture`'s description; empty for pixels.
+    cc::optional<sg::texture_2d> gpu;
+
+    /// What an adopted texture holds, as `texture_record::summary` keeps it; the manager cannot read it without pixels.
+    cc::optional<value_summary> summary;
 
     sg::pixel_format format = sg::pixel_format::rgba8_unorm;
     i32 width = 0;
@@ -130,5 +142,32 @@ struct sv::texture_data
                 .width = width,
                 .height = height,
                 .mip_count = mip_count};
+    }
+
+    /// A texture already on the GPU, its first `written_mips` levels written, keyed by `key`, the caller's own hash
+    /// of its content.
+    ///
+    /// The key is what makes a second adopt of the same content a lookup, so it must change whenever the texels do;
+    /// the shape is hashed in beside it, as for pixels.
+    /// `texture` must come from `adoptable_texture`'s description, whose usage and chain the manager's follow-up needs.
+    [[nodiscard]] static texture_data adopt(sg::texture_2d texture,
+                                            cc::hash128 key,
+                                            i32 written_mips = 1,
+                                            cc::optional<value_summary> summary = {})
+    {
+        CC_ASSERT(written_mips >= 1 && written_mips <= texture.mip_levels(), "an adopted texture has its base level "
+                                                                             "written");
+        auto const format = texture.raw()->format();
+        auto const width = i32(texture.width());
+        auto const height = i32(texture.height());
+        i32 const shape_fields[] = {width, height, written_mips, i32(format)};
+        auto const shape = cc::hash128::create(cc::span<i32 const>(shape_fields).as_bytes(), impl::texture_hash_seed);
+        return {.hash = impl::combine_digests(key, shape),
+                .gpu = cc::move(texture),
+                .summary = summary,
+                .format = format,
+                .width = width,
+                .height = height,
+                .mip_count = written_mips};
     }
 };
