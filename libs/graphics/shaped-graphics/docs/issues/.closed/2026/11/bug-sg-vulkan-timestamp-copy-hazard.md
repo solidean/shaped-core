@@ -2,6 +2,8 @@
 created: 2026-11-11
 refs:
   - test: sg vulkan backend / vulkan / sg - timestamps from hundreds of lists in flight at once all read back
+closed: 2026-11-11
+resolution: fixed
 ---
 
 # vulkan: copying timestamp results sometimes races a prior read of the same buffer (WRITE_AFTER_READ)
@@ -19,3 +21,5 @@ Buffer access region: offset = 0, size = 16
 So a timestamp readback copies into a buffer region a previous submission still reads, without a barrier between them.
 Hypothesis: a readback buffer is reused across lists in flight while an earlier copy or host read of it has not been made available yet.
 Met while shipping unrelated nexus and clean-core changes; two of three reruns passed.
+
+After merging e2980e9f4 (the first list of each epoch begins with a barrier) and ccbd29ada (a submission waits for the epoch before its own), the test passed 10 runs of 10 (2026-11-11).
