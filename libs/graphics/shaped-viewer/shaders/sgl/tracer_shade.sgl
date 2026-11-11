@@ -638,6 +638,42 @@ fun instance_position(inst: scene.instance, vertex: uint){bindless} -> float3:
     let buffer = inst.vertices as int
     return material.position_of(inst, bindless.buffers[nonuniform buffer], vertex)
 
+/// `ctx` with the level its textures sample at: the ray cone `width` meters wide at the ray's origin, widening by `spread`
+/// per meter, met `t` meters along the unit `dir` on a triangle whose world edges from its first corner cross to `edges`.
+/// A cone of no width and no spread leaves `ctx` at the base level, as does a degenerate triangle.
+fun with_cone(ctx: material.shading_context, edges: float3, dir: float3, t: float, width: float, spread: float) -> material.shading_context:
+    if width <= 0.0 and spread <= 0.0 => return ctx
+    let area = length(edges)
+    if area <= 0.0 => return ctx
+    // A grazing hit stretches the footprint along the face; past about 87 degrees the stretch is held, as a sampler's anisotropy would be.
+    let facing = max(abs(dot(edges / area, dir)), 0.05)
+    let footprint = max(width + spread * t, 1e-9)
+    let mut coned = ctx
+    coned.lod = log2(footprint / facing) - 0.5 * log2(area)
+    return coned
+
+/// The angle a ray cone widens by where a path leaves a surface along `lobe`, of perceptual `roughness`.
+/// A smooth reflection keeps its spread, a rough one widens about by its lobe's width, alpha twice over, and a diffuse one by a radian.
+/// A surface's curvature is left out, so the reflection in a curved mirror samples finer textures than it could.
+fun bounce_spread(lobe: uint, roughness: float) -> float:
+    if openpbr.bsdf_lobe_is_specular(lobe) => return 2.0 * roughness * roughness
+    return 1.0
+
+/// The shading context of a closest hit, its cone the one `p` brought.
+/// The edges reach the world through the hit's own transform, as its tangent frame does.
+fun cone_context(h: triangle_hit, p: surface_payload){traced, bindless} -> material.shading_context:
+    let ctx = triangle_context(h)
+    let inst = scene.instance(..traced.instances[h.instance_id])
+    let v0 = instance_position(inst, ctx.corner.x)
+    let a = instance_position(inst, ctx.corner.y) - v0
+    let b = instance_position(inst, ctx.corner.z) - v0
+    let e1 = h.to_world(vec3(a.x, a.y, a.z))
+    let e2 = h.to_world(vec3(b.x, b.y, b.z))
+    let edges = cross(float3(e1.x, e1.y, e1.z), float3(e2.x, e2.y, e2.z))
+    let d = float3(h.ray.direction.x, h.ray.direction.y, h.ray.direction.z)
+    let len = length(d)
+    return with_cone(ctx, edges, d / len, h.t * len, p.cone_width, p.cone_spread)
+
 /// The shading context of a triangle hit, which is all a material needs to know about where it is.
 fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_context:
     let inst = scene.instance(..traced.instances[h.instance_id])

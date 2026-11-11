@@ -5,6 +5,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <typed-geometry/scalar/half_float.hh>
 
 using namespace cc::primitive_defines;
@@ -604,6 +605,8 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
         {
             auto fc = sv::default_frame_constants();
             fc.camera = sv::camera_record_of(scene.camera);
+            // A pixel's angle, as a view sets it, so a hit's textures pick the level its ray cone covers.
+            fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(scene.size);
             lights.describe_in(fc);
             fc.samples_per_pixel = scene.samples_per_pixel;
             fc.max_bounces = scene.max_bounces;
@@ -1448,6 +1451,104 @@ ASYNC_INVOCABLE_TEST("sv - a normal map shades as the tangent frame turned onto 
                 for (auto j = i + 1; j < shades.size(); ++j)
                     CHECK(tg::abs(shades[i] - shades[j]) > 0.03f * hi).dump("frame", f.name).dump("i", i).dump("j", j);
         }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+namespace
+{
+/// A floor `k` uv units to the meter, sampling a 64 by 64 base color whose level L holds 2^-L, or `flat` at every level.
+[[nodiscard]] sv::mesh mipped_floor(f32 k, bool halving, f32 flat = 1.0f)
+{
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-50, 0, -50), tg::pos3f(-50, 0, 50), tg::pos3f(50, 0, 50),
+                          tg::pos3f(50, 0, -50), sv_test::pbr_material{});
+    auto uvs = cc::vector<tg::vec2f>();
+    for (auto const& p : floor.positions)
+        uvs.push_back(tg::vec2f(p[0] * k, p[2] * k));
+    auto attributes = cc::vector<sv::mesh_attribute>();
+    attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    auto mesh = sv::mesh{.name = "mipped floor",
+                         .geometry = sv::triangle_geometry::create_from_positions(floor.positions),
+                         .attributes = cc::move(attributes),
+                         .material = sv::default_material(sv_test::shared_material_library())};
+
+    auto pixels = cc::vector<byte>();
+    auto const levels = sv::impl::mip_count_of(64, 64);
+    for (auto level = 0; level < levels; ++level)
+    {
+        auto const value = byte(u8(tg::round(255.0f * (halving ? 1.0f / f32(1 << level) : flat))));
+        auto const e = sv::impl::mip_extent(64, level);
+        for (auto i = 0; i < e * e; ++i)
+            pixels.push_back_range(cc::fixed_array<byte, 4>{value, value, value, byte(255)});
+    }
+    auto const repeat
+        = sg::sampler{.address_u = sg::sampler_address_mode::repeat, .address_v = sg::sampler_address_mode::repeat};
+    mesh.textures.push_back(
+        {.name = "base_color",
+         .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 64, 64, levels),
+                    .sampler = repeat}});
+    return mesh;
+}
+
+/// The level a sample of a chain whose level L holds 2^-L reads, from what it read: linear between two levels, 2^-n (1 - f / 2) at n + f.
+[[nodiscard]] f32 level_of(f32 ratio)
+{
+    auto const n = tg::floor(-(tg::log(ratio) / tg::log(2.0f)));
+    auto const f = 2.0f * (1.0f - ratio * tg::pow(2.0f, n));
+    return n + f;
+}
+} // namespace
+
+// A ray cone picks a texture's level from its footprint: the pixel's angle times the distance, over the cosine it meets
+// the face at, against the texels the triangle spans per meter (Akenine-Moller et al. 2019).
+// A floor whose levels each hold half the one above shows the level a pixel read, against the same floor at 1 throughout,
+// so the light cancels: the camera's level is the one the cone predicts, and four times as far is two levels coarser.
+ASYNC_INVOCABLE_TEST("sv - a ray cone samples the texture level its footprint covers", (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    // 2 uv units a meter, of 64 texels each: 128 texels a meter
+    auto const k = 2.0f;
+    auto measured = cc::vector<f32>();
+    for (auto const height : {3.0, 12.0})
+    {
+        auto cam = sv::camera::looking_at(tg::pos3d(0, height, -0.01), tg::pos3d(0, 0, 0));
+        cam.projection.aspect_ratio = 1.0;
+
+        // halving, white and black at every level: what the albedo does not scale, the specular, falls out of the ratio
+        auto shade = cc::fixed_array<f32, 3>{};
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto scene = make_light_scene(resources, mipped_floor(k, i == 0, i == 1 ? 1.0f : 0.0f), cam);
+            REQUIRE(scene.has_value());
+            auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+            auto const& images = co_await traced;
+            REQUIRE(images.size() == 1);
+            shade[i] = mean_brightness(images[0], scene.value().size, 2);
+        }
+        REQUIRE(shade[1] > shade[2]);
+        auto const level = level_of((shade[0] - shade[2]) / (shade[1] - shade[2]));
+
+        // the footprint at the image's center, straight down: the pixel's angle times the height, at 128 texels a meter
+        auto const record = sv::camera_record_of(cam);
+        auto const spread = 2.0f * record.up_scaled.length() / 48.0f;
+        auto const wanted = tg::log(spread * f32(height) * k * 64.0f) / tg::log(2.0f);
+        CHECK(tg::abs(level - wanted) < 0.35f).dump("height", height).dump("level", level).dump("wanted", wanted);
+        measured.push_back(level);
+    }
+    CHECK(tg::abs(measured[1] - measured[0] - 2.0f) < 0.2f).dump("near", measured[0]).dump("far", measured[1]);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

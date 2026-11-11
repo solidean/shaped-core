@@ -406,7 +406,9 @@ Gotchas:
 - **A texture samples through a fixed palette**, never through per-permutation samplers.
   Module `tracer`'s `binding bindless` declares one static sampler per magnification filter and address mode of each axis.
   It sits beside the tables because every pipeline that samples a material lists that group, and sg allows no fourth.
-  A hit samples level 0, where only the magnification filter applies, so the minification and mip filters are dropped; `sgl_palette_sampler` says what else is.
+  The palette keeps a sampler's magnification filter for all three, minification and between levels included; `sgl_palette_sampler` says what else it drops.
+- **A hit samples at its ray cone's level** (`material.texture_level`): the cone's width over the texels the triangle spans, from `shading_context::lod`.
+  The cone starts a pixel's angle wide (`frame_constants::pixel_spread`) and widens at each bounce by the lobe it left along; emission and opacity stay at level 0.
 
 ## Mesh authoring — geometry + what a material reads
 

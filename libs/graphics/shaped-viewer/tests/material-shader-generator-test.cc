@@ -193,9 +193,13 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
     CHECK(g.source.contains("fun sv_attribute_base_color(ctx: material.shading_context){tracer.bindless} -> float3:"));
     CHECK(g.source.contains("let uv = material.interpolate_f2("));
     CHECK(g.source.contains("let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + "));
-    // An explicit level, because a ray tracing hit shader has no derivatives to pick a mip from.
+    // An explicit level, because a ray tracing hit shader has no derivatives to pick a mip from: the ray cone's, over the
+    // texels the triangle's uvs span.
+    CHECK(g.source.contains(
+        "let level = material.texture_level(ctx, material.uv_area(tracer.bindless.buffers[nonuniform "
+        "uv_desc_buffer], uv_desc, ctx.corner), tracer.bindless.textures_2d[nonuniform image].size())"));
     CHECK(g.source.contains("let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, "
-                            "tracer.bindless.palette_linear_repeat_repeat, level = 0.0)"));
+                            "tracer.bindless.palette_linear_repeat_repeat, level = level)"));
     // An identity swizzle narrows to the declaration's three components and stays a letter swizzle.
     CHECK(g.source.contains("return texel.xyz\n"));
 
@@ -400,8 +404,8 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     CHECK(g.raster_source.contains("    if raster.is_cut(p, ctx) => discard\n"));
     CHECK(g.raster_source.find("raster.is_cut") < g.raster_source.find("raster.shade("));
 
-    // The hit group samples the same palette at level 0.
-    CHECK(g.source.contains("tracer.bindless.palette_linear_repeat_repeat, level = 0.0"));
+    // The hit group samples the same palette, at the ray cone's level.
+    CHECK(g.source.contains("tracer.bindless.palette_linear_repeat_repeat, level = level"));
 
     // A material that cannot cut out has no cut to make.
     auto const opaque = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));

@@ -205,7 +205,7 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
 
     let s = slot as int
     traced.path_rays[s] = path_ray(cam.position, dir)
-    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u)
+    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, 0.0, f.pixel_spread)
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
 
@@ -423,6 +423,9 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
             let u_phase_2 = pt.rand(mut rng)
             let scattered = pt.sample_hg(dir, md.g, u_phase_1, u_phase_2)
             st.prev_pdf = pt.hg_phase(dot(dir, scattered), md.g)
+            // A scattering medium blurs about as a diffuse bounce does.
+            st.cone_width += st.cone_spread * t
+            st.cone_spread += 1.0
             st.flags = (st.flags & ~path_flag_prev_nee_reachable) & ~path_flag_primary
             dir = scattered
             st.scatters += 1u
@@ -549,7 +552,13 @@ fun stored_triangle_context(slot: uint){traced, bindless, wavefront_step} -> mat
     let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
     let indices = inst.indices as int
-    return material.make_context(inst, bindless.buffers[nonuniform indices], hit.primitive, hit.barycentrics)
+    let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], hit.primitive, hit.barycentrics)
+    let r = traced.path_rays[slot as int]
+    let st = traced.path_states[slot as int]
+    let v0 = instance_position(inst, ctx.corner.x)
+    let edges = cross(instance_to_world(inst, instance_position(inst, ctx.corner.y) - v0), instance_to_world(inst, instance_position(inst, ctx.corner.z) - v0))
+    let len = length(r.direction)
+    return with_cone(ctx, edges, r.direction / len, hit.t * len, st.cone_width, st.cone_spread)
 
 /// The shading context of the quadric hit `slot` recorded.
 fun stored_quadric_context(slot: uint){traced, wavefront_step} -> material.shading_context:
@@ -687,6 +696,9 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         else:
             st.flags = st.flags & ~path_flag_prev_nee_reachable
         st.bounce = b + 1u
+        // The cone reached this hit, and leaves it as wide as the lobe the continuation was drawn from.
+        st.cone_width += st.cone_spread * hit.t * length(ray_dir)
+        st.cone_spread += bounce_spread(p.lobe, p.roughness)
         let free = (st.flags & path_free_mask) >> path_free_shift
         if is_free_refraction(p.lobe, p.roughness) and free < free_refraction_cap:
             st.flags = (st.flags & ~path_free_mask) | ((free + 1u) << path_free_shift)
