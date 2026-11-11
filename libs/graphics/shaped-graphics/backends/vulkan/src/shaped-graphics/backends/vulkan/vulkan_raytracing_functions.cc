@@ -35,4 +35,16 @@ bool vulkan_raytracing_functions::load_micromaps(VkDevice device)
     return create_micromap != nullptr && destroy_micromap != nullptr && get_micromap_build_sizes != nullptr
         && cmd_build_micromaps != nullptr;
 }
+
+bool vulkan_raytracing_functions::load_partitioned(VkDevice device)
+{
+    auto const fetch = [device](char const* name) { return vkGetDeviceProcAddr(device, name); };
+
+    get_partitioned_build_sizes = PFN_vkGetPartitionedAccelerationStructuresBuildSizesNV(
+        fetch("vkGetPartitionedAccelerationStructuresBuildSizesNV"));
+    cmd_build_partitioned
+        = PFN_vkCmdBuildPartitionedAccelerationStructuresNV(fetch("vkCmdBuildPartitionedAccelerationStructuresNV"));
+
+    return get_partitioned_build_sizes != nullptr && cmd_build_partitioned != nullptr;
+}
 } // namespace sg::backend::vulkan

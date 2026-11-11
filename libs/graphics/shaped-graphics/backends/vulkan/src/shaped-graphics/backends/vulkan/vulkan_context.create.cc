@@ -822,6 +822,22 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (micromap_supported)
         device_extensions.push_back(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
 
+    // A partitioned tlas, updated in place: optional above ray tracing too, and enabled wherever the device grants it.
+    char const* const partitioned_names[] = {VK_NV_PARTITIONED_ACCELERATION_STRUCTURE_EXTENSION_NAME};
+    auto partitioned_supported = false;
+    if (raytracing_supported && device_extensions_available(best_device, partitioned_names))
+    {
+        auto partitioned_query = VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PARTITIONED_ACCELERATION_STRUCTURE_FEATURES_NV,
+        };
+        auto features = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                                  .pNext = &partitioned_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        partitioned_supported = partitioned_query.partitionedAccelerationStructure == VK_TRUE;
+    }
+    if (partitioned_supported)
+        device_extensions.push_back(VK_NV_PARTITIONED_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+
     // A native float add, which SGL's `atomic[float].add` uses where it is granted in a buffer and in workgroup memory
     // alike, and writes as a compare-exchange loop otherwise.
     char const* const float_atomic_names[] = {VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME};
@@ -1132,9 +1148,17 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     };
     void const* const with_statistics = statistics_supported ? static_cast<void const*>(&statistics_features) : chain;
 
+    auto partitioned_features = VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PARTITIONED_ACCELERATION_STRUCTURE_FEATURES_NV,
+        .pNext = const_cast<void*>(with_statistics),
+        .partitionedAccelerationStructure = VK_TRUE,
+    };
+    void const* const with_partitioned
+        = partitioned_supported ? static_cast<void const*>(&partitioned_features) : with_statistics;
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = with_statistics,
+        .pNext = with_partitioned,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),
@@ -1230,6 +1254,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         vkGetPhysicalDeviceProperties2(best_device, &props);
         ctx->_opacity_micromap = micromap_props;
     }
+    if (raytracing_supported && partitioned_supported && ctx->_raytracing_functions.load_partitioned(device))
+        ctx->_partitioned_tlas = true;
     ctx->_shader_f16 = shader_features.has_f16();
     ctx->_shader_int16 = shader_features.has_int16();
     ctx->_shader_int64 = shader_features.shader_int64 == VK_TRUE;

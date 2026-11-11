@@ -215,7 +215,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                     while (group->acceleration_addresses.size() <= position)
                         group->acceleration_addresses.push_back(0);
                     group->acceleration_addresses[position]
-                        = tv_as->tlas != nullptr ? static_cast<vulkan_tlas const&>(*tv_as->tlas)._address : 0;
+                        = tv_as->tlas != nullptr ? trace_target_of(*tv_as->tlas).address : 0;
                 }
                 if (b.traced_in_software)
                 {
@@ -267,8 +267,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
             {
                 // A trace reads the TLAS's storage buffer, so that is what is kept alive and declared accel_read at
                 // dispatch — the structure object itself is not a resource the barrier vocabulary knows.
-                auto const& tlas = static_cast<vulkan_tlas const&>(*tv_as->tlas);
-                group->referenced.push_back(tlas._vulkan_storage);
+                group->referenced.push_back(trace_target_of(*tv_as->tlas).storage);
                 group->hazard_views.push_back({group->referenced.back(), sg::view_class::acceleration_structure, slot});
             }
             else if (is_array)

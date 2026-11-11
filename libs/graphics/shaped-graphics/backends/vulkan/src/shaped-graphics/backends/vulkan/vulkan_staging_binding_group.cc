@@ -122,12 +122,12 @@ void vulkan_staging_binding_group::write_view_descriptors(int first_descriptor,
         {
             // A trace reads the TLAS's storage buffer, so that is what a minted group keeps alive and declares.
             // A null handle is the null acceleration structure rather than a mistake, and references nothing.
-            auto const& tlas = static_cast<vulkan_tlas const&>(*av->tlas);
-            res = {.buffer = tlas._vulkan_storage,
+            auto const target = trace_target_of(*av->tlas);
+            res = {.buffer = target.storage,
                    .texture = {},
                    .range = {},
                    .bound_as = sg::view_class::acceleration_structure,
-                   .address = tlas._address};
+                   .address = target.address};
         }
     }
 }

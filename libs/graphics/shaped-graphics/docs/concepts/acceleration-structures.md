@@ -110,6 +110,21 @@ sg's own tracking meanwhile records the buffers as acceleration-structure access
 A geometry naming one becomes DXR's OMM triangles, linking its index buffer and the array's address.
 metal and webgpu have no equivalent — [feat-sg-opacity-micromaps](../issues/feat-sg-opacity-micromaps.md).
 
+## Partitioned TLAS
+
+**A `partitioned_tlas` is a `tlas` of fixed capacity, updated in place** rather than rebuilt from an instance list.
+`ctx.persistent.create_partitioned_tlas` allocates it empty from its capacities, recording nothing, and `cmd.raytracing.update` fills it.
+- **An update writes, updates and clears slots, and translates partitions**, and only the partitions it touches are rebuilt.
+  The global partition, `sg::global_partition`, treats each of its instances as a partition of its own, for what moves every frame.
+- **The slots are the ownership edge**: a partitioned tlas holds every blas a slot names, and the list of an update keeps the ones it replaced until it has run.
+- **It binds and traces as any tlas does**, `as_view()`, so a shader never knows which kind it traces.
+- **Requires `sg::feature::partitioned_tlas`**, which vulkan grants with `VK_NV_partitioned_acceleration_structure`.
+
+**On vulkan it has no descriptor**: `VK_EXT_descriptor_buffer` can name only a `VkAccelerationStructureKHR`, which a partitioned tlas is not.
+So SGL's own SPIR-V traces every structure by its device address, from the reserved `sg_acceleration_addresses` ([reserved-bindings](../../../shaped-graphics-language/docs/reserved-bindings.md)).
+A trace compiled through DXC still reads the descriptor, where a partitioned tlas writes the null structure, which every ray misses.
+[plans/clusters-and-partitioned-tlas.md](../plans/clusters-and-partitioned-tlas.md) is the design, and dx12's half.
+
 ## Invariants
 
 Preserve these; the rest is tuning:

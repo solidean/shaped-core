@@ -470,6 +470,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/texture-shapes-test.cc
             tests/pipeline/stages-test.cc
             tests/pipeline/ray-query-test.cc
+            tests/pipeline/partitioned-tlas-test.cc
             tests/pipeline/sgl-mesh-test.cc
             tests/pipeline/software-trace-test.cc
             tests/pipeline/raytracing-pipeline-test.cc

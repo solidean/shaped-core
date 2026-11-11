@@ -30,11 +30,18 @@ struct sg::backend::vulkan::vulkan_raytracing_functions
     PFN_vkGetMicromapBuildSizesEXT get_micromap_build_sizes = nullptr;
     PFN_vkCmdBuildMicromapsEXT cmd_build_micromaps = nullptr;
 
+    // VK_NV_partitioned_acceleration_structure, loaded apart likewise
+    PFN_vkGetPartitionedAccelerationStructuresBuildSizesNV get_partitioned_build_sizes = nullptr;
+    PFN_vkCmdBuildPartitionedAccelerationStructuresNV cmd_build_partitioned = nullptr;
+
     /// Fetches every entry point; returns false when any is missing.
     [[nodiscard]] bool load(VkDevice device);
 
     /// Fetches the micromap entry points; returns false when any is missing.
     [[nodiscard]] bool load_micromaps(VkDevice device);
+
+    /// Fetches the partitioned-structure entry points; returns false when any is missing.
+    [[nodiscard]] bool load_partitioned(VkDevice device);
 
     [[nodiscard]] bool is_loaded() const { return cmd_build_acceleration_structures != nullptr; }
 };

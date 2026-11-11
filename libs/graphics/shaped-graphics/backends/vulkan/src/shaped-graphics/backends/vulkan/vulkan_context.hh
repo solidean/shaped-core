@@ -434,7 +434,7 @@ public:
         case sg::feature::opacity_micromap:
             return is_opacity_micromap_supported();
         case sg::feature::partitioned_tlas:
-            return false;
+            return _partitioned_tlas;
         }
         return false;
     }
@@ -599,6 +599,10 @@ public:
     {
         return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes, contents));
     }
+
+    /// Sizes and allocates a partitioned tlas for `desc`'s capacities; its first update builds it.
+    [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
+        sg::partitioned_tlas_description const& desc) override;
 
     [[nodiscard]] cc::result<vulkan_swapchain_handle> create_vulkan_swapchain(sg::swapchain_description const& desc);
 
@@ -1019,6 +1023,8 @@ public:
     bool _float_atomic_add = false;
     /// `VK_EXT_ray_tracing_invocation_reorder`, enabled where the device reorders rather than only accepting the calls.
     bool _shader_execution_reordering = false;
+    /// `VK_NV_partitioned_acceleration_structure`, enabled with its entry points loaded.
+    bool _partitioned_tlas = false;
     bool _native_spirv = false;
     bool _native_line_tables = false; // vulkan_config::native_line_tables
     /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.

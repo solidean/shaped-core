@@ -949,6 +949,15 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace, int hit_
 //   metal bakes it (geometry g's offset = g*stride), dx12/vulkan take the multiplier per TraceRay and ignore it
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
 cmd.raytracing.build_micromap(micromap_triangles)  // -> micromap_handle; ASSERTS without sg::feature::opacity_micromap, as does a blas naming one
+ctx.persistent.create_partitioned_tlas({.instance_capacity, .partition_count, .max_instances_per_partition,
+                                        .max_global_instances, .allows_partition_translation, .flags})
+                                                   // -> partitioned_tlas_handle, a tlas: empty, built by its first update;
+                                                   //    needs sg::feature::partitioned_tlas (vulkan's NV extension today)
+cmd.raytracing.update(ptlas, {.writes, .updates, .clears, .translations})
+                                                   // in place; a slot once per update; ptlas_write{index, partition, tlas_instance},
+                                                   // ptlas_update{index, blas, hit_group_offset}, ptlas_translation{partition, xyz};
+                                                   // sg::global_partition for what moves every frame. GOTCHA: vulkan traces one
+                                                   // from SGL's own SPIR-V alone — a DXC-compiled trace sees the null structure
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

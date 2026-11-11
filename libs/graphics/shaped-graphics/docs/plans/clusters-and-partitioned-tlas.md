@@ -1,6 +1,6 @@
 # Plan: clustered geometry and partitioned TLAS
 
-Status: **phase 1 built**, which the [phases](#phases) describe.
+Status: **phase 1 built, and phase 2's vulkan half**, which the [phases](#phases) describe.
 The [decisions](#decisions) stand as proposals except D5's, and [open questions](#open-questions) lists what the specs leave unsettled.
 D3D12 and Vulkan each gained two acceleration-structure kinds that change how a large scene is kept current: clusters and partitioned top-level structures.
 This plan is how sg exposes them, on dx12 and vulkan only.
@@ -181,8 +181,9 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
    The preview runtime loads and accepts its features; the RTX 4090's driver 32.0.16.1088 does not report the cap, so it is unproven on a device.
    No sg feature reports either yet, since a reported feature promises a code path that does not exist until phase 2.
 2. **PTLAS, described tier**, over ordinary BLASes, vulkan first, since this machine's NVIDIA driver grants the extension:
-   - (a) vulkan traces every TLAS by its address cell in SGL's own SPIR-V, with every existing trace test unchanged.
-   - (b) `sg::feature::partitioned_tlas`, `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops, and `hit_record_checks` on the mirror.
+   - (a) (built) vulkan traces every TLAS by its address in SGL's own SPIR-V, with every existing trace test unchanged.
+   - (b) (built on vulkan) `sg::feature::partitioned_tlas`, `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops and clears, and `hit_record_checks` on the mirror.
+     A DXC-compiled trace sees a partitioned tlas as the null structure, which is not refused yet: no binding knows its pipeline's route.
    - (c) dx12's half, which binds as a TLAS does and waits for a driver reporting the cap to be tested.
    This alone retires a full TLAS rebuild per edit, the cost shaped-viewer pays on a large scene today.
 3. **PTLAS, GPU-written tier**: the BLAS table, the input set, `accel_build_args`, and the record layouts of D5.
