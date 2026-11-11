@@ -28,7 +28,7 @@ a compute entry point writes the vertices the stage would have produced into a b
 **It would be SGL's, not sg's.**
 SGL knows the stages' code and can write the compute text; sg would see two pipelines and a buffer between them, which it already knows how to order.
 The repository's README names polyfills for ray tracing on webgpu as a goal, and this is the same move for the raster stages.
-[gpu-driven-work.md](gpu-driven-work.md) is the same move for work graphs and work lists.
+[gpu-driven-work.md](gpu-driven-work.md) is the same move for work lists.
 
 ## Automatic or opt-in, by measurement
 
