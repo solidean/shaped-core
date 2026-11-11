@@ -607,6 +607,7 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
             fc.camera = sv::camera_record_of(scene.camera);
             // A pixel's angle, as a view sets it, so a hit's textures pick the level its ray cone covers.
             fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(scene.size);
+            fc.primary_spread = fc.pixel_spread;
             lights.describe_in(fc);
             fc.samples_per_pixel = scene.samples_per_pixel;
             fc.max_bounces = scene.max_bounces;
@@ -1549,6 +1550,56 @@ ASYNC_INVOCABLE_TEST("sv - a ray cone samples the texture level its footprint co
         measured.push_back(level);
     }
     CHECK(tg::abs(measured[1] - measured[0] - 2.0f) < 0.2f).dump("near", measured[0]).dump("far", measured[1]);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A grazing view stretches a cone's footprint along the floor by one over the cosine, and an anisotropic sampler reads
+// that ellipse at the level of its short axis, the cone's own width, with more taps along the long one.
+// The same halving floor seen 70 degrees off its normal reads the level the width predicts, where an isotropic footprint
+// would read log2(1 / cos 70), about 1.55 levels, coarser.
+ASYNC_INVOCABLE_TEST("sv - a grazing ray cone samples at its footprint's short axis, filtering anisotropically",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    // 3 m from the floor's center, 70 degrees off its normal
+    auto const k = 2.0f;
+    auto const distance = 3.0;
+    auto const tilt = tg::angle_d::make_from_degree(70.0);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, distance * tg::cos(tilt), -distance * tg::sin(tilt)), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+
+    auto shade = cc::fixed_array<f32, 3>{};
+    for (auto i = 0; i < 3; ++i)
+    {
+        auto scene = make_light_scene(resources, mipped_floor(k, i == 0, i == 1 ? 1.0f : 0.0f), cam);
+        REQUIRE(scene.has_value());
+        auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+        auto const& images = co_await traced;
+        REQUIRE(images.size() == 1);
+        shade[i] = mean_brightness(images[0], scene.value().size, 2);
+    }
+    REQUIRE(shade[1] > shade[2]);
+    auto const level = level_of((shade[0] - shade[2]) / (shade[1] - shade[2]));
+
+    // the short axis at the image's center: the pixel's angle times the distance, at 128 texels a meter
+    // a GPU's anisotropic level selection is an approximation of its own, so the bound is wider than the isotropic test's
+    auto const record = sv::camera_record_of(cam);
+    auto const spread = 2.0f * record.up_scaled.length() / 48.0f;
+    auto const wanted = tg::log(spread * f32(distance) * k * 64.0f) / tg::log(2.0f);
+    CHECK(tg::abs(level - wanted) < 0.5f).dump("level", level).dump("wanted", wanted);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

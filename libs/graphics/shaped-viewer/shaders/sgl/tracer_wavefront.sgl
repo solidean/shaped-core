@@ -205,7 +205,7 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
 
     let s = slot as int
     traced.path_rays[s] = path_ray(cam.position, dir)
-    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, 0.0, f.pixel_spread)
+    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, 0.0, f.primary_spread)
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
 
@@ -555,7 +555,7 @@ fun stored_triangle_context(slot: uint){traced, bindless, wavefront_step} -> mat
     let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], hit.primitive, hit.barycentrics)
     let st = traced.path_states[slot as int]
     let g = stored_hit_geometry(slot, ctx)
-    return with_cone(ctx, cross(g.e1, g.e2), g.dir, g.t, st.cone_width, st.cone_spread)
+    return with_cone(ctx, g.e1, g.e2, g.dir, g.t, st.cone_width, st.cone_spread)
 
 /// The geometry of the triangle hit `slot` recorded, its edges through the instance's record.
 fun stored_hit_geometry(slot: uint, ctx: material.shading_context){traced, bindless, wavefront_step} -> hit_geometry:

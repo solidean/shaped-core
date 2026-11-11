@@ -136,6 +136,7 @@ ASYNC_INVOCABLE_TEST("sv - a decal paints the traced surface its projector reach
                                                        .rng_seed = 1};
         fc.decal_count = 1;
         fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(image_size);
+        fc.primary_spread = fc.pixel_spread;
 
         auto pixels = cc::vector<tg::vec4f>();
         auto const loop_start = cc::current_time_steady_secs();

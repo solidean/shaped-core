@@ -112,6 +112,12 @@ struct sv::render_settings
     /// so this trades how fast a moving camera settles against how smooth it stays while it moves.
     i32 samples_per_pixel = 4;
 
+    /// How many jittered samples per pixel a still image of a traced layer is expected to average; 0 for unknown.
+    /// That average already filters a pixel, so each primary ray reads its textures through a footprint narrowed by
+    /// 1/sqrt of it, held at an eighth, as pbrt-v4 scales its ray differentials; 0 and 1 read a whole pixel's.
+    /// A capture that accumulates a known count sets it, and its image comes out as sharp as its samples allow.
+    u32 expected_samples_per_pixel = 0;
+
     /// Path length: the primary hit plus this many bounces.
     /// Up to eight refractions through smooth glass spend none, so a hollow glass vessel still leaves the path its bounces for what lies behind.
     i32 max_bounces = 5;

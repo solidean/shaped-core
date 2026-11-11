@@ -66,7 +66,7 @@ use tracer
         // Its stream comes back advanced and is dropped, so the path traces as it would without it.
         let guided = tracer.guide_rays()
         let mut guide_hit = tracer.surface_payload_for(rng, float3(0.0), float3(0.0), 0.0, 3u, 0u)
-        guide_hit.cone_spread = f.pixel_spread
+        guide_hit.cone_spread = f.primary_spread
         if guided:
             guide_hit.guide = 1u
             let gr = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
@@ -98,7 +98,7 @@ use tracer
 
         // The ray cone a texture's level is read off: a pixel's angle wide from the camera, widened by each bounce.
         let mut cone_width = 0.0
-        let mut cone_spread = f.pixel_spread
+        let mut cone_spread = f.primary_spread
 
         // Scattering events do not count against `max_bounces`: Russian roulette ends a long walk, and `pt.scatter_cap` guards it.
         let mut scatters = 0

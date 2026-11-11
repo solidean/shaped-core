@@ -181,6 +181,9 @@ struct frame_constants:
     decal_count: uint
     /// The angle one pixel spans at the image's center, in radians: a hit's footprint is this times its distance.
     pixel_spread: float
+    /// The angle a primary ray's cone starts at: `pixel_spread`, narrowed where the image averages many jittered samples,
+    /// since that average already filters a pixel (`render_settings::expected_samples_per_pixel`).
+    primary_spread: float
     /// the frame's one sub-pixel offset while `fixed_jitter` is set, in [0, 1)
     jitter: float2
 
@@ -462,38 +465,47 @@ binding bindless:
         address_v = .clamp_edge
     sampler palette_linear_repeat_repeat:
         filter = .linear
+        max_anisotropy = 16
         address_u = .repeat
         address_v = .repeat
     sampler palette_linear_repeat_mirror:
         filter = .linear
+        max_anisotropy = 16
         address_u = .repeat
         address_v = .mirror_repeat
     sampler palette_linear_repeat_clamp:
         filter = .linear
+        max_anisotropy = 16
         address_u = .repeat
         address_v = .clamp_edge
     sampler palette_linear_mirror_repeat:
         filter = .linear
+        max_anisotropy = 16
         address_u = .mirror_repeat
         address_v = .repeat
     sampler palette_linear_mirror_mirror:
         filter = .linear
+        max_anisotropy = 16
         address_u = .mirror_repeat
         address_v = .mirror_repeat
     sampler palette_linear_mirror_clamp:
         filter = .linear
+        max_anisotropy = 16
         address_u = .mirror_repeat
         address_v = .clamp_edge
     sampler palette_linear_clamp_repeat:
         filter = .linear
+        max_anisotropy = 16
         address_u = .clamp_edge
         address_v = .repeat
     sampler palette_linear_clamp_mirror:
         filter = .linear
+        max_anisotropy = 16
         address_u = .clamp_edge
         address_v = .mirror_repeat
     sampler palette_linear_clamp_clamp:
         filter = .linear
+        max_anisotropy = 16
         address_u = .clamp_edge
         address_v = .clamp_edge
 

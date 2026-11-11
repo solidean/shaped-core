@@ -408,7 +408,9 @@ Gotchas:
   Module `tracer`'s `binding bindless` declares one static sampler per magnification filter and address mode of each axis.
   It sits beside the tables because every pipeline that samples a material lists that group, and sg allows no fourth.
   The palette keeps a sampler's magnification filter for all three, minification and between levels included; `sgl_palette_sampler` says what else it drops.
-- **A hit samples at its ray cone's level** (`material.texture_level`): the cone's width over the texels the triangle spans, from `shading_context::lod`.
+- **A hit samples through its ray cone's footprint** (`material.texture_gradients`): an ellipse on the face, as two axes in barycentrics (`shading_context::footprint_a`, `footprint_b`).
+  Each texture maps them through its own uv edges to `grad_x` and `grad_y`, and the linear palette samplers filter 16:1 anisotropically.
+- **`render_settings::expected_samples_per_pixel`** narrows a primary's footprint by 1/sqrt of it, held at an eighth, as pbrt-v4 does: an image that averages many jittered samples is filtered by them already.
   The cone starts a pixel's angle wide (`frame_constants::pixel_spread`) and widens at each bounce by the lobe it left along; emission and opacity stay at level 0.
 
 ## Mesh authoring — geometry + what a material reads

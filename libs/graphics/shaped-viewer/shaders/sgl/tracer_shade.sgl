@@ -661,16 +661,38 @@ fun instance_position(inst: scene.instance, vertex: uint){bindless} -> float3:
 /// `ctx` with the level its textures sample at: the ray cone `width` meters wide at the ray's origin, widening by `spread`
 /// per meter, met `t` meters along the unit `dir` on a triangle whose world edges from its first corner cross to `edges`.
 /// A cone of no width and no spread leaves `ctx` at the base level, as does a degenerate triangle.
-fun with_cone(ctx: material.shading_context, edges: float3, dir: float3, t: float, width: float, spread: float) -> material.shading_context:
+fun with_cone(ctx: material.shading_context, e1: float3, e2: float3, dir: float3, t: float, width: float, spread: float) -> material.shading_context:
     if width <= 0.0 and spread <= 0.0 => return ctx
-    let area = length(edges)
+    let normal = cross(e1, e2)
+    let area = length(normal)
     if area <= 0.0 => return ctx
-    // A grazing hit stretches the footprint along the face; past about 87 degrees the stretch is held, as a sampler's anisotropy would be.
-    let facing = max(abs(dot(edges / area, dir)), 0.05)
+    let n = normal / area
     let footprint = max(width + spread * t, 1e-9)
+
+    // On the face the footprint is an ellipse: across the ray as wide as the cone, and along the ray's trace on the face
+    // stretched by one over the cosine; past about 87 degrees the stretch is held, as a sampler's anisotropy is.
+    let facing = max(abs(dot(n, dir)), 0.05)
+    let mut across = cross(n, dir)
+    if dot(across, across) < 1e-12:
+        across = e1
+    across = normalize(across)
+    let along = cross(across, n)
     let mut coned = ctx
-    coned.lod = log2(footprint / facing) - 0.5 * log2(area)
+    coned.footprint_a = barycentric_offset(e1, e2, across * footprint)
+    coned.footprint_b = barycentric_offset(e1, e2, along * (footprint / facing))
     return coned
+
+/// The offset `d` on a triangle's plane in its barycentrics: the (s, t) with e1 s + e2 t = d, for edges `e1` and `e2`
+/// from its first corner, through their Gram matrix; a degenerate triangle gives none.
+fun barycentric_offset(e1: float3, e2: float3, d: float3) -> float2:
+    let g11 = dot(e1, e1)
+    let g12 = dot(e1, e2)
+    let g22 = dot(e2, e2)
+    let det = g11 * g22 - g12 * g12
+    if det <= 0.0 => return float2(0.0, 0.0)
+    let r1 = dot(e1, d)
+    let r2 = dot(e2, d)
+    return float2(g22 * r1 - g12 * r2, g11 * r2 - g12 * r1) / det
 
 /// The angle a ray cone widens by where a path leaves a surface along `lobe`, of perceptual `roughness`.
 /// A smooth reflection keeps its spread, a rough one widens about by its lobe's width, alpha twice over, and a diffuse one by a radian.
@@ -703,7 +725,7 @@ fun hit_geometry_of(h: triangle_hit, ctx: material.shading_context){traced, bind
 fun cone_context(h: triangle_hit, p: surface_payload){traced, bindless} -> material.shading_context:
     let ctx = triangle_context(h)
     let g = hit_geometry_of(h, ctx)
-    return with_cone(ctx, cross(g.e1, g.e2), g.dir, g.t, p.cone_width, p.cone_spread)
+    return with_cone(ctx, g.e1, g.e2, g.dir, g.t, p.cone_width, p.cone_spread)
 
 /// The shading context of a triangle hit, which is all a material needs to know about where it is.
 fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_context:
