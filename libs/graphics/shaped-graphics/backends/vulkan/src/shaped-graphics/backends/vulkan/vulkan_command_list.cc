@@ -248,10 +248,20 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                     entry_image_barriers.push_back(
                         make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
 
+            // The first list of a new epoch orders everything submitted before it against everything from here on.
+            // Transient buffers and textures of each epoch are placed from offset 0 of the same heap, so this epoch's
+            // first write may land where the last epoch still reads or writes (libs/graphics/shaped-graphics/docs/concepts/memory.md).
+            // D3D12 orders that by itself; Vulkan's submission order is execution order without a memory dependency,
+            // so without this barrier the boundary the aliasing rests on is none, and synchronization validation
+            // reports the reuse as a WRITE_AFTER_READ.
+            // Lists submit in the epoch they were opened in, so one barrier per epoch covers all of them.
+            bool const new_epoch = cmd->created_in_epoch() != _last_submitted_epoch;
+            _last_submitted_epoch = cmd->created_in_epoch();
+
             VkCommandBuffer submitted_buffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
             u32 submitted_count = 0;
             bool const has_entry_barriers = !entry_buffer_barriers.empty() || !entry_image_barriers.empty();
-            if (!initial_barriers.empty() || has_entry_barriers)
+            if (!initial_barriers.empty() || has_entry_barriers || new_epoch)
             {
                 auto const pre_begin = VkCommandBufferBeginInfo{
                     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -259,6 +269,24 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 };
                 VkResult const pre = vkBeginCommandBuffer(cmd->_pre_buffer, &pre_begin);
                 CC_ASSERT(pre == VK_SUCCESS, "vkBeginCommandBuffer (entry transitions) failed");
+                if (new_epoch)
+                {
+                    // Every stage and every access on both sides, since what aliases what is not known here.
+                    // Set directly rather than through sg's flag set, which would name ray-tracing stages a device may lack.
+                    auto const boundary = VkMemoryBarrier2{
+                        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+                        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    };
+                    auto const dependency = VkDependencyInfo{
+                        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                        .memoryBarrierCount = 1,
+                        .pMemoryBarriers = &boundary,
+                    };
+                    vkCmdPipelineBarrier2(cmd->_pre_buffer, &dependency);
+                }
                 // Two dependencies rather than one: an initial transition and an entry barrier can name the same
                 // subresource, and two barriers on one subresource in a single dependency have no order between them.
                 if (!initial_barriers.empty())
@@ -298,17 +326,6 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             cc::vector<VkPipelineStageFlags> wait_stages;
             for (isize i = 0; i < async_waits.size(); ++i)
                 wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-
-            // The previous epoch's end, which a list of this one runs after: the transient heap places this epoch's
-            // resources over that one's (docs/concepts/memory.md), and Vulkan orders no two submissions by their order
-            // alone, where D3D12 orders its ExecuteCommandLists calls.
-            // advance_epoch submitted that signal before this epoch opened, so the wait is satisfied, never deadlocked.
-            if (u64 const previous = u64(_current_epoch) - 1; previous >= u64(sg::epoch::first))
-            {
-                waits.push_back(_epoch_timeline);
-                wait_values.push_back(previous);
-                wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-            }
             if (cmd->_present_wait != VK_NULL_HANDLE)
             {
                 waits.push_back(cmd->_present_wait);
