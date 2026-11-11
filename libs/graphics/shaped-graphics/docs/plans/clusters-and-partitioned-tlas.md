@@ -77,10 +77,13 @@ Its `accel_read` / `accel_write` accesses are the structure's own, so an in-plac
 A PTLAS has a descriptor type of its own, `VK_DESCRIPTOR_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_NV`, but only classic descriptor sets can write it.
 sg's vulkan backend writes descriptors through `VK_EXT_descriptor_buffer`, whose `vkGetDescriptorEXT` takes an acceleration structure only as a `VkAccelerationStructureKHR`'s address (VUID-08028).
 Wrapping a PTLAS in one is undefined, so sg does what NVIDIA's own sample does instead:
-- **Each vulkan `tlas` owns an address cell**, an 8-byte buffer holding its device address, which a PTLAS's in-place updates never change.
-- **In SGL's own SPIR-V, an acceleration-structure binding is that cell**, which the shader loads and converts with `OpConvertUToAccelerationStructureKHR`.
+- **A pipeline of SGL's own SPIR-V reads a reserved address block**, `sg_acceleration_addresses` in set 3, which holds each acceleration member's device address by its position.
+  It is the software walk's `sg_acceleration_roots` again, filled per op the same way, with addresses in place of roots.
+- **The shader converts the address** with `OpConvertUToAccelerationStructureKHR`, where it loads the descriptor today.
   A TLAS and a PTLAS are then the same binding, so a shader never knows which it traces.
-- **A package compiled through DXC keeps the descriptor it has today**, and refuses a PTLAS naming its route.
+- **The binding itself keeps its descriptor type**, so a layout does not depend on the route a package compiled through.
+  A TLAS still writes its descriptor there, and a PTLAS writes a null one.
+- **A package compiled through DXC reads that descriptor as today**, and refuses a PTLAS naming its route.
   DXC may reach the cell too through inline SPIR-V (`[[vk::ext_instruction]]`), which is the next step rather than part of this one.
 
 ### D3. Two tiers per operation: described and GPU-written
