@@ -66,13 +66,7 @@ value_ref lowering::acceleration_by_address(i32 index)
         unsupported("a trace of something that is no binding");
         return value_ref::none;
     }
-    // sg's numbering: the layout's acceleration members group by group, each group's by slot
-    auto const& r = _plan.resources[index];
-    auto position = u32(0);
-    for (auto const& other : _plan.resources)
-        if (!other.is_reserved && _m.at(other.type).kind == check::type_kind::acceleration_structure
-            && (other.group < r.group || (other.group == r.group && other.slot < r.slot)))
-            ++position;
+    auto const position = emit::impl::acceleration_address_position(_plan, index);
     if (position >= check::k_acceleration_address_capacity)
     {
         unsupported("more acceleration structures than sg_acceleration_addresses holds");

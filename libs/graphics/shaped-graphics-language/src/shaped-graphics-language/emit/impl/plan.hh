@@ -300,6 +300,13 @@ struct plan
 /// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
 [[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
 
+/// Where vulkan's `sg_acceleration_addresses` holds the address of resource `index`, an acceleration member: its rank
+/// among the plan's, group by group and each group's by slot, which is how sg numbers them.
+[[nodiscard]] u32 acceleration_address_position(plan const& p, i32 index);
+
+/// Whether the plan holds an acceleration member a trace reaches by address, which then declares the address block.
+[[nodiscard]] bool holds_acceleration_member(plan const& p);
+
 /// The position in `samplers` of the file-scope sampler `symbol`, or -1 where the entry point reaches none of it.
 [[nodiscard]] i32 sampler_of(plan const& p, check::symbol_id symbol);
 /// The position of the file-scope sampler `symbol` among the module's, in declaration order: its index in every layout.

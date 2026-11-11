@@ -957,7 +957,8 @@ cmd.raytracing.update(ptlas, {.writes, .updates, .clears, .translations})
                                                    // in place; a slot once per update; ptlas_write{index, partition, tlas_instance},
                                                    // ptlas_update{index, blas, hit_group_offset}, ptlas_translation{partition, xyz};
                                                    // sg::global_partition for what moves every frame. GOTCHA: vulkan traces one
-                                                   // from SGL's own SPIR-V alone — a DXC-compiled trace sees the null structure
+                                                   // by address, which SGL writes on both routes; a package's own HLSL sees
+                                                   // the null structure
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

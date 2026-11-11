@@ -1417,7 +1417,10 @@ struct writer
                 // A buffer is a global of its own; every other member is a field of a block, `@inline` or its group's.
                 if (auto const found = resource_of(p, b.binding, b.member); found >= 0)
                 {
-                    result = {.text = p.resources[found].name};
+                    auto by_address = p.m.at(p.resources[found].type).kind == type_kind::acceleration_structure
+                                        ? d.acceleration_by_address(p, found)
+                                        : cc::string();
+                    result = {.text = by_address.empty() ? p.resources[found].name : cc::move(by_address)};
                     return;
                 }
                 if (auto const found = workgroup_of(p, b.binding, b.member); found >= 0)

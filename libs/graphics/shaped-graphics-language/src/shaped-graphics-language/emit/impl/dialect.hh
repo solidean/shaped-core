@@ -58,6 +58,9 @@ public:
 
     /// What an emulated trace reads, for a dialect whose `write_declarations` does not write it: WGSL's does.
     virtual void write_acceleration_pool(cc::string&) const {}
+    /// How a trace names acceleration member `resource` where the target traces by address; empty where it names the
+    /// resource itself, as every target but vulkan's does.
+    [[nodiscard]] virtual cc::string acceleration_by_address(plan const&, i32 /*resource*/) const { return {}; }
     /// The length of the buffer or `bytes` declared as `name`, in elements or bytes (CHK-460); MSL has none.
     [[nodiscard]] virtual cc::string buffer_length(cc::string_view name, bool is_bytes) const = 0;
     /// What the text declares before the entry point for `buffer_length` of `name`, empty where nothing.
