@@ -12,7 +12,14 @@ The decisions behind it are [feat-sgl-mesh-task-polyfill](../../../shaped-graphi
 ## Status
 
 SGL writes both halves, for a mesh stage with no task stage and no values per primitive.
-sg draws them on webgpu; dx12 and vulkan refuse a polyfilled pipeline until their draw lands, which the benchmark against their native stage waits on.
+sg draws them on webgpu, dx12 and vulkan; metal has every mesh stage natively and draws none.
+
+**Measured on an Arc B580** (2026-11-11, `tests/pipeline/mesh-polyfill-benchmark.cc`), a frame of 4096 workgroups of 98 triangles each:
+
+| backend | native | polyfilled |
+|---|---|---|
+| dx12 | 1.33 ms | 1.87 ms, +41% |
+| vulkan | 1.39 ms | 1.62 ms, +17% |
 
 **A polyfill is opt-in until that benchmark has run.**
 `ctx.set_mesh_polyfill(sg::polyfill_use::where_missing)` polyfills where the device has no mesh stage, and `always` everywhere, which is how a test compares the two on one device.
@@ -58,6 +65,8 @@ A polyfilled pipeline's description holds the compute half beside the vertex hal
 
 A slot past its workgroup's count stands outside the clip volume, so it draws nothing, and the scratch buffer needs no clearing.
 On webgpu one buffer serves every draw, grown as needed, since WebGPU orders each pass after the one before it.
+On dx12 and vulkan each draw takes a transient buffer of its own, and the barrier tracker orders its compute write before its vertex read.
+dx12 dispatches inside the scope, which binds its targets without a render pass; vulkan suspends its rendering instance around the dispatch.
 Reopening the pass is a split that `render_pass_splits` counts and no warning reports, which batching every polyfilled draw of a scope into one compute pass ahead of it would remove later.
 
 ## Not yet

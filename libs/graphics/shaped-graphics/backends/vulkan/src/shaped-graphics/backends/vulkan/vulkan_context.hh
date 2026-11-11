@@ -350,6 +350,7 @@ public:
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_spirv() const override { return _native_spirv; }
+    [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
     [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
 
     /// Vulkan has every stage sg models, and most of the rest are device facts.

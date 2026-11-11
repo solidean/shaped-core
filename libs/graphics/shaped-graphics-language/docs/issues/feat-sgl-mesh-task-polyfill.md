@@ -56,4 +56,7 @@ There the two images must be identical, equal depths and blending included, and 
 - **2026-11-11: drawn on webgpu.**
   `ctx.set_mesh_polyfill(...)` opts in, slib acquires both halves, and sg's webgpu backend dispatches and draws them.
   `tests/pipeline/mesh-polyfill-test.cc` passes under node (Dawn) and deno (wgpu), the primitive order and an unused slot included.
-  Next: the draw on dx12 and vulkan, where `draws_mesh_polyfill` is false so far, and the benchmark against their native stage on the same device.
+- **2026-11-11: drawn on dx12 and vulkan, and measured.**
+  The same tests pass on dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V, five times over.
+  On an Arc B580 the polyfill costs +41% over the native stage on dx12 and +17% on vulkan, for 400 000 triangles a frame.
+  Whether that is a small enough factor for `where_missing` to be the default is the open decision.

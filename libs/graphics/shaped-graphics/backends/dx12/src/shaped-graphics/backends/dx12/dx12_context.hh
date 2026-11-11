@@ -229,6 +229,7 @@ public:
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
+    [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
     [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
 
     /// D3D12 has every stage sg models, and headless present is always available here.

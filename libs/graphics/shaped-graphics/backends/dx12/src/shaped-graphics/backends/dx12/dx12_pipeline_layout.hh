@@ -18,8 +18,9 @@ public:
                          cc::span<sg::binding_group_layout_handle const> groups,
                          cc::optional<sg::binding> inline_constants,
                          bool dispatch_grid,
-                         cc::span<sg::bound_sampler const> static_samplers)
-      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants), dispatch_grid, static_samplers)
+                         cc::span<sg::bound_sampler const> static_samplers,
+                         sg::mesh_polyfill_slots mesh_polyfill = sg::mesh_polyfill_slots::none)
+      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants), dispatch_grid, static_samplers, mesh_polyfill)
     {
     }
 
@@ -41,7 +42,8 @@ public:
         cc::span<sg::binding_group_layout_handle const> groups,
         cc::span<sg::bound_sampler const> static_samplers,
         cc::optional<sg::binding> const& inline_constants,
-        bool dispatch_grid);
+        bool dispatch_grid,
+        sg::mesh_polyfill_slots mesh_polyfill = sg::mesh_polyfill_slots::none);
 
     ComPtr<ID3D12RootSignature> root_signature;
     cc::vector<group_slot> groups; // one per bind slot, in order
@@ -60,6 +62,9 @@ public:
     cc::vector<isize> length_bases;
     /// Root-parameter index of the grid `dispatch_threads` writes, 4 root constants, -1 unless the layout holds it.
     int dispatch_grid_root_param = -1;
+    /// Root-parameter index of a polyfilled mesh stage's slots: a root UAV for its compute half, a root SRV for its
+    /// vertex half; -1 where the layout holds neither.
+    int mesh_slots_root_param = -1;
 
     /// Whether the root signature carries a static sampler, a group's or the layout's own.
     /// **A pipeline over one neither restores from a cached blob nor hands one out.**

@@ -132,6 +132,8 @@ public:
     // What compute_bind_* set up and the next dispatch consumes.
     // The layout supplies each slot's schema; the groups supply the resources whose accesses are declared at dispatch.
     vulkan_pipeline_layout const* _bound_pipeline_layout = nullptr;
+    /// The bound compute pipeline, which a polyfilled mesh draw binds again after its own compute half.
+    VkPipeline _bound_compute_pipeline = VK_NULL_HANDLE;
     cc::vector<vulkan_binding_group const*> _bound_groups;
     // The bound compute or raytracing pipeline's footprint, which the dispatch declares its groups' accesses from.
     // The pipeline itself is kept alive by keep_bound.
@@ -261,6 +263,10 @@ public:
     u32 _software_set_grid[4] = {};
     u32 _software_set_addresses[2 * sg::impl::acceleration_address_capacity] = {};
     u32 _software_set_lengths[16] = {};
+    VkDeviceAddress _software_set_mesh_slots = 0;
+    /// The slot buffer of the polyfilled mesh draw being recorded, which set 3 names where the layout holds its slots.
+    VkDeviceAddress _mesh_slots = 0;
+    isize _mesh_slots_bytes = 0;
 
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
@@ -346,6 +352,7 @@ protected:
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
     void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
 
     // Ray tracing (reached through cmd.raytracing).
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.

@@ -138,3 +138,24 @@ pipeline layered:
     pixel = painting
     cull = .none
     format = .rgba8_unorm
+
+// A patch of 8 x 8 vertices and 98 triangles a workgroup, the 64 x 64 workgroups of a draw tiling the target: what the
+// polyfill is benchmarked against the native stage with, in tests/pipeline/mesh-polyfill-benchmark.cc.
+@mesh(64, vertices = 64, triangles = 98)
+fun patch(@workgroup_id group: int3, @local_thread_index k: int, output: mut mesh_output[corner]):
+    output.set_counts(64u, 98u)
+    let cx = ((k % 8) as float) / 7.0
+    let cy = ((k / 8) as float) / 7.0
+    let x = (((group.x % 64) as float) + cx) / 32.0 - 1.0
+    let y = (((group.x / 64) as float) + cy) / 32.0 - 1.0
+    output.vertex(k as uint, {position = hpos4(x, y, 0.0, 1.0), color = float4(cx, cy, 0.5, 1.0)})
+    if k < 49:
+        let a = ((k / 7) * 8 + k % 7) as uint
+        output.triangle((2 * k) as uint, uint3(a, a + 1u, a + 9u))
+        output.triangle((2 * k + 1) as uint, uint3(a, a + 9u, a + 8u))
+
+pipeline patched:
+    mesh = patch
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm

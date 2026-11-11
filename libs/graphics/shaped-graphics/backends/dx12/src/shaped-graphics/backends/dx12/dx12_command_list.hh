@@ -176,6 +176,11 @@ public:
     cc::vector<dx12_binding_group const*> _bound_raster_groups;
     sg::impl::pipeline_footprint const* _bound_raster_footprint = nullptr;
     void const* _bound_raster_footprint_owner = nullptr;
+    /// The bound raster pipeline's state object, which a polyfilled mesh draw sets again after its compute half, since
+    /// D3D12 has one pipeline-state slot for both.
+    ID3D12PipelineState* _bound_raster_pso = nullptr;
+    /// The raster inline constants as last set, which a polyfilled mesh draw's compute half is handed too.
+    cc::vector<u32> _raster_inline_constants;
 
     // The live array declarations of the raster bind point, met at every draw by _bound_raster_groups; ended with the scope.
     sg::impl::array_declaration_book _raster_arrays;
@@ -277,6 +282,7 @@ protected:
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
     void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;

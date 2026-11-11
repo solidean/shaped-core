@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
+#include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
@@ -227,8 +228,10 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
     _list->SetDescriptorHeaps(2, heaps);
     _list->SetGraphicsRootSignature(rp->layout->root_signature.Get());
     _list->SetPipelineState(rp->pipeline_state.Get());
+    _bound_raster_pso = rp->pipeline_state.Get();
     bind_debug_window(*rp->layout, pipeline.footprint(), true);
     _list->IASetPrimitiveTopology(rp->topology);
+    _raster_inline_constants.clear_resize_to_filled(rp->layout->inline_constants_num_32bit, 0u);
 
     _bound_raster_layout = rp->layout.get();
     _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->groups.size(), nullptr);
@@ -374,6 +377,8 @@ void dx12_command_list::raster_set_inline_constants(cc::span<byte const> data, c
 
     _list->SetGraphicsRoot32BitConstants(UINT(_bound_raster_layout->inline_constants_root_param), UINT(data.size() / 4),
                                          data.data(), UINT(off / 4));
+    if (_raster_inline_constants.size() * 4 >= off + data.size())
+        cc::memcpy(_raster_inline_constants.data() + off / 4, data.data(), size_t(data.size()));
 }
 
 void dx12_command_list::declare_raster_draw_barriers(bool indexed)
@@ -418,6 +423,71 @@ void dx12_command_list::raster_draw_mesh_tasks(int x, int y, int z)
     auto const queried = _list->QueryInterface(IID_PPV_ARGS(&list6));
     CC_ASSERT(SUCCEEDED(queried), "a device with mesh shaders records them through ID3D12GraphicsCommandList6");
     list6->DispatchMesh(UINT(x), UINT(y), UINT(z));
+}
+
+void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z)
+{
+    CC_ASSERT(_in_render_pass, "draw_mesh_tasks requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr && _bound_raster_pso != nullptr, "bind a raster pipeline before drawing");
+    auto const* const compute = dynamic_cast<dx12_compute_pipeline const*>(polyfill.compute.get());
+    CC_ASSERT(compute != nullptr, "a mesh polyfill's compute half is not a dx12 compute_pipeline");
+    keep_bound(polyfill.compute);
+
+    // A buffer of the draw's own, so no draw's compute half waits on an earlier one's vertex reads.
+    auto const groups = i64(x) * i64(y) * i64(z);
+    auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(_ctx.transient.create_raw_buffer(
+        isize(groups * polyfill.words_per_group * 4), sg::buffer_usage::readwrite_buffer));
+    CC_ASSERT(scratch != nullptr, "the mesh polyfill's slot buffer is not a dx12 buffer");
+    keep_bound(scratch);
+
+    // The compute half over the groups bound for the draw, with its inline constants and the grid it reads.
+    // D3D12 dispatches inside the scope, which binds its targets with OMSetRenderTargets rather than a render pass.
+    auto const& layout = *compute->layout;
+    _list->SetComputeRootSignature(layout.root_signature.Get());
+    _list->SetPipelineState(compute->pipeline_state.Get());
+    bind_debug_window(layout, compute->footprint(), false);
+    for (isize g = 0; g < _bound_raster_groups.size() && g < layout.groups.size(); ++g)
+        if (auto const* const group = _bound_raster_groups[g]; group != nullptr)
+        {
+            if (layout.groups[g].resource_root_param >= 0)
+                _list->SetComputeRootDescriptorTable(UINT(layout.groups[g].resource_root_param), group->table_start);
+            if (layout.groups[g].sampler_root_param >= 0)
+                _list->SetComputeRootDescriptorTable(UINT(layout.groups[g].sampler_root_param),
+                                                     group->sampler_table_start);
+        }
+    if (layout.inline_constants_root_param >= 0 && !_raster_inline_constants.empty())
+        _list->SetComputeRoot32BitConstants(UINT(layout.inline_constants_root_param),
+                                            UINT(_raster_inline_constants.size()), _raster_inline_constants.data(), 0);
+    bind_software_trace(layout, _bound_raster_groups, false);
+    if (layout.dispatch_grid_root_param >= 0)
+    {
+        u32 const grid[4]
+            = {u32(x * polyfill.workgroup.x), u32(y * polyfill.workgroup.y), u32(z * polyfill.workgroup.z), 0};
+        _list->SetComputeRoot32BitConstants(UINT(layout.dispatch_grid_root_param), 4, grid, 0);
+    }
+    CC_ASSERT(layout.mesh_slots_root_param >= 0, "a mesh polyfill's compute half holds its slots");
+    _list->SetComputeRootUnorderedAccessView(UINT(layout.mesh_slots_root_param), scratch->gpu_virtual_address());
+    declare_group_accesses(_bound_raster_groups, &compute->footprint(), sg::pipeline_stage_flag::compute);
+    track_buffer_access(scratch, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    _list->Dispatch(UINT(x), UINT(y), UINT(z));
+
+    // The list's compute binding is gone with its pipeline state, as after any raster bind: a dispatch binds again.
+    _bound_pipeline_layout = nullptr;
+    _bound_groups.clear();
+    _bound_footprint = nullptr;
+    _bound_footprint_owner = nullptr;
+
+    // The vertex half draws every corner of every slot, in order, under the raster state as it was.
+    _list->SetPipelineState(_bound_raster_pso);
+    bind_debug_window(*_bound_raster_layout, *_bound_raster_footprint, true);
+    CC_ASSERT(_bound_raster_layout->mesh_slots_root_param >= 0, "a mesh polyfill's vertex half reads its slots");
+    _list->SetGraphicsRootShaderResourceView(UINT(_bound_raster_layout->mesh_slots_root_param),
+                                             scratch->gpu_virtual_address());
+    track_buffer_access(scratch, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    declare_raster_draw_barriers(false);
+    flush_barriers();
+    _list->DrawInstanced(UINT(groups * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
 }
 
 void dx12_command_list::raster_draw_indexed(sg::draw_indexed_config const& config)

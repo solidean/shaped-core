@@ -14,14 +14,15 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
                                                                      cc::span<sg::binding_group_layout_handle const> groups,
                                                                      cc::span<sg::bound_sampler const> static_samplers,
                                                                      cc::optional<sg::binding> const& inline_constants,
-                                                                     bool dispatch_grid)
+                                                                     bool dispatch_grid,
+                                                                     sg::mesh_polyfill_slots mesh_polyfill)
 {
     if (int(groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
     auto pl = std::make_shared<dx12_pipeline_layout>(
-        sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants, dispatch_grid), groups,
-        inline_constants, dispatch_grid, static_samplers);
+        sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants, dispatch_grid, mesh_polyfill), groups,
+        inline_constants, dispatch_grid, static_samplers, mesh_polyfill);
 
     // One descriptor-table root parameter per group table, appended in group order (resource table then
     // sampler table).
@@ -172,6 +173,20 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         param.Constants.ShaderRegister = UINT(sg::reserved_dispatch_grid.dx12_register);
         param.Constants.RegisterSpace = UINT(sg::reserved_dispatch_grid.dx12_space);
         pl->dispatch_grid_root_param = int(params.size());
+        params.push_back(param);
+    }
+
+    // a polyfilled mesh stage's slots, written by its compute half and read by its vertex half, both by address
+    if (mesh_polyfill != sg::mesh_polyfill_slots::none)
+    {
+        auto const is_output = mesh_polyfill == sg::mesh_polyfill_slots::output;
+        auto const& address = is_output ? sg::reserved_mesh_output : sg::reserved_mesh_input;
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = is_output ? D3D12_ROOT_PARAMETER_TYPE_UAV : D3D12_ROOT_PARAMETER_TYPE_SRV;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Descriptor.ShaderRegister = UINT(address.dx12_register);
+        param.Descriptor.RegisterSpace = UINT(address.dx12_space);
+        pl->mesh_slots_root_param = int(params.size());
         params.push_back(param);
     }
 

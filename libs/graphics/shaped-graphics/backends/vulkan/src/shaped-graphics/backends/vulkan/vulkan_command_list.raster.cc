@@ -15,6 +15,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_compute_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_format.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raster_pipeline.hh>
@@ -465,6 +466,77 @@ void vulkan_command_list::raster_draw_mesh_tasks(int x, int y, int z)
     flush_barriers();
     resume_rendering();
     _ctx._cmd_draw_mesh_tasks(_buffer, u32(x), u32(y), u32(z));
+}
+
+void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z)
+{
+    CC_ASSERT(_in_render_pass, "draw_mesh_tasks requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    auto const* const compute = dynamic_cast<vulkan_compute_pipeline const*>(polyfill.compute.get());
+    CC_ASSERT(compute != nullptr, "a mesh polyfill's compute half is not a vulkan compute_pipeline");
+    keep_bound(polyfill.compute);
+
+    // A buffer of the draw's own, so no draw's compute half waits on an earlier one's vertex reads.
+    auto const groups = i64(x) * i64(y) * i64(z);
+    auto const scratch_raw = _ctx.transient.create_raw_buffer(isize(groups * polyfill.words_per_group * 4),
+                                                              sg::buffer_usage::readwrite_buffer);
+    auto const scratch = std::dynamic_pointer_cast<vulkan_buffer const>(scratch_raw);
+    CC_ASSERT(scratch != nullptr, "the mesh polyfill's slot buffer is not a vulkan buffer");
+    keep_bound(scratch);
+    _mesh_slots = scratch->_device_address;
+    _mesh_slots_bytes = scratch->size_in_bytes();
+
+    // The compute half, outside the rendering instance, over the groups bound for the draw; push constants are no
+    // bind point's, so the draw's own reach it.
+    suspend_rendering("a polyfilled mesh draw", split_remedy::none);
+    auto const& layout = *compute->layout;
+    auto const raster_window = _bound_debug_window;
+    vkCmdBindPipeline(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->_pipeline);
+    (void)bind_debug_window(compute->footprint());
+    u32 const buffer_index = 0;
+    for (isize g = 0; g < _bound_raster_groups.size() && g < layout._groups.size(); ++g)
+        if (auto const* const group = _bound_raster_groups[g]; group != nullptr)
+        {
+            auto const offset = VkDeviceSize(group->range.offset);
+            _ctx._descriptor_functions.cmd_set_descriptor_offsets(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                                                  layout._layout, u32(g), 1, &buffer_index, &offset);
+        }
+    _dispatch_grid[0] = x * polyfill.workgroup.x;
+    _dispatch_grid[1] = y * polyfill.workgroup.y;
+    _dispatch_grid[2] = z * polyfill.workgroup.z;
+    bind_software_trace(layout, _bound_raster_groups, VK_PIPELINE_BIND_POINT_COMPUTE);
+    declare_group_accesses(_bound_raster_groups, &compute->footprint(), sg::pipeline_stage_flag::compute);
+    track_buffer_access(*scratch, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    vkCmdDispatch(_buffer, u32(x), u32(y), u32(z));
+    _dispatch_grid[0] = _dispatch_grid[1] = _dispatch_grid[2] = 0;
+
+    // The list's own compute binding, as it was, for a dispatch after the scope.
+    if (_bound_pipeline_layout != nullptr && _bound_compute_pipeline != VK_NULL_HANDLE)
+    {
+        vkCmdBindPipeline(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, _bound_compute_pipeline);
+        _bound_pipeline_layout->bind_reserved(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                              bind_debug_window(*_bound_footprint));
+        for (isize g = 0; g < _bound_groups.size(); ++g)
+            if (auto const* const group = _bound_groups[g]; group != nullptr)
+            {
+                auto const offset = VkDeviceSize(group->range.offset);
+                _ctx._descriptor_functions.cmd_set_descriptor_offsets(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                                                      _bound_pipeline_layout->_layout, u32(g), 1,
+                                                                      &buffer_index, &offset);
+            }
+    }
+    _bound_debug_window = raster_window;
+    _software_set_layout = nullptr;
+
+    // The vertex half draws every corner of every slot, in order, back inside the instance.
+    track_buffer_access(*scratch, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    declare_raster_draw_barriers(false);
+    flush_barriers();
+    resume_rendering();
+    vkCmdDraw(_buffer, u32(groups * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
+    _mesh_slots = 0;
+    _mesh_slots_bytes = 0;
 }
 
 void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& config)

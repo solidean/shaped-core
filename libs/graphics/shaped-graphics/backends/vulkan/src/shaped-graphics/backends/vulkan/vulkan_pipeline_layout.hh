@@ -39,8 +39,9 @@ public:
                            cc::optional<sg::binding> inline_constants,
                            int inline_constants_bytes,
                            bool dispatch_grid,
-                           cc::span<sg::bound_sampler const> static_samplers)
-      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants), dispatch_grid, static_samplers),
+                           cc::span<sg::bound_sampler const> static_samplers,
+                           sg::mesh_polyfill_slots mesh_polyfill = sg::mesh_polyfill_slots::none)
+      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants), dispatch_grid, static_samplers, mesh_polyfill),
         _ctx(ctx),
         _layout(layout),
         _groups(cc::move(groups)),
@@ -64,12 +65,15 @@ public:
                              cc::span<u32 const> roots,
                              cc::span<u32 const> lengths,
                              cc::span<u32 const> grid,
-                             cc::span<u32 const> addresses) const;
+                             cc::span<u32 const> addresses,
+                             VkDeviceAddress mesh_slots = 0,
+                             isize mesh_slots_bytes = 0) const;
 
     /// Whether set 3 holds values of the op, so each op binds it (bind_software_trace) rather than the pipeline bind.
     [[nodiscard]] bool binds_set_per_op() const
     {
-        return _traces_in_software || _has_array_lengths || has_dispatch_grid() || _traces_by_address;
+        return _traces_in_software || _has_array_lengths || has_dispatch_grid() || _traces_by_address
+            || mesh_polyfill() != sg::mesh_polyfill_slots::none;
     }
 
     ~vulkan_pipeline_layout() override;
@@ -112,6 +116,8 @@ public:
     bool _has_array_lengths = false;
     isize _lengths_offset = 0;
     isize _grid_offset = 0;
+    /// Where a polyfilled mesh stage's slot buffer's descriptor goes, at the binding its `mesh_polyfill` names.
+    isize _mesh_slots_offset = 0;
     /// Each group's position among the lengths, -1 for a group with none.
     cc::vector<isize> _length_bases;
 

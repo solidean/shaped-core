@@ -57,8 +57,12 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     auto const traces_by_address = acceleration_members > 0;
     CC_ASSERT(acceleration_members <= sg::impl::acceleration_address_capacity,
               "a vulkan pipeline binds at most 16 acceleration structures, whose addresses set 3 holds");
-    auto const has_regions
-        = has_debug_window || traces_in_software || has_array_lengths || desc.dispatch_grid || traces_by_address;
+    auto const has_mesh_slots = desc.mesh_polyfill != sg::mesh_polyfill_slots::none;
+    auto const mesh_binding
+        = u32(desc.mesh_polyfill == sg::mesh_polyfill_slots::output ? sg::reserved_mesh_output.vulkan_binding
+                                                                    : sg::reserved_mesh_input.vulkan_binding);
+    auto const has_regions = has_debug_window || traces_in_software || has_array_lengths || desc.dispatch_grid
+                          || traces_by_address || has_mesh_slots;
     if (!desc.static_samplers.empty() || has_regions)
     {
         auto reserved_bindings = cc::vector<VkDescriptorSetLayoutBinding>();
@@ -127,6 +131,14 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
                 .binding = u32(sg::reserved_acceleration_addresses.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
+        // a polyfilled mesh stage's slots, written by its compute half and read by its vertex half
+        if (has_mesh_slots)
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = mesh_binding,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
             });
@@ -213,7 +225,8 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     }
 
     auto result = std::make_shared<vulkan_pipeline_layout>(ctx, hash, layout, cc::move(groups), desc.inline_constants,
-                                                           inline_bytes, desc.dispatch_grid, desc.static_samplers);
+                                                           inline_bytes, desc.dispatch_grid, desc.static_samplers,
+                                                           desc.mesh_polyfill);
     result->_reserved_set_layout = reserved_set_layout;
     result->_empty_set_layout = empty_set_layout;
     result->_acceleration_bases = cc::move(acceleration_bases);
@@ -265,6 +278,11 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
             ctx._descriptor_functions.get_binding_offset(
                 ctx._device, reserved_set_layout, u32(sg::reserved_acceleration_addresses.vulkan_binding), &offset);
             result->_addresses_offset = isize(offset);
+        }
+        if (has_mesh_slots)
+        {
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout, mesh_binding, &offset);
+            result->_mesh_slots_offset = isize(offset);
         }
     }
     return vulkan_pipeline_layout_handle(cc::move(result));
@@ -335,7 +353,9 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
                                                  cc::span<u32 const> roots,
                                                  cc::span<u32 const> lengths,
                                                  cc::span<u32 const> grid,
-                                                 cc::span<u32 const> addresses) const
+                                                 cc::span<u32 const> addresses,
+                                                 VkDeviceAddress mesh_slots,
+                                                 isize mesh_slots_bytes) const
 {
     // The set and the values it names, in one transient range of the heap, each a uniform buffer behind the set.
     // 256 is the largest minUniformBufferOffsetAlignment Vulkan allows.
@@ -392,6 +412,11 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
     }
     if (_traces_by_address)
         write_uniform(addresses, next, _addresses_offset);
+    if (mesh_polyfill() != sg::mesh_polyfill_slots::none)
+    {
+        CC_ASSERT(mesh_slots != 0, "a polyfilled mesh stage's set 3 names the draw's slot buffer");
+        write_storage_descriptor(mesh_slots, mesh_slots_bytes, base + _mesh_slots_offset);
+    }
 
     u32 const buffer_index = 0;
     auto const vk_offset = VkDeviceSize(range.offset);

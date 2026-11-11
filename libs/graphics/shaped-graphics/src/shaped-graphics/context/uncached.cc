@@ -520,6 +520,12 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
+    // The compute half through the cache, which deduplicates it and starts it now, beside the raster half; the uncached
+    // async build hands vulkan an empty shader here (bug-sg-uncached-async-compute-pipeline-empty-shader).
+    auto compute = cc::shared_async<compute_pipeline_handle>();
+    if (desc.mesh_polyfill.has_value())
+        compute = _ctx.cached.acquire_compute_pipeline(compute_half_of(_ctx, desc));
+
     // A backend may settle the build from a callback of its own, so the name is set once it has.
     _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
@@ -528,8 +534,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
                         desc.mesh_shader.has_value(), footprint_of(desc));
     if (!desc.mesh_polyfill.has_value())
         return result;
-    return with_polyfill(cc::move(result), create_compute_pipeline_async(compute_half_of(_ctx, desc)),
-                         desc.mesh_polyfill.value());
+    return with_polyfill(cc::move(result), cc::move(compute), desc.mesh_polyfill.value());
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)
