@@ -1392,6 +1392,7 @@ auto loaded = cc::rec::load_recording(path);  // -> cc::result<loaded_recording>
 loaded.value().events();                   // -> recording const&; algebra + queries work identically
 loaded.value().is_truncated(); loaded.value().cycles_per_second(); loaded.value().dumped_at_wall_secs();
 // gotcha: from_domain(domain const*) matches NOTHING on a loaded recording — use from_domain("name")
+// Python: libs/base/clean-core/tools/ccrec reads the same file (ccrec.load + ccrec.analyze); recording-formats.md
 
 #include <clean-core/record/crash_dump.hh>
 cc::install_crash_handler();                                  // the hook list this rides on

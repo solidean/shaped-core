@@ -265,6 +265,47 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
 
         return dev.report.summarize_tests(records, presets, ctx.root)
 
+    def check_ccrec_reader(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The `.ccrec` format exists twice -- the C++ writer and loader, and clean-core's Python reader -- and this
+        # round trip is what keeps the two agreeing.
+        # The C++ half records a fixture and writes what its loader reads back; the Python half must read the same.
+        # clean-core-test is declared in `builds`, so the runner built it ahead.
+        # Not fixable and not scopable, so fix and scope are ignored.
+        import os
+        import tempfile
+
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        with tempfile.TemporaryDirectory(prefix="ccrec-reader-") as tmp:
+            records = dev.test(
+                presets, ["clean-core-test"], root=ctx.root,
+                test_name="the Python reader's fixture round-trips through the C++ loader",
+                env={**os.environ, "CC_REC_READER_FIXTURE_DIR": tmp},
+                timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+            )
+
+            # Selected by name, so zero cases means renamed or removed rather than passed, exactly as in shader-grammar.
+            ran = sum(r["junit"]["tests"] for r in records if r.get("junit"))
+            if ran == 0:
+                dev.ui.write_line(console.red(
+                    "ccrec-reader: the fixture test did not run -- this gate selects it by name, so zero cases "
+                    "means it was renamed or removed, not that it passed"))
+                return False
+            if not dev.report.summarize_tests(records, presets, ctx.root):
+                return False
+
+            runner = ctx.root / "libs" / "base" / "clean-core" / "tools" / "ccrec-self-test.py"
+            result = dev.run_step(
+                ["uv", "run", str(runner), "--fixture-dir", tmp],
+                step_type="lint", name="ccrec-self-test",
+                build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            if not result.ok and not mirror:
+                for log in (result.stdout_log, result.stderr_log):
+                    text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                    if text:
+                        dev.ui.write_line(text)
+            return result.ok
+
     def check_sgl_prelude(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # SGL's builtins live in a C++ registry, and prelude/builtins.sgl is that registry written out and committed.
         # slib's impl/pipeline_fields.hh is the prelude's mirror of sg's raster pipeline description, written out the same way.
@@ -623,6 +664,13 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   False, check_shader_grammar,
                   watches=("libs/graphics/shaped-shader-library/**",),
                   builds=("shaped-shader-library-test",)),
+        dev.Check("ccrec-reader",
+                  "clean-core's Python .ccrec reader reads a fresh C++ recording exactly as the C++ loader does",
+                  False, check_ccrec_reader,
+                  watches=("libs/base/clean-core/src/clean-core/record/**", "libs/base/clean-core/tools/ccrec*",
+                           "libs/base/clean-core/tools/ccrec/**",
+                           "libs/base/clean-core/tests/record/record-reader-fixture-test.cc"),
+                  builds=("clean-core-test",)),
         dev.Check("sgl-prelude",
                   "SGL's prelude/builtins.sgl and slib's impl/pipeline_fields.hh are what `sgl` generates (--fix rewrites them)",
                   True, check_sgl_prelude,
