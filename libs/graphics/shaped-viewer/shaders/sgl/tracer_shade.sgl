@@ -679,20 +679,31 @@ fun bounce_spread(lobe: uint, roughness: float) -> float:
     if openpbr.bsdf_lobe_is_specular(lobe) => return 2.0 * roughness * roughness
     return 1.0
 
-/// The shading context of a closest hit, its cone the one `p` brought.
-/// The edges reach the world through the hit's own transform, as its tangent frame does.
-fun cone_context(h: triangle_hit, p: surface_payload){traced, bindless} -> material.shading_context:
-    let ctx = triangle_context(h)
+/// What a triangle hit's ray and face are in the world: the ray's unit direction and the meters it went, and the face's
+/// edges from its first corner, which a ray cone and a relief's parallax both read.
+struct hit_geometry:
+    dir: float3
+    t: float
+    e1: float3
+    e2: float3
+
+/// The geometry of a closest hit, its edges through the hit's own transform, as its tangent frame goes.
+fun hit_geometry_of(h: triangle_hit, ctx: material.shading_context){traced, bindless} -> hit_geometry:
     let inst = scene.instance(..traced.instances[h.instance_id])
     let v0 = instance_position(inst, ctx.corner.x)
     let a = instance_position(inst, ctx.corner.y) - v0
     let b = instance_position(inst, ctx.corner.z) - v0
     let e1 = h.to_world(vec3(a.x, a.y, a.z))
     let e2 = h.to_world(vec3(b.x, b.y, b.z))
-    let edges = cross(float3(e1.x, e1.y, e1.z), float3(e2.x, e2.y, e2.z))
     let d = float3(h.ray.direction.x, h.ray.direction.y, h.ray.direction.z)
     let len = length(d)
-    return with_cone(ctx, edges, d / len, h.t * len, p.cone_width, p.cone_spread)
+    return hit_geometry(d / len, h.t * len, float3(e1.x, e1.y, e1.z), float3(e2.x, e2.y, e2.z))
+
+/// The shading context of a closest hit, its cone the one `p` brought.
+fun cone_context(h: triangle_hit, p: surface_payload){traced, bindless} -> material.shading_context:
+    let ctx = triangle_context(h)
+    let g = hit_geometry_of(h, ctx)
+    return with_cone(ctx, cross(g.e1, g.e2), g.dir, g.t, p.cone_width, p.cone_spread)
 
 /// The shading context of a triangle hit, which is all a material needs to know about where it is.
 fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_context:

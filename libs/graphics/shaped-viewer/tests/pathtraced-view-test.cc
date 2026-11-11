@@ -1627,3 +1627,112 @@ ASYNC_INVOCABLE_TEST("sv - a relief material's occlusion closes grazing light, b
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
+
+namespace
+{
+/// A floor at height `y`, uv `k` per meter of x and z, striped in u, of the relief type: its height texture holds
+/// `height` everywhere in the band from `top` down to `bottom`.
+[[nodiscard]] sv::mesh relief_floor(f32 y, f32 k, f32 height, f32 top, f32 bottom)
+{
+    auto& lib = sv_test::shared_material_library();
+    auto const material
+        = lib.acquire(sv::material::create(cc::format("relief floor {} {} {}", height, top, bottom),
+                                           lib.acquire_type(sv::builtin_material::openpbr_relief).value(),
+                                           {sv::material_attribute_binding::of("specular_weight", 0.0f),
+                                            sv::material_attribute_binding::of("height_top", top),
+                                            sv::material_attribute_binding::of("height_bottom", bottom)}));
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-8, y, -8), tg::pos3f(-8, y, 8), tg::pos3f(8, y, 8), tg::pos3f(8, y, -8),
+                          sv_test::pbr_material{});
+    auto uvs = cc::vector<tg::vec2f>();
+    for (auto const& p : floor.positions)
+        uvs.push_back(tg::vec2f(p[0] * k, p[2] * k));
+    auto attributes = cc::vector<sv::mesh_attribute>();
+    attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    auto mesh = sv::mesh{.name = "relief floor",
+                         .geometry = sv::triangle_geometry::create_from_positions(floor.positions),
+                         .attributes = cc::move(attributes),
+                         .material = material};
+
+    auto const repeat
+        = sg::sampler{.address_u = sg::sampler_address_mode::repeat, .address_v = sg::sampler_address_mode::repeat};
+    // eight stripes across a repeat, black and white
+    auto stripes = cc::vector<byte>();
+    for (auto row = 0; row < 8; ++row)
+        for (auto col = 0; col < 8; ++col)
+        {
+            auto const v = col % 2 == 0 ? byte(230) : byte(25);
+            stripes.push_back_range(cc::fixed_array<byte, 4>{v, v, v, byte(255)});
+        }
+    mesh.textures.push_back(
+        {.name = "base_color",
+         .source = {.texture = sv::texture_data::create(cc::move(stripes), sg::pixel_format::rgba8_unorm, 8, 8),
+                    .sampler = repeat}});
+    auto heights = cc::vector<f32>::create_filled(4 * 4, height);
+    mesh.textures.push_back({.name = "height",
+                             .source = {.texture = sv::texture_data::create(cc::span<f32 const>(heights).as_bytes(),
+                                                                            sg::pixel_format::r32_float, 4, 4),
+                                        .sampler = repeat}});
+    return mesh;
+}
+
+/// The root mean square of two images' difference in brightness.
+[[nodiscard]] f32 rms_between(cc::vector<tg::vec4f> const& a, cc::vector<tg::vec4f> const& b)
+{
+    auto sum = 0.0;
+    for (auto i = isize(0); i < a.size(); ++i)
+    {
+        auto const d = (a[i][0] + a[i][1] + a[i][2] - b[i][0] - b[i][1] - b[i][2]) / 3.0f;
+        sum += f64(d) * f64(d);
+    }
+    return f32(tg::sqrt(sum / f64(a.size())));
+}
+} // namespace
+
+// Parallax occlusion mapping against geometry: a relief whose height is one flat plane 0.2 m below its face must look
+// exactly as a face 0.2 m lower does, its stripes moved by the ray's own slant (Tatarchuk 2006).
+// The same relief with no band to march, top at the bottom, stays where its face is, which is what the comparison is against.
+ASYNC_INVOCABLE_TEST("sv - a relief's parallax shows a sunken plane where real geometry would be",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    // 45 degrees down onto the floor, so a sunken plane shows its stripes moved by its depth
+    auto cam = sv::camera::looking_at(tg::pos3d(0.3, 2.5, -2.5), tg::pos3d(0.3, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+
+    auto const k = 1.5f;
+    auto const meshes = cc::fixed_array<sv::mesh, 3>{
+        relief_floor(0.0f, k, -0.2f, 0.0f, -0.4f), // the relief, a plane 0.2 m down
+        relief_floor(-0.2f, k, 0.0f, 0.0f, 0.0f),  // real geometry 0.2 m down, nothing to march
+        relief_floor(0.0f, k, -0.2f, 0.0f, 0.0f),  // the relief's face itself, its band empty
+    };
+    auto images = cc::vector<cc::vector<tg::vec4f>>();
+    for (auto const& mesh : meshes)
+    {
+        auto scene = make_light_scene(resources, mesh, cam);
+        REQUIRE(scene.has_value());
+        scene.value().size = 64;
+        auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+        auto const& out = co_await traced;
+        REQUIRE(out.size() == 1);
+        images.push_back(out[0]);
+    }
+
+    auto const parallax_error = rms_between(images[0], images[1]);
+    auto const unmoved_error = rms_between(images[2], images[1]);
+    CHECK(unmoved_error > 0.05f).dump("unmoved", unmoved_error);
+    CHECK(parallax_error < 0.15f * unmoved_error).dump("parallax", parallax_error).dump("unmoved", unmoved_error);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}

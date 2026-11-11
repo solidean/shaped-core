@@ -212,7 +212,7 @@ fun context_from(inst: scene.instance, p: varyings, primitive: uint){tracer.bind
     let o1 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.y)
     let o2 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.z)
     let bary = barycentrics_of(p.object, o0, o1, o2)
-    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, corner, bary, material.no_cone)
+    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, corner, bary, material.no_cone, float2(0.0, 0.0))
 
 /// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
 ///

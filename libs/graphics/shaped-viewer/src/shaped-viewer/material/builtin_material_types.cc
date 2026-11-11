@@ -229,9 +229,17 @@ surface.emission_color = color
 // The plain `openpbr` type leaves occlusion to the raster path, since an imported asset's is baked from geometry the tracer traces.
 [[nodiscard]] material_type make_openpbr_relief()
 {
+    // The relief's height in meters, and the band it fills: the face stands at the top, the relief is carved to the bottom.
+    auto signature = openpbr_signature();
+    signature.push_back(material_signature_entry::of("height", 0.0f));
+    signature.push_back(material_signature_entry::of("height_top", 0.0f));
+    signature.push_back(material_signature_entry::of("height_bottom", 0.0f));
     return material_type::create({.name = cc::string(builtin_material::openpbr_relief),
-                                  .signature = openpbr_signature(),
+                                  .signature = cc::move(signature),
                                   .shader = cc::string(openpbr_shader) + "surface.micro_occlusion = saturate(occlusion)\n",
+                                  .height_attribute = "height",
+                                  .height_top_attribute = "height_top",
+                                  .height_bottom_attribute = "height_bottom",
                                   .opacity_attribute = "opacity",
                                   .opacity_cutoff_attribute = "alpha_cutoff",
                                   .occlusion_attribute = "occlusion",
