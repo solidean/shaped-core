@@ -250,7 +250,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
 
             // The first list of a new epoch orders everything submitted before it against everything from here on.
             // Transient buffers and textures of each epoch are placed from offset 0 of the same heap, so this epoch's
-            // first write may land where the last epoch still reads or writes (docs/concepts/memory.md).
+            // first write may land where the last epoch still reads or writes (libs/graphics/shaped-graphics/docs/concepts/memory.md).
             // D3D12 orders that by itself; Vulkan's submission order is execution order without a memory dependency,
             // so without this barrier the boundary the aliasing rests on is none, and synchronization validation
             // reports the reuse as a WRITE_AFTER_READ.
