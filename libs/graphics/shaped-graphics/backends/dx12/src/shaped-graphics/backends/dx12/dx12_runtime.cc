@@ -11,12 +11,44 @@
 #ifndef SG_HAS_AGILITY
 #error "SG_HAS_AGILITY must be defined by the dx12 backend's CMake"
 #endif
+#ifndef SG_HAS_AGILITY_PREVIEW
+#error "SG_HAS_AGILITY_PREVIEW must be defined by the dx12 backend's CMake"
+#endif
 
 namespace sg::backend::dx12
 {
 namespace
 {
 #if SG_HAS_AGILITY
+// The version the runtime is loaded and asked as: a preview runtime is the preview SDK's, not the retail one it builds on.
+#if SG_HAS_AGILITY_PREVIEW
+constexpr UINT k_sdk_version = D3D12_PREVIEW_SDK_VERSION;
+#else
+constexpr UINT k_sdk_version = D3D12_SDK_VERSION;
+#endif
+
+cc::atomic<bool> g_raytracing_preview = false;
+
+/// Enables the preview runtime's raytracing features on `factory`, before it makes any device.
+/// A refusal leaves the factory as it was.
+void enable_raytracing_preview([[maybe_unused]] ID3D12DeviceFactory* factory)
+{
+#if SG_HAS_AGILITY_PREVIEW
+    UUID const features[] = {D3D12ExperimentalShaderModels, D3D12RaytracingPreview};
+    if (HRESULT hr
+        = factory->EnableExperimentalFeatures(UINT(sizeof(features) / sizeof(UUID)), features, nullptr, nullptr);
+        FAILED(hr))
+    {
+        CC_LOG_INFO("the preview Agility SDK refused its experimental features (hr=0x{:08X}), so clustered geometry "
+                    "and "
+                    "partitioned TLAS report absent",
+                    u32(hr));
+        return;
+    }
+    g_raytracing_preview.store(true, cc::memory_order_release);
+#endif
+}
+
 /// Where D3D12Core.dll is: a `D3D12` directory beside the executable where one was staged there, which is how a shipped
 /// application carries it, and the fetched install otherwise.
 cc::string agility_directory()
@@ -51,13 +83,15 @@ ComPtr<ID3D12DeviceFactory> make_agility_factory()
     auto directory = agility_directory();
     ComPtr<ID3D12DeviceFactory> factory;
     if (HRESULT hr
-        = configuration->CreateDeviceFactory(D3D12_SDK_VERSION, directory.c_str_materialize(), IID_PPV_ARGS(&factory));
+        = configuration->CreateDeviceFactory(k_sdk_version, directory.c_str_materialize(), IID_PPV_ARGS(&factory));
         FAILED(hr))
     {
-        CC_LOG_WARNING("the Agility SDK {} in {} did not load (hr=0x{:08X}), so dx12 runs on the system runtime",
-                       D3D12_SDK_VERSION, directory, u32(hr));
+        CC_LOG_WARNING("the Agility SDK {} in {} did not load (hr=0x{:08X}), so dx12 runs on the system runtime{}",
+                       k_sdk_version, directory, u32(hr),
+                       SG_HAS_AGILITY_PREVIEW ? ": a preview runtime loads only with Windows Developer Mode on" : "");
         return nullptr;
     }
+    enable_raytracing_preview(factory.Get());
     return factory;
 }
 
@@ -237,6 +271,15 @@ bool sg::backend::dx12::runs_agility_runtime()
 #endif
 }
 
+bool sg::backend::dx12::runs_raytracing_preview()
+{
+#if SG_HAS_AGILITY
+    return runs_agility_runtime() && g_raytracing_preview.load(cc::memory_order_acquire);
+#else
+    return false;
+#endif
+}
+
 HRESULT sg::backend::dx12::create_d3d12_device(IUnknown* adapter, D3D_FEATURE_LEVEL level, REFIID riid, void** out)
 {
 #if SG_HAS_AGILITY
@@ -261,7 +304,7 @@ HRESULT sg::backend::dx12::check_feature_support(ID3D12Device* device, D3D12_FEA
 #if SG_HAS_AGILITY
     if (ComPtr<ID3D12Device16> device16;
         runs_agility_runtime() && SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&device16))))
-        return device16->CheckFeatureSupport1(feature, data, size, D3D12_SDK_VERSION);
+        return device16->CheckFeatureSupport1(feature, data, size, k_sdk_version);
 #endif
     return device->CheckFeatureSupport(feature, data, size);
 }

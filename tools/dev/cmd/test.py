@@ -98,6 +98,26 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     return p
 
 
+def _rebuild_built_outside_all(ctx: Context, args: argparse.Namespace, presets: list, primary, all_targets: list,
+                               binary_names: list[str], server) -> None:
+    """Builds by name each of `binary_names` that a preset's build directory already holds an artifact of."""
+    selected = set(binary_names)
+    for preset in presets:
+        targets = all_targets if preset is primary else ctx.discover(preset, args.emsdk_path)
+        names = sorted(t.name for t in targets
+                       if t.name in selected and t.artifact is not None and Path(t.artifact).exists())
+        if not names:
+            continue
+        results = dev.build(
+            [preset], names, root=ctx.root,
+            auto_configure=False,
+            mirror=args.mirror_output, verbose=args.verbose,
+            emsdk_path=args.emsdk_path, server=server,
+        )
+        if not all(r.ok for r in results):
+            ctx.fail_build(results, [preset])
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     primary = presets[0]
@@ -171,6 +191,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     )
     if err:
         ctx.die(err)
+
+    # A binary outside `all` (EXCLUDE_FROM_ALL) is not rebuilt by the build above, yet its artifact from an earlier build is still there.
+    # Run or probed as it is, it is stale: a new test is missing from its listing, and a fixed one still fails.
+    # So every selected binary that has an artifact is built by name, which costs a no-op ninja call when it is current.
+    # One never built stays unbuilt and is reported so, rather than pulling in what `all` deliberately leaves out.
+    if not args.no_build and not args.target:
+        _rebuild_built_outside_all(ctx, args, presets, primary, all_targets, binary_names, server)
 
     # Both probes below launch the artifact, so on a wasm preset they need the same runtime the run itself will use.
     # Resolved against the emsdk overlay rather than the inherited PATH, because emsdk's bundled node is usually the

@@ -80,6 +80,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             presets, root=ctx.root,
             toolset=args.toolset, build_suffix=args.build_suffix, build_dir=args.build_dir,
             example_backend=args.example_backend,
+            agility_preview=args.agility_preview,
         )
     except dev.ToolsetError as e:
         ctx.die(str(e))

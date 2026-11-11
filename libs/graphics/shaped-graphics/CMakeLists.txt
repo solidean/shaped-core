@@ -236,6 +236,12 @@ function(sg_warp_test_binary target)
         target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=1)
     else()
         target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=0)
+        # A WARP staged while one was pinned would still load in place of Windows' own, which SG_HAS_PINNED_WARP=0 denies.
+        # The define's flip relinks the binary, so this runs exactly when the pin went away.
+        if(WIN32)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${target}>/d3d10warp.dll" VERBATIM)
+        endif()
     endif()
 endfunction()
 

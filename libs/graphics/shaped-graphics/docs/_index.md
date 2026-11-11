@@ -76,6 +76,8 @@ Designs, each stating its status at the top.
 
 - [sticky array declarations](plans/sticky-array-declarations.md) — an array declaration that lives until the caller withdraws it.
   A bindless table bound for many ops is then tracked once rather than per op.
+- [clusters and partitioned TLAS](plans/clusters-and-partitioned-tlas.md) — proposed: D3D12's and Vulkan's clustered geometry and partitioned TLAS, built indirectly.
+  Ownership moves from what an instance names to what a structure may name.
 
 ## Conventions
 

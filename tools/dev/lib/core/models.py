@@ -24,6 +24,7 @@ class Preset:
     build_type: str  # CMAKE_BUILD_TYPE, e.g. "RelWithDebInfo"
     toolset: str | None = None  # pinned compiler version/path (--toolset); None = preset default
     example_backend: str | None = None  # SC_EXAMPLE_BACKEND (--example-backend); None = the cache's own default
+    agility_preview: bool = False  # SC_AGILITY_PREVIEW=ON (--agility-preview); False = the cache's own default
 
     @property
     def family(self) -> str:

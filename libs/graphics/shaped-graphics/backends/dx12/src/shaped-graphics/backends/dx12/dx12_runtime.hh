@@ -33,6 +33,11 @@ void choose_d3d12_runtime(d3d12_runtime runtime);
 /// False where the Agility SDK was asked for and failed to load.
 [[nodiscard]] bool runs_agility_runtime();
 
+/// Whether this process's runtime is the pre-release Agility SDK with its preview raytracing features enabled.
+/// Only a build with `SG_HAS_AGILITY_PREVIEW` asks for them, and that runtime loads only with Windows Developer Mode on.
+/// Where they were refused the runtime still loads, and the features they carry report absent.
+[[nodiscard]] bool runs_raytracing_preview();
+
 /// Whether acceleration-structure buffers carry `D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE`, which a
 /// micromap array needs: from the first context that reports `sg::feature::opacity_micromap` on, and never before.
 /// A device without micromaps so keeps the creation calls it always had.

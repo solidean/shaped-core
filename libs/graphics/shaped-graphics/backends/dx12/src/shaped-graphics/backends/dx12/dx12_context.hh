@@ -217,6 +217,11 @@ public:
     /// Whether this device supports inline `RayQuery` (DXR tier >= 1.1).
     [[nodiscard]] bool supports_ray_query() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_1; }
 
+    /// Whether this device builds clustered geometry and partitioned TLAS through `ExecuteIndirectRTASOperations`.
+    /// Only the preview Agility SDK, with its experimental features enabled, ever answers true.
+    /// No sg feature reports it until sg has the operations: libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md.
+    [[nodiscard]] bool supports_clusters_and_ptlas() const { return _clusters_and_ptlas; }
+
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
     [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
@@ -750,6 +755,7 @@ public:
     bool _unbounded_binding_arrays = false;    // resource binding tier 3, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
+    bool _clusters_and_ptlas = false;          // ClustersAndPTLASSupported, from the preview Agility SDK alone
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
     bool _view_instancing = false;             // D3D12_OPTIONS3's ViewInstancingTier, cached at creation
     bool _mesh_shader = false;                 // D3D12_OPTIONS7's MeshShaderTier, cached at creation

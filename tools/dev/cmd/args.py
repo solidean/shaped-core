@@ -45,6 +45,12 @@ def build_overrides(p: argparse.ArgumentParser) -> None:
              "'auto' takes each example's own first choice, so this is how the other arms are "
              "reached. Auto-redirects the build dir, like --toolset.",
     )
+    p.add_argument(
+        "--agility-preview", action="store_true",
+        help="Build dx12 against the pre-release Agility SDK (SC_AGILITY_PREVIEW), for clustered geometry and "
+             "partitioned TLAS. Development only, and it needs `uv run extern/agility/fetch-agility.py --preview "
+             "--accept-license`. Auto-redirects the build dir, like --toolset.",
+    )
 
 
 def server(p: argparse.ArgumentParser) -> None:

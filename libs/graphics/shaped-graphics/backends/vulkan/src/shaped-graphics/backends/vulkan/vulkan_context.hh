@@ -1078,6 +1078,10 @@ public:
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
     // cc::mutex's value ctor is explicit, so the type is named rather than left to `= {…}`.
     cc::mutex<sg::submission_token> _next_submission = cc::mutex<sg::submission_token>(sg::submission_token::first);
+
+    /// The epoch of the last list submitted, read and written only under `_next_submission`.
+    /// The first list of a newer epoch carries the barrier that makes the epoch boundary one (see submit_command_list).
+    sg::epoch _last_submitted_epoch = sg::epoch::first;
     cc::mutex<vulkan_command_pool_set> _command_pools;
 
     // Hands each open command list a dense access-tracking slot, acquired at create and released at submit/drop.

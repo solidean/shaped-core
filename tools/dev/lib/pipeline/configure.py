@@ -65,6 +65,8 @@ def _configure_one(
     defines = toolset.compiler_defines(preset, root)
     if preset.example_backend is not None:
         defines = {**defines, "SC_EXAMPLE_BACKEND": preset.example_backend}
+    if preset.agility_preview:
+        defines = {**defines, "SC_AGILITY_PREVIEW": "ON"}
     if preset.is_cross_compiling:
         # Imported here: host_tools configures the host preset through this module.
         from .host_tools import ensure_host_sgl

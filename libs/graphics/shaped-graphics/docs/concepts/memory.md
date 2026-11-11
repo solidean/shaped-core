@@ -57,6 +57,7 @@ The axes are independent, but in practice:
 A monotonic head hands out placement offsets and **resets to 0 whenever the epoch changes**, so successive epochs alias the same storage — which is not only safe but desired.
 It is safe because a single direct queue executes each epoch's GPU work before the next's.
 Epoch N's transient memory is therefore finished before epoch N+1 resets to 0 and touches it: the epoch boundary is the barrier.
+On D3D12 the queue orders that by itself; on Vulkan, whose submission order carries no memory dependency, the first list submitted in each epoch begins with a barrier from every stage to every stage.
 It is desired because a one-epoch-sized heap serves any pipelining depth, which is smaller and kinder to caches than a ring sized for every in-flight frame.
 A request larger than the budget falls back to a dedicated (committed) allocation.
 The buffer budget defaults to 128 MiB, set with `ctx.transient.set_budget`, and the texture budget to 256 MiB, set with `ctx.transient.set_texture_budget`.
