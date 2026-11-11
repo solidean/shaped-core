@@ -540,6 +540,8 @@ int nx::run(int argc, char** argv)
         config.allow_cross_bucket_naming = false;
         config.filters = {route.entry->name};
         config.test_args = route.entry_args;
+        if (route.jobs > 0)
+            config.jobs = route.jobs;
     }
 
     // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks,

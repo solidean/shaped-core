@@ -1,6 +1,7 @@
 #include "entry.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/string/from_string.hh>
 #include <nexus/tests/config.hh>
 #include <nexus/tests/registry.hh>
 
@@ -97,6 +98,32 @@ nx::impl::entry_route nx::impl::route_command_line(test_registry const& registry
             route.entry_args = rest_after(1);
             return route;
         }
+
+    // A pool size first, then a name: the run's, since a command's own line starts after its name.
+    // Not followed by a name, the tokens stay where they were, and a default entry takes them as its own.
+    {
+        auto at = isize(0);
+        auto jobs = 0;
+        if (args.size() >= 2 && (args[0] == "--jobs" || args[0] == "-j"))
+        {
+            jobs = cc::from_string<int>(args[1]).value_or(0);
+            at = 2;
+        }
+        else if (!args.empty() && (args[0].starts_with("--jobs=") || (args[0].starts_with("-j") && args[0].size() > 2)))
+        {
+            jobs = cc::from_string<int>(args[0].subview(args[0].starts_with("--jobs=") ? 7 : 2)).value_or(0);
+            at = 1;
+        }
+        if (jobs > 0 && at < args.size() && !args[at].starts_with('-'))
+            if (auto const* const entry = find_entry(args[at]); entry != nullptr)
+            {
+                route.kind = entry_route_kind::entry;
+                route.entry = entry;
+                route.entry_args = rest_after(at + 1);
+                route.jobs = jobs;
+                return route;
+            }
+    }
 
     // A nexus selector anywhere makes the line nexus's.
     for (auto const token : args)

@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
-from ..core import console, ui
+from ..core import console, memory_guard, ui
 from ..core.models import StepResult
 
 ENV_ENABLE = "SC_BUILD_SERVER"
@@ -201,6 +201,8 @@ class Session:
         if self.command is None:
             self._warn(self._missing, doing=doing)
             return False
+        # The server outlives this run, so it may leave the memory guard's job; only now, with this run building through it.
+        memory_guard.allow_breakaway()
         try:
             # CREATE_NO_WINDOW: the server it starts must never open a console window, and the client must not hold ours.
             proc = subprocess.run(
