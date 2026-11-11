@@ -108,9 +108,9 @@ A caller starts on the described tier and moves a hot path to the GPU-written on
 sg exposes no GPU address today, by design: Metal has none, and an address is invisible to barrier tracking.
 The GPU-written tier needs addresses in its records, so sg hands them out only through tables it owns:
 
-- **A PTLAS's BLAS table** is a set of `blas_handle`s the caller registers, and the PTLAS holds every one alive.
-  sg keeps their addresses in a buffer a shader reads, so a compute pass writes `table[i]` into a record, never a number it made up.
-  Unregistering a BLAS is deferred until no recorded update can still name it.
+- **A BLAS table** (decided) is `ctx.persistent.create_blas_table(span<blas_handle>)`: it holds the handles, and a GPU array of their addresses a shader binds and indexes.
+  A compute pass so writes `scene.blases[k]` into a record, never a number it made up.
+  `update_indirect` names the tables its records may reach, and the partitioned tlas then holds each, which is the ownership edge.
 - **A cluster pool's address array** is written by the build itself, in implicit-destination mode, one address per CLAS.
   A cluster BLAS holds its pool, which is the edge a TLAS has with its BLASes today.
 - **An input set's buffer table** gives each named buffer's base address, for the vertex and index addresses in a cluster record.
@@ -130,8 +130,10 @@ So "one layout everywhere", which the micromap descriptor could choose, is not a
 Two ways remain, and the first is decided:
 
 - **SGL emits the records** (decided).
-  A builtin module, say `use accel`, declares `accel.ptlas_write_instance`, `accel.clas_triangles` and the rest as SGL structs whose layout is the target's.
-  A compute shader fills them by field name, and each backend's emission lays them out natively, so nothing translates at run time.
+  A builtin module, `use accel`, declares `accel.ptlas_write`, `accel.ptlas_update`, `accel.ptlas_translation` and later `accel.clas_triangles` as structs whose layout is the target's.
+  A compute shader writes them into an ordinary `mut buffer[accel.ptlas_write]` by field name, and each target lays them out natively, so nothing translates at run time.
+  The count is the shader's too, an atomic it bumps: **sg writes the operation array itself and copies that count into it** with a buffer copy before the build (decided).
+  So no shader writes the operation array, and sg needs no kernel of its own.
   sg's C++ side gets the same layouts, for the described tier, from one generated header.
 - **sg defines its own layout and transcodes it** in a compute pass before each operation.
   It works from HLSL and WGSL alike, at a dispatch and a buffer per operation, and sg would carry a kernel of its own.
