@@ -298,6 +298,17 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             cc::vector<VkPipelineStageFlags> wait_stages;
             for (isize i = 0; i < async_waits.size(); ++i)
                 wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+            // The previous epoch's end, which a list of this one runs after: the transient heap places this epoch's
+            // resources over that one's (docs/concepts/memory.md), and Vulkan orders no two submissions by their order
+            // alone, where D3D12 orders its ExecuteCommandLists calls.
+            // advance_epoch submitted that signal before this epoch opened, so the wait is satisfied, never deadlocked.
+            if (u64 const previous = u64(_current_epoch) - 1; previous >= u64(sg::epoch::first))
+            {
+                waits.push_back(_epoch_timeline);
+                wait_values.push_back(previous);
+                wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+            }
             if (cmd->_present_wait != VK_NULL_HANDLE)
             {
                 waits.push_back(cmd->_present_wait);
