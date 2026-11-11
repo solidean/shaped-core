@@ -2,6 +2,8 @@
 created: 2026-11-11
 refs:
   - file: libs/base/clean-core/src/clean-core/record/sampling.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-11T13:23Z
 ---
 
 # record.thread_run on macOS: a thread's running time per sampler tick, from thread_info
