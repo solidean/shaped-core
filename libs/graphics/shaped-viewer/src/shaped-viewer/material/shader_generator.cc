@@ -346,11 +346,32 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
         cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
                           spelling.mark, tex.offset);
-        // An explicit level where there are no derivatives, at a hit.
+        // At a hit, which has no derivatives, the level is the ray cone's: its footprint over the texels the triangle spans.
+        // A flat uv has one value per triangle and so no footprint, which samples the base level.
+        // Emission and opacity sample the base level wherever they are read: next-event estimation and an any-hit read
+        // them with no cone, and a light or a cutout that a bounce ray sees blurred would weigh against one it does not.
         // The texel is named because a constant selector reads it twice.
+        auto const base_level_only
+            = r.type != nullptr
+           && (a.name == r.type->emission_color_attribute || a.name == r.type->emission_scale_attribute
+               || a.name == r.type->opacity_attribute);
+        auto level = cc::string();
+        if (spelling.explicit_level && base_level_only)
+            level = ", level = 0.0";
+        else if (spelling.explicit_level)
+        {
+            auto const area = shape_of(a.uv->frequency) == load_shape::flat
+                                ? cc::string("0.0")
+                                : cc::format("material.uv_area(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, {})",
+                                             spelling.mark, element_expression(a.uv->frequency));
+            cc::format_append(out,
+                              "    let level = material.texture_level(ctx, {}, "
+                              "tracer.bindless.textures_2d[{}image].size())\n",
+                              area, spelling.mark);
+            level = ", level = level";
+        }
         cc::format_append(out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
-                          spelling.mark, sgl_palette_sampler(a.sample->sampler),
-                          spelling.explicit_level ? ", level = 0.0" : "");
+                          spelling.mark, sgl_palette_sampler(a.sample->sampler), level);
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 
@@ -663,7 +684,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     cc::format_append(src,
                       "@closest_hit fun sv_closest_hit(h: triangle_hit, p: mut tracer.surface_payload){{tracer.traced, "
                       "tracer.bindless, slug.tables}}:\n"
-                      "    let ctx = tracer.triangle_context(h)\n"
+                      "    let ctx = tracer.cone_context(h, p)\n"
                       "    tracer.shade_triangle(h, mut p, ctx, sv_evaluate_material(ctx), {})\n\n",
                       supplied_frame);
 

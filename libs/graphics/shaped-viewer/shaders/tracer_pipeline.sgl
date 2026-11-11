@@ -66,6 +66,7 @@ use tracer
         // Its stream comes back advanced and is dropped, so the path traces as it would without it.
         let guided = tracer.guide_rays()
         let mut guide_hit = tracer.surface_payload_for(rng, float3(0.0), float3(0.0), 0.0, 3u, 0u)
+        guide_hit.cone_spread = f.pixel_spread
         if guided:
             guide_hit.guide = 1u
             let gr = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
@@ -95,6 +96,10 @@ use tracer
         // The first trace of a sample is the primary ray, whose hit the guides describe; a scattering event spends no bounce.
         let mut primary = true
 
+        // The ray cone a texture's level is read off: a pixel's angle wide from the camera, widened by each bounce.
+        let mut cone_width = 0.0
+        let mut cone_spread = f.pixel_spread
+
         // Scattering events do not count against `max_bounces`: Russian roulette ends a long walk, and `pt.scatter_cap` guards it.
         let mut scatters = 0
 
@@ -104,6 +109,8 @@ use tracer
         while b - free < f.max_bounces:
             let last_bounce = if b - free + 1 >= f.max_bounces => 1u else 0u
             let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
+            p.cone_width = cone_width
+            p.cone_spread = cone_spread
             let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
             trace(tracer.traced.world, r, tracer.path_rays.surface, mut p)
 
@@ -127,6 +134,11 @@ use tracer
             let albedo = p.albedo
             let specular_albedo = p.specular_albedo
             let roughness = p.roughness
+
+            // The cone reached this hit, and leaves it as wide as the lobe the continuation was drawn from.
+            // A medium's scattering events on the way are not told apart: the cone widens as if the segment ran to the surface.
+            cone_width += cone_spread * max(hit_t, 0.0)
+            cone_spread += tracer.bounce_spread(lobe, roughness)
 
             if primary:
                 // The surface the guides describe: the guide ray's where there is one, the camera ray's otherwise.

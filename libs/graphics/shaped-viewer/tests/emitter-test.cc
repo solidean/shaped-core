@@ -231,7 +231,7 @@ TEST("sv - an emission descriptor says where each of its factors lives")
         CHECK(e.color.channels[1] == 1u);
         CHECK(e.color.channels[2] == 0u);
         CHECK(e.color.transform != sv::material_opacity::no_offset);
-        // The generated hit and shade kernel sample at level 0, the level the light sampler's reader samples at.
+        // The generated hit and shade kernel sample an emission at level 0 whatever the ray cone, the level the light sampler's reader samples at.
         CHECK(g.source.contains("level = 0.0"));
         CHECK(g.shade_source.contains("level = 0.0"));
     }

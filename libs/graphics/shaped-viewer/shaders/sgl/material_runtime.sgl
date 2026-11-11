@@ -37,6 +37,11 @@ struct shading_context:
     corner: uint3
     /// (1 - b.x - b.y, b.x, b.y), so the three weigh the three corners in order
     barycentrics: float3
+    /// The ray cone's footprint here, as the level a texture samples at less half the log2 of its texels on this triangle.
+    /// log2 of the cone's width over the cosine it meets the face at, less half the log2 of the triangle's world area,
+    /// both areas as the cross product's length (Akenine-Moller et al., "Texture Level of Detail Strategies for Real-Time Ray Tracing", 2019).
+    /// `no_cone` where nothing traced a cone here, which samples level 0.
+    lod: float
 
 /// One attribute descriptor out of a parameter block.
 fun load_attribute_desc(params: bytes, offset: uint) -> attribute_desc:
@@ -60,6 +65,25 @@ fun load_element_f4(b: bytes, d: attribute_desc, element: uint) -> float4:
 // Barycentric interpolation of the three corners of the hit triangle.
 // `e` is the three element indices the generated code resolved from the frequency.
 // Those are vertex indices for per_vertex, and `primitive * 3 + k` for per_corner.
+
+/// A context's `lod` where no cone reached it: far enough below 0 that every texture samples its base level.
+const no_cone = -100.0
+
+/// Twice the area of the triangle the uvs at corners `e` span, the length of their cross product, in uv units.
+fun uv_area(b: bytes, d: attribute_desc, e: uint3) -> float:
+    let u0 = load_element_f2(b, d, e.x)
+    let u1 = load_element_f2(b, d, e.y)
+    let u2 = load_element_f2(b, d, e.z)
+    let a = u1 - u0
+    let c = u2 - u0
+    return abs(a.x * c.y - a.y * c.x)
+
+/// The level a texture of `size` texels samples at where the triangle spans `uv_area` (as `uv_area` gives it) under `ctx`'s cone.
+/// Never below the base level; a flat or degenerate uv triangle has no footprint and samples the base level.
+fun texture_level(ctx: shading_context, uv_area: float, size: int2) -> float:
+    let texels = uv_area * (size.x as float) * (size.y as float)
+    if texels <= 0.0 or ctx.lod <= no_cone => return 0.0
+    return max(ctx.lod + 0.5 * log2(texels), 0.0)
 
 fun interpolate_f1(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float:
     return load_element_f1(b, d, e.x) * w.x + load_element_f1(b, d, e.y) * w.y + load_element_f1(b, d, e.z) * w.z
@@ -164,4 +188,4 @@ fun position_of(inst: scene.instance, vertex_buffer: bytes, v: uint) -> float3:
 /// `bary` is the two barycentrics a hit attribute carries; the third is what is left of one.
 fun make_context(inst: scene.instance, index_buffer: bytes, primitive: uint, bary: float2) -> shading_context:
     let corner = triangle_corners(inst, index_buffer, primitive)
-    return shading_context(inst.param_buffer, inst.param_offset, primitive, corner, float3(1.0 - bary.x - bary.y, bary.x, bary.y))
+    return shading_context(inst.param_buffer, inst.param_offset, primitive, corner, float3(1.0 - bary.x - bary.y, bary.x, bary.y), no_cone)

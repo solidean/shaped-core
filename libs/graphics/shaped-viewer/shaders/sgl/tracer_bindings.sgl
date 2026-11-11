@@ -248,6 +248,9 @@ struct path_state:
     jitter: float2
     /// how many fill draws the slot has made since its sample last started, which keeps each of them fresh
     fill_draws: uint
+    /// the ray cone at the path ray's origin, as `surface_payload` carries it
+    cone_width: float
+    cone_spread: float
 
 /// The medium a path's next segment travels through, and the wavelength it has collapsed onto (3 while it carries all three).
 struct path_medium:
@@ -547,6 +550,10 @@ struct surface_payload:
     /// Negative where the instance is no light of the trace, and 0 where it is but next-event estimation cannot draw this point.
     /// What the caller weighs `emission` by past the camera's ray.
     light_pdf: float
+    /// The ray cone at the ray's origin, which picks a texture's level at the hit: its width in meters, and the angle
+    /// it widens by per meter — written by the caller only; 0 and 0 sample every texture's base level.
+    cone_width: float
+    cone_spread: float
 
 /// The wavefront's indirect-dispatch arguments, a group of their own: a dispatch may not read its counts from a buffer it binds writable.
 /// Only the small kernels that turn counts into arguments list it — `dispatch_*` name its records.
@@ -580,7 +587,7 @@ rays path_rays:
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
 fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0, 0.0, 0.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:
