@@ -451,6 +451,7 @@ void writer::ray_query(instruction const& i, u32 id)
         spv::RayQueryGetIntersectionWorldToObjectKHR,
         spv::RayQueryGetIntersectionObjectRayOriginKHR,
         spv::RayQueryGetIntersectionObjectRayDirectionKHR,
+        spv::RayQueryGetIntersectionClusterIdNV,
     };
     auto const operands = _p.operands_of(i);
     auto const at = [&](isize k) { return id_of_raw(operands[k]); };
@@ -469,6 +470,11 @@ void writer::ray_query(instruction const& i, u32 id)
     case op::ray_query_read:
     {
         auto const opcode = k_reads[i.sub];
+        if (ray_query_value(i.sub) == ray_query_value::cluster_id)
+        {
+            require(spv::RayTracingClusterAccelerationStructureNV);
+            require_extension("SPV_NV_cluster_acceleration_structure");
+        }
         if (ray_query_value(i.sub) == ray_query_value::candidate_box_is_opaque)
             return emit(_code, opcode, {id_of(i.type), id, at(0)});
         return emit(_code, opcode, {id_of(i.type), id, at(0), literal_id(i.aux)});

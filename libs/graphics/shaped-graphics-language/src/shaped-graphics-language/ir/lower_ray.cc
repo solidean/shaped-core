@@ -306,6 +306,8 @@ value_ref lowering::ray_stage_call(builtins::function_record const& record, cc::
         return as_int(built_in::ray_geometry_index, name);
     if (name == "hit_primitive_index")
         return as_int(built_in::ray_primitive_index, name);
+    if (name == "hit_cluster_id")
+        return as_int(built_in::ray_cluster_id, name);
     if (name == "hit_object_to_world_row")
         return row_of(built_in::object_to_world, "object_to_world");
     if (name == "hit_world_to_object_row")

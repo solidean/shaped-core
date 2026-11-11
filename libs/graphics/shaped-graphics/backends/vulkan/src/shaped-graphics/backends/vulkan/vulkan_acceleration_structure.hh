@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
+#include <shaped-graphics/raytracing/clusters.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 
 /// Vulkan acceleration structures.
@@ -155,6 +156,27 @@ private:
         if (_vulkan_storage)
             _vulkan_storage->expire();
     }
+};
+
+/// The clusters one build made, in implicit-destination mode: the driver packs them into `_vulkan_storage` and writes
+/// each one's address into `_addresses`, which a cluster BLAS build reads by range, so the CPU never learns them.
+class sg::backend::vulkan::vulkan_cluster_set final : public sg::cluster_set
+{
+public:
+    vulkan_cluster_set(int cluster_count,
+                       int max_geometry_index,
+                       isize size_in_bytes,
+                       vulkan_buffer_handle storage,
+                       vulkan_buffer_handle addresses)
+      : sg::cluster_set(cluster_count, max_geometry_index, size_in_bytes),
+        _vulkan_storage(cc::move(storage)),
+        _addresses(cc::move(addresses))
+    {
+    }
+
+    vulkan_buffer_handle _vulkan_storage;
+    /// One `VkDeviceAddress` per cluster, in build order.
+    vulkan_buffer_handle _addresses;
 };
 
 /// What a binding takes of a tlas, either kind: the storage a trace reads, the address a trace converts, and what its

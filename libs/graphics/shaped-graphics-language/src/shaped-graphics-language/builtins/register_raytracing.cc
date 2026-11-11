@@ -29,6 +29,12 @@ void zero_int(cc::span<scalar const>, cc::vector<scalar>& out)
     out.push_back(scalar::of(i32(0)));
 }
 
+/// No cluster: what a hit is in wherever no BLAS is built from clusters, the interpreter's trace among them.
+void no_cluster(cc::span<scalar const>, cc::vector<scalar>& out)
+{
+    out.push_back(scalar::of(i32(-1)));
+}
+
 void zero_uint(cc::span<scalar const>, cc::vector<scalar>& out)
 {
     out.push_back(scalar::of_uint(0));
@@ -121,9 +127,14 @@ constexpr read_spelling k_reads[] = {
      "get_candidate_ray_origin", "get_committed_ray_origin"},
     {"object_ray_direction", "float3", zero_float3, "CandidateObjectRayDirection", "CommittedObjectRayDirection",
      "get_candidate_ray_direction", "get_committed_ray_direction"},
+    // spelled by `sgl_ray_query_cluster_id`, which the HLSL dialect declares per API, and none on metal (EMIT-260)
+    {"cluster_id", "int", no_cluster, "", "", "", ""},
 };
 
 constexpr cc::string_view k_query_hlsl[] = {
+    "sgl_ray_query_cluster_id",
+    "CandidateClusterID",
+    "CommittedClusterID",
     "ray_desc",
     "RayDesc",
     "TraceRayInline",
@@ -243,6 +254,10 @@ written write_query(call_context const& ctx)
         auto const& s = k_reads[isize(read)];
         auto const getter = is_hlsl ? (is_committed ? s.hlsl_committed : s.hlsl_candidate)
                                     : (is_committed ? s.msl_committed : s.msl_candidate);
+        // EMIT-260: a helper the dialect declares, and no cluster where the target has none
+        if (read == query_read::cluster_id)
+            return {.text = is_hlsl ? cc::format("sgl_ray_query_cluster_id({}, {}u)", q, is_committed ? 1 : 0)
+                                    : cc::string("(-1)")};
         if (read == query_read::object_to_world_row || read == query_read::world_to_object_row)
         {
             // a row of the 3x4 matrix: HLSL indexes its float3x4, and MSL's float4x3 holds it as its columns' components
@@ -362,9 +377,14 @@ constexpr stage_read k_stage_reads[] = {
      zero_float3, "sgl_hit.object_origin"},
     {"@stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_direction() -> float3", "ObjectRayDirection()",
      zero_float3, "sgl_hit.object_direction"},
+    // EMIT-260: a helper the HLSL dialect declares per API, and no cluster on metal
+    {"@stages(.closest_hit, .any_hit) fun hit_cluster_id() -> int", "sgl_hit_cluster_id()", no_cluster, "(-1)"},
 };
 
 constexpr cc::string_view k_stage_reads_hlsl[] = {
+    "sgl_hit_cluster_id",
+    "sgl_cluster_id_input",
+    "ClusterID",
     "ObjectRayOrigin",
     "ObjectRayDirection",
     "ReportHit",

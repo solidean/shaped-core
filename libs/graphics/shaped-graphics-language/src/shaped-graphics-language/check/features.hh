@@ -77,6 +77,9 @@ enum class sgl::check::feature : sgl::u8
     /// `atomic[ulong]` in a buffer, its `min` and `max` alone (CHK-511); `shader_int64_atomics` grants it too.
     /// It is all of Metal's 64-bit atomics, on the GPUs that have any.
     shader_int64_min_max_atomics,
+    /// A hit's cluster, which `cluster_id` reads where the device builds a BLAS from clusters, and is -1 elsewhere.
+    /// No program names it: the prelude asks it with `has`, so a device without it needs no capability of it.
+    clustered_geometry,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -119,6 +122,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "unbounded_binding_arrays",     //
     "shader_shared_int64_atomics",  //
     "shader_int64_min_max_atomics", //
+    "clustered_geometry",           //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

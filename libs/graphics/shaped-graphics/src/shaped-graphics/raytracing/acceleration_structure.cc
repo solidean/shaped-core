@@ -100,6 +100,11 @@ void impl::set_instance_records(tlas const& tlas, cc::vector<tlas_instance_recor
                                 { current = cc::move(snapshot); });
 }
 
+void impl::set_clusters(blas const& blas, cluster_set_handle clusters)
+{
+    const_cast<sg::blas&>(blas)._clusters = cc::move(clusters);
+}
+
 void impl::clear_instance_records(tlas const& tlas)
 {
     tlas._instance_records.lock([](std::shared_ptr<cc::vector<tlas_instance_record> const>& current)

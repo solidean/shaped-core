@@ -965,6 +965,12 @@ cmd.raytracing.update_indirect(ptlas, {.writes, .updates, .translations, .tables
                                                    // records a shader wrote (SGL's `use accel`), each ptlas_indirect_records
                                                    // {records, offset, max_count, count, count_offset}; sg copies each u32 count
                                                    // into the operation it writes. gpu_ptlas_write is opaque: only a shader fills one
+cmd.raytracing.build_clusters(span<cluster_triangles const>{vertices, vertex_count, indices, triangle_count, cluster_id,
+                                                            geometry_index, is_opaque, ...}, flags=fast_trace)
+                                                   // -> cluster_set_handle: immutable, <= 256 triangles and vertices a cluster;
+                                                   //    needs sg::feature::clustered_geometry (vulkan's NV extension today)
+cmd.raytracing.build_cluster_blas(set, span<cluster_range const>{first, count}, flags, hit_record_stride=1)
+                                                   // -> vector<blas_handle>, one per contiguous range, each holding the set
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

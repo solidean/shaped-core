@@ -141,6 +141,16 @@ Only a package's own HLSL still reads the descriptor, where a partitioned tlas w
   SGL's `@target_layout` is why: its fields stand in another order on dx12 and on vulkan.
 - **No check follows the records**, so `hit_record_checks` stops checking a partitioned tlas from its first such update, and logs that once.
 
+## Clustered geometry
+
+**A cluster BLAS is built from clusters rather than from triangles**: up to 256 triangles over up to 256 vertices each.
+- **`cmd.raytracing.build_clusters` builds a `cluster_set`**, immutable like a blas, cluster k at position k.
+- **`build_cluster_blas(set, ranges)` builds one blas per range** of the set's clusters, and each holds its set.
+  A range is contiguous because a cluster's address exists only on the GPU, in the set's address array, which the BLAS build reads in place.
+- **A cluster BLAS is a blas like any other**: a tlas or a partitioned tlas places it, and a trace meets its triangles.
+  A hit's `cluster_id` in SGL is the cluster's `cluster_id`, and its `primitive_index` the triangle's within the cluster.
+- **Requires `sg::feature::clustered_geometry`**, which vulkan grants with `VK_NV_cluster_acceleration_structure`; dx12's waits for the preview runtime, as the partitioned tlas's does.
+
 ## Invariants
 
 Preserve these; the rest is tuning:

@@ -209,6 +209,9 @@ void set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> rec
 /// Records the micromaps a BLAS was built from, which it then holds.
 void set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
 
+/// Records the cluster set a cluster BLAS was built from, which it then holds.
+void set_clusters(blas const& blas, cluster_set_handle clusters);
+
 /// Drops every instance record of `tlas`, so no check reads it; a snapshot a check already holds stays as it was.
 void clear_instance_records(tlas const& tlas);
 
@@ -288,6 +291,7 @@ protected:
 private:
     friend void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
     friend void impl::set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
+    friend void impl::set_clusters(blas const& blas, cluster_set_handle clusters);
     friend void impl::set_software_region(blas const& blas, impl::software_region region);
     friend impl::software_region const& impl::software_region_of(blas const& blas);
 
@@ -295,6 +299,7 @@ private:
     blas_geometry _geometry = blas_geometry::triangles;
     int _hit_record_stride = 1;
     cc::vector<micromap_handle> _micromaps; // the ownership edge: keeps every micromap a geometry named alive
+    cluster_set_handle _clusters;           // the ownership edge of a cluster BLAS: keeps the clusters it lists alive
 };
 
 /// A top-level acceleration structure: an opaque index over a set of instances, each placing a blas with a transform.

@@ -11,6 +11,7 @@
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/raytracing/blas_table.hh>
+#include <shaped-graphics/raytracing/clusters.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 
 using namespace cc::primitive_defines;
@@ -242,4 +243,92 @@ ASYNC_INVOCABLE_TEST("sg - a partitioned tlas updates from records a compute pas
     co_await trace_and_check(
         ctx, pipeline, ptlas,
         {{.instance_id = 10, .slot = 0, .x = 4, .z = 0}, {.instance_id = 20, .slot = 1, .x = 4, .z = 2}}, "translated");
+}
+
+ASYNC_INVOCABLE_TEST("sg - a cluster BLAS traces as a blas does, through a tlas and a partitioned tlas",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::clustered_geometry))
+        SKIP("this device has no clustered geometry");
+    auto const pipeline = co_await shaders::raytracing::trace_cells_opaque.acquire_pipeline(*ctx);
+
+    // the square as two clusters, a triangle each: 7 below its diagonal, 9 above it
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    u32 const indices[] = {0, 1, 2};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const index_input
+        = ctx->persistent.create_buffer_from_data(indices, sg::buffer_usage::accel_structure_build_input);
+
+    auto build = ctx->create_command_list();
+    sg::cluster_triangles const square[] = {
+        {.vertices = input.raw(), .vertex_count = 3, .indices = index_input.raw(), .triangle_count = 1, .cluster_id = 7},
+        {.vertices = input.raw(),
+         .vertex_count = 3,
+         .vertex_offset_in_bytes = 36,
+         .indices = index_input.raw(),
+         .triangle_count = 1,
+         .cluster_id = 9},
+    };
+    auto const clusters = build->raytracing.build_clusters(square);
+    REQUIRE(clusters != nullptr);
+    CHECK(clusters->cluster_count() == 2);
+    sg::cluster_range const whole[] = {{.first = 0, .count = 2}};
+    auto const blases = build->raytracing.build_cluster_blas(clusters, whole);
+    REQUIRE(blases.size() == 1);
+    CHECK(blases[0]->geometry_count() == 1);
+    sg::tlas_instance const placed[] = {{.blas = blases[0], .instance_id = 10}};
+    auto const world = build->raytracing.build_tlas(placed);
+    ctx->submit_command_list(cc::move(build));
+    co_await trace_and_check(ctx, pipeline, world, {{.instance_id = 10, .slot = 0, .x = 0, .z = 0}}, "a tlas");
+
+    // each hit reads the cluster it is in
+    {
+        auto const clustered = co_await shaders::raytracing::trace_cells_clusters.acquire_pipeline(*ctx);
+        auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+        auto const hits
+            = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+        auto const ids
+            = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+        auto cmd = ctx->create_command_list();
+        auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
+        auto const group
+            = ctx->transient.create_binding_group(*cmd, layout,
+                                                  shaders::raytracing::scene{.world = world->as_view(),
+                                                                             .hits = hits.as_readwrite_buffer(),
+                                                                             .ids = ids.as_readwrite_buffer()});
+        cmd->compute.bind_pipeline(*clustered);
+        cmd->compute.bind_group(0, *group);
+        cmd->compute.dispatch_threads(grid, grid);
+        auto const ids_back = cmd->download.data_from_buffer(ids);
+        ctx->submit_command_list(cc::move(cmd));
+        auto const got = co_await ids_back.data();
+        REQUIRE(got.size() == grid * grid);
+        for (auto y = 0; y < 4; ++y)
+            for (auto x = 0; x < 4; ++x)
+            {
+                auto const is_below = float(x) + 0.25f + float(y) + 0.5f < 4.0f;
+                CHECK(got[y * grid + x][2] == (is_below ? 7 : 9)).context(cc::format("cell ({}, {})", x, y));
+            }
+    }
+
+    if (!ctx->supports(sg::feature::partitioned_tlas))
+        co_return;
+    auto const ptlas = ctx->persistent.create_partitioned_tlas(
+        {.instance_capacity = 2, .partition_count = 1, .max_instances_per_partition = 2, .max_global_instances = 1});
+    auto written = ctx->create_command_list();
+    sg::ptlas_write const writes[] = {
+        {.index = 0, .partition = 0, .instance = {.blas = blases[0], .instance_id = 10}},
+        {.index = 1,
+         .partition = sg::global_partition,
+         .instance = {.blas = blases[0], .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20}},
+    };
+    written->raytracing.update(*ptlas, {.writes = writes});
+    ctx->submit_command_list(cc::move(written));
+    co_await trace_and_check(
+        ctx, pipeline, ptlas,
+        {{.instance_id = 10, .slot = 0, .x = 0, .z = 0}, {.instance_id = 20, .slot = 1, .x = 4, .z = 2}},
+        "a partitioned tlas");
 }

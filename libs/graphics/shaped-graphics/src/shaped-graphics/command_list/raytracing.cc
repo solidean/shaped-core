@@ -7,6 +7,7 @@
 #include <shaped-graphics/command_list/raytracing.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/raytracing/blas_table.hh>
+#include <shaped-graphics/raytracing/clusters.hh>
 #include <shaped-graphics/raytracing/impl/hit_record_check.hh>
 #include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
@@ -211,6 +212,21 @@ void command_list::raytracing_update_partitioned_tlas_indirect(partitioned_tlas 
                      "raytracing_update_partitioned_tlas_indirect");
 }
 
+cluster_set_handle command_list::raytracing_build_clusters(cc::span<cluster_triangles const>, accel_build_flags)
+{
+    CC_ASSERT(false, "a backend that reports sg::feature::clustered_geometry overrides raytracing_build_clusters");
+    return nullptr;
+}
+
+cc::vector<blas_handle> command_list::raytracing_build_cluster_blas(cluster_set_handle const&,
+                                                                    cc::span<cluster_range const>,
+                                                                    accel_build_flags,
+                                                                    int)
+{
+    CC_ASSERT(false, "a backend that reports sg::feature::clustered_geometry overrides raytracing_build_cluster_blas");
+    return {};
+}
+
 namespace
 {
 /// Checks one kind of record against the buffers it names, which the build then reads.
@@ -265,6 +281,75 @@ void command_list_raytracing_scope::update_indirect(partitioned_tlas const& ptla
         CC_LOG_INFO("a partitioned tlas was updated from GPU-written records, so hit_record_checks no longer checks "
                     "its instances");
     _cmd.raytracing_update_partitioned_tlas_indirect(ptlas, ops, impl::mark_updated(ptlas), cc::move(released));
+}
+
+cluster_set_handle command_list_raytracing_scope::build_clusters(cc::span<cluster_triangles const> clusters,
+                                                                 accel_build_flags flags)
+{
+    CC_ASSERT(_cmd.context().supports(feature::clustered_geometry), "build_clusters: this context has no "
+                                                                    "sg::feature::clustered_geometry");
+    CC_ASSERT(!clusters.empty(), "build_clusters: a set holds at least one cluster");
+    CC_ASSERT(flags.without(accel_build_flag::fast_trace | accel_build_flag::fast_build).is_empty(),
+              "build_clusters: only fast_trace or fast_build apply");
+    CC_ASSERT(!flags.has_all(accel_build_flag::fast_trace | accel_build_flag::fast_build),
+              "build_clusters: fast_trace and fast_build are mutually exclusive");
+    for (auto i = isize(0); i < clusters.size(); ++i)
+    {
+        auto const& c = clusters[i];
+        CC_ASSERTF(c.vertices != nullptr && c.indices != nullptr,
+                   "build_clusters: cluster {} needs vertices and "
+                   "indices",
+                   i);
+        CC_ASSERTF(c.vertex_count >= 1 && c.vertex_count <= max_cluster_vertices,
+                   "build_clusters: cluster {} has {} vertices, of 1 to {}", i, c.vertex_count, max_cluster_vertices);
+        CC_ASSERTF(c.triangle_count >= 1 && c.triangle_count <= max_cluster_triangles,
+                   "build_clusters: cluster {} has {} triangles, of 1 to {}", i, c.triangle_count, max_cluster_triangles);
+        CC_ASSERTF(c.geometry_index >= 0 && c.geometry_index < (1 << 24),
+                   "build_clusters: cluster {}'s geometry index must fit in 24 bits", i);
+        CC_ASSERTF(c.vertices->usage().has(buffer_usage::accel_structure_build_input)
+                       && c.indices->usage().has(buffer_usage::accel_structure_build_input),
+                   "build_clusters: cluster {}'s buffers need buffer_usage::accel_structure_build_input", i);
+        auto const index_size = c.index_type == index_format::uint16 ? isize(2) : isize(4);
+        CC_ASSERTF(
+            c.index_offset_in_bytes >= 0
+                && c.index_offset_in_bytes + isize(c.triangle_count) * 3 * index_size <= c.indices->size_in_bytes(),
+            "build_clusters: cluster {}'s indices overrun their buffer", i);
+        CC_ASSERTF(c.vertex_offset_in_bytes >= 0 && c.vertex_stride_in_bytes >= isize(sizeof(float) * 3)
+                       && c.vertex_offset_in_bytes + isize(c.vertex_count - 1) * c.vertex_stride_in_bytes
+                                  + isize(sizeof(float) * 3)
+                              <= c.vertices->size_in_bytes(),
+                   "build_clusters: cluster {}'s vertices overrun their buffer", i);
+    }
+    _cmd._stats.add(stat::blas_builds);
+    return _cmd.raytracing_build_clusters(clusters, flags);
+}
+
+cc::vector<blas_handle> command_list_raytracing_scope::build_cluster_blas(cluster_set_handle const& clusters,
+                                                                          cc::span<cluster_range const> ranges,
+                                                                          accel_build_flags flags,
+                                                                          int hit_record_stride)
+{
+    CC_ASSERT(_cmd.context().supports(feature::clustered_geometry), "build_cluster_blas: this context has no "
+                                                                    "sg::feature::clustered_geometry");
+    CC_ASSERT(clusters != nullptr, "build_cluster_blas: the cluster set is null");
+    CC_ASSERT(!ranges.empty(), "build_cluster_blas: at least one range");
+    CC_ASSERT(hit_record_stride >= 1, "build_cluster_blas: hit_record_stride must be >= 1");
+    CC_ASSERT(flags.without(accel_build_flag::fast_trace | accel_build_flag::fast_build).is_empty(),
+              "build_cluster_blas: only fast_trace or fast_build apply");
+    CC_ASSERT(!flags.has_all(accel_build_flag::fast_trace | accel_build_flag::fast_build),
+              "build_cluster_blas: fast_trace and fast_build are mutually exclusive");
+    for (auto const& r : ranges)
+        CC_ASSERTF(r.count >= 1 && r.first >= 0 && r.first + r.count <= clusters->cluster_count(),
+                   "build_cluster_blas: clusters {} to {} are not within a set of {}", r.first, r.first + r.count,
+                   clusters->cluster_count());
+    _cmd._stats.add(stat::blas_builds);
+    auto blases = _cmd.raytracing_build_cluster_blas(clusters, ranges, flags, hit_record_stride);
+    for (auto const& blas : blases)
+    {
+        impl::set_build_record(*blas, blas_geometry::triangles, hit_record_stride);
+        impl::set_clusters(*blas, clusters);
+    }
+    return blases;
 }
 
 void command_list_raytracing_scope::bind_pipeline(raytracing_pipeline const& pipeline)

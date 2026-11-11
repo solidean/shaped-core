@@ -47,4 +47,16 @@ bool vulkan_raytracing_functions::load_partitioned(VkDevice device)
 
     return get_partitioned_build_sizes != nullptr && cmd_build_partitioned != nullptr;
 }
+
+bool vulkan_raytracing_functions::load_clusters(VkDevice device)
+{
+    auto const fetch = [device](char const* name) { return vkGetDeviceProcAddr(device, name); };
+
+    get_cluster_build_sizes
+        = PFN_vkGetClusterAccelerationStructureBuildSizesNV(fetch("vkGetClusterAccelerationStructureBuildSizesNV"));
+    cmd_build_clusters = PFN_vkCmdBuildClusterAccelerationStructureIndirectNV(fetch("vkCmdBuildClusterAccelerationStruc"
+                                                                                    "tureIndirectNV"));
+
+    return get_cluster_build_sizes != nullptr && cmd_build_clusters != nullptr;
+}
 } // namespace sg::backend::vulkan
