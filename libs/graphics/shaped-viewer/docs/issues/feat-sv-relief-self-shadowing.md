@@ -17,7 +17,8 @@ Why not march the height toward the light: light sampling in `shade_sampled` is 
 
 The plan:
 
-- **Two optional rgba attributes**, the horizon elevation in 8 directions of tangent space, baked by the producer from the height.
+- **Two optional rgba attributes**, the horizon elevation in 8 directions of tangent space, baked by the producer.
+  `feat-sv-render-channels` gives a producer that bakes from a model the horizons traced against true geometry, not marched over a height.
 - **A surface field** beside `micro_occlusion`, the horizon interpolated toward the direction asked.
 - **Applied like the micro-occlusion**: on light samples, environment samples and the continuation alike, so multiple importance sampling weighs one visibility.
 - **A reference test**: a step height field's shadow against the same step as geometry, plus mutation checks, like the parallax test.
