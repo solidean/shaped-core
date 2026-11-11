@@ -159,7 +159,8 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
   Its terms forbid distribution and expire, so it is a development pin only: [platforms](../../../../../docs/platforms.md#preview-agility-sdk-sc_agility_preview) has the switch.
 - `extern/dxc` needs a matching preview pin, `1.10.2605.37-preview`, since `1.9.2602.24` stops at Shader Model 6.9.
   Only `cluster_id` needs it, so it waits for phase 4, and its terms carry the same restrictions.
-- `Microsoft.Direct3D.WARP 1.65535.22-preview` supports both features, in `extern/warp-preview`, which would make dx12 tests runnable on any machine.
+- `Microsoft.Direct3D.WARP 1.65535.22-preview` supports both features, which would make dx12 tests runnable on any machine.
+  It creates no device under the preview runtime, though, so nothing pins it: [the issue](../issues/bug-sg-dx12-preview-warp-refuses-agility-preview.md).
 - The dx12 backend opts in through `ID3D12DeviceFactory::EnableExperimentalFeatures` on its own factory, with `D3D12ExperimentalShaderModels` and `D3D12RaytracingPreview`.
   It already loads through `CreateDeviceFactory`, so the opt-in touches no other D3D12 user in the process.
   Without Developer Mode the preview runtime does not load at all, and dx12 falls back to the system runtime with a warning.
@@ -167,7 +168,8 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
 
 ## Phases
 
-1. **Plumbing** (built): the preview channel for Agility and WARP, `--agility-preview`, the opt-in, and dx12's `supports_clusters_and_ptlas()`.
+1. **Plumbing** (built): the preview channel for Agility, `--agility-preview`, the opt-in, and dx12's `supports_clusters_and_ptlas()`.
+   The preview runtime loads and accepts its features; the RTX 4090's driver 32.0.16.1088 does not report the cap, so it is unproven on a device.
    No sg feature reports either yet, since a reported feature promises a code path that does not exist until phase 2.
 2. **PTLAS, described tier**, over ordinary BLASes: `sg::feature::partitioned_tlas`, and Vulkan's extension enabled where granted.
    Then `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops, and `hit_record_checks` on the mirror.
@@ -176,7 +178,7 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
 4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id` with the preview DXC.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.
 
-Each phase lands tested on dx12 (WARP preview) and on vulkan where an NVIDIA device is present.
+Each phase lands tested on dx12 where an adapter reports the cap, and on vulkan where an NVIDIA device grants the extensions.
 
 ## Open questions
 

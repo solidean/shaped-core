@@ -379,7 +379,6 @@ The preview's terms forbid distributing it, and end 30 days after a retail relea
 
 ```bash
 uv run extern/agility/fetch-agility.py --preview --accept-license   # after reading its terms
-uv run extern/warp/fetch-warp.py --preview                          # optional: a WARP that implements the preview features
 uv run dev.py test --agility-preview "<pattern>"
 ```
 
@@ -390,7 +389,9 @@ uv run dev.py test --agility-preview "<pattern>"
   dx12 then falls back to the system runtime with a warning, which fails every dx12 test of that build, as a fetched SDK that fails to load always has.
 - **The backend enables the preview features as experimental features on its own device factory**, so no other D3D12 user in the process is affected.
   A runtime that loads and refuses them logs that at info level and reports them absent.
-- **The dx12 tests prefer the preview WARP** where it was fetched, and keep `extern/warp`'s otherwise, which lacks the preview features.
+- **The dx12 tests keep the WARP they always had**, which lacks the preview features.
+  The preview WARP creates no device under the preview runtime: [the issue](../libs/graphics/shaped-graphics/docs/issues/bug-sg-dx12-preview-warp-refuses-agility-preview.md).
+- **A hardware adapter reports the features only on a driver that implements them**, which a vendor's current release need not be.
 
 ## Build types
 

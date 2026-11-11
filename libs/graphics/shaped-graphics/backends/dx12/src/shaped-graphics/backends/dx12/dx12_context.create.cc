@@ -223,7 +223,13 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
             info.driver_version = cc::move(warp);
     // The runtime is part of what a pipeline blob depends on: the Agility SDK's rejects the system runtime's, and back.
     if (runs_agility_runtime())
+    {
+#if SG_HAS_AGILITY_PREVIEW
+        info.driver_version += cc::format(" (Agility SDK {} preview)", D3D12_PREVIEW_SDK_VERSION);
+#else
         info.driver_version += cc::format(" (Agility SDK {})", D3D12_SDK_VERSION);
+#endif
+    }
 
     return info;
 }

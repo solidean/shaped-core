@@ -5,13 +5,10 @@ cmake_minimum_required(VERSION 3.28)
 # Fetched ON REQUEST by fetch-warp.py (`uv run extern/warp/fetch-warp.py`), never by a configure; dependency.yml says why.
 # Nothing links it: a d3d10warp.dll beside an executable is loaded instead of the system one, so all this does is say
 # where the DLL is, and shaped-graphics' sg_warp_test_binary stages it beside every WARP test binary.
-# WARP_INSTALL is the parent's choice: this directory's install, or extern/warp-preview's under SC_AGILITY_PREVIEW.
-if(NOT WARP_INSTALL)
-    set(WARP_INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/.install)
-endif()
+set(WARP_INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/.install)
 
 if(NOT EXISTS "${WARP_INSTALL}/bin/d3d10warp.dll")
-    message(STATUS "warp: ${WARP_INSTALL} holds no d3d10warp.dll — re-run its fetch with `--force`; the tests keep Windows' own WARP.")
+    message(STATUS "warp: the install holds no d3d10warp.dll — re-run `uv run extern/warp/fetch-warp.py --force`; the tests keep Windows' own WARP.")
     return()
 endif()
 
