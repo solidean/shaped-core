@@ -36,6 +36,7 @@ COMMAND("emit")
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
     auto mesh_name = cc::string("native");
+    auto polyfill_vertex = cc::string();
     auto args = nx::args({.name = "sgl emit",
                           .description = "Compiles one entry point of an SGL file and prints the target text, with its "
                                          "warnings on stderr, or the diagnostics that kept it from being written."});
@@ -73,9 +74,11 @@ COMMAND("emit")
     args.arg({"module-dir"}, module_dirs,
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     args.arg({"mesh"}, mesh_name,
-             {.desc = "a mesh entry point as itself, or as the compute or the vertex half of its polyfill: native, "
-                      "compute or vertex",
+             {.desc = "a mesh or geometry entry point as itself, or as the compute or the vertex half of its "
+                      "polyfill: native, compute or vertex",
               .metavar = "FORM"});
+    args.arg({"vertex"}, polyfill_vertex,
+             {.desc = "the vertex stage a geometry entry point's compute half runs, its pipeline's", .metavar = "NAME"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
     auto const library = sgl_tool::read_module_dirs(module_dirs);
@@ -173,7 +176,8 @@ COMMAND("emit")
          .device_features = device_features,
          .native = is_spirv || is_dxil ? sgl::emit::native_route::require : sgl::emit::native_route::text,
          .native_line_table = native_line_table,
-         .mesh = mesh});
+         .mesh = mesh,
+         .polyfill_vertex = polyfill_vertex});
     if (text.has_error())
     {
         cc::eprint(text.error());

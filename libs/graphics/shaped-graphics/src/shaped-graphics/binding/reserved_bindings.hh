@@ -79,8 +79,9 @@ inline constexpr reserved_binding_address reserved_acceleration_addresses
        .vulkan_set = 3,
        .vulkan_binding = 22};
 
-/// A polyfilled mesh stage's slots in 32-bit words, which its compute form writes and its vertex form reads back; one
-/// buffer sg sizes per draw, bound twice.
+/// A polyfilled mesh or geometry stage's slots in 32-bit words, which its compute form writes and its vertex form reads
+/// back; one buffer sg sizes per draw, bound twice.
+/// metal has them for a geometry stage alone, since it draws every mesh stage natively.
 /// libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md is the protocol.
 inline constexpr reserved_binding_address reserved_mesh_output = {.name = "sg_mesh_output",
                                                                   .dx12_space = 11,
@@ -88,18 +89,78 @@ inline constexpr reserved_binding_address reserved_mesh_output = {.name = "sg_me
                                                                   .vulkan_set = 3,
                                                                   .vulkan_binding = 23,
                                                                   .webgpu_group = 3,
-                                                                  .webgpu_binding = 23};
+                                                                  .webgpu_binding = 23,
+                                                                  .metal_buffer = 20};
 inline constexpr reserved_binding_address reserved_mesh_input = {.name = "sg_mesh_input",
                                                                  .dx12_space = 11,
                                                                  .dx12_register = 2,
                                                                  .vulkan_set = 3,
                                                                  .vulkan_binding = 24,
                                                                  .webgpu_group = 3,
-                                                                 .webgpu_binding = 24};
+                                                                 .webgpu_binding = 24,
+                                                                 .metal_buffer = 21};
+
+/// What a polyfilled geometry stage's draw was, `uint4[3]`, which its compute form assembles primitives by.
+/// `[0]` first vertex or first index, primitives an instance, index kind (0 none, 1 16-bit, 2 32-bit), vertex offset.
+/// `[1]` first instance, the index buffer's offset in indices; `[2]` each vertex buffer's offset in words.
+inline constexpr reserved_binding_address reserved_geometry_draw = {.name = "sg_geometry_draw",
+                                                                    .dx12_space = 11,
+                                                                    .dx12_register = 8,
+                                                                    .vulkan_set = 3,
+                                                                    .vulkan_binding = 25,
+                                                                    .webgpu_group = 3,
+                                                                    .webgpu_binding = 25,
+                                                                    .metal_buffer = 22};
+/// The draw's index buffer and its vertex buffers in slot order, as words, which that compute form reads.
+inline constexpr reserved_binding_address reserved_geometry_indices = {.name = "sg_geometry_indices",
+                                                                       .dx12_space = 11,
+                                                                       .dx12_register = 3,
+                                                                       .vulkan_set = 3,
+                                                                       .vulkan_binding = 26,
+                                                                       .webgpu_group = 3,
+                                                                       .webgpu_binding = 26,
+                                                                       .metal_buffer = 23};
+inline constexpr reserved_binding_address reserved_geometry_vertices[] = {
+    {.name = "sg_geometry_vertices0",
+     .dx12_space = 11,
+     .dx12_register = 4,
+     .vulkan_set = 3,
+     .vulkan_binding = 27,
+     .webgpu_group = 3,
+     .webgpu_binding = 27,
+     .metal_buffer = 24},
+    {.name = "sg_geometry_vertices1",
+     .dx12_space = 11,
+     .dx12_register = 5,
+     .vulkan_set = 3,
+     .vulkan_binding = 28,
+     .webgpu_group = 3,
+     .webgpu_binding = 28,
+     .metal_buffer = 25},
+    {.name = "sg_geometry_vertices2",
+     .dx12_space = 11,
+     .dx12_register = 6,
+     .vulkan_set = 3,
+     .vulkan_binding = 29,
+     .webgpu_group = 3,
+     .webgpu_binding = 29,
+     .metal_buffer = 26},
+    {.name = "sg_geometry_vertices3",
+     .dx12_space = 11,
+     .dx12_register = 7,
+     .vulkan_set = 3,
+     .vulkan_binding = 30,
+     .webgpu_group = 3,
+     .webgpu_binding = 30,
+     .metal_buffer = 27},
+};
 
 inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window,  reserved_acceleration_pool,      reserved_acceleration_roots, reserved_array_lengths,
-       reserved_dispatch_grid, reserved_acceleration_addresses, reserved_mesh_output,        reserved_mesh_input};
+    = {reserved_debug_window,         reserved_acceleration_pool,    reserved_acceleration_roots,
+       reserved_array_lengths,        reserved_dispatch_grid,        reserved_acceleration_addresses,
+       reserved_mesh_output,          reserved_mesh_input,           reserved_geometry_draw,
+       reserved_geometry_indices,     reserved_geometry_vertices[0], reserved_geometry_vertices[1],
+       reserved_geometry_vertices[2], reserved_geometry_vertices[3]};
 
 namespace impl
 {

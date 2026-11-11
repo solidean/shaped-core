@@ -24,6 +24,8 @@ enum class sgl::check::reserved_use : sgl::u8
     trace_by_address,
     /// A mesh stage polyfilled as a compute pass and a draw (CHK-524).
     mesh_polyfill,
+    /// A geometry stage polyfilled as a compute pass and a draw (CHK-525).
+    geometry_polyfill,
 };
 
 /// Where one target finds an entry.
@@ -127,7 +129,8 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {},
          {},
      }},
-    // a polyfilled mesh stage's slots, which its compute form writes (CHK-524); metal draws every mesh stage natively
+    // a polyfilled mesh or geometry stage's slots, which its compute form writes (CHK-524, CHK-525); metal draws every
+    // mesh stage natively, and polyfills only a geometry stage
     {.name = "sg_mesh_output",
      .declaration = "@internal binding sg_mesh_output:\n    words: mut buffer[uint]\n",
      .enabled_by = reserved_use::mesh_polyfill,
@@ -135,7 +138,8 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 11, .slot = 1, .stages = stage_bit(stage::compute)},
          {.group = 3, .slot = 23, .stages = stage_bit(stage::compute)},
          {.group = 3, .slot = 23, .stages = stage_bit(stage::compute)},
-         {},
+         // past the vertex-input slots, which a kernel has none of
+         {.group = -1, .slot = 20, .stages = stage_bit(stage::compute)},
      }},
     // the same slots, which its vertex form reads back, read-only since WebGPU's vertex stage writes no storage
     {.name = "sg_mesh_input",
@@ -145,7 +149,67 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 11, .slot = 2, .stages = stage_bit(stage::vertex)},
          {.group = 3, .slot = 24, .stages = stage_bit(stage::vertex)},
          {.group = 3, .slot = 24, .stages = stage_bit(stage::vertex)},
-         {},
+         // past the vertex-input slots, which the vertex half binds none of
+         {.group = -1, .slot = 21, .stages = stage_bit(stage::vertex)},
+     }},
+    // what a polyfilled geometry stage's draw was (CHK-525): `[0]` first vertex or index, primitives an instance, index
+    // kind (0 none, 1 16-bit, 2 32-bit), vertex offset; `[1]` first instance, the index buffer's offset in indices;
+    // `[2]` each vertex buffer's offset in words; a buffer rather than a block, since metal has no reserved block
+    {.name = "sg_geometry_draw",
+     .declaration = "@internal binding sg_geometry_draw:\n    values: buffer[uint4]\n",
+     .enabled_by = reserved_use::geometry_polyfill,
+     .targets = {
+         {.group = 11, .slot = 8, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 25, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 25, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 22, .stages = stage_bit(stage::compute)},
+     }},
+    // the draw's index buffer and vertex buffers as words, which a polyfilled geometry stage assembles its primitives
+    // from (CHK-525)
+    {.name = "sg_geometry_indices",
+     .declaration = "@internal binding sg_geometry_indices:\n    words: buffer[uint]\n",
+     .enabled_by = reserved_use::geometry_polyfill,
+     .targets = {
+         {.group = 11, .slot = 3, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 26, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 26, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 23, .stages = stage_bit(stage::compute)},
+     }},
+    {.name = "sg_geometry_vertices0",
+     .declaration = "@internal binding sg_geometry_vertices0:\n    words: buffer[uint]\n",
+     .enabled_by = reserved_use::geometry_polyfill,
+     .targets = {
+         {.group = 11, .slot = 4, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 27, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 27, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 24, .stages = stage_bit(stage::compute)},
+     }},
+    {.name = "sg_geometry_vertices1",
+     .declaration = "@internal binding sg_geometry_vertices1:\n    words: buffer[uint]\n",
+     .enabled_by = reserved_use::geometry_polyfill,
+     .targets = {
+         {.group = 11, .slot = 5, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 28, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 28, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 25, .stages = stage_bit(stage::compute)},
+     }},
+    {.name = "sg_geometry_vertices2",
+     .declaration = "@internal binding sg_geometry_vertices2:\n    words: buffer[uint]\n",
+     .enabled_by = reserved_use::geometry_polyfill,
+     .targets = {
+         {.group = 11, .slot = 6, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 29, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 29, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 26, .stages = stage_bit(stage::compute)},
+     }},
+    {.name = "sg_geometry_vertices3",
+     .declaration = "@internal binding sg_geometry_vertices3:\n    words: buffer[uint]\n",
+     .enabled_by = reserved_use::geometry_polyfill,
+     .targets = {
+         {.group = 11, .slot = 7, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 30, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 30, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 27, .stages = stage_bit(stage::compute)},
      }},
 };
 

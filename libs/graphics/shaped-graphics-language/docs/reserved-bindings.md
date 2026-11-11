@@ -27,8 +27,11 @@ A table edited on one side alone stops the build.
 | `sg_array_lengths` | `b1, space12`, root constants | set 3, binding 20 | none | none, the array's table counts it | an unbounded binding array |
 | `sg_dispatch_grid` | `b2, space12`, root constants | set 3, binding 21 | group 3, binding 21 | none, metal dispatches the grid's threads | a bare `@compute` |
 | `sg_acceleration_addresses` | none | set 3, binding 22 | none | none | a trace in SGL's own SPIR-V |
-| `sg_mesh_output` | `u1, space11`, a root UAV | set 3, binding 23 | group 3, binding 23 | none, metal draws every mesh stage | a polyfilled mesh stage's compute half |
-| `sg_mesh_input` | `t2, space11`, a root SRV | set 3, binding 24 | group 3, binding 24 | none | a polyfilled mesh stage's vertex half |
+| `sg_mesh_output` | `u1, space11`, a root UAV | set 3, binding 23 | group 3, binding 23 | `[[buffer(20)]]`, for a geometry stage alone | a polyfilled mesh or geometry stage's compute half |
+| `sg_mesh_input` | `t2, space11`, a root SRV | set 3, binding 24 | group 3, binding 24 | `[[buffer(21)]]` | a polyfilled mesh or geometry stage's vertex half |
+| `sg_geometry_draw` | `t8, space11` | set 3, binding 25 | group 3, binding 25 | `[[buffer(22)]]` | a polyfilled geometry stage's compute half |
+| `sg_geometry_indices` | `t3, space11` | set 3, binding 26 | group 3, binding 26 | `[[buffer(23)]]` | the same |
+| `sg_geometry_vertices0` to `3` | `t4` to `t7, space11` | set 3, bindings 27 to 30 | group 3, bindings 27 to 30 | `[[buffer(24)]]` to `[[buffer(27)]]` | the same |
 
 On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and hands it every stage it calls through `sgl_context` (EMIT-183).
 
@@ -50,6 +53,10 @@ sg's vulkan layout holds it wherever the layout holds an acceleration member, si
 `sg_mesh_output` and `sg_mesh_input` are one buffer of words, which a polyfilled mesh stage's compute half writes and its vertex half reads back (CHK-524).
 The compute half also reads `sg_dispatch_grid`, the threads sg dispatched it in, to number its workgroups.
 [mesh-polyfill.md](../../shaped-graphics/docs/concepts/mesh-polyfill.md) is the protocol: the words, and how sg sizes and draws them.
+
+A polyfilled geometry stage writes the same words, a primitive's in place of a workgroup's, and reads its draw from the `sg_geometry_*` entries (CHK-525).
+`sg_geometry_draw` is a buffer of three `uint4`s rather than a block, since metal has no reserved block, and the protocol page says what each lane holds.
+`sg_geometry_indices` and `sg_geometry_vertices0` on are the draw's own index buffer and vertex buffers, bound as words; metal binds them past every vertex-input slot.
 
 ## The debug window
 

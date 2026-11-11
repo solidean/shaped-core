@@ -3621,6 +3621,30 @@
     words: buffer[uint]
 
 
+@internal binding sg_geometry_draw:
+    values: buffer[uint4]
+
+
+@internal binding sg_geometry_indices:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices0:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices1:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices2:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices3:
+    words: buffer[uint]
+
+
 /// What a weak compare-exchange read, and whether it stored `desired`.
 struct exchange_result[T]:
     old: T

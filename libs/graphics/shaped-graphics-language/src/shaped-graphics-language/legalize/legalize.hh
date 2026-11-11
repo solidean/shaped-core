@@ -125,6 +125,31 @@ namespace sgl::check
 [[nodiscard]] cc::result<mesh_polyfill_layout, cc::string> mesh_polyfill_layout_of(checked_module const& m,
                                                                                    flat_entry_point const& e);
 
+/// The vertex buffers a polyfilled geometry stage's vertex stage reads at most, `sg_geometry_vertices0` on (CHK-525).
+inline constexpr i32 k_geometry_polyfill_streams = 4;
+
+/// The threads of a polyfilled geometry stage's workgroup, one a primitive (CHK-525).
+inline constexpr i32 k_geometry_polyfill_workgroup = 64;
+
+/// The layout a geometry entry point `g` polyfills into, a primitive's slots in place of a workgroup's, or the reason
+/// it has none yet: a stream of points, or a vertex member that is no scalar, vector or array of them (CHK-525).
+/// A primitive owns `max_vertices` vertex slots and as many primitive slots as one strip of them cuts into.
+[[nodiscard]] cc::result<mesh_polyfill_layout, cc::string> geometry_polyfill_layout_of(checked_module const& m,
+                                                                                       flat_entry_point const& g);
+
+/// The vertex stage `v` and the geometry stage `g` of one pipeline, both legalized, as one compute entry point that
+/// writes each primitive's slots of `sg_mesh_output`, one thread a primitive of an instance (CHK-525).
+/// It assembles each primitive from `sg_geometry_indices` and `sg_geometry_vertices0` on, as `sg_geometry_draw` says.
+/// What comes back is no core tree: legalize it before a target writes it.
+/// An error names what the polyfill does not carry yet: points, a stage input it has no value for, too many buffers.
+[[nodiscard]] cc::result<flat_entry_point, cc::string> geometry_as_compute(checked_module const& m,
+                                                                           flat_entry_point const& v,
+                                                                           flat_entry_point const& g);
+
+/// The vertex entry point that draws what `geometry_as_compute` wrote: `mesh_as_vertex_fetch`'s, over `g`'s layout.
+/// `g` must have a layout.
+[[nodiscard]] flat_entry_point geometry_as_vertex_fetch(checked_module const& m, flat_entry_point const& g);
+
 /// A mesh entry point `e` as the compute entry point that writes its workgroup's slots of `sg_mesh_output` instead of
 /// handing them to the rasterizer; its grid is the one sg writes into `sg_dispatch_grid`.
 /// `e` must have a layout.

@@ -150,25 +150,54 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  check::feature_set device_features,
                                                  emit::native_route native = emit::native_route::text,
                                                  bool native_line_table = false,
-                                                 emit::mesh_form mesh = emit::mesh_form::native)
+                                                 emit::mesh_form mesh = emit::mesh_form::native,
+                                                 check::flat_entry_point const* polyfill_vertex = nullptr)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
+    // CHK-525: a polyfilled geometry stage's compute half is its pipeline's vertex stage and itself as one compute
+    // entry point; each is legalized to be grafted, and what they make is legalized below as any entry point is
+    auto polyfill_layout = cc::optional<check::mesh_polyfill_layout>();
+    auto fused = cc::optional<check::flat_entry_point>();
+    if (mesh != emit::mesh_form::native && e.entry_stage == check::stage::geometry)
+    {
+        auto const layout = check::geometry_polyfill_layout_of(m, e);
+        if (layout.has_error())
+            return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, layout.error()));
+        polyfill_layout = layout.value();
+        if (mesh == emit::mesh_form::compute)
+        {
+            if (polyfill_vertex == nullptr)
+                return cc::error(cc::format("{}: error: the compute half of geometry entry point '{}' runs its "
+                                            "pipeline's "
+                                            "vertex stage, and none was named\n",
+                                            source_name, e.name));
+            auto const graft = check::legalize_options{.is_emulated = target == emit::target::wgsl || asks_software_trace,
+                                                       .lowers_asserts = diagnostics};
+            auto made = check::geometry_as_compute(m, check::legalize(m, *polyfill_vertex, graft),
+                                                   check::legalize(m, e, graft));
+            if (made.has_error())
+                return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
+            fused = cc::move(made.value());
+        }
+    }
+    auto const& source_entry = fused.has_value() ? fused.value() : e;
     // EMIT-185: a guarantee the target cannot keep is refused, unless the host weakened it on WebGPU
-    auto const raised_by = check::is_valid(e.float_raised_by) ? m.at(e.float_raised_by).name : cc::string();
-    auto float_guarantee = e.float_guarantee;
+    auto const raised_by
+        = check::is_valid(source_entry.float_raised_by) ? m.at(source_entry.float_raised_by).name : cc::string();
+    auto float_guarantee = source_entry.float_guarantee;
     if (u8(float_guarantee) > u8(kept_float_level(target)))
     {
         if (target != emit::target::wgsl || !weakens_float)
             return cc::error(cc::format("{}: error: float-guarantee-not-kept: entry point '{}' needs @float(.{}), "
                                         "which "
                                         "'{}' asks for, and {} keeps no more than .{}\n",
-                                        source_name, e.name, float_level_name(float_guarantee), raised_by,
+                                        source_name, source_entry.name, float_level_name(float_guarantee), raised_by,
                                         emit::to_string(target), float_level_name(kept_float_level(target))));
         float_guarantee = check::float_level::fast;
     }
     // EMIT-185: vulkan keeps a level through execution modes the device must have
-    auto entry = e;
+    auto entry = source_entry;
     if (target == emit::target::hlsl_vulkan && float_guarantee != check::float_level::fast)
         entry.features.set(check::feature::float_specials);
     if (target == emit::target::hlsl_vulkan && float_guarantee == check::float_level::ieee)
@@ -197,8 +226,10 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                         .names = names,
                                         .guards_undefined = guards_undefined});
     // CHK-524: a polyfilled mesh entry point is written, reflected and described as the form it becomes
-    auto mesh_layout = cc::optional<check::mesh_polyfill_layout>();
+    auto mesh_layout = polyfill_layout;
     auto form = legal;
+    if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::geometry)
+        form = check::geometry_as_vertex_fetch(m, legal);
     if (mesh != emit::mesh_form::native && legal.entry_stage == check::stage::mesh)
     {
         auto const layout = check::mesh_polyfill_layout_of(m, legal);
@@ -249,7 +280,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
             result.target_struct = cc::format("{}.{}", module, result.target_struct);
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = form.workgroup[axis];
-    result.is_dispatched_by_threads = e.is_auto_workgroup;
+    result.is_dispatched_by_threads = form.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     result.unshadowed_bytes = legal.unshadowed_bytes;
     result.float_guarantee = float_guarantee;
@@ -326,9 +357,21 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     // CHK-402: what was judged of another entry point's body is no error of this one
     if (auto own = front.errors_of(e.function); !own.empty())
         return cc::error(cc::move(own));
-    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
-                            request.guards_undefined, request.software_trace, request.weakens_float,
-                            request.device_features, request.native, request.native_line_table, request.mesh);
+    // CHK-525: the vertex stage a polyfilled geometry stage's compute half runs
+    auto const* polyfill_vertex = static_cast<check::flat_entry_point const*>(nullptr);
+    if (!request.polyfill_vertex.empty())
+    {
+        for (auto const& v : m.entry_points)
+            if (v.name == request.polyfill_vertex && v.entry_stage == check::stage::vertex)
+                polyfill_vertex = &v;
+        if (polyfill_vertex == nullptr)
+            return cc::error(cc::format("{}: error: no vertex entry point named '{}'\n", request.source_name,
+                                        request.polyfill_vertex));
+    }
+    auto result
+        = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.guards_undefined,
+                    request.software_trace, request.weakens_float, request.device_features, request.native,
+                    request.native_line_table, request.mesh, polyfill_vertex);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(

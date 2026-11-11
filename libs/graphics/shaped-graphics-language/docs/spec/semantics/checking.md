@@ -1430,6 +1430,12 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   The vertex half draws one invocation a corner of every slot, and a slot past its workgroup's count stands outside the clip volume.
   The words, the reserved buffers and how sg draws them are [the polyfill protocol](../../../../shaped-graphics/docs/concepts/mesh-polyfill.md).
   A mesh entry point that takes a payload, writes values per primitive, or has a vertex member that is no scalar, vector or array of them is `unsupported-yet` there.
+* **CHK-525** Where a device has no geometry stage, a geometry entry point can be polyfilled the same way: its pipeline's vertex stage and itself as one compute entry point, then a draw.
+  One thread a primitive of an instance assembles it from the draw's index and vertex buffers, runs the vertex stage on each corner, and runs the geometry stage on the result.
+  What it appends goes into the primitive's fixed slots, the mesh polyfill's words, so the draw keeps the native order: primitive by primitive, then as appended.
+  A strip is cut into primitives as it grows, an odd triangle's first two corners swapped so every one winds alike; what is appended past `max_vertices` is dropped.
+  `vertex_index` counts from the draw's first vertex, or is the index an indexed draw read; `instance_index` counts from the draw's first instance, and `primitive_id` within the instance.
+  A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
 
 ## Ray tracing
 
@@ -1839,7 +1845,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-524, CHK-450, CHK-453, CHK-454 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |

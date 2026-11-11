@@ -69,6 +69,35 @@ On dx12 and vulkan each draw takes a transient buffer of its own, and the barrie
 dx12 dispatches inside the scope, which binds its targets without a render pass; vulkan suspends its rendering instance around the dispatch.
 Reopening the pass is a split that `render_pass_splits` counts and no warning reports, which batching every polyfilled draw of a scope into one compute pass ahead of it would remove later.
 
+## A geometry stage on the same words
+
+**A device without a geometry stage draws one the same way** (CHK-525): metal and webgpu, which have none.
+SGL writes the compute half from the pipeline's vertex stage and the geometry stage together, and the vertex half is this page's.
+A primitive takes a workgroup's place: thread `t` of the dispatch is primitive `t % primitives` of instance `t / primitives`, and owns `group_words` words from `t * group_words`.
+`max_vertices` is the stage's own, and `max_primitives` is what one strip of that many vertices cuts into: `max_vertices - 2` triangles, or `max_vertices - 1` lines.
+
+The compute half assembles each primitive from the draw's own buffers, which sg binds as words:
+
+| entry | holds |
+|---|---|
+| `sg_geometry_draw[0]` | first vertex, or first index of an indexed draw; primitives an instance; index kind, 0 none, 1 16-bit, 2 32-bit; the vertex offset added to each index |
+| `sg_geometry_draw[1]` | first instance; the index buffer's offset, in indices; two words unused |
+| `sg_geometry_draw[2]` | each vertex buffer's offset, in words, in slot order |
+| `sg_geometry_indices` | the index buffer bound for the draw; a 16-bit index is half a word, the low half first |
+| `sg_geometry_vertices0` to `3` | the vertex buffers bound, in slot order |
+
+A vertex buffer's element is its `@vertex struct` stream as the host packs it: each member in order, a word a scalar leaf, a packed `@format` one word.
+So its stride is in the shader, and only the offsets are the draw's.
+
+`draw` and `draw_indexed` of such a pipeline then:
+
+1. take a scratch buffer of `primitives * instances * group_words` words;
+2. leave the rendering scope's pass;
+3. dispatch the compute half over `primitives * instances` threads, with the draw's buffers and the groups bound for it;
+4. reopen the pass and draw `primitives * instances * max_primitives * corners` vertices of the vertex half, unindexed.
+
+A list topology alone: a strip's primitives share corners, which no fixed slot assigns yet.
+
 ## Not yet
 
 - A task stage, whose launch count the GPU chooses: a declared maximum per task workgroup, or a per-draw budget a host may override.
