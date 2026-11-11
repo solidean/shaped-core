@@ -138,6 +138,10 @@ Two ways remain, and the first is decided:
   So no shader writes the operation array, and sg needs no kernel of its own.
   **No host code mirrors a target-layout record**, which keeps a program's C++ side portable (decided).
   sg declares an opaque host type of each record's size, `sg::gpu_ptlas_write`, and the plain ones as they are; slib's `sgl_modules/accel.hh` names them for generated code.
+  **The CLAS record differs in shape, not only in order** (decided): Vulkan packs its counts into 9-, 6- and 4-bit fields of one word where D3D12 has `UINT16`s.
+  Each API also has fields the other lacks, and the records are 64 and 80 bytes.
+  So `@target_layout` grows two field attributes: `@bits(n)` packs a field into the next bits of a word, and `@absent` declares one its API lacks.
+  Every branch still declares the same fields; a store to an absent one is dropped, so a shader writes one record for both APIs.
 - **sg defines its own layout and transcodes it** in a compute pass before each operation.
   It works from HLSL and WGSL alike, at a dispatch and a buffer per operation, and sg would carry a kernel of its own.
   Rejected: the GPU-written tier exists for hot paths, and a conversion pass per operation is the cost it was meant to avoid.
@@ -196,7 +200,14 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
    A record's BLAS is a table's address, and the tables an update names are the input set D3 asks for.
    The records and counts take the accesses the described tier's input does, so `accel_build_args` waits for a barrier that needs it.
    dx12's half compiles in the `--agility-preview` build, untested here like phase 2's.
-4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id` with the preview DXC.
+4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id`.
+   The described tier comes first (decided), since only the GPU-written CLAS record waits on `@bits` and `@absent`.
+   - (a) vulkan's described tier: a pool sized from its limits, `cmd.raytracing.build_clusters` replacing its contents, and `build_cluster_blas` over ranges of it.
+     A cluster BLAS is built in explicit-destination mode, into storage of its own, so the CPU knows the address a described TLAS write names.
+     A CLAS address exists only on the GPU, in the pool's address array, so a described cluster BLAS names a contiguous range of the pool's clusters.
+     SGL's `cluster_id` reads `ClusterIDNV` in SGL's own SPIR-V and through inline SPIR-V on the HLSL route, where the device has the feature.
+   - (b) the GPU-written CLAS tier, over `accel.clas_triangles` once SGL places `@bits` and `@absent` fields.
+   - (c) dx12's half, compiled in the `--agility-preview` build; its HLSL `cluster_id` waits for the preview DXC pin of D8.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.
 
 Each phase lands tested on dx12 where an adapter reports the cap, and on vulkan where an NVIDIA device grants the extensions.
