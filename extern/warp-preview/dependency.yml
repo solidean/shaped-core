@@ -1,0 +1,28 @@
+# Pin and license for the upstream fetched here.
+# `fetch-warp.py --preview` reads its pin from this file; extern/warp/ holds the script and the CMake wrapper both use.
+
+upstreams:
+  - name: WARP preview
+    homepage: https://www.nuget.org/packages/Microsoft.Direct3D.WARP
+    install: on-request
+    source: nuget
+    # The package id on nuget.org, which with `version` names the download.
+    repo: Microsoft.Direct3D.WARP
+    track: none
+    version: 1.65535.22-preview
+    asset: Microsoft.Direct3D.WARP.1.65535.22-preview.nupkg
+    digest_algo: sha256
+    pin_hash: 0752d47849b669e0a56615b9142706b29ac10773b761c0e99432ceba347870e2
+    # A D3D12 software adapter: there is nothing to run it on anywhere else.
+    unavailable_on: [linux, macos]
+    license: LicenseRef-Microsoft-WARP-Testing
+    license_files: [.install/LICENSE.txt]
+    used_by: the dx12 test binaries' WARP driver in a build configured with SC_AGILITY_PREVIEW
+    notes: |
+      The WARP that implements the preview runtime's clustered geometry and partitioned TLAS, so a build against
+      extern/agility-preview runs its tests on any machine.
+      A build configured with SC_AGILITY_PREVIEW stages it in place of extern/warp's, where it was fetched.
+
+      Its terms are word for word the ones extern/warp pins, compared on 2026-11-11, hence the same license identifier.
+      ON REQUEST for the same reason as extern/warp: they are testing-only and forbid redistributing it.
+      Re-read the terms on any bump.

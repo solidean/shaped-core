@@ -16,6 +16,9 @@ data-collection and arbitration clauses, which are a person's or a CI job's to a
 
 Pinning lives in dependency.yml next to this script: `version` names the package, and `pin_hash` (its SHA-256) is the authority.
 Re-running is idempotent; --force re-downloads anyway.
+
+`--preview` installs extern/warp-preview's pin into extern/warp-preview/.install instead: the WARP that implements the
+preview Agility runtime's features, which a build configured with SC_AGILITY_PREVIEW stages in place of this one.
 """
 
 import argparse
@@ -28,11 +31,9 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-DEST = Path(__file__).resolve().parent
-INSTALL = DEST / ".install"
-PIN_FILE = INSTALL / "pin.txt"
+HERE = Path(__file__).resolve().parent
 
-sys.path.insert(0, str(DEST.parent))
+sys.path.insert(0, str(HERE.parent))
 import deps_manifest  # noqa: E402
 
 # platform.machine() -> the package's per-arch folder.
@@ -41,16 +42,22 @@ ARCH_MAP = {"amd64": "x64", "x86_64": "x64", "arm64": "arm64", "aarch64": "arm64
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Download the pinned WARP package.")
+    ap.add_argument("--preview", action="store_true",
+                    help="install extern/warp-preview's pre-release pin instead of the retail one")
     ap.add_argument("--force", action="store_true", help="re-download even if the install is current")
     args = ap.parse_args()
 
-    up = deps_manifest.one(DEST)
+    dest = HERE.parent / "warp-preview" if args.preview else HERE
+    install = dest / ".install"
+    pin_file = install / "pin.txt"
+
+    up = deps_manifest.one(dest)
     if not up.is_available:
         print("warp: a Windows-only adapter — nothing to install on this host")
         return 0
 
-    if not args.force and PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == up.pin_hash:
-        print(f"warp {up.version} already installed at {INSTALL.as_posix()} — nothing to do")
+    if not args.force and pin_file.is_file() and pin_file.read_text(encoding="utf-8").strip() == up.pin_hash:
+        print(f"warp {up.version} already installed at {install.as_posix()} — nothing to do")
         return 0
 
     arch = ARCH_MAP.get(platform.machine().lower())
@@ -76,20 +83,20 @@ def main() -> int:
             sys.exit(f"{up.asset} is missing {', '.join(missing)} — its layout changed; the installed copy is untouched")
 
         # Staged beside the live install and swapped in only once complete, so a failed extract never leaves it half-gone.
-        staging = INSTALL.with_name(".install.staging")
+        staging = install.with_name(".install.staging")
         if staging.exists():
             shutil.rmtree(staging)
-        for member, dest in plan:
-            (staging / dest).parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(member) as src, open(staging / dest, "wb") as out:
+        for member, target in plan:
+            (staging / target).parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member) as src, open(staging / target, "wb") as out:
                 shutil.copyfileobj(src, out)
 
-    if INSTALL.exists():
-        shutil.rmtree(INSTALL)
-    staging.rename(INSTALL)
-    PIN_FILE.write_text(up.pin_hash + "\n", encoding="utf-8")
+    if install.exists():
+        shutil.rmtree(install)
+    staging.rename(install)
+    pin_file.write_text(up.pin_hash + "\n", encoding="utf-8")
 
-    print(f"\ninstalled {up.name} {up.version} ({arch}) -> {INSTALL.as_posix()}")
+    print(f"\ninstalled {up.name} {up.version} ({arch}) -> {install.as_posix()}")
     print("  reconfigure (any dev.py build does) so the WARP test binaries stage it beside themselves")
     return 0
 

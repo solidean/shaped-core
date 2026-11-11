@@ -345,6 +345,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   **The clang development presets build at `OPAQUE`**, so moving lines changes only debug info; `release-*` and the `singlethreaded-*` presets keep `FULL`.
   `dev.py test` resolves a failed run's `module+0xoffset` sites to `file:line (function)` and the source line.
   Whole-build, since it changes `cc::source_location`'s layout; see [docs/platforms.md](docs/platforms.md#source-sites-sc_source_sites).
+* `SC_AGILITY_PREVIEW` (default OFF) builds dx12 against the pre-release Agility SDK, for clustered geometry and partitioned TLAS → `SG_HAS_AGILITY_PREVIEW`.
+  **Development only**, since its terms forbid shipping it.
+  `--agility-preview` gives it a build directory of its own; see [docs/platforms.md](docs/platforms.md#preview-agility-sdk-sc_agility_preview).
 * `SC_FROZEN_SHADERS` (default OFF) is the shipping mode for shaders: no shader file read, no hot reload, and recorded bytecode embedded where an executable asks with `sc_embed_shader_bundle`.
   A miss still compiles from the embedded sources, so DXC still ships; the `frozen-clang` preset sets it.
   See [frozen-shaders](libs/graphics/shaped-shader-library/docs/frozen-shaders.md).

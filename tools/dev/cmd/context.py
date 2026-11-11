@@ -121,7 +121,7 @@ class Context:
             self.die(str(e))
 
     def resolve_build_presets(self, args: argparse.Namespace) -> list[dev.Preset]:
-        """Resolve --preset and apply the --toolset / --build-suffix / --build-dir / --example-backend overrides.
+        """Resolve --preset and apply the --toolset / --build-suffix / --build-dir / --example-backend / --agility-preview overrides.
 
         Used by the configure/build/test commands; validates a pinned toolset eagerly so an
         unresolvable one fails fast with a clean message instead of mid-build.
@@ -132,6 +132,7 @@ class Context:
                 presets, root=self.root,
                 toolset=args.toolset, build_suffix=args.build_suffix, build_dir=args.build_dir,
                 example_backend=getattr(args, "example_backend", None),
+                agility_preview=getattr(args, "agility_preview", False),
             )
         except dev.ToolsetError as e:
             self.die(str(e))

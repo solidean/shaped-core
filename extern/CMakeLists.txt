@@ -263,11 +263,31 @@ if(_sc_host_side_deps AND SC_USE_VENDORED_DLSS AND EXISTS "${CMAKE_CURRENT_SOURC
 endif()
 
 # Reset first, so uninstalling it takes effect at the next configure rather than leaving the old path cached.
+# SC_AGILITY_PREVIEW swaps both for their extern/*-preview pins, read through the same wrappers.
+# The preview runtime is required, since a retail build under that name would test nothing the switch is for.
+# The preview WARP is only preferred: without it the dx12 tests run on the retail WARP, which lacks the preview features.
+set(_sc_warp_install "${CMAKE_CURRENT_SOURCE_DIR}/warp/.install")
+set(_sc_agility_install "${CMAKE_CURRENT_SOURCE_DIR}/agility/.install")
+if(WIN32 AND SC_AGILITY_PREVIEW)
+    set(_sc_agility_install "${CMAKE_CURRENT_SOURCE_DIR}/agility-preview/.install")
+    if(NOT SC_USE_VENDORED_AGILITY OR NOT EXISTS "${_sc_agility_install}/pin.txt")
+        message(FATAL_ERROR "SC_AGILITY_PREVIEW is ON, but no preview Agility SDK was fetched: "
+                            "run `uv run extern/agility/fetch-agility.py --preview --accept-license` after reading its terms")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/warp-preview/.install/pin.txt")
+        set(_sc_warp_install "${CMAKE_CURRENT_SOURCE_DIR}/warp-preview/.install")
+    else()
+        message(STATUS "warp: no preview WARP fetched (`uv run extern/warp/fetch-warp.py --preview`), so the dx12 tests run without clusters and partitioned TLAS on WARP")
+    endif()
+endif()
+
 set(SC_PINNED_WARP_DLL "" CACHE INTERNAL "The pinned WARP the dx12 test binaries load")
-if(WIN32 AND SC_USE_VENDORED_WARP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/warp/.install/pin.txt")
+if(WIN32 AND SC_USE_VENDORED_WARP AND EXISTS "${_sc_warp_install}/pin.txt")
+    set(WARP_INSTALL "${_sc_warp_install}")
     add_subdirectory(warp)
 endif()
 
-if(WIN32 AND SC_USE_VENDORED_AGILITY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/agility/.install/pin.txt")
+if(WIN32 AND SC_USE_VENDORED_AGILITY AND EXISTS "${_sc_agility_install}/pin.txt")
+    set(AGILITY_INSTALL "${_sc_agility_install}")
     add_subdirectory(agility)
 endif()
