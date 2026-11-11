@@ -41,6 +41,7 @@ struct vulkan_raytracing_functions; // the acceleration-structure + ray-tracing-
 class vulkan_blas;
 class vulkan_tlas;
 class vulkan_partitioned_tlas;
+class vulkan_cluster_set;
 class vulkan_micromap;
 struct vulkan_descriptor_range;    // one allocated range within the descriptor heap
 class vulkan_descriptor_heap;      // host-visible memory descriptors are written into

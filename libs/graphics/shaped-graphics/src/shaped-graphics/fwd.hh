@@ -136,6 +136,9 @@ struct gpu_ptlas_update;             // value type — SGL's accel.ptlas_update
 struct gpu_ptlas_translation;        // value type — SGL's accel.ptlas_translation
 struct ptlas_indirect_records;       // value type — one kind of record a compute pass wrote, and its count
 struct ptlas_indirect_operations;    // value type — one GPU-written update of a partitioned_tlas
+class cluster_set;                   // immutable clusters one build made (see raytracing/clusters.hh)
+struct cluster_triangles;            // value type — one cluster's indexed triangles
+struct cluster_range;                // value type — the clusters of a set one cluster BLAS lists
 
 struct reserved_binding_address;
 } // namespace sg
@@ -520,6 +523,7 @@ using tlas_handle = std::shared_ptr<tlas const>;         // shared-immutable: in
 using micromap_handle = std::shared_ptr<micromap const>; // shared-immutable: an opaque, driver-built micromap
 using partitioned_tlas_handle = std::shared_ptr<partitioned_tlas const>; // a tlas updated in place by recorded operations
 using blas_table_handle = std::shared_ptr<blas_table const>;             // immutable — BLASes and their addresses
+using cluster_set_handle = std::shared_ptr<cluster_set const>;           // immutable — the clusters one build made
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

@@ -69,6 +69,22 @@ public:
     /// Requires `sg::feature::partitioned_tlas`.
     void update_indirect(partitioned_tlas const& ptlas, ptlas_indirect_operations const& ops);
 
+    /// Builds `clusters` into one immutable set, cluster k at position k, which `build_cluster_blas` then lists.
+    /// Each must be indexed, with 1 to `max_cluster_triangles` triangles over 1 to `max_cluster_vertices` vertices.
+    /// `fast_trace` / `fast_build` are mutually exclusive, and nothing else applies.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception if the set cannot be allocated.
+    [[nodiscard]] cluster_set_handle build_clusters(cc::span<cluster_triangles const> clusters,
+                                                    accel_build_flags flags = accel_build_flag::fast_trace);
+
+    /// Builds one BLAS per range, each listing those clusters of `clusters`, and each holding the set.
+    /// A range is non-empty and within the set, and ranges may overlap.
+    /// A cluster BLAS has `max_geometry_index() + 1` geometries, and `hit_record_stride` is build_blas's.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception if a BLAS cannot be allocated.
+    [[nodiscard]] cc::vector<blas_handle> build_cluster_blas(cluster_set_handle const& clusters,
+                                                             cc::span<cluster_range const> ranges,
+                                                             accel_build_flags flags = accel_build_flag::fast_trace,
+                                                             int hit_record_stride = 1);
+
     /// Binds a raytracing_pipeline for the following bind_group / dispatch_rays.
     /// Requires is_supported().
     void bind_pipeline(raytracing_pipeline const& pipeline);

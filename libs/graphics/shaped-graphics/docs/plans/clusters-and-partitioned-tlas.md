@@ -202,7 +202,9 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
    dx12's half compiles in the `--agility-preview` build, untested here like phase 2's.
 4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id`.
    The described tier comes first (decided), since only the GPU-written CLAS record waits on `@bits` and `@absent`.
-   - (a) vulkan's described tier: a pool sized from its limits, `cmd.raytracing.build_clusters` replacing its contents, and `build_cluster_blas` over ranges of it.
+   - (a) (built on vulkan, but for `cluster_id`) vulkan's described tier: `cmd.raytracing.build_clusters` and `build_cluster_blas` over ranges of a set.
+     A described build returns an immutable `cluster_set`, as `build_blas` returns a blas, rather than filling a pool in place.
+     So no trace in flight reads a cluster a later build overwrites, and no generation is checked; the pool and its generations arrive with (b), which needs them.
      A cluster BLAS is built in explicit-destination mode, into storage of its own, so the CPU knows the address a described TLAS write names.
      A CLAS address exists only on the GPU, in the pool's address array, so a described cluster BLAS names a contiguous range of the pool's clusters.
      SGL's `cluster_id` reads `ClusterIDNV` in SGL's own SPIR-V and through inline SPIR-V on the HLSL route, where the device has the feature.

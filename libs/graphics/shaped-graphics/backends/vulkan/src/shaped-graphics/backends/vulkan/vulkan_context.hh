@@ -271,6 +271,14 @@ public:
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
 
+    /// Whether VK_NV_cluster_acceleration_structure is enabled, with its entry points loaded: sg::feature::clustered_geometry.
+    [[nodiscard]] bool is_clustered_geometry_supported() const { return _clusters.has_value(); }
+    /// The device's cluster limits and alignments, which only a context with clustered geometry has.
+    [[nodiscard]] VkPhysicalDeviceClusterAccelerationStructurePropertiesNV const& cluster_properties() const
+    {
+        return _clusters.value();
+    }
+
     /// Whether VK_EXT_opacity_micromap is enabled, with its entry points loaded: sg::feature::opacity_micromap.
     [[nodiscard]] bool is_opacity_micromap_supported() const { return _opacity_micromap.has_value(); }
 
@@ -435,6 +443,8 @@ public:
             return is_opacity_micromap_supported();
         case sg::feature::partitioned_tlas:
             return _partitioned_tlas;
+        case sg::feature::clustered_geometry:
+            return _clusters.has_value();
         }
         return false;
     }
@@ -955,6 +965,8 @@ public:
 
     // Set once at creation where VK_EXT_opacity_micromap is enabled; see is_opacity_micromap_supported.
     cc::optional<VkPhysicalDeviceOpacityMicromapPropertiesEXT> _opacity_micromap;
+    // Set once at creation where VK_NV_cluster_acceleration_structure is enabled; see is_clustered_geometry_supported.
+    cc::optional<VkPhysicalDeviceClusterAccelerationStructurePropertiesNV> _clusters;
 
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;

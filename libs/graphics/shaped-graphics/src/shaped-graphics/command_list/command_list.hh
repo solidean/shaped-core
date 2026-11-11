@@ -241,6 +241,13 @@ protected:
                                                     cc::vector<blas_handle>&& released);
     // The GPU-written form, after the scope validated `ops`: the backend writes the operation array, copies each count
     // into it, and declares every buffer and blas the build reads; `released` are the tables the structure let go of.
+    // Reached only where the context reports sg::feature::clustered_geometry, after the scope validated the inputs.
+    [[nodiscard]] virtual cluster_set_handle raytracing_build_clusters(cc::span<cluster_triangles const> clusters,
+                                                                       accel_build_flags flags);
+    [[nodiscard]] virtual cc::vector<blas_handle> raytracing_build_cluster_blas(cluster_set_handle const& clusters,
+                                                                                cc::span<cluster_range const> ranges,
+                                                                                accel_build_flags flags,
+                                                                                int hit_record_stride);
     virtual void raytracing_update_partitioned_tlas_indirect(partitioned_tlas const& ptlas,
                                                              ptlas_indirect_operations const& ops,
                                                              bool is_first,

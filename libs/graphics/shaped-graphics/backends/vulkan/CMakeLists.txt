@@ -29,6 +29,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_raster_pipeline.cc
     src/shaped-graphics/backends/vulkan/vulkan_raytracing.cc
     src/shaped-graphics/backends/vulkan/vulkan_partitioned_tlas.cc
+    src/shaped-graphics/backends/vulkan/vulkan_clusters.cc
     src/shaped-graphics/backends/vulkan/vulkan_software_pool.cc
     src/shaped-graphics/backends/vulkan/vulkan_raytracing_functions.cc
     src/shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.cc
