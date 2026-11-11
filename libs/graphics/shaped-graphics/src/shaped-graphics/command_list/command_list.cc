@@ -89,7 +89,7 @@ command_list::command_list(sg::context& ctx, epoch created_in)
 void command_list::note_render_pass_split(cc::string_view cause, split_remedy remedy)
 {
     _stats.add(stat::render_pass_splits);
-    if (!context().claim_render_pass_split_warning(cause))
+    if (remedy == split_remedy::none || !context().claim_render_pass_split_warning(cause))
         return;
 
     auto const advice = remedy == split_remedy::split_scope_between_draws

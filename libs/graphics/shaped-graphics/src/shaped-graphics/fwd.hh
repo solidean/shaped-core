@@ -136,6 +136,9 @@ struct gpu_ptlas_update;             // value type — SGL's accel.ptlas_update
 struct gpu_ptlas_translation;        // value type — SGL's accel.ptlas_translation
 struct ptlas_indirect_records;       // value type — one kind of record a compute pass wrote, and its count
 struct ptlas_indirect_operations;    // value type — one GPU-written update of a partitioned_tlas
+class cluster_set;                   // immutable clusters one build made (see raytracing/clusters.hh)
+struct cluster_triangles;            // value type — one cluster's indexed triangles
+struct cluster_range;                // value type — the clusters of a set one cluster BLAS lists
 
 struct reserved_binding_address;
 } // namespace sg
@@ -379,7 +382,10 @@ struct vertex_type_layout;
 class raster_pipeline;
 struct color_target_state;          // {format, blend, write_mask} — one color target's PSO state
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
-struct raster_target_formats;       // {color formats, depth format, sample count} a pipeline is compiled for
+enum class mesh_polyfill_slots : u8;
+enum class polyfill_use : u8;
+struct mesh_polyfill_description; // {compute_shader, corners, primitives_per_group, words_per_group} — a mesh stage as compute + draw
+struct raster_target_formats; // {color formats, depth format, sample count} a pipeline is compiled for
 namespace impl
 {
 // records the target set and formats of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
@@ -392,6 +398,9 @@ void set_footprint(compute_pipeline const& pipeline, pipeline_footprint footprin
 void set_footprint(raster_pipeline const& pipeline, pipeline_footprint footprint);
 // records that a compute pipeline's shader is dispatched by threads alone; defined in compute/compute_pipeline.cc
 void set_dispatched_by_threads(compute_pipeline const& pipeline);
+// what a polyfilled mesh stage's draw runs and sizes by; defined in raster/raster_pipeline.cc
+struct mesh_polyfill_state;
+void set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_state state);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.
@@ -520,6 +529,7 @@ using tlas_handle = std::shared_ptr<tlas const>;         // shared-immutable: in
 using micromap_handle = std::shared_ptr<micromap const>; // shared-immutable: an opaque, driver-built micromap
 using partitioned_tlas_handle = std::shared_ptr<partitioned_tlas const>; // a tlas updated in place by recorded operations
 using blas_table_handle = std::shared_ptr<blas_table const>;             // immutable — BLASes and their addresses
+using cluster_set_handle = std::shared_ptr<cluster_set const>;           // immutable — the clusters one build made
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

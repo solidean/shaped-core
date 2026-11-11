@@ -102,7 +102,7 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     // writes: a `has` anywhere it inlines, a prelude function's included.
     for (auto const& o : options)
         if (o.name == k_device_features_option || o.name == k_native_spirv_option || o.name == k_native_dxil_option
-            || o.name == k_native_line_table_option)
+            || o.name == k_native_line_table_option || o.name == k_mesh_form_option)
             key.push_back(o);
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 

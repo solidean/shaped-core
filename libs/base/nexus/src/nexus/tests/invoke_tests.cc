@@ -177,6 +177,9 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
                 continue; // this child is scoped out
         }
 
+        if (is_parked(*decl, *config, child_scopes, consumed))
+            continue;
+
         // --shard: a driver that runs in every shard dispatches only this shard's children
         if (parent->instance.shards_children
             && !config->in_shard(cc::format("{} / {} / {}", parent->instance.declaration->name, name, decl->name)))

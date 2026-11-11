@@ -315,6 +315,7 @@ protected:
     void raster_draw(sg::draw_config const& config) override;
     // webgpu builds no mesh-shaded pipeline, so none is ever bound to draw
     void raster_draw_mesh_tasks(int, int, int) override { CC_UNREACHABLE("webgpu has no mesh stage"); }
+    void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
     void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const&, isize, isize) override
     {
         CC_UNREACHABLE("webgpu has no mesh stage");

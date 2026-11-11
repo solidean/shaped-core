@@ -29,12 +29,16 @@ constexpr query_read_rule k_query_reads[] = {
     {dx_op::ray_query_candidate_world_to_object, dx_op::ray_query_committed_world_to_object},
     {dx_op::ray_query_candidate_object_origin, dx_op::ray_query_committed_object_origin},
     {dx_op::ray_query_candidate_object_direction, dx_op::ray_query_committed_object_direction},
+    // cluster_id: none before Shader Model 6.10, which `ray_query_read` refuses ahead of reading this
+    {dx_op::ray_query_committed_status, dx_op::ray_query_committed_status},
 };
 } // namespace
 
 void writer::ray_query_read(u32 index, instruction const& i)
 {
     auto const what = ray_query_value(i.sub);
+    if (what == ray_query_value::cluster_id)
+        return unsupported("a hit's cluster_id, which DXIL has from Shader Model 6.10");
     auto const& rule = k_query_reads[i.sub];
     auto const code = i.aux != 0 ? rule.committed : rule.candidate;
     auto const number = _m.constant_i32(k_dx_ops[isize(code)].number);

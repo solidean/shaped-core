@@ -7,6 +7,7 @@
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/ir/dxil/signature.hh>
+#include <shaped-graphics-language/legalize/legalize.hh>
 
 /// The text a graphics API compiles, written from one flat entry point of a checked module.
 ///
@@ -19,6 +20,16 @@ enum class sgl::emit::target : sgl::u8
     hlsl_vulkan,
     wgsl,
     msl,
+};
+
+/// What a mesh entry point is written as (CHK-524): the stage itself, or one half of its polyfill.
+enum class sgl::emit::mesh_form : sgl::u8
+{
+    native,
+    /// The compute entry point that writes its workgroups' slots of `sg_mesh_output`.
+    compute,
+    /// The vertex entry point that draws those slots from `sg_mesh_input`.
+    vertex_fetch,
 };
 
 /// What keeps an entry point from being written, as a closed set with stable kebab-case names.
@@ -140,6 +151,8 @@ struct sgl::emit::options
     native_route native = native_route::text;
     /// Writes each operation's `.sgl` line into the native route's binary (EMIT-257); `files` must hold the sources.
     bool native_line_table = false;
+    /// A mesh entry point as one half of its polyfill rather than as a mesh stage; every other entry ignores it.
+    mesh_form mesh = mesh_form::native;
 };
 
 /// Either the text or the reasons there is none.
@@ -171,6 +184,9 @@ struct sgl::emit::emitted_text
     cc::vector<line_origin> lines;
     /// Every print and assert the text writes into sg's debug buffer, which it declares when this is not empty (EMIT-183).
     cc::vector<debug_site> debug_sites;
+    /// The slots a polyfilled mesh entry point's two halves agree on, which sg sizes its buffer and its draw by;
+    /// empty for every other emit.
+    cc::optional<check::mesh_polyfill_layout> mesh_layout;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -182,7 +198,8 @@ struct sgl::emit::emitted_text
             && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
             && color_targets == rhs.color_targets && target_struct == rhs.target_struct
             && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
-            && ast::impl::is_equal(debug_sites, rhs.debug_sites) && ast::impl::is_equal(errors, rhs.errors);
+            && ast::impl::is_equal(debug_sites, rhs.debug_sites) && mesh_layout == rhs.mesh_layout
+            && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

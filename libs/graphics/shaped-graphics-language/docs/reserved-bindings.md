@@ -27,6 +27,8 @@ A table edited on one side alone stops the build.
 | `sg_array_lengths` | `b1, space12`, root constants | set 3, binding 20 | none | none, the array's table counts it | an unbounded binding array |
 | `sg_dispatch_grid` | `b2, space12`, root constants | set 3, binding 21 | group 3, binding 21 | none, metal dispatches the grid's threads | a bare `@compute` |
 | `sg_acceleration_addresses` | none | set 3, binding 22 | none | none | a trace in SGL's own SPIR-V |
+| `sg_mesh_output` | `u1, space11`, a root UAV | set 3, binding 23 | group 3, binding 23 | none, metal draws every mesh stage | a polyfilled mesh stage's compute half |
+| `sg_mesh_input` | `t2, space11`, a root SRV | set 3, binding 24 | group 3, binding 24 | none | a polyfilled mesh stage's vertex half |
 
 On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and hands it every stage it calls through `sgl_context` (EMIT-183).
 
@@ -44,6 +46,10 @@ That is how vulkan traces a partitioned tlas, which `VK_EXT_descriptor_buffer` h
 - The HLSL a DXC route compiles declares it as `cbuffer sg_acceleration_addresses_block`, and the conversion as inline SPIR-V, `[[vk::ext_instruction(4447)]]`, which DXC has no builtin for.
   An element of an array of structures still names its descriptor there.
 sg's vulkan layout holds it wherever the layout holds an acceleration member, since any package may compile to SGL's own SPIR-V.
+
+`sg_mesh_output` and `sg_mesh_input` are one buffer of words, which a polyfilled mesh stage's compute half writes and its vertex half reads back (CHK-524).
+The compute half also reads `sg_dispatch_grid`, the threads sg dispatched it in, to number its workgroups.
+[mesh-polyfill.md](../../shaped-graphics/docs/concepts/mesh-polyfill.md) is the protocol: the words, and how sg sizes and draws them.
 
 ## The debug window
 

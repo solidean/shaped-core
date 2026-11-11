@@ -25,6 +25,33 @@ struct sg::color_target_state
     color_write_mask write_mask = color_write_mask_all;
 };
 
+/// A mesh stage drawn where the device has none: a compute pass writes each workgroup's output into fixed slots of a
+/// buffer, and the pipeline's vertex stage draws them back.
+/// SGL writes both halves of one mesh entry point; libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md is the
+/// protocol, and these are its numbers.
+struct sg::mesh_polyfill_description
+{
+    /// The compute half, at the mesh stage's workgroup size, which writes `sg_mesh_output`.
+    compiled_shader compute_shader;
+    /// 3 for triangles, 2 for lines.
+    int corners = 3;
+    /// The mesh stage's `triangles` or `lines` bound.
+    int primitives_per_group = 0;
+    /// The 32-bit words one workgroup's slots take.
+    int words_per_group = 0;
+};
+
+/// What a polyfilled raster pipeline draws with, which the context attaches once both halves are built.
+struct sg::impl::mesh_polyfill_state
+{
+    compute_pipeline_handle compute;
+    /// The compute half's workgroup size, which the grid of threads it reads is counted in.
+    compute_dimensions workgroup;
+    int corners = 3;
+    int primitives_per_group = 0;
+    int words_per_group = 0;
+};
+
 /// Everything needed to build a raster_pipeline: the shaders, the pipeline_layout they are compiled against, the vertex-input layout, and the fixed-function state.
 /// It owns its shaders, since a pipeline combines several and building on a worker thread must be safe — parity with raytracing_pipeline_description.
 ///
@@ -53,6 +80,10 @@ struct sg::raster_pipeline_description
     cc::optional<compiled_shader> mesh_shader;
     /// Optional task stage before `mesh_shader`, whose workgroups each launch mesh workgroups and hand them one payload.
     cc::optional<compiled_shader> task_shader;
+    /// A mesh stage as its polyfill, in place of `mesh_shader`: `vertex_shader` is its vertex half, and the pipeline still
+    /// draws with `draw_mesh_tasks`, where the device lacks sg::feature::mesh_shader or not.
+    /// It takes no vertex input, no task, tessellation or geometry stage, and `topology` must match its `corners`.
+    cc::optional<mesh_polyfill_description> mesh_polyfill;
 
     vertex_input_layout vertex_input;
     primitive_topology topology = primitive_topology::triangle_list;
@@ -140,7 +171,14 @@ public:
     [[nodiscard]] cc::optional<raster_target_formats> const& target_formats() const { return _target_formats; }
 
     /// Whether a mesh stage draws for this pipeline, which `draw_mesh_tasks` needs and every other draw refuses.
+    /// A polyfilled mesh stage is one.
     [[nodiscard]] bool is_mesh_shaded() const { return _is_mesh_shaded; }
+
+    /// What a polyfilled mesh stage's draw runs, or null where the mesh stage is native or there is none.
+    [[nodiscard]] impl::mesh_polyfill_state const* mesh_polyfill() const
+    {
+        return _mesh_polyfill.has_value() ? &_mesh_polyfill.value() : nullptr;
+    }
 
     /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
     /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
@@ -159,9 +197,11 @@ private:
                                   bool is_mesh_shaded);
 
     friend void impl::set_footprint(raster_pipeline const& pipeline, impl::pipeline_footprint footprint);
+    friend void impl::set_mesh_polyfill(raster_pipeline const& pipeline, impl::mesh_polyfill_state state);
 
     cc::string _target_set;
     cc::optional<raster_target_formats> _target_formats;
     impl::pipeline_footprint _footprint;
     bool _is_mesh_shaded = false;
+    cc::optional<impl::mesh_polyfill_state> _mesh_polyfill;
 };

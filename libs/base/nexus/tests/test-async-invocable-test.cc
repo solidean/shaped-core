@@ -223,6 +223,33 @@ bool any_error_mentions(nx::test_execution const& e, cc::string_view text)
 }
 } // namespace
 
+TEST("async invocables - a disabled child is parked unless named, as a disabled test is", no_scheduler)
+{
+    for (auto const named : {false, true})
+    {
+        probe p;
+        nx::test_registry reg;
+        add_async_child(reg, "a", &child_a, nx::config::cfg{.enabled = false});
+        add_async_child(reg, "c", &child_c);
+
+        auto const exec = run_driver(reg, p, &drive_in_sequence, 1, {},
+                                     named ? cc::vector<cc::string>{"g", "a"} : cc::vector<cc::string>{});
+
+        CHECK(exec.count_failed_tests() == 0);
+        auto const order = p.order.lock([](cc::vector<cc::string>& o) { return o; });
+        if (named)
+        {
+            REQUIRE(order.size() == 1);
+            CHECK(order[0] == "a");
+        }
+        else
+        {
+            REQUIRE(order.size() == 1);
+            CHECK(order[0] == "c");
+        }
+    }
+}
+
 TEST("async invocables - in_sequence runs sync and async children in match order, nested under the driver", no_scheduler)
 {
     for (auto const jobs : {1, 4})

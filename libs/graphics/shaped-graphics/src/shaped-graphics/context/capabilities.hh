@@ -13,6 +13,16 @@
 /// So a `feature` earns its place only when a whole code path is present or absent, never to describe a difference of
 /// degree.
 
+/// When a stage is drawn as its polyfill rather than natively.
+enum class sg::polyfill_use : sg::u8
+{
+    never,
+    /// Where the device lacks the stage.
+    where_missing,
+    /// On every device, the stage's own included: what compares the two on one device.
+    always,
+};
+
 /// A capability a context either has or does not.
 /// Absent means the code path does not exist on this backend or device — not that it is slow.
 enum class sg::feature
@@ -237,6 +247,11 @@ enum class sg::feature
     /// Vulkan grants it with `VK_NV_partitioned_acceleration_structure`, and traces it by its address.
     /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
     partitioned_tlas,
+
+    /// A blas may be built from clusters: `cmd.raytracing.build_clusters`, then `build_cluster_blas` over ranges of them.
+    /// Vulkan grants it with `VK_NV_cluster_acceleration_structure`, and a shader reads a hit's cluster as `cluster_id`.
+    /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
+    clustered_geometry,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -291,8 +306,9 @@ inline constexpr feature k_all_features[] = {
     feature::shader_int64_min_max_atomics,
     feature::ray_tracing_motion_blur,
     feature::partitioned_tlas,
+    feature::clustered_geometry,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::partitioned_tlas) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::clustered_geometry) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -386,6 +402,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "ray_tracing_motion_blur";
     case feature::partitioned_tlas:
         return "partitioned_tlas";
+    case feature::clustered_geometry:
+        return "clustered_geometry";
     }
     return "";
 }

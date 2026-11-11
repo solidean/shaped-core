@@ -126,6 +126,11 @@ inline constexpr cc::string_view k_native_line_table_option = "native_line_table
 /// point at `fast` whose `@float` WGSL cannot keep, with a warning, rather than refusing it (EMIT-185).
 /// The host's call, never the shader's, and the cache keys on it as on any option.
 inline constexpr cc::string_view k_weakens_float_option = "weakens_float";
+
+/// The option a polyfilled pipeline's acquire passes for an SGL mesh stage, valued `compute` or `vertex`: the half of
+/// its polyfill to compile, which is then that stage (SGL's CHK-524).
+/// The cache keys on it as on any option.
+inline constexpr cc::string_view k_mesh_form_option = "mesh_form";
 } // namespace slib
 
 namespace slib

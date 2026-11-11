@@ -149,7 +149,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  bool weakens_float,
                                                  check::feature_set device_features,
                                                  emit::native_route native = emit::native_route::text,
-                                                 bool native_line_table = false)
+                                                 bool native_line_table = false,
+                                                 emit::mesh_form mesh = emit::mesh_form::native)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
@@ -195,7 +196,19 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                         .files = files,
                                         .names = names,
                                         .guards_undefined = guards_undefined});
-    auto emitted = emit::emit_entry_point(m, legal, target,
+    // CHK-524: a polyfilled mesh entry point is written, reflected and described as the form it becomes
+    auto mesh_layout = cc::optional<check::mesh_polyfill_layout>();
+    auto form = legal;
+    if (mesh != emit::mesh_form::native && legal.entry_stage == check::stage::mesh)
+    {
+        auto const layout = check::mesh_polyfill_layout_of(m, legal);
+        if (layout.has_error())
+            return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, layout.error()));
+        mesh_layout = layout.value();
+        form = mesh == emit::mesh_form::compute ? check::mesh_as_compute(m, legal)
+                                                : check::mesh_as_vertex_fetch(m, legal);
+    }
+    auto emitted = emit::emit_entry_point(m, form, target,
                                           {.files = files,
                                            .names = names,
                                            .write_directives = line_directives,
@@ -216,17 +229,18 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                       .dxil = cc::move(emitted.dxil),
                                       .native_gap = cc::move(emitted.native_gap),
                                       .signature = cc::move(emitted.signature),
-                                      .stage = entry.entry_stage,
+                                      .stage = form.entry_stage,
                                       .entry_point = cc::move(emitted.entry_point),
-                                      .bindings = interface_of(m, legal, emitted.bound_names),
+                                      .bindings = interface_of(m, form, emitted.bound_names),
                                       .color_targets = emitted.color_targets,
                                       .target_struct = cc::move(emitted.target_struct),
-                                      .features = entry.features,
+                                      .features = mesh_layout.has_value() ? form.features : entry.features,
                                       .options = driver::impl::option_names_of(m, e),
-                                      .footprint = check::footprint_of(m, legal),
+                                      .footprint = check::footprint_of(m, form),
                                       .layouts = cc::move(emitted.layouts),
                                       .lines = cc::move(emitted.lines),
-                                      .debug_sites = cc::move(emitted.debug_sites)};
+                                      .debug_sites = cc::move(emitted.debug_sites),
+                                      .mesh_layout = mesh_layout};
     for (auto const name : names)
         result.line_files.push_back(cc::string(name));
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
@@ -234,7 +248,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         if (auto const module = m.foreign_module_of(m.at(e.result).symbol); !module.empty())
             result.target_struct = cc::format("{}.{}", module, result.target_struct);
     for (auto axis = 0; axis < 3; ++axis)
-        result.workgroup[axis] = e.workgroup[axis];
+        result.workgroup[axis] = form.workgroup[axis];
     result.is_dispatched_by_threads = e.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     result.unshadowed_bytes = legal.unshadowed_bytes;
@@ -314,7 +328,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
         return cc::error(cc::move(own));
     auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
                             request.guards_undefined, request.software_trace, request.weakens_float,
-                            request.device_features, request.native, request.native_line_table);
+                            request.device_features, request.native, request.native_line_table, request.mesh);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(

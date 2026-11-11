@@ -19,6 +19,16 @@ struct sg::bound_sampler
     sg::sampler sampler;
 };
 
+/// Which slots of a polyfilled mesh stage a pipeline layout holds (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
+enum class sg::mesh_polyfill_slots : sg::u8
+{
+    none,
+    /// `sg_mesh_output`, which the compute half writes, and the grid it reads.
+    output,
+    /// `sg_mesh_input`, which the vertex half reads.
+    input,
+};
+
 /// Description for building a pipeline_layout: an ordered list of binding_group_layouts, one per bind slot, plus any extra register-bound static samplers.
 /// `groups[i]` is the schema bound at slot `i` — the `group_index` of cmd.compute.bind_group.
 struct sg::pipeline_layout_description
@@ -52,6 +62,11 @@ struct sg::pipeline_layout_description
     /// threads alone reads.
     /// Pipeline creation sets it for such a shader, so a description rarely does.
     bool dispatch_grid = false;
+
+    /// The layout holds a polyfilled mesh stage's slots: reserved `sg_mesh_output` for its compute half, or
+    /// `sg_mesh_input` for its vertex half; never both, since WebGPU refuses one buffer bound writable and read-only.
+    /// Pipeline creation sets it for a polyfilled pipeline's two halves, so a description rarely does.
+    mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none;
 };
 
 /// The binding interface a pipeline is compiled against: an ordered set of binding_group_layouts.
@@ -92,11 +107,15 @@ public:
     /// Whether the layout holds the grid `dispatch_threads` writes (`pipeline_layout_description::dispatch_grid`).
     [[nodiscard]] bool has_dispatch_grid() const { return _has_dispatch_grid; }
 
+    /// Which of a polyfilled mesh stage's slots the layout holds (`pipeline_layout_description::mesh_polyfill`).
+    [[nodiscard]] mesh_polyfill_slots mesh_polyfill() const { return _mesh_polyfill; }
+
     /// The description it was created from, which creates it again.
     [[nodiscard]] pipeline_layout_description description() const
     {
-        auto result
-            = pipeline_layout_description{.inline_constants = _inline_constants, .dispatch_grid = _has_dispatch_grid};
+        auto result = pipeline_layout_description{.inline_constants = _inline_constants,
+                                                  .dispatch_grid = _has_dispatch_grid,
+                                                  .mesh_polyfill = _mesh_polyfill};
         for (auto const& g : _groups)
             result.groups.push_back(g);
         result.static_samplers.push_back_range(_static_samplers);
@@ -109,10 +128,12 @@ protected:
                     cc::span<binding_group_layout_handle const> groups,
                     cc::optional<binding> inline_constants,
                     bool dispatch_grid = false,
-                    cc::span<bound_sampler const> static_samplers = {})
+                    cc::span<bound_sampler const> static_samplers = {},
+                    mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none)
       : _structural_hash(structural_hash),
         _inline_constants(cc::move(inline_constants)),
-        _has_dispatch_grid(dispatch_grid)
+        _has_dispatch_grid(dispatch_grid),
+        _mesh_polyfill(mesh_polyfill)
     {
         _static_samplers.push_back_range(static_samplers);
         for (auto const& group : groups)
@@ -125,5 +146,6 @@ private:
     cc::small_vector<binding_group_layout_handle, max_binding_groups> _groups;
     cc::optional<binding> _inline_constants;
     bool _has_dispatch_grid = false;
+    mesh_polyfill_slots _mesh_polyfill = mesh_polyfill_slots::none;
     cc::vector<bound_sampler> _static_samplers;
 };

@@ -672,6 +672,8 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     if (preprocessed.value().stated.has_value())
     {
         desc.required_features = preprocessed.value().stated.value().required_features.value_or(sg::feature_set());
+        // what SGL wrote is a stage of its own where it wrote a polyfilled mesh stage's half (CHK-524)
+        desc.stage = preprocessed.value().stated.value().stage;
         pending = sgl_interface{.shader = cc::move(preprocessed.value().stated.value()),
                                 .declared = cc::move(preprocessed.value().declared_bindings),
                                 .layouts = cc::move(preprocessed.value().layouts),

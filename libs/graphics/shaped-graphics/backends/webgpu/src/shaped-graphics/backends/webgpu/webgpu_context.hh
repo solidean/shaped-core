@@ -517,6 +517,22 @@ public:
     webgpu_query_system _queries;
     webgpu_acceleration_pool _acceleration;
 
+    /// The buffer every polyfilled mesh draw's halves write and read (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
+    /// One serves every draw, since WebGPU orders each pass after the one before it, and a draw writes its slots before
+    /// it reads them; it only grows, and `generation` counts its buffers, which a cached reserved group keys on.
+    struct mesh_scratch_buffer
+    {
+        wgpu_buffer buffer;
+        isize bytes = 0;
+        u64 generation = 0;
+    };
+    mesh_scratch_buffer _mesh_scratch;
+
+    /// `_mesh_scratch`'s buffer, grown first to hold at least `bytes`; on the device thread only.
+    WGPUBuffer mesh_scratch_for(isize bytes);
+
+    [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
+
     /// The optional device features creation was granted.
     struct granted_features
     {

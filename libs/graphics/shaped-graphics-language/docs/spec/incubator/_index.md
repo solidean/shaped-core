@@ -39,7 +39,8 @@ Each file has the same shape, so an idea can be picked up cold:
 | [enum-futures.md](enum-futures.md) | ordering, casts to and from `int`, `@bitflags` for a mask enum, and `@exhaustive(false)` for an open one |
 | [texture-methods.md](texture-methods.md) | a texture's subscript over `load`, and what is left of the texture methods |
 | [uniformity.md](uniformity.md) | SGL's own uniformity analysis after inlining, refusing a derivative sample in divergent control flow with a fix to offer |
-| [stage-polyfills.md](stage-polyfills.md) | the geometry and tessellation stages as a compute pass ahead of the draw, where a device lacks them |
+| [stage-polyfills.md](stage-polyfills.md) | every raster stage on every target: metal's own tessellation, and a compute pass or a mesh stage where a device lacks one |
+| [gpu-driven-work.md](gpu-driven-work.md) | work lists native where a target has them, polyfills from indirect compute to raygen with SER, and why work graphs are left out |
 | [atomics.md](atomics.md) | 64-bit and vertex-stage atomics, each behind the sg feature its missing target needs |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |
 | [testing.md](testing.md) | tests on the GPU against the interpreter, resource values in tests, captured constants and message matching |

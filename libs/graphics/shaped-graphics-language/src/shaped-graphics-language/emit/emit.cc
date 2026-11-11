@@ -204,6 +204,25 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             return emit_entry_point(m, guarded, t, sources);
     }
 
+    // CHK-524: a polyfilled mesh entry point is written as a compute or a vertex entry point, from the same slots
+    if (e.entry_stage == check::stage::mesh && sources.mesh != mesh_form::native)
+    {
+        auto const layout = check::mesh_polyfill_layout_of(m, e);
+        if (layout.has_error())
+        {
+            auto refused = emitted_text();
+            refused.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = layout.error()});
+            return refused;
+        }
+        auto native = sources;
+        native.mesh = mesh_form::native;
+        auto const form
+            = sources.mesh == mesh_form::compute ? check::mesh_as_compute(m, e) : check::mesh_as_vertex_fetch(m, e);
+        auto result = emit_entry_point(m, form, t, native);
+        result.mesh_layout = layout.value();
+        return result;
+    }
+
     auto result = emitted_text();
     impl::validate(m, e, result.errors, sources.diagnostics);
     if (!result.errors.empty())

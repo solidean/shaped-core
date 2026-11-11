@@ -31,4 +31,6 @@ enum class sgl::builtins::query_read : sgl::u32
     world_to_object_row,
     object_ray_origin,
     object_ray_direction,
+    /// The cluster the hit is in; only a device with clustered geometry reads it (EMIT-260).
+    cluster_id,
 };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/error/result.hh>
+#include <clean-core/string/string.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/flat.hh>
 
@@ -50,6 +52,25 @@ struct sgl::check::legalize_options
     bool guards_buffers = true;
 };
 
+/// The words a mesh workgroup's polyfill writes into `sg_mesh_output`, and the fetch reads back (CHK-524).
+/// Workgroup `g` owns `group_words` words from `g * group_words`: its vertex count, its primitive count, `corners`
+/// indices for each of `max_primitives` primitives, then `vertex_words` words for each of `max_vertices` vertices.
+struct sgl::check::mesh_polyfill_layout
+{
+    /// 3 for triangles, 2 for lines.
+    i32 corners = 3;
+    i32 max_vertices = 0;
+    i32 max_primitives = 0;
+    /// One word a scalar leaf of the vertex struct, in field order.
+    i32 vertex_words = 0;
+    i32 group_words = 0;
+
+    [[nodiscard]] i32 first_index_word() const { return 2; }
+    [[nodiscard]] i32 first_vertex_word() const { return 2 + corners * max_primitives; }
+
+    bool operator==(mesh_polyfill_layout const&) const = default;
+};
+
 namespace sgl::check
 {
 /// The structured form of `e` as a core tree that behaves the same: same result, same prints in the same order.
@@ -98,5 +119,20 @@ namespace sgl::check
 /// A bare @compute's `e` whose threads past the grid return before its body, against the grid sg writes at each
 /// dispatch_threads into `sg_dispatch_grid` (CHK-520); what dx12, vulkan and WebGPU read, and metal does not.
 [[nodiscard]] flat_entry_point with_dispatch_grid_guard(checked_module const& m, flat_entry_point const& e);
+
+/// The layout a mesh entry point `e` polyfills into, or the reason it has none yet: a task stage's payload, values per
+/// primitive, or a vertex member that is no scalar, vector or array of them (CHK-524).
+[[nodiscard]] cc::result<mesh_polyfill_layout, cc::string> mesh_polyfill_layout_of(checked_module const& m,
+                                                                                   flat_entry_point const& e);
+
+/// A mesh entry point `e` as the compute entry point that writes its workgroup's slots of `sg_mesh_output` instead of
+/// handing them to the rasterizer; its grid is the one sg writes into `sg_dispatch_grid`.
+/// `e` must have a layout.
+[[nodiscard]] flat_entry_point mesh_as_compute(checked_module const& m, flat_entry_point const& e);
+
+/// The vertex entry point that draws what `mesh_as_compute` wrote, from `sg_mesh_input`, one invocation a corner of
+/// every primitive slot; the corners of a slot past its workgroup's count stand outside the clip volume.
+/// `e` must have a layout.
+[[nodiscard]] flat_entry_point mesh_as_vertex_fetch(checked_module const& m, flat_entry_point const& e);
 
 } // namespace sgl::check

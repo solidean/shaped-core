@@ -21,4 +21,12 @@ void impl::set_targets(raster_pipeline const& pipeline,
     p._target_formats = formats;
     p._is_mesh_shaded = is_mesh_shaded;
 }
+
+void impl::set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_state state)
+{
+    // as set_targets: only on a pipeline nobody else holds yet
+    auto& p = const_cast<raster_pipeline&>(pipeline);
+    p._mesh_polyfill = cc::move(state);
+    p._is_mesh_shaded = true;
+}
 } // namespace sg

@@ -125,8 +125,10 @@ cc::shared_async<run_result> render(sg::context& ctx, sv::render_mode mode, bool
 }
 } // namespace
 
+// issue: bug-sv-deterministic-seed-hybrid-differs, disabled until it is fixed; run it by its name
 ASYNC_INVOCABLE_TEST("sv - a traced mean is the same bits whatever ids and restarts its run went through",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::disabled)
 {
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)

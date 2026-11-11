@@ -3613,6 +3613,14 @@
     threads: uint4
 
 
+@internal binding sg_mesh_output:
+    words: mut buffer[uint]
+
+
+@internal binding sg_mesh_input:
+    words: buffer[uint]
+
+
 /// What a weak compare-exchange read, and whether it stored `desired`.
 struct exchange_result[T]:
     old: T
@@ -5071,6 +5079,10 @@ struct exchange_result[T]:
 @builtin @internal fun ray_query_candidate_object_ray_direction(q: ray_query) -> float3
 /// Of the committed hit.
 @builtin @internal fun ray_query_committed_object_ray_direction(q: ray_query) -> float3
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_cluster_id(q: ray_query) -> int
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_cluster_id(q: ray_query) -> int
 
 // What a ray-tracing stage reads of its launch, its ray and its hit, which raytracing.sgl hands its entry point.
 @builtin @internal @stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3
@@ -5089,6 +5101,7 @@ struct exchange_result[T]:
 @builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4
 @builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_origin() -> float3
 @builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_direction() -> float3
+@builtin @internal @stages(.closest_hit, .any_hit) fun hit_cluster_id() -> int
 
 // A ray-tracing stage's trace, which a `trace` naming a ray type of its set lowers to (CHK-329).
 /// Traces a ray through the pipeline's tables, handing the payload over past the signature.
@@ -5214,6 +5227,7 @@ enum feature:
     unbounded_binding_arrays
     shader_shared_int64_atomics
     shader_int64_min_max_atomics
+    clustered_geometry
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

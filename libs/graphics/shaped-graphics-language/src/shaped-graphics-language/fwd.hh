@@ -359,6 +359,7 @@ struct outcome;
 
 enum class undefined_guard : u8;
 struct legalize_options;
+struct mesh_polyfill_layout;
 
 enum class expectation_kind : u8;
 struct test_expectation;
@@ -398,6 +399,7 @@ namespace sgl::emit
 enum class target : u8;
 enum class error_kind : u8;
 enum class native_route : u8;
+enum class mesh_form : u8;
 struct error;
 struct emitted_text;
 struct bound_name;

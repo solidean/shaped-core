@@ -72,6 +72,7 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::hit_kind, 5333},
     {built_in::object_to_world, 5330},
     {built_in::world_to_object, 5331},
+    {built_in::ray_cluster_id, 5436},
 };
 /// A pixel stage reads `@position` as what the rasterizer made of it, where a vertex stage's is `Position`.
 constexpr u32 k_frag_coord = 15;
@@ -459,6 +460,11 @@ void writer::write_stage_elements()
                     require(spv::SampleRateShading);
                 if (e.system == built_in::view_index)
                     require(spv::MultiView);
+                if (e.system == built_in::ray_cluster_id)
+                {
+                    require(spv::RayTracingClusterAccelerationStructureNV);
+                    require_extension("SPV_NV_cluster_acceleration_structure");
+                }
                 if (e.system == built_in::primitive_id && !is_tessellation)
                     require(spv::Geometry);
                 if (e.system == built_in::layer && _p.stage != check::stage::mesh)

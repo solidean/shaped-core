@@ -331,6 +331,7 @@ private:
         auto device_features = sgl::check::feature_set();
         auto weakens_float = false;
         auto native_line_table = false;
+        auto mesh = sgl::emit::mesh_form::native;
         auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
         auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
         auto const requires_native
@@ -346,6 +347,13 @@ private:
             if (o.name == slib::k_native_line_table_option)
             {
                 native_line_table = o.value == "true";
+                continue;
+            }
+            if (o.name == slib::k_mesh_form_option)
+            {
+                mesh = o.value == "compute" ? sgl::emit::mesh_form::compute
+                     : o.value == "vertex"  ? sgl::emit::mesh_form::vertex_fetch
+                                            : sgl::emit::mesh_form::native;
                 continue;
             }
             if (o.name == slib::k_native_spirv_option || o.name == slib::k_native_dxil_option)
@@ -388,7 +396,8 @@ private:
              .weakens_float = weakens_float,
              .device_features = device_features,
              .native = native,
-             .native_line_table = native_line_table});
+             .native_line_table = native_line_table,
+             .mesh = mesh});
         // what the front end checked rather than loaded, kept for the next process
         if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
             store != nullptr)
@@ -396,7 +405,18 @@ private:
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
-        auto shader = sg::compiled_shader{.stage = desc.stage, .format = _format, .entry_point = emitted.entry_point};
+        // CHK-524: a polyfilled mesh stage's half is the stage it became, which the compile after this one builds
+        auto const form_stage = mesh == sgl::emit::mesh_form::compute      ? sg::shader_stage::compute
+                              : mesh == sgl::emit::mesh_form::vertex_fetch ? sg::shader_stage::vertex
+                                                                           : desc.stage;
+        auto shader = sg::compiled_shader{.stage = form_stage, .format = _format, .entry_point = emitted.entry_point};
+        if (emitted.mesh_layout.has_value())
+        {
+            auto const& l = emitted.mesh_layout.value();
+            shader.mesh_polyfill_corners = l.corners;
+            shader.mesh_polyfill_primitives = l.max_primitives;
+            shader.mesh_polyfill_words = l.group_words;
+        }
         auto result = slib::preprocessed_source{.source = emitted.text,
                                                 .entry_point = emitted.entry_point,
                                                 .used_modules = emitted.library_files,
@@ -424,7 +444,8 @@ private:
             result.declared_bindings.push_back(cc::move(binding));
         }
         // a mesh and a task stage's workgroup too, which Metal's mesh draw states and no MSL text does
-        if (stage == sgl::check::stage::compute || stage == sgl::check::stage::mesh || stage == sgl::check::stage::task)
+        if ((stage == sgl::check::stage::compute || stage == sgl::check::stage::mesh || stage == sgl::check::stage::task)
+            && form_stage != sg::shader_stage::vertex)
             shader.workgroup_size
                 = sg::compute_dimensions{.x = emitted.workgroup[0], .y = emitted.workgroup[1], .z = emitted.workgroup[2]};
         if (emitted.preferred_subgroup_size > 0)
