@@ -11,7 +11,7 @@ resolution: wontfix
 # Work graphs polyfilled where a target has none
 
 vulkan, metal and webgpu, and dx12 at SM 6.10 and later.
-Candidates, from [gpu-driven-work.md](../../../../spec/incubator/gpu-driven-work.md#polyfills-native-where-supported-polyfilled-where-not):
+Candidates, from [gpu-driven-work.md](../../../../spec/incubator/gpu-driven-work.md#polyfills):
 
 - **Level by level**: a record queue per node, a small pass writing indirect dispatch arguments, and a round per graph depth.
   vkd3d-proton emulates D3D12 work graphs on Vulkan this way, which makes it the correctness reference to read first.
