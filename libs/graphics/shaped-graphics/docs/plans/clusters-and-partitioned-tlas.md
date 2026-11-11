@@ -1,6 +1,6 @@
 # Plan: clustered geometry and partitioned TLAS
 
-Status: **phases 1 and 2 built**, phase 2's dx12 half untested for want of a driver, which the [phases](#phases) describe.
+Status: **phases 1 to 3 built**, their dx12 halves untested for want of a driver, which the [phases](#phases) describe.
 The [decisions](#decisions) stand as proposals except D5's, and [open questions](#open-questions) lists what the specs leave unsettled.
 D3D12 and Vulkan each gained two acceleration-structure kinds that change how a large scene is kept current: clusters and partitioned top-level structures.
 This plan is how sg exposes them, on dx12 and vulkan only.
@@ -192,7 +192,10 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
    - (c) (built, untested) dx12's half, on the preview runtime's `ExecuteIndirectRTASOperations`, binding as a TLAS does.
      It compiles in the `--agility-preview` build and skips its test on every adapter here, none of which reports the cap.
    This alone retires a full TLAS rebuild per edit, the cost shaped-viewer pays on a large scene today.
-3. **PTLAS, GPU-written tier**: the BLAS table, the input set, `accel_build_args`, and the record layouts of D5.
+3. **PTLAS, GPU-written tier** (built on vulkan): the BLAS table, `cmd.raytracing.update_indirect`, and the record layouts of D5 in SGL's `accel` module.
+   A record's BLAS is a table's address, and the tables an update names are the input set D3 asks for.
+   The records and counts take the accesses the described tier's input does, so `accel_build_args` waits for a barrier that needs it.
+   dx12's half compiles in the `--agility-preview` build, untested here like phase 2's.
 4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id` with the preview DXC.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.
 

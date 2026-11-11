@@ -959,6 +959,12 @@ cmd.raytracing.update(ptlas, {.writes, .updates, .clears, .translations})
                                                    // sg::global_partition for what moves every frame. GOTCHA: vulkan traces one
                                                    // by address, which SGL writes on both routes; a package's own HLSL sees
                                                    // the null structure
+ctx.persistent.create_blas_table(span<blas_handle const>)
+                                                   // -> blas_table_handle: holds them; table->view() binds as buffer[accel.blas_ref]
+cmd.raytracing.update_indirect(ptlas, {.writes, .updates, .translations, .tables})
+                                                   // records a shader wrote (SGL's `use accel`), each ptlas_indirect_records
+                                                   // {records, offset, max_count, count, count_offset}; sg copies each u32 count
+                                                   // into the operation it writes. gpu_ptlas_write is opaque: only a shader fills one
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

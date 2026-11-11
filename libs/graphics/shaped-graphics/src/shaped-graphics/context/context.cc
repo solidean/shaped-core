@@ -652,6 +652,12 @@ cc::result<partitioned_tlas_handle> context::try_create_partitioned_tlas(partiti
     return cc::error("this context has no sg::feature::partitioned_tlas");
 }
 
+u64 context::blas_address_of(blas const&) const
+{
+    CC_ASSERT(false, "blas_address_of: this context has no sg::feature::partitioned_tlas");
+    return 0;
+}
+
 cc::result<gpu_counters> context::read_gpu_counters() const
 {
     // Not an empty counter set, which a sampler would difference into a confident 0% on a pinned GPU.

@@ -7,6 +7,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/raytracing/blas_table.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
@@ -112,6 +113,21 @@ partitioned_tlas_handle context_persistent_scope::create_partitioned_tlas(partit
     if (_ctx.is_device_lost())
         throw device_lost_exception(_ctx.device_loss_reason());
     throw allocation_exception("partitioned tlas allocation failed", 0, r.error());
+}
+
+blas_table_handle context_persistent_scope::create_blas_table(cc::span<blas_handle const> blases)
+{
+    CC_ASSERT(_ctx.supports(feature::partitioned_tlas), "create_blas_table: this context has no "
+                                                        "sg::feature::partitioned_tlas");
+    CC_ASSERT(!blases.empty(), "create_blas_table: a table lists at least one blas");
+    auto addresses = cc::vector<gpu_blas_ref>();
+    for (auto const& blas : blases)
+    {
+        CC_ASSERT(blas != nullptr && !blas->is_expired(), "create_blas_table: a blas is null or expired");
+        addresses.push_back({.address = _ctx.blas_address_of(*blas)});
+    }
+    auto buffer = create_buffer_from_data(cc::span<gpu_blas_ref const>(addresses), buffer_usage::readonly_buffer);
+    return std::make_shared<blas_table const>(cc::vector<blas_handle>::create_copy_of(blases), cc::move(buffer));
 }
 
 // bind path

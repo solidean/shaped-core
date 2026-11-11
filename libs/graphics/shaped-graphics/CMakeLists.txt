@@ -508,6 +508,7 @@ if(SC_BUILD_TESTS)
                 vertex_input.sgl:*
                 dispatch.sgl:*
                 raytracing.sgl:*
+                ptlas_records.sgl:*
                 raytracing_pipeline.sgl:*
                 raytracing_scenes.sgl:*
                 raytracing_transforms.sgl:*

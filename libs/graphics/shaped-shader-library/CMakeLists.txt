@@ -43,6 +43,7 @@ target_sources(shaped-shader-library
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
+    src/sgl_modules/accel.hh
     src/shaped-shader-library/fwd.hh
     src/shaped-shader-library/gpu_affine3.hh
     src/shaped-shader-library/gpu_bool.hh

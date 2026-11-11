@@ -100,6 +100,12 @@ void impl::set_instance_records(tlas const& tlas, cc::vector<tlas_instance_recor
                                 { current = cc::move(snapshot); });
 }
 
+void impl::clear_instance_records(tlas const& tlas)
+{
+    tlas._instance_records.lock([](std::shared_ptr<cc::vector<tlas_instance_record> const>& current)
+                                { current = nullptr; });
+}
+
 std::shared_ptr<cc::vector<impl::tlas_instance_record> const> impl::instance_records_of(tlas const& tlas)
 {
     return tlas._instance_records.lock([](std::shared_ptr<cc::vector<tlas_instance_record> const> const& current)

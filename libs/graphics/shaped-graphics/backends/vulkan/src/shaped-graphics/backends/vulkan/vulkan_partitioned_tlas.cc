@@ -5,10 +5,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/fwd.hh> // offsetof
 #include <shaped-graphics/backends/vulkan/vulkan_acceleration_structure.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/raytracing/blas_table.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 
 namespace sg::backend::vulkan
@@ -101,6 +103,13 @@ cc::result<sg::partitioned_tlas_handle> vulkan_context::try_create_partitioned_t
     return sg::partitioned_tlas_handle(std::make_shared<vulkan_partitioned_tlas>(
         desc, cc::move(storage), address, isize(sizes.accelerationStructureSize), isize(sizes.buildScratchSize),
         isize(sizes.updateScratchSize)));
+}
+
+u64 vulkan_context::blas_address_of(sg::blas const& blas) const
+{
+    auto const* const vk = dynamic_cast<vulkan_blas const*>(&blas);
+    CC_ASSERT(vk != nullptr, "blas_address_of: a blas is not a vulkan blas");
+    return u64(vk->_address);
 }
 
 void vulkan_command_list::raytracing_update_partitioned_tlas(sg::partitioned_tlas const& ptlas,
@@ -229,6 +238,120 @@ void vulkan_command_list::raytracing_update_partitioned_tlas(sg::partitioned_tla
     // the blases no slot names any more, until this list has run; and the structure itself
     for (auto& blas : released)
         keep_bound(cc::move(blas));
+    keep_bound(ptlas.shared_from_this());
+}
+
+void vulkan_command_list::raytracing_update_partitioned_tlas_indirect(sg::partitioned_tlas const& ptlas,
+                                                                      sg::ptlas_indirect_operations const& ops,
+                                                                      bool is_first,
+                                                                      cc::vector<sg::blas_table_handle>&& released)
+{
+    auto const& vk = static_cast<vulkan_partitioned_tlas const&>(ptlas);
+    auto const& d = ptlas.description();
+
+    struct kind
+    {
+        sg::ptlas_indirect_records const* records;
+        VkPartitionedAccelerationStructureOpTypeNV type;
+        isize stride;
+    };
+    kind const kinds[] = {
+        {&ops.writes, VK_PARTITIONED_ACCELERATION_STRUCTURE_OP_TYPE_WRITE_INSTANCE_NV, isize(sizeof(sg::gpu_ptlas_write))},
+        {&ops.updates, VK_PARTITIONED_ACCELERATION_STRUCTURE_OP_TYPE_UPDATE_INSTANCE_NV,
+         isize(sizeof(sg::gpu_ptlas_update))},
+        {&ops.translations, VK_PARTITIONED_ACCELERATION_STRUCTURE_OP_TYPE_WRITE_PARTITION_TRANSLATION_NV,
+         isize(sizeof(sg::gpu_ptlas_translation))},
+    };
+    static_assert(sizeof(sg::gpu_ptlas_write) >= sizeof(VkPartitionedAccelerationStructureWriteInstanceDataNV));
+    static_assert(sizeof(sg::gpu_ptlas_update) == sizeof(VkPartitionedAccelerationStructureUpdateInstanceDataNV));
+    static_assert(sizeof(sg::gpu_ptlas_translation)
+                  == sizeof(VkPartitionedAccelerationStructureWritePartitionTranslationDataNV));
+
+    // The commands with no count yet, each counted below by a copy of the count its shader wrote.
+    auto commands = cc::vector<VkBuildPartitionedAccelerationStructureIndirectCommandNV>();
+    auto counted = cc::vector<sg::ptlas_indirect_records const*>();
+    auto read = cc::vector<vulkan_buffer_handle>();
+    for (auto const& k : kinds)
+    {
+        if (k.records->max_count == 0)
+            continue;
+        auto records = std::dynamic_pointer_cast<vulkan_buffer const>(k.records->records);
+        CC_ASSERT(records != nullptr, "update_indirect: a records buffer is not a vulkan buffer");
+        commands.push_back(
+            {.opType = k.type,
+             .argCount = 0,
+             .argData = {.startAddress = records->_device_address + VkDeviceAddress(k.records->offset_in_bytes),
+                         .strideInBytes = VkDeviceSize(k.stride)}});
+        counted.push_back(k.records);
+        read.push_back(cc::move(records));
+    }
+
+    auto const command_size = isize(sizeof(VkBuildPartitionedAccelerationStructureIndirectCommandNV));
+    auto const count_at = isize(commands.size()) * command_size;
+    auto const total = count_at + isize(sizeof(u32));
+    auto const input_raw = _ctx.transient.create_raw_buffer(
+        total, sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+    auto const input = std::dynamic_pointer_cast<vulkan_buffer const>(input_raw);
+    CC_ASSERT(input != nullptr, "update_indirect: the input buffer is not a vulkan buffer");
+    auto bytes = cc::vector<byte>::create_filled(total, byte(0));
+    if (!commands.empty())
+        cc::memcpy(bytes.data(), commands.data(), size_t(count_at));
+    auto const command_count = u32(commands.size());
+    cc::memcpy(bytes.data() + count_at, &command_count, sizeof(command_count));
+    upload_bytes_to_buffer(input_raw, cc::span<byte const>(bytes), 0);
+    for (auto i = isize(0); i < counted.size(); ++i)
+        copy_buffer_region(
+            counted[i]->count, input_raw, counted[i]->count_offset_in_bytes,
+            i * command_size + isize(offsetof(VkBuildPartitionedAccelerationStructureIndirectCommandNV, argCount)),
+            isize(sizeof(u32)));
+
+    // every build takes the build scratch, an update in place too (VUID-vkCmdBuildPartitionedAccelerationStructuresNV-pBuildInfo-10541)
+    auto const scratch_size = vk.build_scratch_size_in_bytes();
+    auto const scratch_raw = _ctx.transient.create_raw_buffer(
+        (scratch_size > 0 ? scratch_size : isize(1)) + isize(k_structure_alignment), sg::buffer_usage::readwrite_buffer);
+    auto const scratch = std::dynamic_pointer_cast<vulkan_buffer const>(scratch_raw);
+    CC_ASSERT(scratch != nullptr, "update_indirect: the scratch is not a vulkan buffer");
+    auto const scratch_address = (scratch->_device_address + k_structure_alignment - 1) & ~(k_structure_alignment - 1);
+
+    // The structure in place, the commands and the records as the build reads them, and every blas a table lists.
+    track_buffer_access(*vk._vulkan_storage, sg::pipeline_stage_flag::accel_build,
+                        sg::access_flag::accel_read | sg::access_flag::accel_write);
+    track_buffer_access(*scratch, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
+    track_buffer_access(*input, sg::pipeline_stage_flag::accel_build,
+                        sg::access_flag::indirect_read | sg::access_flag::shader_read);
+    for (auto const& r : read)
+        track_buffer_access(*r, sg::pipeline_stage_flag::accel_build,
+                            sg::access_flag::indirect_read | sg::access_flag::shader_read);
+    for (auto const& table : ops.tables)
+        for (auto const& blas : table->blases())
+            track_buffer_access(*vulkan_blas_of(blas)._vulkan_storage, sg::pipeline_stage_flag::accel_build,
+                                sg::access_flag::accel_read);
+    flush_barriers();
+
+    auto const translation = VkPartitionedAccelerationStructureFlagsNV{
+        .sType = VK_STRUCTURE_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_FLAGS_NV,
+        .enablePartitionTranslation = d.allows_partition_translation ? VK_TRUE : VK_FALSE,
+    };
+    auto const info = VkBuildPartitionedAccelerationStructureInfoNV{
+        .sType = VK_STRUCTURE_TYPE_BUILD_PARTITIONED_ACCELERATION_STRUCTURE_INFO_NV,
+        .input = instances_input_of(d, &translation),
+        .srcAccelerationStructureData = is_first ? 0 : vk._address,
+        .dstAccelerationStructureData = vk._address,
+        .scratchData = scratch_address,
+        .srcInfos = input->_device_address,
+        .srcInfosCount = input->_device_address + VkDeviceAddress(count_at),
+    };
+    _ctx._raytracing_functions.cmd_build_partitioned(_buffer, &info);
+
+    // the tables the structure let go of, the records and the structure, until this list has run
+    for (auto& table : released)
+        keep_bound(cc::move(table));
+    for (auto const& k : kinds)
+        if (k.records->max_count > 0)
+        {
+            keep_bound(k.records->records);
+            keep_bound(k.records->count);
+        }
     keep_bound(ptlas.shared_from_this());
 }
 } // namespace sg::backend::vulkan

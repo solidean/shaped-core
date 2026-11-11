@@ -363,6 +363,10 @@ protected:
                                             sg::ptlas_operations const& ops,
                                             bool is_first,
                                             cc::vector<sg::blas_handle>&& released) override;
+    void raytracing_update_partitioned_tlas_indirect(sg::partitioned_tlas const& ptlas,
+                                                     sg::ptlas_indirect_operations const& ops,
+                                                     bool is_first,
+                                                     cc::vector<sg::blas_table_handle>&& released) override;
     void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;
     void raytracing_bind_group(int group_index, sg::binding_group const& group) override;
     void raytracing_dispatch_rays(sg::raytracing_shader_table const& table,

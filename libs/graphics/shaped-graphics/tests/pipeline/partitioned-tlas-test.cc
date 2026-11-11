@@ -10,6 +10,7 @@
 #include <shaped-graphics/command_list/raytracing.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/raytracing/blas_table.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 
 using namespace cc::primitive_defines;
@@ -169,4 +170,76 @@ ASYNC_INVOCABLE_TEST("sg - a partitioned tlas traces as a tlas does, and an upda
     ctx->submit_command_list(cc::move(translated));
     co_await trace_and_check(ctx, pipeline, ptlas, {{.instance_id = 10, .slot = 0, .x = 4, .z = 0}},
                              "translated and cleared");
+}
+
+ASYNC_INVOCABLE_TEST("sg - a partitioned tlas updates from records a compute pass wrote, which sg counts as written",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::partitioned_tlas))
+        SKIP("this device has no partitioned tlas");
+    auto const pipeline = co_await shaders::raytracing::trace_cells_opaque.acquire_pipeline(*ctx);
+    auto const write_instances = co_await shaders::ptlas_records::write_instances.acquire_pipeline(*ctx);
+    auto const translate_partition = co_await shaders::ptlas_records::translate_partition.acquire_pipeline(*ctx);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const ptlas = ctx->persistent.create_partitioned_tlas({.instance_capacity = 3,
+                                                                .partition_count = 1,
+                                                                .max_instances_per_partition = 2,
+                                                                .max_global_instances = 1,
+                                                                .allows_partition_translation = true});
+
+    auto build = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6};
+    auto const blas = build->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1));
+    ctx->submit_command_list(cc::move(build));
+    sg::blas_handle const listed[] = {blas};
+    auto const table = ctx->persistent.create_blas_table(listed);
+    CHECK(table->size() == 1);
+
+    // room for more records than the shaders write, so only the counts they bump say how many there are
+    auto const usage = sg::buffer_usage::readwrite_buffer;
+    auto const writes = ctx->persistent.create_buffer<sg::gpu_ptlas_write>(4, usage);
+    auto const translations = ctx->persistent.create_buffer<sg::gpu_ptlas_translation>(4, usage);
+    auto const counts
+        = ctx->persistent.create_buffer_from_data(cc::vector<u32>{0, 0}, usage | sg::buffer_usage::copy_src);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::ptlas_records::records>();
+    auto const group
+        = ctx->persistent.create_binding_group(layout, shaders::ptlas_records::records{
+                                                           .blases = table->view(),
+                                                           .writes = writes.as_readwrite_buffer(),
+                                                           .translations = translations.as_readwrite_buffer(),
+                                                           .counts = counts.as_readwrite_buffer(),
+                                                       });
+    sg::blas_table_handle const tables[] = {table};
+
+    auto written = ctx->create_command_list();
+    written->compute.bind_pipeline(*write_instances);
+    written->compute.bind_group(0, *group);
+    written->compute.dispatch_threads(2);
+    written->raytracing.update_indirect(
+        *ptlas, {.writes = {.records = writes.raw(), .max_count = 4, .count = counts.raw(), .count_offset_in_bytes = 0},
+                 .tables = tables});
+    ctx->submit_command_list(cc::move(written));
+    CHECK(ptlas->has_been_updated());
+    CHECK(ptlas->is_gpu_written());
+    co_await trace_and_check(
+        ctx, pipeline, ptlas,
+        {{.instance_id = 10, .slot = 0, .x = 0, .z = 0}, {.instance_id = 20, .slot = 1, .x = 4, .z = 2}}, "written");
+
+    auto translated = ctx->create_command_list();
+    translated->compute.bind_pipeline(*translate_partition);
+    translated->compute.bind_group(0, *group);
+    translated->compute.dispatch_threads(1);
+    translated->raytracing.update_indirect(
+        *ptlas, {.translations
+                 = {.records = translations.raw(), .max_count = 4, .count = counts.raw(), .count_offset_in_bytes = 4},
+                 .tables = tables});
+    ctx->submit_command_list(cc::move(translated));
+    co_await trace_and_check(
+        ctx, pipeline, ptlas,
+        {{.instance_id = 10, .slot = 0, .x = 4, .z = 0}, {.instance_id = 20, .slot = 1, .x = 4, .z = 2}}, "translated");
 }

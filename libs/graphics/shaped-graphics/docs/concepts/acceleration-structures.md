@@ -128,6 +128,19 @@ That holds on both routes: SGL's own SPIR-V converts it, and the HLSL a DXC rout
 Only a package's own HLSL still reads the descriptor, where a partitioned tlas writes the null structure, which every ray misses.
 [plans/clusters-and-partitioned-tlas.md](../plans/clusters-and-partitioned-tlas.md) is the design, and dx12's half.
 
+### Updates a compute pass wrote
+
+**`cmd.raytracing.update_indirect` builds from records a shader wrote**, so an update never visits the CPU.
+- **The records are SGL's `accel` module's**, which a shader writes by field name: `accel.ptlas_write`, `accel.ptlas_update` and `accel.ptlas_translation`.
+  Each backend lays them out natively, so nothing translates them before the build.
+- **The shader writes the records and bumps a count; sg writes the operation array** and copies each count into it, so no shader writes an operation.
+  `ptlas_indirect_records` names a buffer of records, its `max_count`, and where the count is; a count past `max_count` is a caller bug.
+- **A record names a BLAS by an address only a `blas_table` hands out**: `ctx.persistent.create_blas_table(blases)` holds them, and a shader binds `table->view()` as `buffer[accel.blas_ref]`.
+  An update's `tables` are every table a record may name afterwards, which the structure holds in place of the earlier update's.
+- **`accel.ptlas_write` is opaque on the host**: `sg::gpu_ptlas_write` sizes a buffer of them, since only a shader fills one.
+  SGL's `@target_layout` is why: its fields stand in another order on dx12 and on vulkan.
+- **No check follows the records**, so `hit_record_checks` stops checking a partitioned tlas from its first such update, and logs that once.
+
 ## Invariants
 
 Preserve these; the rest is tuning:

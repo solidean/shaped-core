@@ -225,6 +225,7 @@ public:
     /// Sizes and allocates a partitioned tlas through the preview runtime; refused on any other.
     [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
         sg::partitioned_tlas_description const& desc) override;
+    [[nodiscard]] u64 blas_address_of(sg::blas const& blas) const override;
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
