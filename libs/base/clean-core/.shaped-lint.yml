@@ -464,6 +464,11 @@ rules:
     reason: std::sort is the baseline cc::sort is measured against, which is the whole point of this file
     files: tests/benchmarks/sort-benchmark.cc
 
+  - kind: allow-include
+    value: <ctime>
+    reason: clock_gettime(CLOCK_THREAD_CPUTIME_ID), the per-thread CPU clock a scope's cost is measured against off Windows
+    files: tests/benchmarks/record-scope-cost-benchmark.cc
+
   # Blocking waits kept in tests, each where the wait or a scheduler the test drives is what is under test.
   - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
