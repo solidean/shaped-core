@@ -36,6 +36,13 @@ struct light_sample:
     /// 1 where the ray has to be tested; 0 where the sample contributes nothing, or comes from a light that casts no shadow
     tested: uint
 
+/// How open direction `w` is above the shading normal `n` where a material's relief leaves `ao` of the hemisphere open:
+/// clamp(|n.w| + 2 ao^2 - 1, 0, 1) (Chan, "Material Advances in Call of Duty: WWII", 2018), and exactly 1 wherever ao is.
+/// Grazing directions close first, so a crevice loses its grazing light and its grazing reflections alike.
+fun micro_visibility(ao: float, n: float3, w: float3) -> float:
+    if ao >= 1.0 => return 1.0
+    return clamp(abs(dot(n, w)) + 2.0 * ao * ao - 1.0, 0.0, 1.0)
+
 /// The sample that contributes nothing and tests nothing.
 fun no_light_sample() -> light_sample:
     return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u)
@@ -571,6 +578,17 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     light = sample_light(b, f, wo_local, p, n, last_bounce, mut rng)
     env = sample_environment(b, f, wo_local, p, n, last_bounce, mut rng)
 
+    // A material's own relief closes grazing directions to every strategy alike, light samples and the continuation,
+    // so multiple importance sampling weighs one visibility.
+    let ao = surface.micro_occlusion
+    if ao < 1.0:
+        let light_open = micro_visibility(ao, f.n, light.direction)
+        light.diffuse *= light_open
+        light.specular *= light_open
+        let env_open = micro_visibility(ao, f.n, env.direction)
+        env.diffuse *= env_open
+        env.specular *= env_open
+
     // The continuation, importance-sampled from the closure the material just described.
     let u1 = pt.rand(mut rng)
     let u2 = pt.rand(mut rng)
@@ -587,6 +605,8 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     if s.valid:
         // The cosine is the one at the SURFACE, so a refracted direction contributes its own magnitude rather than a negative weight.
         let mut weight = s.value * (abs(s.direction.z) / s.pdf)
+        if s.direction.z > 0.0:
+            weight *= micro_visibility(ao, f.n, continuation)
 
         // Collapsing onto one wavelength keeps one channel of three, so what survives is scaled back up by three.
         if collapsing:

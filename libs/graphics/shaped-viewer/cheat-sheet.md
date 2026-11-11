@@ -240,13 +240,14 @@ sv::attribute_interpolation      // linear | rotation — a property of the DECL
 sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
 sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
 
-sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `pbr` and `unlit`
+sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `openpbr_relief`, `pbr` and `unlit`
                                  //   thread-safe: the process-wide one is shared by every viewer and every parallel test
 lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
 lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
-sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
+sv::builtin_material::openpbr / openpbr_relief / pbr / unlit  // the names the builtins register under
+                                                     // openpbr_relief: a tileable material; its `occlusion` is its relief's, which the tracer applies per direction
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
                                  //   emission declared by openpbr (emission_color, emission_luminance) and pbr (emissive); unlit's reaches the camera alone
