@@ -11,7 +11,7 @@
 
 // A traced mean draws its random sequence from what the image is, never from how it got there.
 // So one scene renders to the same bits in two runs whose ids, acceleration structures and restarts all differ.
-// The wavefront is here too, since a pixel's samples do not depend on how frames split them (docs/wavefront.md).
+// The wavefront is here too, since a pixel's samples do not depend on how frames split them (libs/graphics/shaped-viewer/docs/wavefront.md).
 
 namespace
 {
