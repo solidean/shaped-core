@@ -394,6 +394,7 @@ TEST("sg backend - vulkan")
   `s.define_alias(name, {alias_fragment{driver, section_path}, ...})` binds a name to driver+scope, so `dev.py test "<test-name>"` runs it, one scoped run per fragment.
   `s.invocables_with<Args...>()` / `find_test(name)` help build them.
   Aliases never double-run: a full sweep ignores them, and a fragment whose driver is already name-selected is dropped.
+- **A disabled invocable is parked**: its driver skips it unless it is named exactly, or disabled tests run too.
 - **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` that no driver invoked fails the run.
   One an alias can reach is exempt, so a deliberately `disabled` driver parks its invocables (runnable by name) rather than orphaning them.
 - Args are boxed by (decayed) value, so prefer cheap-to-copy / handle types.

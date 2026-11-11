@@ -1805,6 +1805,19 @@ bool nx::impl::has_current_test()
     return current_context() != nullptr;
 }
 
+bool nx::impl::is_parked(nx::test_declaration const& decl,
+                         nx::test_schedule_config const& config,
+                         cc::span<cc::vector<cc::string> const> child_scopes,
+                         int consumed)
+{
+    if (decl.test_config.enabled || config.run_disabled_tests)
+        return false;
+    for (auto const& s : child_scopes)
+        if (consumed + 1 < int(s.size()) && cc::string_view(s[consumed + 1]) == decl.name)
+            return false;
+    return true;
+}
+
 nx::test_execution* nx::impl::current_execution()
 {
     auto const* const ctx = current_context();
@@ -3325,6 +3338,9 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(
             if (child_scopes.empty())
                 continue;
         }
+
+        if (is_parked(*decl, config, child_scopes, consumed))
+            continue;
 
         // --shard: a driver that runs in every shard dispatches only this shard's children
         if (parent->instance.shards_children
