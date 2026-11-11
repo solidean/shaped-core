@@ -461,6 +461,11 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         "        prev_gap = gap\n"
         "    let mut moved = ctx\n"
         "    moved.uv_offset = velocity.xy * hit\n"
+        // the ray went on past the face to the relief, by the depth over the cosine, and its cone widened with it
+        "    let facing = max(abs(dot(normalize(cross(g.e1, g.e2)), g.dir)), 0.05)\n"
+        "    let grow = (g.t + hit / facing) / max(g.t, 1e-9)\n"
+        "    moved.footprint_a = ctx.footprint_a * grow\n"
+        "    moved.footprint_b = ctx.footprint_b * grow\n"
         "    return moved\n",
         r.type->height_top_attribute, r.type->height_bottom_attribute, spelling.mark, uv_slot.offset,
         element_expression(a.uv->frequency), spelling.mark, spelling.mark, spelling.mark, a.name, a.name);
