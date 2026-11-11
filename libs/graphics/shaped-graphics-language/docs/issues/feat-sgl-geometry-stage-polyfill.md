@@ -3,6 +3,8 @@ created: 2026-11-11
 parent: epic-sgl-every-stage-everywhere
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/incubator/stage-polyfills.md
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-11T18:02Z
 ---
 
 # The geometry stage on metal and webgpu, polyfilled
