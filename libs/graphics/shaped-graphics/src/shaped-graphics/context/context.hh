@@ -102,7 +102,8 @@ public:
 
     /// Whether a mesh-shaded pipeline shaped-shader-library describes is drawn as its polyfill: a compute pass and a
     /// draw (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
-    /// **`never` by default**, until the polyfill's benchmark against the native stage has run.
+    /// **`where_missing` by default**: a device without a mesh stage draws it this way, and one with a mesh stage draws
+    /// it natively, which measured faster than the polyfill on every device that has both.
     /// Set it before acquiring the pipelines it should cover.
     [[nodiscard]] polyfill_use mesh_polyfill() const { return _mesh_polyfill.load(cc::memory_order_relaxed); }
     void set_mesh_polyfill(polyfill_use use) { _mesh_polyfill.store(use, cc::memory_order_relaxed); }
@@ -872,7 +873,7 @@ protected:
     cc::atomic<bool> _device_loss_claimed = false;
     cc::atomic<bool> _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
-    cc::atomic<polyfill_use> _mesh_polyfill = polyfill_use::never;
+    cc::atomic<polyfill_use> _mesh_polyfill = polyfill_use::where_missing;
     cc::atomic<bool> _hit_record_checks = CC_ASSERT_ENABLED != 0;
     cc::atomic<bool> _render_pass_split_warnings = true;
 

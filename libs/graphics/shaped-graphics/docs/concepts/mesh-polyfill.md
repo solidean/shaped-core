@@ -21,8 +21,8 @@ sg draws them on webgpu, dx12 and vulkan; metal has every mesh stage natively an
 | dx12 | 1.33 ms | 1.87 ms, +41% |
 | vulkan | 1.39 ms | 1.62 ms, +17% |
 
-**A polyfill is opt-in until that benchmark has run.**
-`ctx.set_mesh_polyfill(sg::polyfill_use::where_missing)` polyfills where the device has no mesh stage, and `always` everywhere, which is how a test compares the two on one device.
+**The polyfill is automatic where the device has no mesh stage**, `ctx.mesh_polyfill()`'s default of `where_missing`, decided by the measurements below.
+`always` polyfills everywhere, which is how a test compares the two on one device, and `never` refuses a mesh stage the device lacks.
 shaped-shader-library reads it when it describes a mesh-shaded pipeline, and acquires the two halves in place of the mesh stage.
 
 ## The words

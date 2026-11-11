@@ -62,6 +62,7 @@ ASYNC_BENCHMARK("sg mesh polyfill - a frame of meshlets, native against polyfill
                                                                .width = size,
                                                                .height = size,
                                                                .usage = sg::texture_usage::render_target});
+        auto const before = ctx->mesh_polyfill();
         for (auto const use : {sg::polyfill_use::never, sg::polyfill_use::always})
         {
             ctx->set_mesh_polyfill(use);
@@ -70,7 +71,7 @@ ASYNC_BENCHMARK("sg mesh polyfill - a frame of meshlets, native against polyfill
                 cc::format("{} {}", factory.backend, use == sg::polyfill_use::never ? "native" : "polyfilled"),
                 [&] { return render_frames(ctx, pipeline, &target); });
         }
-        ctx->set_mesh_polyfill(sg::polyfill_use::never);
+        ctx->set_mesh_polyfill(before);
         co_await ctx->idle_completion();
     }
 }

@@ -36,8 +36,8 @@ A task stage keeps it with a prefix sum over the mesh workgroups each task workg
 - A draw past its bound drops the excess workgroups, never writing out of bounds, and the `report` profile logs it at the `.sgl` line.
   Drawing the excess in chunks is a later refinement.
 
-**Opt-in until measured.**
-A program or host asks for the polyfill by name until the benchmark against native says whether it is automatic.
+**Opt-in until measured, then automatic where the device has no mesh stage.**
+The benchmark said the native stage is faster wherever there is one, so `where_missing` became the default and `always` stays a test's.
 
 **Tested and measured where both exist.**
 The polyfill is compute and a draw, so it runs on dx12 and vulkan too, beside the native mesh stage on the same device.
@@ -59,4 +59,5 @@ There the two images must be identical, equal depths and blending included, and 
 - **2026-11-11: drawn on dx12 and vulkan, and measured.**
   The same tests pass on dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V, five times over.
   On an Arc B580 the polyfill costs +41% over the native stage on dx12 and +17% on vulkan, for 400 000 triangles a frame.
-  Whether that is a small enough factor for `where_missing` to be the default is the open decision.
+- **2026-11-11: automatic where the device has no mesh stage.**
+  `where_missing` is the default: it reaches only a device the native stage cannot run on, webgpu today, and `always` stays a test's.

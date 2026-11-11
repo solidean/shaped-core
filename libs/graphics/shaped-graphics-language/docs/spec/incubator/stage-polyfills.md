@@ -43,6 +43,7 @@ Within a small factor of native, it is automatic, and a pipeline that names the 
 Further off, it is opt-in: the program or the host asks for it by name, and without that the feature still refuses.
 The benchmark stays in the tree, so a driver that changes the answer reopens the decision.
 Every polyfill starts opt-in, until its benchmark has run.
+The mesh and task stages' polyfill is the first decided: automatic where the device has no mesh stage, at +17% to +41% over the native stage on a device that has both.
 
 ## What it touches
 
