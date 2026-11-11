@@ -4,6 +4,8 @@ refs:
   - symbol: sv::seed_of
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/rendering/view_renderer.cc
   - file: libs/graphics/shaped-viewer/docs/wavefront.md
+claimed-by: Claude (for Julius)
+claimed-at: 2026-11-11T08:22Z
 ---
 
 # A seed that makes a capture the same image on any machine
