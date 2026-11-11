@@ -216,7 +216,7 @@ protected:
     // The same for a mesh draw, whose records are `dispatch_args`; a mesh-shaded pipeline is bound.
     virtual void raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
     // A mesh draw of a pipeline that polyfills its mesh stage, bound, with every count positive: dispatch `polyfill`'s
-    // compute half over the bound groups, then draw what it wrote (docs/concepts/mesh-polyfill.md).
+    // compute half over the bound groups, then draw what it wrote (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
     // Reached only on a context whose `draws_mesh_polyfill` says so.
     virtual void raster_draw_mesh_polyfilled(impl::mesh_polyfill_state const& polyfill, int x, int y, int z);
 

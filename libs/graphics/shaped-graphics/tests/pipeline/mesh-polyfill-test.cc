@@ -10,7 +10,7 @@
 using namespace cc::primitive_defines;
 
 // tests/shaders/sgl/meshes.sgl's mesh stages drawn as their polyfill, a compute pass and a draw, where the backend draws
-// one (docs/concepts/mesh-polyfill.md), against the images the native stage draws in sgl-mesh-test.cc.
+// one (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md), against the images the native stage draws in sgl-mesh-test.cc.
 // Every probe is a pixel centre, and no edge of any triangle passes through one.
 
 namespace
