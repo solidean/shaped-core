@@ -1,7 +1,9 @@
 // webgpu_context: construction, bring-up from a device, and shutdown.
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/log.hh>
+#include <clean-core/common/utility.hh> // cc::min, cc::max
 #include <clean-core/record/domain.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/mutex.hh>
@@ -85,6 +87,42 @@ void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features
     _acceleration.initialize(*this);
 }
 
+WGPUBuffer webgpu_context::mesh_scratch_for(isize bytes)
+{
+    // WebGPU's default maxStorageBufferBindingSize, which the device is requested with
+    constexpr auto max_bytes = isize(128) << 20;
+    CC_ASSERTF(bytes <= max_bytes,
+               "a polyfilled mesh draw's slots take {} bytes, past the {} a storage binding holds; draw fewer "
+               "workgroups at once",
+               bytes, max_bytes);
+    if (_mesh_scratch.buffer && bytes <= _mesh_scratch.bytes)
+        return _mesh_scratch.buffer.get();
+
+    // Grown by half again at least, so a run of slightly larger draws grows it a few times rather than once a draw.
+    auto const grown = cc::min(max_bytes, cc::max(bytes, cc::max(isize(64) << 10, _mesh_scratch.bytes * 3 / 2)));
+    auto const desc = WGPUBufferDescriptor{
+        .nextInChain = nullptr,
+        .label = to_wgpu("sg mesh polyfill slots"),
+        .usage = WGPUBufferUsage_Storage,
+        .size = u64(cc::max(isize(4), grown)),
+        .mappedAtCreation = WGPU_FALSE,
+    };
+    auto buffer = wgpu_buffer(wgpuDeviceCreateBuffer(device(), &desc));
+    CC_ASSERT(bool(buffer), "wgpuDeviceCreateBuffer returned no mesh polyfill buffer");
+
+    // A list still open may have bound the old buffer, and every one of them submits before this epoch retires.
+    if (_mesh_scratch.buffer)
+    {
+        auto expiring = webgpu_expiring_resource{};
+        expiring.buffer = cc::move(_mesh_scratch.buffer);
+        schedule_deferred_deletion(cc::move(expiring));
+    }
+    _mesh_scratch.buffer = cc::move(buffer);
+    _mesh_scratch.bytes = grown;
+    ++_mesh_scratch.generation;
+    return _mesh_scratch.buffer.get();
+}
+
 void webgpu_context::shutdown()
 {
     if (_is_shut_down)
@@ -127,6 +165,7 @@ void webgpu_context::shutdown()
 
     _queries.shutdown();
     _acceleration.shutdown();
+    _mesh_scratch = {};
     _constant_pages.shutdown();
     _readbacks.shutdown();
     _upload_ring.shutdown();

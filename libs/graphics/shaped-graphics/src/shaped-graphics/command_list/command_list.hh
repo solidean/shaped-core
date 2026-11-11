@@ -16,6 +16,7 @@
 #include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh> // impl::mesh_polyfill_state
 #include <shaped-graphics/raster/raster_target_formats.hh>
 #include <shaped-graphics/resource/subresource.hh> // subresource_range (the open rendering's targets)
 
@@ -214,6 +215,10 @@ protected:
     virtual void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
     // The same for a mesh draw, whose records are `dispatch_args`; a mesh-shaded pipeline is bound.
     virtual void raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
+    // A mesh draw of a pipeline that polyfills its mesh stage, bound, with every count positive: dispatch `polyfill`'s
+    // compute half over the bound groups, then draw what it wrote (docs/concepts/mesh-polyfill.md).
+    // Reached only on a context whose `draws_mesh_polyfill` says so.
+    virtual void raster_draw_mesh_polyfilled(impl::mesh_polyfill_state const& polyfill, int x, int y, int z);
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing).
     // Split by geometry family, since a BLAS is triangles or AABBs and span-element overloads cannot
@@ -284,6 +289,9 @@ protected:
         record_outside_scope,
         /// Nothing outside the scope helps — the hazard is between two of its own draws, so the scope itself splits.
         split_scope_between_draws,
+        /// The draw itself splits the scope, as a polyfilled mesh stage's does, so there is nothing to advise: counted,
+        /// never warned about.
+        none,
     };
 
     /// A backend closed the open rendering scope's pass and reopened it, forced by `cause`: "a copy", "a barrier", ….
@@ -321,9 +329,10 @@ private:
     // Whether any bound tlas reaches a hit record past the end of `table`, which dispatch_rays must not submit.
     bool check_hit_records(raytracing_shader_table const& table);
 
-    cc::string _rendering_target_set;                       // of the open rendering, or empty
-    bool _raster_is_mesh_shaded = false;                    // of the bound raster pipeline
-    cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
+    cc::string _rendering_target_set;                              // of the open rendering, or empty
+    bool _raster_is_mesh_shaded = false;                           // of the bound raster pipeline
+    cc::optional<impl::mesh_polyfill_state> _raster_mesh_polyfill; // of the bound raster pipeline, where it polyfills
+    cc::optional<raster_target_formats> _rendering_formats;        // of the open rendering, or empty when none is open
 
     // One entry per color and depth-stencil target of the open rendering, the subresources a copy inside the scope
     // must not name; the backend keeps each target alive for the recording, so the pointers stay valid.

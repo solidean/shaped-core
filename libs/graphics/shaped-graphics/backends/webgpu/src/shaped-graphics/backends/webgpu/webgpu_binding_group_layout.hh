@@ -111,7 +111,8 @@ public:
     /// The bind group for group 3 over constant page `page` and debug window `debug_window`, cached per page and window,
     /// since both live as long as the context.
     /// Without a reserved block the page is ignored.
-    /// A grown acceleration pool drops the cache, since the group names the pool buffer.
+    /// A grown acceleration pool drops the cache, since the group names the pool buffer, and so does a grown mesh scratch
+    /// buffer where the layout holds a polyfilled mesh stage's slots.
     [[nodiscard]] WGPUBindGroup reserved_group_for(webgpu_constant_page const* page, WGPUBuffer debug_window) const;
 
     /// Group 3's dynamic offsets for a reserved block placed at `block_offset`, in binding order, into `out`; returns how many.
@@ -157,4 +158,6 @@ private:
     mutable cc::vector<wgpu_bind_group> _reserved_groups_without_page;
     mutable cc::vector<WGPUBuffer> _debug_windows;
     mutable u64 _reserved_groups_pool_generation = 0;
+    /// The mesh scratch buffer's generation the cached groups name, where the layout holds a polyfill's slots.
+    mutable u64 _reserved_groups_scratch_generation = 0;
 };

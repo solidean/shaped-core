@@ -13,6 +13,16 @@
 /// So a `feature` earns its place only when a whole code path is present or absent, never to describe a difference of
 /// degree.
 
+/// When a stage is drawn as its polyfill rather than natively.
+enum class sg::polyfill_use : sg::u8
+{
+    never,
+    /// Where the device lacks the stage.
+    where_missing,
+    /// On every device, the stage's own included: what compares the two on one device.
+    always,
+};
+
 /// A capability a context either has or does not.
 /// Absent means the code path does not exist on this backend or device — not that it is slow.
 enum class sg::feature

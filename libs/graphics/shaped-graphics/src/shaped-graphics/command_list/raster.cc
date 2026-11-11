@@ -203,7 +203,15 @@ void command_list::draw_mesh_tasks(int x, int y, int z)
         return;
     _stats.add(stat::draws);
     check_raster_aliasing(false);
-    raster_draw_mesh_tasks(x, y, z);
+    if (_raster_mesh_polyfill.has_value())
+        raster_draw_mesh_polyfilled(_raster_mesh_polyfill.value(), x, y, z);
+    else
+        raster_draw_mesh_tasks(x, y, z);
+}
+
+void command_list::raster_draw_mesh_polyfilled(impl::mesh_polyfill_state const&, int, int, int)
+{
+    CC_UNREACHABLE("a context whose draws_mesh_polyfill says so overrides this");
 }
 
 void command_list::draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
@@ -230,6 +238,8 @@ void command_list::draw_indexed_indirect(raw_buffer_handle const& args, isize of
 void command_list::draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
 {
     CC_ASSERT(_raster_is_mesh_shaded, "draw_mesh_tasks_indirect draws a mesh-shaded pipeline; bind one first");
+    CC_ASSERT(!_raster_mesh_polyfill.has_value(), "a polyfilled mesh stage draws with draw_mesh_tasks alone so far, "
+                                                  "since its vertex count would be the GPU's to write");
     CC_ASSERT(args != nullptr, "indirect mesh draw arguments buffer is null");
     CC_ASSERT(args->usage().has(buffer_usage::indirect_command_buffer), "indirect mesh draw arguments need "
                                                                         "buffer_usage::indirect_command_buffer");
@@ -284,6 +294,9 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
             g = nullptr;
     }
     _raster_is_mesh_shaded = pipeline.is_mesh_shaded();
+    _raster_mesh_polyfill = {};
+    if (auto const* const polyfill = pipeline.mesh_polyfill(); polyfill != nullptr)
+        _raster_mesh_polyfill = *polyfill;
     raster_bind_pipeline(pipeline);
 }
 

@@ -223,6 +223,7 @@ struct live_pipeline
         cc::optional<sg::compiled_shader> tessellation_evaluation;
         cc::optional<sg::compiled_shader> mesh;
         cc::optional<sg::compiled_shader> task;
+        cc::optional<sg::mesh_polyfill_description> mesh_polyfill;
     };
     slib::impl::kept_builds<stages> kept;
 };
@@ -236,7 +237,8 @@ live_pipeline::stages stages_in(sg::raster_pipeline_description const& desc)
             .tessellation_control = desc.tessellation_control_shader,
             .tessellation_evaluation = desc.tessellation_evaluation_shader,
             .mesh = desc.mesh_shader,
-            .task = desc.task_shader};
+            .task = desc.task_shader,
+            .mesh_polyfill = desc.mesh_polyfill};
 }
 
 void use_stages(sg::raster_pipeline_description& desc, live_pipeline::stages const& s)
@@ -248,6 +250,7 @@ void use_stages(sg::raster_pipeline_description& desc, live_pipeline::stages con
     desc.tessellation_evaluation_shader = s.tessellation_evaluation;
     desc.mesh_shader = s.mesh;
     desc.task_shader = s.task;
+    desc.mesh_polyfill = s.mesh_polyfill;
 }
 
 cc::mutex<cc::vector<cc::unique_ptr<live_pipeline>>>& live_pipelines()
@@ -373,7 +376,13 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                                        "and this device "
                                                                        "lacks sg::feature::tessellation_shader",
                                                                        d.file, d.name)));
-    if (d.mesh != nullptr && !ctx->supports(sg::feature::mesh_shader))
+    // A mesh stage is drawn as its polyfill where the context asks for one, and only a mesh stage of no task stage so far.
+    auto const polyfill_use = ctx->mesh_polyfill();
+    auto const polyfills
+        = d.mesh != nullptr && d.task == nullptr
+       && (polyfill_use == sg::polyfill_use::always
+           || (polyfill_use == sg::polyfill_use::where_missing && !ctx->supports(sg::feature::mesh_shader)));
+    if (d.mesh != nullptr && !polyfills && !ctx->supports(sg::feature::mesh_shader))
         throw sg::pipeline_creation_exception(
             cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a mesh stage, and this device "
                                                          "lacks sg::feature::mesh_shader",
@@ -389,7 +398,22 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     desc.layout = d.acquire_layout(*ctx);
     if (d.vertex != nullptr)
         desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
-    if (d.mesh != nullptr)
+    if (d.mesh != nullptr && polyfills)
+    {
+        auto const half = [&](cc::string_view form)
+        {
+            auto with_form = options;
+            with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string(form)});
+            return (*d.mesh)->acquire(*ctx, with_form);
+        };
+        auto compute = co_await half("compute");
+        desc.vertex_shader = co_await half("vertex");
+        desc.mesh_polyfill = sg::mesh_polyfill_description{.corners = compute.mesh_polyfill_corners,
+                                                           .primitives_per_group = compute.mesh_polyfill_primitives,
+                                                           .words_per_group = compute.mesh_polyfill_words};
+        desc.mesh_polyfill.value().compute_shader = cc::move(compute);
+    }
+    else if (d.mesh != nullptr)
         desc.mesh_shader = co_await (*d.mesh)->acquire(*ctx, options);
     if (d.task != nullptr)
         desc.task_shader = co_await (*d.task)->acquire(*ctx, options);
@@ -455,6 +479,10 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         }
     }
 
+    // a polyfilled mesh stage draws its primitives as a list of the kind it writes
+    if (desc.mesh_polyfill.has_value())
+        desc.topology = desc.mesh_polyfill.value().corners == 2 ? sg::primitive_topology::line_list
+                                                                : sg::primitive_topology::triangle_list;
     if (customize)
         customize(desc);
     co_return desc;

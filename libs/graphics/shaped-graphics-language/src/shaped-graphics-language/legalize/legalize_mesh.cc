@@ -408,6 +408,9 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
     for (auto const s : out.e.at(rest))
         body.push_back(s);
     out.e.locals[index_of(output)].kind = local_kind::temporary;
+    // an output that is the first parameter stands as the entry point's stage struct, which a compute stage has none of
+    if (out.e.input == out.e.at(output).type)
+        out.e.input = type_id::none;
     out.e.entry_stage = stage::compute;
     out.e.features.remove(feature::mesh_shader);
     // the slots' base and the grid are read by every store, which the compaction gives a node each

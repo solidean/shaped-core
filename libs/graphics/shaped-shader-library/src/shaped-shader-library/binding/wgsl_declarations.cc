@@ -222,6 +222,10 @@ public:
             CC_RETURN_IF_ERROR(debug_window);
             if (debug_window.value())
                 continue;
+            auto reserved = is_reserved_entry(b);
+            CC_RETURN_IF_ERROR(reserved);
+            if (reserved.value())
+                continue;
 
             auto binding = sg::binding{};
             CC_RETURN_IF_ERROR(to_binding(b, binding));
@@ -716,6 +720,28 @@ private:
                                         "'var<storage, read_write> sg_debug'",
                                         p.line, group.value()));
         return true;
+    }
+
+    /// Whether `p` is any other entry of sg's reserved table, at its WebGPU address and under its own name, which the
+    /// webgpu backend binds itself: a polyfilled mesh stage's slots, a bare @compute's grid.
+    cc::result<bool> is_reserved_entry(pending_binding const& p) const
+    {
+        auto group = integer_of(p.group, p.line);
+        CC_RETURN_IF_ERROR(group);
+        auto index = integer_of(p.index, p.line);
+        CC_RETURN_IF_ERROR(index);
+        for (auto const& entry : sg::reserved_bindings)
+        {
+            if (entry.webgpu_group < 0 || group.value() != i64(entry.webgpu_group)
+                || index.value() != i64(entry.webgpu_binding))
+                continue;
+            if (p.name != entry.name)
+                return cc::error(cc::format("line {}: @group({}) @binding({}) is sg's reserved '{}', and '{}' stands "
+                                            "there",
+                                            p.line, group.value(), index.value(), entry.name, p.name));
+            return true;
+        }
+        return false;
     }
 
     /// The layout of a host-shareable type, under WGSL's alignment and size rules.

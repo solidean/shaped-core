@@ -47,6 +47,81 @@ sg::compute_pipeline_description over_grid(sg::context& ctx, sg::compute_pipelin
             .cached_pipeline = desc.cached_pipeline};
 }
 
+/// A polyfilled description's raster half, over the twin of its layout that holds `sg_mesh_input`; `desc` otherwise.
+sg::raster_pipeline_description raster_half_of(sg::context& ctx, sg::raster_pipeline_description const& desc)
+{
+    if (!desc.mesh_polyfill.has_value() || desc.layout == nullptr
+        || desc.layout->mesh_polyfill() == sg::mesh_polyfill_slots::input)
+        return desc;
+    auto twin = desc.layout->description();
+    twin.mesh_polyfill = sg::mesh_polyfill_slots::input;
+    auto result = desc;
+    result.layout = ctx.cached.acquire_pipeline_layout(twin);
+    return result;
+}
+
+/// A polyfilled description's compute half, over the twin of its layout that holds `sg_mesh_output` and the grid.
+sg::compute_pipeline_description compute_half_of(sg::context& ctx, sg::raster_pipeline_description const& desc)
+{
+    auto twin = desc.layout->description();
+    twin.mesh_polyfill = sg::mesh_polyfill_slots::output;
+    twin.dispatch_grid = true;
+    return {.shader = desc.mesh_polyfill.value().compute_shader, .layout = ctx.cached.acquire_pipeline_layout(twin)};
+}
+
+sg::impl::mesh_polyfill_state state_of(sg::mesh_polyfill_description const& polyfill, sg::compute_pipeline_handle compute)
+{
+    return {.compute = cc::move(compute),
+            .workgroup = polyfill.compute_shader.workgroup_size.value_or(sg::compute_dimensions{}),
+            .corners = polyfill.corners,
+            .primitives_per_group = polyfill.primitives_per_group,
+            .words_per_group = polyfill.words_per_group};
+}
+
+/// Why a polyfilled mesh stage of `desc` cannot be built, or nothing when it can; nothing for a description without one.
+cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description const& desc, bool draws_polyfill)
+{
+    if (!desc.mesh_polyfill.has_value())
+        return {};
+    auto const& p = desc.mesh_polyfill.value();
+    if (!draws_polyfill)
+        return cc::string("the pipeline polyfills its mesh stage, and this backend draws no polyfilled mesh stage yet");
+    if (desc.mesh_shader.has_value() || desc.task_shader.has_value())
+        return cc::string("the pipeline polyfills its mesh stage and holds a mesh or task stage too; the polyfill "
+                          "takes "
+                          "the mesh stage's place");
+    if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value()
+        || desc.geometry_shader.has_value())
+        return cc::string("the pipeline polyfills its mesh stage beside a tessellation or geometry stage");
+    if (!desc.vertex_input.slots.empty())
+        return cc::string("the pipeline polyfills its mesh stage and has a vertex input; its vertex half reads the "
+                          "polyfill's slots");
+    if (desc.view_count > 1)
+        return cc::string("the pipeline renders several views from a polyfilled mesh stage, which sg does not wire up "
+                          "yet");
+    if (p.corners != 2 && p.corners != 3)
+        return cc::format("the pipeline's mesh polyfill has {} corners a primitive, and a line has 2, a triangle 3",
+                          p.corners);
+    auto const topology = p.corners == 3 ? sg::primitive_topology::triangle_list : sg::primitive_topology::line_list;
+    if (desc.topology != topology)
+        return cc::string("the pipeline's topology is not the list its mesh polyfill's primitives draw as");
+    if (p.primitives_per_group <= 0 || p.words_per_group <= 0)
+        return cc::string("the pipeline's mesh polyfill states no primitives or no words per workgroup");
+    if (p.compute_shader.bytecode.empty())
+        return cc::string("the pipeline's mesh polyfill has no compute half");
+    return {};
+}
+
+cc::shared_async<sg::raster_pipeline_handle> with_polyfill(cc::shared_async<sg::raster_pipeline_handle> built,
+                                                           cc::shared_async<sg::compute_pipeline_handle> compute,
+                                                           sg::mesh_polyfill_description numbers)
+{
+    auto pipeline = co_await built;
+    numbers.compute_shader = {};
+    sg::impl::set_mesh_polyfill(*pipeline, state_of(numbers, co_await compute));
+    co_return pipeline;
+}
+
 /// Why a compute pipeline of `desc` cannot be built on a device with `supported`, or nothing when it can.
 cc::optional<cc::string> refusal_of(sg::compute_pipeline_description const& desc, sg::feature_set supported)
 {
@@ -390,10 +465,23 @@ raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pip
     throw pipeline_creation_exception(entry_point_of(desc), r.error());
 }
 
-cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
+cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& given)
 {
+    auto const desc = raster_half_of(_ctx, given);
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
+    if (auto refusal = polyfill_refusal_of(desc, _ctx.draws_mesh_polyfill()); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
+
+    // the compute half first, so a refusal of it leaves no raster half behind
+    auto compute = compute_pipeline_handle();
+    if (desc.mesh_polyfill.has_value())
+    {
+        auto half = try_create_compute_pipeline(compute_half_of(_ctx, desc));
+        if (half.has_error())
+            return cc::error(cc::format("its mesh polyfill's compute half: {}", half.error()));
+        compute = cc::move(half.value());
+    }
 
     _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
@@ -402,6 +490,8 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
         impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc), desc.mesh_shader.has_value());
         add_debug_sites(_ctx._debug_windows, desc);
         impl::set_footprint(*r.value(), footprint_of(desc));
+        if (desc.mesh_polyfill.has_value())
+            impl::set_mesh_polyfill(*r.value(), state_of(desc.mesh_polyfill.value(), cc::move(compute)));
     }
     return r;
 }
@@ -420,9 +510,13 @@ cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute
 }
 
 cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_pipeline_async(
-    raster_pipeline_description const& desc)
+    raster_pipeline_description const& given)
 {
-    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
+    auto const desc = raster_half_of(_ctx, given);
+    auto refusal = refusal_of(desc, _ctx.supported_features());
+    if (!refusal.has_value())
+        refusal = polyfill_refusal_of(desc, _ctx.draws_mesh_polyfill());
+    if (refusal.has_value())
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
@@ -430,8 +524,12 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
     add_debug_sites(_ctx._debug_windows, desc);
-    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc),
-                 desc.mesh_shader.has_value(), footprint_of(desc));
+    auto result = named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc),
+                        desc.mesh_shader.has_value(), footprint_of(desc));
+    if (!desc.mesh_polyfill.has_value())
+        return result;
+    return with_polyfill(cc::move(result), create_compute_pipeline_async(compute_half_of(_ctx, desc)),
+                         desc.mesh_polyfill.value());
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)

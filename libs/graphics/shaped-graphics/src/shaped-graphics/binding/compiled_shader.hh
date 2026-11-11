@@ -82,6 +82,12 @@ struct sg::compiled_shader
     /// threads alone, writing the grid its threads past it return before, and refuses a dispatch by groups.
     /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
     bool is_dispatched_by_threads = false;
+    /// A polyfilled mesh stage's numbers, which both its halves carry alike: a primitive's corners, the primitives and
+    /// the 32-bit words of one workgroup's slots (docs/concepts/mesh-polyfill.md); all 0 for every other shader.
+    /// SGL states them, and a compiler's cache holds the compiler's own result, so a cached shader never carries them.
+    i32 mesh_polyfill_corners = 0;
+    i32 mesh_polyfill_primitives = 0;
+    i32 mesh_polyfill_words = 0;
 
     compiler_info compiler;
 

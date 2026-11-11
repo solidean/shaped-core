@@ -70,6 +70,24 @@ TEST("sgl emit - a polyfilled mesh stage's vertex half reads sg_mesh_input, and 
     CHECK(hlsl.text.contains("space11")).dump("text", hlsl.text);
 }
 
+TEST("sgl emit - a polyfilled mesh stage that reads no stage input still numbers its workgroup (CHK-524)")
+{
+    constexpr auto program = cc::string_view("require mesh_shader\n"
+                                             "struct corner:\n    @position position: hpos4\n"
+                                             "@mesh(1, vertices = 3, triangles = 1)\n"
+                                             "fun ms(output: mut mesh_output[corner]):\n"
+                                             "    output.set_counts(3u, 1u)\n"
+                                             "    output.vertex(0u, {position = hpos4(0.0, 0.0, 0.0, 1.0)})\n"
+                                             "    output.triangle(0u, uint3(0u, 0u, 0u))\n");
+    for (auto const form : {mesh_form::compute, mesh_form::vertex_fetch})
+    {
+        auto const e = emit_source(program, 0, target::wgsl, {.mesh = form});
+        REQUIRE(sgl::emit::dump_errors(e) == "");
+        if (form == mesh_form::compute)
+            CHECK(e.text.contains("@builtin(workgroup_id)")).dump("text", e.text);
+    }
+}
+
 TEST("sgl emit - a mesh stage the polyfill does not carry yet is refused by name, not guessed (CHK-524)")
 {
     constexpr auto per_primitive = cc::string_view("require mesh_shader\n"

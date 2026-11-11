@@ -100,6 +100,16 @@ public:
     [[nodiscard]] bool portability_checks() const { return _portability_checks.load(cc::memory_order_relaxed); }
     void set_portability_checks(bool enabled) { _portability_checks.store(enabled, cc::memory_order_relaxed); }
 
+    /// Whether a mesh-shaded pipeline shaped-shader-library describes is drawn as its polyfill: a compute pass and a
+    /// draw (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
+    /// **`never` by default**, until the polyfill's benchmark against the native stage has run.
+    /// Set it before acquiring the pipelines it should cover.
+    [[nodiscard]] polyfill_use mesh_polyfill() const { return _mesh_polyfill.load(cc::memory_order_relaxed); }
+    void set_mesh_polyfill(polyfill_use use) { _mesh_polyfill.store(use, cc::memory_order_relaxed); }
+
+    /// Whether this backend draws a pipeline whose description holds a `mesh_polyfill`.
+    [[nodiscard]] virtual bool draws_mesh_polyfill() const { return false; }
+
     /// Whether `dispatch_rays` checks every instance of every bound tlas against the hit records it reaches.
     /// A record past the shader table or of the wrong kind is undefined behavior on every backend.
     /// On metal a record past the table can fault the GPU, so `dispatch_rays` skips a dispatch that reaches one.
@@ -862,6 +872,7 @@ protected:
     cc::atomic<bool> _device_loss_claimed = false;
     cc::atomic<bool> _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
+    cc::atomic<polyfill_use> _mesh_polyfill = polyfill_use::never;
     cc::atomic<bool> _hit_record_checks = CC_ASSERT_ENABLED != 0;
     cc::atomic<bool> _render_pass_split_warnings = true;
 

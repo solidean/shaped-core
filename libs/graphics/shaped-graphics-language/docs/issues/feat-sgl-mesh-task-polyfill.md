@@ -48,3 +48,12 @@ There the two images must be identical, equal depths and blending included, and 
 - Whether webgpu's per-primitive index reaches a pixel stage, through the feature `primitive_index`, or the polyfill duplicates vertices for per-triangle values instead; to be tried.
 - Where a task stage declares its maximum, and its spelling.
 - The primitive-order claim above is from memory of both specs, and is checked against their text before a test relies on it.
+
+## Log
+
+- **2026-11-11: the SGL half.**
+  `sgl emit --mesh compute|vertex` writes both halves of a mesh entry point over `sg_mesh_output` and `sg_mesh_input`, CHK-524.
+- **2026-11-11: drawn on webgpu.**
+  `ctx.set_mesh_polyfill(...)` opts in, slib acquires both halves, and sg's webgpu backend dispatches and draws them.
+  `tests/pipeline/mesh-polyfill-test.cc` passes under node (Dawn) and deno (wgpu), the primitive order and an unused slot included.
+  Next: the draw on dx12 and vulkan, where `draws_mesh_polyfill` is false so far, and the benchmark against their native stage on the same device.

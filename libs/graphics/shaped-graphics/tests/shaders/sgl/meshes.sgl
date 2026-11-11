@@ -116,3 +116,25 @@ pipeline crossed:
     pixel = painting
     cull = .none
     format = .rgba8_unorm
+
+// Two workgroups of two full-screen triangles each, in a mesh stage of three slots: the last triangle drawn is the
+// one seen, by workgroup and then by index, and the third slot, past the count, draws nothing.
+@mesh(1, vertices = 6, triangles = 3)
+fun layering(@workgroup_id group: int3, output: mut mesh_output[corner]):
+    output.set_counts(6u, 2u)
+    let first = if group.x == 0 => float4(1.0, 0.0, 0.0, 1.0) else float4(0.0, 0.0, 1.0, 1.0)
+    let second = if group.x == 0 => float4(0.0, 1.0, 0.0, 1.0) else float4(1.0, 1.0, 1.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = first})
+    output.vertex(1u, {position = hpos4(3.0, -1.0, 0.0, 1.0), color = first})
+    output.vertex(2u, {position = hpos4(-1.0, 3.0, 0.0, 1.0), color = first})
+    output.vertex(3u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = second})
+    output.vertex(4u, {position = hpos4(3.0, -1.0, 0.0, 1.0), color = second})
+    output.vertex(5u, {position = hpos4(-1.0, 3.0, 0.0, 1.0), color = second})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(3u, 4u, 5u))
+
+pipeline layered:
+    mesh = layering
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
