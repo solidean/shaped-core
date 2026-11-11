@@ -531,7 +531,8 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     fc.samples_per_pixel = l.settings.samples_per_pixel;
     // the primary cone narrows where the image averages many samples, which filter the pixel already (pbrt-v4's rule)
     auto const expected = l.settings.expected_samples_per_pixel;
-    fc.primary_spread = expected > 1 ? fc.pixel_spread * cc::max(0.125f, 1.0f / tg::sqrt(f32(expected))) : fc.pixel_spread;
+    fc.primary_spread
+        = expected > 1 ? fc.pixel_spread * cc::max(0.125f, 1.0f / tg::sqrt(f32(expected))) : fc.pixel_spread;
     // A hybrid layer lights its own count of bounces, which its shaders read from the same field.
     fc.max_bounces
         = l.settings.mode == render_mode::hybrid ? cc::clamp(l.settings.hybrid_bounces, 1, 2) : l.settings.max_bounces;

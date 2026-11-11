@@ -1578,7 +1578,8 @@ ASYNC_INVOCABLE_TEST("sv - a grazing ray cone samples at its footprint's short a
     auto const k = 2.0f;
     auto const distance = 3.0;
     auto const tilt = tg::angle_d::make_from_degree(70.0);
-    auto cam = sv::camera::looking_at(tg::pos3d(0, distance * tg::cos(tilt), -distance * tg::sin(tilt)), tg::pos3d(0, 0, 0));
+    auto cam
+        = sv::camera::looking_at(tg::pos3d(0, distance * tg::cos(tilt), -distance * tg::sin(tilt)), tg::pos3d(0, 0, 0));
     cam.projection.aspect_ratio = 1.0;
 
     auto shade = cc::fixed_array<f32, 3>{};
