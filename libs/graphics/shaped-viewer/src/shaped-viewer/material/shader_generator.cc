@@ -285,17 +285,23 @@ constexpr auto traced_spelling = body_spelling{};
 constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
 
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
+/// With `at_uv`, a texture's `fun sv_<name>_at(ctx, at)` instead, read at the uv `at` rather than the hit's own: a relief's march.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
                                             material_parameter_layout const& layout,
                                             i32 index,
-                                            body_spelling const& spelling)
+                                            body_spelling const& spelling,
+                                            bool at_uv = false)
 {
     auto const& a = r.attributes[index];
     auto const components = a.format.component_count();
 
     auto out = cc::string();
-    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
-                      sgl_type_of(a.format));
+    if (at_uv)
+        cc::format_append(out, "fun sv_{}_at(ctx: material.shading_context, at: float2){{tracer.bindless}} -> {}:\n",
+                          a.name, sgl_type_of(a.format));
+    else
+        cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
+                          sgl_type_of(a.format));
     out += "    let block = ctx.param_buffer as int\n";
 
     switch (a.frequency)
@@ -343,7 +349,12 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
                           spelling.mark, uv_slot.offset);
         out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
         // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
-        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
+        // Every texture reads where a relief's parallax found the ray meets it, the hit's own uv elsewhere.
+        if (at_uv)
+            out += "    let uv = at\n";
+        else
+            cc::format_append(out, "    let uv = {} + ctx.uv_offset\n",
+                              mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
         cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
                           spelling.mark, tex.offset);
         // At a hit, which has no derivatives, the level is the ray cone's: its footprint over the texels the triangle spans.
@@ -392,6 +403,71 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         break;
     }
     }
+    return out;
+}
+
+/// `fun sv_parallax(ctx, g)`: `ctx` with the uv offset where the hit's ray meets the type's relief, or `ctx` itself.
+/// A relief marches only where the type declares a height and it is bound to a texture, read through a uv per corner.
+/// The march steps the ray down from the face, which stands at the top, to the bottom, and refines the crossing linearly
+/// (Tatarchuk, "Practical Parallax Occlusion Mapping", 2006); the height is read at the hit's ray-cone level.
+[[nodiscard]] cc::string parallax_function(resolved_material const& r,
+                                           material_parameter_layout const& layout,
+                                           body_spelling const& spelling)
+{
+    auto out = cc::string("fun sv_parallax(ctx: material.shading_context, g: tracer.hit_geometry){tracer.bindless} -> "
+                          "material.shading_context:\n");
+    auto height = i32(-1);
+    if (r.type != nullptr && !r.type->height_attribute.empty())
+        for (auto i = 0; i < r.attributes.size(); ++i)
+            if (r.attributes[i].name == r.type->height_attribute)
+                height = i32(i);
+    auto const textured = height >= 0
+                       && (r.attributes[height].frequency == material_frequency::material_texture
+                           || r.attributes[height].frequency == material_frequency::mesh_texture_binding)
+                       && shape_of(r.attributes[height].uv->frequency) != load_shape::flat;
+    if (!textured)
+    {
+        out += "    return ctx\n";
+        return out;
+    }
+
+    auto const& a = r.attributes[height];
+    auto const& uv_slot = slot_for(layout, height, material_slot_kind::attribute_descriptor);
+    cc::format_append(
+        out,
+        "    let top = sv_attribute_{}(ctx)\n"
+        "    let bottom = sv_attribute_{}(ctx)\n"
+        "    if top <= bottom => return ctx\n"
+        "    let block = ctx.param_buffer as int\n"
+        "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], ctx.param_offset + {}u)\n"
+        "    let uv_desc_buffer = uv_desc.buffer as int\n"
+        "    let corners = {}\n"
+        "    let u0 = material.load_element_f2(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, corners.x)\n"
+        "    let u1 = material.load_element_f2(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, corners.y)\n"
+        "    let u2 = material.load_element_f2(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, corners.z)\n"
+        "    let velocity = material.parallax_velocity(u1 - u0, u2 - u0, g.e1, g.e2, g.dir)\n"
+        "    if velocity.z == 0.0 => return ctx\n"
+        "    let uv = u0 * ctx.barycentrics.x + u1 * ctx.barycentrics.y + u2 * ctx.barycentrics.z\n"
+        "    let depth_range = top - bottom\n"
+        "    let mut prev_depth = 0.0\n"
+        "    let mut prev_gap = top - sv_{}_at(ctx, uv)\n"
+        "    if prev_gap <= 0.0 => return ctx\n"
+        "    let mut hit = depth_range\n"
+        "    for i in 1 ..= 32:\n"
+        "        let depth = depth_range * (i as float) / 32.0\n"
+        "        let gap = top - sv_{}_at(ctx, uv + velocity.xy * depth) - depth\n"
+        "        if gap <= 0.0:\n"
+        "            hit = prev_depth + (depth - prev_depth) * prev_gap / (prev_gap - gap)\n"
+        "            break\n"
+        "        prev_depth = depth\n"
+        "        prev_gap = gap\n"
+        "    let mut moved = ctx\n"
+        "    moved.uv_offset = velocity.xy * hit\n"
+        "    return moved\n",
+        r.type->height_top_attribute, r.type->height_bottom_attribute, spelling.mark, uv_slot.offset,
+        element_expression(a.uv->frequency), spelling.mark, spelling.mark, spelling.mark, a.name, a.name);
+    out += "\n";
+    out += attribute_function(r, layout, height, spelling, true);
     return out;
 }
 
@@ -607,6 +683,9 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         src += "\n";
     }
 
+    src += parallax_function(r, layout, spelling);
+    src += "\n";
+
     src += "fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:\n";
     for (auto const& a : r.attributes)
         cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
@@ -684,7 +763,8 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     cc::format_append(src,
                       "@closest_hit fun sv_closest_hit(h: triangle_hit, p: mut tracer.surface_payload){{tracer.traced, "
                       "tracer.bindless, slug.tables}}:\n"
-                      "    let ctx = tracer.cone_context(h, p)\n"
+                      "    let coned = tracer.cone_context(h, p)\n"
+                      "    let ctx = sv_parallax(coned, tracer.hit_geometry_of(h, coned))\n"
                       "    tracer.shade_triangle(h, mut p, ctx, sv_evaluate_material(ctx), {})\n\n",
                       supplied_frame);
 
@@ -733,7 +813,8 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
                           supplied_frame);
     else
         cc::format_append(src,
-                          "    let ctx = tracer.stored_triangle_context(slot)\n"
+                          "    let coned = tracer.stored_triangle_context(slot)\n"
+                          "    let ctx = sv_parallax(coned, tracer.stored_hit_geometry(slot, coned))\n"
                           "    tracer.shade_stored_triangle(slot, ctx, sv_evaluate_material(ctx), {})\n",
                           supplied_frame);
     return src;

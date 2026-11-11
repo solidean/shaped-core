@@ -327,6 +327,7 @@ if(SC_BUILD_TESTS)
             tests/cutout-trace-test.cc
             tests/guide-ray-test.cc
             tests/emitter-trace-test.cc
+            tests/deterministic-seed-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc

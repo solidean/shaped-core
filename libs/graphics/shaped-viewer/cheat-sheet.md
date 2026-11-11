@@ -240,13 +240,14 @@ sv::attribute_interpolation      // linear | rotation — a property of the DECL
 sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
 sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
 
-sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `pbr` and `unlit`
+sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `openpbr_relief`, `pbr` and `unlit`
                                  //   thread-safe: the process-wide one is shared by every viewer and every parallel test
 lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
 lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
-sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
+sv::builtin_material::openpbr / openpbr_relief / pbr / unlit  // the names the builtins register under
+                                                     // openpbr_relief: a tileable material; its `occlusion` is its relief's, which the tracer applies per direction
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
                                  //   emission declared by openpbr (emission_color, emission_luminance) and pbr (emissive); unlit's reaches the camera alone
@@ -999,7 +1000,7 @@ store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_
 store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
 store.accumulated_frames(id) -> u32           // one named slot's frame counter, defaulting to accumulation(0) — the layer, not the view
-store.history_of(id) -> {restarts, loading_frames}  // the slot's restart count, which picks its seed, and frames traced while loading
+store.history_of(id) -> {seed_key, loading_frames}  // the key its random sequence is drawn from, equal on any machine for one image, and frames traced while loading
                                               //   read it once after a render: logging every frame changes the timing a flake hangs on
 store.min_accumulated_samples(id) -> u32      // the fewest samples per pixel across every traced layer; sv::impl::min_accumulated_samples is the rule
 store.is_accumulation_converged(id, samples = {}) -> bool  // every traced layer holds `samples`, or stopped at sv::accumulation_sample_cap

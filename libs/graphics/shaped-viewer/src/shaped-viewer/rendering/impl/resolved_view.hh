@@ -27,6 +27,10 @@ struct sv::impl::resolved_view
     /// A frame mesh's BLAS and buffers are new every frame, so the trace hash reads this in their place.
     cc::vector<cc::hash128> frame_contents;
 
+    /// Per instance, its geometry's content key whoever holds it, and zero for a placeholder box.
+    /// What the seed reads in place of a BLAS address, since it is equal on any machine.
+    cc::vector<cc::hash128> contents;
+
     /// Per instance, a frame mesh's own index buffer, which a raster frame binds to draw its row; null where the row's indices are in the mesh manager's pool.
     cc::vector<sg::buffer<u32>> own_indices;
     cc::vector<material_permutation const*> hit_groups;

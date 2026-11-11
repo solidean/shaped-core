@@ -26,6 +26,9 @@ struct sv::material_type_description
     cc::string transmission_attribute = {};
     cc::string thin_walled_attribute = {};
     cc::string tangent_frame_attribute = {};
+    cc::string height_attribute = {};
+    cc::string height_top_attribute = {};
+    cc::string height_bottom_attribute = {};
 };
 
 /// A family of materials: what a shader needs per pixel, and the code that turns it into a shaded surface.
@@ -111,6 +114,14 @@ struct sv::material_type
     /// Which declared rotation attribute is this type's tangent frame, or empty for none.
     /// The hybrid reads its +z as the smooth normal where a bounce meets the surface, so glass refracts and a secondary is lit without facets.
     cc::string tangent_frame_attribute;
+
+    /// Which declared float attribute is a relief's height in meters, positive out of the face, or empty for none.
+    /// Bound to a texture, a hit marches it along its ray (parallax occlusion mapping) and every texture is read where the ray met it.
+    /// The face's geometry stands at `height_top_attribute` and the relief is carved down to `height_bottom_attribute`;
+    /// a top not above the bottom marches nothing.
+    cc::string height_attribute;
+    cc::string height_top_attribute;
+    cc::string height_bottom_attribute;
 
     cc::hash128 hash;
 

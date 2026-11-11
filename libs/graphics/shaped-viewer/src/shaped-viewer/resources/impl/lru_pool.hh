@@ -54,6 +54,13 @@ public:
         _epoch = e;
     }
 
+    /// The content hash `id` was inserted under, or zero for an id not resident.
+    [[nodiscard]] cc::hash128 hash_of(Id id) const
+    {
+        auto const* const e = _entries.get_ptr(id);
+        return e == nullptr ? cc::hash128() : e->hash;
+    }
+
     /// The record for `id`, or null if absent.
     /// Marks it used this epoch (an LRU touch).
     [[nodiscard]] Record const* get_ptr(Id id)

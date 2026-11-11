@@ -553,12 +553,20 @@ fun stored_triangle_context(slot: uint){traced, bindless, wavefront_step} -> mat
     let inst = scene.instance(..traced.instances[hit.instance as int])
     let indices = inst.indices as int
     let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], hit.primitive, hit.barycentrics)
-    let r = traced.path_rays[slot as int]
     let st = traced.path_states[slot as int]
+    let g = stored_hit_geometry(slot, ctx)
+    return with_cone(ctx, cross(g.e1, g.e2), g.dir, g.t, st.cone_width, st.cone_spread)
+
+/// The geometry of the triangle hit `slot` recorded, its edges through the instance's record.
+fun stored_hit_geometry(slot: uint, ctx: material.shading_context){traced, bindless, wavefront_step} -> hit_geometry:
+    let hit = stored_hit(slot)
+    let inst = scene.instance(..traced.instances[hit.instance as int])
+    let r = traced.path_rays[slot as int]
     let v0 = instance_position(inst, ctx.corner.x)
-    let edges = cross(instance_to_world(inst, instance_position(inst, ctx.corner.y) - v0), instance_to_world(inst, instance_position(inst, ctx.corner.z) - v0))
+    let e1 = instance_to_world(inst, instance_position(inst, ctx.corner.y) - v0)
+    let e2 = instance_to_world(inst, instance_position(inst, ctx.corner.z) - v0)
     let len = length(r.direction)
-    return with_cone(ctx, edges, r.direction / len, hit.t * len, st.cone_width, st.cone_spread)
+    return hit_geometry(r.direction / len, hit.t * len, e1, e2)
 
 /// The shading context of the quadric hit `slot` recorded.
 fun stored_quadric_context(slot: uint){traced, wavefront_step} -> material.shading_context:

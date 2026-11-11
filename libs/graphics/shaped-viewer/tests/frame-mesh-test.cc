@@ -277,11 +277,11 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean 
         auto const* const rec = store.peek_ptr(id);
         return rec == nullptr ? nullptr : rec->temporal.get_ptr(t);
     };
-    // where the mean is: (restarts, frames), which every traced frame moves, a restart included
+    // where the mean is: (the image it averages, frames), which every traced frame moves, a restart included
     auto const progress = [&]
     {
         auto const* const s = slot(sv::temporal_id::accumulation(0));
-        return s == nullptr ? cc::pair<u32, u32>{0, 0} : cc::pair<u32, u32>{s->restarts, s->accum_frame};
+        return s == nullptr ? cc::pair<u64, u32>{0, 0} : cc::pair<u64, u32>{s->reset_hash, s->accum_frame};
     };
     auto const trace = [&](sv::viewer_definition const& def)
     {
@@ -313,10 +313,11 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean 
     // deformed, recolored and moved every frame: the mean restarts each time, the history's rule holds
     for (auto i = 1; i <= 8; ++i)
     {
-        auto const restarts = progress().first;
+        auto const image = progress().first;
         auto const deformed = cc::vector<sv::mesh>{body(0.05f * f32(i), i <= 4 ? 0.0f : 0.1f * f32(i))};
         REQUIRE(trace(definition_with(deformed, tg::vec3f(0.02f * f32(i), 0, 0))));
-        CHECK(progress().first == restarts + 1);
+        CHECK(progress().first != image);
+        CHECK(progress().second == 1);
         CHECK(slot(sv::temporal_id::frame_samples(0))->reset_hash == history).context(cc::format("frame {}", i));
     }
 

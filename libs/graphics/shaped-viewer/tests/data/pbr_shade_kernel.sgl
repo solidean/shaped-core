@@ -48,6 +48,9 @@ fun sv_attribute_tangent_handedness(ctx: material.shading_context){tracer.bindle
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 64u))
 
+fun sv_parallax(ctx: material.shading_context, g: tracer.hit_geometry){tracer.bindless} -> material.shading_context:
+    return ctx
+
 fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:
     let base_color = sv_attribute_base_color(ctx)
     let metallic = sv_attribute_metallic(ctx)
@@ -78,5 +81,6 @@ fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> open
 @compute(64) fun sv_shade(@thread_id id: int3){tracer.traced, tracer.bindless, slug.tables, tracer.wavefront_step}:
     let slot = tracer.shade_slot(tracer.thread_index(id))
     if slot == tracer.no_slot => return
-    let ctx = tracer.stored_triangle_context(slot)
+    let coned = tracer.stored_triangle_context(slot)
+    let ctx = sv_parallax(coned, tracer.stored_hit_geometry(slot, coned))
     tracer.shade_stored_triangle(slot, ctx, sv_evaluate_material(ctx), sv_supplied_tangent_frame)
