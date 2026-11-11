@@ -640,8 +640,8 @@ REC_TEST("record/sampling - each tick tells a thread that ran from one the OS ke
 {
     if (!sampling_possible())
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
-#if !defined(_WIN32)
-    SKIP("record.thread_run is recorded on Windows only so far");
+#if !defined(_WIN32) && !defined(__APPLE__)
+    SKIP("record.thread_run is recorded on Windows and macOS only so far");
 #else
     rec_fixture const fixture(deterministic_config());
 
