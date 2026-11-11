@@ -73,9 +73,15 @@ Changing a PTLAS's capacities is a new PTLAS, not an op, since both APIs price i
 D3D12 says outright that a PTLAS traces exactly like a TLAS.
 Its `accel_read` / `accel_write` accesses are the structure's own, so an in-place update after a trace orders itself through the existing barrier tracking.
 
-**Vulkan is the exception**: a PTLAS binds through its own descriptor type, `VK_DESCRIPTOR_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_NV`.
-A descriptor set layout is fixed before anything is bound to it, so the layout has to know a binding takes a PTLAS.
-See [open question Q1](#open-questions).
+**Vulkan is the exception, and every TLAS there is traced by its address** (decided).
+A PTLAS has a descriptor type of its own, `VK_DESCRIPTOR_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_NV`, but only classic descriptor sets can write it.
+sg's vulkan backend writes descriptors through `VK_EXT_descriptor_buffer`, whose `vkGetDescriptorEXT` takes an acceleration structure only as a `VkAccelerationStructureKHR`'s address (VUID-08028).
+Wrapping a PTLAS in one is undefined, so sg does what NVIDIA's own sample does instead:
+- **Each vulkan `tlas` owns an address cell**, an 8-byte buffer holding its device address, which a PTLAS's in-place updates never change.
+- **In SGL's own SPIR-V, an acceleration-structure binding is that cell**, which the shader loads and converts with `OpConvertUToAccelerationStructureKHR`.
+  A TLAS and a PTLAS are then the same binding, so a shader never knows which it traces.
+- **A package compiled through DXC keeps the descriptor it has today**, and refuses a PTLAS naming its route.
+  DXC may reach the cell too through inline SPIR-V (`[[vk::ext_instruction]]`), which is the next step rather than part of this one.
 
 ### D3. Two tiers per operation: described and GPU-written
 
@@ -171,8 +177,10 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
 1. **Plumbing** (built): the preview channel for Agility, `--agility-preview`, the opt-in, and dx12's `supports_clusters_and_ptlas()`.
    The preview runtime loads and accepts its features; the RTX 4090's driver 32.0.16.1088 does not report the cap, so it is unproven on a device.
    No sg feature reports either yet, since a reported feature promises a code path that does not exist until phase 2.
-2. **PTLAS, described tier**, over ordinary BLASes: `sg::feature::partitioned_tlas`, and Vulkan's extension enabled where granted.
-   Then `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops, and `hit_record_checks` on the mirror.
+2. **PTLAS, described tier**, over ordinary BLASes, vulkan first, since this machine's NVIDIA driver grants the extension:
+   - (a) vulkan traces every TLAS by its address cell in SGL's own SPIR-V, with every existing trace test unchanged.
+   - (b) `sg::feature::partitioned_tlas`, `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops, and `hit_record_checks` on the mirror.
+   - (c) dx12's half, which binds as a TLAS does and waits for a driver reporting the cap to be tested.
    This alone retires a full TLAS rebuild per edit, the cost shaped-viewer pays on a large scene today.
 3. **PTLAS, GPU-written tier**: the BLAS table, the input set, `accel_build_args`, and the record layouts of D5.
 4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id` with the preview DXC.
@@ -182,9 +190,7 @@ Each phase lands tested on dx12 where an adapter reports the cap, and on vulkan 
 
 ## Open questions
 
-- **Q1: Can a Vulkan PTLAS bind as an ordinary acceleration structure?**
-  The refpages show only the partitioned descriptor type, and do not say whether a `VkAccelerationStructureKHR` may wrap one.
-  If not, a binding declares it takes a PTLAS, and SGL learns which bindings may.
+- **Q1: Can a Vulkan PTLAS bind as an ordinary acceleration structure?** — settled: no, so vulkan traces every TLAS by its address ([D2](#d2-a-ptlas-is-a-tlas)).
 - **Q2: D5's record layouts** — settled: SGL emits them, so sg's GPU-written tier is reached from SGL.
 - **Q3: What does `ALLOW_CLUSTERED_GEOMETRY` cost a pipeline that never meets a cluster?**
   Neither spec says; it decides whether D7 sets it everywhere or a pipeline asks for it.
