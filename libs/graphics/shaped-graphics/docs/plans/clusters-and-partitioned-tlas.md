@@ -1,6 +1,7 @@
 # Plan: clustered geometry and partitioned TLAS
 
-Status: **proposed** — nothing is built; the [decisions](#decisions) are proposals awaiting review, and [open questions](#open-questions) lists what the specs leave unsettled.
+Status: **phase 1 built**, which the [phases](#phases) describe.
+The [decisions](#decisions) stand as proposals except D5's, and [open questions](#open-questions) lists what the specs leave unsettled.
 D3D12 and Vulkan each gained two acceleration-structure kinds that change how a large scene is kept current: clusters and partitioned top-level structures.
 This plan is how sg exposes them, on dx12 and vulkan only.
 Background: [acceleration structures](../concepts/acceleration-structures.md) for the model this plan departs from, and [barriers](../concepts/barriers.md) for how ordering is inferred.
@@ -154,21 +155,25 @@ A CLAS build, then the cluster BLAS, then the PTLAS update is three calls, order
 ### D8. The preview runtime is a channel of its own
 
 Retail `1.620.1` stays the default Agility pin, so a default build and test run needs no Developer Mode.
-- `fetch-agility.py --preview` installs `1.722.0-preview` beside it, and `SG_HAS_AGILITY_PREVIEW` (1/0) says which one a build took.
+- `fetch-agility.py --preview` installs `1.722.1-preview` into `extern/agility-preview`, and `SG_HAS_AGILITY_PREVIEW` (1/0) says which one a build took.
+  Its terms forbid distribution and expire, so it is a development pin only: [platforms](../../../../../docs/platforms.md#preview-agility-sdk-sc_agility_preview) has the switch.
 - `extern/dxc` needs a matching preview pin, `1.10.2605.37-preview`, since `1.9.2602.24` stops at Shader Model 6.9.
-- `Microsoft.Direct3D.WARP 1.65535.22-preview` supports both features, which would make dx12 tests runnable on any machine, CI included.
+  Only `cluster_id` needs it, so it waits for phase 4, and its terms carry the same restrictions.
+- `Microsoft.Direct3D.WARP 1.65535.22-preview` supports both features, in `extern/warp-preview`, which would make dx12 tests runnable on any machine.
 - The dx12 backend opts in through `ID3D12DeviceFactory::EnableExperimentalFeatures` on its own factory, with `D3D12ExperimentalShaderModels` and `D3D12RaytracingPreview`.
   It already loads through `CreateDeviceFactory`, so the opt-in touches no other D3D12 user in the process.
-  Without Developer Mode the call fails, and both features are reported absent, at info level.
+  Without Developer Mode the preview runtime does not load at all, and dx12 falls back to the system runtime with a warning.
 - Every preview identifier lives in one dx12 file behind `SG_HAS_AGILITY_PREVIEW`, because the spec is at v0.38 and still renames fields.
 
 ## Phases
 
-1. **Plumbing**: the preview channel for Agility, DXC and WARP, the opt-in, both features reported, and Vulkan's two extensions enabled where granted.
-2. **PTLAS, described tier**, over ordinary BLASes: `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops, `hit_record_checks` on the mirror.
+1. **Plumbing** (built): the preview channel for Agility and WARP, `--agility-preview`, the opt-in, and dx12's `supports_clusters_and_ptlas()`.
+   No sg feature reports either yet, since a reported feature promises a code path that does not exist until phase 2.
+2. **PTLAS, described tier**, over ordinary BLASes: `sg::feature::partitioned_tlas`, and Vulkan's extension enabled where granted.
+   Then `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops, and `hit_record_checks` on the mirror.
    This alone retires a full TLAS rebuild per edit, the cost shaped-viewer pays on a large scene today.
 3. **PTLAS, GPU-written tier**: the BLAS table, the input set, `accel_build_args`, and the record layouts of D5.
-4. **Clusters**: the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id`.
+4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id` with the preview DXC.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.
 
 Each phase lands tested on dx12 (WARP preview) and on vulkan where an NVIDIA device is present.
