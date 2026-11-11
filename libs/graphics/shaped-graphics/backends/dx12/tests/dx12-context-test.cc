@@ -269,3 +269,26 @@ TEST("sg dx12 - devices come from the Agility SDK exactly where it was fetched a
     CHECK(SUCCEEDED(
         dx12::check_feature_support(device.Get(), D3D12_FEATURE_SHADER_MODEL, &shader_model, sizeof(shader_model))));
 }
+
+// The one cap of DXR's preview operations, read only through the experimental features the preview runtime opts into.
+// libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md is what sg builds on it.
+INVOCABLE_TEST("sg dx12 - only the preview runtime reports clustered geometry and partitioned TLAS",
+               (dx12::dx12_context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    // a retail build never enables the preview, whatever runtime it found
+    CHECK((SG_HAS_AGILITY_PREVIEW || !dx12::runs_raytracing_preview()));
+    if (!dx12::runs_raytracing_preview())
+    {
+        CHECK(!handle->supports_clusters_and_ptlas());
+        if (!SG_HAS_AGILITY_PREVIEW)
+            SKIP("not built against the preview Agility SDK (uv run dev.py test --agility-preview)");
+        if (!dx12::runs_agility_runtime())
+            SKIP("the preview Agility SDK did not load, which it does only with Windows Developer Mode on");
+        SKIP("the preview Agility SDK refused its experimental features");
+    }
+    if (!handle->supports_clusters_and_ptlas())
+        SKIP("this adapter's driver does not report ClustersAndPTLASSupported");
+    // the cap promises Shader Model 6.10, and with it the inline traces a partitioned TLAS is read through
+    CHECK(handle->supports_ray_query());
+}

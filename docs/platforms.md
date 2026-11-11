@@ -368,6 +368,31 @@ That gate is about what the machine has; this setting is about what the build wa
 
 It is declared unconditionally in the root `CMakeLists.txt`, so the cache entry is present whether or not any example is gated out by a missing shader compiler.
 
+## Preview Agility SDK (`SC_AGILITY_PREVIEW`)
+
+`SC_AGILITY_PREVIEW` (default OFF) builds the dx12 backend against the **pre-release** D3D12 Agility SDK in `extern/agility-preview` rather than the retail one in `extern/agility`.
+It exists for DXR's clustered geometry and partitioned TLAS, which no retail runtime carries yet.
+[The plan](../libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md) is what sg builds on them.
+
+**It is a development switch, and nothing shipped may be built with it.**
+The preview's terms forbid distributing it, and end 30 days after a retail release carries the same features; `extern/agility-preview/dependency.yml` has the rest.
+
+```bash
+uv run extern/agility/fetch-agility.py --preview --accept-license   # after reading its terms
+uv run dev.py test --agility-preview "<pattern>"
+```
+
+- **It redirects the build directory**, to `build/<preset>-agility-preview`, as `--example-backend` does, since the headers it swaps in rebuild everything that includes `d3d12.h`.
+- **ON with no preview fetched is a configure error**, rather than a retail build under the preview's name.
+- **The backend says which it is built against** through `SG_HAS_AGILITY_PREVIEW` (1/0), beside `SG_HAS_AGILITY`.
+- **The preview runtime needs Windows Developer Mode**, and does not load at all without it (`D3D12_ERROR_INVALID_REDIST`).
+  dx12 then falls back to the system runtime with a warning, which fails every dx12 test of that build, as a fetched SDK that fails to load always has.
+- **The backend enables the preview features as experimental features on its own device factory**, so no other D3D12 user in the process is affected.
+  A runtime that loads and refuses them logs that at info level and reports them absent.
+- **The dx12 tests keep the WARP they always had**, which lacks the preview features.
+  The preview WARP creates no device under the preview runtime: [the issue](../libs/graphics/shaped-graphics/docs/issues/bug-sg-dx12-preview-warp-refuses-agility-preview.md).
+- **A hardware adapter reports the features only on a driver that implements them**, which a vendor's current release need not be.
+
 ## Build types
 
 The standard **Debug / RelWithDebInfo / Release** build types should all work on every supported platform.

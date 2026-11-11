@@ -223,7 +223,13 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
             info.driver_version = cc::move(warp);
     // The runtime is part of what a pipeline blob depends on: the Agility SDK's rejects the system runtime's, and back.
     if (runs_agility_runtime())
+    {
+#if SG_HAS_AGILITY_PREVIEW
+        info.driver_version += cc::format(" (Agility SDK {} preview)", D3D12_PREVIEW_SDK_VERSION);
+#else
         info.driver_version += cc::format(" (Agility SDK {})", D3D12_SDK_VERSION);
+#endif
+    }
 
     return info;
 }
@@ -633,6 +639,18 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     auto const opacity_micromap = false;
 #endif
 
+    // The preview runtime's DXR operations: clustered geometry and partitioned TLAS, one cap for both.
+    // Only its headers name the query, and only its experimental features make the runtime answer it.
+#if SG_HAS_AGILITY_PREVIEW
+    D3D12_FEATURE_DATA_D3D12_OPTIONS_RAYTRACING2 raytracing2 = {};
+    auto const clusters_and_ptlas = runs_raytracing_preview() && raytracing_tier >= D3D12_RAYTRACING_TIER_1_1
+                                 && SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS_RAYTRACING2,
+                                                                    &raytracing2, sizeof(raytracing2)))
+                                 && raytracing2.ClustersAndPTLASSupported;
+#else
+    auto const clusters_and_ptlas = false;
+#endif
+
     auto ctx = std::make_shared<dx12_context>();
     ctx->set_adapter_info(describe_adapter(adapter.Get()));
     log_adapter(ctx->metrics.adapter());
@@ -655,6 +673,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_shared_int64_atomics = shared_int64_atomics;
     ctx->_shader_execution_reordering = shader_execution_reordering;
     ctx->_opacity_micromap = opacity_micromap;
+    ctx->_clusters_and_ptlas = clusters_and_ptlas;
     if (opacity_micromap)
         mark_acceleration_structures();
     ctx->_vertex_layer_output = vertex_layer_output;

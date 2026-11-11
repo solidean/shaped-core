@@ -107,16 +107,17 @@ target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxg
 
 # The Agility SDK, where it was fetched: its headers ahead of the Windows SDK's, and its runtime loaded from where it
 # was installed (dx12_runtime.hh). `SG_HAS_AGILITY` says which, and the backend works either way.
+# `SG_HAS_AGILITY_PREVIEW` says the headers and runtime are the pre-release ones SC_AGILITY_PREVIEW selects.
 if(TARGET agility)
     get_target_property(_sg_agility_dir agility SC_AGILITY_RUNTIME_DIR)
     target_link_libraries(shaped-graphics-dx12 PUBLIC agility)
-    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=1)
+    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=1 SG_HAS_AGILITY_PREVIEW=$<BOOL:${SC_AGILITY_PREVIEW}>)
     # TEMPORARY(debt-dx12-agility-source-tree-fallback): an absolute path into the source tree.
     # So it is defined on the one file that reads it, and the backend's other files compile the same in any checkout.
     set_property(SOURCE src/shaped-graphics/backends/dx12/dx12_runtime.cc APPEND PROPERTY
         COMPILE_DEFINITIONS "SG_AGILITY_RUNTIME_DIR=\"${_sg_agility_dir}/\"")
 else()
-    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=0)
+    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=0 SG_HAS_AGILITY_PREVIEW=0)
 endif()
 
 target_compile_options(shaped-graphics-dx12

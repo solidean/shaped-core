@@ -66,6 +66,13 @@ option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVE
 set(SC_EXAMPLE_BACKEND "auto" CACHE STRING "Backend the graphics examples build against: auto, dx12, vulkan, webgpu or metal")
 set_property(CACHE SC_EXAMPLE_BACKEND PROPERTY STRINGS auto dx12 vulkan webgpu metal)
 
+# Build dx12 against the PRE-RELEASE Agility SDK in extern/agility-preview, for DXR's clustered geometry and partitioned TLAS.
+# A development switch only: the preview's terms forbid distributing it, so nothing shipped may be built with it ON.
+# ON with no preview fetched is a configure error rather than a silent retail build; `dev.py --agility-preview` gives
+# it a build directory of its own, since the headers it swaps in rebuild everything that includes d3d12.h.
+# See docs/platforms.md.
+option(SC_AGILITY_PREVIEW "Build dx12 against the pre-release Agility SDK in extern/agility-preview (development only)" OFF)
+
 # Threading mode for the whole project. OFF reaches the compiler as CC_SINGLE_THREADED, which forces
 # clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set
 # it. Forcing single-threaded on a native host is what makes that mode developable without a wasm build.
