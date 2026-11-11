@@ -4,6 +4,8 @@ parent: epic-sgl-every-stage-everywhere
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/incubator/stage-polyfills.md
   - issue: feat-sgl-mesh-and-task-stages
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-11T11:15Z
 ---
 
 # The mesh and task stages on webgpu, polyfilled
