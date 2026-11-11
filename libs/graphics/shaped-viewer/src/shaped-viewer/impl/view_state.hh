@@ -138,12 +138,9 @@ struct temporal_slot
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
 
-    /// How many runs of this accumulation slot's mean drew samples before a different image restarted it, which keeps each run's random sequence apart.
-    /// A run ended only because its last frame traced through something still loading is not counted, so the run after it repeats its sequence.
-    u32 restarts = 0;
-
-    /// Whether a full-size frame traced through the sequence `restarts` picks, so the next restart for a different image moves on from it.
-    bool drew_since_restart = false;
+    /// What the mean's random sequence is drawn from: the image hashed over inputs that are equal on any machine.
+    /// So a run repeats its sequence whatever restarted it, and a capture is one image whatever its restarts were.
+    u64 seed_key = 0;
 
     /// How many frames of this slot traced through a stand-in or an emitter still loading, each of which restarts the mean behind it.
     /// Nothing decides by it: it is how a test tells a mean that waited on a compile from one that did not.

@@ -96,7 +96,7 @@ view_store::accumulation_history view_store::history_of(view_id id, u64 temporal
     auto const* const st = _entries.peek_ptr(id);
     auto const* const slot = st == nullptr ? nullptr : st->temporal.get_ptr(temporal_id);
     return slot == nullptr ? accumulation_history{}
-                           : accumulation_history{.restarts = slot->restarts, .loading_frames = slot->loading_frames};
+                           : accumulation_history{.seed_key = slot->seed_key, .loading_frames = slot->loading_frames};
 }
 
 u32 view_store::min_accumulated_samples(view_id id) const

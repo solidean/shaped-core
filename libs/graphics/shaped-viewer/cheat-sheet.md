@@ -1000,7 +1000,7 @@ store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_
 store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
 store.accumulated_frames(id) -> u32           // one named slot's frame counter, defaulting to accumulation(0) — the layer, not the view
-store.history_of(id) -> {restarts, loading_frames}  // the slot's restart count, which picks its seed, and frames traced while loading
+store.history_of(id) -> {seed_key, loading_frames}  // the key its random sequence is drawn from, equal on any machine for one image, and frames traced while loading
                                               //   read it once after a render: logging every frame changes the timing a flake hangs on
 store.min_accumulated_samples(id) -> u32      // the fewest samples per pixel across every traced layer; sv::impl::min_accumulated_samples is the rule
 store.is_accumulation_converged(id, samples = {}) -> bool  // every traced layer holds `samples`, or stopped at sv::accumulation_sample_cap
