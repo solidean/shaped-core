@@ -100,6 +100,15 @@ struct cc::rec::sampling_config
     /// Turn it on when you are hunting a thread that records nothing, which is exactly what it is for.
     bool include_unknown_threads = false;
 
+    /// Each tick also reads, per thread it samples, how much of the time since its last tick the thread ran (`record.thread_run`).
+    ///
+    /// A scope's wall time cannot tell work from a thread the OS kept off the CPU, and reading a thread clock in every
+    /// scope would cost it several times over (a scope 29 ns, QueryThreadCycleTime 179 ns, on Windows).
+    /// Read here, it costs the sampler alone, about 180 ns per thread per tick, and a trace shows each stretch a thread
+    /// mostly sat off the CPU (babel::chrome_trace's off-CPU lanes).
+    /// Windows only so far: elsewhere nothing is recorded.
+    bool thread_run = true;
+
     /// Where samples go instead of the recording, or null for the recording.
     ///
     /// For a consumer that aggregates as it goes — which functions ran under which owner, say — rather than keeping
@@ -213,6 +222,23 @@ inline constexpr rec::field sample_fields[] = {
     {.name = "native_tid", .type = rec::type_code::u64_, .offset = 16, .size = 8},
     {.name = "frames", .type = rec::type_code::u64_array, .offset = 24, .size = 4},
 };
+
+/// The layout of a thread's running time since the sampler's previous tick of it: `ran` of `interval`, both in the
+/// timestamp counter's ticks, so `ran / interval` is the share of the stretch the thread was on a CPU.
+/// The stretch ends when the event was recorded; a thread's first tick only starts it, and records nothing.
+/// `in_scope` is 1 where the thread had a recorded scope open at the stretch's end: a thread off the CPU inside its work
+/// rather than a worker waiting for some.
+inline constexpr rec::field thread_run_fields[] = {
+    {.name = "thread_index", .type = rec::type_code::u32_, .offset = 0, .size = 4},
+    {.name = "in_scope", .type = rec::type_code::u32_, .offset = 4, .size = 4},
+    {.name = "native_tid", .type = rec::type_code::u64_, .offset = 8, .size = 8},
+    {.name = "interval", .type = rec::type_code::u64_, .offset = 16, .size = 8},
+    {.name = "ran", .type = rec::type_code::u64_, .offset = 24, .size = 8},
+};
+inline constexpr isize thread_run_payload_size = 32;
+
+/// The descriptor every `record.thread_run` is written through, a value event of the system domain.
+[[nodiscard]] rec::desc const& thread_run_desc();
 
 /// What `thread_index` says when the sampled thread has no stream of its own.
 /// Its `native_tid` is then the only identity it has, and there is nothing to anchor into.

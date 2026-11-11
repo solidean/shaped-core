@@ -67,6 +67,15 @@ struct babel::chrome_trace::write_options
     /// knows it as and offset clear of the recorded threads' indices.
     i32 sampled_tid_offset = 1 << 20;
 
+    /// Show each stretch a sampled thread ran less than half of as a span, from the sampler's `record.thread_run` events,
+    /// on a lane of its own beside the thread's: `(off cpu, in a scope)` where it had a recorded scope open, a stall in its
+    /// work, and `(off cpu, idle)` where it had none, a worker waiting for some.
+    /// On its own lane because the stretches cross the thread's scopes, which a span on the same track could not.
+    bool include_off_cpu = true;
+
+    /// Where a thread's off-CPU lane sits: its index plus this, clear of the recorded and the sampled tracks.
+    i32 off_cpu_tid_offset = 1 << 21;
+
     /// One event per line.
     /// Costs bytes, and makes a diff or a grep possible.
     bool pretty = true;
