@@ -203,6 +203,8 @@ def build_policy() -> cmd.Policy:
         layout=LAYOUT,
         default_branch=DEFAULT_BRANCH,
         companions=COMPANIONS,
+        # The optional build server, off unless this checkout's dev.toml `[build_server]` names a client and opts in.
+        build_server=dev.build_server_from_dev_toml(ROOT),
     )
 
 

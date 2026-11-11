@@ -25,6 +25,7 @@ from .lib.core.process import (
 )
 from .lib.pipeline.build import build
 from .lib.pipeline.build_server import BuildServer
+from .lib.pipeline.build_server import from_dev_toml as build_server_from_dev_toml
 from .lib.pipeline.cmake import remove_build_dir
 from .lib.pipeline.configure import configure, ensure_configured
 from .lib.pipeline.diagjobs import BuildMark

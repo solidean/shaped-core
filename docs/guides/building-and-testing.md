@@ -337,6 +337,17 @@ It is opt-in and never required: without it, everything builds and tests exactly
 - **Opting in**, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1` (or `0`), then the project's own default.
   `--no-server` always wins.
 - **Where the client is**: `SC_BUILD_SERVER_CLIENT` names its executable, over the location the project's `Policy.build_server` gives.
+- **A checkout's `dev.toml`** (gitignored, at the repo root) sets the project's half in its `[build_server]` table:
+
+  ```toml
+  [build_server]
+  enabled = true                      # opt this checkout in; --no-server and SC_BUILD_SERVER=0 still win
+  client = "C:/path/to/client.exe"    # the client, over the project's default; SC_BUILD_SERVER_CLIENT wins over it
+  # speculative_tests = true          # BuildServer.speculative_tests, below
+  # ship_proof = true                 # BuildServer.ship_proof, below
+  ```
+
+  A project that builds on this one reads its own `dev.toml` the same way, through `dev.build_server_from_dev_toml`.
 - **Only the build step and the test runs move**: configure stays cmake's, and the server runs in the same developer environment dev.py builds in, which it passes to every command.
 - **When it cannot serve**, dev.py prints one warning naming the cause and how to install it, then builds as without it.
   That covers a missing client, a server that cannot be started, another protocol version, a server restarting, and a server failing on its own.
