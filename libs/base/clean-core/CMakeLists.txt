@@ -621,6 +621,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-stamp-test.cc
         tests/record/record-query-test.cc
         tests/record/record-serialize-test.cc
+        tests/record/record-reader-fixture-test.cc
         tests/record/record-trace-test.cc
         tests/record/record-async-scope-test.cc
         tests/record/record-sampling-test.cc
