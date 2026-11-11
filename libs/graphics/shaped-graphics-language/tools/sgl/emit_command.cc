@@ -35,6 +35,7 @@ COMMAND("emit")
     auto device_feature_names = cc::vector<cc::string>();
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
+    auto mesh_name = cc::string("native");
     auto args = nx::args({.name = "sgl emit",
                           .description = "Compiles one entry point of an SGL file and prints the target text, with its "
                                          "warnings on stderr, or the diagnostics that kept it from being written."});
@@ -71,6 +72,10 @@ COMMAND("emit")
         {.desc = "give an option of the source a value, `--option tile=16`; repeat for each", .metavar = "NAME=VALUE"});
     args.arg({"module-dir"}, module_dirs,
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
+    args.arg({"mesh"}, mesh_name,
+             {.desc = "a mesh entry point as itself, or as the compute or the vertex half of its polyfill: native, "
+                      "compute or vertex",
+              .metavar = "FORM"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
     auto const library = sgl_tool::read_module_dirs(module_dirs);
@@ -115,6 +120,17 @@ COMMAND("emit")
         return exit_usage;
     }
 
+    auto mesh = sgl::emit::mesh_form::native;
+    if (mesh_name == "compute")
+        mesh = sgl::emit::mesh_form::compute;
+    else if (mesh_name == "vertex")
+        mesh = sgl::emit::mesh_form::vertex_fetch;
+    else if (mesh_name != "native")
+    {
+        cc::eprintln("sgl emit: unknown --mesh '{}' (one of native, compute, vertex)", mesh_name);
+        return exit_usage;
+    }
+
     auto device_features = sgl::check::feature_set();
     for (auto const& name : device_feature_names)
     {
@@ -156,7 +172,8 @@ COMMAND("emit")
          .weakens_float = weaken_float,
          .device_features = device_features,
          .native = is_spirv || is_dxil ? sgl::emit::native_route::require : sgl::emit::native_route::text,
-         .native_line_table = native_line_table});
+         .native_line_table = native_line_table,
+         .mesh = mesh});
     if (text.has_error())
     {
         cc::eprint(text.error());

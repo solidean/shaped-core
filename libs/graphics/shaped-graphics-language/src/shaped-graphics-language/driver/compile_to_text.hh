@@ -56,6 +56,8 @@ struct sgl::text_request
     /// Writes the `.sgl` line of each operation into what the native route writes, for a debugger to read (EMIT-257).
     /// Off, the binary is byte for byte what it would be without this option; the text route has `line_directives`.
     bool native_line_table = false;
+    /// A mesh entry point as one half of its polyfill (CHK-524), which `emitted_source::mesh_layout` then describes.
+    emit::mesh_form mesh = emit::mesh_form::native;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
@@ -150,6 +152,8 @@ struct sgl::emitted_source
     cc::vector<cc::string> line_files;
     /// Every print and assert the text writes into sg's debug buffer; empty without `text_request::diagnostics`.
     cc::vector<emit::debug_site> debug_sites;
+    /// The slots a polyfilled mesh entry point's halves agree on (CHK-524); empty unless `text_request::mesh` asked.
+    cc::optional<check::mesh_polyfill_layout> mesh_layout;
     /// The names of the library files the source reached through `use`, which an edit of any of them changes the text of.
     cc::vector<cc::string> library_files;
     /// One entry per warning, `cube.sgl:12:5: warning: no-effect: ...` and its notes on the lines under it.

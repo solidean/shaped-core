@@ -79,9 +79,27 @@ inline constexpr reserved_binding_address reserved_acceleration_addresses
        .vulkan_set = 3,
        .vulkan_binding = 22};
 
+/// A polyfilled mesh stage's slots in 32-bit words, which its compute form writes and its vertex form reads back; one
+/// buffer sg sizes per draw, bound twice.
+/// libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md is the protocol.
+inline constexpr reserved_binding_address reserved_mesh_output = {.name = "sg_mesh_output",
+                                                                  .dx12_space = 11,
+                                                                  .dx12_register = 1,
+                                                                  .vulkan_set = 3,
+                                                                  .vulkan_binding = 23,
+                                                                  .webgpu_group = 3,
+                                                                  .webgpu_binding = 23};
+inline constexpr reserved_binding_address reserved_mesh_input = {.name = "sg_mesh_input",
+                                                                 .dx12_space = 11,
+                                                                 .dx12_register = 2,
+                                                                 .vulkan_set = 3,
+                                                                 .vulkan_binding = 24,
+                                                                 .webgpu_group = 3,
+                                                                 .webgpu_binding = 24};
+
 inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window,  reserved_acceleration_pool, reserved_acceleration_roots,
-       reserved_array_lengths, reserved_dispatch_grid,     reserved_acceleration_addresses};
+    = {reserved_debug_window,  reserved_acceleration_pool,      reserved_acceleration_roots, reserved_array_lengths,
+       reserved_dispatch_grid, reserved_acceleration_addresses, reserved_mesh_output,        reserved_mesh_input};
 
 namespace impl
 {

@@ -14,4 +14,15 @@ inline sgl::emit::emitted_text emit_source(cc::string_view user, isize index, sg
     CHECK(reports_of(checked) == "");
     return sgl::emit::emit(checked.module, index, t);
 }
+
+/// The same, with the emit's options.
+inline sgl::emit::emitted_text emit_source(cc::string_view user,
+                                           isize index,
+                                           sgl::emit::target t,
+                                           sgl::emit::options const& options)
+{
+    auto const checked = check_sources(read_prelude(), user);
+    CHECK(reports_of(checked) == "");
+    return sgl::emit::emit(checked.module, index, t, options);
+}
 } // namespace sgl_test

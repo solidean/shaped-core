@@ -22,6 +22,8 @@ enum class sgl::check::reserved_use : sgl::u8
     dispatch_grid,
     /// A trace in SGL's own SPIR-V, which reads its structure by address.
     trace_by_address,
+    /// A mesh stage polyfilled as a compute pass and a draw (CHK-524).
+    mesh_polyfill,
 };
 
 /// Where one target finds an entry.
@@ -123,6 +125,26 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {},
          {.group = 3, .slot = 22, .stages = k_every_stage},
          {},
+         {},
+     }},
+    // a polyfilled mesh stage's slots, which its compute form writes (CHK-524); metal draws every mesh stage natively
+    {.name = "sg_mesh_output",
+     .declaration = "@internal binding sg_mesh_output:\n    words: mut buffer[uint]\n",
+     .enabled_by = reserved_use::mesh_polyfill,
+     .targets = {
+         {.group = 11, .slot = 1, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 23, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 23, .stages = stage_bit(stage::compute)},
+         {},
+     }},
+    // the same slots, which its vertex form reads back, read-only since WebGPU's vertex stage writes no storage
+    {.name = "sg_mesh_input",
+     .declaration = "@internal binding sg_mesh_input:\n    words: buffer[uint]\n",
+     .enabled_by = reserved_use::mesh_polyfill,
+     .targets = {
+         {.group = 11, .slot = 2, .stages = stage_bit(stage::vertex)},
+         {.group = 3, .slot = 24, .stages = stage_bit(stage::vertex)},
+         {.group = 3, .slot = 24, .stages = stage_bit(stage::vertex)},
          {},
      }},
 };
