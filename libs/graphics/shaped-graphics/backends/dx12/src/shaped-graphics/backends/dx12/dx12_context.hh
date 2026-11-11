@@ -308,6 +308,9 @@ public:
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;
+        case sg::feature::partitioned_tlas:
+            // supports_clusters_and_ptlas() is the device's answer; sg's operations come with plan phase 2c
+            return false;
         }
         return false;
     }

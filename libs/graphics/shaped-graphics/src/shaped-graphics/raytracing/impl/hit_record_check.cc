@@ -16,7 +16,10 @@ cc::vector<hit_record_mismatch> find_hit_record_mismatches(raytracing_shader_tab
     auto const ray_count = isize(table.ray_count());
     auto const* const pipeline = table.pipeline().get();
 
-    auto const instances = instance_records_of(tlas);
+    auto const snapshot = instance_records_of(tlas);
+    if (snapshot == nullptr)
+        return messages;
+    auto const& instances = *snapshot;
     for (auto i = isize(0); i < instances.size() && messages.size() < max_messages; ++i)
     {
         auto const& instance = instances[i];

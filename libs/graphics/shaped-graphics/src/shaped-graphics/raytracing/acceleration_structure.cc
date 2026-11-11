@@ -95,12 +95,14 @@ isize micromap::map_count() const
 
 void impl::set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records)
 {
-    // Only ever called on a structure nobody else holds yet, and never on one created const.
-    const_cast<sg::tlas&>(tlas)._instance_records = cc::move(records);
+    auto snapshot = std::make_shared<cc::vector<tlas_instance_record> const>(cc::move(records));
+    tlas._instance_records.lock([&](std::shared_ptr<cc::vector<tlas_instance_record> const>& current)
+                                { current = cc::move(snapshot); });
 }
 
-cc::span<impl::tlas_instance_record const> impl::instance_records_of(tlas const& tlas)
+std::shared_ptr<cc::vector<impl::tlas_instance_record> const> impl::instance_records_of(tlas const& tlas)
 {
-    return tlas._instance_records;
+    return tlas._instance_records.lock([](std::shared_ptr<cc::vector<tlas_instance_record> const> const& current)
+                                       { return current; });
 }
 } // namespace sg

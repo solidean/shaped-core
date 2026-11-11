@@ -743,6 +743,11 @@ protected:
     [[nodiscard]] virtual cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
                                                                                 memory_heap_contents contents) = 0;
 
+    /// Allocates an empty partitioned_tlas, reached through ctx.persistent.create_partitioned_tlas.
+    /// Only a backend that reports `sg::feature::partitioned_tlas` overrides it.
+    [[nodiscard]] virtual cc::result<partitioned_tlas_handle> try_create_partitioned_tlas(
+        partitioned_tlas_description const& desc);
+
     // The bind-path creates carry an explicit lifetime_scope; buffers carry it inside allocation_info instead.
     // binding_group is a real per-scope descriptor allocation, so ctx.persistent / ctx.transient append the scope.
     // Layouts and pipelines are schemas / PSOs with no transient variant — ctx.uncached always passes persistent.

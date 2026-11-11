@@ -195,6 +195,9 @@ public:
         case sg::feature::ray_tracing_motion_blur:
             // the polyfill's walk places a moving instance at the ray's time
             return true;
+        case sg::feature::partitioned_tlas:
+            // the polyfill's structures are rebuilt whole, with no partitions to update in place
+            return false;
         case sg::feature::vertex_pipeline_stores:
             // a vertex stage binds no writable storage on any WebGPU device
             return false;

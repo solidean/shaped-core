@@ -647,6 +647,11 @@ cc::result<gpu_memory_usage> context::query_gpu_memory() const
     return cc::error("this backend does not report GPU memory");
 }
 
+cc::result<partitioned_tlas_handle> context::try_create_partitioned_tlas(partitioned_tlas_description const&)
+{
+    return cc::error("this context has no sg::feature::partitioned_tlas");
+}
+
 cc::result<gpu_counters> context::read_gpu_counters() const
 {
     // Not an empty counter set, which a sampler would difference into a confident 0% on a pinned GPU.

@@ -232,6 +232,13 @@ protected:
                                                                   int hit_record_stride) = 0;
     [[nodiscard]] virtual tlas_handle raytracing_build_tlas(cc::span<tlas_instance const> instances,
                                                             accel_build_flags flags) = 0;
+    // Reached only where the context reports sg::feature::partitioned_tlas, after the scope validated `ops`.
+    // `is_first` says the structure has no contents yet; `released` are the blases no slot holds any more, which the
+    // list keeps until it has run.
+    virtual void raytracing_update_partitioned_tlas(partitioned_tlas const& ptlas,
+                                                    ptlas_operations const& ops,
+                                                    bool is_first,
+                                                    cc::vector<blas_handle> released);
 
     // Ray-tracing dispatch (reached through cmd.raytracing).
     // bind_pipeline sets the DXR state object + global root signature, and bind_group binds through that root signature, like compute.

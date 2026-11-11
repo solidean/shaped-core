@@ -21,6 +21,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list/query.cc
     src/shaped-graphics/query/gpu_timestamp.cc
     src/shaped-graphics/raytracing/acceleration_structure.cc
+    src/shaped-graphics/raytracing/partitioned_tlas.cc
     src/shaped-graphics/raytracing/impl/hit_record_check.cc
     src/shaped-graphics/raytracing/impl/software_trace.cc
     src/shaped-graphics/barrier/command_list_slot.cc

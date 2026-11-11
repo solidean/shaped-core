@@ -168,6 +168,13 @@ public:
     [[nodiscard]] memory_heap_handle create_memory_heap(isize size_in_bytes,
                                                         memory_heap_contents contents = memory_heap_contents::buffers);
 
+    // acceleration structures
+public:
+    /// Allocates an empty partitioned_tlas for `desc`'s capacities, which `cmd.raytracing.update` then fills.
+    /// Unlike build_tlas this records nothing: the size follows from the capacities alone.
+    /// Requires `sg::feature::partitioned_tlas`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] partitioned_tlas_handle create_partitioned_tlas(partitioned_tlas_description const& desc);
+
     // bind path
     // binding_group_layout / pipeline_layout / compute_pipeline creation is not here — those are schemas / PSOs, not lifetime-scoped GPU resources.
     // They live on the raw `ctx.uncached` scope; prefer `ctx.cached`.

@@ -232,6 +232,11 @@ enum class sg::feature
     /// A native trace sees none of it, since DXR has no motion and vulkan's VK_NV_ray_tracing_motion_blur reaches no ray query.
     /// metal offers it natively to a pipeline's trace, and through the software walk to an inline one, whose query has no motion.
     ray_tracing_motion_blur,
+
+    /// A tlas may be a `partitioned_tlas`: created with fixed capacities, and updated in place by `cmd.raytracing.update`.
+    /// Vulkan grants it with `VK_NV_partitioned_acceleration_structure`, and traces it by its address.
+    /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
+    partitioned_tlas,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -285,8 +290,9 @@ inline constexpr feature k_all_features[] = {
     feature::shader_shared_int64_atomics,
     feature::shader_int64_min_max_atomics,
     feature::ray_tracing_motion_blur,
+    feature::partitioned_tlas,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::ray_tracing_motion_blur) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::partitioned_tlas) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -378,6 +384,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "shader_int64_min_max_atomics";
     case feature::ray_tracing_motion_blur:
         return "ray_tracing_motion_blur";
+    case feature::partitioned_tlas:
+        return "partitioned_tlas";
     }
     return "";
 }

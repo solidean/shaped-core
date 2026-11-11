@@ -53,6 +53,13 @@ public:
     [[nodiscard]] tlas_handle build_tlas(cc::span<tlas_instance const> instances,
                                          accel_build_flags flags = accel_build_flag::fast_trace);
 
+    /// Applies `ops` to `ptlas` in place, rebuilding only the partitions they touch; its first update builds it.
+    /// A slot is named once at most across the writes, updates and clears, and each blas they name must be built.
+    /// The partitioned_tlas holds every blas its slots name, and this list keeps the ones it replaces until it has run.
+    /// Under `context::hit_record_checks` it also keeps each slot's blas, offset and mask, which is what dispatch_rays checks.
+    /// Requires `sg::feature::partitioned_tlas`.
+    void update(partitioned_tlas const& ptlas, ptlas_operations const& ops);
+
     /// Binds a raytracing_pipeline for the following bind_group / dispatch_rays.
     /// Requires is_supported().
     void bind_pipeline(raytracing_pipeline const& pipeline);

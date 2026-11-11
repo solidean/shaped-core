@@ -433,6 +433,8 @@ public:
             return true;
         case sg::feature::opacity_micromap:
             return is_opacity_micromap_supported();
+        case sg::feature::partitioned_tlas:
+            return false;
         }
         return false;
     }

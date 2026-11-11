@@ -167,6 +167,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::ray_tracing_motion_blur:
         // motion acceleration structures, which a pipeline's trace takes natively
         return true;
+    case sg::feature::partitioned_tlas:
+        // Metal 4 has no partitioned instance structure
+        return false;
     case sg::feature::vertex_pipeline_stores:
         // a vertex function writes a device buffer on every Apple GPU
         return true;

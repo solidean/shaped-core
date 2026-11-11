@@ -7,6 +7,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/micromap.hh> // blas_triangles::micromap
 #include <shaped-graphics/resource/views.hh>      // tlas_view (tlas::as_view)
@@ -201,14 +202,15 @@ struct tlas_instance_record
 /// Records what the build took, as the structure comes back from its backend and before anyone else holds it.
 void set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
 
-/// Records every instance of `tlas`, which only a build under `context::hit_record_checks` does.
+/// Records every instance of `tlas`, which only a build or a partitioned update under `context::hit_record_checks` does.
+/// A later call replaces the snapshot, and one a check already holds stays as it was.
 void set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records);
 
 /// Records the micromaps a BLAS was built from, which it then holds.
 void set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
 
-/// What `set_instance_records` recorded, which is empty where it never ran.
-[[nodiscard]] cc::span<tlas_instance_record const> instance_records_of(tlas const& tlas);
+/// What `set_instance_records` recorded last, which is null where it never ran.
+[[nodiscard]] std::shared_ptr<cc::vector<tlas_instance_record> const> instance_records_of(tlas const& tlas);
 
 /// Records the region a build wrote, which the structure then releases.
 void set_software_region(blas const& blas, software_region region);
@@ -344,10 +346,11 @@ protected:
 
 private:
     friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
-    friend cc::span<impl::tlas_instance_record const> impl::instance_records_of(tlas const& tlas);
+    friend std::shared_ptr<cc::vector<impl::tlas_instance_record> const> impl::instance_records_of(tlas const& tlas);
     friend void impl::set_software_region(tlas const& tlas, impl::software_region region);
     friend impl::software_region const& impl::software_region_of(tlas const& tlas);
 
     impl::software_region _software;
-    cc::vector<impl::tlas_instance_record> _instance_records; // set once, as the tlas is made
+    // mutable: a partitioned tlas replaces the snapshot at each update, through a const handle
+    mutable cc::mutex<std::shared_ptr<cc::vector<impl::tlas_instance_record> const>> _instance_records;
 };

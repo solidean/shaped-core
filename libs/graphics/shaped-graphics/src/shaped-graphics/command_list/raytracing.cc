@@ -7,6 +7,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/raytracing/impl/hit_record_check.hh>
 #include <shaped-graphics/raytracing/impl/software_trace.hh>
+#include <shaped-graphics/raytracing/partitioned_tlas.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
@@ -188,6 +189,26 @@ tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance con
         impl::set_instance_records(*tlas, cc::move(records));
     }
     return tlas;
+}
+
+void command_list::raytracing_update_partitioned_tlas(partitioned_tlas const&,
+                                                      ptlas_operations const&,
+                                                      bool,
+                                                      cc::vector<blas_handle>)
+{
+    CC_ASSERT(false, "a backend that reports sg::feature::partitioned_tlas overrides raytracing_update_partitioned_tlas");
+}
+
+void command_list_raytracing_scope::update(partitioned_tlas const& ptlas, ptlas_operations const& ops)
+{
+    CC_ASSERT(_cmd.context().supports(feature::partitioned_tlas),
+              "update: this context has no sg::feature::partitioned_tlas");
+    CC_ASSERT(!ptlas.is_expired(), "update: the partitioned tlas is expired");
+    _cmd._stats.add(stat::tlas_builds);
+    auto released = impl::apply_to_slots(ptlas, ops);
+    if (_cmd.context().hit_record_checks())
+        impl::set_instance_records(ptlas, impl::slot_records(ptlas));
+    _cmd.raytracing_update_partitioned_tlas(ptlas, ops, impl::mark_updated(ptlas), cc::move(released));
 }
 
 void command_list_raytracing_scope::bind_pipeline(raytracing_pipeline const& pipeline)

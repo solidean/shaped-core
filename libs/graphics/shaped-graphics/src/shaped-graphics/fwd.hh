@@ -123,6 +123,12 @@ struct micromap_descriptor;         // the GPU record of one map: where its stat
 enum class micromap_format : u16;   // 2-state or 4-state
 enum class micromap_state : u8;     // one micro-triangle's state in a 4-state map
 enum class micromap_special_index : i32; // a whole triangle's state, in place of a map index
+class partitioned_tlas;                  // a tlas of fixed capacity, updated in place (see raytracing/partitioned_tlas.hh)
+struct partitioned_tlas_description;     // value type — the capacities a partitioned_tlas is created with
+struct ptlas_write;                      // value type — writes one instance slot of a partitioned_tlas
+struct ptlas_update;                     // value type — replaces one instance's blas and hit-group offset
+struct ptlas_translation;                // value type — moves one partition
+struct ptlas_operations;                 // value type — one update's writes, updates, clears and translations
 
 struct reserved_binding_address;
 } // namespace sg
@@ -505,6 +511,7 @@ using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutab
 using blas_handle = std::shared_ptr<blas const>;               // shared-immutable: an opaque, driver-built structure
 using tlas_handle = std::shared_ptr<tlas const>;         // shared-immutable: indexes a set of instances of blas_handle
 using micromap_handle = std::shared_ptr<micromap const>; // shared-immutable: an opaque, driver-built micromap
+using partitioned_tlas_handle = std::shared_ptr<partitioned_tlas const>; // a tlas updated in place by recorded operations
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

@@ -183,14 +183,16 @@ ASYNC_INVOCABLE_TEST("sg - builds record what the dispatch_rays hit-record check
     ctx->set_hit_record_checks(was_on);
     ctx->submit_command_list(cc::move(cmd));
 
-    auto const records = sg::impl::instance_records_of(*checked);
+    auto const snapshot = sg::impl::instance_records_of(*checked);
+    REQUIRE(snapshot != nullptr);
+    auto const& records = *snapshot;
     REQUIRE(records.size() == 2);
     CHECK(records[0].blas == triangles);
     CHECK(records[0].hit_group_offset == 4u);
     CHECK(records[1].blas == procedural);
     CHECK(records[1].hit_group_offset == 9u);
     CHECK(records[1].mask == 0x0F);
-    CHECK(sg::impl::instance_records_of(*unchecked).empty());
+    CHECK(sg::impl::instance_records_of(*unchecked) == nullptr);
 
     co_await ctx->idle_completion();
 }
