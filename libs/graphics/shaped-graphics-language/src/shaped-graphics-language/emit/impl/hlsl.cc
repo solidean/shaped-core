@@ -108,6 +108,15 @@ public:
                         pool.slot, pool.group, roots.slot, roots.group);
         out += "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
     }
+    /// Vulkan traces a structure by its address, as SGL's own SPIR-V does, so a partitioned tlas traces through DXC too.
+    cc::string acceleration_by_address(plan const& p, i32 resource) const override
+    {
+        auto const position = acceleration_address_position(p, resource);
+        if (!_is_vulkan || position >= check::k_acceleration_address_capacity)
+            return {};
+        return cc::format("sg_acceleration_from_address(sg_acceleration_addresses[{}].{})", position / 2,
+                          position % 2 == 0 ? "xy" : "zw");
+    }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
@@ -487,6 +496,18 @@ public:
             write_workgroup(out, w, p);
         if (!p.workgroup.empty())
             out += "\n";
+
+        // every acceleration member's address, and the conversion DXC has no builtin for but takes as inline SPIR-V
+        if (_is_vulkan && holds_acceleration_member(p))
+        {
+            auto const& at
+                = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(emit::target::hlsl_vulkan)];
+            out.appendf("[[vk::binding({}, {})]] cbuffer sg_acceleration_addresses_block\n{{\n"
+                        "    uint4 sg_acceleration_addresses[{}];\n}};\n\n",
+                        at.slot, at.group, check::k_acceleration_address_capacity / 2);
+            out += "[[vk::ext_instruction(4447)]] // OpConvertUToAccelerationStructureKHR\n"
+                   "RaytracingAccelerationStructure sg_acceleration_from_address(uint2 address);\n\n";
+        }
 
         if (!p.constants.has_value())
             return;

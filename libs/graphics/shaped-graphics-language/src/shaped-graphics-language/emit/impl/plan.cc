@@ -910,6 +910,25 @@ sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i
     return -1;
 }
 
+sgl::u32 sgl::emit::impl::acceleration_address_position(plan const& p, i32 index)
+{
+    auto const& r = p.resources[index];
+    auto position = u32(0);
+    for (auto const& other : p.resources)
+        if (!other.is_reserved && p.m.at(other.type).kind == check::type_kind::acceleration_structure
+            && (other.group < r.group || (other.group == r.group && other.slot < r.slot)))
+            ++position;
+    return position;
+}
+
+bool sgl::emit::impl::holds_acceleration_member(plan const& p)
+{
+    for (auto const& r : p.resources)
+        if (!r.is_reserved && p.m.at(r.type).kind == check::type_kind::acceleration_structure)
+            return true;
+    return false;
+}
+
 cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
 {
     // a float's atomic is a uint's, holding its bits, unless the target's own float atomic is in use

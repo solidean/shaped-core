@@ -118,9 +118,6 @@ ASYNC_INVOCABLE_TEST("sg - a partitioned tlas traces as a tlas does, and an upda
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::partitioned_tlas))
         SKIP("this device has no partitioned tlas");
-    // vulkan reaches one by its address alone, which only SGL's own SPIR-V traces by
-    if (ctx->backend() == sg::backend_kind::vulkan && !ctx->prefers_native_spirv())
-        SKIP("this context takes DXC's SPIR-V, which traces a structure by its descriptor");
     auto const pipeline = co_await shaders::raytracing::trace_cells_opaque.acquire_pipeline(*ctx);
 
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};

@@ -121,8 +121,10 @@ metal and webgpu have no equivalent — [feat-sg-opacity-micromaps](../issues/fe
 - **Requires `sg::feature::partitioned_tlas`**, which vulkan grants with `VK_NV_partitioned_acceleration_structure`.
 
 **On vulkan it has no descriptor**: `VK_EXT_descriptor_buffer` can name only a `VkAccelerationStructureKHR`, which a partitioned tlas is not.
-So SGL's own SPIR-V traces every structure by its device address, from the reserved `sg_acceleration_addresses` ([reserved-bindings](../../../shaped-graphics-language/docs/reserved-bindings.md)).
-A trace compiled through DXC still reads the descriptor, where a partitioned tlas writes the null structure, which every ray misses.
+So every vulkan trace SGL writes takes its structure by device address, from the reserved `sg_acceleration_addresses`.
+[reserved-bindings](../../../shaped-graphics-language/docs/reserved-bindings.md) is that block's contract.
+That holds on both routes: SGL's own SPIR-V converts it, and the HLSL a DXC route compiles converts it through inline SPIR-V.
+Only a package's own HLSL still reads the descriptor, where a partitioned tlas writes the null structure, which every ray misses.
 [plans/clusters-and-partitioned-tlas.md](../plans/clusters-and-partitioned-tlas.md) is the design, and dx12's half.
 
 ## Invariants

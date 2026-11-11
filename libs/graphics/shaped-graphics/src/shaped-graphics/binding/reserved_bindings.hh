@@ -74,7 +74,10 @@ inline constexpr reserved_binding_address reserved_dispatch_grid = {.name = "sg_
 /// at each dispatch or draw from the groups it binds.
 /// SGL's own SPIR-V traces a structure by it, which is how a partitioned tlas, with no descriptor there, is traced.
 inline constexpr reserved_binding_address reserved_acceleration_addresses
-    = {.name = "sg_acceleration_addresses", .vulkan_set = 3, .vulkan_binding = 22};
+    = {.name = "sg_acceleration_addresses",
+       .reflected_name = "sg_acceleration_addresses_block",
+       .vulkan_set = 3,
+       .vulkan_binding = 22};
 
 inline constexpr reserved_binding_address reserved_bindings[]
     = {reserved_debug_window,  reserved_acceleration_pool, reserved_acceleration_roots,

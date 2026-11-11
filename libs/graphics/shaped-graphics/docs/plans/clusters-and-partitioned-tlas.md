@@ -83,8 +83,8 @@ Wrapping a PTLAS in one is undefined, so sg does what NVIDIA's own sample does i
   A TLAS and a PTLAS are then the same binding, so a shader never knows which it traces.
 - **The binding itself keeps its descriptor type**, so a layout does not depend on the route a package compiled through.
   A TLAS still writes its descriptor there, and a PTLAS writes a null one.
-- **A package compiled through DXC reads that descriptor as today**, and refuses a PTLAS naming its route.
-  DXC may reach the cell too through inline SPIR-V (`[[vk::ext_instruction]]`), which is the next step rather than part of this one.
+- **SGL's HLSL for vulkan reads the block too**, and converts through inline SPIR-V, `[[vk::ext_instruction(4447)]]`, which DXC has no builtin for.
+  So an SGL package traces a PTLAS on either route; only a package's own HLSL reads the descriptor, which for a PTLAS is the null structure.
 
 ### D3. Two tiers per operation: described and GPU-written
 
@@ -183,7 +183,7 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
 2. **PTLAS, described tier**, over ordinary BLASes, vulkan first, since this machine's NVIDIA driver grants the extension:
    - (a) (built) vulkan traces every TLAS by its address in SGL's own SPIR-V, with every existing trace test unchanged.
    - (b) (built on vulkan) `sg::feature::partitioned_tlas`, `ctx.create_partitioned_tlas`, `cmd.raytracing.update` with the three ops and clears, and `hit_record_checks` on the mirror.
-     A DXC-compiled trace sees a partitioned tlas as the null structure, which is not refused yet: no binding knows its pipeline's route.
+     SGL's HLSL for vulkan traces by address too, through inline SPIR-V, so both of SGL's routes reach one; a package's own HLSL sees the null structure.
    - (c) dx12's half, which binds as a TLAS does and waits for a driver reporting the cap to be tested.
    This alone retires a full TLAS rebuild per edit, the cost shaped-viewer pays on a large scene today.
 3. **PTLAS, GPU-written tier**: the BLAS table, the input set, `accel_build_args`, and the record layouts of D5.

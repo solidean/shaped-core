@@ -38,9 +38,11 @@ A pipeline of such a shader is built over its layout's twin that holds it, `pipe
 
 `sg_acceleration_addresses` is every acceleration member's device address, `uint4[8]`, two a vector and each low word first, by the member's position.
 That position is the layout's acceleration members group by group, each group's by slot: the numbering the software roots use.
-**SGL's own SPIR-V traces every structure by it**, through `OpConvertUToAccelerationStructureKHR`, rather than through its descriptor.
+**Every vulkan trace of SGL's reads its structure by it**, through `OpConvertUToAccelerationStructureKHR`, rather than through its descriptor.
 That is how vulkan traces a partitioned tlas, which `VK_EXT_descriptor_buffer` has no descriptor for.
-The lowering declares it, in `lowering::acceleration_by_address`, so it has no prelude declaration; an element of an array of structures is a native gap there.
+- SGL's own SPIR-V declares it in `lowering::acceleration_by_address`, so it has no prelude declaration; an element of an array of structures is a native gap there.
+- The HLSL a DXC route compiles declares it as `cbuffer sg_acceleration_addresses_block`, and the conversion as inline SPIR-V, `[[vk::ext_instruction(4447)]]`, which DXC has no builtin for.
+  An element of an array of structures still names its descriptor there.
 sg's vulkan layout holds it wherever the layout holds an acceleration member, since any package may compile to SGL's own SPIR-V.
 
 ## The debug window
