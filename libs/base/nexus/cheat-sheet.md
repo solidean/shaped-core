@@ -175,6 +175,7 @@ TEST("lint - a clean file exits 0", main_thread, exclusive())   // run_command r
 
 ```bash
 tool lint a.cc          # an app or command named first runs with the rest of the line
+tool -j8 lint a.cc      # a --jobs before the name sizes its run's pool; after the name it is the command's own
 tool --tests "lint -"   # --tests (or --examples, --benchmarks, --manual, --apps, --commands, --list-tests-json,
                         #   --list-hw-counters, --reporter) hands the line to nexus; an exact test name does too
 tool a.cc --fix         # otherwise the default_entry takes the WHOLE line — nexus parses none of it
