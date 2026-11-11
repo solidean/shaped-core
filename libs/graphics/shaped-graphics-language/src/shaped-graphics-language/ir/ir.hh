@@ -556,6 +556,8 @@ enum class sgl::ir::ray_query_value : sgl::u8
     world_to_object,
     object_ray_origin,
     object_ray_direction,
+    /// The cluster the hit is in, where the device has clustered geometry.
+    cluster_id,
 };
 
 /// What a `hit_object_read` asks.
@@ -659,6 +661,8 @@ enum class sgl::ir::built_in : sgl::u8
     /// Four columns of three lanes.
     object_to_world,
     world_to_object,
+    /// The cluster a hit is in, where the device has clustered geometry.
+    ray_cluster_id,
     depth,
     depth_greater_equal,
     depth_less_equal,

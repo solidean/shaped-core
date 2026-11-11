@@ -26,6 +26,7 @@ constexpr ray_query_value k_read_values[] = {
     ray_query_value::world_to_object,
     ray_query_value::object_ray_origin,
     ray_query_value::object_ray_direction,
+    ray_query_value::cluster_id,
 };
 } // namespace
 

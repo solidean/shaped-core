@@ -202,12 +202,13 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
    dx12's half compiles in the `--agility-preview` build, untested here like phase 2's.
 4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id`.
    The described tier comes first (decided), since only the GPU-written CLAS record waits on `@bits` and `@absent`.
-   - (a) (built on vulkan, but for `cluster_id`) vulkan's described tier: `cmd.raytracing.build_clusters` and `build_cluster_blas` over ranges of a set.
+   - (a) (built on vulkan) vulkan's described tier: `cmd.raytracing.build_clusters` and `build_cluster_blas` over ranges of a set.
      A described build returns an immutable `cluster_set`, as `build_blas` returns a blas, rather than filling a pool in place.
      So no trace in flight reads a cluster a later build overwrites, and no generation is checked; the pool and its generations arrive with (b), which needs them.
      A cluster BLAS is built in explicit-destination mode, into storage of its own, so the CPU knows the address a described TLAS write names.
      A CLAS address exists only on the GPU, in the pool's address array, so a described cluster BLAS names a contiguous range of the pool's clusters.
-     SGL's `cluster_id` reads `ClusterIDNV` in SGL's own SPIR-V and through inline SPIR-V on the HLSL route, where the device has the feature.
+     SGL's `cluster_id` is a field of a hit and a candidate, -1 outside a cluster; it reads `ClusterIDNV` in SGL's own SPIR-V and through inline SPIR-V on the HLSL route (SGL's EMIT-260).
+     The prelude reads it only where the device has the feature, so no other device's shader needs the capability.
    - (b) the GPU-written CLAS tier, over `accel.clas_triangles` once SGL places `@bits` and `@absent` fields.
    - (c) dx12's half, compiled in the `--agility-preview` build; its HLSL `cluster_id` waits for the preview DXC pin of D8.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.

@@ -22,6 +22,39 @@ constexpr cc::string_view k_texture_names[]
 constexpr cc::string_view k_image_names[]
     = {"RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray", "", "", "RWTexture3D", "", ""};
 
+/// Whether the entry point calls the builtin `name`, which a helper its text declares stands for.
+[[nodiscard]] bool calls_builtin(plan const& p, cc::string_view name)
+{
+    for (auto const& x : p.e.exprs)
+        if (auto const* const c = x.node.try_as<flat_call>(); c != nullptr && is_valid(c->intrinsic))
+            if (auto const* const record = p.m.builtin_function(c->intrinsic); record != nullptr && record->name == name)
+                return true;
+    return false;
+}
+
+/// EMIT-260: a hit's cluster, which DXC reaches through inline SPIR-V on vulkan and Shader Model 6.10 has on dx12.
+/// Generic over both of a query's parameters, since one that sees micromaps states its second (EMIT-184).
+constexpr cc::string_view k_query_cluster_vulkan
+    = "template <uint sgl_flags, uint sgl_query_flags>\n"
+      "[[vk::ext_extension(\"SPV_NV_cluster_acceleration_structure\")]]\n"
+      "[[vk::ext_capability(5437)]] // RayTracingClusterAccelerationStructureNV\n"
+      "[[vk::ext_instruction(5345)]] // OpRayQueryGetIntersectionClusterIdNV\n"
+      "int sgl_ray_query_cluster_id([[vk::ext_reference]] RayQuery<sgl_flags, sgl_query_flags> q, uint is_committed);"
+      "\n\n";
+constexpr cc::string_view k_query_cluster_dx12
+    = "template <uint sgl_flags, uint sgl_query_flags>\n"
+      "int sgl_ray_query_cluster_id(RayQuery<sgl_flags, sgl_query_flags> q, uint is_committed)\n"
+      "{\n"
+      "    return int(is_committed != 0u ? q.CommittedClusterID() : q.CandidateClusterID());\n"
+      "}\n\n";
+constexpr cc::string_view k_hit_cluster_vulkan
+    = "[[vk::ext_extension(\"SPV_NV_cluster_acceleration_structure\")]]\n"
+      "[[vk::ext_capability(5437)]] // RayTracingClusterAccelerationStructureNV\n"
+      "[[vk::ext_builtin_input(5436)]] // ClusterIDNV\n"
+      "static const uint sgl_cluster_id_input;\n"
+      "int sgl_hit_cluster_id()\n{\n    return int(sgl_cluster_id_input);\n}\n\n";
+constexpr cc::string_view k_hit_cluster_dx12 = "int sgl_hit_cluster_id()\n{\n    return int(ClusterID());\n}\n\n";
+
 /// Both HLSL targets: one language, and two ways of saying where a thing lives.
 class hlsl_dialect final : public dialect
 {
@@ -508,6 +541,10 @@ public:
             out += "[[vk::ext_instruction(4447)]] // OpConvertUToAccelerationStructureKHR\n"
                    "RaytracingAccelerationStructure sg_acceleration_from_address(uint2 address);\n\n";
         }
+        if (calls_builtin(p, "ray_query_candidate_cluster_id") || calls_builtin(p, "ray_query_committed_cluster_id"))
+            out += _is_vulkan ? k_query_cluster_vulkan : k_query_cluster_dx12;
+        if (calls_builtin(p, "hit_cluster_id"))
+            out += _is_vulkan ? k_hit_cluster_vulkan : k_hit_cluster_dx12;
 
         if (!p.constants.has_value())
             return;
