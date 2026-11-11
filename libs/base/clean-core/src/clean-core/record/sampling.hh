@@ -104,9 +104,9 @@ struct cc::rec::sampling_config
     ///
     /// A scope's wall time cannot tell work from a thread the OS kept off the CPU, and reading a thread clock in every
     /// scope would cost it several times over (a scope 29 ns, QueryThreadCycleTime 179 ns, on Windows).
-    /// Read here, it costs the sampler alone, about 180 ns per thread per tick, and a trace shows each stretch a thread
-    /// mostly sat off the CPU (babel::chrome_trace's off-CPU lanes).
-    /// Windows only so far: elsewhere nothing is recorded.
+    /// Read here, it costs the sampler alone, per thread per tick about 180 ns on Windows and 340 ns on an M4 (thread_info).
+    /// A trace then shows each stretch a thread mostly sat off the CPU (babel::chrome_trace's off-CPU lanes).
+    /// Windows and macOS only so far: elsewhere nothing is recorded.
     bool thread_run = true;
 
     /// Where samples go instead of the recording, or null for the recording.
@@ -225,6 +225,7 @@ inline constexpr rec::field sample_fields[] = {
 
 /// The layout of a thread's running time since the sampler's previous tick of it: `ran` of `interval`, both in the
 /// timestamp counter's ticks, so `ran / interval` is the share of the stretch the thread was on a CPU.
+/// On macOS `ran` is the kernel's nanoseconds converted at the recorder's calibrated rate, so it is no exact count of ticks.
 /// The stretch ends when the event was recorded; a thread's first tick only starts it, and records nothing.
 /// `in_scope` is 1 where the thread had a recorded scope open at the stretch's end: a thread off the CPU inside its work
 /// rather than a worker waiting for some.

@@ -146,8 +146,9 @@ So scopes and sampling are worth having together rather than as alternatives.
 A sampler catches a parked thread as often as a busy one, so a pool of idle workers buries the work under waits: `{.skip_idle = true}` leaves those stacks out.
 
 A scope's wall time cannot tell work from a thread the OS kept off the CPU.
-So each tick also records how much of the stretch since the last one each thread ran (`record.thread_run`, Windows only so far).
-It costs the sampler about 180 ns per thread per tick and the sampled threads nothing; a thread clock in every scope would have made each scope about 13 times as expensive.
+So each tick also records how much of the stretch since the last one each thread ran (`record.thread_run`, Windows and macOS so far).
+It costs the sampler about 180 ns per thread per tick on Windows and 340 ns on an M4, and the sampled threads nothing.
+A thread clock in every scope would have made each scope about 13 times as expensive.
 `babel::chrome_trace` draws each stretch a thread ran less than half of on a lane beside it: `(off cpu, in a scope)` is a thread kept from its work, `(off cpu, idle)` a worker waiting for some.
 
 To profile a slow test, `uv run dev.py test "<filter>" --sample` does all of it.
