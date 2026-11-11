@@ -1284,3 +1284,170 @@ ASYNC_INVOCABLE_TEST("sv - a light visible to the camera is seen at its radiance
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
+
+namespace
+{
+/// `a` x `b` as a vector, which a tangent frame is built from.
+[[nodiscard]] tg::vec3f cross_of(tg::vec3f a, tg::vec3f b)
+{
+    return tg::vec3f(a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);
+}
+
+/// A tangent frame as the `tangent_frame` attribute carries it: tangent, bitangent and normal as the quaternion's x, y and z.
+[[nodiscard]] tg::quat_f frame_quat(tg::vec3f t, tg::vec3f n)
+{
+    auto const b = cross_of(n, t);
+    return tg::quat_f::make_from_basis(t, b, n).normalized();
+}
+
+/// The floor, a matte gray, with `frame` and `handedness` at every corner and uvs across it.
+[[nodiscard]] sv::mesh framed_floor(tg::quat_f frame, f32 handedness)
+{
+    auto const gray = sv_test::pbr_material{.base_color = tg::vec3f(0.5f, 0.5f, 0.5f), .roughness = 1.0f};
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          gray);
+    auto mesh = sv_test::as_mesh("normal-mapped floor", floor.positions, floor.materials);
+
+    auto const count = floor.positions.size();
+    auto uvs = cc::vector<tg::vec2f>();
+    for (auto const& p : floor.positions)
+        uvs.push_back(tg::vec2f(p[0], p[2]));
+    mesh.attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    mesh.attributes.push_back(sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                                         cc::vector<tg::quat_f>::create_filled(count, frame)));
+    mesh.attributes.push_back(sv::mesh_attribute::create("tangent_handedness", sv::attribute_frequency::per_vertex,
+                                                         cc::vector<f32>::create_filled(count, handedness)));
+    return mesh;
+}
+} // namespace
+
+// A normal map against its own definition: a tangent-space normal read from a texture means the shading normal
+// `t * x + b * y + n * z` of the corner's frame, b mirrored where the handedness is negative.
+// So a flat floor with a constant normal map must shade as the same floor does whose frame is turned onto that normal and
+// which samples no map.
+// Four tilts, one toward each tangent direction, under a light that tells all four apart, catch a swapped or a negated
+// axis and a wrong strength; a frame turned a quarter about its normal, a mirrored one, and both encodings a normal map
+// arrives in, signed or unsigned with its transform, catch what only those reach.
+ASYNC_INVOCABLE_TEST("sv - a normal map shades as the tangent frame turned onto its normal does",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    struct frame_case
+    {
+        cc::string_view name;
+        tg::vec3f tangent;
+        f32 handedness;
+    };
+    auto const up = tg::vec3f(0, 1, 0);
+    auto const frames = cc::vector<frame_case>{
+        {.name = "tangent along +x", .tangent = tg::vec3f(1, 0, 0), .handedness = 1.0f},
+        {.name = "tangent along -z, a quarter turn", .tangent = tg::vec3f(0, 0, -1), .handedness = 1.0f},
+        {.name = "mirrored", .tangent = tg::vec3f(1, 0, 0), .handedness = -1.0f},
+    };
+
+    // From above, off every axis, so a tilt toward each of the four tangent directions is lit differently.
+    auto const light = sv::light::directional(tg::normalize(tg::vec3f(0.7f, -1.0f, 0.35f))).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+
+    auto const tilt = tg::angle_f::make_from_degree(40.0f);
+    for (auto const& f : frames)
+        for (auto const is_signed : {true, false})
+        {
+            auto shades = cc::vector<f32>();
+            for (auto const azimuth_degrees : {0.0f, 90.0f, 180.0f, 270.0f})
+            {
+                auto const azimuth = tg::angle_f::make_from_degree(azimuth_degrees);
+                auto const wanted
+                    = tg::vec3f(tg::sin(tilt) * tg::cos(azimuth), tg::sin(tilt) * tg::sin(azimuth), tg::cos(tilt));
+
+                // Encoded as a normal map stores it, and decoded as the sampler returns it, so the reference has the
+                // quantized normal rather than the exact one.
+                auto pixels = cc::vector<byte>();
+                auto decoded = tg::vec3f();
+                for (auto c = 0; c < 3; ++c)
+                {
+                    if (is_signed)
+                    {
+                        auto const q = i32(tg::round(wanted[c] * 127.0f));
+                        pixels.push_back(byte(u8(i8(q))));
+                        decoded[c] = f32(q) / 127.0f;
+                    }
+                    else
+                    {
+                        auto const q = i32(tg::round((wanted[c] * 0.5f + 0.5f) * 255.0f));
+                        pixels.push_back(byte(u8(q)));
+                        decoded[c] = f32(q) / 255.0f * 2.0f - 1.0f;
+                    }
+                }
+                pixels.push_back(byte(is_signed ? 127 : 255));
+                auto texels = cc::vector<byte>();
+                for (auto i = 0; i < 4 * 4; ++i)
+                    texels.push_back_range(pixels);
+                decoded = tg::normalize(decoded);
+
+                auto mapped = framed_floor(frame_quat(f.tangent, up), f.handedness);
+                mapped.textures.push_back(
+                    {.name = "normal",
+                     .source
+                     = {.texture = sv::texture_data::create(
+                            cc::move(texels), is_signed ? sg::pixel_format::rgba8_snorm : sg::pixel_format::rgba8_unorm,
+                            4, 4),
+                        .transform = is_signed ? sv::sample_transform{} : sv::sample_transform::of_signed_normal()}});
+
+                // The same normal in world space, and a frame turned onto it, with no map to sample.
+                auto const bitangent = cross_of(up, f.tangent) * f.handedness;
+                auto const world = tg::normalize(f.tangent * decoded[0] + bitangent * decoded[1] + up * decoded[2]);
+                auto const level = tg::normalize(f.tangent - world * tg::dot(f.tangent, world));
+                auto const reference = framed_floor(frame_quat(level, world), 1.0f);
+
+                auto shade = cc::fixed_array<f32, 2>{};
+                auto const meshes = cc::fixed_array<sv::mesh const*, 2>{&mapped, &reference};
+                for (auto k = 0; k < 2; ++k)
+                {
+                    auto scene = make_light_scene(resources, *meshes[k], cam);
+                    REQUIRE(scene.has_value());
+                    auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+                    auto const& images = co_await traced;
+                    REQUIRE(images.size() == 1);
+                    shade[k] = mean_brightness(images[0], scene.value().size);
+                }
+                auto const shade_mapped = shade[0];
+                auto const shade_reference = shade[1];
+                CHECK(tg::abs(shade_mapped - shade_reference) <= 0.02f * shade_reference)
+                    .dump("frame", f.name)
+                    .dump("signed", is_signed)
+                    .dump("azimuth", azimuth_degrees)
+                    .dump("mapped", shade_mapped)
+                    .dump("reference", shade_reference);
+                shades.push_back(shade_reference);
+            }
+
+            // The light tells the four tilts apart, or the comparison above could not catch a swapped axis.
+            auto lo = shades[0];
+            auto hi = shades[0];
+            for (auto const s : shades)
+            {
+                lo = cc::min(lo, s);
+                hi = cc::max(hi, s);
+            }
+            CHECK(hi - lo > 0.2f * hi).dump("frame", f.name).dump("darkest", lo).dump("brightest", hi);
+            for (auto i = isize(0); i < shades.size(); ++i)
+                for (auto j = i + 1; j < shades.size(); ++j)
+                    CHECK(tg::abs(shades[i] - shades[j]) > 0.03f * hi).dump("frame", f.name).dump("i", i).dump("j", j);
+        }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
