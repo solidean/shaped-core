@@ -22,11 +22,16 @@ a compute entry point writes the vertices the stage would have produced into a b
   Metal has mesh shaders, a geometry stage's per-primitive output with a bound is what a mesh workgroup writes, and it stays one draw with no buffer between passes.
 * **The tessellation stages on webgpu** become a compute pass that evaluates the control stage's factors, then a grid of domain locations per patch, then the evaluation stage at each.
 * **The mesh and task stages on webgpu** become a compute pass that runs the task stage, then each mesh workgroup it launches.
-  The mesh workgroups write vertices and indices to a buffer, and a GPU-written `draw_indexed_indirect` draws them.
-  The task stage's payload is a buffer slot per launched workgroup, and `set_counts` is an atomic reservation of that workgroup's slots.
+  Each mesh workgroup writes fixed slots of a buffer, bounded by its `vertices` and `triangles`, and one indexed draw of the buffer follows.
+  The task stage's payload is a buffer slot per launched workgroup.
 
-**It would be SGL's, not sg's.**
-SGL knows the stages' code and can write the compute text; sg would see two pipelines and a buffer between them, which it already knows how to order.
+**A polyfill keeps the primitive order the real stage has.**
+The order decides which triangle wins an equal depth and the result of a blend, so a polyfill that loses it draws a different image.
+Fixed slots in workgroup order keep it, where an atomic append in completion order would not.
+
+**SGL writes it, and sg draws it, through a documented polyfill protocol.**
+SGL knows the stages' code and writes the compute text the protocol asks for.
+sg draws a polyfilled pipeline through the call a native one takes, recording the compute ahead of the draw and owning the buffer between them.
 The repository's README names polyfills for ray tracing on webgpu as a goal, and this is the same move for the raster stages.
 [gpu-driven-work.md](gpu-driven-work.md) is the same move for work lists.
 
@@ -37,6 +42,7 @@ Each polyfill is benchmarked against the native stage on a device that has both,
 Within a small factor of native, it is automatic, and a pipeline that names the stage builds on a target without it.
 Further off, it is opt-in: the program or the host asks for it by name, and without that the feature still refuses.
 The benchmark stays in the tree, so a driver that changes the answer reopens the decision.
+Every polyfill starts opt-in, until its benchmark has run.
 
 ## What it touches
 
@@ -56,5 +62,4 @@ The benchmark stays in the tree, so a driver that changes the answer reopens the
 ## Open
 
 * How a polyfilled tessellation picks its grid when the factors vary per patch: the largest factor's grid, or a prefix sum over patches first.
-* Whether a vertex order that differs from the real stage's, within a primitive, is acceptable.
 * What "a small factor of native" is, and whether it is one threshold or one per stage.
