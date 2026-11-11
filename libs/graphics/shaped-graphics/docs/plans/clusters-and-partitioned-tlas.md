@@ -130,11 +130,14 @@ So "one layout everywhere", which the micromap descriptor could choose, is not a
 Two ways remain, and the first is decided:
 
 - **SGL emits the records** (decided).
-  A builtin module, `use accel`, declares `accel.ptlas_write`, `accel.ptlas_update`, `accel.ptlas_translation` and later `accel.clas_triangles` as structs whose layout is the target's.
+  A module SGL ships, `use accel`, declares `accel.ptlas_write`, `accel.ptlas_update`, `accel.ptlas_translation` and later `accel.clas_triangles`.
   A compute shader writes them into an ordinary `mut buffer[accel.ptlas_write]` by field name, and each target lays them out natively, so nothing translates at run time.
+  Where the two APIs order a record differently, its struct is `@target_layout` (SGL's CHK-522): a branch of fields per target, judged by its first.
+  Only `ptlas_write` differs today; an update and a translation are laid out alike on both.
   The count is the shader's too, an atomic it bumps: **sg writes the operation array itself and copies that count into it** with a buffer copy before the build (decided).
   So no shader writes the operation array, and sg needs no kernel of its own.
-  sg's C++ side gets the same layouts, for the described tier, from one generated header.
+  **No host code mirrors a target-layout record**, which keeps a program's C++ side portable (decided).
+  sg declares an opaque host type of each record's size, `sg::gpu_ptlas_write`, and the plain ones as they are; slib's `sgl_modules/accel.hh` names them for generated code.
 - **sg defines its own layout and transcodes it** in a compute pass before each operation.
   It works from HLSL and WGSL alike, at a dispatch and a buffer per operation, and sg would carry a kernel of its own.
   Rejected: the GPU-written tier exists for hot paths, and a conversion pass per operation is the cost it was meant to avoid.

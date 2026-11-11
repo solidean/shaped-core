@@ -94,6 +94,9 @@ sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file co
 sgl::prelude_file_of(path)                 // -> i32: which prelude file a path or file:// uri is, else -1; only a file in
                                            // a shaped-graphics-language/prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
+sgl::shipped_library()                     // -> cc::span<library_file const>: the modules SGL ships ("accel.sgl", module `accel`),
+                                           // which join a library wherever a file has `use accel`; no module dir needed
+                                           // its records are `@target_layout` (CHK-522): fields in each target's own order
 sgl::check::check_library(prelude, library)  // -> optional<checked_prelude>: every module once, one layer for every
                                            // program reaching any of them; none where a module reports anything,
                                            // a file's parse error included; the chain below, from scratch

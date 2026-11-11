@@ -1013,3 +1013,80 @@ void sgl::check::impl::flattener::judge_text_types()
         }
     }
 }
+
+void sgl::check::impl::flattener::place_target_layouts()
+{
+    if (c.target_layouts.empty() && c.unplaced_layouts.empty())
+        return;
+    auto const placed = [&](type_id type) -> type_id
+    {
+        for (auto const& [from, to] : c.target_layouts)
+            if (from == type)
+                return to;
+        return type;
+    };
+    // a field's position in the branch's struct, which holds the same fields as the type the check judged
+    auto const renumbered = [&](type_id from, type_id to, i32 member) -> i32
+    {
+        auto const& name = c.out.at(c.out.at(from).members)[member].name;
+        auto const fields = c.out.at(c.out.at(to).members);
+        for (auto i = isize(0); i < fields.size(); ++i)
+            if (fields[i].name == name)
+                return i32(i);
+        return member;
+    };
+    auto is_reported = false;
+    for (auto i = isize(0); i < entry.exprs.size(); ++i)
+    {
+        auto& x = entry.exprs[i];
+        if (!is_reported && c.unplaced_layouts.values().contains(x.type))
+        {
+            auto const chain = entry.at(x.inlined_through);
+            unroll_reports.push_back({.kind = diagnostic_kind::invalid_target_text,
+                                      .file = x.from.file,
+                                      .where = c.span_of(x.from.file, x.from.expr),
+                                      .detail = cc::format("{} has no branch this compile takes, so it has no layout "
+                                                           "here",
+                                                           c.out.name_of(x.type)),
+                                      .site = chain.empty() ? call_site{} : chain[chain.size() - 1]});
+            is_failed = true;
+            meets_error = true;
+            is_reported = true;
+        }
+        if (auto* const m = x.node.try_as<flat_member>(); m != nullptr && is_valid(m->object) && !m->is_swizzle())
+        {
+            auto const object = entry.exprs[index_of(m->object)].type;
+            if (auto const to = placed(object); to != object)
+                m->member = renumbered(object, to, m->member);
+        }
+        if (auto* const k = x.node.try_as<flat_construct>(); k != nullptr)
+            if (auto const to = placed(x.type); to != x.type)
+            {
+                auto const arguments = cc::vector<flat_expr_id>::create_copy_of(entry.at(k->arguments));
+                // its arguments are written in the branch's order, which no two effects among them may tell
+                auto with_effect = 0;
+                for (auto const a : arguments)
+                    with_effect += calls_impure(a, 0) ? 1 : 0;
+                if (with_effect >= 2)
+                {
+                    auto const chain = entry.at(x.inlined_through);
+                    unroll_reports.push_back({.kind = diagnostic_kind::unsupported_yet,
+                                              .file = x.from.file,
+                                              .where = c.span_of(x.from.file, x.from.expr),
+                                              .detail = cc::format("a construction of {} of two arguments with an "
+                                                                   "effect, which this compile writes in another order",
+                                                                   c.out.name_of(x.type)),
+                                              .site = chain.empty() ? call_site{} : chain[chain.size() - 1]});
+                    is_failed = true;
+                    meets_error = true;
+                }
+                for (auto a = isize(0); a < arguments.size(); ++a)
+                    entry.expr_lists[k->arguments.first + renumbered(x.type, to, i32(a))] = arguments[a];
+            }
+    }
+    // the types last, since a field is renumbered from the type its object had
+    for (auto& x : entry.exprs)
+        x.type = placed(x.type);
+    for (auto& l : entry.locals)
+        l.type = placed(l.type);
+}

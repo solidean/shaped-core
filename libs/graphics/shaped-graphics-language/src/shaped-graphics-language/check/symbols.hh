@@ -280,6 +280,12 @@ struct sgl::check::type_info
     bool is_opaque = false;
     /// A struct whose body is a `const if` chain, which a compile may spell in its target's text (CHK-432).
     bool is_text_type = false;
+    /// `@target_layout`: a struct whose fields stand in each target's own order, as one of `target_type_branches` says
+    /// (CHK-522); the check judges it by its first branch's fields, and a compile writes its branch's struct instead.
+    bool has_target_layout = false;
+    /// The struct with a target layout this one is a branch of, whose fields it holds in that branch's order; `none` for
+    /// every other type.
+    type_id layout_of = type_id::none;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
     /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.

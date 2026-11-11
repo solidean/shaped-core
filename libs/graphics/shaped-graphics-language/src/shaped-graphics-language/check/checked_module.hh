@@ -222,12 +222,15 @@ struct sgl::check::target_type_branch
     /// Parallel: the languages it is spelled in, and the spelling in each.
     cc::vector<shading_language> languages;
     cc::vector<cc::string> spellings;
+    /// Of a struct with a target layout (CHK-522): the struct of this branch's fields in its order, which a compile taking
+    /// it writes wherever the type stands.
+    type_id layout = type_id::none;
 
     [[nodiscard]] bool operator==(target_type_branch const& rhs) const
     {
         return type_symbol == rhs.type_symbol && ast::impl::is_equal(condition, rhs.condition)
             && is_fields == rhs.is_fields && ast::impl::is_equal(languages, rhs.languages)
-            && ast::impl::is_equal(spellings, rhs.spellings);
+            && ast::impl::is_equal(spellings, rhs.spellings) && layout == rhs.layout;
     }
 };
 

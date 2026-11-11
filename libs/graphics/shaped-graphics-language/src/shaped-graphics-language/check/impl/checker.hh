@@ -455,6 +455,31 @@ struct checker
     /// CHK-432: the branches of a struct whose body is a `const if` chain, into `target_type_branches`.
     /// False where it has no SGL branch, which leaves it opaque.
     bool compile_type_branches(symbol_id id, i32 file, ast::struct_decl const& s);
+    /// CHK-522: the branches of a `@target_layout` struct, each a struct of the same fields in its own order, into
+    /// `target_type_branches`; `fields` are its first branch's, which the check judges it by.
+    void compile_layout_branches(symbol_id id,
+                                 type_id type,
+                                 i32 file,
+                                 ast::struct_decl const& s,
+                                 ast::range_of<member_info> fields);
+    /// Whether `file` belongs to a module SGL ships, the only place a `@target_layout` struct is declared (CHK-522).
+    [[nodiscard]] bool is_shipped_module_file(i32 file) const;
+    /// Whether `type` is a struct with a target layout (CHK-522).
+    [[nodiscard]] bool has_target_layout(type_id type) const;
+    /// CHK-522: a struct with a target layout stands as a buffer's element and a value, so the field or the array
+    /// element `type` is reports it at `where`; true where it did.
+    bool refuse_held_layout(i32 file, source_span where, type_id type, cc::string_view holder);
+    /// CHK-522: what each type holding a struct with a target layout is on this compile, the struct of the branch it
+    /// takes or a buffer of one, made before any entry point is flattened, since flattening interns no type.
+    void prepare_target_layouts();
+    /// CHK-522: each binding of the symbols from `first` on, its buffers of a struct with a target layout made buffers of
+    /// the struct this compile writes, once every tree is flattened against the type the check judged.
+    void place_layout_bindings(isize first);
+    /// Pairs of a type and what this compile writes in its place (CHK-522); empty where no compile reaches one.
+    cc::vector<cc::pair<type_id, type_id>> target_layouts;
+    /// The structs with a target layout that no branch of holds on this compile, which a flattened tree reaching one
+    /// reports.
+    cc::vector<type_id> unplaced_layouts;
     /// A text type's condition as nodes a compile decides alone, appended to `into`; false where it reads anything else.
     bool target_condition_of(i32 file, ast::expr_id expr, cc::vector<target_condition>& into);
     /// CHK-431: `@barrier`, `@subgroup` and `@derivatives` declare what a body in a target's text does, and stand on

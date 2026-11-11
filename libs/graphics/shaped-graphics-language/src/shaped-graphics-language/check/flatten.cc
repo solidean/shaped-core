@@ -1070,6 +1070,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
     f.judge_text_types();
+    f.place_target_layouts();
 
     // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
     // CHK-402: what is judged of this entry point's inlined body is its own, which a compile of a sibling leaves out.

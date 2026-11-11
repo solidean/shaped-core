@@ -103,6 +103,7 @@ void checker::run(resume_point from)
 
     index_builtin_symbols(from.symbols);
     instantiate_generics(from.call_records, from.types);
+    prepare_target_layouts();
     // CHK-350: the entry points are the program's; a module the program uses is a library, whose own are not built
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked
@@ -111,6 +112,7 @@ void checker::run(resume_point from)
     flatten_metal_traversals();
     for (auto i = from.tests; i < out.tests.size(); ++i)
         flatten_test(i32(i));
+    place_layout_bindings(from.symbols);
     // after flattening, which finds what a body's calls need (CHK-322)
     report_unused_requires();
     judge_footprint_pins();
