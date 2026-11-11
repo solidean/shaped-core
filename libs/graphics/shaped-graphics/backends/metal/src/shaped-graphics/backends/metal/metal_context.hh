@@ -125,6 +125,8 @@ public:
 
     /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
     [[nodiscard]] bool supports(sg::feature f) const override;
+    /// A geometry stage is polyfilled here, since metal has none; every mesh stage is native.
+    [[nodiscard]] bool draws_geometry_polyfill() const override { return true; }
 
     /// The backend-typed buffer create, which the sg::context virtual forwards to.
     [[nodiscard]] cc::result<metal_buffer_handle> create_metal_buffer(isize size_in_bytes,

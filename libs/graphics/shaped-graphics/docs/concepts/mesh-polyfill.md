@@ -98,6 +98,12 @@ So its stride is in the shader, and only the offsets are the draw's.
 
 A list topology alone: a strip's primitives share corners, which no fixed slot assigns yet.
 
+**Opt-in until measured**: `ctx.geometry_polyfill()` is `never` by default, and `where_missing` or `always` asks for it.
+slib then acquires the geometry stage's two halves in place of the geometry stage, the compute half naming the pipeline's vertex stage, and leaves the pipeline no vertex input.
+metal draws it, `draws_geometry_polyfill`, with the draw's buffers bound past every vertex-input slot and their offsets folded into the addresses.
+A slot the draw has no buffer for, the index buffer of a draw that is not indexed, takes the draw's own values, since Metal's validation wants every declared buffer bound.
+dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage that decides `where_missing` has not run.
+
 ## Not yet
 
 - A task stage, whose launch count the GPU chooses: a declared maximum per task workgroup, or a per-draw budget a host may override.

@@ -131,6 +131,10 @@ inline constexpr cc::string_view k_weakens_float_option = "weakens_float";
 /// its polyfill to compile, which is then that stage (SGL's CHK-524).
 /// The cache keys on it as on any option.
 inline constexpr cc::string_view k_mesh_form_option = "mesh_form";
+
+/// The option a pipeline that polyfills its geometry stage passes beside `k_mesh_form_option`: the name of the
+/// pipeline's vertex entry point, which the geometry stage's compute half runs on each corner (SGL's CHK-525).
+inline constexpr cc::string_view k_polyfill_vertex_option = "polyfill_vertex";
 } // namespace slib
 
 namespace slib

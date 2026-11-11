@@ -387,7 +387,13 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
             cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a mesh stage, and this device "
                                                          "lacks sg::feature::mesh_shader",
                                                          d.file, d.name)));
-    if (d.geometry != nullptr && !ctx->supports(sg::feature::geometry_shader))
+    // A geometry stage likewise, opt-in until its benchmark against the native stage has run (SGL's CHK-525).
+    auto const geometry_use = ctx->geometry_polyfill();
+    auto const polyfills_geometry
+        = d.geometry != nullptr && d.vertex != nullptr
+       && (geometry_use == sg::polyfill_use::always
+           || (geometry_use == sg::polyfill_use::where_missing && !ctx->supports(sg::feature::geometry_shader)));
+    if (d.geometry != nullptr && !polyfills_geometry && !ctx->supports(sg::feature::geometry_shader))
         throw sg::pipeline_creation_exception(
             cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a geometry stage, and this device "
                                                          "lacks sg::feature::geometry_shader",
@@ -419,14 +425,30 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         desc.task_shader = co_await (*d.task)->acquire(*ctx, options);
     if (d.pixel != nullptr)
         desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx, options);
-    if (d.geometry != nullptr)
+    if (d.geometry != nullptr && polyfills_geometry)
+    {
+        // the compute half runs the pipeline's vertex stage, so it names it; the vertex half draws the slots back
+        auto with_form = options;
+        with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string("vertex")});
+        desc.vertex_shader = co_await (*d.geometry)->acquire(*ctx, with_form);
+        with_form.back().value = "compute";
+        with_form.push_back(
+            {.name = cc::string(slib::k_polyfill_vertex_option), .value = cc::string((*d.vertex)->entry_point())});
+        auto compute = co_await (*d.geometry)->acquire(*ctx, with_form);
+        desc.mesh_polyfill = sg::mesh_polyfill_description{.corners = compute.mesh_polyfill_corners,
+                                                           .primitives_per_group = compute.mesh_polyfill_primitives,
+                                                           .words_per_group = compute.mesh_polyfill_words};
+        desc.mesh_polyfill.value().compute_shader = cc::move(compute);
+    }
+    else if (d.geometry != nullptr)
         desc.geometry_shader = co_await (*d.geometry)->acquire(*ctx, options);
     if (d.tessellation_control != nullptr)
         desc.tessellation_control_shader = co_await (*d.tessellation_control)->acquire(*ctx, options);
     if (d.tessellation_evaluation != nullptr)
         desc.tessellation_evaluation_shader = co_await (*d.tessellation_evaluation)->acquire(*ctx, options);
-    // a vertex stage that draws from no vertex buffer, reading `@vertex_index` alone, has no layout
-    if (d.vertex_input != nullptr)
+    // a vertex stage that draws from no vertex buffer, reading `@vertex_index` alone, has no layout; nor has a polyfill's
+    // vertex half, whose compute half reads the buffers instead
+    if (d.vertex_input != nullptr && !polyfills_geometry)
         desc.vertex_input = d.vertex_input();
     desc.target_set = cc::string(d.target_set);
     for (auto i = isize(0); i < d.targets.size(); ++i)
@@ -479,7 +501,23 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         }
     }
 
-    // a polyfilled mesh stage draws its primitives as a list of the kind it writes
+    // a polyfilled geometry stage assembles the primitives its topology states, a list's alone so far
+    if (polyfills_geometry)
+    {
+        auto const t = desc.topology;
+        auto const corners = t == sg::primitive_topology::point_list    ? 1
+                           : t == sg::primitive_topology::line_list     ? 2
+                           : t == sg::primitive_topology::triangle_list ? 3
+                                                                        : 0;
+        if (corners == 0)
+            throw sg::pipeline_creation_exception(cc::string(d.name),
+                                                  cc::any_error(cc::format("{}'s {}: the pipeline polyfills its "
+                                                                           "geometry stage over a strip, and the "
+                                                                           "polyfill assembles lists alone so far",
+                                                                           d.file, d.name)));
+        desc.mesh_polyfill.value().input_corners = corners;
+    }
+    // a polyfilled stage draws its primitives as a list of the kind it writes
     if (desc.mesh_polyfill.has_value())
         desc.topology = desc.mesh_polyfill.value().corners == 2 ? sg::primitive_topology::line_list
                                                                 : sg::primitive_topology::triangle_list;

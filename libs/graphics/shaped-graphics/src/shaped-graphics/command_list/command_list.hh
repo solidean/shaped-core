@@ -219,6 +219,9 @@ protected:
     // compute half over the bound groups, then draw what it wrote (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
     // Reached only on a context whose `draws_mesh_polyfill` says so.
     virtual void raster_draw_mesh_polyfilled(impl::mesh_polyfill_state const& polyfill, int x, int y, int z);
+    // Reached only on a context whose `draws_geometry_polyfill` says so, for a draw of at least one primitive.
+    virtual void raster_draw_geometry_polyfilled(impl::mesh_polyfill_state const& polyfill,
+                                                 impl::geometry_polyfill_draw const& draw);
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing).
     // Split by geometry family, since a BLAS is triangles or AABBs and span-element overloads cannot

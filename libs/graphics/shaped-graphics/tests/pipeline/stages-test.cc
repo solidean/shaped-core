@@ -14,6 +14,7 @@ using namespace cc::primitive_defines;
 namespace shaders = sg::test::sgl_shaders;
 
 // stages.sgl's geometry and tessellation stages, drawn where the device has them.
+// A geometry stage the device lacks is drawn as its polyfill where the backend draws one, to the same images (CHK-525).
 // Every probe is a pixel centre well inside or well outside each triangle, so no rasterization tie-break decides it.
 
 namespace
@@ -61,6 +62,31 @@ bool drawn(sg_test::offscreen_pixels const& pixels, int x, int y)
 {
     return pixels[0].rgba_float(x, y)[3] == 1.0f;
 }
+
+/// Why `ctx` draws no geometry stage at all, or nothing where it draws one, natively or as its polyfill.
+cc::optional<cc::string_view> no_geometry_stage(sg::context const& ctx)
+{
+    if (!sg_test::shaders_reach(ctx))
+        return cc::string_view("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx.supports(sg::feature::geometry_shader) && !ctx.draws_geometry_polyfill())
+        return cc::string_view("this device has no geometry stage, and its backend draws no polyfilled one");
+    return {};
+}
+
+/// Polyfills a geometry stage the device lacks while it lives, and restores what the context did before.
+struct geometry_polyfilling
+{
+    sg::context& ctx;
+    sg::polyfill_use before;
+
+    explicit geometry_polyfilling(sg::context& c) : ctx(c), before(c.geometry_polyfill())
+    {
+        ctx.set_geometry_polyfill(sg::polyfill_use::where_missing);
+    }
+    ~geometry_polyfilling() { ctx.set_geometry_polyfill(before); }
+    geometry_polyfilling(geometry_polyfilling const&) = delete;
+    geometry_polyfilling& operator=(geometry_polyfilling const&) = delete;
+};
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, reports its domain, and winds as its "
@@ -176,10 +202,9 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage's ended strips draw each copy and no
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    if (!sg_test::shaders_reach(*ctx))
-        SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (!ctx->supports(sg::feature::geometry_shader))
-        SKIP("this device has no geometry stage");
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
 
     // One triangle in the left half, which the geometry stage emits again one unit to the right.
     // Without the strip ended between them, the strip's middle triangle would bridge the two across the bottom.
@@ -220,10 +245,9 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id a
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    if (!sg_test::shaders_reach(*ctx))
-        SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (!ctx->supports(sg::feature::geometry_shader))
-        SKIP("this device has no geometry stage");
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
 
     // Two triangles over the whole target: the lower-right is primitive 0 and the upper-left primitive 1.
     auto const bl = tg::vec2f(-1, -1);
@@ -253,6 +277,54 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id a
                 continue;
             CHECK(pixels[0].rgba_float(x, y)[0] == (lower > 0 ? 0.0f : 1.0f)).context(cc::format("pixel ({}, {})", x, y));
         }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an indexed draw through a geometry stage assembles each triangle from its indices",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+
+    // The two triangles of the primitive-id test from four corners: 16-bit indices first, then 32-bit ones offset by a
+    // decoy corner, each past an unused leading pair.
+    auto const bl = tg::vec2f(-1, -1);
+    auto const br = tg::vec2f(1, -1);
+    auto const tr = tg::vec2f(1, 1);
+    auto const tl = tg::vec2f(-1, 1);
+    shaders::stages::stage_corner const corners[]
+        = {{.position = tg::vec2f(5, 5)}, {.position = bl}, {.position = br}, {.position = tr}, {.position = tl}};
+    u16 const short_indices[] = {0, 0, 1, 2, 3, 1, 3, 4};
+    u32 const long_indices[] = {9, 9, 0, 1, 2, 0, 2, 3};
+    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+    auto const shorts = ctx->persistent.create_buffer_from_data(short_indices, sg::buffer_usage::index_buffer);
+    auto const longs = ctx->persistent.create_buffer_from_data(long_indices, sg::buffer_usage::index_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::primitive_ids);
+
+    for (auto const is_short : {true, false})
+    {
+        auto const pixels = co_await sg_test::draw_offscreen(
+            *ctx, stage_target(),
+            [&](sg::rendering_scope& scope)
+            {
+                scope.bind_pipeline(*pipeline);
+                scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                scope.bind_index_buffer(is_short ? shorts.as_index_buffer() : longs.as_index_buffer());
+                scope.draw_indexed({.index_range = {.offset = 2, .size = 6}, .vertex_offset = is_short ? 0 : 1});
+            });
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+            {
+                auto const p = centre_of(x, y);
+                auto const lower = side_of(p, bl, br, tr);
+                auto const upper = side_of(p, bl, tr, tl);
+                if (lower == 0 || upper == 0)
+                    continue;
+                CHECK(pixels[0].rgba_float(x, y)[0] == (lower > 0 ? 0.0f : 1.0f))
+                    .context(cc::format("{} indices, pixel ({}, {})", is_short ? "16-bit" : "32-bit", x, y));
+            }
+    }
 }
 
 ASYNC_INVOCABLE_TEST("sg - a pipeline with a geometry stage the device lacks is refused naming geometry_shader",

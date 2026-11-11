@@ -17,6 +17,7 @@
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/barrier/access_inference.hh> // shader_access_of
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
 
@@ -1040,7 +1041,8 @@ void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<ver
 
         // The stride is pipeline state on Metal, baked into the vertex descriptor, so a view carrying a different one
         // is a mismatch nothing below would report — the fetch simply reads the pipeline's stride.
-        if (_bound_raster != nullptr)
+        // A polyfilled geometry stage reads the buffers in its compute half instead, by a stride its shader holds.
+        if (_bound_raster != nullptr && _bound_raster->mesh_polyfill() == nullptr)
         {
             auto const strides = _bound_raster->vertex_strides();
             CC_ASSERT(slot < strides.size(), "the bound raster pipeline declares no vertex input slot here");
@@ -1053,8 +1055,12 @@ void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<ver
                                      NS::UInteger(k_vertex_buffer_base_index + slot));
 
         while (_bound_vertex_buffers.size() <= slot)
+        {
             _bound_vertex_buffers.push_back(nullptr);
+            _bound_vertex_addresses.push_back(0);
+        }
         _bound_vertex_buffers[slot] = view.buffer;
+        _bound_vertex_addresses[slot] = mtl_buffer.gpu_address() + u64(view.offset_in_bytes);
     }
 }
 
@@ -1513,6 +1519,7 @@ void metal_command_list::raster_end_rendering()
     _render_suspended = false;
     _bound_raster = nullptr;
     _bound_vertex_buffers.clear();
+    _bound_vertex_addresses.clear();
     _bound_index_buffer = nullptr;
     _index_address = 0;
     _index_size_in_bytes = 0;
@@ -1653,6 +1660,99 @@ void metal_command_list::raster_draw_mesh_tasks_indirect(raw_buffer_handle const
             _bound_raster->object_threads(), _bound_raster->mesh_threads());
         ++_draws_in_render_encoder;
     }
+}
+
+void metal_command_list::raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                                         sg::impl::geometry_polyfill_draw const& draw)
+{
+    CC_ASSERT(in_rendering_scope(), "a draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr, "a draw needs a bound raster pipeline");
+    CC_ASSERT(!draw.is_indexed || _bound_index_buffer != nullptr, "an indexed draw needs a bound index buffer");
+    auto const* const compute = dynamic_cast<metal_compute_pipeline const*>(polyfill.compute.get());
+    CC_ASSERT(compute != nullptr, "a geometry polyfill's compute half is not a metal compute_pipeline");
+    constexpr auto streams = cc::span<sg::reserved_binding_address const>(sg::reserved_geometry_vertices).size();
+    CC_ASSERTF(_bound_vertex_buffers.size() <= streams,
+               "a polyfilled geometry stage reads at most {} vertex buffers, and {} are bound", streams,
+               _bound_vertex_buffers.size());
+
+    // One thread a primitive of an instance, each owning its slots of a buffer of the draw's own.
+    auto const threads = u64(draw.primitives) * u64(draw.instances);
+    auto const scratch = _metal_context.transient.create_raw_buffer(isize(threads * u64(polyfill.words_per_group) * 4),
+                                                                    sg::buffer_usage::readwrite_buffer);
+    auto const& mtl_scratch = static_cast<metal_buffer const&>(*scratch);
+
+    // What the compute half reads of the draw: the buffers' offsets are folded into the addresses bound below.
+    u32 const values[12] = {draw.first,
+                            draw.primitives,
+                            draw.is_indexed ? (_index_format == sg::index_format::uint16 ? 1u : 2u) : 0u,
+                            u32(draw.vertex_offset),
+                            draw.first_instance,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0};
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(values)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed,
+                                             "a polyfilled geometry stage's draw could not be staged: the metal device "
+                                             "refused a one-off staging buffer");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), values, sizeof(values));
+
+    // The compute half runs outside the pass, which Metal has no dispatch inside of: the draw splits the scope.
+    suspend_render_encoder("a polyfilled geometry stage", split_remedy::none);
+    place_inline_constants();
+    declare_bound_groups(sg::pipeline_stage_flag::compute, &compute->footprint());
+    for (auto const& vertex_buffer : _bound_vertex_buffers)
+        if (vertex_buffer != nullptr)
+            declare_buffer(vertex_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    if (draw.is_indexed)
+        declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(scratch, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    bind_debug_window(compute->footprint());
+
+    // Metal's validation wants every buffer the kernel declares bound, read or not: a slot the draw has no buffer for
+    // takes the draw's own values, which the kernel never reads there.
+    auto* const table = argument_table();
+    auto const draw_address = staging.buffer->gpuAddress() + u64(staging.offset);
+    table->setAddress(mtl_scratch.gpu_address(), NS::UInteger(sg::reserved_mesh_output.metal_buffer));
+    table->setAddress(draw_address, NS::UInteger(sg::reserved_geometry_draw.metal_buffer));
+    table->setAddress(draw.is_indexed ? _index_address : draw_address,
+                      NS::UInteger(sg::reserved_geometry_indices.metal_buffer));
+    for (auto i = isize(0); i < isize(streams); ++i)
+    {
+        auto const address = i < _bound_vertex_addresses.size() ? _bound_vertex_addresses[i] : u64(0);
+        table->setAddress(address != 0 ? address : draw_address,
+                          NS::UInteger(sg::reserved_geometry_vertices[i].metal_buffer));
+    }
+
+    auto* const encoder = compute_encoder();
+    encoder->setComputePipelineState(compute->state());
+    encoder->setArgumentTable(table);
+    auto const size = compute->workgroup_size();
+    encoder->dispatchThreads(MTL::Size(NS::UInteger(threads), 1, 1),
+                             MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    // the encoder's pipeline is the polyfill's now, which the next dispatch of the bound compute pipeline sets again
+    if (_bound_compute != nullptr)
+        encoder->setComputePipelineState(_bound_compute->state());
+
+    // The vertex half draws every corner of every slot, in order, under the raster state as it was.
+    table->setAddress(mtl_scratch.gpu_address(), NS::UInteger(sg::reserved_mesh_input.metal_buffer));
+    declare_buffer(scratch, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    bind_debug_window(_bound_raster->footprint());
+    declare_raster_draw(false);
+    resume_render_encoder();
+    auto const corners = u64(polyfill.primitives_per_group) * u64(polyfill.corners);
+    _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()), NS::UInteger(0),
+                                    NS::UInteger(threads * corners), NS::UInteger(1), NS::UInteger(0));
+    ++_draws_in_render_encoder;
 }
 
 void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pipeline)

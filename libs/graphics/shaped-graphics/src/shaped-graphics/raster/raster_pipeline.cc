@@ -26,7 +26,8 @@ void impl::set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_stat
 {
     // as set_targets: only on a pipeline nobody else holds yet
     auto& p = const_cast<raster_pipeline&>(pipeline);
+    // a polyfilled geometry stage draws with `draw`, as its pipeline would natively
+    p._is_mesh_shaded = state.input_corners == 0;
     p._mesh_polyfill = cc::move(state);
-    p._is_mesh_shaded = true;
 }
 } // namespace sg

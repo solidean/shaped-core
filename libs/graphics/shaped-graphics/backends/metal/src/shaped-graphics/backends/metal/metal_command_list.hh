@@ -191,6 +191,8 @@ private:
     // metal builds no mesh-shaded pipeline yet, so none is ever bound to draw
     void raster_draw_mesh_tasks(int x, int y, int z) override;
     void raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                         sg::impl::geometry_polyfill_draw const& draw) override;
     void raster_draw_indexed(draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
@@ -463,6 +465,8 @@ private:
     /// The vertex buffer bound at each input slot, in slot order and with a null for a slot nothing bound.
     /// Held so a draw can declare `vertex_read` on them — the address itself lives in the argument table.
     cc::small_vector<sg::raw_buffer_handle, sg::max_vertex_buffers> _bound_vertex_buffers;
+    /// Each bound vertex buffer's address, its view's offset folded in, which a polyfilled geometry stage reads.
+    cc::small_vector<u64, sg::max_vertex_buffers> _bound_vertex_addresses;
 
     /// The bound index buffer, and what `drawIndexedPrimitives` needs of it.
     ///

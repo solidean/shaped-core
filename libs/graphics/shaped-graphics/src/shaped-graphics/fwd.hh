@@ -400,6 +400,7 @@ void set_footprint(raster_pipeline const& pipeline, pipeline_footprint footprint
 void set_dispatched_by_threads(compute_pipeline const& pipeline);
 // what a polyfilled mesh stage's draw runs and sizes by; defined in raster/raster_pipeline.cc
 struct mesh_polyfill_state;
+struct geometry_polyfill_draw;
 void set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_state state);
 } // namespace impl
 

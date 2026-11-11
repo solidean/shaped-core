@@ -75,16 +75,29 @@ sg::impl::mesh_polyfill_state state_of(sg::mesh_polyfill_description const& poly
             .workgroup = polyfill.compute_shader.workgroup_size.value_or(sg::compute_dimensions{}),
             .corners = polyfill.corners,
             .primitives_per_group = polyfill.primitives_per_group,
-            .words_per_group = polyfill.words_per_group};
+            .words_per_group = polyfill.words_per_group,
+            .input_corners = polyfill.input_corners};
 }
 
-/// Why a polyfilled mesh stage of `desc` cannot be built, or nothing when it can; nothing for a description without one.
-cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description const& desc, bool draws_polyfill)
+/// Why a polyfilled mesh or geometry stage of `desc` cannot be built, or nothing when it can; nothing for a description
+/// without one.
+cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description const& desc, sg::context const& ctx)
 {
     if (!desc.mesh_polyfill.has_value())
         return {};
     auto const& p = desc.mesh_polyfill.value();
-    if (!draws_polyfill)
+    if (p.input_corners > 0)
+    {
+        if (!ctx.draws_geometry_polyfill())
+            return cc::string("the pipeline polyfills its geometry stage, and this backend draws no polyfilled "
+                              "geometry "
+                              "stage yet");
+        if (p.input_corners > 3)
+            return cc::format("the pipeline's geometry polyfill assembles primitives of {} corners, and a point has 1, "
+                              "a line 2, a triangle 3",
+                              p.input_corners);
+    }
+    else if (!ctx.draws_mesh_polyfill())
         return cc::string("the pipeline polyfills its mesh stage, and this backend draws no polyfilled mesh stage yet");
     if (desc.mesh_shader.has_value() || desc.task_shader.has_value())
         return cc::string("the pipeline polyfills its mesh stage and holds a mesh or task stage too; the polyfill "
@@ -470,7 +483,7 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     auto const desc = raster_half_of(_ctx, given);
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
-    if (auto refusal = polyfill_refusal_of(desc, _ctx.draws_mesh_polyfill()); refusal.has_value())
+    if (auto refusal = polyfill_refusal_of(desc, _ctx); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
 
     // the compute half first, so a refusal of it leaves no raster half behind
@@ -515,7 +528,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     auto const desc = raster_half_of(_ctx, given);
     auto refusal = refusal_of(desc, _ctx.supported_features());
     if (!refusal.has_value())
-        refusal = polyfill_refusal_of(desc, _ctx.draws_mesh_polyfill());
+        refusal = polyfill_refusal_of(desc, _ctx);
     if (refusal.has_value())
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));

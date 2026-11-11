@@ -342,6 +342,7 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
         b.add_pod(p.corners);
         b.add_pod(p.primitives_per_group);
         b.add_pod(p.words_per_group);
+        b.add_pod(p.input_corners);
     }
 
     b.add_pod(u64(desc.vertex_input.slots.size()));

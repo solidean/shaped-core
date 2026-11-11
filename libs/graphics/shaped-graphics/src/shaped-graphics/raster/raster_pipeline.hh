@@ -39,6 +39,10 @@ struct sg::mesh_polyfill_description
     int primitives_per_group = 0;
     /// The 32-bit words one workgroup's slots take.
     int words_per_group = 0;
+    /// 0 for a mesh stage.
+    /// For a geometry stage drawn this way, the corners of each primitive a draw assembles from the bound buffers, 1, 2
+    /// or 3: a primitive's output then takes a workgroup's slots, and the pipeline draws with `draw` (SGL's CHK-525).
+    int input_corners = 0;
 };
 
 /// What a polyfilled raster pipeline draws with, which the context attaches once both halves are built.
@@ -50,6 +54,22 @@ struct sg::impl::mesh_polyfill_state
     int corners = 3;
     int primitives_per_group = 0;
     int words_per_group = 0;
+    /// `mesh_polyfill_description::input_corners`: 0 for a mesh stage, the assembled primitive's for a geometry stage.
+    int input_corners = 0;
+};
+
+/// One draw of a polyfilled geometry stage, as its compute half reads it from `sg_geometry_draw`.
+struct sg::impl::geometry_polyfill_draw
+{
+    /// The first vertex, or the first index of an indexed draw.
+    u32 first = 0;
+    /// The primitives of one instance: the draw's vertices or indices over the assembled primitive's corners.
+    u32 primitives = 0;
+    u32 instances = 0;
+    u32 first_instance = 0;
+    bool is_indexed = false;
+    /// What an indexed draw adds to each index before the fetch.
+    i32 vertex_offset = 0;
 };
 
 /// Everything needed to build a raster_pipeline: the shaders, the pipeline_layout they are compiled against, the vertex-input layout, and the fixed-function state.

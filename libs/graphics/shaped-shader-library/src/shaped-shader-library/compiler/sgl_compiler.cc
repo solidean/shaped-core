@@ -332,6 +332,7 @@ private:
         auto weakens_float = false;
         auto native_line_table = false;
         auto mesh = sgl::emit::mesh_form::native;
+        auto polyfill_vertex = cc::string();
         auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
         auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
         auto const requires_native
@@ -354,6 +355,11 @@ private:
                 mesh = o.value == "compute" ? sgl::emit::mesh_form::compute
                      : o.value == "vertex"  ? sgl::emit::mesh_form::vertex_fetch
                                             : sgl::emit::mesh_form::native;
+                continue;
+            }
+            if (o.name == slib::k_polyfill_vertex_option)
+            {
+                polyfill_vertex = o.value;
                 continue;
             }
             if (o.name == slib::k_native_spirv_option || o.name == slib::k_native_dxil_option)
@@ -397,7 +403,8 @@ private:
              .device_features = device_features,
              .native = native,
              .native_line_table = native_line_table,
-             .mesh = mesh});
+             .mesh = mesh,
+             .polyfill_vertex = polyfill_vertex});
         // what the front end checked rather than loaded, kept for the next process
         if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
             store != nullptr)

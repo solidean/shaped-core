@@ -160,6 +160,8 @@ ctx.limits()                                       // -> sg::device_limits const
 ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
 ctx.set_mesh_polyfill(sg::polyfill_use::where_missing) // slib draws a mesh stage as compute + draw where the device has none (`always`: everywhere, `never`: refuse); `where_missing` by default
 ctx.draws_mesh_polyfill()                          // bool — whether this backend draws a polyfilled pipeline at all (all but metal, which needs none)
+ctx.set_geometry_polyfill(sg::polyfill_use::where_missing) // slib draws a geometry stage as compute + draw where the device has none; `never` by default, opt-in until measured
+ctx.draws_geometry_polyfill()                      // bool — whether this backend draws a polyfilled geometry stage (metal so far)
 ctx.set_hit_record_checks(bool)                    // dispatch_rays checks the hit records each tlas instance reaches; default = CC_ASSERT_ENABLED (see dispatch_rays)
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
