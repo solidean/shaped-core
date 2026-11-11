@@ -219,8 +219,12 @@ public:
 
     /// Whether this device builds clustered geometry and partitioned TLAS through `ExecuteIndirectRTASOperations`.
     /// Only the preview Agility SDK, with its experimental features enabled, ever answers true.
-    /// No sg feature reports it until sg has the operations: libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md.
+    /// `sg::feature::partitioned_tlas` reports it; clusters wait for libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md.
     [[nodiscard]] bool supports_clusters_and_ptlas() const { return _clusters_and_ptlas; }
+
+    /// Sizes and allocates a partitioned tlas through the preview runtime; refused on any other.
+    [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
+        sg::partitioned_tlas_description const& desc) override;
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
@@ -309,8 +313,8 @@ public:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;
         case sg::feature::partitioned_tlas:
-            // supports_clusters_and_ptlas() is the device's answer; sg's operations come with plan phase 2c
-            return false;
+            // the preview runtime's, which reports it for clusters and partitioned tlas together
+            return _clusters_and_ptlas;
         }
         return false;
     }

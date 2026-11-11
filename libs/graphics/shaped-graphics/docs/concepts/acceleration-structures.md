@@ -119,6 +119,7 @@ metal and webgpu have no equivalent — [feat-sg-opacity-micromaps](../issues/fe
 - **The slots are the ownership edge**: a partitioned tlas holds every blas a slot names, and the list of an update keeps the ones it replaced until it has run.
 - **It binds and traces as any tlas does**, `as_view()`, so a shader never knows which kind it traces.
 - **Requires `sg::feature::partitioned_tlas`**, which vulkan grants with `VK_NV_partitioned_acceleration_structure`.
+  dx12 grants it on the preview Agility SDK alone (`SC_AGILITY_PREVIEW`), where the device reports `ClustersAndPTLASSupported`, and binds it as a tlas.
 
 **On vulkan it has no descriptor**: `VK_EXT_descriptor_buffer` can name only a `VkAccelerationStructureKHR`, which a partitioned tlas is not.
 So every vulkan trace SGL writes takes its structure by device address, from the reserved `sg_acceleration_addresses`.

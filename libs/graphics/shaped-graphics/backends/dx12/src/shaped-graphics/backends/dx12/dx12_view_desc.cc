@@ -485,12 +485,12 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
     CC_UNREACHABLE("unhandled binding kind");
 }
 
-void create_accel_view(ID3D12Device* device, dx12_tlas const* tlas, D3D12_CPU_DESCRIPTOR_HANDLE dst)
+void create_accel_view(ID3D12Device* device, dx12_buffer const* storage, D3D12_CPU_DESCRIPTOR_HANDLE dst)
 {
     // A ray-tracing AS SRV is special: it is addressed purely by the AS's GPU virtual address, so the resource
     // argument to CreateShaderResourceView is null and the location lives in the desc.
     //
-    // A null `tlas` leaves that location at 0, which is the null acceleration structure: every TraceRay against it
+    // A null `storage` leaves that location at 0, which is the null acceleration structure: every TraceRay against it
     // misses.
     // That is the whole descriptor — nothing is built and nothing is allocated, which is what lets a scene holding
     // only an environment cost nothing rather than needing a stand-in.
@@ -499,11 +499,8 @@ void create_accel_view(ID3D12Device* device, dx12_tlas const* tlas, D3D12_CPU_DE
     desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
     desc.Format = DXGI_FORMAT_UNKNOWN;
 
-    if (tlas != nullptr)
-    {
-        CC_ASSERT(tlas->_dx12_storage != nullptr, "acceleration structure has no storage buffer");
-        desc.RaytracingAccelerationStructure.Location = tlas->_dx12_storage->gpu_virtual_address();
-    }
+    if (storage != nullptr)
+        desc.RaytracingAccelerationStructure.Location = storage->gpu_virtual_address();
 
     device->CreateShaderResourceView(nullptr, &desc, dst);
 }
