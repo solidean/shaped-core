@@ -202,6 +202,7 @@ enum op_code : u32
     TypeAccelerationStructureKHR = 5341,
     TraceRayKHR = 4445,
     ExecuteCallableKHR = 4446,
+    ConvertUToAccelerationStructureKHR = 4447,
     IgnoreIntersectionKHR = 4448,
     TerminateRayKHR = 4449,
     ReportIntersectionKHR = 5334,

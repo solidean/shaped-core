@@ -157,19 +157,32 @@ void vulkan_command_list::bind_software_trace(vulkan_pipeline_layout const& layo
                                                                "software");
                 roots[at] = groups[g]->acceleration_roots[k];
             }
+    // each member's address as two words, low first, which SGL's own SPIR-V converts to the structure it traces
+    u32 addresses[2 * sg::impl::acceleration_address_capacity] = {};
+    for (isize g = 0; g < groups.size() && layout._traces_by_address; ++g)
+        if (groups[g] != nullptr)
+            for (isize k = 0; k < groups[g]->acceleration_addresses.size(); ++k)
+            {
+                auto const at = layout._acceleration_bases[g] + k;
+                auto const address = groups[g]->acceleration_addresses[k];
+                addresses[2 * at] = u32(address);
+                addresses[2 * at + 1] = u32(address >> 32);
+            }
     auto const pool = _ctx._software_pool.storage();
     // a loop of draws under one set of roots and lengths takes one region of the transient heap
     if (_software_set_layout == &layout && _software_set_pool == pool.gpu_address
         && cc::memcmp(_software_set_roots, roots, sizeof(roots)) == 0
         && cc::memcmp(_software_set_lengths, lengths, sizeof(lengths)) == 0
-        && cc::memcmp(_software_set_grid, grid, sizeof(grid)) == 0)
+        && cc::memcmp(_software_set_grid, grid, sizeof(grid)) == 0
+        && cc::memcmp(_software_set_addresses, addresses, sizeof(addresses)) == 0)
         return;
-    layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots, lengths, grid);
+    layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots, lengths, grid, addresses);
     _software_set_layout = &layout;
     _software_set_pool = pool.gpu_address;
     cc::memcpy(_software_set_roots, roots, sizeof(roots));
     cc::memcpy(_software_set_lengths, lengths, sizeof(lengths));
     cc::memcpy(_software_set_grid, grid, sizeof(grid));
+    cc::memcpy(_software_set_addresses, addresses, sizeof(addresses));
 }
 
 void vulkan_command_list::declare_debug_window(sg::impl::pipeline_footprint const* footprint,

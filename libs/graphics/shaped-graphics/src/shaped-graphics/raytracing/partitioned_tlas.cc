@@ -31,8 +31,8 @@ cc::vector<blas_handle> impl::apply_to_slots(partitioned_tlas const& ptlas, ptla
             auto named = cc::vector<bool>::create_filled(slots.size(), false);
             auto const name_slot = [&](int index, char const* what)
             {
-                CC_ASSERTF(index >= 0 && index < slots.size(), "update: {} names slot {}, outside capacity {}", what, index,
-                           slots.size());
+                CC_ASSERTF(index >= 0 && index < slots.size(), "update: {} names slot {}, outside capacity {}", what,
+                           index, slots.size());
                 CC_ASSERTF(!named[index], "update: slot {} is named twice in one update", index);
                 named[index] = true;
             };
@@ -50,10 +50,10 @@ cc::vector<blas_handle> impl::apply_to_slots(partitioned_tlas const& ptlas, ptla
                 name_slot(w.index, "a write");
                 CC_ASSERTF(in_partition_range(w.partition), "update: a write names partition {}, of {}", w.partition,
                            d.partition_count);
-                CC_ASSERT(w.instance.blas != nullptr && !w.instance.blas->is_expired(),
-                          "update: a write's blas is null or expired");
-                CC_ASSERT(!w.instance.transform_at_end.has_value(),
-                          "update: a partitioned tlas has no motion, so a write's instance must not move");
+                CC_ASSERT(w.instance.blas != nullptr && !w.instance.blas->is_expired(), "update: a write's blas is "
+                                                                                        "null or expired");
+                CC_ASSERT(!w.instance.transform_at_end.has_value(), "update: a partitioned tlas has no motion, so a "
+                                                                    "write's instance must not move");
                 CC_ASSERT(w.instance.instance_id < (1u << 24), "update: instance_id must fit in 24 bits");
                 CC_ASSERT(w.instance.hit_group_offset < (1u << 24), "update: hit_group_offset must fit in 24 bits");
                 auto& slot = slots[w.index];
@@ -82,8 +82,8 @@ cc::vector<blas_handle> impl::apply_to_slots(partitioned_tlas const& ptlas, ptla
             auto translated = cc::vector<bool>::create_filled(d.partition_count + 1, false);
             for (auto const& t : ops.translations)
             {
-                CC_ASSERT(d.allows_partition_translation,
-                          "update: a translation needs partitioned_tlas_description::allows_partition_translation");
+                CC_ASSERT(d.allows_partition_translation, "update: a translation needs "
+                                                          "partitioned_tlas_description::allows_partition_translation");
                 CC_ASSERTF(in_partition_range(t.partition), "update: a translation names partition {}, of {}",
                            t.partition, d.partition_count);
                 auto const at = t.partition == global_partition ? d.partition_count : t.partition;

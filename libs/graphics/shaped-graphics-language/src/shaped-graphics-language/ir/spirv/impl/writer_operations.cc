@@ -190,6 +190,7 @@ constexpr op_rule k_rules[] = {
     {op::reorder_thread, rule_kind::ray_stage, 0},
     {op::hit_object_invoke, rule_kind::ray_stage, 0},
     {op::hit_object_read, rule_kind::ray_stage, 0},
+    {op::acceleration_from_address, rule_kind::plain, spv::ConvertUToAccelerationStructureKHR},
     {op::ray_query_begin, rule_kind::ray_query, 0},
     {op::ray_query_trace, rule_kind::ray_query, 0},
     {op::ray_query_proceed, rule_kind::ray_query, 0},

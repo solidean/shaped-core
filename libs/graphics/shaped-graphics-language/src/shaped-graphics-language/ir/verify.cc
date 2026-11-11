@@ -173,6 +173,7 @@ constexpr shape k_shapes[] = {
     shape::no_result,           // hit_object_reorder
     shape::no_result,           // reorder_thread
     shape::no_result,           // hit_object_invoke
+    shape::any_result,          // acceleration_from_address
     shape::any_result,          // ray_query_begin
     shape::no_result,           // ray_query_trace
     shape::any_result,          // ray_query_proceed

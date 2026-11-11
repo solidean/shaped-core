@@ -443,6 +443,9 @@ enum class sgl::ir::op : sgl::u16
     reorder_thread,
     /// Operands: hit object, then the global of `storage::ray_output` the payload stands in.
     hit_object_invoke,
+    /// Operands: a `uint2` of a structure's device address, low word first; gives the structure, which a trace takes.
+    /// SPIR-V's alone: vulkan traces a structure by its address (libs/graphics/shaped-graphics-language/docs/reserved-bindings.md).
+    acceleration_from_address,
     // ---- ray queries: every step changes what the query answers, so none moves past another
     /// Operands: the flags every trace of this query states, a constant.
     ray_query_begin,

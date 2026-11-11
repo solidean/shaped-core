@@ -210,6 +210,13 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                                                 "walk sees: the shader's package takes SOFTWARE_TRACE in "
                                                 "sc_add_shader_package",
                                                 nv.name));
+                {
+                    auto const position = sg::impl::acceleration_position(bindings, b.index);
+                    while (group->acceleration_addresses.size() <= position)
+                        group->acceleration_addresses.push_back(0);
+                    group->acceleration_addresses[position]
+                        = tv_as->tlas != nullptr ? static_cast<vulkan_tlas const&>(*tv_as->tlas)._address : 0;
+                }
                 if (b.traced_in_software)
                 {
                     if (tv_as->tlas != nullptr && software.pool == nullptr)
@@ -341,7 +348,8 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     cc::vector<vulkan_hazard_view> hazard_views,
     cc::vector<vulkan_texture_hazard_view> texture_hazard_views,
     cc::vector<vulkan_array_binding> array_bindings,
-    u32 unbounded_length)
+    u32 unbounded_length,
+    cc::vector<u64> acceleration_addresses)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
     CC_ASSERT(image.size() <= layout->_size_in_bytes, "the descriptor image is one set, its unbounded binding cut "
@@ -351,6 +359,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     group->_ctx = &ctx;
     group->layout = layout;
     group->unbounded_length = unbounded_length;
+    group->acceleration_addresses = cc::move(acceleration_addresses);
     group->creation_epoch = ctx.current_epoch();
 
     {

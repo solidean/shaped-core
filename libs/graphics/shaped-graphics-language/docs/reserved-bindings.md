@@ -26,6 +26,7 @@ A table edited on one side alone stops the build.
 | `sg_acceleration_roots` | `b0, space12`, root constants | set 3, binding 18 | group 3, binding 18 | none | a software trace |
 | `sg_array_lengths` | `b1, space12`, root constants | set 3, binding 20 | none | none, the array's table counts it | an unbounded binding array |
 | `sg_dispatch_grid` | `b2, space12`, root constants | set 3, binding 21 | group 3, binding 21 | none, metal dispatches the grid's threads | a bare `@compute` |
+| `sg_acceleration_addresses` | none | set 3, binding 22 | none | none | a trace in SGL's own SPIR-V |
 
 On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and hands it every stage it calls through `sgl_context` (EMIT-183).
 
@@ -34,6 +35,13 @@ sg writes it at each dispatch and draw from the groups bound, beside the roots, 
 
 `sg_dispatch_grid` is the threads `dispatch_threads` asked for, `uint4`, which a bare `@compute`'s threads past the grid return before (CHK-520).
 A pipeline of such a shader is built over its layout's twin that holds it, `pipeline_layout_description::dispatch_grid`, so no other layout pays for it.
+
+`sg_acceleration_addresses` is every acceleration member's device address, `uint4[8]`, two a vector and each low word first, by the member's position.
+That position is the layout's acceleration members group by group, each group's by slot: the numbering the software roots use.
+**SGL's own SPIR-V traces every structure by it**, through `OpConvertUToAccelerationStructureKHR`, rather than through its descriptor.
+That is how vulkan traces a partitioned tlas, which `VK_EXT_descriptor_buffer` has no descriptor for.
+The lowering declares it, in `lowering::acceleration_by_address`, so it has no prelude declaration; an element of an array of structures is a native gap there.
+sg's vulkan layout holds it wherever the layout holds an acceleration member, since any package may compile to SGL's own SPIR-V.
 
 ## The debug window
 

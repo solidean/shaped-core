@@ -20,6 +20,8 @@ enum class sgl::check::reserved_use : sgl::u8
     array_lengths,
     /// A bare @compute, whose threads past the grid return (CHK-520).
     dispatch_grid,
+    /// A trace in SGL's own SPIR-V, which reads its structure by address.
+    trace_by_address,
 };
 
 /// Where one target finds an entry.
@@ -113,7 +115,20 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 3, .slot = 21, .stages = stage_bit(stage::compute)},
          {},
      }},
+    // every acceleration member's device address by position, `uint4[8]`, two a vector, low word first: vulkan traces
+    // a structure by it, so a partitioned tlas, which has no descriptor there, traces too; SGL's own SPIR-V alone reads it
+    {.name = "sg_acceleration_addresses",
+     .enabled_by = reserved_use::trace_by_address,
+     .targets = {
+         {},
+         {.group = 3, .slot = 22, .stages = k_every_stage},
+         {},
+         {},
+     }},
 };
+
+/// The acceleration members `sg_acceleration_addresses` holds the address of; a trace of a later one is a native gap.
+inline constexpr u32 k_acceleration_address_capacity = 16;
 
 /// A debug window's header, in words, and the records behind it (EMIT-183).
 inline constexpr i32 k_debug_cursor_word = 0;

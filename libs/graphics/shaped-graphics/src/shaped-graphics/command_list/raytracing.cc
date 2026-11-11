@@ -194,15 +194,16 @@ tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance con
 void command_list::raytracing_update_partitioned_tlas(partitioned_tlas const&,
                                                       ptlas_operations const&,
                                                       bool,
-                                                      cc::vector<blas_handle>)
+                                                      cc::vector<blas_handle>&&)
 {
-    CC_ASSERT(false, "a backend that reports sg::feature::partitioned_tlas overrides raytracing_update_partitioned_tlas");
+    CC_ASSERT(false, "a backend that reports sg::feature::partitioned_tlas overrides "
+                     "raytracing_update_partitioned_tlas");
 }
 
 void command_list_raytracing_scope::update(partitioned_tlas const& ptlas, ptlas_operations const& ops)
 {
-    CC_ASSERT(_cmd.context().supports(feature::partitioned_tlas),
-              "update: this context has no sg::feature::partitioned_tlas");
+    CC_ASSERT(_cmd.context().supports(feature::partitioned_tlas), "update: this context has no "
+                                                                  "sg::feature::partitioned_tlas");
     CC_ASSERT(!ptlas.is_expired(), "update: the partitioned tlas is expired");
     _cmd._stats.add(stat::tlas_builds);
     auto released = impl::apply_to_slots(ptlas, ops);

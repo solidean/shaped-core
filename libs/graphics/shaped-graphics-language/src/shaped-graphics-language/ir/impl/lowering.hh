@@ -131,7 +131,10 @@ private:
     [[nodiscard]] value_ref ray_query_row(value_ref query, ray_query_value what, bool is_committed, value_ref row);
     [[nodiscard]] value_ref begin_ray_query(check::local_id id);
     /// The structure `id` names, a member of a binding or an element of an array of them.
+    /// On vulkan, that member's address in `sg_acceleration_addresses`, converted, so a partitioned tlas traces too.
     [[nodiscard]] value_ref acceleration_structure(check::flat_expr_id id);
+    /// Resource `index`'s structure read from its device address, the vulkan form of `acceleration_structure`.
+    [[nodiscard]] value_ref acceleration_by_address(i32 index);
     /// EMIT-196: the elements from `element` on written with the 64-bit `value` of `t`, its words low first.
     void store_words(check::type_id t, value_ref value, u32& element, value_ref index = value_ref::none);
     /// Whether the parameter at `position` is a pixel stage's second struct, what a mesh stage wrote per primitive.
@@ -271,6 +274,8 @@ private:
 
     /// Parallel to the plan's tables: the global each is declared as, once something reaches it.
     value_ref _constants_global = value_ref::none;
+    /// `sg_acceleration_addresses`, declared once a trace reads it.
+    value_ref _acceleration_addresses = value_ref::none;
     cc::vector<value_ref> _block_globals;
     cc::vector<value_ref> _resource_globals;
     cc::vector<value_ref> _workgroup_globals;

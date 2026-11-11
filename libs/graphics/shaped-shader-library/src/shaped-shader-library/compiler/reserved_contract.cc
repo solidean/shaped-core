@@ -2,6 +2,8 @@
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics/binding/reserved_bindings.hh>
 
+using namespace cc::primitive_defines;
+
 // sgl and sg each hold their side of what the reserved bindings are, and neither links the other.
 // slib is the one library that sees both, so a table edited on one side alone stops the build here.
 
@@ -37,4 +39,6 @@ static_assert(sgl::check::k_debug_cursor_word == sg::debug_cursor_word
                   && sgl::check::k_debug_dropped_word == sg::debug_dropped_word
                   && sgl::check::k_debug_header_words == sg::debug_header_words,
               "sgl writes a debug window's header where sg does not read it");
+static_assert(isize(sgl::check::k_acceleration_address_capacity) == sg::impl::acceleration_address_capacity,
+              "sgl reads more acceleration addresses than sg writes, or fewer");
 } // namespace

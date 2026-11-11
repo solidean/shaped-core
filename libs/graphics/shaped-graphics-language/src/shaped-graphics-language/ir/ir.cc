@@ -114,6 +114,7 @@ constexpr cc::string_view k_names[] = {
     "hit_object_reorder",
     "reorder_thread",
     "hit_object_invoke",
+    "acceleration_from_address",
     "ray_query_begin",
     "ray_query_trace",
     "ray_query_proceed",

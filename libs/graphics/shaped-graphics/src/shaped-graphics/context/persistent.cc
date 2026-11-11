@@ -3,9 +3,9 @@
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/binding/staging_binding_group.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/persistent.hh>
-#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -93,15 +93,15 @@ cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(
 
 partitioned_tlas_handle context_persistent_scope::create_partitioned_tlas(partitioned_tlas_description const& desc)
 {
-    CC_ASSERT(_ctx.supports(feature::partitioned_tlas),
-              "create_partitioned_tlas: this context has no sg::feature::partitioned_tlas");
+    CC_ASSERT(_ctx.supports(feature::partitioned_tlas), "create_partitioned_tlas: this context has no "
+                                                        "sg::feature::partitioned_tlas");
     CC_ASSERT(desc.instance_capacity > 0, "create_partitioned_tlas: instance_capacity must be > 0");
-    CC_ASSERT(desc.partition_count >= 0 && desc.max_global_instances >= 0,
-              "create_partitioned_tlas: partition_count and max_global_instances must be >= 0");
-    CC_ASSERT(desc.partition_count == 0 || desc.max_instances_per_partition > 0,
-              "create_partitioned_tlas: a partition holds at least one instance");
-    CC_ASSERT(desc.partition_count > 0 || desc.max_global_instances > 0,
-              "create_partitioned_tlas: no partition can hold an instance");
+    CC_ASSERT(desc.partition_count >= 0 && desc.max_global_instances >= 0, "create_partitioned_tlas: partition_count "
+                                                                           "and max_global_instances must be >= 0");
+    CC_ASSERT(desc.partition_count == 0 || desc.max_instances_per_partition > 0, "create_partitioned_tlas: a partition "
+                                                                                 "holds at least one instance");
+    CC_ASSERT(desc.partition_count > 0 || desc.max_global_instances > 0, "create_partitioned_tlas: no partition can "
+                                                                         "hold an instance");
     CC_ASSERT(desc.flags.without(accel_build_flag::fast_trace | accel_build_flag::fast_build).is_empty(),
               "create_partitioned_tlas: only fast_trace or fast_build apply");
     CC_ASSERT(!desc.flags.has_all(accel_build_flag::fast_trace | accel_build_flag::fast_build),

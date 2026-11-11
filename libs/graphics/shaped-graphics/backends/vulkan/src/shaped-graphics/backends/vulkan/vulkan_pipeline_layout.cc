@@ -53,7 +53,12 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         length_bases.push_back(sg::impl::has_unbounded_array(g->bindings()) ? lengths++ : isize(-1));
     CC_ASSERT(lengths <= sg::impl::array_lengths_capacity, "a pipeline binds at most 16 unbounded binding arrays");
     auto const has_array_lengths = lengths > 0;
-    auto const has_regions = has_debug_window || traces_in_software || has_array_lengths || desc.dispatch_grid;
+    // SGL's own SPIR-V traces every acceleration member by its address, which any package may compile to on any context
+    auto const traces_by_address = acceleration_members > 0;
+    CC_ASSERT(acceleration_members <= sg::impl::acceleration_address_capacity,
+              "a vulkan pipeline binds at most 16 acceleration structures, whose addresses set 3 holds");
+    auto const has_regions
+        = has_debug_window || traces_in_software || has_array_lengths || desc.dispatch_grid || traces_by_address;
     if (!desc.static_samplers.empty() || has_regions)
     {
         auto reserved_bindings = cc::vector<VkDescriptorSetLayoutBinding>();
@@ -114,6 +119,13 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         if (desc.dispatch_grid)
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
                 .binding = u32(sg::reserved_dispatch_grid.vulkan_binding),
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
+        if (traces_by_address)
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = u32(sg::reserved_acceleration_addresses.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
@@ -206,6 +218,7 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     result->_empty_set_layout = empty_set_layout;
     result->_acceleration_bases = cc::move(acceleration_bases);
     result->_traces_in_software = traces_in_software;
+    result->_traces_by_address = traces_by_address;
     result->_has_array_lengths = has_array_lengths;
     result->_length_bases = cc::move(length_bases);
     if (has_regions && reserved_set_layout != VK_NULL_HANDLE)
@@ -246,6 +259,12 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
             ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout,
                                                          u32(sg::reserved_dispatch_grid.vulkan_binding), &offset);
             result->_grid_offset = isize(offset);
+        }
+        if (traces_by_address)
+        {
+            ctx._descriptor_functions.get_binding_offset(
+                ctx._device, reserved_set_layout, u32(sg::reserved_acceleration_addresses.vulkan_binding), &offset);
+            result->_addresses_offset = isize(offset);
         }
     }
     return vulkan_pipeline_layout_handle(cc::move(result));
@@ -315,7 +334,8 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
                                                  sg::impl::software_pool_storage const& pool,
                                                  cc::span<u32 const> roots,
                                                  cc::span<u32 const> lengths,
-                                                 cc::span<u32 const> grid) const
+                                                 cc::span<u32 const> grid,
+                                                 cc::span<u32 const> addresses) const
 {
     // The set and the values it names, in one transient range of the heap, each a uniform buffer behind the set.
     // 256 is the largest minUniformBufferOffsetAlignment Vulkan allows.
@@ -323,8 +343,9 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
     auto const roots_bytes = _traces_in_software ? roots.size() * isize(sizeof(u32)) : isize(0);
     auto const lengths_bytes = _has_array_lengths ? lengths.size() * isize(sizeof(u32)) : isize(0);
     auto const grid_bytes = has_dispatch_grid() ? grid.size() * isize(sizeof(u32)) : isize(0);
-    auto range = _ctx._descriptor_heap.allocate_transient(_reserved_size + 3 * uniform_alignment + roots_bytes
-                                                          + lengths_bytes + grid_bytes);
+    auto const addresses_bytes = _traces_by_address ? addresses.size() * isize(sizeof(u32)) : isize(0);
+    auto range = _ctx._descriptor_heap.allocate_transient(_reserved_size + 4 * uniform_alignment + roots_bytes
+                                                          + lengths_bytes + grid_bytes + addresses_bytes);
     CC_ASSERT(range.size > 0, "the descriptor heap has no room for set 3");
     auto* const base = _ctx._descriptor_heap.mapped_at(range);
     for (isize i = 0; i < _reserved_samplers.size(); ++i)
@@ -365,7 +386,12 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
         next = cc::align_up(next + lengths_bytes, uniform_alignment);
     }
     if (has_dispatch_grid())
+    {
         write_uniform(grid, next, _grid_offset);
+        next = cc::align_up(next + grid_bytes, uniform_alignment);
+    }
+    if (_traces_by_address)
+        write_uniform(addresses, next, _addresses_offset);
 
     u32 const buffer_index = 0;
     auto const vk_offset = VkDeviceSize(range.offset);

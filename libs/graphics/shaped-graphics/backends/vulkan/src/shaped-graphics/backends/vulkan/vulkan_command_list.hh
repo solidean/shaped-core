@@ -14,6 +14,7 @@
 #include <shaped-graphics/barrier/array_declarations.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -258,6 +259,7 @@ public:
     u64 _software_set_pool = 0;
     u32 _software_set_roots[16] = {};
     u32 _software_set_grid[4] = {};
+    u32 _software_set_addresses[2 * sg::impl::acceleration_address_capacity] = {};
     u32 _software_set_lengths[16] = {};
 
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,

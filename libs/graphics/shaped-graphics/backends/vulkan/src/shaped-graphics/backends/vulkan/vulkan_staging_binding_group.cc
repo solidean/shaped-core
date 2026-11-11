@@ -126,7 +126,8 @@ void vulkan_staging_binding_group::write_view_descriptors(int first_descriptor,
             res = {.buffer = tlas._vulkan_storage,
                    .texture = {},
                    .range = {},
-                   .bound_as = sg::view_class::acceleration_structure};
+                   .bound_as = sg::view_class::acceleration_structure,
+                   .address = tlas._address};
         }
     }
 }
@@ -165,6 +166,7 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
     cc::vector<vulkan_hazard_view> hazard_views;
     cc::vector<vulkan_texture_hazard_view> texture_hazard_views;
     cc::vector<vulkan_array_binding> array_bindings;
+    cc::vector<u64> acceleration_addresses;
 
     auto const bindings = _vk_layout->bindings();
     int flat = 0;
@@ -198,6 +200,13 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
         else
         {
             auto const& res = _resources[flat];
+            if (b.type == sg::binding_type::acceleration_structure)
+            {
+                auto const position = sg::impl::acceleration_position(bindings, b.index);
+                while (acceleration_addresses.size() <= position)
+                    acceleration_addresses.push_back(0);
+                acceleration_addresses[position] = res.address;
+            }
             if (res.texture != nullptr)
             {
                 referenced_textures.push_back(res.texture);
@@ -215,7 +224,7 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
 
     auto r = vulkan_binding_group::create_from_image(
         _ctx, _vk_layout, _image, cc::move(referenced), cc::move(referenced_textures), cc::move(hazard_views),
-        cc::move(texture_hazard_views), cc::move(array_bindings), unbounded_length);
+        cc::move(texture_hazard_views), cc::move(array_bindings), unbounded_length, cc::move(acceleration_addresses));
     CC_RETURN_IF_ERROR(r);
     return sg::binding_group_handle(cc::move(r.value()));
 }

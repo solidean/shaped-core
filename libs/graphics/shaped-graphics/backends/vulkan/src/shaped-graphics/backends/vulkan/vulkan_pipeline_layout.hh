@@ -63,12 +63,13 @@ public:
                              sg::impl::software_pool_storage const& pool,
                              cc::span<u32 const> roots,
                              cc::span<u32 const> lengths,
-                             cc::span<u32 const> grid) const;
+                             cc::span<u32 const> grid,
+                             cc::span<u32 const> addresses) const;
 
     /// Whether set 3 holds values of the op, so each op binds it (bind_software_trace) rather than the pipeline bind.
     [[nodiscard]] bool binds_set_per_op() const
     {
-        return _traces_in_software || _has_array_lengths || has_dispatch_grid();
+        return _traces_in_software || _has_array_lengths || has_dispatch_grid() || _traces_by_address;
     }
 
     ~vulkan_pipeline_layout() override;
@@ -102,8 +103,11 @@ public:
     bool _traces_in_software = false;
     isize _pool_offset = 0;
     isize _roots_offset = 0;
-    /// Each group's first acceleration member among the roots.
+    /// Each group's first acceleration member among the roots and the addresses.
     cc::vector<isize> _acceleration_bases;
+    /// A group holds an acceleration member, so set 3 also holds every one's address, which SGL's own SPIR-V traces.
+    bool _traces_by_address = false;
+    isize _addresses_offset = 0;
     /// A group holds an unbounded binding array, so set 3 also holds their lengths, each group's at its position.
     bool _has_array_lengths = false;
     isize _lengths_offset = 0;

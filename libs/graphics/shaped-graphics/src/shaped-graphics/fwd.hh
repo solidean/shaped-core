@@ -123,12 +123,12 @@ struct micromap_descriptor;         // the GPU record of one map: where its stat
 enum class micromap_format : u16;   // 2-state or 4-state
 enum class micromap_state : u8;     // one micro-triangle's state in a 4-state map
 enum class micromap_special_index : i32; // a whole triangle's state, in place of a map index
-class partitioned_tlas;                  // a tlas of fixed capacity, updated in place (see raytracing/partitioned_tlas.hh)
-struct partitioned_tlas_description;     // value type — the capacities a partitioned_tlas is created with
-struct ptlas_write;                      // value type — writes one instance slot of a partitioned_tlas
-struct ptlas_update;                     // value type — replaces one instance's blas and hit-group offset
-struct ptlas_translation;                // value type — moves one partition
-struct ptlas_operations;                 // value type — one update's writes, updates, clears and translations
+class partitioned_tlas;              // a tlas of fixed capacity, updated in place (see raytracing/partitioned_tlas.hh)
+struct partitioned_tlas_description; // value type — the capacities a partitioned_tlas is created with
+struct ptlas_write;                  // value type — writes one instance slot of a partitioned_tlas
+struct ptlas_update;                 // value type — replaces one instance's blas and hit-group offset
+struct ptlas_translation;            // value type — moves one partition
+struct ptlas_operations;             // value type — one update's writes, updates, clears and translations
 
 struct reserved_binding_address;
 } // namespace sg

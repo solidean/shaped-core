@@ -1,5 +1,6 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/ray_query_calls.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/ir/impl/lowering.hh>
 
 using namespace sgl;
@@ -39,6 +40,15 @@ value_ref lowering::begin_ray_query(local_id id)
 value_ref lowering::acceleration_structure(flat_expr_id id)
 {
     auto const* const bound = _e.at(id).node.try_as<flat_binding_member>();
+    if (_plan.which == emit::target::hlsl_vulkan)
+    {
+        if (bound == nullptr)
+        {
+            unsupported("an element of an array of acceleration structures, which vulkan traces by address");
+            return value_ref::none;
+        }
+        return acceleration_by_address(emit::impl::resource_of(_plan, bound->binding, bound->member));
+    }
     auto const pointer = bound != nullptr ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
                                           : bound_element(id);
     if (!is_valid(pointer))
@@ -47,6 +57,58 @@ value_ref lowering::acceleration_structure(flat_expr_id id)
         return value_ref::none;
     }
     return add(op::load, _out.at(_out.type_of(pointer)).element, {pointer}, 0, nonuniform_of(pointer));
+}
+
+value_ref lowering::acceleration_by_address(i32 index)
+{
+    if (index < 0)
+    {
+        unsupported("a trace of something that is no binding");
+        return value_ref::none;
+    }
+    // sg's numbering: the layout's acceleration members group by group, each group's by slot
+    auto const& r = _plan.resources[index];
+    auto position = u32(0);
+    for (auto const& other : _plan.resources)
+        if (!other.is_reserved && _m.at(other.type).kind == check::type_kind::acceleration_structure
+            && (other.group < r.group || (other.group == r.group && other.slot < r.slot)))
+            ++position;
+    if (position >= check::k_acceleration_address_capacity)
+    {
+        unsupported("more acceleration structures than sg_acceleration_addresses holds");
+        return value_ref::none;
+    }
+    auto const quad = vector_type(_uint, 4);
+    if (!is_valid(_acceleration_addresses))
+    {
+        auto const& at
+            = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(emit::target::hlsl_vulkan)];
+        auto const values = array_type(quad, check::k_acceleration_address_capacity / 2, 16);
+        auto const member_name = add_name("values");
+        _out.members.push_back({.type = values, .offset = 0, .name_first = member_name, .name_size = 6});
+        constexpr auto block_name = cc::string_view("sg_acceleration_addresses_block");
+        auto const block_first = add_name(block_name);
+        _out.types.push_back({.kind = type_kind::structure,
+                              .is_block = true,
+                              .first_member = u32(_out.members.size() - 1),
+                              .member_count = 1,
+                              .name_first = block_first,
+                              .name_size = u32(block_name.size())});
+        _acceleration_addresses = add_global({.type = pointer_type(type_ref(_out.types.size() - 1), storage::uniform),
+                                              .kind = global_kind::constants,
+                                              .set = at.group,
+                                              .binding = at.slot,
+                                              .is_read_only = true},
+                                             "sg_acceleration_addresses");
+    }
+    // two addresses a uint4, each low word first, which the conversion takes as a uint2
+    auto const element = add(op::access_chain, pointer_type(quad, storage::uniform),
+                             {_acceleration_addresses, uint_constant(0), uint_constant(position / 2)});
+    auto const words = add(op::load, quad, {element});
+    auto const low = (position % 2) * 2;
+    u32 const lanes[] = {u32(words), u32(words), low, low + 1};
+    auto const address = add(op::shuffle, vector_type(_uint, 2), lanes);
+    return add(op::acceleration_from_address, intern({.kind = type_kind::acceleration_structure}), {address});
 }
 
 value_ref lowering::ray_query_read(value_ref query, ray_query_value what, bool is_committed, type_ref result)

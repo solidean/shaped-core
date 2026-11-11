@@ -70,12 +70,21 @@ inline constexpr reserved_binding_address reserved_dispatch_grid = {.name = "sg_
                                                                     .webgpu_group = 3,
                                                                     .webgpu_binding = 21};
 
+/// Every acceleration member's device address by position, `uint4[8]`, two a vector, low word first, which vulkan writes
+/// at each dispatch or draw from the groups it binds.
+/// SGL's own SPIR-V traces a structure by it, which is how a partitioned tlas, with no descriptor there, is traced.
+inline constexpr reserved_binding_address reserved_acceleration_addresses
+    = {.name = "sg_acceleration_addresses", .vulkan_set = 3, .vulkan_binding = 22};
+
 inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window, reserved_acceleration_pool, reserved_acceleration_roots, reserved_array_lengths,
-       reserved_dispatch_grid};
+    = {reserved_debug_window,  reserved_acceleration_pool, reserved_acceleration_roots,
+       reserved_array_lengths, reserved_dispatch_grid,     reserved_acceleration_addresses};
 
 namespace impl
 {
+/// The acceleration members `sg_acceleration_addresses` holds; a pipeline that binds more refuses to trace by address.
+inline constexpr isize acceleration_address_capacity = 16;
+
 /// How many unbounded binding arrays a pipeline's bound groups may hold: `uint4[4]` of 32-bit lengths, one root
 /// constant each on dx12.
 inline constexpr isize array_lengths_capacity = 16;

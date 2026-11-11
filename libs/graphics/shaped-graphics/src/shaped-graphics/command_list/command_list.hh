@@ -238,7 +238,7 @@ protected:
     virtual void raytracing_update_partitioned_tlas(partitioned_tlas const& ptlas,
                                                     ptlas_operations const& ops,
                                                     bool is_first,
-                                                    cc::vector<blas_handle> released);
+                                                    cc::vector<blas_handle>&& released);
 
     // Ray-tracing dispatch (reached through cmd.raytracing).
     // bind_pipeline sets the DXR state object + global root signature, and bind_group binds through that root signature, like compute.
