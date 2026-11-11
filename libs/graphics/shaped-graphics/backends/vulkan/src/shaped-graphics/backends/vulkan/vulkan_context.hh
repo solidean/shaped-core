@@ -603,6 +603,7 @@ public:
     /// Sizes and allocates a partitioned tlas for `desc`'s capacities; its first update builds it.
     [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
         sg::partitioned_tlas_description const& desc) override;
+    [[nodiscard]] u64 blas_address_of(sg::blas const& blas) const override;
 
     [[nodiscard]] cc::result<vulkan_swapchain_handle> create_vulkan_swapchain(sg::swapchain_description const& desc);
 

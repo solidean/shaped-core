@@ -104,6 +104,15 @@ struct ptlas_slot
 
 /// Marks `ptlas` updated, and answers whether this is its first update, which a backend builds from no source.
 bool mark_updated(partitioned_tlas const& ptlas);
+
+/// Makes `tables` the ones `ptlas` holds for its GPU-written records, and hands back those it held before.
+/// The caller keeps those alive until the recorded update has run.
+[[nodiscard]] cc::vector<blas_table_handle> hold_tables(partitioned_tlas const& ptlas,
+                                                        cc::span<blas_table_handle const> tables);
+
+/// Marks `ptlas` written from the GPU, whose instances no check can follow any more, and drops its instance records.
+/// Answers whether this is the first such update.
+bool mark_gpu_written(partitioned_tlas const& ptlas);
 } // namespace sg::impl
 
 /// Abstract: a backend subclasses it and owns the native structure, as with `tlas`.
@@ -117,6 +126,9 @@ public:
     /// Whether an update was recorded into it, which a trace needs: it is built by its first update.
     [[nodiscard]] bool has_been_updated() const { return _has_been_updated.load(std::memory_order_acquire); }
 
+    /// Whether an update was recorded from GPU-written records, whose instances no check follows from then on.
+    [[nodiscard]] bool is_gpu_written() const { return _is_gpu_written.load(std::memory_order_acquire); }
+
 protected:
     partitioned_tlas(partitioned_tlas_description const& description,
                      isize size_in_bytes,
@@ -127,8 +139,13 @@ private:
     friend cc::vector<blas_handle> impl::apply_to_slots(partitioned_tlas const& ptlas, ptlas_operations const& ops);
     friend cc::vector<impl::tlas_instance_record> impl::slot_records(partitioned_tlas const& ptlas);
     friend bool impl::mark_updated(partitioned_tlas const& ptlas);
+    friend cc::vector<blas_table_handle> impl::hold_tables(partitioned_tlas const& ptlas,
+                                                           cc::span<blas_table_handle const> tables);
+    friend bool impl::mark_gpu_written(partitioned_tlas const& ptlas);
 
     partitioned_tlas_description _description;
     mutable std::atomic<bool> _has_been_updated = {false};
+    mutable std::atomic<bool> _is_gpu_written = {false};
     mutable cc::mutex<cc::vector<impl::ptlas_slot>> _slots; // mutable: updates are recorded through a const handle
+    mutable cc::mutex<cc::vector<blas_table_handle>> _tables;
 };

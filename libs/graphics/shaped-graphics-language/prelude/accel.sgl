@@ -1,0 +1,74 @@
+// Module `accel`: the records a compute shader writes for sg to build acceleration structures from, on the GPU.
+//
+// SGL ships it, so `use accel` finds it without a module directory of the program's.
+// Each record is what the target's API reads, so nothing translates it before a build.
+// Where the two APIs order a record's fields differently, its struct is `@target_layout` (CHK-522), and no host code
+// mirrors it: the host sizes a buffer of records through sg, which knows each backend's stride.
+module accel
+
+/// A BLAS as a record names it: its address, which only an sg BLAS table hands out.
+/// A shader copies one from the table it binds into a record, and never makes one up.
+struct blas_ref:
+    address: uint2
+
+/// Writes one instance of a partitioned TLAS: what it places, where, and into which partition.
+/// Built by name, `accel.ptlas_write(index = i, blas = b)`, every field but those two having a default.
+@target_layout
+struct ptlas_write:
+    const if target_api == .vulkan:
+        transform: affine3 = identity_rows()
+        /// The instance's box in world space, min then max, read where `flags` holds `explicit_aabb()`.
+        aabb: float[6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        instance_id: uint = 0u
+        mask: uint = 0xffu
+        hit_group_offset: uint = 0u
+        flags: uint = 0u
+        index: uint
+        /// A partition's index, or `global_partition`.
+        partition: uint = global_partition
+        blas: blas_ref
+    else if target_api == .dx12:
+        transform: affine3 = identity_rows()
+        instance_id: uint = 0u
+        mask: uint = 0xffu
+        hit_group_offset: uint = 0u
+        flags: uint = 0u
+        blas: blas_ref
+        index: uint
+        partition: uint = global_partition
+        aabb: float[6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+/// No transform at all: the rows of the identity.
+@internal
+fun identity_rows() -> affine3 => affine3.from_rows(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0))
+
+/// Points instance `index` of a partitioned TLAS at another BLAS and another hit group offset, leaving its placement.
+struct ptlas_update:
+    index: uint
+    hit_group_offset: uint
+    blas: blas_ref
+
+/// Moves every instance of one partition by `translation`, which a TLAS created with partition translation allows.
+struct ptlas_translation:
+    partition: uint
+    translation: float[3]
+
+/// The partition an instance stands in when it belongs to none, which no translation moves.
+const global_partition: uint = 0xffff'ffff
+
+/// `ptlas_write.flags`: triangles of either facing are hit, whatever the ray's culling.
+const cull_disable: uint = 0x1
+/// `ptlas_write.flags`: a counter-clockwise triangle faces front.
+const front_counterclockwise: uint = 0x2
+/// `ptlas_write.flags`: every geometry of the instance is opaque, and no any-hit runs.
+const force_opaque: uint = 0x4
+/// `ptlas_write.flags`: every geometry of the instance is non-opaque, and any-hit runs for each.
+const force_non_opaque: uint = 0x8
+
+/// `ptlas_write.flags`: the instance is bounded by its `aabb`, rather than its BLAS's own box placed by its transform.
+/// The one flag whose value the two APIs disagree on.
+fun explicit_aabb() -> uint:
+    const if target_api == .vulkan:
+        return 0x10
+    else:
+        return 0x40

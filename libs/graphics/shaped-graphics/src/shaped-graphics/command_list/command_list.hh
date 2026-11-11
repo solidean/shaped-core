@@ -239,6 +239,12 @@ protected:
                                                     ptlas_operations const& ops,
                                                     bool is_first,
                                                     cc::vector<blas_handle>&& released);
+    // The GPU-written form, after the scope validated `ops`: the backend writes the operation array, copies each count
+    // into it, and declares every buffer and blas the build reads; `released` are the tables the structure let go of.
+    virtual void raytracing_update_partitioned_tlas_indirect(partitioned_tlas const& ptlas,
+                                                             ptlas_indirect_operations const& ops,
+                                                             bool is_first,
+                                                             cc::vector<blas_table_handle>&& released);
 
     // Ray-tracing dispatch (reached through cmd.raytracing).
     // bind_pipeline sets the DXR state object + global root signature, and bind_group binds through that root signature, like compute.

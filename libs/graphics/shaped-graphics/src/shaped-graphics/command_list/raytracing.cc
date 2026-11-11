@@ -1,10 +1,12 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/raytracing.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/raytracing/blas_table.hh>
 #include <shaped-graphics/raytracing/impl/hit_record_check.hh>
 #include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
@@ -200,6 +202,38 @@ void command_list::raytracing_update_partitioned_tlas(partitioned_tlas const&,
                      "raytracing_update_partitioned_tlas");
 }
 
+void command_list::raytracing_update_partitioned_tlas_indirect(partitioned_tlas const&,
+                                                               ptlas_indirect_operations const&,
+                                                               bool,
+                                                               cc::vector<blas_table_handle>&&)
+{
+    CC_ASSERT(false, "a backend that reports sg::feature::partitioned_tlas overrides "
+                     "raytracing_update_partitioned_tlas_indirect");
+}
+
+namespace
+{
+/// Checks one kind of record against the buffers it names, which the build then reads.
+void validate_indirect_records(ptlas_indirect_records const& r, isize stride, char const* what)
+{
+    if (r.max_count == 0)
+        return;
+    CC_ASSERTF(r.max_count > 0, "update_indirect: {} has a negative max_count", what);
+    CC_ASSERTF(r.records != nullptr && r.count != nullptr, "update_indirect: {} needs a records and a count buffer",
+               what);
+    CC_ASSERTF(r.offset_in_bytes >= 0 && r.offset_in_bytes % 16 == 0,
+               "update_indirect: the records of {} start at {}, which is no multiple of 16", what, r.offset_in_bytes);
+    CC_ASSERTF(r.offset_in_bytes + isize(r.max_count) * stride <= r.records->size_in_bytes(),
+               "update_indirect: {} records of {}, of {} bytes from {}, overrun their buffer of {}", r.max_count, what,
+               stride, r.offset_in_bytes, r.records->size_in_bytes());
+    CC_ASSERTF(r.count_offset_in_bytes >= 0 && r.count_offset_in_bytes % 4 == 0
+                   && r.count_offset_in_bytes + 4 <= r.count->size_in_bytes(),
+               "update_indirect: the count of {} at {} is no aligned u32 of its buffer", what, r.count_offset_in_bytes);
+    CC_ASSERTF(r.count->usage().has(buffer_usage::copy_src), "update_indirect: the count buffer of {} needs copy_src",
+               what);
+}
+} // namespace
+
 void command_list_raytracing_scope::update(partitioned_tlas const& ptlas, ptlas_operations const& ops)
 {
     CC_ASSERT(_cmd.context().supports(feature::partitioned_tlas), "update: this context has no "
@@ -207,9 +241,30 @@ void command_list_raytracing_scope::update(partitioned_tlas const& ptlas, ptlas_
     CC_ASSERT(!ptlas.is_expired(), "update: the partitioned tlas is expired");
     _cmd._stats.add(stat::tlas_builds);
     auto released = impl::apply_to_slots(ptlas, ops);
-    if (_cmd.context().hit_record_checks())
+    if (_cmd.context().hit_record_checks() && !ptlas.is_gpu_written())
         impl::set_instance_records(ptlas, impl::slot_records(ptlas));
     _cmd.raytracing_update_partitioned_tlas(ptlas, ops, impl::mark_updated(ptlas), cc::move(released));
+}
+
+void command_list_raytracing_scope::update_indirect(partitioned_tlas const& ptlas, ptlas_indirect_operations const& ops)
+{
+    CC_ASSERT(_cmd.context().supports(feature::partitioned_tlas), "update_indirect: this context has no "
+                                                                  "sg::feature::partitioned_tlas");
+    CC_ASSERT(!ptlas.is_expired(), "update_indirect: the partitioned tlas is expired");
+    validate_indirect_records(ops.writes, isize(sizeof(gpu_ptlas_write)), "the writes");
+    validate_indirect_records(ops.updates, isize(sizeof(gpu_ptlas_update)), "the updates");
+    validate_indirect_records(ops.translations, isize(sizeof(gpu_ptlas_translation)), "the translations");
+    CC_ASSERT(ops.translations.max_count == 0 || ptlas.description().allows_partition_translation,
+              "update_indirect: a translation needs partitioned_tlas_description::allows_partition_translation");
+    for (auto const& table : ops.tables)
+        CC_ASSERT(table != nullptr, "update_indirect: a table is null");
+    _cmd._stats.add(stat::tlas_builds);
+    auto released = impl::hold_tables(ptlas, ops.tables);
+    // what the records hold is the GPU's to know, so no check can follow them
+    if (impl::mark_gpu_written(ptlas) && _cmd.context().hit_record_checks())
+        CC_LOG_INFO("a partitioned tlas was updated from GPU-written records, so hit_record_checks no longer checks "
+                    "its instances");
+    _cmd.raytracing_update_partitioned_tlas_indirect(ptlas, ops, impl::mark_updated(ptlas), cc::move(released));
 }
 
 void command_list_raytracing_scope::bind_pipeline(raytracing_pipeline const& pipeline)

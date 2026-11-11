@@ -802,6 +802,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
   A read of a value rebuilds it from its fields, and a write stores each field; a whole struct is stored once into a local, then field by field.
 * **EMIT-114** A struct has one layout, so every binding places it by one rule: in a constant block, in a buffer's element, packed in either, never two of them.
   A struct placed by two is `layout-conflict`.
+  A struct with a target layout (CHK-522) places its fields in another order per compile, and each compile places that order by this one rule.
 * **EMIT-115** `@no_padding` on a struct or on a binding makes a gap before any of its members `padding-forbidden`, and the detail says where.
   The rest of a block's last row follows no member, so it is no gap.
 * **EMIT-116** A layout carries no guarantee without an annotation that asks for one ([why](why/emitting.md#emit-116)).

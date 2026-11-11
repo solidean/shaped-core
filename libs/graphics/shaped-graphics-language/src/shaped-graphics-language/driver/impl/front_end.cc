@@ -77,7 +77,7 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     CC_RECORD_SCOPE_BEGIN("sgl.parse");
     auto const user = own_file(own >= 0 ? cc::string_view() : source);
     if (own < 0)
-        if (auto shared = shared_library_of(library, source_name); shared != nullptr)
+        if (auto shared = shared_library_of(library, source_name, source); shared != nullptr)
         {
             library_files = shared->files;
             for (auto const& name : shared->names)

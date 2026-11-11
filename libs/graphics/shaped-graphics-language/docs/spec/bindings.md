@@ -676,6 +676,7 @@ The syntax above is what the AST builds; the check pass is what limits it.
 Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out at natural alignment (EMIT-111), or as C++ lays it out under `@padding(.none)` (EMIT-167).
+  A `T` with a target layout, such as `accel.ptlas_write`, is laid out in the order of the branch the compile takes (CHK-522), and has no C++ struct.
 * `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)).

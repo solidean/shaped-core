@@ -1116,7 +1116,8 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle"};
+    cc::string_view const known[]
+        = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle", "target_layout"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -1151,6 +1152,8 @@ void checker::compile_struct(symbol_id id)
     }
     auto const members = compile_members(file, s.members, true, is_pixel, is_vertex);
     type_parameter_names.resize_down_to(type_parameter_names.size() - parameters.size());
+    for (auto const& m : out.at(members))
+        (void)refuse_held_layout(file, span_of(file, ast_of(file).at(m.field).type), m.type, "a struct field");
     // CHK-328: a ray type's member is the payload its stages take, which is a struct
     if (s.is_ray_set)
         for (auto const& m : out.at(members))
@@ -1233,6 +1236,20 @@ void checker::compile_struct(symbol_id id)
     out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
 
+    // CHK-522: a struct SGL ships may stand in each target's own order, a branch of fields per target
+    auto const* const layout = find_attribute(file, d.attributes, "target_layout");
+    if (layout != nullptr && !is_shipped_module_file(file))
+        unsupported(file, layout->name, "@target_layout on a struct outside the modules SGL ships");
+    else if (layout != nullptr && (s.branches.empty() || !parameters.empty()))
+        report(diagnostic_kind::invalid_attribute_arguments, file, layout->name,
+               "@target_layout lays a struct out per target, so its body is a const if chain of fields, and it is no "
+               "generic");
+    else if (layout != nullptr)
+    {
+        out.types.own(index_of(type)).has_target_layout = true;
+        compile_layout_branches(id, type, file, s, members);
+        return;
+    }
     // CHK-432: a body that is one `const if` chain spells the type per compile, and its SGL branch is its fields
     if (!s.branches.empty())
     {

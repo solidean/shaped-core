@@ -38,6 +38,29 @@ bool may_declare_module(cc::string_view text)
     return false;
 }
 
+/// Whether `text` has a line `use name`, as module `name` is reached; a comment or a string that reads so is a harmless
+/// yes, since a module no `use` reaches is never checked.
+bool may_use_module(cc::string_view text, cc::string_view name)
+{
+    while (!text.empty())
+    {
+        auto const end = text.find('\n');
+        auto line = end < 0 ? text : text.subview({.offset = 0, .size = end});
+        text = end < 0 ? cc::string_view() : text.subview(end + 1);
+        while (!line.empty() && (line[0] == ' ' || line[0] == '\t'))
+            line = line.subview(1);
+        if (!line.starts_with("use "))
+            continue;
+        line = line.subview(4);
+        while (!line.empty() && line[0] == ' ')
+            line = line.subview(1);
+        if (line.starts_with(name)
+            && (line.size() == name.size() || line[name.size()] == ' ' || line[name.size()] == '\r'))
+            return true;
+    }
+    return false;
+}
+
 using sgl::shared_library;
 using layer_ptr = cc::shared_ptr<sgl::check::checked_prelude const>;
 
@@ -302,13 +325,28 @@ constexpr isize k_max_option_chains = 32;
 } // namespace
 
 cc::shared_ptr<shared_library const> sgl::shared_library_of(cc::span<library_file const> library,
-                                                            cc::string_view source_name)
+                                                            cc::string_view source_name,
+                                                            cc::string_view source)
 {
     // A library file named like the source is the source itself, which a module directory holding it hands in again.
     auto handed = cc::vector<library_file const*>();
     for (auto const& f : library)
         if (!is_same_path(f.name, source_name) && may_declare_module(f.source))
             handed.push_back(&f);
+    // a module SGL ships stands behind the caller's where a file uses it, unless the source is it or the caller hands it in
+    auto const shipped = shipped_library();
+    for (auto i = isize(0); i < shipped.size(); ++i)
+    {
+        auto const name = shipped[i].name.subview({.offset = 0, .size = shipped[i].name.size() - 4});
+        auto is_used = may_use_module(source, name);
+        for (auto const* f : handed)
+            is_used = is_used || may_use_module(f->source, name);
+        auto is_handed = shipped_library_file_of(source_name) == i;
+        for (auto const& f : library)
+            is_handed = is_handed || shipped_library_file_of(f.name) == i;
+        if (is_used && !is_handed)
+            handed.push_back(&shipped[i]);
+    }
     if (handed.empty())
         return {};
 
@@ -442,9 +480,11 @@ sgl::shared_library::link_ptr sgl::layer_of(shared_library const& library,
     return link != nullptr && check::layer_serves_options(*link->layer, options) ? link : link_ptr();
 }
 
-cc::vector<cc::string> sgl::module_artifact_keys(cc::span<library_file const> library, cc::string_view source_name)
+cc::vector<cc::string> sgl::module_artifact_keys(cc::span<library_file const> library,
+                                                 cc::string_view source_name,
+                                                 cc::string_view source)
 {
-    auto const shared = shared_library_of(library, source_name);
+    auto const shared = shared_library_of(library, source_name, source);
     if (shared == nullptr)
         return {};
     auto keys = cc::vector<cc::string>();

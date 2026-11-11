@@ -829,3 +829,13 @@ Every target compiles the atomic itself in all six stages, so the refusal is SGL
 An inline trace runs the same two decisions inside a loop of its own stage, as often as the same traversal asks, so the rule follows the decision rather than the entry point.
 What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
 Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.
+
+## CHK-522
+
+The rule that a struct has one layout (EMIT-114) is there so a program's C++ side is the same on every backend: the struct a package generates is what every target reads.
+A record a GPU API reads, such as a partitioned TLAS's write-instance argument, has no such layout: D3D12 and Vulkan hold the same fields in different orders.
+So a struct with a target layout gives up the host mirror and keeps the portability.
+The shader writes its fields by name, each target lays them out natively, and the host only sizes the buffer, through sg.
+Nothing translates the records at run time, which is what the GPU-written tier of a build exists to avoid.
+The first branch is the one the check judges, so a field read, a default and a constructor mean one thing on every compile, and only the bytes move.
+It stays in the modules SGL ships, since a program's own struct is one the host writes too, and one layout is what lets the host write it.

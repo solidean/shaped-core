@@ -209,6 +209,9 @@ void set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> rec
 /// Records the micromaps a BLAS was built from, which it then holds.
 void set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
 
+/// Drops every instance record of `tlas`, so no check reads it; a snapshot a check already holds stays as it was.
+void clear_instance_records(tlas const& tlas);
+
 /// What `set_instance_records` recorded last, which is null where it never ran.
 [[nodiscard]] std::shared_ptr<cc::vector<tlas_instance_record> const> instance_records_of(tlas const& tlas);
 
@@ -347,6 +350,7 @@ protected:
 private:
     friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
     friend std::shared_ptr<cc::vector<impl::tlas_instance_record> const> impl::instance_records_of(tlas const& tlas);
+    friend void impl::clear_instance_records(tlas const& tlas);
     friend void impl::set_software_region(tlas const& tlas, impl::software_region region);
     friend impl::software_region const& impl::software_region_of(tlas const& tlas);
 

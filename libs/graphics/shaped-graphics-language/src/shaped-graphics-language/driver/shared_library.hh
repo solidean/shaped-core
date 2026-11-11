@@ -78,10 +78,12 @@ namespace sgl
 /// The files of `library` a compile of `source_name` checks, parsed once for the process; null where there are none.
 /// The file named like the source (`is_same_path`) is left out, and so is one whose first line plainly declares no module.
 /// The key is every name and source handed in, so an edit of any file is another library.
+/// A module SGL ships (`shipped_library()`) joins the files where `source` or one of them has a line `use` of it.
 /// A few are kept, and every one goes once there are many, so hot reloading or editing cannot grow them without bound.
 /// Safe from any thread.
 [[nodiscard]] cc::shared_ptr<shared_library const> shared_library_of(cc::span<library_file const> library,
-                                                                     cc::string_view source_name);
+                                                                     cc::string_view source_name,
+                                                                     cc::string_view source = {});
 
 /// The link `program` continues from behind `checked_prelude()`: the whole library's chain, or else a layer of the
 /// modules it reaches, made on first need and kept in `library`.
@@ -93,12 +95,13 @@ namespace sgl
                                                 check::module_file program,
                                                 cc::span<check::option_value const> options = {});
 
-/// The keys of the artifacts of the modules of `library`, as `shared_library_of(library, source_name)` reads it: what
+/// The keys of the artifacts of the modules of `library`, as `shared_library_of(library, source_name, source)` reads it: what
 /// a host that keeps artifacts fetches before a compile, from wherever it keeps them, and hands in.
 /// A key names the compiler's build, the module, and its files' sources, and nothing of the modules it uses: an
 /// artifact loads over them as they stand, or is a miss.
 [[nodiscard]] cc::vector<cc::string> module_artifact_keys(cc::span<library_file const> library,
-                                                          cc::string_view source_name);
+                                                          cc::string_view source_name,
+                                                          cc::string_view source = {});
 
 /// Whether the process makes artifacts of the modules it checks, for a host to keep; off by default, and turning it
 /// off drops every artifact handed in or made.

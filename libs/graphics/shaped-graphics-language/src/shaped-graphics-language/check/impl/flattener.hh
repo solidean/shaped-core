@@ -766,6 +766,9 @@ struct flattener
     /// CHK-432: each text type the tree holds a value of, as this compile spells it, into `entry.text_types`.
     /// A field or a constructor of one that the compile spells in its target's text is reported.
     void judge_text_types();
+    /// CHK-522: every struct with a target layout the tree holds as the struct of the branch this compile takes, its
+    /// fields renumbered to that order; one no branch of holds on this compile is reported.
+    void place_target_layouts();
 
     void flatten_assign(origin from, ast::assign_stmt const& assign);
 

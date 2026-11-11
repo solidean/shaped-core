@@ -60,6 +60,15 @@ public:
     /// Requires `sg::feature::partitioned_tlas`.
     void update(partitioned_tlas const& ptlas, ptlas_operations const& ops);
 
+    /// Applies records a compute pass wrote to `ptlas`, as `update` applies its operations: the GPU-written tier.
+    /// sg writes the operation array and copies each count into it, so a shader writes the records and bumps a count.
+    /// The records are SGL's `accel` module's, and each count must not exceed its `max_count`.
+    /// `ops.tables` are every table a record may name after this update, which the structure then holds in place of
+    /// the earlier update's; a record naming a BLAS of no such table is a caller bug sg cannot see.
+    /// No check follows the records, so under `context::hit_record_checks` the structure stops being checked.
+    /// Requires `sg::feature::partitioned_tlas`.
+    void update_indirect(partitioned_tlas const& ptlas, ptlas_indirect_operations const& ops);
+
     /// Binds a raytracing_pipeline for the following bind_group / dispatch_rays.
     /// Requires is_supported().
     void bind_pipeline(raytracing_pipeline const& pipeline);

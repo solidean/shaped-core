@@ -175,6 +175,11 @@ public:
     /// Requires `sg::feature::partitioned_tlas`; throws sg::allocation_exception on allocation failure.
     [[nodiscard]] partitioned_tlas_handle create_partitioned_tlas(partitioned_tlas_description const& desc);
 
+    /// A table of `blases` a shader copies addresses from into GPU-written records, holding each of them.
+    /// Each must be built and unexpired, and the list non-empty; the addresses are uploaded once, here.
+    /// Requires `sg::feature::partitioned_tlas`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] blas_table_handle create_blas_table(cc::span<blas_handle const> blases);
+
     // bind path
     // binding_group_layout / pipeline_layout / compute_pipeline creation is not here — those are schemas / PSOs, not lifetime-scoped GPU resources.
     // They live on the raw `ctx.uncached` scope; prefer `ctx.cached`.

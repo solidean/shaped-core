@@ -293,6 +293,10 @@ protected:
                                             sg::ptlas_operations const& ops,
                                             bool is_first,
                                             cc::vector<sg::blas_handle>&& released) override;
+    void raytracing_update_partitioned_tlas_indirect(sg::partitioned_tlas const& ptlas,
+                                                     sg::ptlas_indirect_operations const& ops,
+                                                     bool is_first,
+                                                     cc::vector<sg::blas_table_handle>&& released) override;
 
     // Ray-tracing dispatch, reached through cmd.raytracing.
     // Bodies in dx12_command_list.cc, next to the compute equivalents — ray tracing binds through the compute root signature.

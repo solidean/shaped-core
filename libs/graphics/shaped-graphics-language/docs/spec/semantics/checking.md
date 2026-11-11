@@ -73,6 +73,9 @@ The program is checked with a **library**: the files of the module directories i
   A module's name may be dotted, `module sv.scene`, and is then that whole name: no module `sv` holds it, nor is it one of a module `sv` (CHK-347).
   Only the modules the program reaches through `use`, directly or through another module, are checked.
   A program file whose `module` line names a module of the library is checked as one more file of that module.
+* **CHK-523** SGL ships modules of its own, which a program uses as it uses any other, with no module directory of its own: `accel` alone so far.
+  A shipped module joins the library where the program or a library file has a `use` of it.
+  A library file handed in as that module's own file, `shaped-graphics-language/prelude/accel.sgl`, stands in for the shipped one, and so does a program that is that file.
 * **CHK-347** `use m` binds the name `m`, and `use m as n` the name `n`, to module `m`, in the file that writes it alone ([why](why/checking.md#chk-347)).
   It brings no name of `m` into the file: what `m` declares is reached as `m.name` (CHK-348).
   `use a.b` binds `b`, the last part of the module's name, so two modules whose names end alike need `as` to be used by one file.
@@ -458,7 +461,7 @@ fun shade(k: float) -> float:
 |---|---|
 | a function | `@builtin`, `@pure`, `@barrier`, `@subgroup`, `@derivatives`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal`, `@preferred_subgroup_size` |
 | a function, as a ray-tracing stage | `@raygen`, `@miss`, `@closest_hit`, `@any_hit`, `@intersection`, `@callable` |
-| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal`, `@swizzle` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal`, `@swizzle`, `@target_layout` |
 | an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
 | a const | `@shadowable`, `@option` |
 | a test | `@expect` |
@@ -1028,6 +1031,17 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   There a field read or a construction of it is `invalid-target-text`, since its fields are its SGL branch's alone, and so is a compile that takes no branch or one with no spelling in its language.
   A text type is a value of function bodies alone (CHK-397), so no binding, buffer or stage edge holds it, whatever branch a compile takes.
   A test runs on no target, so it takes the SGL branch, and one that takes another is `invalid-target-text`.
+* **CHK-522** `@target_layout` on a struct whose body is a `const if` chain lays its fields out per target ([why](why/checking.md#chk-522)).
+  Each branch declares the same fields, in the order that target's memory holds them.
+  It exists for the records a GPU API reads, whose order differs between APIs, so only a module SGL ships declares one (CHK-523); elsewhere it is `unsupported-yet`.
+  A branch that is a target's text, or one whose fields differ from the first branch's in a name or a type, is `invalid-target-text`.
+  `@target_layout` on a generic struct, or on a body that is no chain, is `invalid-attribute-arguments`.
+  The check judges the struct by its first branch: its fields, their defaults and its constructor's parameters are that branch's for every compile.
+  A compile writes the struct of the branch its target takes wherever the struct stands, so EMIT-110 places that branch's order, and a field is the same field in every branch.
+  A construction is written in that order too, and one with two arguments that have an effect is `unsupported-yet`, since the order would tell.
+  A compile for a target that no branch names reports the first use of the struct as `invalid-target-text`; a description and a test write for no target and take the first branch.
+  It stands as a buffer's element and as a value of a body, and in nothing else: a struct field, an array element, a constant block member, a stage edge or a payload holding one is `unsupported-yet`.
+  No host code mirrors it, so a program's C++ side stays the same on every backend: the host sizes a buffer of one through sg, which knows each backend's stride.
 * **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
   It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
   Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
@@ -1820,7 +1834,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-450, CHK-453, CHK-454 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
@@ -1834,7 +1848,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
@@ -1887,7 +1901,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
-| `invalid-target-text` | CHK-427, CHK-428, CHK-432 |
+| `invalid-target-text` | CHK-427, CHK-428, CHK-432, CHK-522 |
 
 ## Open
 

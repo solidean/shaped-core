@@ -111,4 +111,21 @@ bool impl::mark_updated(partitioned_tlas const& ptlas)
 {
     return !ptlas._has_been_updated.exchange(true, std::memory_order_acq_rel);
 }
+
+cc::vector<blas_table_handle> impl::hold_tables(partitioned_tlas const& ptlas, cc::span<blas_table_handle const> tables)
+{
+    return ptlas._tables.lock(
+        [&](cc::vector<blas_table_handle>& held)
+        {
+            auto released = cc::move(held);
+            held = cc::vector<blas_table_handle>::create_copy_of(tables);
+            return released;
+        });
+}
+
+bool impl::mark_gpu_written(partitioned_tlas const& ptlas)
+{
+    clear_instance_records(ptlas);
+    return !ptlas._is_gpu_written.exchange(true, std::memory_order_acq_rel);
+}
 } // namespace sg

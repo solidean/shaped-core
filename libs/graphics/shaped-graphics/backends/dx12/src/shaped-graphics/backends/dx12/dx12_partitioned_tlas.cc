@@ -6,11 +6,13 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/fwd.hh> // offsetof
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/context/impl/device_lifecycle.hh>
+#include <shaped-graphics/raytracing/blas_table.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 
 #ifndef SG_HAS_AGILITY_PREVIEW
@@ -19,6 +21,13 @@
 
 namespace sg::backend::dx12
 {
+u64 dx12_context::blas_address_of(sg::blas const& blas) const
+{
+    auto const* const dx = dynamic_cast<dx12_blas const*>(&blas);
+    CC_ASSERT(dx != nullptr, "blas_address_of: a blas is not a dx12 blas");
+    return u64(dx->_dx12_storage->gpu_virtual_address());
+}
+
 #if SG_HAS_AGILITY_PREVIEW
 namespace
 {
@@ -232,6 +241,117 @@ void dx12_command_list::raytracing_update_partitioned_tlas(sg::partitioned_tlas 
         keep_bound(cc::move(blas));
     keep_bound(ptlas.shared_from_this());
 }
+
+void dx12_command_list::raytracing_update_partitioned_tlas_indirect(sg::partitioned_tlas const& ptlas,
+                                                                    sg::ptlas_indirect_operations const& ops,
+                                                                    bool is_first,
+                                                                    cc::vector<sg::blas_table_handle>&& released)
+{
+    auto const& dx = static_cast<dx12_partitioned_tlas const&>(ptlas);
+    ComPtr<ID3D12CommandListRaytracing2> list;
+    [[maybe_unused]] HRESULT const list_hr = _list.As(&list);
+    CC_ASSERT(SUCCEEDED(list_hr) && list, "update_indirect: the command list has no ID3D12CommandListRaytracing2");
+
+    struct kind
+    {
+        sg::ptlas_indirect_records const* records;
+        D3D12_RTAS_PARTITIONED_TLAS_OPERATION_TYPE type;
+        isize stride;
+    };
+    kind const kinds[] = {
+        {&ops.writes, D3D12_RTAS_PARTITIONED_TLAS_OPERATION_TYPE_WRITE_INSTANCE, isize(sizeof(sg::gpu_ptlas_write))},
+        {&ops.updates, D3D12_RTAS_PARTITIONED_TLAS_OPERATION_TYPE_UPDATE_INSTANCE, isize(sizeof(sg::gpu_ptlas_update))},
+        {&ops.translations, D3D12_RTAS_PARTITIONED_TLAS_OPERATION_TYPE_TRANSLATE_PARTITION,
+         isize(sizeof(sg::gpu_ptlas_translation))},
+    };
+    static_assert(sizeof(sg::gpu_ptlas_write) >= sizeof(D3D12_RTAS_PARTITIONED_TLAS_OPERATION_WRITE_INSTANCE_ARGS));
+    static_assert(sizeof(sg::gpu_ptlas_update) == sizeof(D3D12_RTAS_PARTITIONED_TLAS_OPERATION_UPDATE_INSTANCE_ARGS));
+    static_assert(sizeof(sg::gpu_ptlas_translation)
+                  == sizeof(D3D12_RTAS_PARTITIONED_TLAS_OPERATION_TRANSLATE_PARTITION_ARGS));
+
+    // The operations with no count yet, each counted below by a copy of the count its shader wrote.
+    auto operations = cc::vector<D3D12_RTAS_PARTITIONED_TLAS_OPERATION>();
+    auto counted = cc::vector<sg::ptlas_indirect_records const*>();
+    auto read = cc::vector<dx12_buffer_handle>();
+    for (auto const& k : kinds)
+    {
+        if (k.records->max_count == 0)
+            continue;
+        auto records = std::dynamic_pointer_cast<dx12_buffer const>(k.records->records);
+        CC_ASSERT(records != nullptr, "update_indirect: a records buffer is not a dx12 buffer");
+        operations.push_back({.Type = k.type,
+                              .ArgCount = 0,
+                              .ArgData = {.StartAddress = records->gpu_virtual_address()
+                                                        + D3D12_GPU_VIRTUAL_ADDRESS(k.records->offset_in_bytes),
+                                          .StrideInBytes = UINT64(k.stride)}});
+        counted.push_back(k.records);
+        read.push_back(cc::move(records));
+    }
+
+    auto const operation_size = isize(sizeof(D3D12_RTAS_PARTITIONED_TLAS_OPERATION));
+    auto const count_at = isize(operations.size()) * operation_size;
+    auto const total = count_at + isize(sizeof(UINT));
+    auto const input_raw = _ctx.transient.create_raw_buffer(
+        total, sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+    auto const input = std::dynamic_pointer_cast<dx12_buffer const>(input_raw);
+    CC_ASSERT(input != nullptr, "update_indirect: the input buffer is not a dx12 buffer");
+    auto bytes = cc::vector<byte>::create_filled(total, byte(0));
+    if (!operations.empty())
+        cc::memcpy(bytes.data(), operations.data(), size_t(count_at));
+    auto const operation_count = UINT(operations.size());
+    cc::memcpy(bytes.data() + count_at, &operation_count, sizeof(operation_count));
+    upload_bytes_to_buffer(input_raw, cc::span<byte const>(bytes), 0);
+    for (auto i = isize(0); i < counted.size(); ++i)
+        copy_buffer_region(counted[i]->count, input_raw, counted[i]->count_offset_in_bytes,
+                           i * operation_size + isize(offsetof(D3D12_RTAS_PARTITIONED_TLAS_OPERATION, ArgCount)),
+                           isize(sizeof(UINT)));
+
+    auto const scratch_size = dx.build_scratch_size_in_bytes();
+    auto const scratch_raw = _ctx.transient.create_raw_buffer(scratch_size > 0 ? scratch_size : isize(1),
+                                                              sg::buffer_usage::readwrite_buffer);
+    auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(scratch_raw);
+    CC_ASSERT(scratch != nullptr, "update_indirect: the scratch is not a dx12 buffer");
+
+    // The structure in place, the operations and the records as shader reads, and every blas a table lists.
+    track_buffer_access(dx._dx12_storage, sg::pipeline_stage_flag::accel_build,
+                        sg::access_flag::accel_read | sg::access_flag::accel_write);
+    track_buffer_access(scratch, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
+    track_buffer_access(input, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    for (auto const& r : read)
+        track_buffer_access(r, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    for (auto const& table : ops.tables)
+        for (auto const& blas : table->blases())
+            track_buffer_access(dx12_blas_of(blas)._dx12_storage, sg::pipeline_stage_flag::accel_build,
+                                sg::access_flag::accel_read);
+    flush_barriers();
+
+    auto const ptlas_inputs = inputs_of(ptlas.description());
+    auto const data = D3D12_RTAS_PARTITIONED_TLAS_OPERATION_DATA{
+        .SourceAccelerationStructureData = is_first ? 0 : dx._dx12_storage->gpu_virtual_address(),
+        .DestAccelerationStructureData = dx._dx12_storage->gpu_virtual_address(),
+        .ScratchAccelerationStructureData = scratch->gpu_virtual_address(),
+        .IndirectPartitionedTlasOpCount = input->gpu_virtual_address() + D3D12_GPU_VIRTUAL_ADDRESS(count_at),
+        .IndirectPartitionedTlasOps = input->gpu_virtual_address(),
+    };
+    auto const desc = D3D12_RTAS_OPERATION_DESC{
+        .Inputs = {.Type = D3D12_RTAS_OPERATION_TYPE_PARTITIONED_TLAS, .pPartitionedTLASInputsDesc = &ptlas_inputs},
+        .pPartitionedTlasOperationData = &data};
+    {
+        sg::impl::raytracing_driver_hold const driver_guard;
+        list->ExecuteIndirectRTASOperations(1, &desc, D3D12_EXECUTE_INDIRECT_RTAS_OPERATIONS_FLAG_NONE);
+    }
+
+    // the tables the structure let go of, the records and the structure, until this list has run
+    for (auto& table : released)
+        keep_bound(cc::move(table));
+    for (auto const& k : kinds)
+        if (k.records->max_count > 0)
+        {
+            keep_bound(k.records->records);
+            keep_bound(k.records->count);
+        }
+    keep_bound(ptlas.shared_from_this());
+}
 #else
 cc::result<sg::partitioned_tlas_handle> dx12_context::try_create_partitioned_tlas(sg::partitioned_tlas_description const&)
 {
@@ -245,6 +365,14 @@ void dx12_command_list::raytracing_update_partitioned_tlas(sg::partitioned_tlas 
                                                            cc::vector<sg::blas_handle>&&)
 {
     CC_ASSERT(false, "update: dx12 updates a partitioned tlas only against the preview Agility SDK");
+}
+
+void dx12_command_list::raytracing_update_partitioned_tlas_indirect(sg::partitioned_tlas const&,
+                                                                    sg::ptlas_indirect_operations const&,
+                                                                    bool,
+                                                                    cc::vector<sg::blas_table_handle>&&)
+{
+    CC_ASSERT(false, "update_indirect: dx12 updates a partitioned tlas only against the preview Agility SDK");
 }
 #endif
 } // namespace sg::backend::dx12

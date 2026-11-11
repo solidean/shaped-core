@@ -748,6 +748,10 @@ protected:
     [[nodiscard]] virtual cc::result<partitioned_tlas_handle> try_create_partitioned_tlas(
         partitioned_tlas_description const& desc);
 
+    /// The GPU address a record names `blas` by, which only a blas_table hands out.
+    /// Only a backend that reports `sg::feature::partitioned_tlas` overrides it.
+    [[nodiscard]] virtual u64 blas_address_of(blas const& blas) const;
+
     // The bind-path creates carry an explicit lifetime_scope; buffers carry it inside allocation_info instead.
     // binding_group is a real per-scope descriptor allocation, so ctx.persistent / ctx.transient append the scope.
     // Layouts and pipelines are schemas / PSOs with no transient variant — ctx.uncached always passes persistent.

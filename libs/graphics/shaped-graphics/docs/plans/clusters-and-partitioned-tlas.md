@@ -1,6 +1,6 @@
 # Plan: clustered geometry and partitioned TLAS
 
-Status: **phases 1 and 2 built**, phase 2's dx12 half untested for want of a driver, which the [phases](#phases) describe.
+Status: **phases 1 to 3 built**, their dx12 halves untested for want of a driver, which the [phases](#phases) describe.
 The [decisions](#decisions) stand as proposals except D5's, and [open questions](#open-questions) lists what the specs leave unsettled.
 D3D12 and Vulkan each gained two acceleration-structure kinds that change how a large scene is kept current: clusters and partitioned top-level structures.
 This plan is how sg exposes them, on dx12 and vulkan only.
@@ -108,9 +108,9 @@ A caller starts on the described tier and moves a hot path to the GPU-written on
 sg exposes no GPU address today, by design: Metal has none, and an address is invisible to barrier tracking.
 The GPU-written tier needs addresses in its records, so sg hands them out only through tables it owns:
 
-- **A PTLAS's BLAS table** is a set of `blas_handle`s the caller registers, and the PTLAS holds every one alive.
-  sg keeps their addresses in a buffer a shader reads, so a compute pass writes `table[i]` into a record, never a number it made up.
-  Unregistering a BLAS is deferred until no recorded update can still name it.
+- **A BLAS table** (decided) is `ctx.persistent.create_blas_table(span<blas_handle>)`: it holds the handles, and a GPU array of their addresses a shader binds and indexes.
+  A compute pass so writes `scene.blases[k]` into a record, never a number it made up.
+  `update_indirect` names the tables its records may reach, and the partitioned tlas then holds each, which is the ownership edge.
 - **A cluster pool's address array** is written by the build itself, in implicit-destination mode, one address per CLAS.
   A cluster BLAS holds its pool, which is the edge a TLAS has with its BLASes today.
 - **An input set's buffer table** gives each named buffer's base address, for the vertex and index addresses in a cluster record.
@@ -130,9 +130,14 @@ So "one layout everywhere", which the micromap descriptor could choose, is not a
 Two ways remain, and the first is decided:
 
 - **SGL emits the records** (decided).
-  A builtin module, say `use accel`, declares `accel.ptlas_write_instance`, `accel.clas_triangles` and the rest as SGL structs whose layout is the target's.
-  A compute shader fills them by field name, and each backend's emission lays them out natively, so nothing translates at run time.
-  sg's C++ side gets the same layouts, for the described tier, from one generated header.
+  A module SGL ships, `use accel`, declares `accel.ptlas_write`, `accel.ptlas_update`, `accel.ptlas_translation` and later `accel.clas_triangles`.
+  A compute shader writes them into an ordinary `mut buffer[accel.ptlas_write]` by field name, and each target lays them out natively, so nothing translates at run time.
+  Where the two APIs order a record differently, its struct is `@target_layout` (SGL's CHK-522): a branch of fields per target, judged by its first.
+  Only `ptlas_write` differs today; an update and a translation are laid out alike on both.
+  The count is the shader's too, an atomic it bumps: **sg writes the operation array itself and copies that count into it** with a buffer copy before the build (decided).
+  So no shader writes the operation array, and sg needs no kernel of its own.
+  **No host code mirrors a target-layout record**, which keeps a program's C++ side portable (decided).
+  sg declares an opaque host type of each record's size, `sg::gpu_ptlas_write`, and the plain ones as they are; slib's `sgl_modules/accel.hh` names them for generated code.
 - **sg defines its own layout and transcodes it** in a compute pass before each operation.
   It works from HLSL and WGSL alike, at a dispatch and a buffer per operation, and sg would carry a kernel of its own.
   Rejected: the GPU-written tier exists for hot paths, and a conversion pass per operation is the cost it was meant to avoid.
@@ -187,7 +192,10 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
    - (c) (built, untested) dx12's half, on the preview runtime's `ExecuteIndirectRTASOperations`, binding as a TLAS does.
      It compiles in the `--agility-preview` build and skips its test on every adapter here, none of which reports the cap.
    This alone retires a full TLAS rebuild per edit, the cost shaped-viewer pays on a large scene today.
-3. **PTLAS, GPU-written tier**: the BLAS table, the input set, `accel_build_args`, and the record layouts of D5.
+3. **PTLAS, GPU-written tier** (built on vulkan): the BLAS table, `cmd.raytracing.update_indirect`, and the record layouts of D5 in SGL's `accel` module.
+   A record's BLAS is a table's address, and the tables an update names are the input set D3 asks for.
+   The records and counts take the accesses the described tier's input does, so `accel_build_args` waits for a barrier that needs it.
+   dx12's half compiles in the `--agility-preview` build, untested here like phase 2's.
 4. **Clusters**: `sg::feature::clustered_geometry`, the pool, CLAS builds in implicit-destination mode, cluster BLAS, the generation check, and SGL's `cluster_id` with the preview DXC.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.
 
