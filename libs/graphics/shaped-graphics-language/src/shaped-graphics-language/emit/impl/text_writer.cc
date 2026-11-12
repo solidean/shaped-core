@@ -1499,7 +1499,8 @@ struct writer
         auto const* const type_record = p.m.builtin_type_of(local.type);
         auto const& flags = p.local_flags[index_of(id)];
         // EMIT-184: forcing micromaps to 2 states is a name of Shader Model 6.9 alone, and the template only a hint
-        auto const sees_micromaps = p.e.features.has(check::feature::opacity_micromap);
+        auto const sees_micromaps
+            = p.e.features.has(check::feature::opacity_micromap) && d.flags_query_for_micromaps(flags);
         auto type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
                          && type_record->hlsl_flagged != nullptr && flags.has_value()
                       ? type_record->hlsl_flagged(sees_micromaps ? flags.value() : flags.value() & ~1024u)

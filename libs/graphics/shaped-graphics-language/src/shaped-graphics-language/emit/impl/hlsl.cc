@@ -12,6 +12,8 @@ constexpr auto k_inline_constants_space = 9;
 constexpr auto k_bound_samplers_space = 10;
 /// The descriptor set sg keeps for itself on vulkan, `sg::reserved_binding_group`, whose binding 0 no static sampler takes.
 constexpr auto k_reserved_set = 3;
+/// `ray_flags.force_omm_2_state`, the one ray flag a query must not carry on vulkan without micromaps stated for it.
+constexpr auto k_ray_flag_force_omm_2_state = 1024u;
 
 using namespace sgl;
 using namespace sgl::check;
@@ -39,6 +41,13 @@ public:
 
     bool is_c_like() const override { return true; }
     bool has_line_directives() const override { return true; }
+
+    // vulkan sees micromaps without the flag, and DXC takes minutes over it and can write invalid SPIR-V; it takes a
+    // ray forced to 2 states only beside it, so such a query keeps it, and so does one whose flags are no constant
+    bool flags_query_for_micromaps(cc::optional<u32> flags) const override
+    {
+        return !_is_vulkan || !flags.has_value() || (flags.value() & k_ray_flag_force_omm_2_state) != 0;
+    }
 
     // vulkan writes no storage from a vertex, geometry or tessellation stage without vertexPipelineStoresAndAtomics,
     // which sg does not ask a device for
@@ -739,7 +748,7 @@ public:
     void write_function_head(cc::string& out, plan const& p) const override
     {
         // EMIT-184: DXC lowers a query's micromap flags to SPIR-V without declaring the capability they need
-        if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap))
+        if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap) && flags_some_query_for_micromaps(p))
             out += "[[vk::ext_extension(\"SPV_EXT_opacity_micromap\")]]\n[[vk::ext_capability(5381)]]\n";
         if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control
             || p.e.entry_stage == stage::tessellation_evaluation)
@@ -815,6 +824,36 @@ public:
     }
 
 private:
+    /// Whether any ray query of the entry point is written to see micromaps, which its capability is then declared for.
+    /// A query is a local a `declares_only` call declares, as the body writes it.
+    [[nodiscard]] bool flags_some_query_for_micromaps(plan const& p) const
+    {
+        for (auto const& st : p.e.stmts)
+        {
+            auto local = local_id::none;
+            auto value = flat_expr_id::none;
+            if (auto const* const let = st.node.try_as<flat_let>())
+            {
+                local = let->local;
+                value = let->value;
+            }
+            else if (auto const* const var = st.node.try_as<flat_var>())
+            {
+                local = var->local;
+                value = var->value;
+            }
+            if (!is_valid(value))
+                continue;
+            auto const* const call = p.e.at(value).node.try_as<flat_call>();
+            auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+            auto const* const type_record = p.m.builtin_type_of(p.e.at(local).type);
+            if (record != nullptr && record->declares_only && type_record != nullptr
+                && type_record->hlsl_flagged != nullptr && flags_query_for_micromaps(p.local_flags[index_of(local)]))
+                return true;
+        }
+        return false;
+    }
+
     bool _is_vulkan = false;
 };
 

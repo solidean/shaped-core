@@ -38,3 +38,18 @@ Before the commit vulkan saw micromaps without the flag.
 The commit added it because DXC takes `RAY_FLAG_FORCE_OMM_2_STATE` only beside it.
 A likely fix is to write the flag and the capability on vulkan only for a query whose ray is forced to 2 states.
 That leaves every other query as it was.
+
+## Log
+
+2026-11-12: it hung the default `shaped-viewer-test` run twice, once a change to modules `light_thin` uses (`quadric_runtime`, `scene`) made its compile miss the blob cache.
+The same ctypes driver, at HEAD and on the working tree, gave the same failure; leaving `opacity_micromap` out compiled in 17 s.
+A run the watchdog does not stop compiles it in about 340 s and then fails only the vulkan agreement test.
+
+## Fix
+
+Either half is enough to trigger it: with no query flagged, the capability alone still took DXC about 250 s and failed validation.
+A vulkan query now carries the flag only where its flags force 2 states or are no constant, and the entry point declares the capability only beside such a query (EMIT-184).
+sv's queries all looked non-constant, since a mixed world's trace hands its flags on through a local the prelude names `given`.
+The plan now reads a local given a constant and never assigned again as that constant (EMIT-159), so their flags are known and force nothing.
+`light_thin` for vulkan compiles in 18 s and validates, and the full `shaped-viewer-test` passes, 553 tests, the vulkan agreement test among them.
+Fixed in the working tree on 2026-11-12, uncommitted.

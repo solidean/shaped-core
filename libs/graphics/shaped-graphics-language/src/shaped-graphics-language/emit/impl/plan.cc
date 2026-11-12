@@ -1423,6 +1423,37 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
 
     result.local_flags = cc::vector<cc::optional<u32>>::create_defaulted(e.locals.size());
     auto flags_known = cc::vector<bool>::create_filled(e.locals.size(), true);
+
+    // A trace hands its flags on through a local more often than as a literal: one given a literal and never assigned
+    // again holds that literal wherever it is read.
+    auto constant_locals = cc::vector<check::flat_int_literal const*>::create_filled(e.locals.size(), nullptr);
+    for (auto const& st : e.stmts)
+    {
+        auto local = check::local_id::none;
+        auto value = check::flat_expr_id::none;
+        if (auto const* const let = st.node.try_as<check::flat_let>())
+        {
+            local = let->local;
+            value = let->value;
+        }
+        else if (auto const* const var = st.node.try_as<check::flat_var>())
+        {
+            local = var->local;
+            value = var->value;
+        }
+        if (check::is_valid(value))
+            constant_locals[index_of(local)] = e.at(value).node.try_as<check::flat_int_literal>();
+    }
+    for (auto const& st : e.stmts)
+        if (auto const* const assign = st.node.try_as<check::flat_assign>())
+            if (auto const* const ref = e.at(assign->place).node.try_as<check::flat_local_ref>())
+                constant_locals[index_of(ref->local)] = nullptr;
+    auto const literal_of = [&](check::flat_expr_id x) -> check::flat_int_literal const*
+    {
+        if (auto const* const ref = e.at(x).node.try_as<check::flat_local_ref>())
+            return constant_locals[index_of(ref->local)];
+        return e.at(x).node.try_as<check::flat_int_literal>();
+    };
     for (auto const& x : e.exprs)
     {
         auto const* const call = x.node.try_as<check::flat_call>();
@@ -1434,7 +1465,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         if (target == nullptr)
             continue;
         auto const at = index_of(target->local);
-        auto const* const k = e.at(arguments[record->flags_argument]).node.try_as<check::flat_int_literal>();
+        auto const* const k = literal_of(arguments[record->flags_argument]);
         auto& flags = result.local_flags[at];
         if (k == nullptr || (flags.has_value() && flags.value() != u32(k->value)))
             flags_known[at] = false;

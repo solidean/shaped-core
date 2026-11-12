@@ -462,11 +462,14 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   The root of the entry point's k-th acceleration member (CHK-325) is `sg_acceleration_roots[k / 4][k % 4]`.
   So WGSL traces the first 16 acceleration members, and a trace of a later one is `too-many-acceleration-structures`.
 * **EMIT-159** HLSL's `RayQuery` takes a trace's flags as its template where they are a constant, each by its `RAY_FLAG_` name, and `RAY_FLAG_NONE` where they are not.
+  A local given a constant and never assigned again is that constant, which is how a mixed world's trace hands its flags on.
   The template is ORed with the trace's own flags, so naming them there changes nothing but what a driver may specialize on.
   Forced opaque, the native form only steps the query to its end, since the target commits every candidate itself and none is left to decide.
 * **EMIT-184** An HLSL compile for a device with `opacity_micromap` writes every `RayQuery` with `RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS`, so its traces see the micromaps their BLASes hold.
   The entry point then states the feature, which no program names, and is compiled at Shader Model 6.9.
-  vulkan sees micromaps without the flag, but DXC takes a ray forced to 2 states only beside it, and the entry point declares `SPV_EXT_opacity_micromap`'s capability, which DXC leaves out.
+  vulkan sees micromaps without the flag, so it writes the flag only on a query whose flags force 2 states or are no constant, since DXC takes a forced ray only beside it.
+  An entry point with such a query declares `SPV_EXT_opacity_micromap`'s capability, which DXC leaves out.
+  Either one on a query that needs neither makes DXC take minutes over a large kernel and can make it write invalid SPIR-V.
   `ray_flags.force_omm_2_state` is in a `RayQuery`'s template only there, since only 6.9 names it; elsewhere the template leaves it out, and the trace's flags still carry it.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
