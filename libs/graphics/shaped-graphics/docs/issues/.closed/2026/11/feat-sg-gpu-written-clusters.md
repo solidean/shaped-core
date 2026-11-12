@@ -4,8 +4,8 @@ priority: next
 tags: [raytracing]
 refs:
   - file: libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md
-claimed-by: Philip Trettner
-claimed-at: 2026-11-12T04:40Z
+closed: 2026-11-12
+resolution: fixed
 ---
 
 # Clusters built from records a compute pass wrote (phase 4b)
