@@ -204,8 +204,8 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
     let dir = normalize(scene.camera_ray_offset(cam, pixel, image_size()))
 
     let s = slot as int
-    traced.path_rays[s] = path_ray(cam.position, dir)
-    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, 0.0, f.primary_spread)
+    traced.path_rays[s] = path_ray(scene.camera_origin(cam, pixel, image_size()), dir)
+    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, f.pixel_width * f.primary_scale, f.pixel_spread * f.primary_scale)
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
 
@@ -221,8 +221,9 @@ fun start_guide(slot: uint, rng: uint){traced, wavefront_step}:
     let jitter_y = pt.rand(mut jitter_rng)
     let jitter = if f.fixed_jitter != 0u => f.jitter else float2(jitter_x, jitter_y)
     let cam = scene.camera(..f.camera)
-    let dir = normalize(scene.camera_ray_offset(cam, float2(px.x as float, px.y as float) + jitter, image_size()))
-    traced.path_rays[s] = path_ray(cam.position, dir)
+    let at = float2(px.x as float, px.y as float) + jitter
+    let dir = normalize(scene.camera_ray_offset(cam, at, image_size()))
+    traced.path_rays[s] = path_ray(scene.camera_origin(cam, at, image_size()), dir)
     let mut st = traced.path_states[s]
     st.rng = rng
     st.jitter = jitter
@@ -845,8 +846,8 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
         traced.guide_hit_distance[xy] = float2(diffuse, specular)
 
     // The near plane is applied here rather than stored, since a drawing that starts needing depth changes it without a restart.
-    // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
-    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_view_depth < 0.0 => 1.0 else max(1.0 - f.near_plane / tally.primary_view_depth, 0.0)
+    // It is the depth the projection sv::matrices_of builds gives: 1 - near / depth for a pinhole, linear for an orthographic camera.
+    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_view_depth < 0.0 => 1.0 else scene.camera_primary_depth(scene.camera(..f.camera), f.near_plane, tally.primary_view_depth)
 
     if f.write_guides != 0u:
         traced.sample_counts[xy] = tally.count

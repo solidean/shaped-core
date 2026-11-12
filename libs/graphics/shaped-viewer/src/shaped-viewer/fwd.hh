@@ -47,7 +47,8 @@ using light_id = stable_id<light_id_tag>;
 
 struct camera;
 struct camera_basis;
-struct perspective_projection;
+enum class projection_kind : u8; // perspective or orthographic (view/camera.hh)
+struct camera_projection;
 struct camera_matrices;
 struct orbit_state;
 enum class camera_style;

@@ -605,9 +605,8 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
         {
             auto fc = sv::default_frame_constants();
             fc.camera = sv::camera_record_of(scene.camera);
-            // A pixel's angle, as a view sets it, so a hit's textures pick the level its ray cone covers.
-            fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(scene.size);
-            fc.primary_spread = fc.pixel_spread;
+            // A pixel's footprint, as a view sets it, so a hit's textures pick the level its ray cone covers.
+            sv::set_pixel_footprint(fc, scene.size);
             lights.describe_in(fc);
             fc.samples_per_pixel = scene.samples_per_pixel;
             fc.max_bounces = scene.max_bounces;
@@ -1550,6 +1549,58 @@ ASYNC_INVOCABLE_TEST("sv - a ray cone samples the texture level its footprint co
         measured.push_back(level);
     }
     CHECK(tg::abs(measured[1] - measured[0] - 2.0f) < 0.2f).dump("near", measured[0]).dump("far", measured[1]);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// An orthographic camera's rays run parallel, so its cone starts a pixel wide and never widens.
+// The halving floor seen straight down through it reads one level at 3 m above it as at 12: the level its pixel's width predicts,
+// where a pinhole's reads two levels coarser four times as far.
+ASYNC_INVOCABLE_TEST("sv - an orthographic ray cone samples the level of its pixel's width, at any distance",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    // 2 uv units a meter, of 64 texels each: 128 texels a meter; the image 4 m high over 48 pixels
+    auto const k = 2.0f;
+    auto const view_height = 4.0;
+    auto measured = cc::vector<f32>();
+    for (auto const height : {3.0, 12.0})
+    {
+        auto cam = sv::camera::looking_at(tg::pos3d(0, height, -0.01), tg::pos3d(0, 0, 0));
+        cam.projection.aspect_ratio = 1.0;
+        cam.projection.kind = sv::projection_kind::orthographic;
+        cam.projection.view_height = view_height;
+
+        auto shade = cc::fixed_array<f32, 3>{};
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto scene = make_light_scene(resources, mipped_floor(k, i == 0, i == 1 ? 1.0f : 0.0f), cam);
+            REQUIRE(scene.has_value());
+            auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+            auto const& images = co_await traced;
+            REQUIRE(images.size() == 1);
+            shade[i] = mean_brightness(images[0], scene.value().size, 2);
+        }
+        REQUIRE(shade[1] > shade[2]);
+        measured.push_back(level_of((shade[0] - shade[2]) / (shade[1] - shade[2])));
+    }
+
+    auto const wanted = tg::log(f32(view_height) / 48.0f * k * 64.0f) / tg::log(2.0f);
+    CHECK(tg::abs(measured[0] - wanted) < 0.35f).dump("near", measured[0]).dump("wanted", wanted);
+    CHECK(tg::abs(measured[1] - wanted) < 0.35f).dump("far", measured[1]).dump("wanted", wanted);
+    CHECK(tg::abs(measured[1] - measured[0]) < 0.1f).dump("near", measured[0]).dump("far", measured[1]);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

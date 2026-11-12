@@ -33,14 +33,16 @@ camera_basis camera::basis() const
 shaders::tracer::camera_record camera_record_of(camera const& cam)
 {
     auto const b = cam.basis();
-    auto const t = (cam.projection.vertical_fov * 0.5).tan();
+    auto const orthographic = cam.projection.kind == projection_kind::orthographic;
+    // a pinhole's tangent of half its field of view, or half an orthographic camera's height in meters
+    auto const t = orthographic ? 0.5 * cam.projection.view_height : (cam.projection.vertical_fov * 0.5).tan();
 
     auto const to_f = [](tg::vec3d const& v) { return tg::vec3f(f32(v[0]), f32(v[1]), f32(v[2])); };
 
     return {.position = tg::vec3f(f32(cam.position[0]), f32(cam.position[1]), f32(cam.position[2])),
-            .pad0 = 0,
+            .orthographic = orthographic ? 1.0f : 0.0f,
             .forward = to_f(b.forward),
-            .pad1 = 0,
+            .far_plane = f32(cam.projection.far_plane),
             .right_scaled = to_f(b.right * (cam.projection.aspect_ratio * t)),
             .pad2 = 0,
             .up_scaled = to_f(b.up * t),
@@ -76,12 +78,23 @@ camera_matrices matrices_of(shaders::tracer::camera_record const& cam, f32 near_
     // what a denoiser decomposing this projection expects.
     // y is up here, where `camera_project`'s pixel space is y down; the flip belongs to that function rather than to
     // the projection.
+    // An orthographic camera's `w` is 1, and its depth runs linearly from 0 at the near plane to 1 at the far one.
     auto view_to_clip = tg::mat4f::zero;
     view_to_clip[0, 0] = 1.0f / tan_x;
     view_to_clip[1, 1] = 1.0f / tan_y;
-    view_to_clip[2, 2] = 1.0f;
-    view_to_clip[3, 2] = -near_plane;
-    view_to_clip[2, 3] = 1.0f;
+    if (cam.orthographic > 0.5f)
+    {
+        auto const range = cc::max(cam.far_plane - near_plane, 1e-6f);
+        view_to_clip[2, 2] = 1.0f / range;
+        view_to_clip[3, 2] = -near_plane / range;
+        view_to_clip[3, 3] = 1.0f;
+    }
+    else
+    {
+        view_to_clip[2, 2] = 1.0f;
+        view_to_clip[3, 2] = -near_plane;
+        view_to_clip[2, 3] = 1.0f;
+    }
 
     return {.world_to_view = world_to_view, .view_to_clip = view_to_clip};
 }
@@ -105,11 +118,20 @@ cc::optional<tg::pos3d> primary_hit_position(shaders::tracer::camera_record cons
     // The ray `camera_ray_offset` forms through the pixel center, and the view depth that ray reached.
     auto const ndc_x = (f64(pixel[0]) + 0.5) / f64(resolution[0]) * 2.0 - 1.0;
     auto const ndc_y = (f64(pixel[1]) + 0.5) / f64(resolution[1]) * 2.0 - 1.0;
+    auto const position = tg::pos3d(f64(cam.position[0]), f64(cam.position[1]), f64(cam.position[2]));
+
+    // An orthographic ray leaves its own point of the image plane along forward, and its depth is linear to the far plane.
+    if (cam.orthographic > 0.5f)
+    {
+        auto const origin = position + to_d(cam.right_scaled) * ndc_x - to_d(cam.up_scaled) * ndc_y;
+        auto const view_depth = f64(near_plane) + f64(depth) * (f64(cam.far_plane) - f64(near_plane));
+        return origin + forward / forward_length * view_depth;
+    }
+
     auto const offset = forward + to_d(cam.right_scaled) * ndc_x - to_d(cam.up_scaled) * ndc_y;
     auto const view_depth = f64(near_plane) / (1.0 - f64(depth));
 
     // View depth is measured along the unit forward, so the offset is scaled until its own forward component matches.
-    auto const position = tg::pos3d(f64(cam.position[0]), f64(cam.position[1]), f64(cam.position[2]));
     return position + offset * (view_depth * forward_length / tg::dot(offset, forward));
 }
 } // namespace sv

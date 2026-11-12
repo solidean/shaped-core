@@ -16,9 +16,9 @@ require raytracing_pipeline
 /// `scene.camera` as the frame constants carry it, 64 bytes; the host fills it through `sv::camera_record_of`.
 struct camera_record:
     position: float3
-    pad0: float
+    orthographic: float
     forward: float3
-    pad1: float
+    far_plane: float
     right_scaled: float3
     pad2: float
     up_scaled: float3
@@ -181,9 +181,11 @@ struct frame_constants:
     decal_count: uint
     /// The angle one pixel spans at the image's center, in radians: a hit's footprint is this times its distance.
     pixel_spread: float
-    /// The angle a primary ray's cone starts at: `pixel_spread`, narrowed where the image averages many jittered samples,
-    /// since that average already filters a pixel (`render_settings::expected_samples_per_pixel`).
-    primary_spread: float
+    /// The width one pixel spans at the image plane, in meters: an orthographic camera's footprint, which is its whole; 0 for a pinhole.
+    pixel_width: float
+    /// What a primary ray's cone is narrowed to of a pixel's footprint, 1 for all of it: less where the image averages
+    /// many jittered samples, since that average already filters a pixel (`render_settings::expected_samples_per_pixel`).
+    primary_scale: float
     /// the frame's one sub-pixel offset while `fixed_jitter` is set, in [0, 1)
     jitter: float2
 

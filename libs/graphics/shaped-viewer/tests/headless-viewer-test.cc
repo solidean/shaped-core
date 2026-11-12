@@ -834,3 +834,65 @@ ASYNC_INVOCABLE_TEST("sv - a settled render hands back the image a capture of th
     // and it is a picture of the box, not a cleared target
     CHECK(lit_pixels > size[0] * size[1] / 4).dump("lit", lit_pixels);
 }
+
+// An orthographic camera draws a thing the same size at any distance, and every renderer draws it at the same pixels.
+// A white quad a meter wide, 3 m and 12 m in front of a view 4 m high over 64 pixels, covers 16 by 16 pixels each time,
+// through the wavefront's parallel rays, raster's orthographic clip position and culling, and the hybrid's rebuilt point.
+ASYNC_INVOCABLE_TEST("sv - an orthographic camera draws a quad the same size at any distance, traced and raster alike",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto& lib = sv_test::shared_material_library();
+    auto const white = lib.acquire(
+        sv::material::create("orthographic test white", lib.acquire_type(sv::builtin_material::unlit).value(),
+                             {sv::material_attribute_binding::of("color", tg::vec3f(1, 1, 1))}));
+    // a meter square in the plane z = 0, facing -z, where the cameras stand
+    auto const positions
+        = cc::vector<tg::pos3f>{tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(-0.5f, 0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),
+                                tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),  tg::pos3f(0.5f, -0.5f, 0)};
+    auto const quad = sv::mesh{.name = "orthographic test quad",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = white};
+
+    auto const size = tg::vec2i(64, 64);
+    for (auto const [mode, name] : {cc::pair<sv::render_mode, cc::string_view>{sv::render_mode::wavefront, "wavefront"},
+                                    {sv::render_mode::raster, "raster"},
+                                    {sv::render_mode::hybrid, "hybrid"}})
+        for (auto const distance : {3.0, 12.0})
+        {
+            auto cam = sv::camera::looking_at(tg::pos3d(0, 0, -distance), tg::pos3d(0, 0, 0));
+            cam.projection.kind = sv::projection_kind::orthographic;
+            cam.projection.view_height = 4.0;
+            cam.projection.far_plane = 50.0;
+            auto const body = [&](sv::frame& f)
+            {
+                auto view = f.window().view();
+                view.camera(cam);
+                auto scene = view.add_scene();
+                scene.settings({.mode = mode});
+                scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
+                scene.add_mesh(quad);
+            };
+            auto const image = sv::render_settled(ctx, cc::format("sv-test/orthographic-{}-{}", name, distance),
+                                                  {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+            co_await cc::async_settled(sv::background_work(ctx));
+            REQUIRE(image.has_value()).context(image.has_error() ? image.error().to_string() : cc::string());
+
+            auto covered = 0;
+            for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+                covered += image.value().rgba[i * 4 + 1] > 128 ? 1 : 0;
+            CHECK(covered == 16 * 16).dump("renderer", name).dump("distance", distance).dump("covered", covered);
+        }
+}

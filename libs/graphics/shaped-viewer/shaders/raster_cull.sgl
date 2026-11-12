@@ -48,12 +48,18 @@ fun beyond(n: float3, d: float, position: float3, c: float3, e: float3) -> bool:
 /// Whether the world box around `c` with half-extents `e` misses the view of `cam`: beside the image, or wholly before the near plane.
 ///
 /// The side planes are where `scene.camera_project` puts a point on the image's edge.
-/// The projection has no far plane, so nothing is cut for its distance.
+/// A pinhole's projection has no far plane, so nothing is cut for its distance; an orthographic camera's sides are parallel.
 fun outside_view(cam: scene.camera, near: float, c: float3, e: float3) -> bool:
     let f = normalize(cam.forward)
     let r = cam.right_scaled / dot(cam.right_scaled, cam.right_scaled)
     let u = cam.up_scaled / dot(cam.up_scaled, cam.up_scaled)
     if beyond(-f, near, cam.position, c, e) => return true
+    if scene.camera_is_orthographic(cam):
+        // a point lies on the image where its offset's dot with r and u is within 1 either way
+        if beyond(r, -1.0, cam.position, c, e) => return true
+        if beyond(-r, -1.0, cam.position, c, e) => return true
+        if beyond(u, -1.0, cam.position, c, e) => return true
+        return beyond(-u, -1.0, cam.position, c, e)
     if beyond(r - f, 0.0, cam.position, c, e) => return true
     if beyond(-r - f, 0.0, cam.position, c, e) => return true
     if beyond(u - f, 0.0, cam.position, c, e) => return true
@@ -195,7 +201,7 @@ fun occluded(f: raster.frame_constants, c: float3, e: float3, levels: int){raste
     let farthest = max(max(raster_second_io.pyramid.load(t0, level), raster_second_io.pyramid.load(int2(t1.x, t0.y), level)), max(raster_second_io.pyramid.load(int2(t0.x, t1.y), level), raster_second_io.pyramid.load(t1, level)))
 
     // Both in the primary depth's form, larger farther.
-    let box_depth = 1.0 - f.near_plane / nearest
+    let box_depth = scene.camera_primary_depth(cam, f.near_plane, nearest)
     return box_depth > farthest
 
 @compute(64) fun cull_second(@thread_id id: int3){raster_second_io, raster_second_shape}:
