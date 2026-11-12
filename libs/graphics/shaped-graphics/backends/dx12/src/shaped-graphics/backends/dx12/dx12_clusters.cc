@@ -8,6 +8,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
+#include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -272,6 +273,11 @@ void dx12_command_list::raytracing_build_clusters_indirect(sg::cluster_pool cons
             track_buffer_access(dx12_buffer_of(b, "build_clusters_indirect: a table's buffer"),
                                 sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
     flush_barriers();
+    auto after_traces = make_empty_global_barrier();
+    merge_into_global_barrier(after_traces, make_buffer_barrier(nullptr, sg::impl::pool_rebuild_after_traces()));
+    auto const globals = cc::span<D3D12_GLOBAL_BARRIER const>(&after_traces, 1);
+    count_barriers(_stats, cc::span<D3D12_BUFFER_BARRIER const>(), cc::span<D3D12_TEXTURE_BARRIER const>(), globals);
+    submit_barriers(_list.Get(), {}, {}, globals);
 
     auto const triangles = triangles_input_of(d.max_clusters, d.max_geometry_index, d.max_triangles_per_cluster,
                                               d.max_vertices_per_cluster, d.max_total_triangles, d.max_total_vertices,

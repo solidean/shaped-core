@@ -333,6 +333,8 @@ private:
     void check_raster_aliasing(bool indexed);
     // Whether any bound tlas reaches a hit record past the end of `table`, which dispatch_rays must not submit.
     bool check_hit_records(raytracing_shader_table const& table);
+    // Under context::hit_record_checks, asserts no tlas `groups` bind reaches a cluster pool rebuilt since it was built.
+    void check_cluster_pools(cc::span<binding_group const* const> groups, cc::string_view what) const;
 
     cc::string _rendering_target_set;                              // of the open rendering, or empty
     bool _raster_is_mesh_shaded = false;                           // of the bound raster pipeline

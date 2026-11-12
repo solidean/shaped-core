@@ -982,7 +982,8 @@ ctx.persistent.create_buffer_table(span<raw_buffer_handle const>)
                                                    // -> buffer_table_handle: table->view() binds as buffer[accel.buffer_ref]
 cmd.raytracing.build_clusters_indirect(pool, {.clusters = indirect_records{...}, .tables})
                                                    // accel.clas_triangles records a shader wrote; bumps the generation, so
-                                                   // a BLAS built before is_stale() and a tlas build asserts on it
+                                                   // a BLAS built before is_stale() and a tlas build asserts on it;
+                                                   // so does a dispatch through a tlas built earlier (hit_record_checks)
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

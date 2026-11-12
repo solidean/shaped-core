@@ -36,12 +36,27 @@ void command_list::bind_raytracing_group(int group_index, binding_group const& g
 
 void command_list::dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height, int depth)
 {
+    check_cluster_pools(_raytracing_groups, "dispatch_rays");
     if (context().hit_record_checks() && check_hit_records(table))
     {
         CC_LOG_ERROR("dispatch_rays skipped a dispatch whose hit records reach past the shader table's end");
         return;
     }
     raytracing_dispatch_rays(table, raygen, width, height, depth);
+}
+
+void command_list::check_cluster_pools(cc::span<binding_group const* const> groups, cc::string_view what) const
+{
+    if (!context().hit_record_checks())
+        return;
+    for (auto const* group : groups)
+        if (group != nullptr)
+            for (auto const& tlas : impl::tlases_of(*group))
+                CC_ASSERTF(!impl::reaches_rebuilt_pool(*tlas),
+                           "{}: a bound tlas reaches a cluster BLAS whose pool was rebuilt since the tlas was built, "
+                           "so "
+                           "the clusters it lists are gone",
+                           what);
 }
 
 bool command_list::check_hit_records(raytracing_shader_table const& table)

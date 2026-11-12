@@ -35,6 +35,7 @@ void command_list::bind_compute_group(int group_index, binding_group const& grou
 
 void command_list::dispatch(int x, int y, int z)
 {
+    check_cluster_pools(_compute_groups, "dispatch");
     if (context().portability_checks())
     {
         _compute_aliasing.clear();
@@ -52,6 +53,7 @@ void command_list::dispatch_indirect(raw_buffer_handle const& args, isize offset
                                                                 "non-negative multiple of 4");
     CC_ASSERT(offset_in_bytes + isize(sizeof(dispatch_args)) <= args->size_in_bytes(), "indirect dispatch arguments "
                                                                                        "extend past the buffer");
+    check_cluster_pools(_compute_groups, "dispatch_indirect");
     if (context().portability_checks())
     {
         _compute_aliasing.clear();

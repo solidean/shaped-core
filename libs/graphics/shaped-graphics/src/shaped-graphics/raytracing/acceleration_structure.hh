@@ -215,6 +215,17 @@ void set_clusters(blas const& blas, cluster_set_handle clusters);
 /// Drops every instance record of `tlas`, so no check reads it; a snapshot a check already holds stays as it was.
 void clear_instance_records(tlas const& tlas);
 
+/// A cluster pool the recorded instances of a tlas reach, at the generation their BLASes were built from.
+struct reached_pool
+{
+    cluster_set_handle pool;
+    u64 generation = 0;
+};
+
+/// Whether a pool the recorded instances of `tlas` reach was rebuilt since, so a trace would meet clusters that are gone.
+/// Always false where `set_instance_records` never ran.
+[[nodiscard]] bool reaches_rebuilt_pool(tlas const& tlas);
+
 /// What `set_instance_records` recorded last, which is null where it never ran.
 [[nodiscard]] std::shared_ptr<cc::vector<tlas_instance_record> const> instance_records_of(tlas const& tlas);
 
@@ -295,6 +306,7 @@ private:
     friend void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
     friend void impl::set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
     friend void impl::set_clusters(blas const& blas, cluster_set_handle clusters);
+    friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
     friend void impl::set_software_region(blas const& blas, impl::software_region region);
     friend impl::software_region const& impl::software_region_of(blas const& blas);
 
@@ -360,10 +372,12 @@ private:
     friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
     friend std::shared_ptr<cc::vector<impl::tlas_instance_record> const> impl::instance_records_of(tlas const& tlas);
     friend void impl::clear_instance_records(tlas const& tlas);
+    friend bool impl::reaches_rebuilt_pool(tlas const& tlas);
     friend void impl::set_software_region(tlas const& tlas, impl::software_region region);
     friend impl::software_region const& impl::software_region_of(tlas const& tlas);
 
     impl::software_region _software;
     // mutable: a partitioned tlas replaces the snapshot at each update, through a const handle
     mutable cc::mutex<std::shared_ptr<cc::vector<impl::tlas_instance_record> const>> _instance_records;
+    mutable cc::mutex<cc::vector<impl::reached_pool>> _reached_pools; // of the records, set and cleared with them
 };

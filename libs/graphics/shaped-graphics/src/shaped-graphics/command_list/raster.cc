@@ -172,6 +172,7 @@ void command_list::bind_raster_index_buffer(index_buffer_view const& view)
 
 void command_list::check_raster_aliasing(bool indexed)
 {
+    check_cluster_pools(_raster_groups, "draw");
     if (context().portability_checks())
     {
         _raster_aliasing.clear();

@@ -154,7 +154,10 @@ Only a package's own HLSL still reads the descriptor, where a partitioned tlas w
 - **A record names its buffers by address**, which only a `buffer_table` hands out: `ctx.persistent.create_buffer_table(buffers)`, bound as `buffer[accel.buffer_ref]`.
   The build names the tables, so their buffers are what it declares it reads.
 - **A pool has a generation, which each build bumps**, and a cluster BLAS records the one it was built from.
-  A stale one, `blas.is_stale()`, lists clusters that are gone: a tlas or a partitioned tlas build asserts on it, and a structure built from it earlier must not be traced after the rebuild.
+  A stale one, `blas.is_stale()`, lists clusters that are gone: a tlas or a partitioned tlas build asserts on it.
+  A structure built from it earlier must not be traced after the rebuild, and under `context::hit_record_checks` a dispatch or draw binding one asserts.
+  A tlas updated from GPU-written records is not checked, since sg never sees its instances.
+- **A rebuild waits behind every earlier trace, with one global barrier**, since a trace declares only its tlas's storage and reads the pool's clusters through it.
 - **`accel.clas_triangles` differs in shape per backend**, so its host type `sg::gpu_clas_triangles` is opaque and sized for the larger record; each backend strides by its own.
 - **Requires `sg::feature::clustered_geometry`**, which vulkan grants with `VK_NV_cluster_acceleration_structure`.
   dx12 grants it on the preview Agility SDK alone, with the partitioned tlas, and takes one index format per build.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <shaped-graphics/barrier/resource_access_state.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh> // std::enable_shared_from_this, as blas uses it
 #include <shaped-graphics/raytracing/blas_table.hh>
@@ -108,6 +109,20 @@ namespace sg::impl
 {
 /// Marks `pool` rebuilt, which every cluster BLAS built from it before then sees as stale; returns the new generation.
 u64 bump_generation(cluster_pool const& pool);
+
+/// The global barrier a rebuild of a pool waits behind: every earlier read of an acceleration structure, in any stage.
+/// A trace reads a pool's clusters through a tlas, which declares only its own storage, so no tracked access does it.
+[[nodiscard]] inline access_barrier pool_rebuild_after_traces()
+{
+    return {
+        .needed = true,
+        .src_stages = pipeline_stage_flag::vertex | pipeline_stage_flag::fragment | pipeline_stage_flag::compute
+                    | pipeline_stage_flag::raytracing,
+        .dst_stages = pipeline_stage_flag::accel_build,
+        .src_access = access_flag::accel_read,
+        .dst_access = access_flag::accel_write,
+    };
+}
 } // namespace sg::impl
 
 /// A cluster set built in place on the GPU, from records a compute pass wrote: the GPU-written tier of clusters.

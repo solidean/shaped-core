@@ -8,6 +8,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // offsetof
 #include <shaped-graphics/backends/vulkan/vulkan_acceleration_structure.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_barrier.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
@@ -147,6 +148,11 @@ void vulkan_command_list::raytracing_build_clusters_indirect(sg::cluster_pool co
             track_buffer_access(*vulkan_buffer_of(b, "build_clusters_indirect: a table's buffer"),
                                 sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
     flush_barriers();
+    auto after_traces = make_empty_memory_barrier();
+    merge_into_memory_barrier(after_traces, make_buffer_barrier(VK_NULL_HANDLE, sg::impl::pool_rebuild_after_traces()));
+    auto const globals = cc::span<VkMemoryBarrier2 const>(&after_traces, 1);
+    count_barriers(_stats, cc::span<VkBufferMemoryBarrier2 const>(), cc::span<VkImageMemoryBarrier2 const>(), globals);
+    submit_barriers(_buffer, {}, {}, globals);
 
     auto const triangles = triangle_input_of(d);
     auto const commands = VkClusterAccelerationStructureCommandsInfoNV{

@@ -96,6 +96,20 @@ isize micromap::map_count() const
 
 void impl::set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records)
 {
+    // A set is immutable, so only a pool can be rebuilt under a structure; a scene reaches a few at most.
+    auto pools = cc::vector<reached_pool>();
+    for (auto const& r : records)
+    {
+        if (r.blas == nullptr || dynamic_cast<cluster_pool const*>(r.blas->_clusters.get()) == nullptr)
+            continue;
+        auto known = false;
+        for (auto const& p : pools)
+            known = known || p.pool == r.blas->_clusters;
+        if (!known)
+            pools.push_back({.pool = r.blas->_clusters, .generation = r.blas->_cluster_generation});
+    }
+    tlas._reached_pools.lock([&](cc::vector<reached_pool>& current) { current = cc::move(pools); });
+
     auto snapshot = std::make_shared<cc::vector<tlas_instance_record> const>(cc::move(records));
     tlas._instance_records.lock([&](std::shared_ptr<cc::vector<tlas_instance_record> const>& current)
                                 { current = cc::move(snapshot); });
@@ -122,6 +136,19 @@ void impl::clear_instance_records(tlas const& tlas)
 {
     tlas._instance_records.lock([](std::shared_ptr<cc::vector<tlas_instance_record> const>& current)
                                 { current = nullptr; });
+    tlas._reached_pools.lock([](cc::vector<reached_pool>& current) { current.clear(); });
+}
+
+bool impl::reaches_rebuilt_pool(tlas const& tlas)
+{
+    return tlas._reached_pools.lock(
+        [](cc::vector<reached_pool> const& pools)
+        {
+            for (auto const& p : pools)
+                if (p.pool->generation() != p.generation)
+                    return true;
+            return false;
+        });
 }
 
 std::shared_ptr<cc::vector<impl::tlas_instance_record> const> impl::instance_records_of(tlas const& tlas)

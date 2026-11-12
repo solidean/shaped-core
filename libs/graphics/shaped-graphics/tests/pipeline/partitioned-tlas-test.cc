@@ -402,4 +402,23 @@ ASYNC_INVOCABLE_TEST("sg - a cluster pool is built in place from records a compu
     ctx->submit_command_list(cc::move(again));
     CHECK(pool->generation() == 2);
     CHECK(blases[0]->is_stale());
+
+    // a tlas built before the rebuild still lists that BLAS, so a dispatch tracing it would meet the gone clusters
+    if (!ctx->hit_record_checks())
+        co_return;
+    auto const usage_back = sg::buffer_usage::readwrite_buffer;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage_back);
+    auto const ids
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage_back);
+    auto stale = ctx->create_command_list();
+    auto const scene_layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
+    auto const scene = ctx->transient.create_binding_group(*stale, scene_layout,
+                                                           shaders::raytracing::scene{.world = world->as_view(),
+                                                                                      .hits = hits.as_readwrite_buffer(),
+                                                                                      .ids = ids.as_readwrite_buffer()});
+    stale->compute.bind_pipeline(*pipeline);
+    stale->compute.bind_group(0, *scene);
+    CHECK_ASSERTS(stale->compute.dispatch_threads(grid, grid));
+    ctx->submit_command_list(cc::move(stale));
 }
