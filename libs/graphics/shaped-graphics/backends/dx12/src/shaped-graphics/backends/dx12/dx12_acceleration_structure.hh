@@ -6,6 +6,7 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
+#include <shaped-graphics/raytracing/clusters.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 
 /// DirectX 12 bottom-level acceleration structure.
@@ -113,6 +114,47 @@ private:
         if (_dx12_storage)
             _dx12_storage->expire();
     }
+};
+
+/// The clusters one described build made, in implicit-destination mode: packed into `_dx12_storage` by the device,
+/// which writes each one's address into `_addresses`, read by a cluster BLAS build in place.
+class sg::backend::dx12::dx12_cluster_set final : public sg::cluster_set
+{
+public:
+    dx12_cluster_set(int cluster_count,
+                     int max_geometry_index,
+                     isize size_in_bytes,
+                     dx12_buffer_handle storage,
+                     dx12_buffer_handle addresses)
+      : sg::cluster_set(cluster_count, max_geometry_index, size_in_bytes),
+        _dx12_storage(cc::move(storage)),
+        _addresses(cc::move(addresses))
+    {
+    }
+
+    dx12_buffer_handle _dx12_storage;
+    dx12_buffer_handle _addresses;
+};
+
+/// A cluster pool, built in place like a set from records a compute pass wrote.
+class sg::backend::dx12::dx12_cluster_pool final : public sg::cluster_pool
+{
+public:
+    dx12_cluster_pool(sg::cluster_pool_description const& description,
+                      isize size_in_bytes,
+                      isize scratch_size_in_bytes,
+                      dx12_buffer_handle storage,
+                      dx12_buffer_handle addresses)
+      : sg::cluster_pool(description, size_in_bytes),
+        _scratch_size_in_bytes(scratch_size_in_bytes),
+        _dx12_storage(cc::move(storage)),
+        _addresses(cc::move(addresses))
+    {
+    }
+
+    isize _scratch_size_in_bytes = 0;
+    dx12_buffer_handle _dx12_storage;
+    dx12_buffer_handle _addresses;
 };
 
 namespace sg::backend::dx12

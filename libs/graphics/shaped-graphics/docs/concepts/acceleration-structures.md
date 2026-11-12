@@ -156,7 +156,9 @@ Only a package's own HLSL still reads the descriptor, where a partitioned tlas w
 - **A pool has a generation, which each build bumps**, and a cluster BLAS records the one it was built from.
   A stale one, `blas.is_stale()`, lists clusters that are gone: a tlas or a partitioned tlas build asserts on it, and a structure built from it earlier must not be traced after the rebuild.
 - **`accel.clas_triangles` differs in shape per backend**, so its host type `sg::gpu_clas_triangles` is opaque and sized for the larger record; each backend strides by its own.
-- **Requires `sg::feature::clustered_geometry`**, which vulkan grants with `VK_NV_cluster_acceleration_structure`; dx12's waits for the preview runtime, as the partitioned tlas's does.
+- **Requires `sg::feature::clustered_geometry`**, which vulkan grants with `VK_NV_cluster_acceleration_structure`.
+  dx12 grants it on the preview Agility SDK alone, with the partitioned tlas, and takes one index format per build.
+  A dx12 shader reads -1 for `cluster_id` until the preview DXC is pinned, since Shader Model 6.10 has the name and slib masks the feature off.
 
 ## Invariants
 

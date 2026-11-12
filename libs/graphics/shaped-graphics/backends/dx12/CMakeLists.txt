@@ -42,6 +42,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_bind.cc
     src/shaped-graphics/backends/dx12/dx12_raytracing.cc
     src/shaped-graphics/backends/dx12/dx12_partitioned_tlas.cc
+    src/shaped-graphics/backends/dx12/dx12_clusters.cc
     src/shaped-graphics/backends/dx12/dx12_software_pool.cc
     src/shaped-graphics/backends/dx12/dx12_query.cc
     src/shaped-graphics/backends/dx12/dx12_runtime.cc

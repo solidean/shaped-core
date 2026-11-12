@@ -213,7 +213,10 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
      A record's buffers are a `buffer_table`'s addresses, the input set D3 asks for; a pool's generation makes each BLAS built from it before a rebuild stale.
      A shader builds a record whole, since a packed or absent field is never read or written alone yet.
      The cluster BLAS over a pool is still described; a GPU-written cluster BLAS, whose addresses only the GPU knows, waits for a consumer.
-   - (c) dx12's half, compiled in the `--agility-preview` build; its HLSL `cluster_id` waits for the preview DXC pin of D8.
+   - (c) (built, untested) dx12's half, on the preview runtime's `ExecuteIndirectRTASOperations`: described and GPU-written clusters and cluster BLASes.
+     It compiles in the `--agility-preview` build and skips its tests on every adapter here, none of which reports the cap.
+     `BaseGeometryIndexAndFlags` holds its flags in the top bits, opaque at bit 31, so `accel.geometry_opaque` is one value on both APIs.
+     A dx12 shader reads -1 for `cluster_id`: slib masks the feature off for dx12 compiles until the preview DXC of D8 is pinned.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.
 
 Each phase lands tested on dx12 where an adapter reports the cap, and on vulkan where an NVIDIA device grants the extensions.
