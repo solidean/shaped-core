@@ -143,11 +143,13 @@ struct cc::default_shared_traits
     static constexpr bool supports_weak = true;
 
     // node layout: payload at offset 0, control at the next control-aligned offset after it
-    static constexpr isize control_offset = cc::align_up(isize(sizeof(T)), isize(alignof(control)));
+    // A function rather than a static member, so naming the traits of an incomplete T (a weak_ptr member of T itself)
+    // does not need sizeof(T): cl instantiates a static member's initializer with the class.
+    static constexpr isize control_offset() { return cc::align_up(isize(sizeof(T)), isize(alignof(control))); }
 
     static constexpr isize node_size(isize /*psize*/, isize /*palign*/)
     {
-        return control_offset + isize(sizeof(control));
+        return control_offset() + isize(sizeof(control));
     }
     static constexpr isize node_align(isize palign)
     {
@@ -173,7 +175,7 @@ struct cc::default_shared_traits
     }
 
 private:
-    static control* ctrl(T* p) { return reinterpret_cast<control*>(reinterpret_cast<byte*>(p) + control_offset); }
+    static control* ctrl(T* p) { return reinterpret_cast<control*>(reinterpret_cast<byte*>(p) + control_offset()); }
 };
 
 namespace cc
