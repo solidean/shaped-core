@@ -87,21 +87,24 @@ A second buffer of words holds the task workgroups' records behind a header:
 
 | words | hold |
 |---|---|
-| 0 | the task workgroups of the draw |
+| 0 | the task workgroups that hold a record, which the scan writes |
 | 1 | the mesh workgroups launched, cut to the slots the draw holds |
 | 2 to 4 | the mesh pass's dispatch arguments, `launched, 1, 1` |
 | 5 to 8 | the draw's arguments, `launched * M * K, 1, 0, 0` |
-| then `record_words` a task workgroup | its launch's mesh workgroups, its grid's three sizes, the first of them among all launched, and its payload's words |
+| 9 to 11 | the draw's task workgroups along each axis, which sg writes before the draw |
+| then `record_words` a task workgroup | the grid of mesh workgroups it launches, the first of them among all launched, and its payload's words |
 
 A task workgroup's launch is cut to `@task(…, meshes = N)`'s `N` where the stage states one.
-The draw then holds slots for `N` mesh workgroups a task workgroup; where it states none, for `mesh_polyfill_description::task_budget`, 4096 unless the host sets it.
+The draw then holds slots for `N` mesh workgroups a task workgroup; where it states none, for `mesh_polyfill_description::launch_budget`, 4096 unless the host sets it.
 Either is cut to the 65535 one dispatch dimension holds, and a launch past the slots is dropped.
 `record_words`, `N` and the budget are the shader's `task_layout` and the description's, which sg sizes the buffer by.
 
-`draw_mesh_tasks(x, y, z)` of such a pipeline then dispatches, in one pass:
+`draw_mesh_tasks(x, y, z)` of such a pipeline then writes `x, y, z` into words 9 to 11 and dispatches, in one pass:
 
-1. the task stage's compute form, in `x * y * z` workgroups numbered as the mesh stage's are, its first invocation writing its record in place of `dispatch_mesh`;
-2. the scan, one invocation, which writes each record's first launched, the count launched cut to the slots it reads from `sg_dispatch_grid.threads.x`, and both arguments;
+1. the task stage's compute form, in `x * y * z` workgroups numbered by words 9 to 11, its first invocation writing its record in place of `dispatch_mesh`;
+   a workgroup past the records `sg_dispatch_grid.threads.x` says the draw holds writes none;
+2. the scan, one invocation, which counts the task workgroups that hold a record, cut to `threads.y`;
+   it then writes each record's first launched, the count launched cut to the slots `threads.x` says the draw holds, and both arguments;
 3. the mesh stage's compute half, indirectly by words 2 to 4; workgroup `g` finds the last record whose first is at most `g`, and reads its workgroup id within that grid and its payload there;
 4. then the vertex half, indirectly by words 5 to 8.
 
@@ -112,6 +115,16 @@ Either is cut to the 65535 one dispatch dimension holds, and a launch past the s
 | mesh stage's compute half | `sg_mesh_output` | the pipeline's groups, `sg_task_input` |
 
 The first two take a layout of `mesh_polyfill_slots::task`, the third one of `launched`.
+
+## An indirect draw
+
+**`draw_mesh_tasks_indirect` of a polyfilled pipeline draws each record of its arguments as the draws above**, its grid the GPU's.
+Its slots and the task workgroups it holds records for are then `launch_budget` each, cut to 65535, and what the GPU asks past them is dropped.
+Behind a task stage, sg copies the record's grid into words 9 to 11 and dispatches the task stage's compute form by the arguments themselves, since a dispatch reads none from a buffer it writes.
+With no task stage, the draw is one task workgroup of no payload: sg writes `1, 1, 1` into words 9 to 11 and copies the record's grid into the one record, of 4 words.
+The scan and the mesh stage's compute half read it as they would a task stage's.
+That compute half is SGL's `launched` form, which slib acquires beside the `compute` one for every polyfilled mesh stage with no task stage, as `mesh_polyfill_description::launched_shader`.
+A buffer of `buffer_usage::indirect_command_buffer` is a copy source on every backend for this, without `copy_src`.
 
 ## A geometry stage on the same words
 
@@ -179,9 +192,10 @@ metal draws it, `draws_tessellation_polyfill`; dx12, vulkan and webgpu draw none
 
 ## Not yet
 
-- `draw_mesh_tasks_indirect`, whose vertex count the GPU then writes.
 - A launch dropped past the slots is silent; the decision is that the `report` profile logs it at the `.sgl` line.
 - The scan is one invocation, a loop over the task workgroups, which a parallel scan replaces once a benchmark of many task workgroups says it matters.
 - On webgpu a launched mesh stage's workgroup id and payload come from a storage read, so WGSL takes control flow on either for non-uniform.
   A barrier under such a branch, which the native stage takes, fails WGSL's uniformity analysis there.
+  Since every polyfilled mesh stage has a `launched` form, such a mesh stage fails its pipeline's build on webgpu with no task stage too.
+  `workgroupUniformLoad` of what the first invocation read is the fix.
 - The task stage is drawn this way wherever the mesh stage is, `where_missing` by default, with no benchmark of its own yet.

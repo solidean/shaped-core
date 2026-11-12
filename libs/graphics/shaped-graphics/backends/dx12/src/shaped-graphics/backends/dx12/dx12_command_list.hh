@@ -283,6 +283,10 @@ protected:
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
     void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
     void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
+    void raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                              sg::raw_buffer_handle const& args,
+                                              isize offset_in_bytes,
+                                              isize count) override;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;
@@ -346,6 +350,13 @@ private:
                                                sg::pipeline_stage_flags stages,
                                                sg::access_flags access,
                                                bool from_array_application = false);
+
+    /// One polyfilled mesh draw, of the grid `x, y, z`, or of the record of `dispatch_args` at `offset_in_bytes` of
+    /// `args` where it is non-null.
+    void draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                              cc::fixed_array<int, 3> grid,
+                              dx12_buffer_handle const& args,
+                              isize offset_in_bytes);
 
     // Shared BLAS build for both geometry families.
     // Prebuild-query the translated geometry descs, allocate the persistent result + transient scratch, barrier + record the build, and wrap it in a dx12_blas.

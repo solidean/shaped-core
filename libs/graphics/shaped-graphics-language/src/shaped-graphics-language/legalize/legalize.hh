@@ -100,24 +100,27 @@ struct sgl::check::tessellation_polyfill_layout
     bool operator==(tessellation_polyfill_layout const&) const = default;
 };
 
-/// The words of `sg_task_output` a polyfilled task stage's draw takes (CHK-524), behind a header of
-/// `k_first_record_word` words: the task workgroups, the mesh workgroups launched, the mesh pass's dispatch arguments
-/// and the draw's arguments.
-/// Task workgroup `t` owns `record_words()` words from `k_first_record_word + t * record_words()`: the mesh workgroups
-/// it launches, their grid's three sizes, the first of them among all launched, then its payload's words.
+/// The words of `sg_task_output` a polyfilled draw whose mesh workgroups the GPU counts takes (CHK-524), behind a
+/// header of `k_first_record_word` words: the task workgroups, the mesh workgroups launched, the mesh pass's dispatch
+/// arguments, the draw's arguments, and the task grid, which sg writes before the draw.
+/// Task workgroup `t` owns `record_words()` words from `k_first_record_word + t * record_words()`: the grid of mesh
+/// workgroups it launches, the first of them among all launched, then its payload's words.
+/// A draw with no task stage is one task workgroup of no payload, whose record sg writes too: an indirect draw.
 struct sgl::check::task_polyfill_layout
 {
+    /// The task workgroups that hold a record, which the scan writes.
     static constexpr i32 k_task_count_word = 0;
     static constexpr i32 k_launched_word = 1;
     /// Three words, `x, 1, 1`, which the mesh pass is dispatched indirectly by.
     static constexpr i32 k_dispatch_word = 2;
     /// Four words, `vertex_count, 1, 0, 0`, which the vertex half is drawn indirectly by.
     static constexpr i32 k_draw_word = 5;
-    static constexpr i32 k_first_record_word = 9;
-    static constexpr i32 k_record_count = 0;
-    static constexpr i32 k_record_grid = 1;
-    static constexpr i32 k_record_first = 4;
-    static constexpr i32 k_record_payload = 5;
+    /// Three words, the draw's task workgroups along each axis, which the task stage numbers its workgroups by.
+    static constexpr i32 k_task_grid_word = 9;
+    static constexpr i32 k_first_record_word = 12;
+    static constexpr i32 k_record_grid = 0;
+    static constexpr i32 k_record_first = 3;
+    static constexpr i32 k_record_payload = 4;
 
     /// One word a scalar leaf of the payload, in field order.
     i32 payload_words = 0;
@@ -246,8 +249,9 @@ tessellation_polyfill_layout_of(checked_module const& m, flat_entry_point const&
 
 /// A mesh entry point `e` as the compute entry point that writes its workgroup's slots of `sg_mesh_output` instead of
 /// handing them to the rasterizer; its grid is the one sg writes into `sg_dispatch_grid`.
-/// Where a polyfilled task stage launches it, `task` is that stage's layout: workgroup `g` of its indirect dispatch
-/// is the `g`-th launched, whose task workgroup, workgroup id and payload it reads from `sg_task_input`.
+/// Where records launch it, `task` is their layout, a polyfilled task stage's or an indirect draw's: workgroup `g` of
+/// its indirect dispatch is the `g`-th launched, whose task workgroup, workgroup id and payload it reads from
+/// `sg_task_input`.
 /// `e` must have a layout.
 [[nodiscard]] flat_entry_point mesh_as_compute(checked_module const& m,
                                                flat_entry_point const& e,
@@ -259,13 +263,15 @@ tessellation_polyfill_layout_of(checked_module const& m, flat_entry_point const&
                                                                                    flat_entry_point const& t);
 
 /// A task entry point `t` as the compute entry point that writes its workgroup's record of `sg_task_output`, its
-/// first invocation's launch in place of `dispatch_mesh`; its grid is the one sg writes into `sg_dispatch_grid`.
-/// `t` must have a layout.
+/// first invocation's launch in place of `dispatch_mesh`.
+/// Its grid is the header's, and a workgroup past the records `sg_dispatch_grid.threads.x` says the draw holds writes
+/// none; `t` must have a layout.
 [[nodiscard]] flat_entry_point task_as_compute(checked_module const& m, flat_entry_point const& t);
 
 /// The one-invocation compute entry point that runs between a polyfilled task stage and the mesh stage `e` it
-/// launches: each record's first launched workgroup, the count launched, cut to the threads sg wrote into
-/// `sg_dispatch_grid`, and from it the mesh pass's dispatch and the draw's arguments.
+/// launches: the task workgroups that hold a record, each record's first launched workgroup, and the count launched.
+/// `sg_dispatch_grid.threads` holds the slots and the records the draw holds, which the counts are cut to; from them it
+/// writes the mesh pass's dispatch and the draw's arguments.
 /// It takes `e`'s header, since the draw's vertex count is `e`'s; `e` must have a layout.
 [[nodiscard]] flat_entry_point mesh_task_scan(checked_module const& m,
                                               flat_entry_point const& e,

@@ -114,7 +114,8 @@ WGPUBuffer webgpu_context::scratch_for(mesh_scratch_buffer& scratch, isize bytes
     auto const desc = WGPUBufferDescriptor{
         .nextInChain = nullptr,
         .label = to_wgpu(is_task ? "sg task polyfill records" : "sg mesh polyfill slots"),
-        .usage = is_task ? WGPUBufferUsage_Storage | WGPUBufferUsage_Indirect : WGPUBufferUsage_Storage,
+        .usage = is_task ? WGPUBufferUsage_Storage | WGPUBufferUsage_Indirect | WGPUBufferUsage_CopyDst
+                         : WGPUBufferUsage_Storage,
         .size = u64(cc::max(isize(4), grown)),
         .mappedAtCreation = WGPU_FALSE,
     };

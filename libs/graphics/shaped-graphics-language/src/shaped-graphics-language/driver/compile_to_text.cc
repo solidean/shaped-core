@@ -313,17 +313,16 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         form = check::task_as_compute(m, legal);
     if (mesh != emit::mesh_form::native && legal.entry_stage == check::stage::mesh)
     {
-        // the vertex half reads no payload, so only a compute half without a task stage refuses one
+        // the vertex half reads no payload, so only a task stage's records carry one; with none named, the scan and
+        // the launched form number the one record of an indirect draw
         auto const layout
-            = check::mesh_polyfill_layout_of(m, legal, mesh != emit::mesh_form::compute || task_layout.has_value());
+            = check::mesh_polyfill_layout_of(m, legal, mesh == emit::mesh_form::vertex_fetch || task_layout.has_value());
         if (layout.has_error())
             return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, layout.error()));
-        if (mesh == emit::mesh_form::scan && !task_layout.has_value())
-            return cc::error(cc::format("{}: error: the scan of mesh entry point '{}' runs after its pipeline's task "
-                                        "stage, and none was named\n",
-                                        source_name, e.name));
+        if ((mesh == emit::mesh_form::scan || mesh == emit::mesh_form::launched) && !task_layout.has_value())
+            task_layout = check::task_polyfill_layout{};
         mesh_layout = layout.value();
-        form = mesh == emit::mesh_form::compute
+        form = mesh == emit::mesh_form::compute || mesh == emit::mesh_form::launched
                  ? check::mesh_as_compute(m, legal, task_layout.has_value() ? &task_layout.value() : nullptr)
              : mesh == emit::mesh_form::scan ? check::mesh_task_scan(m, legal, task_layout.value())
                                              : check::mesh_as_vertex_fetch(m, legal, corner);

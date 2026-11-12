@@ -1438,6 +1438,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   A task stage before it is a compute entry point whose first invocation writes its launch and payload into a record, and a scan that numbers what all of them launched.
   The mesh stage's compute half then runs once a launched workgroup, in that number's order, reading its workgroup id and payload from its task workgroup's record.
   A launch past `meshes = N`, or past what the draw holds slots for, is dropped.
+  An indirect draw with no task stage is one record of no payload, which the same scan numbers, and the compute half it launches is a form of its own.
   The words, the reserved buffers and how sg draws them are [the polyfill protocol](../../../../shaped-graphics/docs/concepts/mesh-polyfill.md).
   A mesh entry point with a vertex, primitive or payload member that is no scalar, vector or array of them is `unsupported-yet` there, and so is one that takes a payload with no polyfilled task stage.
 * **CHK-525** Where a device has no geometry stage, a geometry entry point can be polyfilled the same way: its pipeline's vertex stage and itself as one compute entry point, then a draw.

@@ -30,7 +30,11 @@ enum class sgl::emit::mesh_form : sgl::u8
     compute,
     /// Between a polyfilled task stage's compute entry point and a mesh stage's: the one that numbers the launched mesh
     /// workgroups in order; written from the mesh entry point, since the draw's vertex count is its.
+    /// With no task stage, it numbers the one record an indirect draw writes.
     scan,
+    /// The compute entry point an indirect draw of a pipeline with no task stage dispatches: `compute`, its workgroups
+    /// launched by that one record.
+    launched,
     /// The vertex entry point that draws those slots from `sg_mesh_input`.
     /// A pixel entry point is then its polyfilled pipeline's, which takes what the mesh stage wrote per primitive from
     /// the vertex half.

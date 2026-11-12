@@ -77,9 +77,9 @@ COMMAND("emit")
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     args.arg({"mesh"}, mesh_name,
              {.desc = "a mesh, task, geometry or tessellation entry point as itself, or as the compute or the vertex "
-                      "half of its "
-                      "polyfill, or the scan between a task and a mesh stage, and a pixel entry point as the one after "
-                      "the vertex half: native, compute, scan or vertex",
+                      "half of its polyfill, or the scan between a task and a mesh stage, or the compute half an "
+                      "indirect draw launches, and a pixel entry point as the one after the vertex half: native, "
+                      "compute, scan, launched or vertex",
               .metavar = "FORM"});
     args.arg({"task"}, polyfill_task,
              {.desc = "the task stage that launches a mesh entry point's compute half or scan, its pipeline's",
@@ -142,9 +142,11 @@ COMMAND("emit")
         mesh = sgl::emit::mesh_form::vertex_fetch;
     else if (mesh_name == "scan")
         mesh = sgl::emit::mesh_form::scan;
+    else if (mesh_name == "launched")
+        mesh = sgl::emit::mesh_form::launched;
     else if (mesh_name != "native")
     {
-        cc::eprintln("sgl emit: unknown --mesh '{}' (one of native, compute, scan, vertex)", mesh_name);
+        cc::eprintln("sgl emit: unknown --mesh '{}' (one of native, compute, scan, launched, vertex)", mesh_name);
         return exit_usage;
     }
 

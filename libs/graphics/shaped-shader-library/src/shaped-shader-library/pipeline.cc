@@ -413,7 +413,8 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
     if (d.mesh != nullptr && polyfills)
     {
-        // the compute half and the scan read the task stage's records, so they name it
+        // the compute half and the scan read the task stage's records, so they name it; with no task stage, an
+        // indirect draw launches a half of its own by one record, which the scan numbers too
         auto const half = [&](cc::string_view form)
         {
             auto with_form = options;
@@ -428,17 +429,23 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         desc.mesh_polyfill = sg::mesh_polyfill_description{.corners = compute.mesh_polyfill_corners,
                                                            .primitives_per_group = compute.mesh_polyfill_primitives,
                                                            .words_per_group = compute.mesh_polyfill_words};
+        auto& p = desc.mesh_polyfill.value();
         if (d.task != nullptr)
         {
             auto with_form = options;
             with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string("compute")});
             auto task = co_await (*d.task)->acquire(*ctx, with_form);
-            auto& p = desc.mesh_polyfill.value();
-            p.task_record_words = task.task_polyfill_record_words;
+            p.record_words = task.task_polyfill_record_words;
             p.task_meshes = task.task_polyfill_meshes;
-            p.task_scan_shader = co_await half("scan");
             p.task_shader = cc::move(task);
         }
+        else
+        {
+            auto launched = co_await half("launched");
+            p.record_words = launched.task_polyfill_record_words;
+            p.launched_shader = cc::move(launched);
+        }
+        p.scan_shader = co_await half("scan");
         desc.mesh_polyfill.value().compute_shader = cc::move(compute);
     }
     else if (d.mesh != nullptr)

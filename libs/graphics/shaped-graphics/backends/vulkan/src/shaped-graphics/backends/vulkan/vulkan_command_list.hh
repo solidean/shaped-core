@@ -57,6 +57,13 @@ public:
                                                sg::access_flags access,
                                                bool from_array_application = false);
 
+    /// One polyfilled mesh draw, of the grid `x, y, z`, or of the record of `dispatch_args` at `offset_in_bytes` of
+    /// `args` where it is non-null.
+    void draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                              cc::fixed_array<int, 3> grid,
+                              std::shared_ptr<vulkan_buffer const> const& args,
+                              isize offset_in_bytes);
+
     /// The texture equivalent, scoped to one subresource range and carrying the layout the op needs it in.
     /// Declare one access, returning the layout this call asked the tracker for — which is not always `layout`, since
     /// a texture with a transfer in flight is held at `general` instead.
@@ -357,6 +364,10 @@ protected:
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
     void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
     void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
+    void raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                              sg::raw_buffer_handle const& args,
+                                              isize offset_in_bytes,
+                                              isize count) override;
 
     // Ray tracing (reached through cmd.raytracing).
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.

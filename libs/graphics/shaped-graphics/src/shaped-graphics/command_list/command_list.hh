@@ -219,6 +219,12 @@ protected:
     // compute half over the bound groups, then draw what it wrote (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
     // Reached only on a context whose `draws_mesh_polyfill` says so.
     virtual void raster_draw_mesh_polyfilled(impl::mesh_polyfill_state const& polyfill, int x, int y, int z);
+    // The same for `count` indirect draws, whose grids are the records of `dispatch_args` from `offset_in_bytes`;
+    // `polyfill.scan` is non-null.
+    virtual void raster_draw_mesh_polyfilled_indirect(impl::mesh_polyfill_state const& polyfill,
+                                                      raw_buffer_handle const& args,
+                                                      isize offset_in_bytes,
+                                                      isize count);
     // Reached only on a context whose `draws_geometry_polyfill` says so, for a draw of at least one primitive.
     virtual void raster_draw_geometry_polyfilled(impl::mesh_polyfill_state const& polyfill,
                                                  impl::geometry_polyfill_draw const& draw);

@@ -316,6 +316,10 @@ protected:
     // webgpu builds no mesh-shaded pipeline, so none is ever bound to draw
     void raster_draw_mesh_tasks(int, int, int) override { CC_UNREACHABLE("webgpu has no mesh stage"); }
     void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
+    void raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                              sg::raw_buffer_handle const& args,
+                                              isize offset_in_bytes,
+                                              isize count) override;
     void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const&, isize, isize) override
     {
         CC_UNREACHABLE("webgpu has no mesh stage");
@@ -350,4 +354,10 @@ protected:
 private:
     /// Stages `data` in the ring and holds the ring until this list submits or drops.
     [[nodiscard]] webgpu_upload_span stage_upload(cc::span<byte const> data, isize staged_size);
+    /// One polyfilled mesh draw, of the grid `x, y, z`, or of the record of `dispatch_args` at `offset_in_bytes` of
+    /// `args` where it is non-null.
+    void draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                              cc::fixed_array<int, 3> grid,
+                              webgpu_buffer const* args,
+                              isize offset_in_bytes);
 };

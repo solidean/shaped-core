@@ -265,6 +265,14 @@ void command_list::raster_draw_mesh_polyfilled(impl::mesh_polyfill_state const&,
     CC_UNREACHABLE("a context whose draws_mesh_polyfill says so overrides this");
 }
 
+void command_list::raster_draw_mesh_polyfilled_indirect(impl::mesh_polyfill_state const&,
+                                                        raw_buffer_handle const&,
+                                                        isize,
+                                                        isize)
+{
+    CC_UNREACHABLE("a context whose draws_mesh_polyfill says so overrides this");
+}
+
 void command_list::raster_draw_geometry_polyfilled(impl::mesh_polyfill_state const&, impl::geometry_polyfill_draw const&)
 {
     CC_UNREACHABLE("a context whose draws_geometry_polyfill says so overrides this");
@@ -304,8 +312,9 @@ void command_list::draw_indexed_indirect(raw_buffer_handle const& args, isize of
 void command_list::draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
 {
     CC_ASSERT(_raster_is_mesh_shaded, "draw_mesh_tasks_indirect draws a mesh-shaded pipeline; bind one first");
-    CC_ASSERT(!_raster_mesh_polyfill.has_value(), "a polyfilled mesh stage draws with draw_mesh_tasks alone so far, "
-                                                  "since its vertex count would be the GPU's to write");
+    CC_ASSERT(!_raster_mesh_polyfill.has_value() || _raster_mesh_polyfill.value().scan != nullptr,
+              "the pipeline polyfills its mesh stage with no task stage and no launched half, which an indirect draw "
+              "dispatches; a description slib builds holds one");
     CC_ASSERT(args != nullptr, "indirect mesh draw arguments buffer is null");
     CC_ASSERT(args->usage().has(buffer_usage::indirect_command_buffer), "indirect mesh draw arguments need "
                                                                         "buffer_usage::indirect_command_buffer");
@@ -322,7 +331,10 @@ void command_list::draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize
         check_raster_aliasing(false);
         _raster_aliasing.add_indirect_args(args.get());
     }
-    raster_draw_mesh_tasks_indirect(args, offset_in_bytes, count);
+    if (_raster_mesh_polyfill.has_value())
+        raster_draw_mesh_polyfilled_indirect(_raster_mesh_polyfill.value(), args, offset_in_bytes, count);
+    else
+        raster_draw_mesh_tasks_indirect(args, offset_in_bytes, count);
 }
 
 void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)

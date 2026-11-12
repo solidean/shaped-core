@@ -143,17 +143,37 @@ TEST("sgl emit - a polyfilled task stage writes its first invocation's launch in
         auto const e = emit_source(program, 0, t, {.mesh = mesh_form::compute});
         REQUIRE(sgl::emit::dump_errors(e) == "");
         REQUIRE(e.task_layout.has_value());
-        // a float and a uint3 behind the launch, its grid and its first
+        // a float and a uint3 behind the launch's grid and its first
         CHECK(e.task_layout.value().payload_words == 4);
-        CHECK(e.task_layout.value().record_words() == 9);
+        CHECK(e.task_layout.value().record_words() == 8);
         CHECK(e.task_layout.value().max_meshes == 3);
         CHECK(e.text.contains("sg_task_output")).dump("text", e.text);
         CHECK(!e.text.contains("DispatchMesh")).dump("text", e.text);
     }
     auto const wgsl = emit_source(program, 0, target::wgsl, {.mesh = mesh_form::compute});
     CHECK(wgsl.text.contains("@compute @workgroup_size(8, 1, 1)")).dump("text", wgsl.text);
-    // the launch is cut to the stated bound
-    CHECK(wgsl.text.contains("min(")).dump("text", wgsl.text);
+    // a workgroup past the records the draw holds writes none
+    CHECK(wgsl.text.contains("sg_dispatch_grid")).dump("text", wgsl.text);
+}
+
+TEST("sgl emit - an indirect draw of a polyfilled mesh stage launches its compute half by one record of no payload")
+{
+    for (auto const t : {target::wgsl, target::hlsl_dx12, target::hlsl_vulkan})
+        for (auto const form : {mesh_form::launched, mesh_form::scan})
+        {
+            auto const e = emit_source(k_program, 0, t, {.mesh = form});
+            REQUIRE(sgl::emit::dump_errors(e) == "");
+            REQUIRE(e.task_layout.has_value());
+            CHECK(e.task_layout.value().record_words() == 4);
+            CHECK(e.task_layout.value().max_meshes == 0);
+            CHECK(e.mesh_layout.value().group_words == 2 + 3 * 2 + 4 * 8);
+        }
+    auto const launched = emit_source(k_program, 0, target::wgsl, {.mesh = mesh_form::launched});
+    CHECK(launched.text.contains("sg_task_input")).dump("text", launched.text);
+    CHECK(launched.text.contains("sg_mesh_output")).dump("text", launched.text);
+    auto const scan = emit_source(k_program, 0, target::wgsl, {.mesh = mesh_form::scan});
+    CHECK(scan.text.contains("@workgroup_size(1, 1, 1)")).dump("text", scan.text);
+    CHECK(scan.text.contains("sg_task_output")).dump("text", scan.text);
 }
 
 TEST("sgl emit - a mesh stage the polyfill does not carry yet is refused by name, not guessed (CHK-524)")

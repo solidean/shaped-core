@@ -61,15 +61,23 @@ sg::raster_pipeline_description raster_half_of(sg::context& ctx, sg::raster_pipe
     return result;
 }
 
-/// A polyfilled description's compute half, over the twin of its layout that holds `sg_mesh_output` and the grid; a
-/// mesh stage a task stage launches reads the task's records instead of the grid, since it is dispatched indirectly.
-sg::compute_pipeline_description compute_half_of(sg::context& ctx, sg::raster_pipeline_description const& desc)
+/// A polyfilled description's compute half `shader`, over the twin of its layout that holds `sg_mesh_output` and the
+/// grid; a half launched by records reads them instead of the grid, since it is dispatched indirectly.
+sg::compute_pipeline_description compute_half_of(sg::context& ctx,
+                                                 sg::raster_pipeline_description const& desc,
+                                                 sg::compiled_shader const& shader,
+                                                 bool is_launched)
 {
-    auto const is_launched = desc.mesh_polyfill.value().task_shader.has_value();
     auto twin = desc.layout->description();
     twin.mesh_polyfill = is_launched ? sg::mesh_polyfill_slots::launched : sg::mesh_polyfill_slots::output;
     twin.dispatch_grid = !is_launched;
-    return {.shader = desc.mesh_polyfill.value().compute_shader, .layout = ctx.cached.acquire_pipeline_layout(twin)};
+    return {.shader = shader, .layout = ctx.cached.acquire_pipeline_layout(twin)};
+}
+
+sg::compute_pipeline_description compute_half_of(sg::context& ctx, sg::raster_pipeline_description const& desc)
+{
+    auto const& p = desc.mesh_polyfill.value();
+    return compute_half_of(ctx, desc, p.compute_shader, p.task_shader.has_value());
 }
 
 /// A polyfilled task stage's compute form or its scan, over the twin of its layout that holds `sg_task_output` and the
@@ -84,12 +92,14 @@ sg::compute_pipeline_description task_half_of(sg::context& ctx,
     return {.shader = shader, .layout = ctx.cached.acquire_pipeline_layout(twin)};
 }
 
-/// The pipelines a polyfill dispatches before its draw: the mesh stage's compute half, and a task stage's two.
+/// The pipelines a polyfill dispatches before its draw: the mesh stage's compute half, a task stage's compute form,
+/// the half an indirect draw with no task stage launches, and the scan of their records.
 struct polyfill_halves
 {
     sg::compute_pipeline_handle compute;
     sg::compute_pipeline_handle task;
-    sg::compute_pipeline_handle task_scan;
+    sg::compute_pipeline_handle launched;
+    sg::compute_pipeline_handle scan;
 };
 
 sg::impl::mesh_polyfill_state state_of(sg::mesh_polyfill_description const& polyfill, polyfill_halves halves)
@@ -101,13 +111,14 @@ sg::impl::mesh_polyfill_state state_of(sg::mesh_polyfill_description const& poly
             .words_per_group = polyfill.words_per_group,
             .input_corners = polyfill.input_corners,
             .task = cc::move(halves.task),
-            .task_scan = cc::move(halves.task_scan),
+            .launched = cc::move(halves.launched),
+            .scan = cc::move(halves.scan),
             .task_workgroup = polyfill.task_shader.has_value()
                                 ? polyfill.task_shader.value().workgroup_size.value_or(sg::compute_dimensions{})
                                 : sg::compute_dimensions{},
-            .task_record_words = polyfill.task_record_words,
+            .record_words = polyfill.record_words,
             .task_meshes = polyfill.task_meshes,
-            .task_budget = polyfill.task_budget};
+            .launch_budget = polyfill.launch_budget};
 }
 
 /// Why a polyfilled mesh or geometry stage of `desc` cannot be built, or nothing when it can; nothing for a description
@@ -153,18 +164,25 @@ cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description con
         return cc::string("the pipeline's mesh polyfill states no primitives or no words per workgroup");
     if (p.compute_shader.bytecode.empty())
         return cc::string("the pipeline's mesh polyfill has no compute half");
-    if (p.task_shader.has_value())
+    if (p.task_shader.has_value() || p.launched_shader.has_value())
     {
         if (p.input_corners > 0)
-            return cc::string("the pipeline polyfills a geometry stage, which no task stage launches");
-        if (p.task_shader.value().bytecode.empty() || p.task_scan_shader.bytecode.empty())
-            return cc::string("the pipeline's task polyfill has no compute form or no scan");
-        if (p.task_record_words < 5)
-            return cc::string("the pipeline's task polyfill states no words per record");
-        if (p.task_meshes <= 0 && (p.task_budget <= 0 || p.task_budget > sg::max_dispatch_groups_per_dimension))
-            return cc::format("the pipeline's task polyfill states no bound, and its budget of {} mesh workgroups a "
-                              "draw is not from 1 to {}",
-                              p.task_budget, sg::max_dispatch_groups_per_dimension);
+            return cc::string("the pipeline polyfills a geometry stage, which no task stage or indirect draw launches");
+        if (p.task_shader.has_value() && p.launched_shader.has_value())
+            return cc::string("the pipeline's mesh polyfill has a task stage and a launched half, and behind a task "
+                              "stage its compute half is the launched one");
+        if (p.task_shader.has_value() && p.task_shader.value().bytecode.empty())
+            return cc::string("the pipeline's task polyfill has no compute form");
+        if (p.launched_shader.has_value() && p.launched_shader.value().bytecode.empty())
+            return cc::string("the pipeline's mesh polyfill has an empty launched half");
+        if (p.scan_shader.bytecode.empty())
+            return cc::string("the pipeline's mesh polyfill launches by records and has no scan of them");
+        if (p.record_words < 4)
+            return cc::string("the pipeline's mesh polyfill states no words per record");
+        if (p.launch_budget <= 0 || p.launch_budget > sg::max_dispatch_groups_per_dimension)
+            return cc::format("the pipeline's mesh polyfill has a budget of {} workgroups a draw, which is not from 1 "
+                              "to {}",
+                              p.launch_budget, sg::max_dispatch_groups_per_dimension);
     }
     return {};
 }
@@ -172,20 +190,24 @@ cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description con
 cc::shared_async<sg::raster_pipeline_handle> with_polyfill(cc::shared_async<sg::raster_pipeline_handle> built,
                                                            cc::shared_async<sg::compute_pipeline_handle> compute,
                                                            cc::shared_async<sg::compute_pipeline_handle> task,
-                                                           cc::shared_async<sg::compute_pipeline_handle> task_scan,
+                                                           cc::shared_async<sg::compute_pipeline_handle> launched,
+                                                           cc::shared_async<sg::compute_pipeline_handle> scan,
                                                            sg::mesh_polyfill_description numbers)
 {
     auto pipeline = co_await built;
     auto halves = polyfill_halves{.compute = co_await compute};
     if (task != nullptr)
-    {
         halves.task = co_await task;
-        halves.task_scan = co_await task_scan;
-    }
+    if (launched != nullptr)
+        halves.launched = co_await launched;
+    if (scan != nullptr)
+        halves.scan = co_await scan;
     numbers.compute_shader = {};
-    numbers.task_scan_shader = {};
+    numbers.scan_shader = {};
     if (numbers.task_shader.has_value())
         numbers.task_shader.value().bytecode = {};
+    if (numbers.launched_shader.has_value())
+        numbers.launched_shader.value().bytecode = {};
     sg::impl::set_mesh_polyfill(*pipeline, state_of(numbers, cc::move(halves)));
     co_return pipeline;
 }
@@ -638,16 +660,27 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
         if (half.has_error())
             return cc::error(cc::format("its mesh polyfill's compute half: {}", half.error()));
         halves.compute = cc::move(half.value());
-        if (auto const& p = desc.mesh_polyfill.value(); p.task_shader.has_value())
+        auto const& p = desc.mesh_polyfill.value();
+        if (p.task_shader.has_value())
         {
             auto task = try_create_compute_pipeline(task_half_of(_ctx, desc, p.task_shader.value()));
             if (task.has_error())
                 return cc::error(cc::format("its task polyfill's compute form: {}", task.error()));
-            auto scan = try_create_compute_pipeline(task_half_of(_ctx, desc, p.task_scan_shader));
-            if (scan.has_error())
-                return cc::error(cc::format("its task polyfill's scan: {}", scan.error()));
             halves.task = cc::move(task.value());
-            halves.task_scan = cc::move(scan.value());
+        }
+        if (p.launched_shader.has_value())
+        {
+            auto launched = try_create_compute_pipeline(compute_half_of(_ctx, desc, p.launched_shader.value(), true));
+            if (launched.has_error())
+                return cc::error(cc::format("its mesh polyfill's launched half: {}", launched.error()));
+            halves.launched = cc::move(launched.value());
+        }
+        if (p.task_shader.has_value() || p.launched_shader.has_value())
+        {
+            auto scan = try_create_compute_pipeline(task_half_of(_ctx, desc, p.scan_shader));
+            if (scan.has_error())
+                return cc::error(cc::format("its mesh polyfill's scan: {}", scan.error()));
+            halves.scan = cc::move(scan.value());
         }
     }
 
@@ -719,15 +752,18 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     // async build hands vulkan an empty shader here (bug-sg-uncached-async-compute-pipeline-empty-shader).
     auto compute = cc::shared_async<compute_pipeline_handle>();
     auto task = cc::shared_async<compute_pipeline_handle>();
-    auto task_scan = cc::shared_async<compute_pipeline_handle>();
+    auto launched = cc::shared_async<compute_pipeline_handle>();
+    auto scan = cc::shared_async<compute_pipeline_handle>();
     if (desc.mesh_polyfill.has_value())
     {
         compute = _ctx.cached.acquire_compute_pipeline(compute_half_of(_ctx, desc));
-        if (auto const& p = desc.mesh_polyfill.value(); p.task_shader.has_value())
-        {
+        auto const& p = desc.mesh_polyfill.value();
+        if (p.task_shader.has_value())
             task = _ctx.cached.acquire_compute_pipeline(task_half_of(_ctx, desc, p.task_shader.value()));
-            task_scan = _ctx.cached.acquire_compute_pipeline(task_half_of(_ctx, desc, p.task_scan_shader));
-        }
+        if (p.launched_shader.has_value())
+            launched = _ctx.cached.acquire_compute_pipeline(compute_half_of(_ctx, desc, p.launched_shader.value(), true));
+        if (p.task_shader.has_value() || p.launched_shader.has_value())
+            scan = _ctx.cached.acquire_compute_pipeline(task_half_of(_ctx, desc, p.scan_shader));
     }
 
     // A backend may settle the build from a callback of its own, so the name is set once it has.
@@ -748,7 +784,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     }
     if (!desc.mesh_polyfill.has_value())
         return result;
-    return with_polyfill(cc::move(result), cc::move(compute), cc::move(task), cc::move(task_scan),
+    return with_polyfill(cc::move(result), cc::move(compute), cc::move(task), cc::move(launched), cc::move(scan),
                          desc.mesh_polyfill.value());
 }
 

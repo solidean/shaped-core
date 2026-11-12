@@ -181,8 +181,9 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
     if (usage.has(sg::buffer_usage::readonly_buffer) || usage.has(sg::buffer_usage::readwrite_buffer))
         flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
+    // a polyfilled indirect mesh draw copies its arguments into the records it draws by
     if (usage.has(sg::buffer_usage::indirect_command_buffer))
-        flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+        flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     if (usage.has(sg::buffer_usage::accel_structure_storage))
         flags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
     if (usage.has(sg::buffer_usage::accel_structure_build_input))

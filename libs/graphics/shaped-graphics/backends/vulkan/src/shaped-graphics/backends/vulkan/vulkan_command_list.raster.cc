@@ -470,16 +470,42 @@ void vulkan_command_list::raster_draw_mesh_tasks(int x, int y, int z)
 
 void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z)
 {
+    draw_mesh_polyfilled(polyfill, {x, y, z}, nullptr, 0);
+}
+
+void vulkan_command_list::raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                                               sg::raw_buffer_handle const& args,
+                                                               isize offset_in_bytes,
+                                                               isize count)
+{
+    auto const buffer = std::dynamic_pointer_cast<vulkan_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect mesh draw arguments are not a vulkan buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect mesh draw arguments are a transient buffer used past its epoch");
+    keep_bound(buffer);
+    for (auto i = isize(0); i < count; ++i)
+        draw_mesh_polyfilled(polyfill, {0, 0, 0}, buffer, offset_in_bytes + i * isize(sizeof(sg::dispatch_args)));
+}
+
+void vulkan_command_list::draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                               cc::fixed_array<int, 3> grid,
+                                               std::shared_ptr<vulkan_buffer const> const& args,
+                                               isize offset_in_bytes)
+{
     CC_ASSERT(_in_render_pass, "draw_mesh_tasks requires an open rendering scope");
     CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
     keep_bound(polyfill.compute);
     keep_bound(polyfill.task);
-    keep_bound(polyfill.task_scan);
+    keep_bound(polyfill.launched);
+    keep_bound(polyfill.scan);
 
-    // Buffers of the draw's own, so no draw's compute forms wait on an earlier one's reads; a task stage's draw holds
-    // slots for the mesh workgroups it may launch, which the GPU counts into its records.
-    auto const groups = i64(x) * i64(y) * i64(z);
-    auto const slots = polyfill.task != nullptr ? i64(polyfill.task_capacity(isize(groups))) : groups;
+    // Buffers of the draw's own, so no draw's compute forms wait on an earlier one's reads; records launch the mesh
+    // workgroups behind a task stage and on an indirect draw, whose counts the GPU then writes into them.
+    auto const by_records = polyfill.task != nullptr || args != nullptr;
+    auto const groups = i64(grid[0]) * i64(grid[1]) * i64(grid[2]);
+    auto const slots = !by_records     ? groups
+                     : args != nullptr ? i64(polyfill.indirect_capacity())
+                                       : i64(polyfill.task_capacity(isize(groups)));
+    auto const held = polyfill.task == nullptr ? i64(1) : args != nullptr ? i64(polyfill.indirect_capacity()) : groups;
     auto const scratch_raw = _ctx.transient.create_raw_buffer(isize(slots * polyfill.words_per_group * 4),
                                                               sg::buffer_usage::readwrite_buffer);
     auto const scratch = std::dynamic_pointer_cast<vulkan_buffer const>(scratch_raw);
@@ -488,12 +514,12 @@ void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_st
     _mesh_slots = scratch->_device_address;
     _mesh_slots_bytes = scratch->size_in_bytes();
     auto records = std::shared_ptr<vulkan_buffer const>();
-    if (polyfill.task != nullptr)
+    if (by_records)
     {
         records = std::dynamic_pointer_cast<vulkan_buffer const>(_ctx.transient.create_raw_buffer(
-            isize((9 + groups * polyfill.task_record_words) * 4),
-            sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer));
-        CC_ASSERT(records != nullptr, "the task polyfill's record buffer is not a vulkan buffer");
+            isize((12 + held * polyfill.record_words) * 4),
+            sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer | sg::buffer_usage::copy_dst));
+        CC_ASSERT(records != nullptr, "the mesh polyfill's record buffer is not a vulkan buffer");
         keep_bound(records);
         _task_slots = records->_device_address;
         _task_slots_bytes = records->size_in_bytes();
@@ -502,9 +528,40 @@ void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_st
     // Each compute form, outside the rendering instance, over the groups bound for the draw; push constants are no
     // bind point's, so the draw's own reach it.
     suspend_rendering("a polyfilled mesh draw", split_remedy::none);
+    if (by_records)
+    {
+        // the header's task grid, and an indirect draw's one record with no task stage, before any form reads them
+        auto const upload = [&](cc::span<u32 const> words, isize word)
+        { upload_bytes_to_buffer(records, cc::as_bytes(words), word * 4); };
+        auto const copy_args = [&](isize word)
+        {
+            track_buffer_access(*args, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+            track_buffer_access(*records, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+            flush_barriers();
+            auto const region = VkBufferCopy{
+                .srcOffset = VkDeviceSize(offset_in_bytes),
+                .dstOffset = VkDeviceSize(word * 4),
+                .size = VkDeviceSize(sizeof(sg::dispatch_args)),
+            };
+            vkCmdCopyBuffer(_buffer, args->_buffer, records->_buffer, 1, &region);
+        };
+        if (args == nullptr)
+        {
+            u32 const task_grid[] = {u32(grid[0]), u32(grid[1]), u32(grid[2])};
+            upload(task_grid, 9);
+        }
+        else if (polyfill.task != nullptr)
+            copy_args(9);
+        else
+        {
+            u32 const one[] = {1, 1, 1};
+            upload(one, 9);
+            copy_args(12);
+        }
+    }
     auto const raster_window = _bound_debug_window;
     u32 const buffer_index = 0;
-    auto const bind_half = [&](sg::compute_pipeline const& pipeline, cc::fixed_array<int, 3> grid)
+    auto const bind_half = [&](sg::compute_pipeline const& pipeline, cc::fixed_array<int, 3> grid_threads)
     {
         auto const* const half = dynamic_cast<vulkan_compute_pipeline const*>(&pipeline);
         CC_ASSERT(half != nullptr, "a polyfill's compute form is not a vulkan compute_pipeline");
@@ -518,9 +575,9 @@ void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_st
                 _ctx._descriptor_functions.cmd_set_descriptor_offsets(
                     _buffer, VK_PIPELINE_BIND_POINT_COMPUTE, layout._layout, u32(g), 1, &buffer_index, &offset);
             }
-        _dispatch_grid[0] = grid[0];
-        _dispatch_grid[1] = grid[1];
-        _dispatch_grid[2] = grid[2];
+        _dispatch_grid[0] = grid_threads[0];
+        _dispatch_grid[1] = grid_threads[1];
+        _dispatch_grid[2] = grid_threads[2];
         bind_software_trace(layout, _bound_raster_groups, VK_PIPELINE_BIND_POINT_COMPUTE);
         declare_group_accesses(_bound_raster_groups, &half->footprint(), sg::pipeline_stage_flag::compute);
         if (layout._holds_mesh_slots)
@@ -529,17 +586,30 @@ void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_st
             track_buffer_access(*records, sg::pipeline_stage_flag::compute,
                                 layout._holds_mesh_slots ? sg::access_flag::shader_read : sg::access_flag::shader_write);
     };
-    if (polyfill.task != nullptr)
+    if (by_records)
     {
-        // the task stage's records, then their scan, cut to the slots held, then each launched mesh workgroup
-        auto const& w = polyfill.task_workgroup;
-        bind_half(*polyfill.task, {x * w.x, y * w.y, z * w.z});
-        flush_barriers();
-        vkCmdDispatch(_buffer, u32(x), u32(y), u32(z));
-        bind_half(*polyfill.task_scan, {int(slots), 0, 0});
+        // the task stage's records, then their scan, cut to the slots and the records held, then each launched mesh
+        // workgroup
+        if (polyfill.task != nullptr)
+        {
+            bind_half(*polyfill.task, {int(held), 0, 0});
+            if (args == nullptr)
+            {
+                flush_barriers();
+                vkCmdDispatch(_buffer, u32(grid[0]), u32(grid[1]), u32(grid[2]));
+            }
+            else
+            {
+                // by the arguments themselves, since a dispatch reads none from the records it writes
+                track_buffer_access(*args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+                flush_barriers();
+                vkCmdDispatchIndirect(_buffer, args->_buffer, VkDeviceSize(offset_in_bytes));
+            }
+        }
+        bind_half(*polyfill.scan, {int(slots), int(held), 0});
         flush_barriers();
         vkCmdDispatch(_buffer, 1, 1, 1);
-        bind_half(*polyfill.compute, {0, 0, 0});
+        bind_half(polyfill.task != nullptr ? *polyfill.compute : *polyfill.launched, {0, 0, 0});
         track_buffer_access(*records, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
         flush_barriers();
         vkCmdDispatchIndirect(_buffer, records->_buffer, 2 * 4);
@@ -547,9 +617,9 @@ void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_st
     else
     {
         auto const& w = polyfill.workgroup;
-        bind_half(*polyfill.compute, {x * w.x, y * w.y, z * w.z});
+        bind_half(*polyfill.compute, {grid[0] * w.x, grid[1] * w.y, grid[2] * w.z});
         flush_barriers();
-        vkCmdDispatch(_buffer, u32(x), u32(y), u32(z));
+        vkCmdDispatch(_buffer, u32(grid[0]), u32(grid[1]), u32(grid[2]));
     }
     _dispatch_grid[0] = _dispatch_grid[1] = _dispatch_grid[2] = 0;
 
@@ -578,7 +648,7 @@ void vulkan_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_st
     declare_raster_draw_barriers(false);
     flush_barriers();
     resume_rendering();
-    // behind a task stage, as many corners as the scan counted
+    // behind records, as many corners as the scan counted
     if (records != nullptr)
         vkCmdDrawIndirect(_buffer, records->_buffer, 5 * 4, 1, 0);
     else

@@ -389,12 +389,10 @@ void merge_stage_into(flat_entry_point& e, flat_entry_point const& v);
 
 /// The workgroup `group` of a compute form dispatched in `workgroup`-sized groups, numbered `x + nx * (y + ny * z)`,
 /// the grid being the threads sg wrote into `sg_dispatch_grid`; what it binds goes into `into`.
-/// `count`, where given, is set to the workgroups of the grid.
 [[nodiscard]] flat_expr_id linear_workgroup(words& w,
                                             local_id group,
                                             cc::fixed_array<i32, 3> const& workgroup,
-                                            stmt_list& into,
-                                            flat_expr_id* count = nullptr);
+                                            stmt_list& into);
 
 /// An entry point of stage `s` with no parameter, binding or result, which takes `e`'s header and origin; its
 /// locals stay, as temporaries, so a body built from `e`'s values reads them.

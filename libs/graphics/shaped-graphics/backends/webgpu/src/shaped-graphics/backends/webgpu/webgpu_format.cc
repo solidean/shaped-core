@@ -134,8 +134,9 @@ WGPUBufferUsage to_wgpu_buffer_usage(sg::buffer_usages usage)
     if (usage.has_any(sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer
                       | sg::buffer_usage::accel_structure_build_input))
         out |= WGPUBufferUsage_Storage;
+    // a polyfilled indirect mesh draw copies its arguments into the records it draws by
     if (usage.has(sg::buffer_usage::indirect_command_buffer))
-        out |= WGPUBufferUsage_Indirect;
+        out |= WGPUBufferUsage_Indirect | WGPUBufferUsage_CopySrc;
     return out;
 }
 

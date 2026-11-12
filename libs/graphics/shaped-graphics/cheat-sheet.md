@@ -160,7 +160,7 @@ ctx.limits()                                       // -> sg::device_limits const
 ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
 ctx.set_mesh_polyfill(sg::polyfill_use::where_missing) // slib draws a mesh stage as compute + draw where the device has none (`always`: everywhere, `never`: refuse); `where_missing` by default
 ctx.draws_mesh_polyfill()                          // bool — whether this backend draws a polyfilled pipeline at all (all but metal, which needs none)
-desc.mesh_polyfill->task_budget = 4096;            // a polyfilled task stage that states no `meshes = N`: the mesh workgroups a draw launches at most
+desc.mesh_polyfill->launch_budget = 4096;          // the mesh workgroups a polyfilled draw launches at most where the GPU counts them and no `meshes = N` bounds them; an indirect draw's task workgroups too
 ctx.set_geometry_polyfill(sg::polyfill_use::where_missing) // slib draws a geometry stage as compute + draw where the device has none; `never` by default, opt-in until measured
 ctx.draws_geometry_polyfill()                      // bool — whether this backend draws a polyfilled geometry stage (metal so far)
 ctx.set_tessellation_polyfill(sg::polyfill_use::where_missing) // slib draws tessellation by D3D's tessellator in compute where the device has none; `never` by default
@@ -435,7 +435,7 @@ cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.off
 //   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
 cmd.raster.draw_mesh_tasks(x, y = 1, z = 1)  // void — x*y*z workgroups of a mesh-shaded pipeline's task stage, or mesh stage without one;
 //   only a pipeline with a mesh stage draws this way (pipeline.is_mesh_shaded()), and it asserts in draw / draw_indexed
-cmd.raster.draw_mesh_tasks_indirect(args, first = 0, count = 1)  // void — `count` mesh draws, each record of buffer<sg::dispatch_args> (x, y, z) read by the GPU
+cmd.raster.draw_mesh_tasks_indirect(args, first = 0, count = 1)  // void — `count` mesh draws, each record of buffer<sg::dispatch_args> (x, y, z) read by the GPU; a polyfilled pipeline too
 cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
 //   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
 //   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts (not 0 needs sg::feature::indirect_first_instance)

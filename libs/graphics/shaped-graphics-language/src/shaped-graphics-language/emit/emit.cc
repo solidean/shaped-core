@@ -224,25 +224,32 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
     if (e.entry_stage == check::stage::mesh && sources.mesh != mesh_form::native)
     {
+        // a task stage is named by a compile of the whole source alone, so the scan and the launched form here are an
+        // indirect draw's, whose one record carries no payload
         auto const layout = check::mesh_polyfill_layout_of(m, e, sources.mesh == mesh_form::vertex_fetch);
-        auto const refusal = layout.has_error()              ? layout.error()
-                           : sources.mesh == mesh_form::scan ? cc::format("the scan of {} runs after its pipeline's "
-                                                                          "task stage, which only a compile of its "
-                                                                          "source names",
-                                                                          e.name)
-                                                             : cc::string();
-        if (!refusal.empty())
+        if (layout.has_error())
         {
             auto refused = emitted_text();
-            refused.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = refusal});
+            refused.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = layout.error()});
             return refused;
         }
         auto native = sources;
         native.mesh = mesh_form::native;
-        if (sources.mesh == mesh_form::compute)
+        auto const indirect = check::task_polyfill_layout{};
+        if (sources.mesh == mesh_form::compute || sources.mesh == mesh_form::launched)
         {
-            auto result = emit_entry_point(m, check::mesh_as_compute(m, e), t, native);
+            auto const is_launched = sources.mesh == mesh_form::launched;
+            auto result = emit_entry_point(m, check::mesh_as_compute(m, e, is_launched ? &indirect : nullptr), t, native);
             result.mesh_layout = layout.value();
+            if (is_launched)
+                result.task_layout = indirect;
+            return result;
+        }
+        if (sources.mesh == mesh_form::scan)
+        {
+            auto result = emit_entry_point(m, check::mesh_task_scan(m, e, indirect), t, native);
+            result.mesh_layout = layout.value();
+            result.task_layout = indirect;
             return result;
         }
         // a vertex half that hands values per primitive on returns a struct of both, which a copy of the module holds

@@ -48,15 +48,20 @@ struct sg::mesh_polyfill_description
     /// record of `sg_task_output`, and the scan that numbers what they launched; `compute_shader` then reads them.
     /// The draw's mesh workgroups are then the GPU's to count, so the draw is indirect.
     cc::optional<compiled_shader> task_shader;
-    compiled_shader task_scan_shader;
-    /// The 32-bit words of one task workgroup's record.
-    int task_record_words = 0;
+    /// With no task stage, the compute half launched by the one record an indirect draw writes, which
+    /// `draw_mesh_tasks_indirect` dispatches; without it, only `draw_mesh_tasks` draws the pipeline.
+    cc::optional<compiled_shader> launched_shader;
+    /// The scan that numbers the records' launches, which a task stage or `launched_shader` needs.
+    compiled_shader scan_shader;
+    /// The 32-bit words of one record: a task workgroup's, or an indirect draw's.
+    int record_words = 0;
     /// The mesh workgroups one task workgroup launches at most, which a draw holds slots for; 0 where the task stage
-    /// states none, and `task_budget` bounds the draw instead.
+    /// states none, and `launch_budget` bounds the draw instead.
     int task_meshes = 0;
-    /// The mesh workgroups a draw of a task stage that states no bound launches at most; the excess is dropped.
+    /// The mesh workgroups a draw whose count no bound states launches at most, and the task workgroups of an
+    /// indirect draw; the excess is dropped.
     /// A host may set it for a pipeline; at most `max_dispatch_groups_per_dimension`.
-    int task_budget = 4096;
+    int launch_budget = 4096;
 };
 
 /// What a polyfilled raster pipeline draws with, which the context attaches once both halves are built.
@@ -70,18 +75,28 @@ struct sg::impl::mesh_polyfill_state
     int words_per_group = 0;
     /// `mesh_polyfill_description::input_corners`: 0 for a mesh stage, the assembled primitive's for a geometry stage.
     int input_corners = 0;
-    /// A polyfilled task stage's compute form and scan, both null without one; `compute` is then dispatched indirectly.
+    /// A polyfilled task stage's compute form, null without one; `compute` is then dispatched indirectly.
     compute_pipeline_handle task;
-    compute_pipeline_handle task_scan;
+    /// The compute half an indirect draw with no task stage dispatches, null behind a task stage or without one.
+    compute_pipeline_handle launched;
+    /// The scan of the records, null where neither a task stage nor `launched` writes any.
+    compute_pipeline_handle scan;
     compute_dimensions task_workgroup;
-    int task_record_words = 0;
+    int record_words = 0;
     int task_meshes = 0;
-    int task_budget = 0;
+    int launch_budget = 0;
 
     /// The mesh workgroups a draw of `tasks` task workgroups holds slots for.
     [[nodiscard]] isize task_capacity(isize tasks) const
     {
-        auto const wanted = task_meshes > 0 ? tasks * isize(task_meshes) : isize(task_budget);
+        return task_meshes > 0 ? capped(tasks * isize(task_meshes)) : indirect_capacity();
+    }
+    /// The mesh workgroups an indirect draw holds slots for, and the task workgroups it holds records for.
+    [[nodiscard]] isize indirect_capacity() const { return capped(isize(launch_budget)); }
+
+private:
+    [[nodiscard]] static isize capped(isize wanted)
+    {
         return wanted < isize(max_dispatch_groups_per_dimension) ? wanted : isize(max_dispatch_groups_per_dimension);
     }
 };

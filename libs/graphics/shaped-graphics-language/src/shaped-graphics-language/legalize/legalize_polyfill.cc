@@ -481,8 +481,7 @@ local_id sgl::check::impl::stage_input_of(flat_builder& out, stage_input input, 
 flat_expr_id sgl::check::impl::linear_workgroup(words& w,
                                                 local_id group,
                                                 cc::fixed_array<i32, 3> const& workgroup,
-                                                stmt_list& into,
-                                                flat_expr_id* count)
+                                                stmt_list& into)
 {
     auto& out = w.out;
     auto const grid = listed(out, "sg_dispatch_grid");
@@ -496,8 +495,6 @@ flat_expr_id sgl::check::impl::linear_workgroup(words& w,
     };
     auto const nx = axis_groups("polyfill_nx", 0);
     auto const ny = axis_groups("polyfill_ny", 1);
-    if (count != nullptr)
-        *count = w.binary("multiply_uint", nx, w.binary("multiply_uint", ny, axis_groups("polyfill_nz", 2)));
     return w.binary("add_uint", id(0),
                     w.binary("multiply_uint", nx, w.binary("add_uint", id(1), w.binary("multiply_uint", ny, id(2)))));
 }

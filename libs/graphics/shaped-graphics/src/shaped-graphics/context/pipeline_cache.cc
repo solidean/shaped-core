@@ -345,11 +345,13 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
         b.add_pod(p.input_corners);
         add_optional_shader(b, p.task_shader);
         b.add_bool(p.task_shader.has_value());
-        if (p.task_shader.has_value())
-            add_shader(b, p.task_scan_shader);
-        b.add_pod(p.task_record_words);
+        add_optional_shader(b, p.launched_shader);
+        b.add_bool(p.launched_shader.has_value());
+        if (p.task_shader.has_value() || p.launched_shader.has_value())
+            add_shader(b, p.scan_shader);
+        b.add_pod(p.record_words);
         b.add_pod(p.task_meshes);
-        b.add_pod(p.task_budget);
+        b.add_pod(p.launch_budget);
     }
     b.add_bool(desc.tessellation_polyfill.has_value());
     if (desc.tessellation_polyfill.has_value())

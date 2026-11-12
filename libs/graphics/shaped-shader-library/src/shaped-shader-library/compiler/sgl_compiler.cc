@@ -355,10 +355,11 @@ private:
             }
             if (o.name == slib::k_mesh_form_option)
             {
-                mesh = o.value == "compute" ? sgl::emit::mesh_form::compute
-                     : o.value == "vertex"  ? sgl::emit::mesh_form::vertex_fetch
-                     : o.value == "scan"    ? sgl::emit::mesh_form::scan
-                                            : sgl::emit::mesh_form::native;
+                mesh = o.value == "compute"  ? sgl::emit::mesh_form::compute
+                     : o.value == "vertex"   ? sgl::emit::mesh_form::vertex_fetch
+                     : o.value == "scan"     ? sgl::emit::mesh_form::scan
+                     : o.value == "launched" ? sgl::emit::mesh_form::launched
+                                             : sgl::emit::mesh_form::native;
                 continue;
             }
             if (o.name == slib::k_polyfill_task_option)
@@ -448,6 +449,7 @@ private:
                               : !is_polyfilled                             ? desc.stage
                               : mesh == sgl::emit::mesh_form::compute      ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::scan         ? sg::shader_stage::compute
+                              : mesh == sgl::emit::mesh_form::launched     ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::vertex_fetch ? sg::shader_stage::vertex
                                                                            : desc.stage;
         auto shader = sg::compiled_shader{.stage = form_stage, .format = _format, .entry_point = emitted.entry_point};

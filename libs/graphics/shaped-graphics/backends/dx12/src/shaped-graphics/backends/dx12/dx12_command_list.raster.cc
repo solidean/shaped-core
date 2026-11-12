@@ -427,34 +427,85 @@ void dx12_command_list::raster_draw_mesh_tasks(int x, int y, int z)
 
 void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z)
 {
+    draw_mesh_polyfilled(polyfill, {x, y, z}, nullptr, 0);
+}
+
+void dx12_command_list::raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                                             sg::raw_buffer_handle const& args,
+                                                             isize offset_in_bytes,
+                                                             isize count)
+{
+    auto const buffer = std::dynamic_pointer_cast<dx12_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect mesh draw arguments are not a dx12 buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect mesh draw arguments are a transient buffer used past its epoch");
+    keep_bound(buffer);
+    for (auto i = isize(0); i < count; ++i)
+        draw_mesh_polyfilled(polyfill, {0, 0, 0}, buffer, offset_in_bytes + i * isize(sizeof(sg::dispatch_args)));
+}
+
+void dx12_command_list::draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                             cc::fixed_array<int, 3> grid,
+                                             dx12_buffer_handle const& args,
+                                             isize offset_in_bytes)
+{
     CC_ASSERT(_in_render_pass, "draw_mesh_tasks requires an open rendering scope");
     CC_ASSERT(_bound_raster_layout != nullptr && _bound_raster_pso != nullptr, "bind a raster pipeline before drawing");
     keep_bound(polyfill.compute);
     keep_bound(polyfill.task);
-    keep_bound(polyfill.task_scan);
+    keep_bound(polyfill.launched);
+    keep_bound(polyfill.scan);
 
-    // Buffers of the draw's own, so no draw's compute forms wait on an earlier one's reads; a task stage's draw holds
-    // slots for the mesh workgroups it may launch, which the GPU counts into its records.
-    auto const groups = i64(x) * i64(y) * i64(z);
-    auto const slots = polyfill.task != nullptr ? i64(polyfill.task_capacity(isize(groups))) : groups;
+    // Buffers of the draw's own, so no draw's compute forms wait on an earlier one's reads; records launch the mesh
+    // workgroups behind a task stage and on an indirect draw, whose counts the GPU then writes into them.
+    auto const by_records = polyfill.task != nullptr || args != nullptr;
+    auto const groups = i64(grid[0]) * i64(grid[1]) * i64(grid[2]);
+    auto const slots = !by_records     ? groups
+                     : args != nullptr ? i64(polyfill.indirect_capacity())
+                                       : i64(polyfill.task_capacity(isize(groups)));
+    auto const held = polyfill.task == nullptr ? i64(1) : args != nullptr ? i64(polyfill.indirect_capacity()) : groups;
     auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(_ctx.transient.create_raw_buffer(
         isize(slots * polyfill.words_per_group * 4), sg::buffer_usage::readwrite_buffer));
     CC_ASSERT(scratch != nullptr, "the mesh polyfill's slot buffer is not a dx12 buffer");
     keep_bound(scratch);
     auto records = std::shared_ptr<dx12_buffer const>();
-    if (polyfill.task != nullptr)
+    if (by_records)
     {
         records = std::dynamic_pointer_cast<dx12_buffer const>(_ctx.transient.create_raw_buffer(
-            isize((9 + groups * polyfill.task_record_words) * 4),
-            sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer));
-        CC_ASSERT(records != nullptr, "the task polyfill's record buffer is not a dx12 buffer");
+            isize((12 + held * polyfill.record_words) * 4),
+            sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer | sg::buffer_usage::copy_dst));
+        CC_ASSERT(records != nullptr, "the mesh polyfill's record buffer is not a dx12 buffer");
         keep_bound(records);
+
+        // the header's task grid, and an indirect draw's one record with no task stage, before any form reads them
+        auto const upload = [&](cc::span<u32 const> words, isize word)
+        { upload_bytes_to_buffer(records, cc::as_bytes(words), word * 4); };
+        auto const copy_args = [&](isize word)
+        {
+            track_buffer_access(args, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+            track_buffer_access(records, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+            flush_barriers();
+            _list->CopyBufferRegion(records->_resource.Get(), UINT64(word * 4), args->_resource.Get(),
+                                    UINT64(offset_in_bytes), UINT64(sizeof(sg::dispatch_args)));
+        };
+        if (args == nullptr)
+        {
+            u32 const task_grid[] = {u32(grid[0]), u32(grid[1]), u32(grid[2])};
+            upload(task_grid, 9);
+        }
+        else if (polyfill.task != nullptr)
+            copy_args(9);
+        else
+        {
+            u32 const one[] = {1, 1, 1};
+            upload(one, 9);
+            copy_args(12);
+        }
     }
 
     // Each compute form over the groups bound for the draw, with its inline constants, the grid where it reads one,
     // and the slots and records its layout holds.
     // D3D12 dispatches inside the scope, which binds its targets with OMSetRenderTargets rather than a render pass.
-    auto const bind_half = [&](sg::compute_pipeline const& pipeline, cc::optional<cc::fixed_array<u32, 4>> grid)
+    auto const bind_half = [&](sg::compute_pipeline const& pipeline, cc::optional<cc::fixed_array<u32, 4>> grid_threads)
     {
         auto const* const half = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
         CC_ASSERT(half != nullptr, "a polyfill's compute form is not a dx12 compute_pipeline");
@@ -476,8 +527,8 @@ void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_stat
                                                 UINT(_raster_inline_constants.size()), _raster_inline_constants.data(),
                                                 0);
         bind_software_trace(layout, _bound_raster_groups, false);
-        if (layout.dispatch_grid_root_param >= 0 && grid.has_value())
-            _list->SetComputeRoot32BitConstants(UINT(layout.dispatch_grid_root_param), 4, grid.value().data(), 0);
+        if (layout.dispatch_grid_root_param >= 0 && grid_threads.has_value())
+            _list->SetComputeRoot32BitConstants(UINT(layout.dispatch_grid_root_param), 4, grid_threads.value().data(), 0);
         if (layout.mesh_slots_root_param >= 0)
         {
             _list->SetComputeRootUnorderedAccessView(UINT(layout.mesh_slots_root_param), scratch->gpu_virtual_address());
@@ -497,17 +548,31 @@ void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_stat
         }
         declare_group_accesses(_bound_raster_groups, &half->footprint(), sg::pipeline_stage_flag::compute);
     };
-    if (polyfill.task != nullptr)
+    if (by_records)
     {
-        // the task stage's records, then their scan, cut to the slots held, then each launched mesh workgroup
-        auto const& w = polyfill.task_workgroup;
-        bind_half(*polyfill.task, cc::fixed_array<u32, 4>{u32(x * w.x), u32(y * w.y), u32(z * w.z), 0});
-        flush_barriers();
-        _list->Dispatch(UINT(x), UINT(y), UINT(z));
-        bind_half(*polyfill.task_scan, cc::fixed_array<u32, 4>{u32(slots), 0, 0, 0});
+        // the task stage's records, then their scan, cut to the slots and the records held, then each launched mesh
+        // workgroup
+        if (polyfill.task != nullptr)
+        {
+            bind_half(*polyfill.task, cc::fixed_array<u32, 4>{u32(held), 0, 0, 0});
+            if (args == nullptr)
+            {
+                flush_barriers();
+                _list->Dispatch(UINT(grid[0]), UINT(grid[1]), UINT(grid[2]));
+            }
+            else
+            {
+                // by the arguments themselves, since a dispatch reads none from the records it writes
+                track_buffer_access(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+                flush_barriers();
+                _list->ExecuteIndirect(_ctx._dispatch_signature.Get(), 1, args->_resource.Get(),
+                                       UINT64(offset_in_bytes), nullptr, 0);
+            }
+        }
+        bind_half(*polyfill.scan, cc::fixed_array<u32, 4>{u32(slots), u32(held), 0, 0});
         flush_barriers();
         _list->Dispatch(1, 1, 1);
-        bind_half(*polyfill.compute, cc::nullopt);
+        bind_half(polyfill.task != nullptr ? *polyfill.compute : *polyfill.launched, cc::nullopt);
         track_buffer_access(records, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
         flush_barriers();
         _list->ExecuteIndirect(_ctx._dispatch_signature.Get(), 1, records->_resource.Get(), 2 * 4, nullptr, 0);
@@ -515,9 +580,10 @@ void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_stat
     else
     {
         auto const& w = polyfill.workgroup;
-        bind_half(*polyfill.compute, cc::fixed_array<u32, 4>{u32(x * w.x), u32(y * w.y), u32(z * w.z), 0});
+        bind_half(*polyfill.compute,
+                  cc::fixed_array<u32, 4>{u32(grid[0] * w.x), u32(grid[1] * w.y), u32(grid[2] * w.z), 0});
         flush_barriers();
-        _list->Dispatch(UINT(x), UINT(y), UINT(z));
+        _list->Dispatch(UINT(grid[0]), UINT(grid[1]), UINT(grid[2]));
     }
 
     // The list's compute binding is gone with its pipeline state, as after any raster bind: a dispatch binds again.
@@ -537,7 +603,7 @@ void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_stat
         track_buffer_access(records, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
     declare_raster_draw_barriers(false);
     flush_barriers();
-    // behind a task stage, as many corners as the scan counted
+    // behind records, as many corners as the scan counted
     if (records != nullptr)
         _list->ExecuteIndirect(_ctx._draw_signature.Get(), 1, records->_resource.Get(), 5 * 4, nullptr, 0);
     else

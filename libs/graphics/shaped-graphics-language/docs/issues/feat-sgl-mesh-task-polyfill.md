@@ -73,3 +73,9 @@ There the two images must be identical, equal depths and blending included, and 
   A launched mesh workgroup finds its task workgroup by a binary search over the records, so the order is the native one.
   `launched` and `culled` (four task workgroups launching 0, 1, 2 and 0) draw the native stages' images on webgpu (Dawn and wgpu), dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V.
   Still open of it: the `report` profile's log of a dropped launch, a parallel scan once measured, and WGSL's uniformity of a launched mesh stage's workgroup id.
+- **2026-11-12: indirect draws.**
+  `draw_mesh_tasks_indirect` draws a polyfilled pipeline, each record of its arguments one draw, with the budget renamed `launch_budget` for the slots and task records it holds.
+  The task grid moved into the record buffer's header, which sg writes on a direct draw and copies from the arguments on an indirect one; the scan now counts launches from each record's grid.
+  With no task stage, an indirect draw is one record of no payload, launching SGL's new `launched` form, which slib acquires for every polyfilled mesh stage.
+  `split` and `culled` drawn indirectly match the native images on webgpu (Dawn and wgpu), dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V.
+  Still open of it: the WGSL uniformity item now reaches a mesh stage with no task stage too, since its `launched` form is built beside it.

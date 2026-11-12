@@ -233,3 +233,71 @@ ASYNC_INVOCABLE_TEST("sg - a polyfilled mesh stage hands its pixel stage what it
             CHECK(pixels[0].rgba8(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
         }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an indirect draw of a polyfilled mesh stage reads its workgroup counts from a buffer, a "
+                     "record at a time",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = unreachable(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const scope = polyfilling(*ctx);
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::split);
+    REQUIRE(pipeline->mesh_polyfill() != nullptr);
+    CHECK(pipeline->mesh_polyfill()->launched != nullptr);
+    // sgl-mesh-test.cc's records and images of the native stage: both halves; then the left alone, beside a record of
+    // no workgroups, which draws nothing
+    auto const args = ctx->persistent.create_buffer_from_data(
+        cc::vector<sg::dispatch_args>{{.x = 2}, {.x = 1}, {.x = 0}}, sg::buffer_usage::indirect_command_buffer);
+    for (auto const [first, count, halves] : {cc::tuple{0, 1, 2}, cc::tuple{1, 2, 1}})
+    {
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx, mesh_target(),
+                                                             [&](sg::rendering_scope& s)
+                                                             {
+                                                                 s.bind_pipeline(*pipeline);
+                                                                 s.draw_mesh_tasks_indirect(args, first, count);
+                                                             });
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+            {
+                auto const is_left = x < size / 2;
+                auto const expected = is_left     ? tg::vec4i(0, 0, 255, 255)
+                                    : halves == 2 ? tg::vec4i(255, 0, 255, 255)
+                                                  : tg::vec4i(0, 0, 0, 0);
+                CHECK(pixels[0].rgba8(x, y) == expected).context(cc::format("{} halves, pixel ({}, {})", halves, x, y));
+            }
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an indirect draw of a polyfilled task stage launches what its task workgroups do",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = unreachable(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const scope = polyfilling(*ctx);
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::culled);
+    REQUIRE(pipeline->mesh_polyfill() != nullptr);
+    CHECK(pipeline->mesh_polyfill()->launched == nullptr);
+    // four task workgroups, then a record of none
+    auto const args = ctx->persistent.create_buffer_from_data(cc::vector<sg::dispatch_args>{{.x = 4}, {.x = 0}},
+                                                              sg::buffer_usage::indirect_command_buffer);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, mesh_target(),
+                                                         [&](sg::rendering_scope& s)
+                                                         {
+                                                             s.bind_pipeline(*pipeline);
+                                                             s.draw_mesh_tasks_indirect(args, 0, 2);
+                                                         });
+    // the direct draw's image above: columns 2, 4 and 5 alone
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const expected = x == 2 ? tg::vec4i(64, 0, 255, 255)
+                                : x == 4 ? tg::vec4i(128, 0, 255, 255)
+                                : x == 5 ? tg::vec4i(128, 255, 255, 255)
+                                         : tg::vec4i(0, 0, 0, 0);
+            CHECK(pixels[0].rgba8(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
+        }
+}

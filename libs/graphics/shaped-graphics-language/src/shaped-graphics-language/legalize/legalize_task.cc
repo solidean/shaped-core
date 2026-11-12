@@ -51,15 +51,22 @@ flat_entry_point sgl::check::task_as_compute(checked_module const& m, flat_entry
 
     auto out = flat_builder::extend(m, t);
     auto w = words{.out = out, .binding = listed(out, "sg_task_output")};
+    auto const grid = listed(out, "sg_dispatch_grid");
     auto const group = stage_input_of(out, stage_input::workgroup_id, "workgroup_id", out.type_named("int3"));
     auto const local
         = stage_input_of(out, stage_input::local_thread_index, "local_thread_index", out.type_named(builtins::k_int));
 
+    // `x + nx * (y + ny * z)` over the header's grid, which an indirect draw's arguments wrote
     auto prologue = stmt_list();
-    auto count = flat_expr_id::none;
-    auto const linear = linear_workgroup(w, group, t.workgroup, prologue, &count);
-    auto const index = w.bound("task_index", linear, prologue);
-    auto const tasks = w.bound("task_count", count, prologue);
+    auto const nx = w.bound("task_nx", w.at(w.word(u32(l::k_task_grid_word))), prologue);
+    auto const ny = w.bound("task_ny", w.at(w.word(u32(l::k_task_grid_word + 1))), prologue);
+    auto const id = [&](i32 axis) { return w.unary("convert_int_to_uint", out.member(out.local(group), axis)); };
+    auto const index = w.bound(
+        "task_index",
+        w.binary("add_uint", id(0),
+                 w.binary("multiply_uint", nx, w.binary("add_uint", id(1), w.binary("multiply_uint", ny, id(2))))),
+        prologue);
+    auto const records = w.bound("task_records", out.member(out.binding_member(grid, 0), 0), prologue);
 
     // the first invocation's launch is the workgroup's, as on metal
     auto const replace = [&](flat_stmt_id sid, stmt_list& into) -> bool
@@ -80,20 +87,8 @@ flat_entry_point sgl::check::task_as_compute(checked_module const& m, flat_entry
                       w.binary("add_uint", w.word(u32(l::k_first_record_word)),
                                w.binary("multiply_uint", index, w.word(u32(layout.value().record_words())))),
                       launch);
-        auto const gx = w.bound("task_gx", arguments[0], launch);
-        auto const gy = w.bound("task_gy", arguments[1], launch);
-        auto const gz = w.bound("task_gz", arguments[2], launch);
-        auto launched = w.binary("multiply_uint", gx, w.binary("multiply_uint", gy, gz));
-        // a launch past the stated bound is cut to it, so the draw's slots hold it
-        if (layout.value().max_meshes > 0)
-        {
-            flat_expr_id const bounded[] = {launched, w.word(u32(layout.value().max_meshes))};
-            launched = out.call("min", bounded);
-        }
-        store(record, l::k_record_count, launched);
-        store(record, l::k_record_grid, gx);
-        store(record, l::k_record_grid + 1, gy);
-        store(record, l::k_record_grid + 2, gz);
+        for (auto axis = 0; axis < 3; ++axis)
+            store(record, u32(l::k_record_grid + axis), arguments[axis]);
         if (arguments.size() > 3)
         {
             auto const payload = w.bound("task_payload", arguments[3], launch);
@@ -101,10 +96,10 @@ flat_entry_point sgl::check::task_as_compute(checked_module const& m, flat_entry
             for (auto k = isize(0); k < leaves.size(); ++k)
                 store(record, u32(l::k_record_payload + k), w.encode(w.leaf_of(payload, leaves[k]), leaves[k].kind));
         }
-        flat_stmt_id const counted[] = {out.assign(w.at(w.word(u32(l::k_task_count_word))), tasks)};
-        launch.push_back(out.if_(w.binary("equal_uint", index, w.word(0)), counted));
+        // a workgroup past the records the draw holds launches nothing, which the scan's count of them says too
         flat_expr_id const first[] = {out.local(local), out.int_literal(0)};
-        into.push_back(out.if_(out.call("equal_int", first), launch));
+        flat_stmt_id const held[] = {out.if_(w.binary("less_uint", index, records), launch)};
+        into.push_back(out.if_(out.call("equal_int", first), held));
         return true;
     };
 
@@ -130,11 +125,22 @@ flat_entry_point sgl::check::mesh_task_scan(checked_module const& m,
     auto w = words{.out = out, .binding = listed(out, "sg_task_output")};
     auto const grid = listed(out, "sg_dispatch_grid");
     auto const uint = w.uint_type();
+    auto const held = [&](i32 axis) { return out.member(out.binding_member(grid, 0), axis); };
+    auto const product = [&](flat_expr_id first, u32 offset)
+    {
+        return w.binary("multiply_uint", w.at(first, offset),
+                        w.binary("multiply_uint", w.at(first, offset + 1), w.at(first, offset + 2)));
+    };
+    auto const min = [&](flat_expr_id a, flat_expr_id b)
+    {
+        flat_expr_id const both[] = {a, b};
+        return out.call("min", both);
+    };
 
+    // the task workgroups that wrote a record, which the launched mesh stage searches
     auto body = stmt_list();
-    auto const tasks = w.bound("scan_tasks", w.at(w.word(u32(l::k_task_count_word))), body);
-    // the mesh workgroups sg holds slots for, which is where the launch is cut
-    auto const capacity = w.bound("scan_capacity", out.member(out.binding_member(grid, 0), 0), body);
+    auto const tasks = w.bound("scan_tasks", min(product(w.word(0), u32(l::k_task_grid_word)), held(1)), body);
+    body.push_back(out.assign(w.at(w.word(u32(l::k_task_count_word))), tasks));
     auto const running = out.add_local(local_kind::temporary, "scan_running", uint);
     auto const i = out.add_local(local_kind::temporary, "scan_task", uint);
     body.push_back(out.var(running, w.word(0)));
@@ -145,14 +151,18 @@ flat_entry_point sgl::check::mesh_task_scan(checked_module const& m,
                                 w.binary("add_uint", w.word(u32(l::k_first_record_word)),
                                          w.binary("multiply_uint", out.local(i), w.word(u32(task.record_words())))),
                                 step);
-    auto const launched = w.bound("scan_launched", w.at(record, u32(l::k_record_count)), step);
+    auto launched = product(record, u32(l::k_record_grid));
+    // a launch past the stated bound is cut to it, so the draw's slots hold it
+    if (task.max_meshes > 0)
+        launched = min(launched, w.word(u32(task.max_meshes)));
+    auto const counted = w.bound("scan_launched", launched, step);
     step.push_back(out.assign(w.at(record, u32(l::k_record_first)), out.local(running)));
-    step.push_back(out.assign(out.local(running), w.binary("add_uint", out.local(running), launched)));
+    step.push_back(out.assign(out.local(running), w.binary("add_uint", out.local(running), counted)));
     step.push_back(out.assign(out.local(i), w.binary("add_uint", out.local(i), w.word(1))));
     body.push_back(out.while_(out.add_label("scan"), w.binary("less_uint", out.local(i), tasks), step));
 
-    flat_expr_id const bounded[] = {out.local(running), capacity};
-    auto const total = w.bound("scan_total", out.call("min", bounded), body);
+    // the mesh workgroups sg holds slots for, which is where the launch is cut
+    auto const total = w.bound("scan_total", min(out.local(running), held(0)), body);
     auto const vertices = u32(mesh.value().max_primitives * mesh.value().corners);
     auto const store = [&](i32 word, flat_expr_id value) { body.push_back(out.assign(w.at(w.word(u32(word))), value)); };
     store(l::k_launched_word, total);
