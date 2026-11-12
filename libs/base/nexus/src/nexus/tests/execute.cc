@@ -1135,6 +1135,12 @@ struct async_test_state
     // For a dispatched child whose invocation asked to inherit the driver's home: where its body is placed.
     cc::thread_bound_scheduler* inherited_home = nullptr;
 
+    // For a dispatched child: the invocation's finish_each, owned by the invocation's frame, which outlives every child.
+    cc::unique_function<cc::shared_async<cc::unit>()> const* finish_each = nullptr;
+    // This pass's finish_each node, and whether it is still to be started: due only for a pass whose body was scheduled.
+    cc::shared_async<cc::unit> finishing;
+    bool finish_due = false;
+
     // Storage for a top-level test's own scopes: its instance's alias fragments, or the run's -c path as one scope.
     cc::vector<cc::vector<cc::string>> owned_scopes;
 
@@ -1265,6 +1271,7 @@ void start_async_pass(async_test_state& state)
     state.pass++;
 
     // Whichever the body handed back, placed and scheduled the same way.
+    state.finish_due = false;
     auto* body = static_cast<cc::async_node_base*>(nullptr);
     if (state.root != nullptr)
         body = state.root.get();
@@ -1304,7 +1311,28 @@ void start_async_pass(async_test_state& state)
             CC_ASSERT(homed, "a cold coroutine always takes a home");
         }
         body->schedule();
+        state.finish_due = state.finish_each != nullptr;
     }
+}
+
+/// Start the invocation's finish_each for the pass whose body just resolved, under that pass's link and placed as its body was.
+void start_async_finish(async_test_state& state)
+{
+    auto const& decl = *state.execution->instance.declaration;
+    state.finish_due = false;
+
+    // The pass's own link, so whatever the step logs or checks is this test's, on whichever thread it runs.
+    cc::async_ambient_install_scope const installed(state.pass_ambient);
+    state.finishing = (*state.finish_each)();
+    if (state.finishing == nullptr || !state.finishing->is_cold())
+        return;
+
+    auto const inherited = !decl.test_config.main_thread && state.inherited_home != nullptr;
+    auto* const home
+        = inherited ? state.inherited_home : (decl.test_config.main_thread ? &cc::main_thread_scheduler() : nullptr);
+    if (home != nullptr && state.finishing->reserves_home_word())
+        (void)state.finishing->try_home_cold(*home);
+    state.finishing->schedule();
 }
 
 /// File the pass whose body just resolved, and say whether another one runs.
@@ -1346,9 +1374,24 @@ void start_async_pass(async_test_state& state)
         }
     }
 
+    if (state.finishing != nullptr && !aborted)
+    {
+        if (auto const* const err = state.finishing->try_error(); err != nullptr)
+        {
+            auto const what = err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string();
+            ctx.errors.push_back(test_error{
+                .expr = cc::format("the invocation's finish_each failed: {}", what),
+                .location = decl.location,
+                .extra_lines = {},
+                .expanded = cc::format("finish_each resolved to an error: {}", what),
+            });
+        }
+    }
+
     // Drop the roots before counting: a ready node carries no context, but whatever it left behind still does.
     state.root = {};
     state.command_root = {};
+    state.finishing = {};
     state.pass_ambient = {};
 
     // `ambient` holds exactly one reference; anything beyond it is work that outlived the pass still naming the test.
@@ -1420,6 +1463,11 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         if (state.root != nullptr && !actx.require(state.root))
             return actx.wait_for_dependencies();
         if (state.command_root != nullptr && !actx.require(state.command_root))
+            return actx.wait_for_dependencies();
+
+        if (state.finish_due)
+            start_async_finish(state);
+        if (state.finishing != nullptr && !actx.require(state.finishing))
             return actx.wait_for_dependencies();
 
         if (!finish_async_pass(state))
@@ -3253,7 +3301,8 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(
     bool in_parallel,
     isize max_concurrent,
     cc::thread_bound_scheduler* home,
-    cc::unique_function<cc::shared_async<cc::unit>()> after_each)
+    cc::unique_function<cc::shared_async<cc::unit>()> after_each,
+    cc::unique_function<cc::shared_async<cc::unit>()> finish_each)
 {
     // Everything below runs on first poll, which inherits the awaiting body's ambient — so this is the driver's context.
     auto* const parent_ctx = current_context();
@@ -3395,6 +3444,7 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(
                 .is_dispatched = true,
                 .locks = locks,
                 .inherited_home = home,
+                .finish_each = finish_each.is_valid() ? &finish_each : nullptr,
             });
             node = cc::make_async_lazy<cc::unit>([state = cc::move(state)](cc::async_context<cc::unit>& actx) mutable
                                                  { return step_async_test(*state, actx); });
@@ -3402,11 +3452,40 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(
         else
         {
             // A synchronous child runs start to finish in one poll, on main when it asks for main.
-            auto const run = [&execution, &config, &child, consumed, vals = cc::span<nx::typed_value*>(values)]
+            auto const run
+                = [&execution, &config, &child, &finish_each, consumed, vals = cc::span<nx::typed_value*>(values)]
             {
                 cc::async_no_worker_scope const unbound; // as for any test body: what it schedules is its own business
                 run_test_body(
-                    execution, config, [&] { child.decl->invocable_function(vals); }, child.scopes, consumed + 2);
+                    execution, config,
+                    [&]
+                    {
+                        if (!finish_each.is_valid())
+                        {
+                            child.decl->invocable_function(vals);
+                            return;
+                        }
+                        // Inside the body, so the step is billed to this child; after a throw too, which it then rethrows.
+                        auto const finish = [&]
+                        {
+                            auto const done = cc::try_async_blocking_get(finish_each());
+                            if (!done.has_value())
+                                FAIL(cc::format("the invocation's finish_each failed: {}",
+                                                done.error().is_cancelled() ? cc::string("cancelled")
+                                                                            : done.error().underlying().to_string()));
+                        };
+                        try
+                        {
+                            child.decl->invocable_function(vals);
+                        }
+                        catch (...)
+                        {
+                            finish();
+                            throw;
+                        }
+                        finish();
+                    },
+                    child.scopes, consumed + 2);
                 return cc::unit{};
             };
             if (child.decl->test_config.main_thread)

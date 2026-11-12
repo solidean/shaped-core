@@ -443,6 +443,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-affine-memory-test.cc
             tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
+            tests/compute/compute-assert-billing-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc

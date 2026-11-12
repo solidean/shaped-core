@@ -41,7 +41,10 @@ ASYNC_TEST("sr dx12 - warp")
     {
         (void)sr_test::shader_fixtures(); // alive before any child acquires through it
         co_await nx::async_invoke_tests_in_sequence(
-            "dx12-warp", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())}, ctx.value());
+            "dx12-warp",
+            nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sr_test::settle_each(ctx.value())},
+            ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -65,7 +68,9 @@ ASYNC_TEST("sr dx12 - native-dxil")
     {
         (void)sr_test::shader_fixtures();
         co_await nx::async_invoke_tests_in_sequence(
-            "dx12-native-dxil", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())},
+            "dx12-native-dxil",
+            nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sr_test::settle_each(ctx.value())},
             ctx.value());
         CHECK(!ctx.value()->is_device_lost())
             .context(cc::format("the device was lost while running this binary's GPU tests: {}",
@@ -87,7 +92,10 @@ ASYNC_TEST("sr dx12 - hardware")
     {
         (void)sr_test::shader_fixtures();
         co_await nx::async_invoke_tests_in_sequence(
-            "dx12-hw", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())}, ctx.value());
+            "dx12-hw",
+            nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sr_test::settle_each(ctx.value())},
+            ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the

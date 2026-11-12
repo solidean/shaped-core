@@ -53,6 +53,11 @@ public:
     /// Decodes and resets every window whose bytes have arrived; the retire sweep calls it.
     void poll();
 
+    /// Whether a record written so far is still to be logged: the recording epoch's window was written, or a window is back from the GPU and not decoded yet.
+    [[nodiscard]] bool has_records_due() const;
+    /// Whether a pipeline that writes records was bound in the recording epoch, whose window is read back only once it closes.
+    [[nodiscard]] bool is_recording_written() const;
+
     /// Waits for every window in flight and decodes it, for a context about to shut down.
     void drain();
     /// Drops the windows' buffers, which must not outlive the device.
