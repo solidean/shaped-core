@@ -148,9 +148,10 @@ symbol_id sgl::check::impl::listed(flat_builder& out, cc::string_view name)
 flat_entry_point sgl::check::impl::slots_as_vertex_fetch(checked_module const& m,
                                                          flat_entry_point const& e,
                                                          mesh_polyfill_layout const& l,
-                                                         type_id vertex_type)
+                                                         type_id vertex_type,
+                                                         type_id corner_type)
 {
-    auto const leaves = leaves_of(m, vertex_type).value();
+    auto const result_type = is_valid(corner_type) ? corner_type : vertex_type;
 
     auto out = flat_builder::extend(m, e);
     for (auto& local : out.e.locals)
@@ -171,9 +172,9 @@ flat_entry_point sgl::check::impl::slots_as_vertex_fetch(checked_module const& m
     out.e.unshadowed_bytes = 0;
     out.e.workgroup_index = local_id::none;
     out.e.entry_stage = stage::vertex;
-    out.e.result = vertex_type;
+    out.e.result = result_type;
     out.e.features = {};
-    for (auto const& leaf : leaves)
+    for (auto const& leaf : leaves_of(m, result_type).value())
         if (leaf.kind == leaf_kind::half_)
             out.e.features.set(feature::shader_f16);
     if (e.body.count > 0)
@@ -192,7 +193,7 @@ flat_entry_point sgl::check::impl::slots_as_vertex_fetch(checked_module const& m
     auto const p = w.bound("mesh_slot", w.binary("divide_uint", v, corners), body);
     auto const base = w.bound(
         "mesh_base", w.binary("multiply_uint", w.binary("divide_uint", p, primitives), w.word(u32(l.group_words))), body);
-    auto const i = w.binary("remainder_uint", p, primitives);
+    auto const i = w.bound("mesh_slot_index", w.binary("remainder_uint", p, primitives), body);
     auto const c = w.binary("remainder_uint", v, corners);
     auto const corner
         = w.bound("mesh_index",
@@ -219,10 +220,29 @@ flat_entry_point sgl::check::impl::slots_as_vertex_fetch(checked_module const& m
                                     w.binary("multiply_uint", out.local(read_from), w.word(u32(l.vertex_words))))),
                   body);
     auto next = isize(0);
-    auto const result = out.add_local(local_kind::temporary, "mesh_vertex", vertex_type);
-    body.push_back(out.var(result, w.read_value(vertex_type, first, next)));
+    auto const result = out.add_local(local_kind::temporary, "mesh_vertex", result_type);
+    if (is_valid(corner_type))
+    {
+        // the vertex's members from its slot, then the primitive's from the slot of the primitive this corner is of
+        auto const primitive_at
+            = w.bound("mesh_primitive_at",
+                      w.binary("add_uint", base,
+                               w.binary("add_uint", w.word(u32(l.first_primitive_word())),
+                                        w.binary("multiply_uint", i, w.word(u32(l.primitive_words))))),
+                      body);
+        auto const vertex_members = isize(m.at(vertex_type).members.count);
+        auto parts = cc::vector<flat_expr_id>();
+        auto primitive_next = isize(0);
+        for (auto const& member : m.at(m.at(corner_type).members))
+            parts.push_back(isize(parts.size()) < vertex_members
+                                ? w.read_value(member.type, first, next)
+                                : w.read_value(member.type, primitive_at, primitive_next));
+        body.push_back(out.var(result, out.construct(corner_type, parts)));
+    }
+    else
+        body.push_back(out.var(result, w.read_value(vertex_type, first, next)));
 
-    auto const members = m.at(m.at(vertex_type).members);
+    auto const members = m.at(m.at(result_type).members);
     for (auto k = isize(0); k < members.size(); ++k)
     {
         if (!members[k].is_position)

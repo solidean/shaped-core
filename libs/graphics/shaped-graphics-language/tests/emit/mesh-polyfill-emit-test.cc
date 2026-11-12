@@ -88,17 +88,45 @@ TEST("sgl emit - a polyfilled mesh stage that reads no stage input still numbers
     }
 }
 
+TEST("sgl emit - a polyfilled mesh stage's values per primitive follow its vertices, and ride flat on each corner")
+{
+    // `face.color` shares a name with the vertex's member, which the struct both halves hand on must not
+    constexpr auto program
+        = cc::string_view("require mesh_shader\n"
+                          "struct corner:\n    @position position: hpos4\n    color: float4\n"
+                          "struct face:\n    color: float2\n    id: uint\n"
+                          "@pixel struct painted:\n    color: float4\n"
+                          "@mesh(1, vertices = 3, triangles = 2)\n"
+                          "fun ms(output: mut mesh_output[corner, face]):\n"
+                          "    output.set_counts(0u, 0u)\n"
+                          "@pixel fun ps(c: corner, f: face) -> painted:\n"
+                          "    return {color = c.color + float4(f.color.x, f.color.y, f.id as float, 0.0)}\n");
+    for (auto const form : {mesh_form::compute, mesh_form::vertex_fetch})
+    {
+        auto const e = emit_source(program, 0, target::wgsl, {.mesh = form});
+        REQUIRE(sgl::emit::dump_errors(e) == "");
+        auto const& l = e.mesh_layout.value();
+        CHECK(l.primitive_words == 3);
+        CHECK(l.first_primitive_word() == 2 + 3 * 2 + 3 * 8);
+        CHECK(l.group_words == l.first_primitive_word() + 2 * 3);
+    }
+
+    auto const vertex = emit_source(program, 0, target::wgsl, {.mesh = mesh_form::vertex_fetch});
+    CHECK(vertex.text.contains("@location(1) @interpolate(flat) color_of_primitive: vec2f")).dump("text", vertex.text);
+    CHECK(vertex.text.contains("@location(2) @interpolate(flat) id: u32")).dump("text", vertex.text);
+
+    // the pixel stage after the vertex half takes the same struct, and makes its own two from it
+    for (auto const t : {target::wgsl, target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const pixel = emit_source(program, 1, t, {.mesh = mesh_form::vertex_fetch});
+        REQUIRE(sgl::emit::dump_errors(pixel) == "");
+        CHECK(pixel.text.contains("sgl_mesh_corner")).dump("text", pixel.text);
+        CHECK(!pixel.text.contains("5271")).dump("text", pixel.text);
+    }
+}
+
 TEST("sgl emit - a mesh stage the polyfill does not carry yet is refused by name, not guessed (CHK-524)")
 {
-    constexpr auto per_primitive = cc::string_view("require mesh_shader\n"
-                                                   "struct corner:\n    @position position: hpos4\n"
-                                                   "struct face:\n    tint: float4\n"
-                                                   "@mesh(1, vertices = 3, triangles = 1)\n"
-                                                   "fun ms(output: mut mesh_output[corner, face]):\n"
-                                                   "    output.set_counts(0u, 0u)\n");
-    auto const faces = sgl::emit::dump_errors(emit_source(per_primitive, 0, target::wgsl, {.mesh = mesh_form::compute}));
-    CHECK(faces.contains("writes values per primitive")).dump("errors", faces);
-
     constexpr auto with_task = cc::string_view("require mesh_shader\n"
                                                "struct corner:\n    @position position: hpos4\n"
                                                "struct handed:\n    blue: float\n"

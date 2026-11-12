@@ -11,7 +11,7 @@ The decisions behind it are [feat-sgl-mesh-task-polyfill](../../../shaped-graphi
 
 ## Status
 
-SGL writes both halves, for a mesh stage with no task stage and no values per primitive.
+SGL writes both halves, for a mesh stage with no task stage.
 sg draws them on webgpu, dx12 and vulkan; metal has every mesh stage natively and draws none.
 
 **Measured on an Arc B580** (2026-11-11, `tests/pipeline/mesh-polyfill-benchmark.cc`), a frame of 4096 workgroups of 98 triangles each:
@@ -23,7 +23,7 @@ sg draws them on webgpu, dx12 and vulkan; metal has every mesh stage natively an
 
 **The polyfill is automatic where the device has no mesh stage**, `ctx.mesh_polyfill()`'s default of `where_missing`, decided by the measurements below.
 `always` polyfills everywhere, which is how a test compares the two on one device, and `never` refuses a mesh stage the device lacks.
-shaped-shader-library reads it when it describes a mesh-shaded pipeline, and acquires the two halves in place of the mesh stage.
+shaped-shader-library reads it when it describes a mesh-shaded pipeline, and acquires the two halves in place of the mesh stage, and the pixel stage that follows them.
 
 ## The words
 
@@ -36,16 +36,25 @@ Workgroup `g` of the draw's grid, numbered `x + nx * (y + ny * z)`, owns `group_
 | 1 | the primitive count `set_counts` stated |
 | 2 to `2 + K * M` | each primitive slot's `K` corner indices, 3 for triangles and 2 for lines |
 | then `N * vertex_words` | each vertex slot, one word a scalar leaf of the vertex struct, in field order |
+| then `M * primitive_words` | each primitive slot's values, `mesh_output[V, P]`'s `P`, the same way; none without a `P` |
 
 A leaf is its bits, a bool 0 or 1, and a `half` widened to a float first, as a debug record holds one.
-`K`, `M` (`max_primitives`), `N` (`max_vertices`), `vertex_words` and `group_words` are the shader's `mesh_layout`, which both halves report alike.
+`K`, `M` (`max_primitives`), `N` (`max_vertices`), `vertex_words`, `primitive_words` and `group_words` are the shader's `mesh_layout`, which both halves report alike.
+
+## Values per primitive
+
+**What a mesh stage writes per primitive rides flat on each corner of it**, since the unindexed draw runs every corner on its own.
+The vertex half returns one struct, `sgl_mesh_corner`: the vertex struct's members, then the primitive struct's, flat.
+Each primitive member then stands at the location CHK-489 gives it, right after the vertex's.
+The pipeline's pixel stage is compiled after the vertex half too: it takes that struct, and makes its own two from it before its body.
+So no target marks a pixel input per primitive, which a vertex stage cannot feed, and no device needs `primitive_index`, which webgpu has none of.
 
 ## What each half binds
 
 | half | stage | reads | writes |
 |---|---|---|---|
 | compute | compute, at the mesh stage's workgroup size | the pipeline's own groups, and `sg_dispatch_grid` | `sg_mesh_output` |
-| vertex | vertex | `sg_mesh_input` | the vertex struct, to the pixel stage |
+| vertex | vertex | `sg_mesh_input` | the vertex struct, to the pixel stage, or `sgl_mesh_corner` with values per primitive |
 
 `sg_mesh_output` and `sg_mesh_input` are the same buffer, bound twice, at the addresses [reserved-bindings.md](../../../shaped-graphics-language/docs/reserved-bindings.md) gives.
 **Each half's layout holds its own slot alone**, `pipeline_layout_description::mesh_polyfill` set to `output` or `input`.
@@ -107,5 +116,4 @@ dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage
 ## Not yet
 
 - A task stage, whose launch count the GPU chooses: a declared maximum per task workgroup, or a per-draw budget a host may override.
-- Values per primitive, through `primitive_index` where the device has it, or carried on every corner otherwise.
 - `draw_mesh_tasks_indirect`, whose vertex count the GPU then writes.

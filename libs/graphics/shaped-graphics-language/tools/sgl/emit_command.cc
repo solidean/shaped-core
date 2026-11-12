@@ -75,7 +75,7 @@ COMMAND("emit")
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     args.arg({"mesh"}, mesh_name,
              {.desc = "a mesh or geometry entry point as itself, or as the compute or the vertex half of its "
-                      "polyfill: native, compute or vertex",
+                      "polyfill, and a pixel entry point as the one after the vertex half: native, compute or vertex",
               .metavar = "FORM"});
     args.arg({"vertex"}, polyfill_vertex,
              {.desc = "the vertex stage a geometry entry point's compute half runs, its pipeline's", .metavar = "NAME"});

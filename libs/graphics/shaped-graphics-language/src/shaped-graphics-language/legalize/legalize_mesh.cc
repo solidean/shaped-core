@@ -5,9 +5,10 @@
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 // CHK-524: a mesh stage on a target without one is a compute pass and a draw.
-// The compute form writes each workgroup's counts, indices and vertices into fixed slots of `sg_mesh_output`, and the
-// vertex form reads them back from `sg_mesh_input`, one invocation a corner of every primitive slot in order, so the
-// draw keeps the primitive order the native stage has.
+// The compute form writes each workgroup's counts, indices, vertices and primitives into fixed slots of
+// `sg_mesh_output`, and the vertex form reads them back from `sg_mesh_input`, one invocation a corner of every
+// primitive slot in order, so the draw keeps the primitive order the native stage has.
+// A primitive's values ride on each of its corners, flat, since the unindexed draw runs every corner on its own.
 
 using namespace sgl;
 using namespace sgl::check;
@@ -43,6 +44,22 @@ namespace
     return -1;
 }
 
+/// A pixel stage's second struct, what a mesh stage wrote per primitive (CHK-489); `none` where it takes none.
+[[nodiscard]] local_id primitive_parameter_of(checked_module const& m, flat_entry_point const& e)
+{
+    for (auto i = isize(1); i < e.locals.size(); ++i)
+    {
+        auto const& local = e.locals[i];
+        auto is_input = false;
+        for (auto const& input : e.stage_inputs)
+            is_input = is_input || index_of(input.local) == i;
+        if (local.kind == local_kind::parameter && !is_input && m.at(local.type).kind == type_kind::structure
+            && local.type != e.input)
+            return local_id(i);
+    }
+    return local_id::none;
+}
+
 } // namespace
 
 cc::result<mesh_polyfill_layout, cc::string> sgl::check::mesh_polyfill_layout_of(checked_module const& m,
@@ -53,8 +70,6 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::mesh_polyfill_layout_of
     if (!is_valid(output))
         return cc::error(cc::format("{} takes no mesh output", e.name));
     auto const& t = m.at(e.at(output).type);
-    if (is_valid(t.primitive))
-        return cc::error(cc::format("{} writes values per primitive, which the polyfill does not carry yet", e.name));
     for (auto i = isize(0); i < e.locals.size(); ++i)
     {
         auto is_input = false;
@@ -67,12 +82,23 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::mesh_polyfill_layout_of
     if (leaves.has_error())
         return cc::error(cc::format("{}'s vertex holds a '{}', which no word holds", e.name, leaves.error()));
 
+    auto primitive_words = i32(0);
+    if (is_valid(t.primitive))
+    {
+        auto const primitive_leaves = leaves_of(m, t.primitive);
+        if (primitive_leaves.has_error())
+            return cc::error(
+                cc::format("{}'s primitive holds a '{}', which no word holds", e.name, primitive_leaves.error()));
+        primitive_words = i32(primitive_leaves.value().size());
+    }
+
     auto const& info = m.functions[m.at(e.function).info];
     auto layout = mesh_polyfill_layout{.corners = info.is_line_mesh ? 2 : 3,
                                        .max_vertices = info.max_vertices,
                                        .max_primitives = info.max_primitives,
-                                       .vertex_words = i32(leaves.value().size())};
-    layout.group_words = layout.first_vertex_word() + layout.max_vertices * layout.vertex_words;
+                                       .vertex_words = i32(leaves.value().size()),
+                                       .primitive_words = primitive_words};
+    layout.group_words = layout.first_primitive_word() + layout.max_primitives * layout.primitive_words;
     return layout;
 }
 
@@ -83,6 +109,8 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
     auto const output = output_of(m, e);
     auto const vertex_type = m.at(e.at(output).type).element;
     auto const leaves = leaves_of(m, vertex_type).value();
+    auto const primitive_type = m.at(e.at(output).type).primitive;
+    auto const primitive_leaves = is_valid(primitive_type) ? leaves_of(m, primitive_type).value() : cc::vector<leaf>();
 
     auto out = flat_builder::extend(m, e);
     auto w = words{.out = out, .binding = listed(out, "sg_mesh_output")};
@@ -146,16 +174,19 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
                 store(first, c, lane(indices, i32(c)));
             return true;
         }
-        // a vertex: its leaves in field order
-        auto const value = w.bound("mesh_vertex", arguments[2], into);
-        auto const first = w.bound(
-            "mesh_at",
-            w.binary("add_uint", base,
-                     w.binary("add_uint", w.word(u32(layout.value().first_vertex_word())),
-                              w.binary("multiply_uint", arguments[1], w.word(u32(layout.value().vertex_words))))),
-            into);
-        for (auto k = isize(0); k < leaves.size(); ++k)
-            store(first, u32(k), w.encode(w.leaf_of(value, leaves[k]), leaves[k].kind));
+        // a vertex or a primitive: its leaves in field order
+        auto const is_primitive = write == 3;
+        auto const& written = is_primitive ? primitive_leaves : leaves;
+        auto const value = w.bound(is_primitive ? "mesh_primitive" : "mesh_vertex", arguments[2], into);
+        auto const first_word = is_primitive ? layout.value().first_primitive_word() : layout.value().first_vertex_word();
+        auto const stride = is_primitive ? layout.value().primitive_words : layout.value().vertex_words;
+        auto const first = w.bound("mesh_at",
+                                   w.binary("add_uint", base,
+                                            w.binary("add_uint", w.word(u32(first_word)),
+                                                     w.binary("multiply_uint", arguments[1], w.word(u32(stride))))),
+                                   into);
+        for (auto k = isize(0); k < written.size(); ++k)
+            store(first, u32(k), w.encode(w.leaf_of(value, written[k]), written[k].kind));
         return true;
     };
 
@@ -173,9 +204,101 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
     return compacted(m, out.e, body);
 }
 
-flat_entry_point sgl::check::mesh_as_vertex_fetch(checked_module const& m, flat_entry_point const& e)
+flat_entry_point sgl::check::mesh_as_vertex_fetch(checked_module const& m, flat_entry_point const& e, type_id corner)
 {
     auto const layout = mesh_polyfill_layout_of(m, e);
     CC_ASSERTF(layout.has_value(), "{}", layout.has_error() ? layout.error() : cc::string());
-    return slots_as_vertex_fetch(m, e, layout.value(), m.at(e.at(output_of(m, e)).type).element);
+    CC_ASSERT(layout.value().primitive_words == 0 || is_valid(corner), "a mesh stage that writes values per primitive "
+                                                                       "hands them on in add_mesh_corner's struct");
+    return slots_as_vertex_fetch(m, e, layout.value(), m.at(e.at(output_of(m, e)).type).element, corner);
+}
+
+sgl::check::mesh_corner_parts sgl::check::mesh_corner_parts_of(checked_module const& m, flat_entry_point const& e)
+{
+    if (e.entry_stage == stage::mesh)
+    {
+        auto const output = output_of(m, e);
+        if (!is_valid(output))
+            return {};
+        auto const& t = m.at(e.at(output).type);
+        return {.vertex = t.element, .primitive = t.primitive};
+    }
+    if (e.entry_stage != stage::pixel || !is_valid(e.input))
+        return {};
+    auto const primitive = primitive_parameter_of(m, e);
+    return {.vertex = e.input, .primitive = is_valid(primitive) ? e.at(primitive).type : type_id::none};
+}
+
+type_id sgl::check::add_mesh_corner(checked_module& m, mesh_corner_parts parts)
+{
+    CC_ASSERT(is_valid(parts.vertex) && is_valid(parts.primitive), "a mesh corner is of a vertex and a primitive");
+    auto const vertex_members = cc::vector<member_info>::create_copy_of(m.at(m.at(parts.vertex).members));
+    auto const primitive_members = cc::vector<member_info>::create_copy_of(m.at(m.at(parts.primitive).members));
+    auto const first = u32(m.members.size());
+    for (auto const& member : vertex_members)
+        m.members.push_back(member);
+    // a primitive's value is the same at each of its corners, so nothing interpolates it; its name differs from the
+    // vertex's, since the locations alone link it to the pixel stage
+    for (auto member : primitive_members)
+    {
+        auto is_taken = true;
+        while (is_taken)
+        {
+            is_taken = false;
+            for (auto const& v : vertex_members)
+                is_taken = is_taken || v.name == member.name;
+            if (is_taken)
+                member.name = cc::format("{}_of_primitive", member.name);
+        }
+        member.interpolate = {.kind = interpolation::kind_t::flat};
+        member.has_interpolate = true;
+        m.members.push_back(cc::move(member));
+    }
+
+    auto const vertex_symbol = m.at(m.at(parts.vertex).symbol);
+    auto const symbol = symbol_id(m.symbols.size());
+    auto const type = type_id(m.types.size());
+    m.symbols.push_back({.file = vertex_symbol.file,
+                         .declaration = vertex_symbol.declaration,
+                         .kind = symbol_kind::structure,
+                         .state = symbol_state::checked,
+                         .name = "sgl_mesh_corner",
+                         .type = type});
+    m.types.push_back({.kind = type_kind::structure,
+                       .symbol = symbol,
+                       .members = {.first = first, .count = u32(vertex_members.size() + primitive_members.size())}});
+    return type;
+}
+
+flat_entry_point sgl::check::pixel_after_mesh_polyfill(checked_module const& m, flat_entry_point const& e, type_id corner)
+{
+    CC_ASSERT(e.entry_stage == stage::pixel && is_valid(e.input), "only a pixel stage takes a primitive struct");
+    auto const primitive = primitive_parameter_of(m, e);
+    CC_ASSERT(is_valid(primitive), "the pixel stage takes a primitive struct");
+
+    auto out = flat_builder::extend(m, e);
+    if (e.body.count > 0)
+        out.from = e.at(e.at(e.body)[0]).from;
+    // `locals[0]` is the stage struct, now the corner: what read the vertex struct reads the local made from it
+    auto const vertex_type = e.input;
+    auto const vertex = out.add_local(local_kind::temporary, e.locals[0].name, vertex_type);
+    for (auto& x : out.e.exprs)
+        if (auto* const ref = x.node.try_as<flat_local_ref>(); ref != nullptr && index_of(ref->local) == 0)
+            ref->local = vertex;
+    out.e.locals[0].type = corner;
+    out.e.locals[index_of(primitive)].kind = local_kind::temporary;
+    out.e.input = corner;
+
+    auto body = stmt_list();
+    auto const vertex_count = isize(m.at(vertex_type).members.count);
+    auto const corner_count = isize(m.at(corner).members.count);
+    auto vertex_parts = cc::vector<flat_expr_id>();
+    auto primitive_parts = cc::vector<flat_expr_id>();
+    for (auto k = isize(0); k < corner_count; ++k)
+        (k < vertex_count ? vertex_parts : primitive_parts).push_back(out.member(out.local(local_id(0)), i32(k)));
+    body.push_back(out.let(vertex, out.construct(vertex_type, vertex_parts)));
+    body.push_back(out.let(primitive, out.construct(e.at(primitive).type, primitive_parts)));
+    for (auto const s : out.e.at(out.e.body))
+        body.push_back(s);
+    return compacted(m, out.e, body);
 }

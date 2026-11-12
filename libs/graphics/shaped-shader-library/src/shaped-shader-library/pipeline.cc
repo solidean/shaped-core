@@ -423,7 +423,14 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         desc.mesh_shader = co_await (*d.mesh)->acquire(*ctx, options);
     if (d.task != nullptr)
         desc.task_shader = co_await (*d.task)->acquire(*ctx, options);
-    if (d.pixel != nullptr)
+    // the pixel stage of a polyfilled mesh stage takes what it wrote per primitive from the vertex half (SGL's CHK-524)
+    if (d.pixel != nullptr && polyfills)
+    {
+        auto with_form = options;
+        with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string("vertex")});
+        desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx, with_form);
+    }
+    else if (d.pixel != nullptr)
         desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx, options);
     if (d.geometry != nullptr && polyfills_geometry)
     {

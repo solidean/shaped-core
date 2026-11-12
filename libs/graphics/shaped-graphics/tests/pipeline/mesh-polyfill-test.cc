@@ -145,3 +145,31 @@ ASYNC_INVOCABLE_TEST("sg - an SGL mesh stage draws its triangles in order, workg
         for (auto x = 0; x < size; ++x)
             CHECK(pixels[0].rgba8(x, y) == tg::vec4i(255, 255, 255, 255)).context(cc::format("pixel ({}, {})", x, y));
 }
+
+ASYNC_INVOCABLE_TEST("sg - a polyfilled mesh stage hands its pixel stage what it wrote per triangle, flat on each "
+                     "corner",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = unreachable(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const scope = polyfilling(*ctx);
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::tinted);
+    REQUIRE(pipeline->mesh_polyfill() != nullptr);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, mesh_target(),
+                                                         [&](sg::rendering_scope& s)
+                                                         {
+                                                             s.bind_pipeline(*pipeline);
+                                                             s.draw_mesh_tasks(1);
+                                                         });
+    // sgl-mesh-test.cc's image of the native stage: triangle 0 red below the diagonal, triangle 1 blue above it
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            if (x + y == size - 1)
+                continue;
+            auto const expected = x + y > size - 1 ? tg::vec4i(255, 0, 0, 255) : tg::vec4i(0, 0, 255, 255);
+            CHECK(pixels[0].rgba8(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
+        }
+}

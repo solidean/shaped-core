@@ -129,6 +129,8 @@ inline constexpr cc::string_view k_weakens_float_option = "weakens_float";
 
 /// The option a polyfilled pipeline's acquire passes for an SGL mesh stage, valued `compute` or `vertex`: the half of
 /// its polyfill to compile, which is then that stage (SGL's CHK-524).
+/// It passes `vertex` for the pipeline's pixel stage too, which then takes what the mesh stage wrote per primitive
+/// from the vertex half.
 /// The cache keys on it as on any option.
 inline constexpr cc::string_view k_mesh_form_option = "mesh_form";
 

@@ -153,7 +153,18 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  emit::mesh_form mesh = emit::mesh_form::native,
                                                  check::flat_entry_point const* polyfill_vertex = nullptr)
 {
-    auto const& m = front.module;
+    // CHK-524: a polyfilled mesh stage that writes values per primitive hands them on in one struct beside its vertex's,
+    // which its vertex half returns and its pixel stage takes, and which a copy of the module holds
+    auto corner_module = cc::optional<check::checked_module>();
+    auto corner = check::type_id::none;
+    if (mesh == emit::mesh_form::vertex_fetch
+        && (e.entry_stage == check::stage::mesh || e.entry_stage == check::stage::pixel))
+        if (auto const parts = check::mesh_corner_parts_of(front.module, e); check::is_valid(parts.primitive))
+        {
+            corner_module = front.module;
+            corner = check::add_mesh_corner(corner_module.value(), parts);
+        }
+    auto const& m = corner_module.has_value() ? corner_module.value() : front.module;
     auto const source_name = front.source_name;
     // CHK-525: a polyfilled geometry stage's compute half is its pipeline's vertex stage and itself as one compute
     // entry point; each is legalized to be grafted, and what they make is legalized below as any entry point is
@@ -237,8 +248,10 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
             return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, layout.error()));
         mesh_layout = layout.value();
         form = mesh == emit::mesh_form::compute ? check::mesh_as_compute(m, legal)
-                                                : check::mesh_as_vertex_fetch(m, legal);
+                                                : check::mesh_as_vertex_fetch(m, legal, corner);
     }
+    if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::pixel && check::is_valid(corner))
+        form = check::pixel_after_mesh_polyfill(m, legal, corner);
     auto emitted = emit::emit_entry_point(m, form, target,
                                           {.files = files,
                                            .names = names,

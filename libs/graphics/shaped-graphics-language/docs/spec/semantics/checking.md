@@ -1433,8 +1433,9 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
 * **CHK-524** Where a device has no mesh stage, a mesh entry point can be polyfilled: a compute entry point that writes each workgroup's output, then a draw of it.
   Workgroup `g` owns fixed slots: its two counts, `M` primitives' indices, then `N` vertices of one word a scalar leaf, so the draw keeps the native primitive order.
   The vertex half draws one invocation a corner of every slot, and a slot past its workgroup's count stands outside the clip volume.
+  What it writes per primitive follows the vertices in the same words, and rides flat on each corner of its primitive, so the pixel stage reads it at CHK-489's locations.
   The words, the reserved buffers and how sg draws them are [the polyfill protocol](../../../../shaped-graphics/docs/concepts/mesh-polyfill.md).
-  A mesh entry point that takes a payload, writes values per primitive, or has a vertex member that is no scalar, vector or array of them is `unsupported-yet` there.
+  A mesh entry point that takes a payload, or has a vertex or primitive member that is no scalar, vector or array of them, is `unsupported-yet` there.
 * **CHK-525** Where a device has no geometry stage, a geometry entry point can be polyfilled the same way: its pipeline's vertex stage and itself as one compute entry point, then a draw.
   One thread a primitive of an instance assembles it from the draw's index and vertex buffers, runs the vertex stage on each corner, and runs the geometry stage on the result.
   What it appends goes into the primitive's fixed slots, the mesh polyfill's words, so the draw keeps the native order: primitive by primitive, then as appended.

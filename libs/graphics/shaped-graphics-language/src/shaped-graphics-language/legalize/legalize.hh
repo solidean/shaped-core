@@ -54,7 +54,8 @@ struct sgl::check::legalize_options
 
 /// The words a mesh workgroup's polyfill writes into `sg_mesh_output`, and the fetch reads back (CHK-524).
 /// Workgroup `g` owns `group_words` words from `g * group_words`: its vertex count, its primitive count, `corners`
-/// indices for each of `max_primitives` primitives, then `vertex_words` words for each of `max_vertices` vertices.
+/// indices for each of `max_primitives` primitives, `vertex_words` words for each of `max_vertices` vertices, then
+/// `primitive_words` words for each primitive.
 struct sgl::check::mesh_polyfill_layout
 {
     /// 3 for triangles, 2 for lines.
@@ -63,12 +64,24 @@ struct sgl::check::mesh_polyfill_layout
     i32 max_primitives = 0;
     /// One word a scalar leaf of the vertex struct, in field order.
     i32 vertex_words = 0;
+    /// One word a scalar leaf of the struct written per primitive, in field order; 0 for none.
+    i32 primitive_words = 0;
     i32 group_words = 0;
 
     [[nodiscard]] i32 first_index_word() const { return 2; }
     [[nodiscard]] i32 first_vertex_word() const { return 2 + corners * max_primitives; }
+    [[nodiscard]] i32 first_primitive_word() const { return first_vertex_word() + max_vertices * vertex_words; }
 
     bool operator==(mesh_polyfill_layout const&) const = default;
+};
+
+/// What a polyfilled mesh stage hands its pixel stage per primitive: the vertex struct and the primitive struct of a
+/// mesh entry point's output, or a pixel entry point's stage struct and the second struct beside it (CHK-489).
+/// `primitive` is `none` where there is none.
+struct sgl::check::mesh_corner_parts
+{
+    type_id vertex = type_id::none;
+    type_id primitive = type_id::none;
 };
 
 namespace sgl::check
@@ -120,8 +133,8 @@ namespace sgl::check
 /// dispatch_threads into `sg_dispatch_grid` (CHK-520); what dx12, vulkan and WebGPU read, and metal does not.
 [[nodiscard]] flat_entry_point with_dispatch_grid_guard(checked_module const& m, flat_entry_point const& e);
 
-/// The layout a mesh entry point `e` polyfills into, or the reason it has none yet: a task stage's payload, values per
-/// primitive, or a vertex member that is no scalar, vector or array of them (CHK-524).
+/// The layout a mesh entry point `e` polyfills into, or the reason it has none yet: a task stage's payload, or a vertex
+/// or primitive member that is no scalar, vector or array of them (CHK-524).
 [[nodiscard]] cc::result<mesh_polyfill_layout, cc::string> mesh_polyfill_layout_of(checked_module const& m,
                                                                                    flat_entry_point const& e);
 
@@ -157,7 +170,23 @@ inline constexpr i32 k_geometry_polyfill_workgroup = 64;
 
 /// The vertex entry point that draws what `mesh_as_compute` wrote, from `sg_mesh_input`, one invocation a corner of
 /// every primitive slot; the corners of a slot past its workgroup's count stand outside the clip volume.
-/// `e` must have a layout.
-[[nodiscard]] flat_entry_point mesh_as_vertex_fetch(checked_module const& m, flat_entry_point const& e);
+/// `e` must have a layout, and `corner` must be `add_mesh_corner`'s struct where `e` writes values per primitive.
+[[nodiscard]] flat_entry_point mesh_as_vertex_fetch(checked_module const& m,
+                                                    flat_entry_point const& e,
+                                                    type_id corner = type_id::none);
+
+[[nodiscard]] mesh_corner_parts mesh_corner_parts_of(checked_module const& m, flat_entry_point const& e);
+
+/// Adds to `m` the struct a polyfilled mesh stage's vertex half returns where it writes values per primitive: the
+/// vertex struct's members, then the primitive struct's, flat, and returns it.
+/// Its pixel stage takes the same struct, so each primitive value lands at the location CHK-489 gives it.
+/// `m` is a copy of the module the entry points checked in, which a compile of the polyfill writes them from.
+[[nodiscard]] type_id add_mesh_corner(checked_module& m, mesh_corner_parts parts);
+
+/// A pixel entry point `e` that takes a primitive struct, as the pixel stage of a polyfilled mesh pipeline: it takes
+/// `corner` as its stage struct, and makes its two structs from it before the body.
+[[nodiscard]] flat_entry_point pixel_after_mesh_polyfill(checked_module const& m,
+                                                         flat_entry_point const& e,
+                                                         type_id corner);
 
 } // namespace sgl::check

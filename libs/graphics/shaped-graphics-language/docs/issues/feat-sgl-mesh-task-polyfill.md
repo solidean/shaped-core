@@ -45,7 +45,6 @@ There the two images must be identical, equal depths and blending included, and 
 
 ## Still open
 
-- Whether webgpu's per-primitive index reaches a pixel stage, through the feature `primitive_index`, or the polyfill duplicates vertices for per-triangle values instead; to be tried.
 - Where a task stage declares its maximum, and its spelling.
 - The primitive-order claim above is from memory of both specs, and is checked against their text before a test relies on it.
 
@@ -61,3 +60,9 @@ There the two images must be identical, equal depths and blending included, and 
   On an Arc B580 the polyfill costs +41% over the native stage on dx12 and +17% on vulkan, for 400 000 triangles a frame.
 - **2026-11-11: automatic where the device has no mesh stage.**
   `where_missing` is the default: it reaches only a device the native stage cannot run on, webgpu today, and `always` stays a test's.
+- **2026-11-12: values per primitive, flat on each corner.**
+  The open question of `primitive_index` is settled without it: sg reports no `primitive_index` on webgpu, and the pixel stage would have to know the mesh stage's layout.
+  The unindexed draw already runs every corner on its own, so each corner carries its primitive's values, flat, at no cost in words.
+  The vertex half returns one struct of both, and the pixel stage, compiled after it, takes that struct and makes its own two.
+  So neither stage is marked per primitive, which vulkan's SPIR-V would otherwise refuse to link.
+  `tinted` draws the native stage's image on webgpu (Dawn and wgpu), dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V.

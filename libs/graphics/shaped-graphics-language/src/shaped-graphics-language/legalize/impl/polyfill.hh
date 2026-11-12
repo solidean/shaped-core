@@ -128,8 +128,10 @@ ast::range_of<flat_stmt_id> rewritten(flat_builder& out, ast::range_of<flat_stmt
 /// The vertex entry point that draws a polyfill's slots back, one invocation a corner of every primitive slot, from
 /// `sg_mesh_input`; the corners of a slot past its workgroup's count stand outside the clip volume.
 /// `e` is the entry point the slots came from, whose header and origin it takes, and `vertex_type` the struct a slot holds.
+/// Where the slots hold values per primitive, `corner_type` is `add_mesh_corner`'s struct of both, which it returns instead.
 [[nodiscard]] flat_entry_point slots_as_vertex_fetch(checked_module const& m,
                                                      flat_entry_point const& e,
                                                      mesh_polyfill_layout const& l,
-                                                     type_id vertex_type);
+                                                     type_id vertex_type,
+                                                     type_id corner_type = type_id::none);
 } // namespace sgl::check::impl

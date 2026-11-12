@@ -416,8 +416,11 @@ private:
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
-        // CHK-524: a polyfilled mesh stage's half is the stage it became, which the compile after this one builds
-        auto const form_stage = mesh == sgl::emit::mesh_form::compute      ? sg::shader_stage::compute
+        // CHK-524: a polyfilled mesh stage's half is the stage it became, which the compile after this one builds; the
+        // pixel stage after it stays one
+        auto const is_polyfilled = desc.stage == sg::shader_stage::mesh || desc.stage == sg::shader_stage::geometry;
+        auto const form_stage = !is_polyfilled                             ? desc.stage
+                              : mesh == sgl::emit::mesh_form::compute      ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::vertex_fetch ? sg::shader_stage::vertex
                                                                            : desc.stage;
         auto shader = sg::compiled_shader{.stage = form_stage, .format = _format, .entry_point = emitted.entry_point};

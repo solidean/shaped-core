@@ -29,6 +29,8 @@ enum class sgl::emit::mesh_form : sgl::u8
     /// The compute entry point that writes its workgroups' slots of `sg_mesh_output`.
     compute,
     /// The vertex entry point that draws those slots from `sg_mesh_input`.
+    /// A pixel entry point is then its polyfilled pipeline's, which takes what the mesh stage wrote per primitive from
+    /// the vertex half.
     vertex_fetch,
 };
 
@@ -151,7 +153,8 @@ struct sgl::emit::options
     native_route native = native_route::text;
     /// Writes each operation's `.sgl` line into the native route's binary (EMIT-257); `files` must hold the sources.
     bool native_line_table = false;
-    /// A mesh entry point as one half of its polyfill rather than as a mesh stage; every other entry ignores it.
+    /// A mesh entry point as one half of its polyfill rather than as a mesh stage, and a pixel entry point as the one
+    /// that follows the vertex half; every other entry ignores it.
     mesh_form mesh = mesh_form::native;
 };
 

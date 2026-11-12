@@ -216,11 +216,37 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         }
         auto native = sources;
         native.mesh = mesh_form::native;
-        auto const form
-            = sources.mesh == mesh_form::compute ? check::mesh_as_compute(m, e) : check::mesh_as_vertex_fetch(m, e);
-        auto result = emit_entry_point(m, form, t, native);
+        if (sources.mesh == mesh_form::compute)
+        {
+            auto result = emit_entry_point(m, check::mesh_as_compute(m, e), t, native);
+            result.mesh_layout = layout.value();
+            return result;
+        }
+        // a vertex half that hands values per primitive on returns a struct of both, which a copy of the module holds
+        auto const parts = check::mesh_corner_parts_of(m, e);
+        auto extended = cc::optional<check::checked_module>();
+        auto corner = check::type_id::none;
+        if (check::is_valid(parts.primitive))
+        {
+            extended = m;
+            corner = check::add_mesh_corner(extended.value(), parts);
+        }
+        auto const& written = extended.has_value() ? extended.value() : m;
+        auto result = emit_entry_point(written, check::mesh_as_vertex_fetch(written, e, corner), t, native);
         result.mesh_layout = layout.value();
         return result;
+    }
+    // CHK-524: the pixel stage of a polyfilled mesh pipeline takes that struct in place of its two
+    if (e.entry_stage == check::stage::pixel && sources.mesh == mesh_form::vertex_fetch)
+    {
+        auto native = sources;
+        native.mesh = mesh_form::native;
+        auto const parts = check::mesh_corner_parts_of(m, e);
+        if (!check::is_valid(parts.primitive))
+            return emit_entry_point(m, e, t, native);
+        auto extended = m;
+        auto const corner = check::add_mesh_corner(extended, parts);
+        return emit_entry_point(extended, check::pixel_after_mesh_polyfill(extended, e, corner), t, native);
     }
 
     auto result = emitted_text();
