@@ -30,6 +30,8 @@ struct frame_constants:
     /// How far this frame's samples sit from the pixels' centers, in pixels: 0 but where a frame is drawn for an upscaler.
     /// The tracer's `jitter` minus one half, so pixel `px` sees the image at `px + 0.5 + jitter`, where its ray would.
     jitter: float2
+    /// The previous frame's `jitter`, where the samples a history was gathered from sat.
+    previous_jitter: float2
     /// 0 cuts coverage below one half; anything else seeds a cut drawn per pixel and frame, which frames accumulated converge to the partial surface.
     coverage_seed: uint
 
@@ -82,7 +84,7 @@ struct quadric_varyings:
 /// Each target is the layer's slot of the same meaning (`sv::impl::raster_slots`, view/view_data.hh), in the format the tracer writes it in.
 /// A pixel no surface covers holds the environment in `color`, its reprojection in `motion`, 1 in `primary_depth`, and zero in every other target.
 @pixel struct targets:
-    /// radiance, alpha 1
+    /// radiance, and its luminance squared in alpha, `pt.moment_of`, which the mean blends into its second moment
     @format(.rgba32_float) color: float4
     /// the geometric normal turned toward the viewer, in world space
     @format(.rgba16_float) normal: float4

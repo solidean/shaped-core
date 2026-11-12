@@ -158,7 +158,7 @@ target_compile_features(typed-geometry
 # Expose "src" so '#include <typed-geometry/...>' works for consumers.
 target_include_directories(typed-geometry
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # clean-core provides the vocabulary types (i32/f32/isize) and assertions used across the public API.

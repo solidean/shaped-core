@@ -242,7 +242,10 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
                                           d.display.grade.is_identity() ? 0.0f : 1.0f, d.display.dither ? 1.0f : 0.0f);
             constants.grade_balance
                 = tg::vec4f(d.display.grade.temperature, d.display.grade.tint, d.display.grade.vignette, 0.0f);
-            constants.grade_tone = tg::vec4f(d.display.grade.contrast, d.display.grade.saturation, 0.0f, 0.0f);
+            // A scene layer's image is opaque, and its alpha holds its samples' second moment rather than coverage.
+            auto const opaque = d.primary.kind == draw_source_kind::trace;
+            constants.grade_tone
+                = tg::vec4f(d.display.grade.contrast, d.display.grade.saturation, opaque ? 1.0f : 0.0f, 0.0f);
 
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;

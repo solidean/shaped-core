@@ -77,9 +77,9 @@ if(EMSCRIPTEN)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
         sc_build_options(COMPILE --profiling-funcs)
         sc_build_options(LINK --profiling-funcs)
-        sc_build_options(DEFINITIONS CC_WASM_KEEPS_FRAME_STRUCTURE=1)
+        set(SC_WASM_KEEPS_FRAME_STRUCTURE 1) # clean-core writes it into build_config.hh
     else()
-        sc_build_options(DEFINITIONS CC_WASM_KEEPS_FRAME_STRUCTURE=0)
+        set(SC_WASM_KEEPS_FRAME_STRUCTURE 0)
     endif()
 
     # Debug info BESIDE the artifact, for resolving a captured stack after the fact.

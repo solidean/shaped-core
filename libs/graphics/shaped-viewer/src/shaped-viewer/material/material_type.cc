@@ -191,6 +191,7 @@ material_type material_type::create(material_type_description description)
     b.add_string(description.transmission_attribute);
     b.add_string(description.thin_walled_attribute);
     b.add_string(description.tangent_frame_attribute);
+    b.add_bool(description.display_only);
     b.add_string(description.height_attribute);
     b.add_string(description.height_top_attribute);
     b.add_string(description.height_bottom_attribute);
@@ -219,6 +220,7 @@ material_type material_type::create(material_type_description description)
                               .transmission_attribute = cc::move(description.transmission_attribute),
                               .thin_walled_attribute = cc::move(description.thin_walled_attribute),
                               .tangent_frame_attribute = cc::move(description.tangent_frame_attribute),
+                              .display_only = description.display_only,
                               .height_attribute = cc::move(description.height_attribute),
                               .height_top_attribute = cc::move(description.height_top_attribute),
                               .height_bottom_attribute = cc::move(description.height_bottom_attribute),

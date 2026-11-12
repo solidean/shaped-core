@@ -168,7 +168,7 @@ target_compile_features(shaped-graphics PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-graphics/...>' works for consumers.
 target_include_directories(shaped-graphics
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # clean-core provides the vocabulary types + assertions; typed-geometry the math types sg's

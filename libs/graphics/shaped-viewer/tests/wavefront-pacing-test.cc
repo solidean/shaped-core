@@ -188,12 +188,12 @@ TEST("sv::impl - a headless viewer gives its wavefront layers no budget")
     CHECK(sv::impl::wavefront_budget_of({.frame_budget_ms = -1.0f}) == 0.0f);
 }
 
-TEST("sv::wavefront_routine - a draining frame runs every bounce, every free refraction, and a medium walk up to its "
-     "roulette")
+TEST("sv::wavefront_routine - a draining frame runs every bounce, every free refraction, the segment past the last "
+     "bounce, and a medium walk up to its roulette")
 {
-    CHECK(sv::wavefront_routine::drain_rounds(5) == 5 + 8 + 1 + 16);
-    CHECK(sv::wavefront_routine::drain_rounds(0) == 8 + 1 + 16);
-    CHECK(sv::wavefront_routine::drain_rounds(-3) == 8 + 1 + 16);
+    CHECK(sv::wavefront_routine::drain_rounds(5) == 5 + 8 + 2 + 16);
+    CHECK(sv::wavefront_routine::drain_rounds(0) == 8 + 2 + 16);
+    CHECK(sv::wavefront_routine::drain_rounds(-3) == 8 + 2 + 16);
 }
 
 // Two still wavefront views split the budget, but one at its sample target traces nothing, so the other gets all of it.

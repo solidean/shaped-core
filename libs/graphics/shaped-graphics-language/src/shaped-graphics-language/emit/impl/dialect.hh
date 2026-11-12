@@ -55,6 +55,9 @@ public:
 
     /// True where the target's compiler reads `#line 12 "file.sgl"` (EMIT-182).
     [[nodiscard]] virtual bool has_line_directives() const { return false; }
+    /// Whether a ray query is written to see micromaps on a device that has them, by its constant flags, none where
+    /// they are no constant (EMIT-184).
+    [[nodiscard]] virtual bool flags_query_for_micromaps(cc::optional<u32>) const { return true; }
 
     /// What an emulated trace reads, for a dialect whose `write_declarations` does not write it: WGSL's does.
     virtual void write_acceleration_pool(cc::string&) const {}

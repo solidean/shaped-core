@@ -1,0 +1,21 @@
+# Pin and license for the upstream vendored here.
+# vendor-inter.py reads its pin from this file; the copy map stays in the script.
+
+upstreams:
+  - name: Inter
+    homepage: https://rsms.me/inter
+    install: vendored
+    source: github-release
+    repo: https://github.com/rsms/inter
+    track: github-releases
+    version: "4.1"
+    tag: v4.1
+    asset: Inter-4.1.zip
+    digest_algo: sha256
+    pin_hash: 9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e
+    license: OFL-1.1
+    license_files: [LICENSE.txt]
+    used_by: shaped-rendering — the UI font a web build draws text in, where no system font file can be opened
+    notes: |
+      Only the static Regular TTF is vendored, from the release zip's extras/ttf/: sv reads TrueType outlines and no CFF yet, and one weight is what its default font needs.
+      The pin is the release zip's SHA-256, which the script checks before it extracts anything.

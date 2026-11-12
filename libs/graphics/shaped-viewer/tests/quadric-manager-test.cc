@@ -23,10 +23,13 @@ using namespace cc::primitive_defines;
 namespace
 {
 /// `id`'s BLAS, built on a list of its own, as the first trace reaching the batch would build it.
-[[nodiscard]] sg::blas_handle build_blas(sg::context& ctx, sv::quadric_manager& manager, sv::quadric_set_id id)
+[[nodiscard]] sg::blas_handle build_blas(sg::context& ctx,
+                                         sv::quadric_manager& manager,
+                                         sv::quadric_set_id id,
+                                         sv::mesh_manager& meshes)
 {
     auto cmd = ctx.create_command_list();
-    auto blas = manager.acquire_blas(*cmd, id);
+    auto blas = manager.acquire_blas(*cmd, id, meshes);
     ctx.submit_command_list(cc::move(cmd));
     return blas;
 }
@@ -46,10 +49,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch streams in and gets a procedural BLAS
 {
     auto& ctx = *ctx_h;
 
+    auto meshes = sv::mesh_manager::create(ctx);
     auto manager = sv::quadric_manager::create(ctx);
 
     auto const set = structure_of(0.25f);
-    auto const id = manager.acquire(sv::quadric_data::of(set));
+    auto const id = manager.acquire(sv::quadric_data::of(set), meshes);
 
     // An acquire hands both payloads to the streaming actor and mints an id; nothing is resident yet.
     //
@@ -68,22 +72,24 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch streams in and gets a procedural BLAS
     CHECK(manager.get(id).primitive_count == 3);
 
     // Waiting is what a caller with no frame loop does; a viewer instead drains what has landed, once per frame.
-    manager.wait_for_settled();
+    manager.wait_for_settled(meshes);
 
     CHECK(manager.get(id).state == sv::residency::complete);
     CHECK(manager.settling_count() == 0);
 
     // Landed is drawable, and the BLAS still waits for a trace: a batch only ever rasterized never builds one.
     CHECK(manager.get(id).blas == nullptr);
-    auto const blas = build_blas(ctx, manager, id);
+    auto const blas = build_blas(ctx, manager, id, meshes);
     CHECK(blas != nullptr);
     CHECK(manager.get(id).blas == blas); // held, so the next trace builds nothing
-    CHECK(build_blas(ctx, manager, id) == blas);
+    CHECK(build_blas(ctx, manager, id, meshes) == blas);
 
-    // Both buffers are real, and they are separate: the boxes are the build input and the primitives are the
-    // intersection shader's, which is why a batch is two buffers rather than one.
-    CHECK(manager.get(id).aabbs.element_count() == 3);
-    CHECK(manager.get(id).primitives.element_count() == 3);
+    // Both blocks are real, and they are separate: the boxes are the build input and the records are an
+    // intersection's, which is why a batch is two blocks rather than one.
+    // A box starts at an even pool element, which is what keeps it 8-byte aligned as D3D12 requires.
+    CHECK(manager.get(id).aabbs.count == 3 * 2);
+    CHECK(manager.get(id).primitives.count == 3 * 8);
+    CHECK(manager.get(id).aabbs.offset % 2 == 0);
 
     co_return;
 }
@@ -92,26 +98,27 @@ ASYNC_INVOCABLE_TEST("sv - an unchanged quadric batch is acquired without upload
 {
     auto& ctx = *ctx_h;
 
+    auto meshes = sv::mesh_manager::create(ctx);
     auto manager = sv::quadric_manager::create(ctx);
 
     auto const a = structure_of(0.25f);
-    auto const first = manager.acquire(sv::quadric_data::of(a));
-    manager.wait_for_settled();
+    auto const first = manager.acquire(sv::quadric_data::of(a), meshes);
+    manager.wait_for_settled(meshes);
 
     // The property the whole authoring model rests on: placing an unchanged batch every frame costs a hash lookup.
     // A second acquire of equal contents must be the SAME id, or a per-frame placement re-uploads the batch forever.
     auto const b = structure_of(0.25f);
-    auto const second = manager.acquire(sv::quadric_data::of(b));
+    auto const second = manager.acquire(sv::quadric_data::of(b), meshes);
     CHECK(second == first);
     CHECK(manager.settling_count() == 0); // nothing was queued, so nothing is in flight
 
     // And a batch that really differs is a different resource, or a placement would hand back the wrong geometry.
     auto const c = structure_of(0.26f);
-    auto const third = manager.acquire(sv::quadric_data::of(c));
+    auto const third = manager.acquire(sv::quadric_data::of(c), meshes);
     CHECK(third != first);
     CHECK(manager.settling_count() == 1);
 
-    manager.wait_for_settled();
+    manager.wait_for_settled(meshes);
     CHECK(manager.get(third).state == sv::residency::complete);
 
     co_return;
@@ -126,7 +133,7 @@ ASYNC_INVOCABLE_TEST("sv - the resource manager drains quadric batches with ever
     m.advance_to(ctx.current_epoch());
 
     auto const set = structure_of(0.25f);
-    auto const id = m.quadrics.acquire(sv::quadric_data::of(set));
+    auto const id = m.quadrics.acquire(sv::quadric_data::of(set), m.meshes);
 
     // A quadric batch is in flight the same way a mesh is, and the manager's own count covers both — which is what
     // makes "is anything still arriving" one question rather than one per resource kind.
@@ -146,6 +153,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch can be a single primitive", (sg::cont
 {
     auto& ctx = *ctx_h;
 
+    auto meshes = sv::mesh_manager::create(ctx);
     auto manager = sv::quadric_manager::create(ctx);
 
     // One sphere is the smallest real batch, and a procedural BLAS over exactly one box is where an off-by-one in the
@@ -153,13 +161,13 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch can be a single primitive", (sg::cont
     auto set = sv::quadric_set();
     set.add_sphere(tg::sphere3f(tg::pos3f(2, 3, 4), 0.5f));
 
-    auto const id = manager.acquire(sv::quadric_data::of(set));
-    manager.wait_for_settled();
+    auto const id = manager.acquire(sv::quadric_data::of(set), meshes);
+    manager.wait_for_settled(meshes);
 
     CHECK(manager.get(id).state == sv::residency::complete);
-    CHECK(build_blas(ctx, manager, id) != nullptr);
+    CHECK(build_blas(ctx, manager, id, meshes) != nullptr);
     CHECK(manager.get(id).primitive_count == 1);
-    CHECK(manager.get(id).aabbs.element_count() == 1);
+    CHECK(manager.get(id).aabbs.count == 2);
 
     co_return;
 }
@@ -177,7 +185,7 @@ ASYNC_INVOCABLE_TEST("sv - an idle quadric batch is evicted like any other resou
     auto set = sv::quadric_set();
     set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.5f));
 
-    auto const id = resources.quadrics.acquire(sv::quadric_data::of(set));
+    auto const id = resources.quadrics.acquire(sv::quadric_data::of(set), resources.meshes);
     REQUIRE(resources.quadrics.get_ptr(id) != nullptr);
 
     // Landed before the boundaries, so what is being tested is the IDLE timeout rather than a cancelled upload.
@@ -296,9 +304,8 @@ ASYNC_INVOCABLE_TEST("sv - a pending quadric batch names the placeholder's posit
     CHECK(described.base_vertex == u32(resources.meshes.placeholder_geometry().base_vertex));
     CHECK(described.first_index == u32(resources.meshes.placeholder_geometry().first_index));
 
-    // And it is NOT the batch's primitive buffer, whose records are not positions.
-    auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
-    CHECK(described.vertices != primitives);
+    // And it is NOT the batch's records, which are not positions, though they sit in the same pool.
+    CHECK(described.base_vertex != u32(record->primitives.offset));
 
     ctx.drop_command_list(cc::move(cmd));
 

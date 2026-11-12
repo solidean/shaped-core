@@ -83,6 +83,9 @@ void webgpu_context::do_advance_epoch()
         if (auto const t = weak.lock())
             t->expire();
 
+    // Before the epoch's staged deletions close: what goes an epoch unclaimed is released with `last`.
+    advance_reuse();
+
     auto data = webgpu_epoch_data{.epoch_id = last, .expiring = cc::move(_epochs.staged)};
     _epochs.staged = {};
     _epochs.in_flight.push_back(cc::move(data));

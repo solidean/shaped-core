@@ -17,6 +17,7 @@ class webgpu_command_list;
 class webgpu_buffer;
 using webgpu_buffer_handle = std::shared_ptr<webgpu_buffer const>;
 class webgpu_texture;
+struct webgpu_texture_storage; // a WebGPU texture and its views, shared by every handle that reuses it
 using webgpu_texture_handle = std::shared_ptr<webgpu_texture const>;
 class webgpu_memory_heap; // a heap that places nothing: WebGPU exposes no memory heaps
 using webgpu_memory_heap_handle = std::shared_ptr<webgpu_memory_heap const>;

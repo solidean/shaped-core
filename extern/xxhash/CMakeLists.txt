@@ -9,7 +9,8 @@ set(XXHASH_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(xxhash STATIC ${XXHASH_DIR}/src/xxhash.c)
 
 # SYSTEM so xxhash.h does not trip our warnings in the consuming TU.
-target_include_directories(xxhash SYSTEM PUBLIC ${XXHASH_DIR}/include)
+# The build tree's only: every library links it PRIVATE, so an installed copy is an archive to link, never a header to include.
+target_include_directories(xxhash SYSTEM PUBLIC $<BUILD_INTERFACE:${XXHASH_DIR}/include>)
 
 # Third-party code: silence its warnings, hide its symbols (statically absorbed).
 # (Full inlining in RelWithDebInfo is handled project-wide in the root CMakeLists via /Ob2 — important here

@@ -29,7 +29,7 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-linux-clang.yml](../../.github/workflows/ci-linux-clang.yml)      | `ubuntu-26.04`   | `debug-linux-clang`, `relwithdebinfo-linux-clang`, `release-linux-clang` (deep matrix), `--toolset 21` |
 | [ci-linux-gcc.yml](../../.github/workflows/ci-linux-gcc.yml)          | `ubuntu-26.04`   | `relwithdebinfo-linux-gcc`, `--toolset 14`                  |
 | [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`, `--toolset 20` (assert clang-cl 20) |
-| [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-2025`   | `relwithdebinfo-msvc`, `--toolset 14.44` (VS 2022)         |
+| [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-2025`   | `relwithdebinfo-msvc`, and `v2-avx-msvc` (`SC_X64_LEVEL=v2-avx`) as a second job, `--toolset 14.44` (VS 2022) |
 | [ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml) | `windows-2025-vs2026` | `relwithdebinfo-msvc`, `--toolset 14.51` (VS 2026) |
 | [ci-windows-arm-msvc.yml](../../.github/workflows/ci-windows-arm-msvc.yml) | `windows-11-arm` | `relwithdebinfo-arm64-windows-msvc`, `--toolset 14.44` (VS 2022, native arm64) |
 | [ci-linux-arm-clang.yml](../../.github/workflows/ci-linux-arm-clang.yml) | `ubuntu-26.04-arm` | `relwithdebinfo-arm64-linux-clang`, `--toolset 21` (native arm64) |

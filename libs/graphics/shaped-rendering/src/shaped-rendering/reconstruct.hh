@@ -197,7 +197,7 @@ struct sr::reconstruct_inputs
 {
     /// The noisy radiance, linear and HDR, at the input extent.
     /// Diffuse radiance alone when the guides carry `split_diffuse_specular`.
-    /// No member reads its alpha; every member copies it into `output`.
+    /// No member reads its alpha unless `moment_in_alpha` says what it holds; every member copies it into `output`.
     sg::texture_2d color;
 
     /// Specular radiance, only under `split_diffuse_specular`.
@@ -222,6 +222,11 @@ struct sr::reconstruct_inputs
     /// average different numbers of samples.
     /// Where set, a member that reads a count reads this one and ignores `sample_count`.
     sg::texture_2d sample_counts;
+
+    /// Whether `color`'s alpha holds the mean of each sample's luminance squared, beside the mean radiance in its rgb.
+    /// A member that reads it measures each pixel's variance as `(alpha - luminance(rgb)^2) / samples` rather than modeling it from the count: à-trous does.
+    /// The alpha still comes back in `output` untouched.
+    bool moment_in_alpha = false;
 
     /// The guides this call carries, derived from which textures are set — `specular` included.
     [[nodiscard]] reconstruct_guide_set present_guides() const;
@@ -507,6 +512,10 @@ namespace sr
 
 /// Whether a member reads history, and so needs fresh per-frame samples and motion vectors rather than a converging mean.
 [[nodiscard]] bool is_temporal(denoise_method m);
+
+/// Whether a member reconstructs from each frame's sub-pixel jitter, and so wants the guides that frame's samples were drawn at.
+/// SVGF is temporal without being one: it averages its frames into a history of its own, which guides averaged over the same frames describe.
+[[nodiscard]] bool reconstructs_from_jitter(denoise_method m);
 
 /// The guides `m` requires; a call missing one reports `unsupported`.
 [[nodiscard]] reconstruct_guide_set required_guides(denoise_method m);

@@ -28,6 +28,10 @@ namespace
 {
 // TrueType-outlined faces only: CFF is not read yet, which rules out most .otf files.
 cc::string_view const system_ui_font_candidates[] = {
+#ifdef __EMSCRIPTEN__
+    // Where a web page's link embeds the vendored Inter, `SR_WEB_UI_FONT_LINK_OPTION`: a page opens no system font.
+    "/sc-fonts/Inter-Regular.ttf",
+#endif
     "C:/Windows/Fonts/segoeui.ttf",
     "C:/Windows/Fonts/arial.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",

@@ -2,7 +2,9 @@
 #include <blob-cache/default_cache.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_backlog.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -13,6 +15,8 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #elif SV_DEFAULT_BACKEND_METAL
 #include <shaped-graphics/backends/metal/metal_context.hh> // sg::create_metal_context
+#elif SV_DEFAULT_BACKEND_WEBGPU
+#include <shaped-graphics/backends/webgpu/webgpu_context.hh> // sg::request_webgpu_context
 #endif
 
 namespace sv
@@ -24,6 +28,17 @@ namespace
 /// It lives here rather than in the header so the only way to reach it is the setter — nothing can read it, and no
 /// translation unit can race the others to initialize it.
 context_provider g_acquire_context;
+
+/// The one context viewers run on, null until a provider, the default or the page's request answered.
+///
+/// One cell for the synchronous and the awaited acquisition alike, so whichever answered first is what the other hands back.
+/// Under a lock for the same reason `acquire_shader_library` is: two threads racing would each build a device,
+/// which is the one outcome the memoization exists to prevent.
+cc::mutex<sg::context_handle>& viewer_context()
+{
+    static auto cached = cc::mutex<sg::context_handle>(nullptr);
+    return cached;
+}
 } // namespace
 
 void set_acquire_context(context_provider provider)
@@ -45,6 +60,9 @@ cc::result<sg::context_handle> impl::acquire_default_context()
     if (ctx.has_error())
         return cc::error("shaped-viewer: could not create a Metal context (no Metal 4 device)");
     return ctx.value();
+#elif SV_DEFAULT_BACKEND_WEBGPU
+    return cc::error("shaped-viewer: a WebGPU device is requested, never created on the spot — acquire it with "
+                     "sv::acquire_viewer_context_async, or loop with sv::interactive_async, which does");
 #else
     return cc::error("shaped-viewer: built with no default graphics backend — call sv::set_acquire_context to supply "
                      "one");
@@ -58,11 +76,7 @@ cc::result<sg::context_handle> acquire_viewer_context()
     // resources rather than duplicating every upload.
     //
     // The memoization lives here rather than inside a provider, so a caller writing one needs no static of their own.
-    // Under a lock for the same reason `acquire_shader_library` is: two threads racing this would each build a device,
-    // which is the one outcome the memoization exists to prevent.
-    static auto cached = cc::mutex<sg::context_handle>(nullptr);
-
-    return cached.lock(
+    return viewer_context().lock(
         [](sg::context_handle& ctx) -> cc::result<sg::context_handle>
         {
             if (ctx != nullptr)
@@ -80,6 +94,33 @@ cc::result<sg::context_handle> acquire_viewer_context()
             ctx = r.value();
             return ctx;
         });
+}
+
+cc::shared_async<cc::result<sg::context_handle>> acquire_viewer_context_async()
+{
+#if SV_DEFAULT_BACKEND_WEBGPU
+    if (!g_acquire_context)
+    {
+        auto const cached = viewer_context().lock([](sg::context_handle const& ctx) { return ctx; });
+        if (cached != nullptr)
+            co_return cached;
+
+        auto const requested = co_await cc::async_as_result(sg::request_webgpu_context());
+        if (requested.has_error())
+            co_return cc::result<sg::context_handle>(cc::error(cc::any_error(
+                cc::format("shaped-viewer: no WebGPU device: {}", requested.error().underlying().to_string()))));
+
+        // Two loops awaiting their first frame at once both request one; the first to answer is the one kept.
+        co_return viewer_context().lock(
+            [&](sg::context_handle& ctx)
+            {
+                if (ctx == nullptr)
+                    ctx = requested.value();
+                return ctx;
+            });
+    }
+#endif
+    co_return acquire_viewer_context();
 }
 
 cc::shared_async<cc::unit> background_work(sg::context& ctx)

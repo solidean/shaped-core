@@ -142,7 +142,6 @@ shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
         .hits = paths.hits.as_readwrite_buffer(),
         .shadow_rays = paths.shadow_rays.as_readwrite_buffer(),
         .tallies = paths.tallies.as_readwrite_buffer(),
-        .channel_sums = paths.channel_sums.as_readwrite_buffer(),
         .queue_a = paths.queue_a.as_readwrite_buffer(),
         .queue_b = paths.queue_b.as_readwrite_buffer(),
         .queue_hits = paths.queue_hits.as_readwrite_buffer(),
@@ -151,6 +150,7 @@ shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
         .queue_finished = paths.queue_finished.as_readwrite_buffer(),
         .counters = paths.counters.as_readwrite_buffer(),
         .shade_offsets = paths.shade_offsets.as_readwrite_buffer(),
+        .channel_sums = paths.channel_sums.as_readwrite_buffer(),
     };
 }
 

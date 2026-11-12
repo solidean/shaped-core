@@ -1,4 +1,5 @@
 #include "shader_fixtures.hh"
+#include "texel_formats.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -778,6 +779,253 @@ cc::shared_async<denoise_run> stream_frame(sg::context& ctx,
     return worst;
 }
 } // namespace
+
+namespace
+{
+/// Not NaN and not infinite; a sample near the float range is finite, and the extreme-sample test hands one in.
+[[nodiscard]] bool finite(tg::vec4f const& p)
+{
+    constexpr auto largest = 3.4028234e38f;
+    return tg::abs(p[0]) <= largest && tg::abs(p[1]) <= largest && tg::abs(p[2]) <= largest;
+}
+
+[[nodiscard]] int non_finite_count(cc::span<tg::vec4f const> pixels)
+{
+    auto count = 0;
+    for (auto const& p : pixels)
+        count += finite(p) ? 0 : 1;
+    return count;
+}
+
+/// The noisy halves, with one pixel near the middle of the bright half set to `value`.
+[[nodiscard]] cc::vector<tg::vec4f> with_one_pixel(f32 value)
+{
+    auto pixels = noisy_halves(0.1f);
+    pixels[(k_size / 2) * k_size + 3 * k_size / 4] = tg::vec4f(value, value, value, 1);
+    return pixels;
+}
+} // namespace
+
+// A one-sample frame's brightest sample can be thousands of times its neighbors', and a viewer shows that frame.
+// An edge-stop that takes such a sample in spreads it over the pass's whole footprint, a square that jumps to wherever
+// the next frame's brightest sample lands.
+// Taken in at a weight near one, a sample near the float range also overflows the pass's sum, and the next pass turns
+// that infinity into NaN, a block that shows black.
+// So the sample stays where it fell, and every other pixel stays near the image it sits in.
+ASYNC_INVOCABLE_TEST("sr - atrous keeps a single extreme sample where it fell",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    for (auto const value : {1e6f, 1e38f})
+    {
+        auto history = sr::reconstruct_history();
+        auto const run = co_await run_once(ctx, with_one_pixel(value), split_normals(), atrous_settings, 1, history);
+        REQUIRE(run.outcome.status == sr::reconstruct_status::denoised);
+        auto spread = 0;
+        for (auto i = isize(0); i < run.output.size(); ++i)
+            spread += finite(run.output[i]) && run.output[i][0] > 8.0f ? 1 : 0;
+        CHECK(non_finite_count(run.output) == 0).dump("value", value);
+        // The sample's own pixel keeps it; ten times the image's brightest elsewhere is the sample spread.
+        CHECK(spread <= 1).dump("value", value).dump("pixels past ten times the image", spread);
+    }
+}
+
+// A half-float target holds nothing past 65504, so a bright enough sample arrives as infinity, and a NaN is one bad
+// division away: one such pixel must not take its neighbors with it, on its own frame or on any after it.
+ASYNC_INVOCABLE_TEST("sr - a non-finite pixel spreads through neither atrous nor svgf, on any frame",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    auto const inf = 1.0f / tg::abs(noise_at(0, 0) * 0.0f);
+    auto const nan = inf * 0.0f;
+    for (auto const bad : {inf, nan})
+    {
+        auto history = sr::reconstruct_history();
+        auto const run = co_await run_once(ctx, with_one_pixel(bad), split_normals(), atrous_settings, 1, history);
+        REQUIRE(run.outcome.status == sr::reconstruct_status::denoised);
+        CHECK(non_finite_count(run.output) == 0).dump("atrous, input", bad);
+
+        // SVGF keeps a history, so a bad pixel on one frame could poison every frame after it.
+        auto stream = make_stream(ctx);
+        for (auto frame = 0; frame < 6; ++frame)
+        {
+            auto color = noisy_frame(frame, 0.1f);
+            if (frame == 1)
+                color[(k_size / 2) * k_size + 3 * k_size / 4] = tg::vec4f(bad, bad, bad, 1);
+            auto const s = co_await stream_frame(ctx, stream, color, 1.0f);
+            REQUIRE(s.outcome.status == sr::reconstruct_status::denoised);
+            CHECK(non_finite_count(s.output) == 0).dump("svgf, input", bad).dump("frame", frame);
+        }
+    }
+}
+
+namespace
+{
+/// The halves as a mean of `n` samples, each with noise of `amplitude`, and in alpha the mean of each sample's luminance
+/// squared, as an integrator accumulating a moment writes them.
+[[nodiscard]] cc::vector<tg::vec4f> measured_halves(int n, f32 amplitude)
+{
+    auto pixels = cc::vector<tg::vec4f>();
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+        {
+            auto mean = 0.0f;
+            auto moment = 0.0f;
+            for (auto i = 0; i < n; ++i)
+            {
+                auto const v = clean_value(x) + amplitude * noise_at(x + 131 * i, y + 71 * i);
+                mean += v;
+                moment += v * v; // a gray sample's luminance is its value
+            }
+            pixels.push_back(tg::vec4f(mean / f32(n), mean / f32(n), mean / f32(n), moment / f32(n)));
+        }
+    return pixels;
+}
+
+/// `run_once` for a color whose alpha carries its moment, `reconstruct_inputs::moment_in_alpha`.
+cc::shared_async<denoise_run> run_measured(sg::context& ctx,
+                                           cc::span<tg::vec4f const> color,
+                                           u32 sample_count,
+                                           sr::reconstruct_history& history)
+{
+    auto const color_tex = make_image(ctx);
+    auto const output_tex = make_image(ctx);
+    auto const normal_tex = make_image(ctx);
+    auto cmd = ctx.create_command_list();
+    upload(*cmd, color_tex, color);
+    upload(*cmd, normal_tex, split_normals());
+    auto const outcome = sr::reconstruct_routine::execute(*cmd,
+                                                          {.color = color_tex,
+                                                           .guides = {.normal = normal_tex},
+                                                           .output = output_tex,
+                                                           .sample_count = sample_count,
+                                                           .moment_in_alpha = true},
+                                                          history, atrous_settings);
+    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output_tex.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+    auto const pixels = co_await readback.data();
+    auto result = denoise_run{.outcome = outcome};
+    for (auto i = isize(0); i < pixels.size(); ++i)
+        result.output.push_back(pixels[i]);
+    co_return result;
+}
+} // namespace
+
+// With each pixel's variance measured from its moment, à-trous removes a young mean's noise and leaves a converged one alone,
+// whose measured noise is too small to average anything across.
+ASYNC_INVOCABLE_TEST("sr - atrous steered by a measured variance denoises a young mean and leaves a converged one",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    auto young_history = sr::reconstruct_history();
+    auto const young = measured_halves(8, 0.3f);
+    auto const young_run = co_await run_measured(ctx, young, 8, young_history);
+    REQUIRE(young_run.outcome.status == sr::reconstruct_status::denoised);
+    CHECK(rmse_against_clean(young_run.output) < 0.5f * rmse_against_clean(young))
+        .dump("raw", rmse_against_clean(young))
+        .dump("denoised", rmse_against_clean(young_run.output));
+    // The moment comes back untouched in alpha.
+    CHECK(young_run.output[100][3] == young[100][3]);
+
+    // A deep mean of a two-valued image: its measured noise is a tiny fraction of the step, which stays where it is.
+    auto converged_history = sr::reconstruct_history();
+    auto const converged = measured_halves(1024, 0.3f);
+    auto const converged_run = co_await run_measured(ctx, converged, 1024, converged_history);
+    REQUIRE(converged_run.outcome.status == sr::reconstruct_status::denoised);
+    auto moved = 0.0f;
+    for (auto i = isize(0); i < converged.size(); ++i)
+        moved = cc::max(moved, tg::abs(converged_run.output[i][0] - converged[i][0]));
+    CHECK(moved < 0.05f).dump("largest change", moved);
+}
+
+// One extreme sample in a mean of sixteen: its measured variance is huge, and a window steered by it would take it in
+// everywhere around it; capped against the neighborhood's median, it stays where it fell.
+ASYNC_INVOCABLE_TEST("sr - atrous steered by a measured variance keeps a single extreme sample where it fell",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    auto image = measured_halves(16, 0.1f);
+    auto const at = (k_size / 2) * k_size + 3 * k_size / 4;
+    // One of the sixteen samples was 1e4: the mean and the moment both carry it.
+    auto const extreme = 1e4f;
+    auto const mean = image[at][0] + extreme / 16.0f;
+    image[at] = tg::vec4f(mean, mean, mean, image[at][3] + extreme * extreme / 16.0f);
+    auto history = sr::reconstruct_history();
+    auto const run = co_await run_measured(ctx, image, 16, history);
+    REQUIRE(run.outcome.status == sr::reconstruct_status::denoised);
+    auto spread = 0;
+    for (auto i = isize(0); i < run.output.size(); ++i)
+        spread += i != at && run.output[i][0] > 2.0f ? 1 : 0;
+    CHECK(spread == 0).dump("pixels lifted past twice the image", spread);
+}
+
+// A viewer's denoised image is a half float, which holds nothing past 65504, and a lamp in the image is brighter than that.
+// Converted as it was, such a pixel became infinity, which whatever reads the image next turns into NaN.
+ASYNC_INVOCABLE_TEST("sr - atrous and svgf saturate a pixel past a half float's range in a half-float output",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    sr::atrous_denoise_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+    sr::svgf_denoise_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+    (void)co_await ctx.routines.idle_completion();
+
+    for (auto const member : {sr::denoise_method::atrous, sr::denoise_method::svgf})
+    {
+        auto stream = make_stream(ctx);
+        stream.output = ctx.persistent.create_texture_2d(
+            {.format = sg::pixel_format::rgba16_float, .width = k_size, .height = k_size, .usage = image_usage});
+        auto shown = cc::vector<tg::vec4f>();
+        // A few frames, so SVGF's history holds the bright image too.
+        for (auto frame = 0; frame < 3; ++frame)
+        {
+            auto cmd = ctx.create_command_list();
+            upload(*cmd, stream.color, filled(tg::vec4f(1e6f, 1e6f, 1e6f, 1)));
+            upload(*cmd, stream.normal, split_normals());
+            upload(*cmd, stream.depth, filled(tg::vec4f(1, 0, 0, 0)));
+            upload(*cmd, stream.motion, filled(tg::vec4f(0, 0, 0, 0)));
+            auto const outcome = sr::reconstruct_routine::execute(
+                *cmd,
+                {.color = stream.color,
+                 .guides = {.normal = stream.normal, .depth = stream.depth, .motion = stream.motion},
+                 .output = stream.output},
+                stream.history, {.denoiser = member, .fresh_samples = member == sr::denoise_method::svgf});
+            auto const readback = cmd->download.bytes_from_texture(stream.output.raw());
+            ctx.submit_command_list(cc::move(cmd));
+            ctx.advance_epoch();
+            REQUIRE(outcome.status == sr::reconstruct_status::denoised).dump("member", sr::to_string(member));
+            shown = sr_test::unpacked(sg::pixel_format::rgba16_float, co_await readback.bytes(), k_size * k_size);
+        }
+        auto saturated = 0;
+        for (auto const& p : shown)
+            saturated += p[0] == 65504.0f && p[1] == 65504.0f && p[2] == 65504.0f ? 1 : 0;
+        CHECK(saturated == k_size * k_size).dump("member", sr::to_string(member)).dump("saturated pixels", saturated);
+    }
+}
 
 ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream",
                      (sg::context_handle const& ctx_h),

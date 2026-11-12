@@ -65,6 +65,16 @@
             }
         },
         {
+            "name": "x64-windows-msvc-ninja-v2-avx",
+            "displayName": "RelWithDebInfo MSVC at x86-64 v2-avx (Ninja)",
+            "description": "RelWithDebInfo build at SC_X64_LEVEL=v2-avx, /arch:AVX: the level of a consumer built for AVX without AVX2",
+            "inherits": "x64-windows-msvc-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_X64_LEVEL": "v2-avx"
+            }
+        },
+        {
             "name": "arm64-windows-base",
             "condition": {
                 "type": "equals",
@@ -753,6 +763,10 @@
         {
             "name": "relwithdebinfo-msvc",
             "configurePreset": "x64-windows-msvc-ninja-relwithdebinfo"
+        },
+        {
+            "name": "v2-avx-msvc",
+            "configurePreset": "x64-windows-msvc-ninja-v2-avx"
         },
         {
             "name": "debug-clang",

@@ -26,6 +26,7 @@ struct sv::material_type_description
     cc::string transmission_attribute = {};
     cc::string thin_walled_attribute = {};
     cc::string tangent_frame_attribute = {};
+    bool display_only = false;
     cc::string height_attribute = {};
     cc::string height_top_attribute = {};
     cc::string height_bottom_attribute = {};
@@ -114,6 +115,11 @@ struct sv::material_type
     /// Which declared rotation attribute is this type's tangent frame, or empty for none.
     /// The hybrid reads its +z as the smooth normal where a bounce meets the surface, so glass refracts and a secondary is lit without facets.
     cc::string tangent_frame_attribute;
+
+    /// Whether this type is a display material, which reaches the camera and reflects nothing.
+    /// A secondary hit then reads its base color and specular weight as 0, so the hybrid's bounce is absorbed there as a tracer's is,
+    /// rather than lit as the mid-gray a type naming no base color is otherwise read as.
+    bool display_only = false;
 
     /// Which declared float attribute is a relief's height in meters, positive out of the face, or empty for none.
     /// Bound to a texture, a hit marches it along its ray (parallax occlusion mapping) and every texture is read where the ray met it.

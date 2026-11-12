@@ -125,6 +125,7 @@ void webgpu_command_list::record_acceleration_kernel(acceleration_kernel kernel,
     auto const pipeline = pool.kernel(kernel);
     auto const layout = pool.kernel_layout();
     auto const pool_buffer = pool.buffer().get();
+    auto const scratch_buffer = pool.sort_scratch().get();
 
     auto const unused = acceleration_kernel_input{.buffer = pool.unused_input(), .offset = 0, .size = WGPU_WHOLE_SIZE};
     acceleration_kernel_input bound_inputs[3] = {unused, unused, unused};
@@ -141,8 +142,8 @@ void webgpu_command_list::record_acceleration_kernel(acceleration_kernel kernel,
         args.words[1] = count;
         auto const placement = _ctx._constant_pages.place(_constant_pages, cc::as_bytes(cc::span<u32 const>(args.words)));
 
-        WGPUBindGroupEntry entries[5] = {};
-        for (auto binding = 0; binding < 5; ++binding)
+        WGPUBindGroupEntry entries[6] = {};
+        for (auto binding = 0; binding < 6; ++binding)
         {
             entries[binding].binding = u32(binding);
             entries[binding].offset = 0;
@@ -158,11 +159,12 @@ void webgpu_command_list::record_acceleration_kernel(acceleration_kernel kernel,
             entries[2 + i].offset = bound_inputs[i].offset;
             entries[2 + i].size = bound_inputs[i].size;
         }
+        entries[5].buffer = scratch_buffer;
         auto const desc = WGPUBindGroupDescriptor{
             .nextInChain = nullptr,
             .label = to_wgpu("sg acceleration build"),
             .layout = layout,
-            .entryCount = 5,
+            .entryCount = 6,
             .entries = entries,
         };
         auto const group = wgpu_bind_group(wgpuDeviceCreateBindGroup(_ctx.device(), &desc));
@@ -219,6 +221,9 @@ void record_tree_boxes(webgpu_command_list& cmd, u32 unit, tree_layout const& tr
     }
 }
 
+/// Below this many records a sort buys nothing measurable, and the record order stays the caller's.
+constexpr u32 spatial_sort_min_records = 16;
+
 /// The header and the nodes, the start of every region.
 [[nodiscard]] cc::vector<u32> region_start(tree_layout const& tree, u32 first_record_unit, u32 record_count, u32 kind_word)
 {
@@ -232,6 +237,89 @@ void record_tree_boxes(webgpu_command_list& cmd, u32 unit, tree_layout const& tr
     return words;
 }
 } // namespace
+
+void webgpu_command_list::record_spatial_sort(u32 record_kind, u32 first_record_unit, u32 record_units, u32 record_count)
+{
+    if (record_count < spatial_sort_min_records)
+        return;
+
+    // A block per invocation of the count and scatter passes: enough blocks to occupy a GPU, few enough that one
+    // invocation per digit can scan its row of them.
+    auto const blocks = cc::clamp((record_count + 255) / 256, u32(1), u32(4096));
+    auto const per_block = (record_count + blocks - 1) / blocks;
+
+    // The scratch, in words: the centers' bounds, the row bases, the counts, two key and value arrays, the gathered records.
+    auto const row_bases = u32(8);
+    auto const counts = row_bases + 256;
+    auto const keys_a = counts + 256 * blocks;
+    auto const values_a = keys_a + record_count;
+    auto const keys_b = values_a + record_count;
+    auto const values_b = keys_b + record_count;
+    auto const gathered = values_b + record_count;
+    auto const words = isize(gathered) + 4 * isize(record_units) * isize(record_count);
+    if (words * 4 > max_sort_scratch_bytes)
+        return; // larger than one storage binding holds: kept in the caller's order, which traces correctly, only slower
+
+    // A growth replaces the buffer an earlier build of this list may have bound.
+    auto& pool = _ctx._acceleration;
+    _keep_alive.push_back(std::make_shared<wgpu_buffer>(pool.sort_scratch()));
+    (void)pool.sort_scratch(words);
+
+    auto const clear = [&](u32 first, u32 count, u32 value)
+    {
+        auto args = acceleration_kernel_args{};
+        args.words[6] = first;
+        args.words[7] = value;
+        record_acceleration_kernel(acceleration_kernel::sort_clear, args, count);
+    };
+
+    // What every kernel reading the records needs: what they are, and where the first one is.
+    auto records = acceleration_kernel_args{};
+    records.words[3] = record_kind;
+    records.words[5] = first_record_unit;
+
+    clear(0, 3, 0xffffffffu);
+    clear(3, 3, 0u);
+    record_acceleration_kernel(acceleration_kernel::sort_bounds, records, record_count);
+    auto keys = records;
+    keys.words[8] = keys_a;
+    keys.words[9] = values_a;
+    record_acceleration_kernel(acceleration_kernel::sort_keys, keys, record_count);
+
+    // Four passes of 8 bits cover the 30 bits of a code, and an even count leaves the result where it started.
+    for (auto pass = u32(0); pass < 4; ++pass)
+    {
+        auto const from_a = pass % 2 == 0;
+        auto args = acceleration_kernel_args{};
+        args.words[6] = from_a ? keys_b : keys_a;
+        args.words[7] = from_a ? values_b : values_a;
+        args.words[8] = from_a ? keys_a : keys_b;
+        args.words[9] = from_a ? values_a : values_b;
+        args.words[10] = counts;
+        args.words[11] = row_bases;
+        args.words[12] = record_count;
+        args.words[13] = blocks;
+        args.words[14] = 8 * pass;
+        args.words[15] = per_block;
+        clear(counts, 256 * blocks, 0u);
+        record_acceleration_kernel(acceleration_kernel::sort_count, args, blocks);
+        record_acceleration_kernel(acceleration_kernel::sort_scan_rows, args, 256);
+        record_acceleration_kernel(acceleration_kernel::sort_scan_bases, args, 1);
+        record_acceleration_kernel(acceleration_kernel::sort_scatter, args, blocks);
+    }
+
+    auto gather = acceleration_kernel_args{};
+    gather.words[4] = record_units;
+    gather.words[5] = first_record_unit;
+    gather.words[6] = gathered;
+    gather.words[9] = values_a;
+    record_acceleration_kernel(acceleration_kernel::sort_gather, gather, record_count);
+
+    end_open_pass("a copy");
+    wgpuCommandEncoderCopyBufferToBuffer(encoder(), pool.sort_scratch().get(), u64(gathered) * 4, pool.buffer().get(),
+                                         u64(first_record_unit) * acceleration_unit_bytes,
+                                         u64(record_count) * u64(record_units) * acceleration_unit_bytes);
+}
 
 sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                      sg::accel_build_flags flags,
@@ -351,6 +439,9 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
             touch(g.transform);
         first_triangle += count;
     }
+    // A moving BLAS's records hold both poses, which the spatial sort's fixed stride does not.
+    if (!flags.has(sg::accel_build_flag::fast_build) && !is_moving)
+        record_spatial_sort(u32(webgpu_blas::primitive_kind::triangles), first_record, 3, triangle_count);
     // leaf kind 4 is triangles that move, whose box holds both of their poses
     record_tree_boxes(*this, unit, tree, is_moving ? 4 : u32(webgpu_blas::primitive_kind::triangles), first_record);
 
@@ -411,6 +502,8 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::bl
         touch(g.aabbs);
         first_box += u32(g.aabb_count);
     }
+    if (!flags.has(sg::accel_build_flag::fast_build))
+        record_spatial_sort(u32(webgpu_blas::primitive_kind::boxes), first_record, 2, box_count);
     record_tree_boxes(*this, unit, tree, u32(webgpu_blas::primitive_kind::boxes), first_record);
 
     return std::make_shared<webgpu_blas>(_ctx, unit, u32(units), webgpu_blas::primitive_kind::boxes, flags,
@@ -456,6 +549,8 @@ sg::tlas_handle webgpu_command_list::raytracing_build_tlas(cc::span<sg::tlas_ins
                                         i, is_moving);
     }
     write_acceleration_region(unit, units, words);
+    if (!flags.has(sg::accel_build_flag::fast_build) && !is_moving)
+        record_spatial_sort(2, first_instance, 7, instance_count);
     // leaf kind 3 is instances that move, whose box holds both of their transforms' boxes
     record_tree_boxes(*this, unit, tree, is_moving ? 3 : 2, first_instance);
 

@@ -1,0 +1,124 @@
+// The bound raster mode's shadows: one occlusion ray a pixel at half the image's size, toward one light chosen at random,
+// whose average over frames is the share of the direct light that is visible there.
+//
+// That share is the ratio estimator of Heitz, Hill and McGuire, "Combining Analytic Direct Illumination and Stochastic
+// Shadows" (I3D 2018): the shading keeps its exact, unshadowed direct light and multiplies it by the share.
+// A light is chosen in proportion to its unshadowed diffuse contribution at the pixel, so the one ray serves every light.
+// The share is accumulated and blurred by the occlusion's passes in module `raster_bound`; this module traces alone,
+// in a group of its own, since the ray query's acceleration pool would not fit beside group 0's seven buffers.
+module raster_bound_shadows
+
+require ray_query
+
+use pt
+use quadric
+use raster
+use raster_bound_shadow_maps
+use scene
+use tracer
+
+/// The shadow pass's one group.
+binding shadow_scene:
+    /// One element, the frame constants.
+    frame: buffer[raster.frame_constants]
+
+    /// Every light of the layer, `light_count` of them.
+    lights: buffer[tracer.light_record]
+
+    /// The depth the prepass laid down, reversed, `near / view depth`.
+    depth: texture_2d_depth
+
+    /// The prepass's flat normal of each full-size pixel's triangle, turned toward the camera; zero where none was drawn.
+    normals: texture_2d[float4]
+
+    /// The scene, as the tracer's instances place it: meshes, and quadric batches as boxes.
+    world: acceleration_structure[.mixed]
+
+    /// The instance table, whose records say where a quadric batch's records start in `vertices`.
+    instances: buffer[tracer.instance_record]
+
+    /// The mesh manager's vertex pool, which holds every quadric batch's records.
+    vertices: bytes
+
+    /// The frame's number, which turns the random numbers from frame to frame; the other lanes unused.
+    settings: float4
+
+/// What the shadow pass writes: 1 where the chosen light's point is visible, 0 where something blocks it.
+@pixel struct shadow_target:
+    @format(.r8_unorm) visibility: float
+
+/// What a quadric's intersection reports of its box: the object-space outward normal its solve computed.
+struct quadric_attributes:
+    normal: float3
+
+/// The primitive of box `b` of the quadric batch `inst`, solved along the box's object-space ray, as
+/// `tracer.intersect_quadric` solves it; its records start at the record's `base_vertex` of the vertex pool `pool`.
+fun quadric_report_of(b: procedural_box, inst: scene.instance, pool: bytes) -> report[quadric_attributes]:
+    let prim = quadric.load_primitive(pool, inst.base_vertex, b.primitive_index as uint)
+    let origin = float3(b.object_ray.origin.x, b.object_ray.origin.y, b.object_ray.origin.z)
+    let direction = float3(b.object_ray.direction.x, b.object_ray.direction.y, b.object_ray.direction.z)
+    let found = quadric.intersect(prim, origin, direction, b.ray.t_min, b.t_current)
+    if not found.valid => return report.none()
+    return report(t = found.t, attributes = quadric_attributes(found.normal))
+
+/// The share of the direct light visible at half-size pixel `h`, from one ray: 1 or 0, or 1 where no light reaches it.
+fun visibility(h: int2){shadow_scene} -> float:
+    let f = shadow_scene.frame[0]
+    let pixel = h * 2
+    let center = raster_bound_shadow_maps.world_from(shadow_scene.depth, f, pixel)
+    if center.w == 0.0 => return 1.0
+    let p = center.xyz
+    let cam = scene.camera(..f.camera)
+    let n = raster_bound_shadow_maps.normal_from(shadow_scene.normals, shadow_scene.depth, f, pixel, p, cam.position)
+
+    let mut total = 0.0
+    for i in 0 ..< (f.light_count as int):
+        total += raster_bound_shadow_maps.light_weight(scene.light(..shadow_scene.lights[i]), p, n)
+    if total <= 0.0 => return 1.0
+
+    // Stratified rather than drawn: a 4x4 Bayer offset spreads a pixel's neighbours over the choices, and the golden
+    // ratio's fractions step every pixel through them from frame to frame, so the blur and the accumulation each see
+    // the light chosen evenly instead of in clumps.
+    let x = h.x & 3
+    let y = h.y & 3
+    let e = x ^ y
+    let bayer = ((e & 1) << 3) | ((y & 1) << 2) | (((e >> 1) & 1) << 1) | ((y >> 1) & 1)
+    let offset = ((bayer as float) + 0.5) / 16.0
+    let frame = shadow_scene.settings.x
+    let mut state = pt.hash((h.x as uint) * 1973u + (h.y as uint) * 9277u)
+    let jitter = pt.rand(mut state)
+    // Each pixel's own rotation too, within its Bayer stratum, so pixels sharing an offset do not step in lockstep --
+    // which a long average shows as a pattern crawling across a still image.
+    let u1 = fract(offset + jitter * 0.0625 + frame * 0.6180340)
+    let u2 = fract(jitter + frame * 0.7548777)
+    let u3 = fract(offset * 7.0 + jitter + frame * 0.5698403)
+    let pick = u1 * total
+    let mut chosen = 0
+    let mut running = 0.0
+    for i in 0 ..< (f.light_count as int):
+        running += raster_bound_shadow_maps.light_weight(scene.light(..shadow_scene.lights[i]), p, n)
+        if running >= pick:
+            chosen = i
+            break
+    let light = scene.light(..shadow_scene.lights[chosen])
+
+    // A point on the chosen light, and the ray to it, lifted off the surface by an amount growing with distance.
+    let lift = 0.002 * length(cam.position - p) + 0.001
+    let origin = p + n * lift
+    let mut direction = -light.normal
+    let mut reach = 3.0e38
+    if light.path == scene.light_path_area:
+        let a = u2 * 2.0 - 1.0
+        let b = u3 * 2.0 - 1.0
+        let target = light.position + a * light.u + b * light.v
+        reach = length(target - origin) * 0.999
+        direction = (target - origin) / max(reach, 1e-6)
+    else if light.path == scene.light_path_point:
+        reach = length(light.position - origin) * 0.999
+        direction = (light.position - origin) / max(reach, 1e-6)
+    else if light.path == scene.light_path_distant_disc:
+        // a direction within the cone the disc subtends, so its shadow softens with its size
+        direction = pt.sample_cone(-light.normal, light.one_minus_cos_angular_radius, u2, u3)
+    let r = ray(pos3(..origin), vec3(..normalize(direction)), 0.0, reach)
+    let hit = shadow_scene.world.trace(r, b => quadric_report_of(b, scene.instance(..shadow_scene.instances[b.instance_id]), shadow_scene.vertices), flags = ray_flags.accept_first_hit_and_end_search)
+    return if hit.is_hit => 0.0 else 1.0

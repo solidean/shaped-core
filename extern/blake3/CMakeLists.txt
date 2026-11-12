@@ -40,7 +40,8 @@ endif()
 add_library(blake3 STATIC ${BLAKE3_SOURCES})
 
 # SYSTEM so blake3.h does not trip our warnings in the consuming TU.
-target_include_directories(blake3 SYSTEM PUBLIC ${BLAKE3_DIR}/include)
+# The build tree's only: every library links it PRIVATE, so an installed copy is an archive to link, never a header to include.
+target_include_directories(blake3 SYSTEM PUBLIC $<BUILD_INTERFACE:${BLAKE3_DIR}/include>)
 
 # blake3_impl.h is upstream-internal and stays out of the public include dir, but
 # every TU here includes it — and it in turn includes "blake3.h", resolved above.

@@ -10,7 +10,7 @@ refs:
 
 Tessellation, geometry, mesh and task stages, and work lists, on dx12, vulkan, metal and webgpu.
 Each one is native where the target has it, and polyfilled where it does not.
-This is row D6 of the [comparison matrix](../comparison/matrix.md), whose SGL cell today is ⚠️ for metal tessellation and every polyfill.
+The stages are row D6 of the [comparison matrix](../comparison/matrix.md), ⚠️ today for the geometry and tessellation polyfills; work lists are row D9.
 
 **Work graphs are not added, natively or polyfilled**: D3D12 has deprecated them, with no support in SM 6.10.
 GPU-driven work goes through work lists instead.
