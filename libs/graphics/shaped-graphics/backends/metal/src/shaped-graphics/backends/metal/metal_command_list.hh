@@ -193,6 +193,8 @@ private:
     void raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
     void raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
                                          sg::impl::geometry_polyfill_draw const& draw) override;
+    void raster_draw_tessellation_polyfilled(sg::impl::tessellation_polyfill_state const& polyfill,
+                                             sg::impl::geometry_polyfill_draw const& draw) override;
     void raster_draw_indexed(draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 

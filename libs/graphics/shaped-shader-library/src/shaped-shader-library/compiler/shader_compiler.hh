@@ -142,6 +142,14 @@ inline constexpr cc::string_view k_polyfill_vertex_option = "polyfill_vertex";
 /// half and the scan before it, valued `scan` there: the name of the pipeline's task entry point, whose records both
 /// read (SGL's CHK-524).
 inline constexpr cc::string_view k_polyfill_task_option = "polyfill_task";
+
+/// The option a pipeline that polyfills its tessellation stages passes beside `k_mesh_form_option` for its evaluation
+/// stage's compute half: the name of the pipeline's control entry point, whose patches it reads (SGL's CHK-527).
+inline constexpr cc::string_view k_polyfill_control_option = "polyfill_control";
+
+/// The option that compiles one of the passes SGL's prelude holds for a polyfill in place of the asset's own entry
+/// point, valued its name, such as `sg_tessellation_scan` (SGL's CHK-527); the result is a compute shader.
+inline constexpr cc::string_view k_polyfill_pass_option = "polyfill_pass";
 } // namespace slib
 
 namespace slib

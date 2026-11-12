@@ -334,6 +334,8 @@ private:
         auto mesh = sgl::emit::mesh_form::native;
         auto polyfill_vertex = cc::string();
         auto polyfill_task = cc::string();
+        auto polyfill_control = cc::string();
+        auto polyfill_pass = cc::string();
         auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
         auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
         auto const requires_native
@@ -369,6 +371,16 @@ private:
                 polyfill_vertex = o.value;
                 continue;
             }
+            if (o.name == slib::k_polyfill_control_option)
+            {
+                polyfill_control = o.value;
+                continue;
+            }
+            if (o.name == slib::k_polyfill_pass_option)
+            {
+                polyfill_pass = o.value;
+                continue;
+            }
             if (o.name == slib::k_native_spirv_option || o.name == slib::k_native_dxil_option)
             {
                 auto const is_for_this = o.name == slib::k_native_spirv_option ? is_spirv : is_dxil;
@@ -401,8 +413,9 @@ private:
             {.source = desc.source,
              .source_name = desc.label.empty() ? cc::string_view("<sgl>") : cc::string_view(desc.label),
              .library = library,
-             .entry_point = desc.entry_point,
-             .stage = stage,
+             // CHK-527: a polyfill's pass of the prelude in place of the asset's own entry point
+             .entry_point = polyfill_pass.empty() ? cc::string_view(desc.entry_point) : cc::string_view(polyfill_pass),
+             .stage = polyfill_pass.empty() ? stage : sgl::check::stage::compute,
              .target = _target,
              .options = options,
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
@@ -416,7 +429,8 @@ private:
              .native_line_table = native_line_table,
              .mesh = mesh,
              .polyfill_vertex = polyfill_vertex,
-             .polyfill_task = polyfill_task});
+             .polyfill_task = polyfill_task,
+             .polyfill_control = polyfill_control});
         // what the front end checked rather than loaded, kept for the next process
         if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
             store != nullptr)
@@ -427,8 +441,11 @@ private:
         // CHK-524: a polyfilled mesh stage's half is the stage it became, which the compile after this one builds; the
         // pixel stage after it stays one
         auto const is_polyfilled = desc.stage == sg::shader_stage::mesh || desc.stage == sg::shader_stage::geometry
-                                || desc.stage == sg::shader_stage::task;
-        auto const form_stage = !is_polyfilled                             ? desc.stage
+                                || desc.stage == sg::shader_stage::task
+                                || desc.stage == sg::shader_stage::tessellation_control
+                                || desc.stage == sg::shader_stage::tessellation_evaluation;
+        auto const form_stage = !polyfill_pass.empty()                     ? sg::shader_stage::compute
+                              : !is_polyfilled                             ? desc.stage
                               : mesh == sgl::emit::mesh_form::compute      ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::scan         ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::vertex_fetch ? sg::shader_stage::vertex
@@ -440,6 +457,16 @@ private:
             shader.mesh_polyfill_corners = l.corners;
             shader.mesh_polyfill_primitives = l.max_primitives;
             shader.mesh_polyfill_words = l.group_words;
+        }
+        if (emitted.tessellation_layout.has_value())
+        {
+            auto const& l = emitted.tessellation_layout.value();
+            shader.tessellation_domain = l.domain;
+            shader.tessellation_control_points = l.control_points;
+            shader.tessellation_patch_words = l.patch_words();
+            shader.tessellation_vertex_words = l.vertex_words;
+            shader.tessellation_partitioning = l.partitioning;
+            shader.tessellation_output = l.output;
         }
         if (emitted.task_layout.has_value())
         {
@@ -472,9 +499,11 @@ private:
                 shader.bindings.push_back(binding);
             result.declared_bindings.push_back(cc::move(binding));
         }
-        // a mesh and a task stage's workgroup too, which Metal's mesh draw states and no MSL text does
-        if ((stage == sgl::check::stage::compute || stage == sgl::check::stage::mesh || stage == sgl::check::stage::task)
-            && form_stage != sg::shader_stage::vertex)
+        // a mesh and a task stage's workgroup too, which Metal's mesh draw states and no MSL text does; and a polyfilled
+        // stage's compute form's, whatever stage it was declared as
+        if (form_stage == sg::shader_stage::compute
+            || ((stage == sgl::check::stage::mesh || stage == sgl::check::stage::task)
+                && form_stage != sg::shader_stage::vertex))
             shader.workgroup_size
                 = sg::compute_dimensions{.x = emitted.workgroup[0], .y = emitted.workgroup[1], .z = emitted.workgroup[2]};
         if (emitted.preferred_subgroup_size > 0)

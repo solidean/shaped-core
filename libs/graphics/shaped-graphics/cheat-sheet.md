@@ -163,6 +163,8 @@ ctx.draws_mesh_polyfill()                          // bool — whether this back
 desc.mesh_polyfill->task_budget = 4096;            // a polyfilled task stage that states no `meshes = N`: the mesh workgroups a draw launches at most
 ctx.set_geometry_polyfill(sg::polyfill_use::where_missing) // slib draws a geometry stage as compute + draw where the device has none; `never` by default, opt-in until measured
 ctx.draws_geometry_polyfill()                      // bool — whether this backend draws a polyfilled geometry stage (metal so far)
+ctx.set_tessellation_polyfill(sg::polyfill_use::where_missing) // slib draws tessellation by D3D's tessellator in compute where the device has none; `never` by default
+ctx.draws_tessellation_polyfill()                  // bool — whether this backend draws polyfilled tessellation (metal so far)
 ctx.set_hit_record_checks(bool)                    // dispatch_rays checks the hit records each tlas instance reaches; default = CC_ASSERT_ENABLED (see dispatch_rays)
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)

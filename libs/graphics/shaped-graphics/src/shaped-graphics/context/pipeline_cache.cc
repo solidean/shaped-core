@@ -351,6 +351,23 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
         b.add_pod(p.task_meshes);
         b.add_pod(p.task_budget);
     }
+    b.add_bool(desc.tessellation_polyfill.has_value());
+    if (desc.tessellation_polyfill.has_value())
+    {
+        auto const& p = desc.tessellation_polyfill.value();
+        add_shader(b, p.control_shader);
+        add_shader(b, p.count_shader);
+        add_shader(b, p.scan_shader);
+        add_shader(b, p.generate_shader);
+        add_shader(b, p.evaluation_shader);
+        b.add_pod(p.domain);
+        b.add_pod(p.control_points);
+        b.add_pod(p.patch_words);
+        b.add_pod(p.vertex_words);
+        b.add_pod(p.partitioning);
+        b.add_pod(p.output);
+        b.add_pod(p.max_factor);
+    }
 
     b.add_pod(u64(desc.vertex_input.slots.size()));
     for (auto const& s : desc.vertex_input.slots)

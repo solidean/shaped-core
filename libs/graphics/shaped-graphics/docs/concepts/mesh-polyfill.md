@@ -148,6 +148,35 @@ metal draws it, `draws_geometry_polyfill`, with the draw's buffers bound past ev
 A slot the draw has no buffer for, the index buffer of a draw that is not indexed, takes the draw's own values, since Metal's validation wants every declared buffer bound.
 dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage that decides `where_missing` has not run.
 
+## The tessellation stages, by D3D's tessellator
+
+**A device without tessellation draws it by compute passes** (CHK-527): metal, whose Metal 4 has none, and webgpu.
+SGL writes every pass, and the tessellator is D3D's, ported into its prelude, so the points and their order are D3D's.
+A draw's vertices are its patches' control points, `control_points` a patch, and the passes read them from the `sg_geometry_*` entries as a geometry stage's compute half does.
+
+| entry | holds |
+|---|---|
+| `sg_tessellation_draw[0]` | patches an instance; instances; partitioning, 0 integer, 1 fractional even, 2 fractional odd; D3D's output topology, 0 `triangle_cw`, 1 `triangle_ccw`, 2 lines |
+| `sg_tessellation_draw[1]` | the domain's edges, 2 isolines, 3, 4; control points a patch; words a patch; the largest factor, a float's bits |
+| `sg_tessellation_controls` | `patch_words` words a patch: its control points as the vertex stage returned them, then the factors struct as the control stage did |
+| `sg_tessellation_patches` | 8 words a patch: the tessellator's 6 factors as floats, then its first point and its first index |
+| `sg_tessellation_points` | 3 words a point: u and v in 16.16, then its patch |
+| `sg_tessellation_indices` | the draw's index buffer, each index a point |
+| `sg_tessellation_args` | the indexed draw's 5 arguments, the evaluation pass's 3 workgroup counts, then the points in all |
+
+`draw` and `draw_indexed` of such a pipeline then:
+
+1. take scratch buffers sized for every patch at the largest factor, `max_factor`, 64 by default;
+2. leave the rendering scope's pass;
+3. dispatch the control pass over `patches * instances` threads, which runs the vertex stage on each control point and the control stage on the patch;
+4. count each patch's points and indices, scan them in patch order in one invocation, then tessellate each patch, a thread a patch;
+5. dispatch the evaluation pass by the scan's workgroup count, a thread a point, which writes the mesh polyfill's words, `vertex_words` a point;
+6. reopen the pass and draw the vertex half by the tessellator's indices, indirectly, by the scan's count.
+
+**Opt-in until measured**: `ctx.tessellation_polyfill()` is `never` by default.
+slib then acquires the evaluation stage's vertex half as the vertex stage, both stages' compute halves, and the prelude's three passes through the control stage's source.
+metal draws it, `draws_tessellation_polyfill`; dx12, vulkan and webgpu draw none yet.
+
 ## Not yet
 
 - `draw_mesh_tasks_indirect`, whose vertex count the GPU then writes.

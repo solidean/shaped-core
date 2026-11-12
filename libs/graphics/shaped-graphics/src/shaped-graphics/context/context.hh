@@ -121,6 +121,19 @@ public:
     /// Whether this backend draws a pipeline whose `mesh_polyfill` stands for a geometry stage.
     [[nodiscard]] virtual bool draws_geometry_polyfill() const { return false; }
 
+    /// Whether a pipeline with tessellation stages that shaped-shader-library describes is drawn as their polyfill:
+    /// compute passes over D3D's tessellator and a draw of the points (SGL's CHK-527).
+    /// **`never` by default**, opt-in until its benchmark against the native stages has run.
+    /// Set it before acquiring the pipelines it should cover.
+    [[nodiscard]] polyfill_use tessellation_polyfill() const
+    {
+        return _tessellation_polyfill.load(cc::memory_order_relaxed);
+    }
+    void set_tessellation_polyfill(polyfill_use use) { _tessellation_polyfill.store(use, cc::memory_order_relaxed); }
+
+    /// Whether this backend draws a pipeline whose description holds a `tessellation_polyfill`.
+    [[nodiscard]] virtual bool draws_tessellation_polyfill() const { return false; }
+
     /// Whether `dispatch_rays` checks every instance of every bound tlas against the hit records it reaches.
     /// A record past the shader table or of the wrong kind is undefined behavior on every backend.
     /// On metal a record past the table can fault the GPU, so `dispatch_rays` skips a dispatch that reaches one.
@@ -893,6 +906,7 @@ protected:
     cc::atomic<bool> _portability_checks = false;
     cc::atomic<polyfill_use> _mesh_polyfill = polyfill_use::where_missing;
     cc::atomic<polyfill_use> _geometry_polyfill = polyfill_use::never;
+    cc::atomic<polyfill_use> _tessellation_polyfill = polyfill_use::never;
     cc::atomic<bool> _hit_record_checks = CC_ASSERT_ENABLED != 0;
     cc::atomic<bool> _render_pass_split_warnings = true;
 

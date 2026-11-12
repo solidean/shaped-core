@@ -30,4 +30,11 @@ void impl::set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_stat
     p._is_mesh_shaded = state.input_corners == 0;
     p._mesh_polyfill = cc::move(state);
 }
+
+void impl::set_tessellation_polyfill(raster_pipeline const& pipeline, tessellation_polyfill_state state)
+{
+    // as set_targets: only on a pipeline nobody else holds yet
+    auto& p = const_cast<raster_pipeline&>(pipeline);
+    p._tessellation_polyfill = cc::move(state);
+}
 } // namespace sg

@@ -222,6 +222,10 @@ protected:
     // Reached only on a context whose `draws_geometry_polyfill` says so, for a draw of at least one primitive.
     virtual void raster_draw_geometry_polyfilled(impl::mesh_polyfill_state const& polyfill,
                                                  impl::geometry_polyfill_draw const& draw);
+    // Reached only on a context whose `draws_tessellation_polyfill` says so, for a draw of at least one patch; `draw`'s
+    // primitives are its patches.
+    virtual void raster_draw_tessellation_polyfilled(impl::tessellation_polyfill_state const& polyfill,
+                                                     impl::geometry_polyfill_draw const& draw);
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing).
     // Split by geometry family, since a BLAS is triangles or AABBs and span-element overloads cannot
@@ -339,7 +343,8 @@ private:
     cc::string _rendering_target_set;                              // of the open rendering, or empty
     bool _raster_is_mesh_shaded = false;                           // of the bound raster pipeline
     cc::optional<impl::mesh_polyfill_state> _raster_mesh_polyfill; // of the bound raster pipeline, where it polyfills
-    cc::optional<raster_target_formats> _rendering_formats;        // of the open rendering, or empty when none is open
+    cc::optional<impl::tessellation_polyfill_state> _raster_tessellation_polyfill; // likewise, for its tessellation
+    cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
 
     // One entry per color and depth-stencil target of the open rendering, the subresources a copy inside the scope
     // must not name; the backend keeps each target alive for the recording, so the pointers stay valid.

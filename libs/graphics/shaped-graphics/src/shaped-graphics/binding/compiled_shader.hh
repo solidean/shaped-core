@@ -94,6 +94,17 @@ struct sg::compiled_shader
     /// SGL states them, as it does the mesh stage's.
     i32 task_polyfill_record_words = 0;
     i32 task_polyfill_meshes = 0;
+    /// A polyfilled tessellation's numbers, which its control stage's and its evaluation stage's halves carry alike
+    /// (SGL's CHK-527): the domain's edges (2 isolines, 3, 4), the patch's control points, the 32-bit words a patch
+    /// takes, the words a point takes, the partitioning (0 integer, 1 fractional even, 2 fractional odd), and D3D's
+    /// output topology (0 `triangle_cw`, 1 `triangle_ccw`, 2 lines); all 0 for every other shader.
+    /// The vertex half carries `tessellation_vertex_words` alone.
+    i32 tessellation_domain = 0;
+    i32 tessellation_control_points = 0;
+    i32 tessellation_patch_words = 0;
+    i32 tessellation_vertex_words = 0;
+    i32 tessellation_partitioning = 0;
+    i32 tessellation_output = 0;
 
     compiler_info compiler;
 

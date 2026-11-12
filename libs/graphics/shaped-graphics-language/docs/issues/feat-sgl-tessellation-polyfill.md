@@ -32,9 +32,14 @@ Measured against dx12's native tessellation on the same patches.
 - 2026-11-12: `prelude/tessellation.sgl`, the tessellator as `@internal` SGL over a sink, and `tests/interpret/tessellation-test.cc`.
   339 cases of every domain, partitioning and winding match the reference's counts and its FNV hash over every point and index, on the interpreter.
   The reference was run in a scratch harness; only its counts and hashes are committed.
+- 2026-11-12: the control and evaluation stages' compute halves, the vertex half, and the prelude's count, scan and generate passes, which the prelude holds as internal entry points no program lists.
+  sg, slib and metal draw it: metal's `sg - a tessellated triangle patch …` and `… quad patch …` tests pass through the polyfill, opt-in by `ctx.set_tessellation_polyfill`.
+  Found on the way: slib stated no workgroup size for a compute form of a stage declared otherwise, so metal ran one thread a group; the geometry polyfill had the same flaw unseen.
 
 ## Still open
 
-- Passes A to D, their reserved bindings, slib acquiring the pipelines, and metal recording the dispatches ahead of the draw.
-- C is serial per patch, 8192 triangles at factor 64 on a quad; a thread per point and per triangle is the faster form, once measured.
-- Measured against dx12's native tessellation on the same patches, on Windows.
+- dx12 and vulkan: the layout twins that hold the six `sg_tessellation_*` entries, the draw, and the benchmark against their native stages that decides `where_missing`; on Windows.
+- webgpu: the control pass reads nine storage buffers with the debug window, over WebGPU's default of eight a stage.
+- `max_factor` as a control stage's attribute; every pipeline holds room for 64 now, which a draw of many patches pays for in memory.
+- The scan is one invocation, and the tessellator one thread a patch, 8192 triangles at factor 64 on a quad; a thread a point and a triangle is the faster form, once measured.
+- An indexed draw's `vertex_index` in the vertex stage is the index read, as the geometry polyfill takes it; unchecked against D3D.

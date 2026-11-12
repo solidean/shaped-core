@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_binding_group.hh>
@@ -1041,8 +1042,10 @@ void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<ver
 
         // The stride is pipeline state on Metal, baked into the vertex descriptor, so a view carrying a different one
         // is a mismatch nothing below would report — the fetch simply reads the pipeline's stride.
-        // A polyfilled geometry stage reads the buffers in its compute half instead, by a stride its shader holds.
-        if (_bound_raster != nullptr && _bound_raster->mesh_polyfill() == nullptr)
+        // A polyfilled geometry stage or tessellation reads the buffers in a compute pass instead, by a stride its
+        // shader holds.
+        if (_bound_raster != nullptr && _bound_raster->mesh_polyfill() == nullptr
+            && _bound_raster->tessellation_polyfill() == nullptr)
         {
             auto const strides = _bound_raster->vertex_strides();
             CC_ASSERT(slot < strides.size(), "the bound raster pipeline declares no vertex input slot here");
@@ -1752,6 +1755,165 @@ void metal_command_list::raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill
     auto const corners = u64(polyfill.primitives_per_group) * u64(polyfill.corners);
     _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()), NS::UInteger(0),
                                     NS::UInteger(threads * corners), NS::UInteger(1), NS::UInteger(0));
+    ++_draws_in_render_encoder;
+}
+
+void metal_command_list::raster_draw_tessellation_polyfilled(sg::impl::tessellation_polyfill_state const& polyfill,
+                                                             sg::impl::geometry_polyfill_draw const& draw)
+{
+    CC_ASSERT(in_rendering_scope(), "a draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr, "a draw needs a bound raster pipeline");
+    CC_ASSERT(!draw.is_indexed || _bound_index_buffer != nullptr, "an indexed draw needs a bound index buffer");
+    auto const pass = [](sg::compute_pipeline_handle const& handle)
+    {
+        auto const* const p = dynamic_cast<metal_compute_pipeline const*>(handle.get());
+        CC_ASSERT(p != nullptr, "a tessellation polyfill's pass is not a metal compute_pipeline");
+        return p;
+    };
+    auto const* const control = pass(polyfill.control);
+    auto const* const count = pass(polyfill.count);
+    auto const* const scan = pass(polyfill.scan);
+    auto const* const generate = pass(polyfill.generate);
+    auto const* const evaluation = pass(polyfill.evaluation);
+    constexpr auto streams = cc::span<sg::reserved_binding_address const>(sg::reserved_geometry_vertices).size();
+    CC_ASSERTF(_bound_vertex_buffers.size() <= streams,
+               "polyfilled tessellation reads at most {} vertex buffers, and {} are bound", streams,
+               _bound_vertex_buffers.size());
+
+    // A patch of every instance owns its words of each buffer of the draw's own, sized for the largest factor.
+    auto const patches = u64(draw.primitives) * u64(draw.instances);
+    auto const points = patches * u64(polyfill.max_points());
+    auto const make
+        = [&](u64 words, auto usage) { return _metal_context.transient.create_raw_buffer(isize(words * 4), usage); };
+    auto const rw = sg::buffer_usage::readwrite_buffer;
+    auto const controls = make(patches * u64(polyfill.patch_words), rw);
+    auto const records = make(patches * 8, rw);
+    auto const point_words = make(points * 3, rw);
+    auto const indices = make(patches * u64(polyfill.max_indices()), rw);
+    auto const args = make(16, rw | sg::buffer_usage::indirect_command_buffer);
+    auto const vertices = make(points * u64(polyfill.vertex_words), rw);
+    auto const address
+        = [](sg::raw_buffer_handle const& b) { return static_cast<metal_buffer const&>(*b).gpu_address(); };
+
+    // What the passes read of the draw: the geometry polyfill's three rows, then the tessellation's two.
+    u32 const values[20] = {draw.first,
+                            draw.primitives,
+                            draw.is_indexed ? (_index_format == sg::index_format::uint16 ? 1u : 2u) : 0u,
+                            u32(draw.vertex_offset),
+                            draw.first_instance,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            draw.primitives,
+                            draw.instances,
+                            u32(polyfill.partitioning),
+                            u32(polyfill.output),
+                            u32(polyfill.domain),
+                            u32(polyfill.control_points),
+                            u32(polyfill.patch_words),
+                            cc::bit_cast<u32>(polyfill.max_factor)};
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(values)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed,
+                                             "a polyfilled tessellation's draw could not be staged: the metal device "
+                                             "refused a one-off staging buffer");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), values, sizeof(values));
+
+    // The passes run outside the pass, which Metal has no dispatch inside of: the draw splits the scope.
+    suspend_render_encoder("polyfilled tessellation", split_remedy::none);
+    place_inline_constants();
+    declare_bound_groups(sg::pipeline_stage_flag::compute, &control->footprint());
+    for (auto const& vertex_buffer : _bound_vertex_buffers)
+        if (vertex_buffer != nullptr)
+            declare_buffer(vertex_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    if (draw.is_indexed)
+        declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    for (auto const* const written : {&controls, &records})
+        declare_buffer(*written, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    bind_debug_window(control->footprint());
+
+    // Metal's validation wants every buffer a kernel declares bound, read or not: a slot the draw has no buffer for
+    // takes the draw's own values, which no pass reads there.
+    auto* const table = argument_table();
+    auto const draw_address = staging.buffer->gpuAddress() + u64(staging.offset);
+    table->setAddress(address(vertices), NS::UInteger(sg::reserved_mesh_output.metal_buffer));
+    table->setAddress(draw_address, NS::UInteger(sg::reserved_geometry_draw.metal_buffer));
+    table->setAddress(draw.is_indexed ? _index_address : draw_address,
+                      NS::UInteger(sg::reserved_geometry_indices.metal_buffer));
+    for (auto i = isize(0); i < isize(streams); ++i)
+    {
+        auto const a = i < _bound_vertex_addresses.size() ? _bound_vertex_addresses[i] : u64(0);
+        table->setAddress(a != 0 ? a : draw_address, NS::UInteger(sg::reserved_geometry_vertices[i].metal_buffer));
+    }
+    table->setAddress(draw_address + 12 * 4, NS::UInteger(sg::reserved_tessellation_draw.metal_buffer));
+    table->setAddress(address(records), NS::UInteger(sg::reserved_tessellation_patches.metal_buffer));
+    table->setAddress(address(controls), NS::UInteger(sg::reserved_tessellation_controls.metal_buffer));
+    table->setAddress(address(point_words), NS::UInteger(sg::reserved_tessellation_points.metal_buffer));
+    table->setAddress(address(indices), NS::UInteger(sg::reserved_tessellation_indices.metal_buffer));
+    table->setAddress(address(args), NS::UInteger(sg::reserved_tessellation_args.metal_buffer));
+
+    auto* const encoder = compute_encoder();
+    encoder->setArgumentTable(table);
+    // each pass takes the debug window as its own footprint asks, since any of them may print or assert
+    auto const run = [&](metal_compute_pipeline const* p, u64 threads)
+    {
+        bind_debug_window(p->footprint());
+        auto const size = p->workgroup_size();
+        encoder->setComputePipelineState(p->state());
+        encoder->dispatchThreads(MTL::Size(NS::UInteger(threads), 1, 1),
+                                 MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    };
+    // each pass reads what the one before it wrote
+    run(control, patches);
+    declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    run(count, patches);
+    declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    declare_buffer(args, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    run(scan, 1);
+    declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(point_words, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    declare_buffer(indices, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    run(generate, patches);
+    // the evaluation pass is as many workgroups as the scan counted, the arguments it wrote after the draw's
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_buffer(point_words, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(controls, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(vertices, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    {
+        bind_debug_window(evaluation->footprint());
+        auto const size = evaluation->workgroup_size();
+        encoder->setComputePipelineState(evaluation->state());
+        encoder->dispatchThreadgroups(MTL::GPUAddress(address(args) + 5 * 4),
+                                      MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    }
+    // the encoder's pipeline is the polyfill's now, which the next dispatch of the bound compute pipeline sets again
+    if (_bound_compute != nullptr)
+        encoder->setComputePipelineState(_bound_compute->state());
+
+    // The vertex half draws the points by the tessellator's indices, under the raster state as it was.
+    table->setAddress(address(vertices), NS::UInteger(sg::reserved_mesh_input.metal_buffer));
+    declare_buffer(vertices, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    declare_buffer(indices, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    bind_debug_window(_bound_raster->footprint());
+    declare_raster_draw(false);
+    resume_render_encoder();
+    _render_encoder->drawIndexedPrimitives(
+        primitive_type_of(_bound_raster->topology()), MTL::IndexTypeUInt32, MTL::GPUAddress(address(indices)),
+        NS::UInteger(patches * u64(polyfill.max_indices()) * 4), MTL::GPUAddress(address(args)));
     ++_draws_in_render_encoder;
 }
 

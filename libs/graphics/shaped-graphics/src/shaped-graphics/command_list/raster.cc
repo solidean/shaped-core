@@ -185,6 +185,18 @@ void command_list::draw(draw_config const& config)
     CC_ASSERT(!_raster_is_mesh_shaded, "a mesh-shaded pipeline draws with draw_mesh_tasks");
     _stats.add(stat::draws);
     check_raster_aliasing(false);
+    if (_raster_tessellation_polyfill.has_value())
+    {
+        // polyfilled tessellation: whole patches of the draw's vertices, as the native assembly drops the rest
+        auto const& p = _raster_tessellation_polyfill.value();
+        auto const patches = config.vertex_range.size / p.control_points;
+        if (patches > 0 && config.instance_range.size > 0)
+            raster_draw_tessellation_polyfilled(p, {.first = u32(config.vertex_range.offset),
+                                                    .primitives = u32(patches),
+                                                    .instances = u32(config.instance_range.size),
+                                                    .first_instance = u32(config.instance_range.offset)});
+        return;
+    }
     if (_raster_mesh_polyfill.has_value())
     {
         // a polyfilled geometry stage: whole primitives of the draw's vertices, as the native assembly drops the rest
@@ -205,6 +217,19 @@ void command_list::draw_indexed(draw_indexed_config const& config)
     CC_ASSERT(!_raster_is_mesh_shaded, "a mesh-shaded pipeline draws with draw_mesh_tasks");
     _stats.add(stat::draws);
     check_raster_aliasing(true);
+    if (_raster_tessellation_polyfill.has_value())
+    {
+        auto const& p = _raster_tessellation_polyfill.value();
+        auto const patches = config.index_range.size / p.control_points;
+        if (patches > 0 && config.instance_range.size > 0)
+            raster_draw_tessellation_polyfilled(p, {.first = u32(config.index_range.offset),
+                                                    .primitives = u32(patches),
+                                                    .instances = u32(config.instance_range.size),
+                                                    .first_instance = u32(config.instance_range.offset),
+                                                    .is_indexed = true,
+                                                    .vertex_offset = config.vertex_offset});
+        return;
+    }
     if (_raster_mesh_polyfill.has_value())
     {
         auto const& p = _raster_mesh_polyfill.value();
@@ -245,10 +270,18 @@ void command_list::raster_draw_geometry_polyfilled(impl::mesh_polyfill_state con
     CC_UNREACHABLE("a context whose draws_geometry_polyfill says so overrides this");
 }
 
+void command_list::raster_draw_tessellation_polyfilled(impl::tessellation_polyfill_state const&,
+                                                       impl::geometry_polyfill_draw const&)
+{
+    CC_UNREACHABLE("a context whose draws_tessellation_polyfill says so overrides this");
+}
+
 void command_list::draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
 {
-    CC_ASSERT(!_raster_mesh_polyfill.has_value(), "a polyfilled stage draws with draw, draw_indexed or draw_mesh_tasks "
-                                                  "alone so far, since its counts would be the GPU's to write");
+    CC_ASSERT(!_raster_mesh_polyfill.has_value() && !_raster_tessellation_polyfill.has_value(),
+              "a polyfilled stage draws with draw, draw_indexed or draw_mesh_tasks alone so far, since its counts "
+              "would "
+              "be the GPU's to write");
     CC_ASSERT(args != nullptr, "indirect draw arguments buffer is null");
     CC_ASSERT(args->usage().has(buffer_usage::indirect_command_buffer), "indirect draw arguments need "
                                                                         "buffer_usage::indirect_command_buffer");
@@ -330,6 +363,9 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
     _raster_mesh_polyfill = {};
     if (auto const* const polyfill = pipeline.mesh_polyfill(); polyfill != nullptr)
         _raster_mesh_polyfill = *polyfill;
+    _raster_tessellation_polyfill = {};
+    if (auto const* const polyfill = pipeline.tessellation_polyfill(); polyfill != nullptr)
+        _raster_tessellation_polyfill = *polyfill;
     raster_bind_pipeline(pipeline);
 }
 

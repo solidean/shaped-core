@@ -391,7 +391,8 @@ struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ..
 enum class mesh_polyfill_slots : u8;
 enum class polyfill_use : u8;
 struct mesh_polyfill_description; // {compute_shader, corners, primitives_per_group, words_per_group} — a mesh stage as compute + draw
-struct raster_target_formats; // {color formats, depth format, sample count} a pipeline is compiled for
+struct tessellation_polyfill_description; // the tessellation stages as compute passes + draw
+struct raster_target_formats;             // {color formats, depth format, sample count} a pipeline is compiled for
 namespace impl
 {
 // records the target set and formats of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
@@ -407,7 +408,9 @@ void set_dispatched_by_threads(compute_pipeline const& pipeline);
 // what a polyfilled mesh stage's draw runs and sizes by; defined in raster/raster_pipeline.cc
 struct mesh_polyfill_state;
 struct geometry_polyfill_draw;
+struct tessellation_polyfill_state;
 void set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_state state);
+void set_tessellation_polyfill(raster_pipeline const& pipeline, tessellation_polyfill_state state);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.

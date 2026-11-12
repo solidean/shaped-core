@@ -1450,6 +1450,12 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   Every location is 16.16 fixed point, as D3D computes it, so no target's float rounding moves a point.
   The factors are clamped and rounded as D3D does, and a patch with an edge factor that is zero, negative or NaN is culled; a NaN inside factor is the partitioning's least.
   Every domain and every partitioning is carried, the walk writing through a sink, so the GPU and a test run the same code.
+  The control stage then becomes a compute entry point that runs its pipeline's vertex stage on each control point and itself on the patch, a thread a patch of every instance.
+  The prelude's passes count each patch's points and indices, scan them in patch order, and tessellate each patch; the evaluation stage becomes a compute entry point a thread a point.
+  The draw reads the points by the tessellator's indices, so it keeps patch order, then D3D's order within a patch.
+  The domain location is the tessellator's 16.16 point as a float, a triangle's third weight what remains of 1 in 16.16, and `primitive_id` counts patches within the instance.
+  A control stage's `.clockwise` hands its triangles to the tessellator as `triangle_ccw`, as EMIT-134 writes it for HLSL.
+  A stage input other than `primitive_id`, or a vertex stage that reads `view_index` or more than four vertex buffers, is `unsupported-yet` there.
 
 ## Ray tracing
 

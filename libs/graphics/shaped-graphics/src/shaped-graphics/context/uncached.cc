@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/string/format.hh> // cc::format
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/binding/binding.hh> // binding::count
@@ -186,6 +187,93 @@ cc::shared_async<sg::raster_pipeline_handle> with_polyfill(cc::shared_async<sg::
     if (numbers.task_shader.has_value())
         numbers.task_shader.value().bytecode = {};
     sg::impl::set_mesh_polyfill(*pipeline, state_of(numbers, cc::move(halves)));
+    co_return pipeline;
+}
+
+/// The compute passes of a polyfilled tessellation, each over the pipeline's layout; the control pass, dispatched by
+/// threads, over its twin that holds the grid.
+struct tessellation_passes
+{
+    sg::compute_pipeline_description control;
+    sg::compute_pipeline_description count;
+    sg::compute_pipeline_description scan;
+    sg::compute_pipeline_description generate;
+    sg::compute_pipeline_description evaluation;
+};
+
+tessellation_passes tessellation_passes_of(sg::context& ctx, sg::raster_pipeline_description const& desc)
+{
+    auto const& p = desc.tessellation_polyfill.value();
+    auto const over
+        = [&](sg::compiled_shader const& shader) { return over_grid(ctx, {.shader = shader, .layout = desc.layout}); };
+    return {.control = over(p.control_shader),
+            .count = over(p.count_shader),
+            .scan = over(p.scan_shader),
+            .generate = over(p.generate_shader),
+            .evaluation = over(p.evaluation_shader)};
+}
+
+sg::impl::tessellation_polyfill_state tessellation_state_of(sg::tessellation_polyfill_description const& p)
+{
+    return {.domain = p.domain,
+            .control_points = p.control_points,
+            .patch_words = p.patch_words,
+            .vertex_words = p.vertex_words,
+            .partitioning = p.partitioning,
+            .output = p.output,
+            .max_factor = p.max_factor};
+}
+
+/// Why a polyfilled tessellation of `desc` cannot be built, or nothing when it can; nothing for a description without
+/// one (SGL's CHK-527).
+cc::optional<cc::string> tessellation_refusal_of(sg::raster_pipeline_description const& desc, sg::context const& ctx)
+{
+    if (!desc.tessellation_polyfill.has_value())
+        return {};
+    auto const& p = desc.tessellation_polyfill.value();
+    if (!ctx.draws_tessellation_polyfill())
+        return cc::string("the pipeline polyfills its tessellation stages, and this backend draws no polyfilled "
+                          "tessellation yet");
+    if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value()
+        || desc.geometry_shader.has_value() || desc.mesh_shader.has_value() || desc.mesh_polyfill.has_value())
+        return cc::string("the pipeline polyfills its tessellation stages beside native tessellation, geometry or mesh "
+                          "stages");
+    if (!desc.vertex_input.slots.empty())
+        return cc::string("the pipeline polyfills its tessellation stages and has a vertex input; its control pass "
+                          "reads "
+                          "the bound buffers itself");
+    if (desc.view_count > 1)
+        return cc::string("the pipeline renders several views from polyfilled tessellation, which sg does not wire up "
+                          "yet");
+    if (p.domain < 2 || p.domain > 4 || p.control_points < 1 || p.control_points > 32 || p.patch_words <= 0
+        || p.vertex_words <= 0)
+        return cc::string("the pipeline's tessellation polyfill states no domain, control points or words");
+    if (!(p.max_factor >= 1.0f && p.max_factor <= 64.0f))
+        return cc::format("the pipeline's tessellation polyfill holds room for factors up to {}, and D3D's are from 1 "
+                          "to 64",
+                          p.max_factor);
+    auto const topology = p.output == 2 ? sg::primitive_topology::line_list : sg::primitive_topology::triangle_list;
+    if (desc.topology != topology)
+        return cc::string("the pipeline's topology is not the list its tessellation polyfill's primitives draw as");
+    for (auto const* const shader :
+         {&p.control_shader, &p.count_shader, &p.scan_shader, &p.generate_shader, &p.evaluation_shader})
+        if (shader->bytecode.empty())
+            return cc::string("the pipeline's tessellation polyfill lacks one of its compute passes");
+    return {};
+}
+
+cc::shared_async<sg::raster_pipeline_handle> with_tessellation(
+    cc::shared_async<sg::raster_pipeline_handle> built,
+    cc::fixed_array<cc::shared_async<sg::compute_pipeline_handle>, 5> passes,
+    sg::impl::tessellation_polyfill_state state)
+{
+    auto pipeline = co_await built;
+    state.control = co_await passes[0];
+    state.count = co_await passes[1];
+    state.scan = co_await passes[2];
+    state.generate = co_await passes[3];
+    state.evaluation = co_await passes[4];
+    sg::impl::set_tessellation_polyfill(*pipeline, cc::move(state));
     co_return pipeline;
 }
 
@@ -539,6 +627,8 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
         return cc::error(cc::move(refusal.value()));
     if (auto refusal = polyfill_refusal_of(desc, _ctx); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
+    if (auto refusal = tessellation_refusal_of(desc, _ctx); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
 
     // the compute halves first, so a refusal of one leaves no raster half behind
     auto halves = polyfill_halves();
@@ -561,6 +651,29 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
         }
     }
 
+    auto tessellation = cc::optional<impl::tessellation_polyfill_state>();
+    if (desc.tessellation_polyfill.has_value())
+    {
+        auto const passes = tessellation_passes_of(_ctx, desc);
+        auto state = tessellation_state_of(desc.tessellation_polyfill.value());
+        auto const make = [&](compute_pipeline_description const& pass, cc::string_view name,
+                              compute_pipeline_handle& into) -> cc::optional<cc::string>
+        {
+            auto made = try_create_compute_pipeline(pass);
+            if (made.has_error())
+                return cc::format("its tessellation polyfill's {} pass: {}", name, made.error());
+            into = cc::move(made.value());
+            return {};
+        };
+        for (auto const refusal :
+             {make(passes.control, "control", state.control), make(passes.count, "count", state.count),
+              make(passes.scan, "scan", state.scan), make(passes.generate, "generate", state.generate),
+              make(passes.evaluation, "evaluation", state.evaluation)})
+            if (refusal.has_value())
+                return cc::error(refusal.value());
+        tessellation = cc::move(state);
+    }
+
     _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
@@ -570,6 +683,8 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
         impl::set_footprint(*r.value(), footprint_of(desc));
         if (desc.mesh_polyfill.has_value())
             impl::set_mesh_polyfill(*r.value(), state_of(desc.mesh_polyfill.value(), cc::move(halves)));
+        if (tessellation.has_value())
+            impl::set_tessellation_polyfill(*r.value(), cc::move(tessellation.value()));
     }
     return r;
 }
@@ -594,6 +709,8 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     auto refusal = refusal_of(desc, _ctx.supported_features());
     if (!refusal.has_value())
         refusal = polyfill_refusal_of(desc, _ctx);
+    if (!refusal.has_value())
+        refusal = tessellation_refusal_of(desc, _ctx);
     if (refusal.has_value())
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
@@ -619,6 +736,16 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     add_debug_sites(_ctx._debug_windows, desc);
     auto result = named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc),
                         desc.mesh_shader.has_value(), footprint_of(desc));
+    if (desc.tessellation_polyfill.has_value())
+    {
+        auto const passes = tessellation_passes_of(_ctx, desc);
+        auto acquired = cc::fixed_array<cc::shared_async<compute_pipeline_handle>, 5>{
+            _ctx.cached.acquire_compute_pipeline(passes.control), _ctx.cached.acquire_compute_pipeline(passes.count),
+            _ctx.cached.acquire_compute_pipeline(passes.scan), _ctx.cached.acquire_compute_pipeline(passes.generate),
+            _ctx.cached.acquire_compute_pipeline(passes.evaluation)};
+        return with_tessellation(cc::move(result), cc::move(acquired),
+                                 tessellation_state_of(desc.tessellation_polyfill.value()));
+    }
     if (!desc.mesh_polyfill.has_value())
         return result;
     return with_polyfill(cc::move(result), cc::move(compute), cc::move(task), cc::move(task_scan),

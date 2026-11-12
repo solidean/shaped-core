@@ -32,6 +32,12 @@ A table edited on one side alone stops the build.
 | `sg_geometry_draw` | `t8, space11` | set 3, binding 25 | group 3, binding 25 | `[[buffer(22)]]` | a polyfilled geometry stage's compute half |
 | `sg_geometry_indices` | `t3, space11` | set 3, binding 26 | group 3, binding 26 | `[[buffer(23)]]` | the same |
 | `sg_geometry_vertices0` to `3` | `t4` to `t7, space11` | set 3, bindings 27 to 30 | group 3, bindings 27 to 30 | `[[buffer(24)]]` to `[[buffer(27)]]` | the same |
+| `sg_tessellation_draw` | `t11, space11` | set 3, binding 33 | group 3, binding 33 | `[[buffer(10)]]` | polyfilled tessellation's compute passes |
+| `sg_tessellation_patches` | `u12, space11` | set 3, binding 34 | group 3, binding 34 | `[[buffer(11)]]` | the same |
+| `sg_tessellation_controls` | `u13, space11` | set 3, binding 35 | group 3, binding 35 | `[[buffer(12)]]` | the same |
+| `sg_tessellation_points` | `u14, space11` | set 3, binding 36 | group 3, binding 36 | `[[buffer(13)]]` | the same |
+| `sg_tessellation_indices` | `u15, space11` | set 3, binding 37 | group 3, binding 37 | `[[buffer(14)]]` | the same |
+| `sg_tessellation_args` | `u16, space11` | set 3, binding 38 | group 3, binding 38 | `[[buffer(15)]]` | the same |
 | `sg_task_output` | `u9, space11`, a root UAV | set 3, binding 31 | group 3, binding 31 | none, metal draws every task stage | a polyfilled task stage's compute half and its scan |
 | `sg_task_input` | `t10, space11`, a root SRV | set 3, binding 32 | group 3, binding 32 | none | the compute half of a mesh stage a polyfilled task stage launches |
 
@@ -60,6 +66,10 @@ The compute half also reads `sg_dispatch_grid`, the threads sg dispatched it in,
 A polyfilled geometry stage writes the same words, a primitive's in place of a workgroup's, and reads its draw from the `sg_geometry_*` entries (CHK-525).
 `sg_geometry_draw` is a buffer of three `uint4`s rather than a block, since metal has no reserved block, and the protocol page says what each lane holds.
 `sg_geometry_indices` and `sg_geometry_vertices0` on are the draw's own index buffer and vertex buffers, bound as words; metal binds them past every vertex-input slot.
+
+Polyfilled tessellation reads its draw from the `sg_geometry_*` entries as a geometry stage does, and keeps its patches and points in the `sg_tessellation_*` ones (CHK-527).
+Each is a buffer of words; metal binds them at slots 10 to 15, which a kernel leaves free, having no vertex input.
+The protocol page says what each holds, and the evaluation pass writes its points into `sg_mesh_output`, which the draw reads back through `sg_mesh_input`.
 
 ## The debug window
 

@@ -100,6 +100,63 @@ struct sg::impl::geometry_polyfill_draw
     i32 vertex_offset = 0;
 };
 
+/// The tessellation stages drawn where the device has none (SGL's CHK-527): compute passes write each patch's points
+/// and indices, D3D's tessellator placing them, and the pipeline's vertex stage draws the points by those indices.
+/// SGL writes every pass; libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md is the protocol, and these are
+/// its numbers.
+struct sg::tessellation_polyfill_description
+{
+    /// The pipeline's vertex stage and its control stage as one compute shader, a thread a patch of every instance.
+    compiled_shader control_shader;
+    /// The prelude's passes: each patch's counts, their scan, then the tessellator, a thread a patch.
+    compiled_shader count_shader;
+    compiled_shader scan_shader;
+    compiled_shader generate_shader;
+    /// The evaluation stage as a compute shader, a thread a point, dispatched by the scan's count.
+    compiled_shader evaluation_shader;
+    /// 3 triangles, 4 quads, 2 isolines.
+    int domain = 3;
+    int control_points = 0;
+    /// The 32-bit words a patch's control points and factors take, and those a point takes.
+    int patch_words = 0;
+    int vertex_words = 0;
+    /// 0 integer, 1 fractional even, 2 fractional odd.
+    int partitioning = 0;
+    /// D3D's output topology: 0 `triangle_cw`, 1 `triangle_ccw`, 2 lines.
+    int output = 0;
+    /// The largest factor a draw's scratch holds room for; a larger one is cut to it.
+    float max_factor = 64.0f;
+};
+
+/// What a polyfilled tessellation draws with, which the context attaches once its passes are built.
+struct sg::impl::tessellation_polyfill_state
+{
+    compute_pipeline_handle control;
+    compute_pipeline_handle count;
+    compute_pipeline_handle scan;
+    compute_pipeline_handle generate;
+    compute_pipeline_handle evaluation;
+    int domain = 3;
+    int control_points = 0;
+    int patch_words = 0;
+    int vertex_words = 0;
+    int partitioning = 0;
+    int output = 0;
+    float max_factor = 64.0f;
+
+    /// The points and indices one patch makes at most, at `max_factor`: a grid of one more segment each way bounds them.
+    [[nodiscard]] isize max_points() const
+    {
+        auto const segments = isize(max_factor) + 2;
+        return (segments + 1) * (segments + 1);
+    }
+    [[nodiscard]] isize max_indices() const
+    {
+        auto const segments = isize(max_factor) + 2;
+        return segments * segments * 6;
+    }
+};
+
 /// Everything needed to build a raster_pipeline: the shaders, the pipeline_layout they are compiled against, the vertex-input layout, and the fixed-function state.
 /// It owns its shaders, since a pipeline combines several and building on a worker thread must be safe — parity with raytracing_pipeline_description.
 ///
@@ -132,6 +189,12 @@ struct sg::raster_pipeline_description
     /// draws with `draw_mesh_tasks`, where the device lacks sg::feature::mesh_shader or not.
     /// It takes no vertex input, no task, tessellation or geometry stage, and `topology` must match its `corners`.
     cc::optional<mesh_polyfill_description> mesh_polyfill;
+    /// The tessellation stages as their polyfill, in place of `tessellation_control_shader` and
+    /// `tessellation_evaluation_shader`: `vertex_shader` draws the points, and the pipeline draws with `draw` or
+    /// `draw_indexed` over its patches' control points, where the device lacks sg::feature::tessellation_shader or not.
+    /// It takes no vertex input, the compute passes reading the bound buffers, and `topology` must be the list its
+    /// `output` draws as.
+    cc::optional<tessellation_polyfill_description> tessellation_polyfill;
 
     vertex_input_layout vertex_input;
     primitive_topology topology = primitive_topology::triangle_list;
@@ -228,6 +291,12 @@ public:
         return _mesh_polyfill.has_value() ? &_mesh_polyfill.value() : nullptr;
     }
 
+    /// What a polyfilled tessellation's draw runs, or null where the stages are native or there are none.
+    [[nodiscard]] impl::tessellation_polyfill_state const* tessellation_polyfill() const
+    {
+        return _tessellation_polyfill.has_value() ? &_tessellation_polyfill.value() : nullptr;
+    }
+
     /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
     /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
     [[nodiscard]] impl::pipeline_footprint const& footprint() const { return _footprint; }
@@ -246,10 +315,12 @@ private:
 
     friend void impl::set_footprint(raster_pipeline const& pipeline, impl::pipeline_footprint footprint);
     friend void impl::set_mesh_polyfill(raster_pipeline const& pipeline, impl::mesh_polyfill_state state);
+    friend void impl::set_tessellation_polyfill(raster_pipeline const& pipeline, impl::tessellation_polyfill_state state);
 
     cc::string _target_set;
     cc::optional<raster_target_formats> _target_formats;
     impl::pipeline_footprint _footprint;
     bool _is_mesh_shaded = false;
     cc::optional<impl::mesh_polyfill_state> _mesh_polyfill;
+    cc::optional<impl::tessellation_polyfill_state> _tessellation_polyfill;
 };

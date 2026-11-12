@@ -87,6 +87,31 @@ struct geometry_polyfilling
     geometry_polyfilling(geometry_polyfilling const&) = delete;
     geometry_polyfilling& operator=(geometry_polyfilling const&) = delete;
 };
+
+/// Why `ctx` draws no tessellation at all, or nothing where it draws it, natively or as its polyfill.
+cc::optional<cc::string_view> no_tessellation(sg::context const& ctx)
+{
+    if (!sg_test::shaders_reach(ctx))
+        return cc::string_view("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx.supports(sg::feature::tessellation_shader) && !ctx.draws_tessellation_polyfill())
+        return cc::string_view("this device has no tessellation stages, and its backend draws no polyfilled ones");
+    return {};
+}
+
+/// Polyfills tessellation stages the device lacks while it lives, and restores what the context did before.
+struct tessellation_polyfilling
+{
+    sg::context& ctx;
+    sg::polyfill_use before;
+
+    explicit tessellation_polyfilling(sg::context& c) : ctx(c), before(c.tessellation_polyfill())
+    {
+        ctx.set_tessellation_polyfill(sg::polyfill_use::where_missing);
+    }
+    ~tessellation_polyfilling() { ctx.set_tessellation_polyfill(before); }
+    tessellation_polyfilling(tessellation_polyfilling const&) = delete;
+    tessellation_polyfilling& operator=(tessellation_polyfilling const&) = delete;
+};
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, reports its domain, and winds as its "
@@ -94,10 +119,9 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    if (!sg_test::shaders_reach(*ctx))
-        SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (!ctx->supports(sg::feature::tessellation_shader))
-        SKIP("this device has no tessellation stages");
+    if (auto const why = no_tessellation(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = tessellation_polyfilling(*ctx);
 
     // The patch is the lower-left half of the target, its corners counter-clockwise in clip space.
     // The evaluation stage writes its domain location as the color: each pixel centre's barycentric coordinates against the three corners.
@@ -153,10 +177,9 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated quad patch covers its quad, reports its
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    if (!sg_test::shaders_reach(*ctx))
-        SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (!ctx->supports(sg::feature::tessellation_shader))
-        SKIP("this device has no tessellation stages");
+    if (auto const why = no_tessellation(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = tessellation_polyfilling(*ctx);
 
     // The patch is the middle half of the target, its corners counter-clockwise from the bottom left.
     // The evaluation stage blends them by `uv`, along the bottom edge and then upwards.
@@ -350,6 +373,8 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline with tessellation stages the device lacks 
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (ctx->supports(sg::feature::tessellation_shader))
         SKIP("this device has tessellation stages, so nothing is refused");
+    if (ctx->tessellation_polyfill() != sg::polyfill_use::never)
+        SKIP("this context polyfills tessellation, so nothing is refused");
 
     auto const built = ctx->cached.acquire_raster_pipeline(shaders::stages::tessellated_ccw);
     co_await cc::async_settled(built);

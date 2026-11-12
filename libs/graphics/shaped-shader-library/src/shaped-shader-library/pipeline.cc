@@ -369,7 +369,13 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
 
     // A stage the device lacks is refused by its feature before any stage compiles, since a target without the stage
     // can fail an earlier one first: Metal rejects a vertex stage that feeds tessellation and writes no position.
-    if ((d.tessellation_control != nullptr || d.tessellation_evaluation != nullptr)
+    // The tessellation stages likewise, opt-in until their benchmark against the native stages has run (SGL's CHK-527).
+    auto const tessellation_use = ctx->tessellation_polyfill();
+    auto const polyfills_tessellation
+        = d.tessellation_control != nullptr && d.tessellation_evaluation != nullptr && d.vertex != nullptr
+       && (tessellation_use == sg::polyfill_use::always
+           || (tessellation_use == sg::polyfill_use::where_missing && !ctx->supports(sg::feature::tessellation_shader)));
+    if ((d.tessellation_control != nullptr || d.tessellation_evaluation != nullptr) && !polyfills_tessellation
         && !ctx->supports(sg::feature::tessellation_shader))
         throw sg::pipeline_creation_exception(cc::string(d.name),
                                               cc::any_error(cc::format("{}'s {}: the pipeline has tessellation stages, "
@@ -402,7 +408,8 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);
-    if (d.vertex != nullptr)
+    // a polyfilled tessellation's vertex stage runs inside its control pass alone, and need not draw on its own
+    if (d.vertex != nullptr && !polyfills_tessellation)
         desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
     if (d.mesh != nullptr && polyfills)
     {
@@ -464,13 +471,52 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     }
     else if (d.geometry != nullptr)
         desc.geometry_shader = co_await (*d.geometry)->acquire(*ctx, options);
-    if (d.tessellation_control != nullptr)
-        desc.tessellation_control_shader = co_await (*d.tessellation_control)->acquire(*ctx, options);
-    if (d.tessellation_evaluation != nullptr)
-        desc.tessellation_evaluation_shader = co_await (*d.tessellation_evaluation)->acquire(*ctx, options);
+    if (polyfills_tessellation)
+    {
+        // the vertex half draws the points back; the control stage's compute half runs the pipeline's vertex stage, and
+        // the evaluation stage's reads the control stage's patches, so each names the other
+        auto with_form = options;
+        with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string("vertex")});
+        desc.vertex_shader = co_await (*d.tessellation_evaluation)->acquire(*ctx, with_form);
+        with_form.back().value = "compute";
+        auto control_options = with_form;
+        control_options.push_back(
+            {.name = cc::string(slib::k_polyfill_vertex_option), .value = cc::string((*d.vertex)->entry_point())});
+        auto control = co_await (*d.tessellation_control)->acquire(*ctx, control_options);
+        auto evaluation_options = with_form;
+        evaluation_options.push_back({.name = cc::string(slib::k_polyfill_control_option),
+                                      .value = cc::string((*d.tessellation_control)->entry_point())});
+        auto evaluation = co_await (*d.tessellation_evaluation)->acquire(*ctx, evaluation_options);
+        // the prelude's passes, compiled through the control stage's source
+        auto const pass = [&](cc::string_view name)
+        {
+            auto with_pass = options;
+            with_pass.push_back({.name = cc::string(slib::k_polyfill_pass_option), .value = cc::string(name)});
+            return (*d.tessellation_control)->acquire(*ctx, with_pass);
+        };
+        auto polyfill = sg::tessellation_polyfill_description{.domain = control.tessellation_domain,
+                                                              .control_points = control.tessellation_control_points,
+                                                              .patch_words = control.tessellation_patch_words,
+                                                              .vertex_words = evaluation.tessellation_vertex_words,
+                                                              .partitioning = control.tessellation_partitioning,
+                                                              .output = control.tessellation_output};
+        polyfill.count_shader = co_await pass("sg_tessellation_count");
+        polyfill.scan_shader = co_await pass("sg_tessellation_scan");
+        polyfill.generate_shader = co_await pass("sg_tessellation_generate");
+        polyfill.control_shader = cc::move(control);
+        polyfill.evaluation_shader = cc::move(evaluation);
+        desc.tessellation_polyfill = cc::move(polyfill);
+    }
+    else
+    {
+        if (d.tessellation_control != nullptr)
+            desc.tessellation_control_shader = co_await (*d.tessellation_control)->acquire(*ctx, options);
+        if (d.tessellation_evaluation != nullptr)
+            desc.tessellation_evaluation_shader = co_await (*d.tessellation_evaluation)->acquire(*ctx, options);
+    }
     // a vertex stage that draws from no vertex buffer, reading `@vertex_index` alone, has no layout; nor has a polyfill's
     // vertex half, whose compute half reads the buffers instead
-    if (d.vertex_input != nullptr && !polyfills_geometry)
+    if (d.vertex_input != nullptr && !polyfills_geometry && !polyfills_tessellation)
         desc.vertex_input = d.vertex_input();
     desc.target_set = cc::string(d.target_set);
     for (auto i = isize(0); i < d.targets.size(); ++i)
@@ -543,6 +589,13 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     if (desc.mesh_polyfill.has_value())
         desc.topology = desc.mesh_polyfill.value().corners == 2 ? sg::primitive_topology::line_list
                                                                 : sg::primitive_topology::triangle_list;
+    // polyfilled tessellation draws the list its output topology states
+    if (desc.tessellation_polyfill.has_value())
+    {
+        desc.topology = desc.tessellation_polyfill.value().output == 2 ? sg::primitive_topology::line_list
+                                                                       : sg::primitive_topology::triangle_list;
+        desc.patch_control_points = 0;
+    }
     if (customize)
         customize(desc);
     co_return desc;
