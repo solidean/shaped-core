@@ -211,6 +211,19 @@ struct sgl::check::target_condition
     constexpr bool operator==(target_condition const&) const = default;
 };
 
+/// Where one field of a struct with a target layout stands in a branch's record (CHK-524).
+struct sgl::check::layout_place
+{
+    /// The member of the branch's struct that holds it; -1 for an `@absent` field, which none holds.
+    i32 member = -1;
+    /// For a `@bits` field, its lowest bit within that member's word and how many it takes; a `bits` of 0 is the whole
+    /// member.
+    i32 offset = 0;
+    i32 bits = 0;
+
+    constexpr bool operator==(layout_place const&) const = default;
+};
+
 /// One branch of a struct whose body is a `const if` chain, a text type (CHK-432), in the order the chain declares them.
 /// An SGL branch is the struct's fields; any other spells the type in each language it is written in.
 struct sgl::check::target_type_branch
@@ -225,12 +238,15 @@ struct sgl::check::target_type_branch
     /// Of a struct with a target layout (CHK-522): the struct of this branch's fields in its order, which a compile taking
     /// it writes wherever the type stands.
     type_id layout = type_id::none;
+    /// Parallel to the fields the check judged: where each stands in `layout` (CHK-524).
+    cc::vector<layout_place> places;
 
     [[nodiscard]] bool operator==(target_type_branch const& rhs) const
     {
         return type_symbol == rhs.type_symbol && ast::impl::is_equal(condition, rhs.condition)
             && is_fields == rhs.is_fields && ast::impl::is_equal(languages, rhs.languages)
-            && ast::impl::is_equal(spellings, rhs.spellings) && layout == rhs.layout;
+            && ast::impl::is_equal(spellings, rhs.spellings) && layout == rhs.layout
+            && ast::impl::is_equal(places, rhs.places);
     }
 };
 

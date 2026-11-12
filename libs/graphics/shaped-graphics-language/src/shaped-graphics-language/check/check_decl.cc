@@ -728,8 +728,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position",    "layer",    "per_instance", "stream",
-                                                  "interpolate", "per_draw", "edge_factors", "inside_factors"};
+        cc::string_view const known_on_field[] = {"position", "layer",        "per_instance",   "stream", "interpolate",
+                                                  "per_draw", "edge_factors", "inside_factors", "bits",   "absent"};
         // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
         cc::string_view const known_on_pixel_field[]
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
@@ -1043,6 +1043,23 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_coherent = is_coherent,
             .padding = member_padding,
         });
+        // CHK-524: where a field stands in one target's record, which a struct with a target layout alone says
+        if (auto const* const bits = is_struct ? find_attribute(file, f.attributes, "bits") : nullptr)
+        {
+            auto const arguments = ast.at(bits->arguments);
+            auto const count = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                 ? constant_count(file, arguments[0].value)
+                                 : cc::optional<i32>();
+            if (!count.has_value() || count.value() < 1 || count.value() > 32)
+                report(diagnostic_kind::invalid_attribute_arguments, file, bits->name,
+                       "@bits takes how many bits of a 32-bit word the field takes, 1 to 32: `@bits(9)`");
+            else if (type != checked_module::error_type && out.name_of(type) != "uint")
+                report(diagnostic_kind::invalid_attribute_arguments, file, bits->name,
+                       cc::format("@bits packs a uint, and {} is {}", name, out.name_of(type)));
+            else
+                collected.back().layout_bits = count.value();
+        }
+        collected.back().is_absent = is_struct && find_attribute(file, f.attributes, "absent") != nullptr;
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(
                 {.member = collected.size() - 1, .attribute = named, .name = name_argument_of(file, named)});
@@ -1154,6 +1171,14 @@ void checker::compile_struct(symbol_id id)
     type_parameter_names.resize_down_to(type_parameter_names.size() - parameters.size());
     for (auto const& m : out.at(members))
         (void)refuse_held_layout(file, span_of(file, ast_of(file).at(m.field).type), m.type, "a struct field");
+    // CHK-524: a field's place in a target's record is a branch's of a struct with a target layout
+    if (find_attribute(file, d.attributes, "target_layout") == nullptr)
+        for (auto const& m : out.at(members))
+            if (m.layout_bits != 0 || m.is_absent)
+                report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, ast_of(file).at(m.field).type),
+                       cc::format("{} is placed by @bits or @absent, which a branch of a @target_layout struct alone "
+                                  "says",
+                                  m.name));
     // CHK-328: a ray type's member is the payload its stages take, which is a struct
     if (s.is_ray_set)
         for (auto const& m : out.at(members))

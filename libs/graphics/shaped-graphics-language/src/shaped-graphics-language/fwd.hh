@@ -227,6 +227,7 @@ struct target_text;
 struct target_preamble;
 struct target_condition;
 struct target_type_branch;
+struct layout_place;
 struct sampler_state;
 struct shape_info;
 struct image_format_info;

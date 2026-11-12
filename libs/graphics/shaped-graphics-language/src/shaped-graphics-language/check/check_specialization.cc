@@ -474,11 +474,45 @@ void checker::compile_layout_branches(symbol_id id,
                               why));
             continue;
         }
+        // CHK-524: the record as the target lays it out: a run of @bits fields shares one word, and an @absent one is
+        // none; each field the check judged is then placed by name
+        auto placed = cc::vector<member_info>();
+        auto by_name = cc::vector<layout_place>();
+        auto word_bits = 32;
+        for (auto const& m : out.at(members))
+        {
+            if (m.is_absent)
+            {
+                by_name.push_back({.member = -1});
+                continue;
+            }
+            if (m.layout_bits == 0)
+            {
+                placed.push_back(m);
+                word_bits = 32;
+                by_name.push_back({.member = i32(placed.size()) - 1});
+                continue;
+            }
+            if (word_bits + m.layout_bits > 32)
+            {
+                placed.push_back({.name = cc::format("sgl_bits{}", placed.size()), .type = m.type});
+                word_bits = 0;
+            }
+            by_name.push_back({.member = i32(placed.size()) - 1, .offset = word_bits, .bits = m.layout_bits});
+            word_bits += m.layout_bits;
+        }
+        for (auto const& f : theirs)
+            for (auto k = isize(0); k < mine.size(); ++k)
+                if (mine[k].name == f.name)
+                    record.places.push_back(by_name[k]);
+        auto const first = u32(out.members.size());
+        for (auto& m : placed)
+            out.members.push_back(cc::move(m));
         record.layout = type_id(out.types.size());
         out.types.push_back({
             .kind = type_kind::structure,
             .symbol = id,
-            .members = members,
+            .members = {.first = first, .count = u32(placed.size())},
             .layout_of = type,
             .arguments = {.first = u32(out.type_lists.size()), .count = 0},
         });
