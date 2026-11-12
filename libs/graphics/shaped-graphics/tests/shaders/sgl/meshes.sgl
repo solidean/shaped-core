@@ -19,9 +19,14 @@ struct corner:
     output.triangle(0u, uint3(0u, 1u, 2u))
 
 // Four invocations, each writing one corner of its workgroup's half; the first writes both triangles.
+// The barrier under a branch on the workgroup id is uniform, and stays so in a polyfill's launched form, whose
+// workgroup id is read from records; WebGPU's compiler checks that (CHK-524).
 @mesh(4, vertices = 4, triangles = 2)
 fun halves(@workgroup_id group: int3, @local_thread_index k: int, output: mut mesh_output[corner]):
     output.set_counts(4u, 2u)
+    // after set_counts: DXC copies a set_counts that follows a branch into both of its paths, and then refuses the copies
+    if group.x == 1:
+        workgroup_barrier()
     let left = if group.x == 0 => -1.0 else 0.0
     let x = if (k & 1) == (k >> 1) => left else left + 1.0
     let y = if k < 2 => -1.0 else 1.0
@@ -86,6 +91,9 @@ struct column:
 @mesh(1, vertices = 4, triangles = 2)
 fun culled_column(@workgroup_id group: int3, handed: column, output: mut mesh_output[corner]):
     output.set_counts(4u, 2u)
+    // as in `halves`, behind a task stage
+    if group.x == 1:
+        workgroup_barrier()
     let left = ((handed.first + (group.x as uint)) as float) / 4.0 - 1.0
     let color = float4((handed.first as float) / 8.0, group.x as float, 1.0, 1.0)
     output.vertex(0u, {position = hpos4(left, -1.0, 0.0, 1.0), color = color})

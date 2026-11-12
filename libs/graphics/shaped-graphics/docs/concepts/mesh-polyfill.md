@@ -114,6 +114,9 @@ Either is cut to the 65535 one dispatch dimension holds, and a launch past the s
 | scan | `sg_task_output` | `sg_dispatch_grid` |
 | mesh stage's compute half | `sg_mesh_output` | the pipeline's groups, `sg_task_input` |
 
+`sg_task_input` is read-only, which keeps a launched mesh stage's workgroup id uniform in WGSL, as `@builtin(workgroup_id)` is: a load of read-only storage at a uniform index is.
+So a barrier under a branch on it compiles on webgpu as it does natively, which `halves` and `culled_column` of the tests' `meshes.sgl` hold.
+
 The first two take a layout of `mesh_polyfill_slots::task`, the third one of `launched`.
 
 ## An indirect draw
@@ -194,8 +197,6 @@ metal draws it, `draws_tessellation_polyfill`; dx12, vulkan and webgpu draw none
 
 - A launch dropped past the slots is silent; the decision is that the `report` profile logs it at the `.sgl` line.
 - The scan is one invocation, a loop over the task workgroups, which a parallel scan replaces once a benchmark of many task workgroups says it matters.
-- On webgpu a launched mesh stage's workgroup id and payload come from a storage read, so WGSL takes control flow on either for non-uniform.
-  A barrier under such a branch, which the native stage takes, fails WGSL's uniformity analysis there.
-  Since every polyfilled mesh stage has a `launched` form, such a mesh stage fails its pipeline's build on webgpu with no task stage too.
-  `workgroupUniformLoad` of what the first invocation read is the fix.
+>>>
+
 - The task stage is drawn this way wherever the mesh stage is, `where_missing` by default, with no benchmark of its own yet.
