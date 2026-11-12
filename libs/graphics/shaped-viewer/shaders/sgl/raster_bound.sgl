@@ -249,7 +249,7 @@ fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, 
     if supplied_tangent_frame:
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(raster.to_world_vector(inst, local.t)), normalize(raster.to_world_vector(inst, local.b)), normalize(raster.to_world_vector(inst, local.n)))
-    return { n = n, exiting = exiting, authored = authored, reach = pt.corner_reach(world, w0, w1, w2) }
+    return {n = n, exiting = exiting, authored = authored, reach = pt.corner_reach(world, w0, w1, w2)}
 
 /// Vertex `vertex` of the box of primitive `primitive` of row `instance`'s quadric batch, as `raster.quadric_vertex_from`
 /// draws it.
@@ -301,7 +301,7 @@ fun quadric_prepass(p: quadric_varyings, hit: raster.quadric_pixel){bound} -> qu
     let mut n = normalize(raster.to_world_vector(inst, hit.object_normal))
     if dot(n, eye - hit.world) < 0.0:
         n = -n
-    return { instance = p.instance + 1u, normal = float4(..n, 0.0), surface_depth = surface_depth_of(hit.world) }
+    return {instance = p.instance + 1u, normal = float4(..n, 0.0), surface_depth = surface_depth_of(hit.world)}
 
 /// Shades the quadric pixel `p` found at `hit`, whose material evaluated to `surface_in`, as `shade` shades a triangle's,
 /// and writes its depth.
@@ -313,7 +313,7 @@ fun shade_quadric(p: quadric_varyings, hit: raster.quadric_pixel, surface_in: op
     let q = float4(..raster.to_object_point(inst, hit.world), 1.0)
     let previous_world = float3(dot(inst.previous_to_world_x, q), dot(inst.previous_to_world_y, q), dot(inst.previous_to_world_z, q))
     let lit = shade_face(float2(p.position.x, p.position.y), hit.world, previous_world, p.instance, face, surface_in, supplied_tangent_frame, occlusion)
-    return { color = lit.color, primary_depth = lit.primary_depth, motion = lit.motion, surface_depth = surface_depth_of(hit.world) }
+    return {color = lit.color, primary_depth = lit.primary_depth, motion = lit.motion, surface_depth = surface_depth_of(hit.world)}
 
 /// How many lanes `bound.decals` holds; `sv::raster_bound_routine` drops the decals past it.
 const decal_lane_count = 1024

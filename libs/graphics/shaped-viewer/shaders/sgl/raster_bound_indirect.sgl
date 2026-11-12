@@ -206,7 +206,7 @@ fun same_surface(depths: float4, depth: float) -> float4:
 
 /// `radiance` holding one frame, at view depth `depth`: an accumulation starting over.
 fun started(radiance: float3, depth: float) -> indirect_history_target:
-    return { radiance = float4(..radiance, 1.0), depth = depth }
+    return {radiance = float4(..radiance, 1.0), depth = depth}
 
 /// Last frame's accumulation at world point `world`, which this frame shows at traced pixel `t` of a grid `scale`
 /// full-size pixels to a side: the radiance, and how many frames it holds, 0 where nothing remembered is this surface's.
@@ -287,7 +287,7 @@ fun indirect_accumulated(t: int2){indirect_accumulate_source} -> indirect_histor
     if remembered.w <= 0.0 => return started(current.xyz, depth_now)
     let motion = carried(f, world.xyz, t, scale)
     let s = indirect_accumulate_source.settings
-    return { radiance = blended_in(remembered, current.xyz, motion, s.z, s.w, 8.0), depth = depth_now }
+    return {radiance = blended_in(remembered, current.xyz, motion, s.z, s.w, 8.0), depth = depth_now}
 
 /// What the indirect blur reads: the accumulated radiance and how many frames it holds, and its view depth.
 binding indirect_blur_source:
@@ -401,7 +401,7 @@ fun traced_reflection(h: int2){indirect_scene, reflection_trace_source} -> trace
     let f = indirect_scene.frame[0]
     let pixel = h * 2
     let center = raster_bound_shadow_maps.world_from(indirect_scene.depth, f, pixel)
-    if center.w == 0.0 => return { reflection = float4(0.0), history = float4(0.0), depth = 0.0 }
+    if center.w == 0.0 => return {reflection = float4(0.0), history = float4(0.0), depth = 0.0}
     let p = center.xyz
     let cam = scene.camera(..f.camera)
     let n = raster_bound_shadow_maps.normal_from(indirect_scene.normals, indirect_scene.depth, f, pixel, p, cam.position)
@@ -414,5 +414,5 @@ fun traced_reflection(h: int2){indirect_scene, reflection_trace_source} -> trace
         let remembered = reprojected(reflection_trace_source.history, reflection_trace_source.history_depth, f, p, n, 2.0)
         if remembered.w > 0.0:
             kept = blended_in(remembered, now.xyz, carried(f, p, h, 2.0), s.z, s.w, 2.0)
-    if indirect_scene.settings.z == 1.0 => return { reflection = float4(..float3(kept.w / 64.0), 1.0), history = kept, depth = depth_here }
-    return { reflection = float4(..kept.xyz, now.w), history = kept, depth = depth_here }
+    if indirect_scene.settings.z == 1.0 => return {reflection = float4(..float3(kept.w / 64.0), 1.0), history = kept, depth = depth_here}
+    return {reflection = float4(..kept.xyz, now.w), history = kept, depth = depth_here}

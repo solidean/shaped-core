@@ -48,7 +48,7 @@ fun edge_fade(pixel: float2, size: float2) -> float:
 
 /// No reflection, at a surface lying at view depth `depth`; 0 for none, at the far plane.
 fun no_reflection(depth: float) -> reflection_target:
-    return { reflection = float4(0.0), depth = depth }
+    return {reflection = float4(0.0), depth = depth}
 
 /// The reflection at half-size pixel `h`: radiance, and a confidence from 0 for none to 1, then the surface's view depth.
 fun reflection(h: int2){raster_bound.bound, reflection_source} -> reflection_target:
@@ -146,4 +146,4 @@ fun reflection(h: int2){raster_bound.bound, reflection_source} -> reflection_tar
     if not (dot(radiance, float3(1.0)) < 1e30) => return no_reflection(depth_here)
 
     let confidence = edge_fade(s_hit, f.size) * edge_fade(at, f.size) * (1.0 - smoothstep(0.7, 1.0, hi))
-    return { reflection = float4(..radiance, confidence), depth = depth_here }
+    return {reflection = float4(..radiance, confidence), depth = depth_here}

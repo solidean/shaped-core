@@ -35,7 +35,7 @@ use scene
     let mut n = normalize(cross(ddx(p.world), ddy(p.world)))
     if dot(n, eye - p.world) < 0.0:
         n = -n
-    return { instance = p.instance + 1u, normal = float4(..n, 0.0) }
+    return {instance = p.instance + 1u, normal = float4(..n, 0.0)}
 
 /// What the environment pass hands its pixel stage: the position alone, whose pixel is the camera ray.
 struct environment_varyings:
@@ -45,19 +45,19 @@ struct environment_varyings:
 @vertex fun bound_environment_vs(@vertex_index vertex: int) -> environment_varyings:
     let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
     let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
-    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+    return {position = hpos4(clip.x, clip.y, 0.0, 1.0)}
 
 /// The ambient occlusion at half the image's size, over the prepass's depth; noisy, which `bound_ao_blur_ps` resolves.
 @pixel fun bound_ao_ps(p: environment_varyings){raster_bound.bound, raster_bound.ao_source} -> raster_bound.ao_target:
-    return { ao = raster_bound.ambient_occlusion(int2(p.position.x as int, p.position.y as int)) }
+    return {ao = raster_bound.ambient_occlusion(int2(p.position.x as int, p.position.y as int))}
 
 /// The AO pass's result blended into last frame's, which turns a few samples a frame into many.
 @pixel fun bound_ao_accumulate_ps(p: environment_varyings){raster_bound.bound, raster_bound.ao_accumulate_source} -> raster_bound.ao_history_target:
-    return { ao = raster_bound.ao_accumulated(int2(p.position.x as int, p.position.y as int)) }
+    return {ao = raster_bound.ao_accumulated(int2(p.position.x as int, p.position.y as int))}
 
 /// The AO pass's result blurred over the 4x4 its noise repeats in, stopping at depth edges.
 @pixel fun bound_ao_blur_ps(p: environment_varyings){raster_bound.bound, raster_bound.ao_blur_source} -> raster_bound.ao_resolved_target:
-    return { ao = raster_bound.ao_blurred(int2(p.position.x as int, p.position.y as int)) }
+    return {ao = raster_bound.ao_blurred(int2(p.position.x as int, p.position.y as int))}
 
 /// The environment where no surface was drawn, which the depth test against the far plane decides.
 @pixel fun bound_environment_ps(p: environment_varyings){raster_bound.bound} -> raster_bound.targets:

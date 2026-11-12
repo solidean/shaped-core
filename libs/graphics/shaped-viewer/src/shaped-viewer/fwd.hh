@@ -86,7 +86,7 @@ struct shadow_settings;           // a raster_bound layer's shadows (view/render
 struct screen_space_reflections;  // a raster_bound layer's mirror reflections (view/render_settings.hh)
 struct temporal_antialiasing;     // a raster_bound layer's temporal antialiasing (view/render_settings.hh)
 struct traced_indirect;           // a raster_bound layer's traced indirect light (view/render_settings.hh)
-enum class render_channel : u32; // a quantity a traced layer averages beside its image (render_settings.hh)
+enum class render_channel : u32;  // a quantity a traced layer averages beside its image (render_settings.hh)
 enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)

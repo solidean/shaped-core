@@ -96,7 +96,7 @@ fun caster_vertex_at(vertex: uint, instance: uint){raster_bound.bound, shadow_ca
     let object = reinterpret_as_float(raster_bound.bound.vertices.load3(vertex * 12u))
     let world = raster.to_world_point(inst, object)
     let l = scene.light(..raster_bound.bound.lights[shadow_caster.light as int])
-    return { position = light_clip(l, world) }
+    return {position = light_clip(l, world)}
 
 /// Vertex `vertex` of an indexed caster draw, as `raster_bound.vertex_of` takes it.
 fun caster_vertex_of(vertex: int, instance: uint){raster_bound.bound, shadow_caster} -> caster_varyings:

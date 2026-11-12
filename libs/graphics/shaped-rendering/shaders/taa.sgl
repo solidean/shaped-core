@@ -39,7 +39,7 @@ struct taa_varyings:
 @vertex fun taa_vs(@vertex_index vertex: int) -> taa_varyings:
     let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
     let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
-    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+    return {position = hpos4(clip.x, clip.y, 0.0, 1.0)}
 
 /// `c` compressed by its largest channel into [0, 1), which `expanded` undoes.
 fun compressed(c: float3) -> float3 => c / (1.0 + max(max(c.x, c.y), c.z))
@@ -81,7 +81,7 @@ fun clipped(c: float3, center: float3, extent: float3) -> float3:
 
 /// `c` alone, with no history to blend into.
 fun unblended(c: float4) -> taa_target:
-    return { color = c, history = float4(..c.xyz, 1.0) }
+    return {color = c, history = float4(..c.xyz, 1.0)}
 
 @pixel fun taa_ps(p: taa_varyings){taa_source} -> taa_target:
     let px = int2(p.position.x as int, p.position.y as int)
@@ -114,4 +114,4 @@ fun unblended(c: float4) -> taa_target:
     let kept = clipped(history, mean, sigma * taa_source.settings.z)
     let now = to_ycocg(compressed(current.xyz))
     let resolved = expanded(from_ycocg(mix(now, kept, taa_source.settings.x)))
-    return { color = float4(..resolved, current.w), history = float4(..resolved, 1.0) }
+    return {color = float4(..resolved, current.w), history = float4(..resolved, 1.0)}

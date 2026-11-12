@@ -419,8 +419,8 @@ fn sort_gather(@builtin(global_invocation_id) id: vec3u) {
 )";
 
 constexpr char const* k_kernel_entry_points[] = {
-    "write_triangles", "write_triangle_ends", "write_boxes", "write_leaves",    "write_levels",
-    "sort_clear",      "sort_bounds",         "sort_keys",   "sort_count",      "sort_scan_rows",
+    "write_triangles", "write_triangle_ends", "write_boxes", "write_leaves", "write_levels",
+    "sort_clear",      "sort_bounds",         "sort_keys",   "sort_count",   "sort_scan_rows",
     "sort_scan_bases", "sort_scatter",        "sort_gather",
 };
 

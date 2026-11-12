@@ -14,11 +14,11 @@ struct indirect_varyings:
 @vertex fun bound_indirect_vs(@vertex_index vertex: int) -> indirect_varyings:
     let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
     let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
-    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+    return {position = hpos4(clip.x, clip.y, 0.0, 1.0)}
 
 /// The radiance one ray brings back to a traced pixel, and the view depth it left from.
 @pixel fun bound_indirect_ps(p: indirect_varyings){raster_bound_indirect.indirect_scene} -> raster_bound_indirect.indirect_target:
-    return { radiance = raster_bound_indirect.indirect(int2(p.position.x as int, p.position.y as int)) }
+    return {radiance = raster_bound_indirect.indirect(int2(p.position.x as int, p.position.y as int))}
 
 /// The reflection traced where the screen lost or missed its own, at half the image's size.
 @pixel fun bound_reflection_trace_ps(p: indirect_varyings){raster_bound_indirect.indirect_scene, raster_bound_indirect.reflection_trace_source} -> raster_bound_indirect.traced_reflection_target:
@@ -30,4 +30,4 @@ struct indirect_varyings:
 
 /// The accumulated radiance blurred within its surfaces.
 @pixel fun bound_indirect_blur_ps(p: indirect_varyings){raster_bound_indirect.indirect_blur_source} -> raster_bound_indirect.indirect_target:
-    return { radiance = raster_bound_indirect.indirect_blurred(int2(p.position.x as int, p.position.y as int)) }
+    return {radiance = raster_bound_indirect.indirect_blurred(int2(p.position.x as int, p.position.y as int))}
