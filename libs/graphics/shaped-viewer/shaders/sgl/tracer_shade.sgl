@@ -43,6 +43,41 @@ fun micro_visibility(ao: float, n: float3, w: float3) -> float:
     if ao >= 1.0 => return 1.0
     return clamp(abs(dot(n, w)) + 2.0 * ao * ao - 1.0, 0.0, 1.0)
 
+/// How open direction `w` is past a material's own relief, whose horizon is `lo` and `hi` in frame `f`'s tangent plane:
+/// the horizon interpolated at `w`'s azimuth, and `w` open where it rises above it, closed a sine of 0.05 below it.
+/// A self-shadowing a height field casts on itself, which a light sample cannot trace, since the relief is no geometry.
+fun horizon_visibility(lo: float4, hi: float4, f: openpbr.frame, w: float3) -> float:
+    let z = dot(w, f.n)
+    if z <= 0.0 => return 1.0
+    let phi = atan2(dot(w, f.b), dot(w, f.t))
+    let u = (if phi < 0.0 => phi + 6.2831853 else phi) / 0.78539816
+    let k = (floor(u) as int) % 8
+    let t = u - floor(u)
+    let h = mix(horizon_sine(lo, hi, k), horizon_sine(lo, hi, (k + 1) % 8), t)
+    return saturate((z - h) / 0.05 + 1.0)
+
+/// Direction `k` of a horizon's 8, 0 to 3 from `lo` and 4 to 7 from `hi`.
+fun horizon_sine(lo: float4, hi: float4, k: int) -> float:
+    if k == 0 => return lo.x
+    if k == 1 => return lo.y
+    if k == 2 => return lo.z
+    if k == 3 => return lo.w
+    if k == 4 => return hi.x
+    if k == 5 => return hi.y
+    if k == 6 => return hi.z
+    return hi.w
+
+/// How open direction `w` is past a material's own relief: by its horizon where it has one, else by its micro-occlusion.
+/// Never both: the horizon is the occlusion's own information per direction, and the two together would count it twice.
+fun relief_visibility(surface: openpbr.surface, f: openpbr.frame, w: float3) -> float:
+    if any(surface.horizon_lo > float4(0.0)) or any(surface.horizon_hi > float4(0.0)):
+        return horizon_visibility(surface.horizon_lo, surface.horizon_hi, f, w)
+    return micro_visibility(surface.micro_occlusion, f.n, w)
+
+/// Whether a surface's relief closes any direction, so a surface with none skips it.
+fun has_relief(surface: openpbr.surface) -> bool:
+    return surface.micro_occlusion < 1.0 or any(surface.horizon_lo > float4(0.0)) or any(surface.horizon_hi > float4(0.0))
+
 /// The sample that contributes nothing and tests nothing.
 fun no_light_sample() -> light_sample:
     return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u)
@@ -578,14 +613,14 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     light = sample_light(b, f, wo_local, p, n, last_bounce, mut rng)
     env = sample_environment(b, f, wo_local, p, n, last_bounce, mut rng)
 
-    // A material's own relief closes grazing directions to every strategy alike, light samples and the continuation,
-    // so multiple importance sampling weighs one visibility.
-    let ao = surface.micro_occlusion
-    if ao < 1.0:
-        let light_open = micro_visibility(ao, f.n, light.direction)
+    // A material's own relief closes grazing directions and the ones below its horizon to every strategy alike,
+    // light samples and the continuation, so multiple importance sampling weighs one visibility.
+    let relief = has_relief(surface)
+    if relief:
+        let light_open = relief_visibility(surface, f, light.direction)
         light.diffuse *= light_open
         light.specular *= light_open
-        let env_open = micro_visibility(ao, f.n, env.direction)
+        let env_open = relief_visibility(surface, f, env.direction)
         env.diffuse *= env_open
         env.specular *= env_open
 
@@ -605,8 +640,8 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     if s.valid:
         // The cosine is the one at the SURFACE, so a refracted direction contributes its own magnitude rather than a negative weight.
         let mut weight = s.value * (abs(s.direction.z) / s.pdf)
-        if s.direction.z > 0.0:
-            weight *= micro_visibility(ao, f.n, continuation)
+        if relief and s.direction.z > 0.0:
+            weight *= relief_visibility(surface, f, continuation)
 
         // Collapsing onto one wavelength keeps one channel of three, so what survives is scaled back up by three.
         if collapsing:

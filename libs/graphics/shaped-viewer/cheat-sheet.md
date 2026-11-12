@@ -250,6 +250,8 @@ lib.acquire(material)            // -> material_id, content-addressed; HERE ever
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
 sv::builtin_material::openpbr / openpbr_relief / pbr / unlit  // the names the builtins register under
                                                      // openpbr_relief: a tileable material; its `occlusion` is its relief's, which the tracer applies per direction
+                                                     //   horizon_lo / horizon_hi: the sines of its relief's horizon in 8 tangent directions, 45 degrees apart from +t;
+                                                     //   where bound they shadow light, environment and bounces below it, in place of the occlusion
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
                                  //   emission declared by openpbr (emission_color, emission_luminance) and pbr (emissive); unlit's reaches the camera alone

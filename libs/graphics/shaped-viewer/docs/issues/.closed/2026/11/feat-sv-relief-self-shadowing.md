@@ -6,6 +6,8 @@ refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/material/builtin_material_types.cc
   - symbol: micro_visibility
   - symbol: sv_parallax
+closed: 2026-11-12
+resolution: fixed
 ---
 
 # Self-shadowing for openpbr_relief, from a horizon map
@@ -23,7 +25,11 @@ The plan:
 - **Applied like the micro-occlusion**: on light samples, environment samples and the continuation alike, so multiple importance sampling weighs one visibility.
 - **A reference test**: a step height field's shadow against the same step as geometry, plus mutation checks, like the parallax test.
 
-## Known limitation to fix with it
+## Done, 2026-11-12
 
-Emission textures are read at the parallax offset in the shading context, while next-event estimation reads emission at level 0 and no offset.
-No relief material is emissive yet, so nothing shows it.
+- `openpbr_relief` takes `horizon_lo` and `horizon_hi`, the sines of the horizon in 8 directions of its tangent frame.
+- The tracer interpolates the horizon at a direction's azimuth and closes what lies below it, a sine of 0.05 soft.
+  It applies on light samples, environment samples and the continuation alike; where a horizon is bound it stands in for the micro-occlusion.
+- Tested in pathtraced-view-test: a horizon of 45 degrees toward +t shadows a light from there at 30 degrees, and neither one at 60 nor one from -t.
+- The horizon map itself is the producer's, from its height; machina-works packs one per mip level.
+- The emission limitation this issue carried moved to `bug-sv-relief-emission-parallax-offset`.

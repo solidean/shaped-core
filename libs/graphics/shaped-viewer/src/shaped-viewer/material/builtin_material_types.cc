@@ -234,24 +234,29 @@ surface.emission_color = color
     signature.push_back(material_signature_entry::of("height", 0.0f));
     signature.push_back(material_signature_entry::of("height_top", 0.0f));
     signature.push_back(material_signature_entry::of("height_bottom", 0.0f));
-    return material_type::create({.name = cc::string(builtin_material::openpbr_relief),
-                                  .signature = cc::move(signature),
-                                  .shader = cc::string(openpbr_shader) + "surface.micro_occlusion = saturate(occlusion)\n",
-                                  .height_attribute = "height",
-                                  .height_top_attribute = "height_top",
-                                  .height_bottom_attribute = "height_bottom",
-                                  .opacity_attribute = "opacity",
-                                  .opacity_cutoff_attribute = "alpha_cutoff",
-                                  .occlusion_attribute = "occlusion",
-                                  .emission_color_attribute = "emission_color",
-                                  .emission_scale_attribute = "emission_luminance",
-                                  .base_color_attribute = "base_color",
-                                  .roughness_attribute = "specular_roughness",
-                                  .metalness_attribute = "base_metalness",
-                                  .specular_weight_attribute = "specular_weight",
-                                  .transmission_attribute = "transmission_weight",
-                                  .thin_walled_attribute = "thin_walled",
-                                  .tangent_frame_attribute = "tangent_frame"});
+    // The horizon its relief rises to in 8 directions of the tangent frame, as sines; 0 is open, and casts no shadow.
+    signature.push_back(material_signature_entry::of("horizon_lo", tg::vec4f(0, 0, 0, 0)));
+    signature.push_back(material_signature_entry::of("horizon_hi", tg::vec4f(0, 0, 0, 0)));
+    return material_type::create(
+        {.name = cc::string(builtin_material::openpbr_relief),
+         .signature = cc::move(signature),
+         .shader = cc::string(openpbr_shader) + "surface.micro_occlusion = saturate(occlusion)\n"
+                 + "surface.horizon_lo = saturate(horizon_lo)\n" + "surface.horizon_hi = saturate(horizon_hi)\n",
+         .height_attribute = "height",
+         .height_top_attribute = "height_top",
+         .height_bottom_attribute = "height_bottom",
+         .opacity_attribute = "opacity",
+         .opacity_cutoff_attribute = "alpha_cutoff",
+         .occlusion_attribute = "occlusion",
+         .emission_color_attribute = "emission_color",
+         .emission_scale_attribute = "emission_luminance",
+         .base_color_attribute = "base_color",
+         .roughness_attribute = "specular_roughness",
+         .metalness_attribute = "base_metalness",
+         .specular_weight_attribute = "specular_weight",
+         .transmission_attribute = "transmission_weight",
+         .thin_walled_attribute = "thin_walled",
+         .tangent_frame_attribute = "tangent_frame"});
 }
 
 [[nodiscard]] material_type make_pbr()
