@@ -24,7 +24,7 @@ struct corner:
 @mesh(4, vertices = 4, triangles = 2)
 fun halves(@workgroup_id group: int3, @local_thread_index k: int, output: mut mesh_output[corner]):
     output.set_counts(4u, 2u)
-    // after set_counts: DXC copies a set_counts that follows a branch into both of its paths, and then refuses the copies
+    // after set_counts, for docs/bugs-external/dxc-mesh-output-counts-duplicated-past-branch
     if group.x == 1:
         workgroup_barrier()
     let left = if group.x == 0 => -1.0 else 0.0
