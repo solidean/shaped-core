@@ -27,6 +27,7 @@ Anything more reaches for the transport directly, and `cnet::http_level` is how 
 
 `cnet::native_http_client` reports `client`.
 The socket underneath is real, and nothing hands it to a caller yet.
+`cnet::fetch_http_client` reports `fetch`.
 
 A call needing a level the backend lacks fails loudly rather than degrading: a dropped header is discovered in
 production, a refused call in the first test run.
@@ -231,6 +232,29 @@ reactor for as long as it takes.
 `stop()` cancels the server's own token, which every accept, read and write is registered with — so shutdown is
 immediate rather than a wait for deadlines nobody set — and lets the listener go, so a connection that arrives
 afterwards is refused rather than accepted by a server that will never read from it.
+
+## The fetch backend
+
+`cnet::fetch_http_client` is the client on wasm, over the browser's own `fetch`; off wasm it exists and refuses every request with `unsupported`.
+
+**The JavaScript side runs on the main runtime thread, whichever thread sent the request.**
+A pool worker never returns to its event loop, so a `fetch` started there would never answer.
+Each call into JavaScript is posted there, and each answer comes back as a signal to a manual operation of the request's `io_system`.
+So the request is stepped by the reactor, its budget is the reactor's deadline and its token cancels it, exactly as on the native backend.
+A request that ends early — its budget, its token, the body cap — aborts the `fetch` through its `AbortController`.
+
+**One JavaScript call is outstanding at a time**: the `fetch` until its head arrives, then one read of the response stream until its chunk does.
+That is what makes a sink's pushback reach the browser: nothing more is read while the sink still holds bytes it has not taken.
+The answers and a sink's `resume()` share one gate, so a wake-up with nothing behind it just waits again.
+
+What a browser decides is refused rather than imitated.
+`follow_redirects = false` fails with `level_not_supported`, because the only way to stop a browser following one hands back an opaque response with no status and no headers.
+A failed `fetch` is `error_code::unknown`: a refused connection, a CORS refusal and an unresolvable name reach the page as the same `TypeError`, on purpose.
+Forbidden headers (`Host`, `Cookie`, …) are the browser's to drop.
+
+A browser page fetches relative to itself, and an `http_target` is absolute: `fetch_http_client::document_url()` is the page's URL to resolve against.
+
+The tests run the whole path under node, against a `fetch` the test itself writes in JavaScript.
 
 ## Still to come
 
