@@ -13,3 +13,6 @@ Two other objects had no dependencies either: clean-core's node-allocation-desig
 Deleting the three objects fixed it, and compute.cc.obj then recorded 442.
 Not known how it lost them: likely a compile through the build server that handed back no include list, since touching the header and building with --no-server did not rebuild it either.
 dev.py could refuse, or rebuild, an object whose deps entry is empty, at build time or in doctor.
+
+The same three objects had no dependencies in the `--agility-preview` build directory too, on 2026-11-12, with the same crash; deleting them fixed it there as well.
+So it is these files rather than one bad compile: two build directories lost exactly the same three entries.
