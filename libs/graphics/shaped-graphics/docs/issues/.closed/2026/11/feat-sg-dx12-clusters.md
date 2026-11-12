@@ -3,8 +3,8 @@ created: 2026-11-11
 tags: [raytracing]
 refs:
   - file: libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md
-claimed-by: Philip Trettner
-claimed-at: 2026-11-12T06:19Z
+closed: 2026-11-12
+resolution: fixed
 ---
 
 # dx12's half of clustered geometry (phase 4c)
