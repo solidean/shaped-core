@@ -561,7 +561,7 @@ cc::optional<place> lowering::place_of(flat_expr_id id)
     auto const space = _out.at(_out.type_of(base.value().pointer)).space;
     for (auto const raw : chain)
     {
-        auto const& t = _out.at(at);
+        auto const t = _out.at(at);
         switch (t.kind)
         {
         case type_kind::structure:
@@ -605,7 +605,7 @@ value_ref lowering::bound_element(flat_expr_id id)
     auto const array = bound_resource(found);
     if (!ir::is_valid(array))
         return value_ref::none;
-    auto const& pointer = _out.at(_out.type_of(array));
+    auto const pointer = _out.at(_out.type_of(array));
     auto const held = _out.at(pointer.element).element;
     auto const space = pointer.space;
     u32 const operands[] = {u32(array), u32(expr(element->index))};
@@ -631,8 +631,8 @@ value_ref lowering::uniform_element_length(flat_expr_id id)
     auto const array = bound_resource(found);
     if (!ir::is_valid(array))
         return value_ref::none;
-    auto const& pointer = _out.at(_out.type_of(array));
-    auto const& elements = _out.at(pointer.element);
+    auto const pointer = _out.at(_out.type_of(array));
+    auto const elements = _out.at(pointer.element);
     auto const held = elements.element;
     auto const space = pointer.space;
     auto const is_fixed = elements.kind == type_kind::array && elements.count <= 16;
@@ -709,7 +709,7 @@ value_ref lowering::spilled(value_ref value, type_id type)
 
 bool lowering::holds_array(type_ref t) const
 {
-    auto const& info = _out.at(t);
+    auto const info = _out.at(t);
     if (info.kind == type_kind::array)
         return true;
     if (info.kind != type_kind::structure)

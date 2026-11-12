@@ -148,7 +148,7 @@ void lowering::elements_of_struct(check::type_id t, stage_part part, u32 array_s
             continue;
         }
         e.type = value_type(member.type);
-        auto const& held = _out.at(e.type);
+        auto const held = _out.at(e.type);
         auto const& scalar = held.kind == ir::type_kind::vector ? _out.at(held.element) : held;
         // CHK-488: a primitive has one value of it, so nothing interpolates
         if (s.role == emit::impl::struct_role::primitive_link)
@@ -326,7 +326,7 @@ void lowering::check_links()
 {
     for (auto const& e : _out.stage_elements)
     {
-        auto const& held = _out.at(e.type);
+        auto const held = _out.at(e.type);
         auto const& scalar = held.kind == ir::type_kind::vector ? _out.at(held.element) : held;
         if (e.system == built_in::none && (scalar.width < 32 || scalar.kind == ir::type_kind::bool_))
             return unsupported("a link that is no 32-bit or 64-bit number");

@@ -218,7 +218,7 @@ constexpr family_name k_families[] = {
 
 type_ref lowering::scalar_of(type_ref t) const
 {
-    auto const& info = _out.at(t);
+    auto const info = _out.at(t);
     return info.kind == type_kind::vector ? info.element
          : info.kind == type_kind::matrix ? _out.at(info.element).element
                                           : t;
@@ -226,13 +226,13 @@ type_ref lowering::scalar_of(type_ref t) const
 
 u32 lowering::lanes_of(type_ref t) const
 {
-    auto const& info = _out.at(t);
+    auto const info = _out.at(t);
     return info.kind == type_kind::vector ? info.count : 1;
 }
 
 value_ref lowering::column_wise(op code, value_ref a, value_ref b, type_ref matrix)
 {
-    auto const& info = _out.at(matrix);
+    auto const info = _out.at(matrix);
     auto const column = info.element;
     auto columns = cc::vector<u32>();
     for (auto i = u32(0); i < info.count; ++i)
@@ -285,7 +285,7 @@ value_ref lowering::converted(value_ref value, type_ref from, type_ref to)
 
 value_ref lowering::constructed(cc::span<value_ref const> args, type_ref result)
 {
-    auto const& info = _out.at(result);
+    auto const info = _out.at(result);
     if (args.size() == 1)
     {
         auto const from = _out.type_of(args[0]);
@@ -330,7 +330,7 @@ value_ref lowering::arithmetic(u32 shape, cc::span<value_ref const> args, type_r
     if (is_valid(b) && lanes_of(b_type) < lanes_of(wide))
         b = splat(b, wide);
 
-    auto const& scalar = _out.at(scalar_of(wide));
+    auto const scalar = _out.at(scalar_of(wide));
     auto const is_float = scalar.kind == type_kind::float_;
     auto const is_bool = scalar.kind == type_kind::bool_;
     auto const is_signed = scalar.is_signed;
@@ -425,7 +425,8 @@ value_ref lowering::atomic(flat_call const& c, flat_expr const& x)
     }
     auto const pointer = target.value().pointer;
     auto const held = _out.at(_out.type_of(pointer)).element;
-    auto const& scalar = _out.at(held);
+    // by value: lowering an argument below interns types, which moves `types`
+    auto const scalar = _out.at(held);
     auto const is_float = scalar.kind == type_kind::float_;
     // a texel is its image's scalar, where a buffer's element is an `atomic[T]` that may hold a float as bits
     auto const declared_float
@@ -794,7 +795,7 @@ value_ref lowering::subgroup_call(flat_call const& c, builtins::function_record 
     auto const what = subgroup_op(record.write.data);
     auto const value = expr(arguments[0]);
     auto const type = _out.type_of(value);
-    auto const& scalar = _out.at(scalar_of(type));
+    auto const scalar = _out.at(scalar_of(type));
     auto const is_float = scalar.kind == type_kind::float_;
     auto const sign = scalar.is_signed;
     // an id SPIR-V reads as unsigned
@@ -1090,7 +1091,7 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         auto fn = name.fn;
         if (name.what == family::math_any_sign)
         {
-            auto const& scalar = _out.at(scalar_of(_out.type_of(args[0])));
+            auto const scalar = _out.at(scalar_of(_out.type_of(args[0])));
             auto const step = scalar.kind == type_kind::float_ ? 0 : scalar.is_signed ? 1 : 2;
             if (fn == math::fabs || fn == math::fsign)
             {
