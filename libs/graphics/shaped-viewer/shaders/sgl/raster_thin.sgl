@@ -100,7 +100,7 @@ fun unpack_transmission(packed: float, thin_walled: mut bool) -> float:
 /// The base takes the subsurface's color by its weight, so a subsurface material keeps its albedo.
 /// The transmission keeps its weight and its thin wall, so the glass a bounce refracts through is clear.
 /// Lost are anisotropy, the fuzz, the thin film, the coat's color and IOR, the diffuse roughness and the medium.
-fun thin_of(surface: openpbr.surface, shading_n: float3, n: float3, reach: float, view_depth: float, motion: float2, near: float) -> thin_targets:
+fun thin_of(surface: openpbr.surface, shading_n: float3, n: float3, reach: float, view_depth: float, motion: float2, primary_depth: float) -> thin_targets:
     let base = saturate(surface.base_weight * mix(surface.base_color, surface.subsurface_color, saturate(surface.subsurface_weight)))
     let specular = saturate(surface.specular_weight * surface.specular_color)
     let emission = max(float3(0.0), surface.emission_luminance * surface.emission_color)
@@ -112,7 +112,7 @@ fun thin_of(surface: openpbr.surface, shading_n: float3, n: float3, reach: float
         extra = float4(saturate(surface.coat_weight), saturate(surface.coat_roughness), saturate((surface.specular_ior - 1.0) / 3.0), pack_transmission(surface.transmission_weight, surface.geometry_thin_walled != 0.0))
         depth = view_depth
         motion = motion
-        primary_depth = max(1.0 - near / view_depth, 0.0)
+        primary_depth = primary_depth
     }
 
 /// The reduced closure `thin_of` wrote as `base`, `specular` and `extra`, as a surface `bsdf_prepare` takes.
@@ -145,15 +145,17 @@ fun thin_surface(base: float4, specular: float4, extra: float4) -> openpbr.surfa
 fun plane_depth(cam: scene.camera, pixel: float2, size: float2, to_point: float3, n: float3) -> float:
     let forward = normalize(cam.forward)
     let ray = scene.camera_ray_offset(cam, pixel, size)
+    // the plane met from the ray's own origin, which an orthographic camera moves across the image
+    let from_origin = to_point + cam.position - scene.camera_origin(cam, pixel, size)
     let facing = dot(ray, n)
     if abs(facing) < 1e-6 => return dot(to_point, forward)
-    return dot(to_point, n) / facing * dot(ray, forward)
+    return dot(from_origin, n) / facing * dot(ray, forward) + dot(scene.camera_origin(cam, pixel, size) - cam.position, forward)
 
 /// The thin G-buffer of the pixel `p` covers, whose material evaluated to `surface_in` through `ctx`, as `shade` describes the surface.
 fun thin(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> thin_targets:
     let cam = scene.camera(..drawn.frame[0].camera)
     let inst = scene.instance(..drawn.instances[p.instance as int])
-    let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
+    let face = face_of(inst, ctx, p.world, scene.camera_eye_of(cam, p.world), surface_in, supplied_tangent_frame)
     return thin_face(float2(p.position.x, p.position.y), p.world, face, surface_in, supplied_tangent_frame)
 
 /// The thin G-buffer of the quadric pixel `p` found at `hit`, and its depth.
@@ -161,7 +163,7 @@ fun thin_quadric(p: quadric_varyings, hit: quadric_pixel, surface_in: openpbr.su
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
     let inst = scene.instance(..drawn.instances[p.instance as int])
-    let face = quadric_face_of(inst, hit.object_normal, hit.world, cam.position, surface_in, supplied_tangent_frame)
+    let face = quadric_face_of(inst, hit.object_normal, hit.world, scene.camera_eye_of(cam, hit.world), surface_in, supplied_tangent_frame)
     let t = thin_face(float2(p.position.x, p.position.y), hit.world, face, surface_in, supplied_tangent_frame)
     return {
         emission = t.emission
@@ -172,24 +174,24 @@ fun thin_quadric(p: quadric_varyings, hit: quadric_pixel, surface_in: openpbr.su
         depth = t.depth
         motion = t.motion
         primary_depth = t.primary_depth
-        surface_depth = f.near_plane / dot(hit.world - cam.position, normalize(cam.forward))
+        surface_depth = scene.camera_reversed_depth(cam, f.near_plane, dot(hit.world - cam.position, normalize(cam.forward)))
     }
 
 /// `thin` for the surface at world point `world` that pixel `pixel` covers, described by `face`.
 fun thin_face(pixel: float2, world: float3, face: pixel_face, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> thin_targets:
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
-    let v = normalize(cam.position - world)
-    let to_point = world - cam.position
-    let view_depth = plane_depth(cam, pixel + f.jitter, f.size, to_point, face.n)
+    let eye = scene.camera_eye_of(cam, world)
+    let v = normalize(eye - world)
+    let view_depth = plane_depth(cam, pixel + f.jitter, f.size, world - cam.position, face.n)
 
     let mut surface = surface_in
-    apply_decals(mut surface, world, face.n, f.pixel_spread * length(to_point))
+    apply_decals(mut surface, world, face.n, f.pixel_width + f.pixel_spread * length(world - eye))
     let shading = openpbr.shading_frame(mut surface, face.n, v, face.authored, supplied_tangent_frame)
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel + f.jitter - scene.camera_project(prev, world - prev.position, f.size)
-    return thin_of(surface, shading.n, face.n, face.reach, view_depth, motion, f.near_plane)
+    return thin_of(surface, shading.n, face.n, face.reach, view_depth, motion, scene.camera_primary_depth(cam, f.near_plane, view_depth))
 
 /// What a pixel no surface covers holds in the thin G-buffer, as `environment` fills the lit targets.
 fun environment_thin(pixel: float2){drawn} -> thin_targets:

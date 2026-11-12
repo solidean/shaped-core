@@ -30,6 +30,8 @@ DEFAULT_FREE_GB = 2.0 if platform.system() == "Darwin" else 5.0
 WATCH_SECONDS = 0.5
 
 _installed = False
+# The guard's job and its limits, once installed on Windows; allow_breakaway widens them.
+_job_state = None
 
 
 def _limit(name: str, default: float) -> float:
@@ -101,6 +103,7 @@ if platform.system() == "Windows":
 
     _JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x100
     _JOB_OBJECT_LIMIT_JOB_MEMORY = 0x200
+    _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x800
     _JobObjectExtendedLimitInformation = 9
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
@@ -140,7 +143,17 @@ if platform.system() == "Windows":
             return None
         if not _kernel32.AssignProcessToJobObject(handle, _kernel32.GetCurrentProcess()):
             return None
+        global _job_state
+        _job_state = (handle, limits)
         return handle
+
+    def _allow_breakaway() -> bool:
+        if _job_state is None:
+            return False
+        handle, limits = _job_state
+        limits.BasicLimitInformation.LimitFlags |= _JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        return bool(_kernel32.SetInformationJobObject(handle, _JobObjectExtendedLimitInformation, ctypes.byref(limits),
+                                                      ctypes.sizeof(limits)))
 
     def _end_everything(job) -> None:
         if job is not None:
@@ -209,6 +222,18 @@ else:
             except OSError:
                 pass
         os._exit(3)
+
+
+def allow_breakaway() -> bool:
+    """Lets a process started with CREATE_BREAKAWAY_FROM_JOB leave the guard's job from now on; True when the job now allows it.
+
+    For the optional build server only, called once this run builds through it (build_server.Session):
+    its daemon outlives the dev.py run that starts it and serves other runs, so it must not end with this run's job.
+    The guard's caps then do not cover the daemon and what it runs, which has limits of its own.
+    Nothing else dev.py starts asks to break away, so everything else stays under the guard.
+    Off Windows there is no job, and nothing to do.
+    """
+    return platform.system() == "Windows" and _allow_breakaway()
 
 
 def install() -> None:

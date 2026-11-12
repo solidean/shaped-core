@@ -12,6 +12,13 @@
 namespace sgl::builtins::impl
 {
 [[nodiscard]] f64 soft_sqrt(f64 x);
+/// The f64 nearest the root, as IEEE 754's sqrt; what a double's `sqrt` is, which soft_sqrt is not to the last bit.
+[[nodiscard]] f64 correctly_rounded_sqrt(f64 x);
+/// `a * b + c` rounded once, to nearest, ties to even, whatever the sizes of the product and the sum.
+[[nodiscard]] f64 soft_fma(f64 a, f64 b, f64 c);
+/// `a * b + c` rounded to odd, where `a * b` is exact in an f64, as a float or a half product is.
+/// Narrowing the result to a float or a half then rounds once: f64 keeps more than twice their bits plus two.
+[[nodiscard]] f64 fma_to_odd(f64 a, f64 b, f64 c);
 [[nodiscard]] f64 soft_exp(f64 x);
 /// -inf at 0, and NaN below it.
 [[nodiscard]] f64 soft_log(f64 x);

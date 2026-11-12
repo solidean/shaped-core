@@ -4,6 +4,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/debug/dump.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
@@ -146,7 +147,7 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
 
     for (auto const file : spec_files)
     {
-        auto const path = cc::string(SGL_SPEC_DIR) + "/" + file;
+        auto const path = nx::source_path(SGL_SPEC_DIR) + "/" + file;
         for (auto const& e : examples_of(read_text(path)))
         {
             if (e.kind == fence_kind::sketch)
@@ -219,7 +220,7 @@ TEST("sgl spec - every rule id is defined exactly once")
     {
         if (!(file.starts_with("syntax/") || file.starts_with("semantics/")) || file.contains("/why/"))
             continue;
-        auto const text = read_text(cc::string(SGL_SPEC_DIR) + "/" + file);
+        auto const text = read_text(nx::source_path(SGL_SPEC_DIR) + "/" + file);
         auto line_number = 0;
         auto at = isize(0);
         while (at < text.size())
@@ -284,7 +285,7 @@ int require_total_under(cc::string_view prefix, cc::string& failures)
     {
         if (!file.starts_with(prefix))
             continue;
-        auto const path = cc::string(SGL_SPEC_DIR) + "/" + file;
+        auto const path = nx::source_path(SGL_SPEC_DIR) + "/" + file;
         for (auto const& e : examples_of(read_text(path)))
         {
             ++sources;
@@ -322,7 +323,7 @@ TEST("sgl spec - every other example, and every sample, compiles for every targe
                               "members-and-bindings.sgl", "pipeline.sgl"})
     {
         ++sources;
-        require_total(read_text(cc::string(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);
+        require_total(read_text(nx::source_path(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);
     }
     CHECK(sources > 10);
     CHECK(failures == "");
@@ -371,7 +372,7 @@ TEST("sgl spec - the tests of every example run")
     // A fence without a test is fine here; it is the corpus that holds a file to having one.
     auto found = 0;
     for (auto const file : spec_files)
-        for (auto const& e : examples_of(read_text(cc::format("{}/{}", SGL_SPEC_DIR, file))))
+        for (auto const& e : examples_of(read_text(cc::format("{}/{}", nx::source_path(SGL_SPEC_DIR), file))))
             if (e.kind == fence_kind::valid && holds_test(e.source))
             {
                 ++found;

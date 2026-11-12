@@ -36,6 +36,12 @@ struct sg::adapter_info
     /// memory at all.
     cc::optional<i64> dedicated_video_memory_bytes;
 
+    /// The adapter's locally unique id, the one key that names the same GPU to dx12, vulkan and an XR runtime alike.
+    /// Valid only on this machine until it reboots, so never persist it.
+    /// Its bytes are a Windows `LUID` read as a little-endian u64: `LowPart` low, `HighPart` high.
+    /// Absent where the platform has no such id, which is everywhere but Windows.
+    cc::optional<u64> luid;
+
     /// A software rasterizer rather than real hardware — WARP, lavapipe.
     /// On dx12 that is every adapter of Microsoft's vendor id, flagged as software or not.
     /// Its "driver" is the runtime, so a blob it produced is worth even less across machines than a real driver's.

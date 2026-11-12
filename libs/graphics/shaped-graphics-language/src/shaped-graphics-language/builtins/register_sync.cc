@@ -1,6 +1,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
@@ -40,6 +41,8 @@ constexpr barrier k_barriers[] = {
 };
 
 constexpr cc::string_view k_barriers_hlsl[] = {"GroupMemoryBarrierWithGroupSync", "DeviceMemoryBarrierWithGroupSync"};
+constexpr cc::string_view k_mesh_output_hlsl[] = {"SetMeshOutputCounts"};
+constexpr cc::string_view k_dispatch_mesh_hlsl[] = {"DispatchMesh", "sgl_payload"};
 constexpr cc::string_view k_barriers_wgsl[] = {"workgroupBarrier", "storageBarrier", "textureBarrier"};
 constexpr cc::string_view k_barriers_msl[]
     = {"threadgroup_barrier", "mem_flags", "atomic_thread_fence", "memory_order_seq_cst", "thread_scope_device"};
@@ -96,6 +99,26 @@ void loaded(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
 {
     out.push_back_range(in);
 }
+
+// ---- LEGAL-69: the shadow of workgroup memory ----------------------------------------------------------------------
+
+// One bit per scalar of the entry point's workgroup memory, which a robustness profile sets where a scalar is stored
+// and tests where it is read.
+// The guards write a read and a mark as these calls, and the last step of legalize makes each the atomic on its word
+// of the shadow (LEGAL-71), so no target writes one.
+// The interpreter never runs these: it reports such a read itself (EVAL-92), so to it every bit is set.
+
+/// Nothing: legalize rewrites every call of the shadow before a target writes one (LEGAL-71).
+written never_written(call_context const&)
+{
+    return {};
+}
+
+void every_bit_written(cc::span<check::scalar const>, cc::vector<check::scalar>& out)
+{
+    out.push_back(scalar::of_uint(0xffffffffu));
+}
+
 // ---- atomics ------------------------------------------------------------------------------------------------------
 
 enum class atomic_op : u8
@@ -184,12 +207,13 @@ constexpr cc::string_view k_atomics_msl[] = {
     "atomic_fetch_max_explicit", "atomic_fetch_and_explicit", "atomic_fetch_or_explicit",
     "atomic_fetch_xor_explicit", "atomic_exchange_explicit",  "atomic_load_explicit",
     "atomic_store_explicit",     "memory_order_relaxed",      "atomic_compare_exchange_weak_explicit",
-    "simd_is_helper_thread",
+    "simd_is_helper_thread",     "atomic_min_explicit",       "atomic_max_explicit",
 };
 
 /// CHK-296: every stage that writes memory once per invocation the program can count.
 /// A vertex stage has no writable storage in WebGPU, and any-hit and intersection stages run as often as traversal decides.
-constexpr cc::string_view k_atomic_stages = "@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)";
+constexpr cc::string_view k_atomic_stages
+    = "@stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable)";
 
 /// A compare-exchange writes statements in every target (EMIT-161).
 bool every_language(language)
@@ -197,10 +221,21 @@ bool every_language(language)
     return true;
 }
 
-/// The data word: the operation, and whether the atomic holds an `int`.
-u32 atomic_data(atomic_op op, bool is_signed)
+/// The data word: the operation, whether the atomic holds a signed integer, and whether a 64-bit one (CHK-296).
+u32 atomic_data(atomic_op op, bool is_signed, bool is_wide = false)
 {
-    return u32(op) | (is_signed ? 0x100u : 0u);
+    return u32(op) | (is_signed ? 0x100u : 0u) | (is_wide ? 0x200u : 0u);
+}
+
+/// The integer an atomic of `data` holds, as `target` spells it; a 64-bit one is never MSL's or WGSL's (EMIT-192).
+cc::string_view atomic_scalar(u32 data, language target)
+{
+    auto const is_signed = (data & 0x100u) != 0;
+    if ((data & 0x200u) != 0)
+        return is_signed ? "int64_t" : "uint64_t";
+    if (target == language::wgsl)
+        return is_signed ? "i32" : "u32";
+    return is_signed ? "int" : "uint";
 }
 
 /// A fresh name of the text, or `desired` itself where no text is being written.
@@ -315,7 +350,7 @@ written write_exchange(call_context const& ctx,
 written write_hlsl_exchange(call_context const& ctx, cc::string_view place, written result)
 {
     auto const& info = k_atomics[ctx.data & 0xffu];
-    auto const t = (ctx.data & 0x100u) != 0 ? "int" : "uint";
+    auto const t = atomic_scalar(ctx.data, language::hlsl);
     auto const before = minted(ctx, "atomic_before");
     auto const desired = wrapped(ctx.arguments[2], precedence::primary);
     if (info.op == atomic_op::compare_exchange_strong)
@@ -354,11 +389,13 @@ written write_atomic(call_context const& ctx)
     {
         // `Interlocked*` gives the value before through an out parameter, so a local declared ahead holds it
         auto const before = minted(ctx, "atomic_before");
+        auto const is_wide = (ctx.data & 0x200u) != 0;
+        auto const zero = is_wide ? (is_signed ? "0LL" : "0ULL") : (is_signed ? "0" : "0u");
         auto const operand = info.op == atomic_op::subtract ? cc::format("-{}", v)
-                           : info.op == atomic_op::load     ? cc::string(is_signed ? "0" : "0u")
+                           : info.op == atomic_op::load     ? cc::string(zero)
                                                             : v;
         auto result = written{.text = before};
-        result.lines.push_back(cc::format("{} {};", is_signed ? "int" : "uint", before));
+        result.lines.push_back(cc::format("{} {};", atomic_scalar(ctx.data, language::hlsl), before));
         result.lines.push_back(cc::format("Interlocked{}({}, {}, {});", info.hlsl, a, operand, before));
         if (info.op == atomic_op::store)
             result.text = {};
@@ -369,6 +406,14 @@ written write_atomic(call_context const& ctx)
             return {.text = cc::format("atomicLoad(&{})", a)};
         return {.text = cc::format("atomic{}(&{}, {})", info.wgsl, a, v)};
     case language::msl:
+        // EMIT-218: MSL's ulong min and max give nothing back, so they stand as statements alone
+        if ((ctx.data & 0x200u) != 0 && (info.op == atomic_op::min || info.op == atomic_op::max))
+        {
+            auto result = written{};
+            result.lines.push_back(cc::format("atomic_{}_explicit(&{}, {}, memory_order_relaxed);",
+                                              info.op == atomic_op::min ? "min" : "max", a, v));
+            return result;
+        }
         if (info.op == atomic_op::load)
             return {.text = cc::format("atomic_load_explicit(&{}, memory_order_relaxed)", a)};
         return {.text = cc::format("atomic_{}_explicit(&{}, {}, memory_order_relaxed)", info.msl, a, v)};
@@ -376,32 +421,36 @@ written write_atomic(call_context const& ctx)
     return {};
 }
 
-template <bool IsSigned>
+/// An update of the integer of `Kind`, 32 or 64 bits, wrapping in either.
+template <value_kind Kind>
 scalar updated(atomic_op op, scalar old, scalar v)
 {
-    auto const kind = IsSigned ? value_kind::scalar_int : value_kind::scalar_uint;
-    auto const a = old.bits;
-    auto const b = v.bits;
-    auto const less = IsSigned ? i32(a) < i32(b) : a < b;
+    constexpr auto is_wide = check::is_64_bit(Kind);
+    constexpr auto is_signed = Kind == value_kind::scalar_int || Kind == value_kind::scalar_long;
+    auto const a = old.wide_bits();
+    auto const b = v.wide_bits();
+    auto const less = !is_signed ? a < b : is_wide ? i64(a) < i64(b) : i32(u32(a)) < i32(u32(b));
+    auto const of = [](u64 bits)
+    { return check::is_64_bit(Kind) ? scalar::of_wide(Kind, bits) : scalar{.kind = Kind, .bits = u32(bits)}; };
     switch (op)
     {
     case atomic_op::add:
-        return {.kind = kind, .bits = a + b};
+        return of(a + b);
     case atomic_op::subtract:
-        return {.kind = kind, .bits = a - b};
+        return of(a - b);
     case atomic_op::min:
-        return {.kind = kind, .bits = less ? a : b};
+        return of(less ? a : b);
     case atomic_op::max:
-        return {.kind = kind, .bits = less ? b : a};
+        return of(less ? b : a);
     case atomic_op::bit_and:
-        return {.kind = kind, .bits = a & b};
+        return of(a & b);
     case atomic_op::bit_or:
-        return {.kind = kind, .bits = a | b};
+        return of(a | b);
     case atomic_op::bit_xor:
-        return {.kind = kind, .bits = a ^ b};
+        return of(a ^ b);
     case atomic_op::exchange:
     case atomic_op::store:
-        return {.kind = kind, .bits = b};
+        return of(b);
     case atomic_op::load:
         return old;
     case atomic_op::compare_exchange_strong:
@@ -412,20 +461,20 @@ scalar updated(atomic_op op, scalar old, scalar v)
 }
 
 /// The atomic's value first, then the operand; gives what the atomic holds after (EVAL-93).
-template <atomic_op Op, bool IsSigned>
+template <atomic_op Op, value_kind Kind>
 void atomic_update(cc::span<scalar const> in, cc::vector<scalar>& out)
 {
-    out.push_back(updated<IsSigned>(Op, in[0], in.size() > 1 ? in[1] : in[0]));
+    out.push_back(updated<Kind>(Op, in[0], in.size() > 1 ? in[1] : in[0]));
 }
 
 /// The atomic's value, `expected` and `desired`: a run is one invocation, so no other update makes it fail (EVAL-93).
 /// The interpreter decides a weak one's spurious failures itself, and gives the value read and whether it stored.
 void exchanged(cc::span<scalar const> in, cc::vector<scalar>& out)
 {
-    out.push_back(in[0].bits == in[1].bits ? in[2] : in[0]);
+    out.push_back(in[0].wide_bits() == in[1].wide_bits() ? in[2] : in[0]);
 }
 
-template <bool IsSigned>
+template <value_kind Kind>
 evaluator evaluator_of(atomic_op op)
 {
     switch (op)
@@ -434,25 +483,25 @@ evaluator evaluator_of(atomic_op op)
     case atomic_op::compare_exchange_weak:
         return exchanged;
     case atomic_op::add:
-        return atomic_update<atomic_op::add, IsSigned>;
+        return atomic_update<atomic_op::add, Kind>;
     case atomic_op::subtract:
-        return atomic_update<atomic_op::subtract, IsSigned>;
+        return atomic_update<atomic_op::subtract, Kind>;
     case atomic_op::min:
-        return atomic_update<atomic_op::min, IsSigned>;
+        return atomic_update<atomic_op::min, Kind>;
     case atomic_op::max:
-        return atomic_update<atomic_op::max, IsSigned>;
+        return atomic_update<atomic_op::max, Kind>;
     case atomic_op::bit_and:
-        return atomic_update<atomic_op::bit_and, IsSigned>;
+        return atomic_update<atomic_op::bit_and, Kind>;
     case atomic_op::bit_or:
-        return atomic_update<atomic_op::bit_or, IsSigned>;
+        return atomic_update<atomic_op::bit_or, Kind>;
     case atomic_op::bit_xor:
-        return atomic_update<atomic_op::bit_xor, IsSigned>;
+        return atomic_update<atomic_op::bit_xor, Kind>;
     case atomic_op::exchange:
-        return atomic_update<atomic_op::exchange, IsSigned>;
+        return atomic_update<atomic_op::exchange, Kind>;
     case atomic_op::load:
-        return atomic_update<atomic_op::load, IsSigned>;
+        return atomic_update<atomic_op::load, Kind>;
     case atomic_op::store:
-        return atomic_update<atomic_op::store, IsSigned>;
+        return atomic_update<atomic_op::store, Kind>;
     }
     return nullptr;
 }
@@ -697,7 +746,8 @@ written write_texel_atomic(call_context const& ctx)
         case atomic_op::load:
             return {.text = cc::format("{}.atomic_load({}).x", image, coordinate)};
         case atomic_op::store:
-            return {.text = cc::format("{}.atomic_store({}, {}({}))", image, coordinate, vector, v)};
+            // the value first, as `write` takes it, where every other texel atomic takes the coordinate first
+            return {.text = cc::format("{}.atomic_store({}({}), {})", image, vector, v, coordinate)};
         case atomic_op::exchange:
             return {.text = cc::format("{}.atomic_exchange({}, {}({})).x", image, coordinate, vector, v)};
         default:
@@ -711,20 +761,6 @@ written write_texel_atomic(call_context const& ctx)
     return {};
 }
 
-/// A test's image has no texels, so an update of one finds zero, as a load of it does.
-template <bool IsSigned>
-void texel_zero(cc::span<scalar const>, cc::vector<scalar>& out)
-{
-    out.push_back({.kind = IsSigned ? value_kind::scalar_int : value_kind::scalar_uint, .bits = 0});
-}
-
-/// A weak compare-exchange of a texel finds zero too, and stores where zero is `expected`; it never fails spuriously.
-void texel_exchanged_weak(cc::span<scalar const> in, cc::vector<scalar>& out)
-{
-    auto const& expected = in[in.size() - 2];
-    out.push_back({.kind = expected.kind, .bits = 0});
-    out.push_back({.kind = value_kind::boolean, .bits = expected.bits == 0 ? 1u : 0u});
-}
 
 // ---- a geometry stage's streams ---------------------------------------------------------------------------------
 
@@ -736,10 +772,157 @@ written write_stream(call_context const& ctx)
         return {.text = cc::format("{}.RestartStrip()", s)};
     return {.text = cc::format("{}.Append({})", s, ctx.arguments[1].text)};
 }
+
+// ---- a mesh stage's output -------------------------------------------------------------------------------------------
+
+/// The data word: 0 for `set_counts`, 1 for `vertex`, 2 for `triangle` (EMIT-205).
+/// HLSL names the output's two arrays after the parameter, as the entry point declares them.
+written write_mesh_output(call_context const& ctx)
+{
+    auto const& o = ctx.arguments[0].text;
+    // EMIT-206: Metal's mesh object takes the primitives' count alone, and a primitive's corners index by index
+    if (ctx.target == language::msl)
+    {
+        if (ctx.data == 0)
+            return {.text = cc::format("{}.set_primitive_count({})", o, ctx.arguments[2].text)};
+        if (ctx.data == 1)
+            return {.text = cc::format("{}.set_vertex({}, {})", o, ctx.arguments[1].text, ctx.arguments[2].text)};
+        if (ctx.data == 3)
+            return {.text = cc::format("{}.set_primitive({}, {})", o, ctx.arguments[1].text, ctx.arguments[2].text)};
+        auto const corners = ctx.data == 2 ? 3 : 2;
+        auto const mint = [&](cc::string_view name) { return ctx.mint.is_valid() ? ctx.mint(name) : cc::string(name); };
+        auto const first = mint("sgl_first");
+        auto const indices = mint("sgl_indices");
+        auto result = written();
+        result.lines.push_back(cc::format("const uint {} = ({}) * {}u;", first, ctx.arguments[1].text, corners));
+        result.lines.push_back(cc::format("const uint{} {} = {};", corners, indices, ctx.arguments[2].text));
+        constexpr char lanes[] = {'x', 'y', 'z'};
+        for (auto c = 0; c < corners; ++c)
+            result.lines.push_back(cc::format("{}.set_index({} + {}u, {}.{});", o, first, c, indices, lanes[c]));
+        return result;
+    }
+    if (ctx.data == 0)
+        return {.text = cc::format("SetMeshOutputCounts({}, {})", ctx.arguments[1].text, ctx.arguments[2].text)};
+    auto const array = ctx.data == 1 ? "vertices"
+                     : ctx.data == 2 ? "triangles"
+                     : ctx.data == 4 ? "lines"
+                                     : "primitives";
+    return {.text = cc::format("{}_{}[{}] = {}", o, array, ctx.arguments[1].text, ctx.arguments[2].text)};
+}
+
+/// EMIT-207: HLSL hands a payload over from groupshared memory alone, so the call stores it there first.
+written write_dispatch_mesh(call_context const& ctx)
+{
+    // EMIT-207: Metal's object stage writes its payload and its grid, once, from its first invocation
+    if (ctx.target == language::msl)
+    {
+        auto result = written();
+        result.lines.push_back("if (sgl_thread == 0u)");
+        result.lines.push_back("{");
+        result.lines.push_back(cc::format("    sgl_payload = {};", ctx.arguments[3].text));
+        result.lines.push_back(cc::format("    sgl_grid.set_threadgroups_per_grid(uint3({}, {}, {}));",
+                                          ctx.arguments[0].text, ctx.arguments[1].text, ctx.arguments[2].text));
+        result.lines.push_back("}");
+        return result;
+    }
+    auto result = written{.text = cc::format("DispatchMesh({}, {}, {}, sgl_payload)", ctx.arguments[0].text,
+                                             ctx.arguments[1].text, ctx.arguments[2].text)};
+    // no WGSL text writes a task stage, which the feature refuses
+    if (ctx.target == language::hlsl)
+        result.lines.push_back(cc::format("sgl_payload = {};", ctx.arguments[3].text));
+    return result;
+}
+
+/// The groupshared payload the call stores into, of the payload's type.
+cc::string dispatch_mesh_helper(helper_context const& h)
+{
+    if (h.target != language::hlsl || h.argument_types.size() < 4)
+        return {};
+    return cc::format("groupshared {} sgl_payload;\n", h.argument_types[3]);
+}
+
+bool is_hlsl_text(language l)
+{
+    return l == language::hlsl;
+}
+
+bool is_hlsl_or_msl_text(language l)
+{
+    return l == language::hlsl || l == language::msl;
+}
+
+bool is_msl_text(language l)
+{
+    return l == language::msl;
+}
 } // namespace
 
 void sgl::builtins::register_sync(registry& r)
 {
+    r.add_comment("// A task stage's launch (CHK-485): `dispatch_mesh(x, y, z, payload)` starts x * y * z mesh "
+                  "workgroups, "
+                  "each\n"
+                  "// handed the struct `payload`, once, as the entry point's last statement.");
+    r.add(function_record{
+        .signature = "@stages(.task) fun dispatch_mesh(x: uint, y: uint, z: uint)",
+        .doc = "/// Launches the mesh workgroups, handing each the payload passed as a fourth argument.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_dispatch_mesh,
+                  .helper = dispatch_mesh_helper,
+                  .writes_lines = is_hlsl_or_msl_text,
+                  .hlsl_names = k_dispatch_mesh_hlsl,
+                  .wgsl_names = k_dispatch_mesh_hlsl,
+                  .msl_names = k_dispatch_mesh_hlsl},
+        .is_barrier = true,
+        .takes_element = true,
+    });
+    r.add_comment("// A mesh stage's output, called as its methods (CHK-482): `out.set_counts(v, t)` says how many\n"
+                  "// vertices and triangles it writes, once, in control flow every invocation of the workgroup "
+                  "takes.\n"
+                  "// `out.vertex(i, v)` writes the vertex at `i`, of the output's own type, and `out.triangle(i, t)`\n"
+                  "// the triangle of the three vertices `t` indexes.");
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun set_counts(o: mut mesh_output, vertices: uint, triangles: uint)",
+        .doc = "/// How many vertices and triangles the workgroup writes, at most the entry point's bounds.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_mesh_output,
+                  .data = 0,
+                  // no WGSL text writes a mesh stage, and the name stays the target's alike
+                  .hlsl_names = k_mesh_output_hlsl,
+                  .wgsl_names = k_mesh_output_hlsl,
+                  .msl_names = k_mesh_output_hlsl},
+        .is_barrier = true,
+    });
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun vertex(o: mut mesh_output, i: uint)",
+        .doc = "/// Writes the vertex at `i`, handed as a third argument of the output's own type.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 1},
+        .takes_element = true,
+    });
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun primitive(o: mut mesh_output, i: uint)",
+        .doc = "/// Writes the values of the triangle at `i`, handed as a third argument of the output's second "
+               "struct.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 3},
+        .takes_element = true,
+    });
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun triangle(o: mut mesh_output, i: uint, t: uint3)",
+        .doc = "/// Writes the triangle at `i`, of the three vertices `t` indexes.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .writes_lines = is_msl_text, .data = 2},
+    });
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun line(o: mut mesh_output, i: uint, l: uint2)",
+        .doc = "/// Writes the line at `i`, of the two vertices `l` indexes, in a mesh stage of `lines = M`.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .writes_lines = is_msl_text, .data = 4},
+    });
+
     r.add_comment("// A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which "
                   "the\n"
                   "// check pass takes as the stream's own type, and `stream.end_strip()` ends the strip (CHK-303).");
@@ -764,7 +947,7 @@ void sgl::builtins::register_sync(registry& r)
                   "(CHK-282).");
     for (auto i = u32(0); i < u32(sizeof(k_barriers) / sizeof(k_barriers[0])); ++i)
         r.add(function_record{
-            .signature = cc::format("@stages(.compute) fun {}()", k_barriers[i].name),
+            .signature = cc::format("@stages(.compute, .task, .mesh) fun {}()", k_barriers[i].name),
             .doc = k_barriers[i].doc,
             .evaluate = nothing,
             .write = {.kind = spelling_kind::custom,
@@ -795,10 +978,31 @@ void sgl::builtins::register_sync(registry& r)
             .is_uniform_load = true,
         });
 
+    r.add_comment("// The shadow of workgroup memory a robustness profile tests a read by (LEGAL-69): a bit per "
+                  "scalar,\n"
+                  "// set where it is stored; the legalizer alone calls these.");
+    r.add(function_record{
+        .signature = "@internal @stages(.compute) fun workgroup_written_word(word: uint) -> uint",
+        .doc = "/// Word `word` of the shadow, one bit per scalar some invocation stored.",
+        .evaluate = every_bit_written,
+        .write = {.kind = spelling_kind::custom, .custom = never_written},
+        .reads_only = true,
+    });
+    r.add(function_record{
+        .signature = "@internal @stages(.compute) fun workgroup_mark_written(word: uint, bits: uint)",
+        .doc = "/// Sets `bits` of word `word` of the shadow, in one step.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = never_written},
+    });
+
     r.add_comment("// What a weak compare-exchange gives, a struct of fields every target declares as a program's "
                   "own.\n"
                   "// The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it "
                   "stored (EMIT-161).");
+    r.add_comment("// What sg binds itself: an entry of `check::k_reserved_bindings`, which legalize alone reaches.");
+    for (auto const& b : check::k_reserved_bindings)
+        if (!b.declaration.empty())
+            r.add_declaration(b.declaration);
     r.add_declaration("/// What a weak compare-exchange read, and whether it stored `desired`.\n"
                       "struct exchange_result[T]:\n"
                       "    old: T\n"
@@ -807,9 +1011,23 @@ void sgl::builtins::register_sync(registry& r)
     r.add_comment("// Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.\n"
                   "// Each is relaxed, and each but a store gives the value before; only the stages its `@stages` "
                   "names take one (CHK-296).");
-    for (auto const is_signed : {false, true})
+    struct atomic_type
     {
-        auto const t = is_signed ? "int" : "uint";
+        cc::string_view name;
+        value_kind kind;
+    };
+    // CHK-296: a 64-bit atomic needs shader_int64_atomics, but a ulong's min and max, which need less (CHK-511)
+    for (auto const [t, kind] : {atomic_type{"uint", value_kind::scalar_uint},
+                                 {"int", value_kind::scalar_int},
+                                 {"ulong", value_kind::scalar_ulong},
+                                 {"long", value_kind::scalar_long}})
+    {
+        auto const is_signed = kind == value_kind::scalar_int || kind == value_kind::scalar_long;
+        auto const is_wide = check::is_64_bit(kind);
+        auto const evaluate = kind == value_kind::scalar_uint  ? evaluator_of<value_kind::scalar_uint>
+                            : kind == value_kind::scalar_int   ? evaluator_of<value_kind::scalar_int>
+                            : kind == value_kind::scalar_ulong ? evaluator_of<value_kind::scalar_ulong>
+                                                               : evaluator_of<value_kind::scalar_long>;
         for (auto const& info : k_atomics)
         {
             auto const signature
@@ -824,16 +1042,24 @@ void sgl::builtins::register_sync(registry& r)
             r.add(function_record{
                 .signature = cc::format("{} {}", k_atomic_stages, signature),
                 .doc = info.doc,
-                .evaluate = is_signed ? evaluator_of<true>(info.op) : evaluator_of<false>(info.op),
+                .evaluate = evaluate(info.op),
                 .write = {.kind = spelling_kind::custom,
                           .custom = write_atomic,
-                          .writes_lines = is_compare_exchange(info.op) ? every_language : is_hlsl,
-                          .data = atomic_data(info.op, is_signed),
+                          // MSL's 64-bit min and max stand as statements (EMIT-218)
+                          .writes_lines = is_compare_exchange(info.op)
+                                               || (is_wide && (info.op == atomic_op::min || info.op == atomic_op::max))
+                                            ? every_language
+                                            : is_hlsl,
+                          .data = atomic_data(info.op, is_signed, is_wide),
                           .hlsl_names = k_atomics_hlsl,
                           .wgsl_names = k_atomics_wgsl,
                           .msl_names = k_atomics_msl},
                 .is_atomic = true,
                 .gives_prelude_struct = info.op == atomic_op::compare_exchange_weak,
+                .features = !is_wide ? check::feature_set()
+                          : kind == value_kind::scalar_ulong && (info.op == atomic_op::min || info.op == atomic_op::max)
+                              ? check::feature_set(check::feature::shader_int64_min_max_atomics)
+                              : check::feature_set(check::feature::shader_int64_atomics),
                 .pixel_features = strong_pixel_features(info.op),
             });
         }
@@ -910,10 +1136,9 @@ void sgl::builtins::register_sync(registry& r)
                 r.add(function_record{
                     .signature = cc::format("@internal {} {}", k_atomic_stages, signature),
                     .doc = info.doc,
-                    .evaluate = info.op == atomic_op::store                 ? nothing
-                              : info.op == atomic_op::compare_exchange_weak ? texel_exchanged_weak
-                              : is_signed                                   ? texel_zero<true>
-                                                                            : texel_zero<false>,
+                    // the interpreter updates the texel as it does a buffer's element (EVAL-100)
+                    .evaluate = is_signed ? evaluator_of<value_kind::scalar_int>(info.op)
+                                          : evaluator_of<value_kind::scalar_uint>(info.op),
                     .write = {.kind = spelling_kind::custom,
                               .custom = write_texel_atomic,
                               .writes_lines = is_compare_exchange(info.op) ? is_not_wgsl : is_hlsl,

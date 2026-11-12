@@ -573,7 +573,7 @@ def run_step(
             except Exception:
                 extra = ""
         verb = "succeeded" if result.ok else "failed"
-        code_note = "" if result.ok else _describe_exit_code(returncode)
+        code_note = "" if result.ok else describe_exit_code(returncode)
         tint = console.green if result.ok else console.red
         summary = tint(f"  {label} {verb}{extra}{code_note} in {duration_s * 1000:.0f} ms")
 
@@ -597,7 +597,7 @@ _NTSTATUS_NAMES = {
 _SIGNAL_NAMES = {4: "SIGILL", 6: "SIGABRT", 7: "SIGBUS", 8: "SIGFPE", 11: "SIGSEGV"}
 
 
-def _describe_exit_code(rc: int) -> str:
+def describe_exit_code(rc: int) -> str:
     """Human-readable suffix for a non-zero process exit, empty for clean exits."""
     if rc == 0:
         return ""

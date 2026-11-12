@@ -1,4 +1,5 @@
 #include <clean-core/common/hash.hh>
+#include <clean-core/common/macros.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -46,21 +47,21 @@ TEST("set - insert / contains / erase")
 
 TEST("set - empty value is free (no per-node value overhead)")
 {
-    // cc::set rides on cc::map<T, cc::unit> whose node stores the value with [[no_unique_address]].
-    // An empty value must add no size — mirror the node shape and compare with/without it (portable
-    // across 32/64-bit pointers).
+    // cc::set rides on cc::map<T, cc::unit> whose node stores the value with CC_NO_UNIQUE_ADDRESS.
+    // An empty value must add no size, under the MSVC ABI too — mirror the node shape and compare with and without it.
+    // The key is a u64 so that no tail padding can absorb a value byte the attribute failed to remove.
     struct with_value
     {
         u64 hash;
         void* next;
-        int key;
-        [[no_unique_address]] cc::unit value;
+        u64 key;
+        CC_NO_UNIQUE_ADDRESS cc::unit value;
     };
     struct without_value
     {
         u64 hash;
         void* next;
-        int key;
+        u64 key;
     };
     CHECK(sizeof(with_value) == sizeof(without_value));
 }

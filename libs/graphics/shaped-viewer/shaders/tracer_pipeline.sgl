@@ -60,7 +60,7 @@ use tracer
         let jitter_y = pt.rand(mut rng)
         let jitter = if f.fixed_jitter != 0u => f.jitter else float2(jitter_x, jitter_y)
         let cam = scene.camera(..f.camera)
-        let mut origin = cam.position
+        let mut origin = scene.camera_origin(cam, px_f + jitter, dim_f)
         let mut dir = normalize(scene.camera_ray_offset(cam, px_f + jitter, dim_f))
 
         // Where a partial coverage can cut out, the guides and the motion come from a guide ray through the same point,
@@ -68,6 +68,8 @@ use tracer
         // Its stream comes back advanced and is dropped, so the path traces as it would without it.
         let guided = tracer.guide_rays()
         let mut guide_hit = tracer.surface_payload_for(rng, float3(0.0), float3(0.0), 0.0, 3u, 0u)
+        guide_hit.cone_width = f.pixel_width * f.primary_scale
+        guide_hit.cone_spread = f.pixel_spread * f.primary_scale
         if guided:
             guide_hit.guide = 1u
             let gr = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
@@ -96,6 +98,10 @@ use tracer
 
         // The first trace of a sample is the primary ray, whose hit the guides describe; a scattering event spends no bounce.
         let mut primary = true
+        // The ray cone a texture's level is read off: a pixel wide and a pixel's angle open at the camera, widened by each bounce.
+        // The ray cone a texture's level is read off: a pixel's angle wide from the camera, widened by each bounce.
+        let mut cone_width = f.pixel_width * f.primary_scale
+        let mut cone_spread = f.pixel_spread * f.primary_scale
 
         // Scattering events do not count against `max_bounces`: Russian roulette ends a long walk, and `pt.scatter_cap` guards it.
         let mut scatters = 0
@@ -107,6 +113,8 @@ use tracer
         while b - free <= f.max_bounces:
             let emission_only = b - free == f.max_bounces
             let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, if emission_only => 1u else 0u)
+            p.cone_width = cone_width
+            p.cone_spread = cone_spread
             let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
             trace(tracer.traced.world, r, tracer.path_rays.surface, mut p)
 
@@ -131,6 +139,11 @@ use tracer
             let specular_albedo = p.specular_albedo
             let roughness = p.roughness
 
+            // The cone reached this hit, and leaves it as wide as the lobe the continuation was drawn from.
+            // A medium's scattering events on the way are not told apart: the cone widens as if the segment ran to the surface.
+            cone_width += cone_spread * max(hit_t, 0.0)
+            cone_spread += tracer.bounce_spread(lobe, roughness)
+
             if primary:
                 // The surface the guides describe: the guide ray's where there is one, the camera ray's otherwise.
                 let g_t = if guided => guide_hit.hit_t else hit_t
@@ -146,14 +159,15 @@ use tracer
                     guide_roughness += if guided => guide_hit.roughness else roughness
 
                     // The depth raster sees at the pixel CENTER: the center ray met with the plane the sample hit.
-                    // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
+                    // It is the depth the projection sv::matrices_of builds gives, `scene.camera_primary_depth`.
                     if s == 0:
                         let center = normalize(scene.camera_ray_offset(cam, px_f + 0.5, dim_f))
                         let facing = dot(g_n, center)
-                        let t = if abs(facing) > 1e-6 => dot(g_n, dir * g_t) / facing else g_t
+                        let center_origin = scene.camera_origin(cam, px_f + 0.5, dim_f)
+                        let t = if abs(facing) > 1e-6 => dot(g_n, origin + dir * g_t - center_origin) / facing else g_t
                         let t_forward = if t > 0.0 => t else g_t
                         let view_depth = t_forward * dot(center, normalize(cam.forward))
-                        primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
+                        primary_depth = scene.camera_primary_depth(cam, f.near_plane, view_depth)
 
                 // An escaped ray reprojects as a point at infinity, so the sky moves with rotation and not with translation.
                 let prev = scene.camera(..f.previous_camera)

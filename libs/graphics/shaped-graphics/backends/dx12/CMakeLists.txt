@@ -41,6 +41,9 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_texture_copy.cc
     src/shaped-graphics/backends/dx12/dx12_bind.cc
     src/shaped-graphics/backends/dx12/dx12_raytracing.cc
+    src/shaped-graphics/backends/dx12/dx12_partitioned_tlas.cc
+    src/shaped-graphics/backends/dx12/dx12_clusters.cc
+    src/shaped-graphics/backends/dx12/dx12_software_pool.cc
     src/shaped-graphics/backends/dx12/dx12_query.cc
     src/shaped-graphics/backends/dx12/dx12_runtime.cc
 )
@@ -106,22 +109,18 @@ target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxg
 
 # The Agility SDK, where it was fetched: its headers ahead of the Windows SDK's, and its runtime loaded from where it
 # was installed (dx12_runtime.hh). `SG_HAS_AGILITY` says which, and the backend works either way.
+# `SG_HAS_AGILITY_PREVIEW` says the headers and runtime are the pre-release ones SC_AGILITY_PREVIEW selects.
 if(TARGET agility)
     get_target_property(_sg_agility_dir agility SC_AGILITY_RUNTIME_DIR)
     target_link_libraries(shaped-graphics-dx12 PUBLIC agility)
-    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=1
-                               PRIVATE "SG_AGILITY_RUNTIME_DIR=\"${_sg_agility_dir}/\"")
+    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=1 SG_HAS_AGILITY_PREVIEW=$<BOOL:${SC_AGILITY_PREVIEW}>)
+    # TEMPORARY(debt-dx12-agility-source-tree-fallback): an absolute path into the source tree.
+    # So it is defined on the one file that reads it, and the backend's other files compile the same in any checkout.
+    set_property(SOURCE src/shaped-graphics/backends/dx12/dx12_runtime.cc APPEND PROPERTY
+        COMPILE_DEFINITIONS "SG_AGILITY_RUNTIME_DIR=\"${_sg_agility_dir}/\"")
 else()
-    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=0)
+    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=0 SG_HAS_AGILITY_PREVIEW=0)
 endif()
-
-# Names dx12_common.hh, this backend's single SDK gate, rather than <d3d12.h> and friends.
-# The gate opens and closes its own `byte` bracket and keeps its clean-core headers above it, so the PCH inherits the sanitization instead of racing it.
-# Naming the SDK headers directly instead breaks 14 of 16 dx12 TUs on an ambiguous `byte` — see clean-core/platform/win32_sanitized.hh.
-# Nothing extends this tier, and nothing should: a gate belongs at the end of a header list.
-sc_declare_pch_tier(DX12 EXTENDS SG HEADERS <shaped-graphics/backends/dx12/dx12_common.hh>)
-
-sc_target_pch(shaped-graphics-dx12 DX12) # 0.34, the largest win in the repo
 
 target_compile_options(shaped-graphics-dx12
     PUBLIC
@@ -138,6 +137,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/dx12-entry.cc
         tests/dx12-context-test.cc
+        tests/dx12-wrap-texture-test.cc
         tests/dx12-dred-test.cc
         tests/dx12-debug-layer-order-manual-test.cc
         tests/dx12-validation-broadcast-test.cc
@@ -174,7 +174,4 @@ if(SC_BUILD_TESTS)
     sg_warp_test_binary(shaped-graphics-dx12-test)
 
     target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)
-
-    # DX12 last, so the SDK gate stays at the end of the header list.
-    sc_target_pch(shaped-graphics-dx12-test NEXUS DX12) # 0.36
 endif()

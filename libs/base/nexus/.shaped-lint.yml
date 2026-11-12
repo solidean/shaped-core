@@ -46,6 +46,16 @@ rules:
     reason: std::exit ends a run that returned to the JS event loop, which is the only way its exit code reaches node or deno
     files: src/nexus/impl/host_loop.cc
 
+  - kind: allow-include
+    value: [<unistd.h>, <cstdlib>]
+    reason: readlink of /proc/self/exe is where Linux says which executable runs, and free releases what an EM_JS call allocated on wasm
+    files: src/nexus/source_root.cc
+
+  - kind: allow-include
+    value: [<cstdint>, <profile/InstrProfData.inc>]
+    reason: clang's own definition of its profile runtime's records, which names the C fixed-width types; the runner report's coverage reads those records
+    files: src/nexus/tests/export/runner_coverage.cc
+
 
   # =========================================================================================================
   # Waiting on a cc:: replacement — see docs/stdlib-migration.md

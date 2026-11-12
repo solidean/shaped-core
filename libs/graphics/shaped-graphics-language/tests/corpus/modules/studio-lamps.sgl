@@ -1,0 +1,6 @@
+// A second dotted module whose last part is `lamps` too, which a file using both binds under another name.
+module studio.lamps
+
+fun glow(x: float) -> float => x + 1.0
+
+test glow(1.0) == 2.0

@@ -394,7 +394,7 @@ fun secondary_of(bounced: bounce, followed: bool) -> secondary:
     surface.specular_roughness = if followed => bounced.roughness else max(bounced.roughness, secondary_roughness_floor)
     let f = openpbr.make_frame(bounced.n)
     let wo_local = if bounced.hit => openpbr.to_local(f, -bounced.wi) else float3(0.0, 0.0, -1.0)
-    return { b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local }
+    return {b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local}
 
 /// Whether the surface `bounced` met is followed by a bounce of its own, `bounce_plain`, and so lit as a primary hit is.
 /// Where the layer asks for two bounces, `render_settings::hybrid_bounces`, which `frame_constants::max_bounces` carries.
@@ -436,19 +436,19 @@ fun quadric_pixel_of(p: raster.quadric_varyings){tracer.traced, tracer.bindless,
 fun pixel_face(p: raster.varyings, ctx: material.shading_context, surface: openpbr.surface, supplied_tangent_frame: bool){tracer.traced, tracer.bindless} -> raster.pixel_face:
     let cam = scene.camera(..tracer.traced.frame[0].camera)
     let inst = scene.instance(..tracer.traced.instances[p.instance as int])
-    return raster.face_of(inst, ctx, p.world, cam.position, surface, supplied_tangent_frame)
+    return raster.face_of(inst, ctx, p.world, scene.camera_eye_of(cam, p.world), surface, supplied_tangent_frame)
 
 /// The face of the quadric pixel `p` found at `hit`, as `raster.quadric_face_of` makes it, reading `tracer.traced`.
 fun quadric_face(p: raster.quadric_varyings, hit: raster.quadric_pixel, surface: openpbr.surface, supplied_tangent_frame: bool){tracer.traced} -> raster.pixel_face:
     let cam = scene.camera(..tracer.traced.frame[0].camera)
     let inst = scene.instance(..tracer.traced.instances[p.instance as int])
-    return raster.quadric_face_of(inst, hit.object_normal, hit.world, cam.position, surface, supplied_tangent_frame)
+    return raster.quadric_face_of(inst, hit.object_normal, hit.world, scene.camera_eye_of(cam, hit.world), surface, supplied_tangent_frame)
 
 /// The raster pass's reversed depth at `hit`, which a quadric's pixel writes.
 fun quadric_depth(hit: raster.quadric_pixel){tracer.traced} -> float:
     let f = tracer.traced.frame[0]
     let cam = scene.camera(..f.camera)
-    return f.near_plane / dot(hit.world - cam.position, normalize(cam.forward))
+    return scene.camera_reversed_depth(cam, f.near_plane, dot(hit.world - cam.position, normalize(cam.forward)))
 
 /// `raster.quadric_context_of`, reading the instance table of `tracer.traced`.
 fun quadric_context_of(p: raster.quadric_varyings){tracer.traced} -> material.shading_context:
@@ -487,12 +487,13 @@ fun is_cut(p: raster.varyings, ctx: material.shading_context){tracer.traced, tra
 fun shade_face(pixel: float2, world: float3, face: raster.pixel_face, surface_in: openpbr.surface, supplied_tangent_frame: bool){tracer.traced, tracer.bindless, slug.tables, pass} -> raster.targets:
     let f = tracer.traced.frame[0]
     let cam = scene.camera(..f.camera)
-    let v = normalize(cam.position - world)
-    let to_point = world - cam.position
-    let view_depth = dot(to_point, normalize(cam.forward))
+    let eye = scene.camera_eye_of(cam, world)
+    let v = normalize(eye - world)
+    let to_point = world - eye
+    let view_depth = dot(world - cam.position, normalize(cam.forward))
 
     let mut surface = surface_in
-    tracer.apply_decals(mut surface, world, face.n, f.pixel_spread * length(to_point))
+    tracer.apply_decals(mut surface, world, face.n, f.pixel_width + f.pixel_spread * length(to_point))
     let shading = openpbr.shading_frame(mut surface, face.n, v, face.authored, supplied_tangent_frame)
     let b = openpbr.bsdf_prepare(surface, face.exiting, 3u)
     let wo_local = openpbr.to_local(shading, v)
@@ -522,4 +523,4 @@ fun shade_face(pixel: float2, world: float3, face: raster.pixel_face, surface_in
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel + jitter_of(f) - scene.camera_project(prev, world - prev.position, pass.size)
-    return raster.lit_targets(color, face.n, view_depth, surface, motion, f.near_plane)
+    return raster.lit_targets(color, face.n, view_depth, surface, motion, scene.camera_primary_depth(cam, f.near_plane, view_depth))

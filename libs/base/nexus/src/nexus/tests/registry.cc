@@ -13,12 +13,14 @@ test_registry& get_static_test_registry()
 void test_registry::add_declaration(cc::string name,
                                     config::cfg test_config,
                                     cc::unique_function<void()> function,
-                                    cc::source_location loc)
+                                    cc::source_location loc,
+                                    char const* file)
 {
     declarations.push_back(test_declaration{
         .name = cc::move(name),
         .test_config = test_config,
         .location = loc,
+        .file = file,
         .function = cc::move(function),
     });
 }
@@ -26,12 +28,14 @@ void test_registry::add_declaration(cc::string name,
 void test_registry::add_async_declaration(cc::string name,
                                           config::cfg test_config,
                                           cc::unique_function<void(impl::async_test_sink&)> async_function,
-                                          cc::source_location loc)
+                                          cc::source_location loc,
+                                          char const* file)
 {
     declarations.push_back(test_declaration{
         .name = cc::move(name),
         .test_config = test_config,
         .location = loc,
+        .file = file,
         .async_function = cc::move(async_function),
     });
 }
@@ -40,12 +44,14 @@ void test_registry::add_invocable_declaration(cc::string name,
                                               config::cfg test_config,
                                               cc::vector<std::type_index> signature,
                                               cc::unique_function<void(cc::span<nx::typed_value*>)> invocable_function,
-                                              cc::source_location loc)
+                                              cc::source_location loc,
+                                              char const* file)
 {
     declarations.push_back(test_declaration{
         .name = cc::move(name),
         .test_config = test_config,
         .location = loc,
+        .file = file,
         .signature = cc::move(signature),
         .invocable_function = cc::move(invocable_function),
     });
@@ -56,12 +62,14 @@ void test_registry::add_async_invocable_declaration(
     config::cfg test_config,
     cc::vector<std::type_index> signature,
     cc::unique_function<void(cc::span<nx::typed_value*>, impl::async_test_sink&)> async_invocable_function,
-    cc::source_location loc)
+    cc::source_location loc,
+    char const* file)
 {
     declarations.push_back(test_declaration{
         .name = cc::move(name),
         .test_config = test_config,
         .location = loc,
+        .file = file,
         .signature = cc::move(signature),
         .async_invocable_function = cc::move(async_invocable_function),
     });

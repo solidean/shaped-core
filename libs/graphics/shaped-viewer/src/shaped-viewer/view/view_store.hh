@@ -27,7 +27,7 @@ public:
     /// See `history_of`.
     struct accumulation_history
     {
-        u32 restarts = 0;
+        u64 seed_key = 0;
         u32 loading_frames = 0;
     };
 
@@ -65,11 +65,14 @@ public:
     /// For tests and debug overlays — the trace needs none of it.
     [[nodiscard]] u32 accumulated_frames(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
 
-    /// What one accumulation slot of `id` went through: how often its random sequence moved on, and how many of its frames traced through something still loading.
+    /// What one accumulation slot of `id` went through: the key its random sequence is drawn from, and how many of its frames traced through something still loading.
     /// Zero for a slot that was never seen.
-    /// A converged image is a function of the restart count, and the loading frames are what tie it to a compile's timing.
-    /// Read once after a render, it tells two runs apart without logging every frame, which changes that timing.
+    /// Read once after a render, it tells two runs apart without logging every frame, which changes their timing.
     [[nodiscard]] accumulation_history history_of(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
+
+    /// The wavefront paths of view `id`'s layer `temporal_id`, the first traced one by default, or null where it has none.
+    /// What a reader of its channels downloads: their sums, and the tallies that count them.
+    [[nodiscard]] wavefront_state const* wavefront_paths(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
 
     /// The fewest samples per pixel across every traced layer of `id`, and 0 for a view with none.
     /// See `impl::min_accumulated_samples`, which is the rule.
@@ -83,6 +86,15 @@ public:
     /// See `impl::is_accumulation_converged`, which is the rule; false for a view that is not here.
     [[nodiscard]] bool is_accumulation_converged(view_id id, cc::optional<u32> samples = {}) const;
 
+    /// Whether every automatic exposure of the view is a reading of the image as it stands; see `impl::is_auto_exposure_read`.
+    /// True for a view with none, or one never drawn.
+    [[nodiscard]] bool is_auto_exposure_read(view_id id);
+
+    /// Whether automatic exposures take each reading whole rather than adapting toward it, which a still image wants.
+    /// An exposure that adapts holds the history of how fast readings landed, so two runs of one still would differ.
+    [[nodiscard]] bool snaps_auto_exposure() const { return _snaps_auto_exposure; }
+    void set_snaps_auto_exposure(bool snaps) { _snaps_auto_exposure = snaps; }
+
     /// Starts every traced layer of `id` over, as a different image would: its mean, and the denoiser's history with it.
     /// For a change the trace's hash cannot see, such as a texture's contents replaced in place; nothing for a view that is not here.
     void restart_accumulation(view_id id);
@@ -91,5 +103,6 @@ public:
     [[nodiscard]] isize payload_bytes() const { return _entries.payload_bytes(); }
 
 private:
+    bool _snaps_auto_exposure = false;
     impl::keyed_cache<view_id, impl::view_state> _entries;
 };

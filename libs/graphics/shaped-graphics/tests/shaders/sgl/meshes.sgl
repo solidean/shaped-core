@@ -1,0 +1,199 @@
+// Mesh stages that hand the rasterizer what they write (CHK-480): one full-screen triangle, and a target split between
+// two workgroups, each covering its half and coloring it by its own index.
+
+require mesh_shader
+
+struct corner:
+    @position position: hpos4
+    color: float4
+
+@pixel struct painted:
+    color: float4
+
+@mesh(1, vertices = 3, triangles = 1) fun covering(output: mut mesh_output[corner]):
+    output.set_counts(3u, 1u)
+    let green = float4(0.0, 1.0, 0.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = green})
+    output.vertex(1u, {position = hpos4(3.0, -1.0, 0.0, 1.0), color = green})
+    output.vertex(2u, {position = hpos4(-1.0, 3.0, 0.0, 1.0), color = green})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+
+// Four invocations, each writing one corner of its workgroup's half; the first writes both triangles.
+// The barrier under a branch on the workgroup id is uniform, and stays so in a polyfill's launched form, whose
+// workgroup id is read from records; WebGPU's compiler checks that (CHK-524).
+@mesh(4, vertices = 4, triangles = 2)
+fun halves(@workgroup_id group: int3, @local_thread_index k: int, output: mut mesh_output[corner]):
+    output.set_counts(4u, 2u)
+    // after set_counts, for docs/bugs-external/dxc-mesh-output-counts-duplicated-past-branch
+    if group.x == 1:
+        workgroup_barrier()
+    let left = if group.x == 0 => -1.0 else 0.0
+    let x = if (k & 1) == (k >> 1) => left else left + 1.0
+    let y = if k < 2 => -1.0 else 1.0
+    output.vertex(k as uint, {position = hpos4(x, y, 0.0, 1.0), color = float4(group.x as float, 0.0, 1.0, 1.0)})
+    if k == 0:
+        output.triangle(0u, uint3(0u, 1u, 2u))
+        output.triangle(1u, uint3(0u, 2u, 3u))
+
+@pixel fun painting(c: corner) -> painted:
+    return {color = c.color}
+
+pipeline covered:
+    mesh = covering
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
+pipeline split:
+    mesh = halves
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
+// A task stage that launches two mesh workgroups and hands both one payload (CHK-484 to CHK-487).
+struct halving:
+    blue: float
+
+@task(1) fun launching():
+    let handed: halving = {blue = 1.0}
+    dispatch_mesh(2u, 1u, 1u, handed)
+
+@mesh(1, vertices = 4, triangles = 2)
+fun launched_half(@workgroup_id group: int3, handed: halving, output: mut mesh_output[corner]):
+    output.set_counts(4u, 2u)
+    let left = if group.x == 0 => -1.0 else 0.0
+    let color = float4(group.x as float, 0.0, handed.blue, 1.0)
+    output.vertex(0u, {position = hpos4(left, -1.0, 0.0, 1.0), color = color})
+    output.vertex(1u, {position = hpos4(left + 1.0, -1.0, 0.0, 1.0), color = color})
+    output.vertex(2u, {position = hpos4(left + 1.0, 1.0, 0.0, 1.0), color = color})
+    output.vertex(3u, {position = hpos4(left, 1.0, 0.0, 1.0), color = color})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(0u, 2u, 3u))
+
+pipeline launched:
+    task = launching
+    mesh = launched_half
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
+// Four task workgroups of a stated bound of two launches, launching 0, 1, 2 and 0 mesh workgroups, each drawing column
+// 2t + j of an 8 × 8 target: a task workgroup's columns past its launch stay clear, and each launch reads its own payload.
+struct column:
+    first: uint
+
+@task(1, meshes = 2) fun culling(@workgroup_id group: int3):
+    let t = group.x as uint
+    let launched = if t == 1u => 1u else if t == 2u => 2u else 0u
+    let handed: column = {first = 2u * t}
+    dispatch_mesh(launched, 1u, 1u, handed)
+
+@mesh(1, vertices = 4, triangles = 2)
+fun culled_column(@workgroup_id group: int3, handed: column, output: mut mesh_output[corner]):
+    output.set_counts(4u, 2u)
+    // as in `halves`, behind a task stage
+    if group.x == 1:
+        workgroup_barrier()
+    let left = ((handed.first + (group.x as uint)) as float) / 4.0 - 1.0
+    let color = float4((handed.first as float) / 8.0, group.x as float, 1.0, 1.0)
+    output.vertex(0u, {position = hpos4(left, -1.0, 0.0, 1.0), color = color})
+    output.vertex(1u, {position = hpos4(left + 0.25, -1.0, 0.0, 1.0), color = color})
+    output.vertex(2u, {position = hpos4(left + 0.25, 1.0, 0.0, 1.0), color = color})
+    output.vertex(3u, {position = hpos4(left, 1.0, 0.0, 1.0), color = color})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(0u, 2u, 3u))
+
+pipeline culled:
+    task = culling
+    mesh = culled_column
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
+// A quad of two triangles, each tinted by what the mesh stage wrote for it alone (CHK-488, CHK-489).
+struct face:
+    tint: float4
+
+@mesh(1, vertices = 4, triangles = 2)
+fun faces(output: mut mesh_output[corner, face]):
+    output.set_counts(4u, 2u)
+    let black = float4(0.0, 0.0, 0.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = black})
+    output.vertex(1u, {position = hpos4(1.0, -1.0, 0.0, 1.0), color = black})
+    output.vertex(2u, {position = hpos4(1.0, 1.0, 0.0, 1.0), color = black})
+    output.vertex(3u, {position = hpos4(-1.0, 1.0, 0.0, 1.0), color = black})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(0u, 2u, 3u))
+    output.primitive(0u, {tint = float4(1.0, 0.0, 0.0, 0.0)})
+    output.primitive(1u, {tint = float4(0.0, 0.0, 1.0, 0.0)})
+
+@pixel fun tinting(c: corner, f: face) -> painted:
+    return {color = c.color + f.tint}
+
+pipeline tinted:
+    mesh = faces
+    pixel = tinting
+    cull = .none
+    format = .rgba8_unorm
+
+// Two lines through the centres of row 3 and column 5 of an 8 × 8 target, red and green (CHK-480's `lines`).
+@mesh(1, vertices = 4, lines = 2)
+fun crossing(output: mut mesh_output[corner]):
+    output.set_counts(4u, 2u)
+    let red = float4(1.0, 0.0, 0.0, 1.0)
+    let green = float4(0.0, 1.0, 0.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, 0.125, 0.0, 1.0), color = red})
+    output.vertex(1u, {position = hpos4(1.0, 0.125, 0.0, 1.0), color = red})
+    output.vertex(2u, {position = hpos4(0.375, -1.0, 0.0, 1.0), color = green})
+    output.vertex(3u, {position = hpos4(0.375, 1.0, 0.0, 1.0), color = green})
+    output.line(0u, uint2(0u, 1u))
+    output.line(1u, uint2(2u, 3u))
+
+pipeline crossed:
+    mesh = crossing
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
+// Two workgroups of two full-screen triangles each, in a mesh stage of three slots: the last triangle drawn is the
+// one seen, by workgroup and then by index, and the third slot, past the count, draws nothing.
+@mesh(1, vertices = 6, triangles = 3)
+fun layering(@workgroup_id group: int3, output: mut mesh_output[corner]):
+    output.set_counts(6u, 2u)
+    let first = if group.x == 0 => float4(1.0, 0.0, 0.0, 1.0) else float4(0.0, 0.0, 1.0, 1.0)
+    let second = if group.x == 0 => float4(0.0, 1.0, 0.0, 1.0) else float4(1.0, 1.0, 1.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = first})
+    output.vertex(1u, {position = hpos4(3.0, -1.0, 0.0, 1.0), color = first})
+    output.vertex(2u, {position = hpos4(-1.0, 3.0, 0.0, 1.0), color = first})
+    output.vertex(3u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = second})
+    output.vertex(4u, {position = hpos4(3.0, -1.0, 0.0, 1.0), color = second})
+    output.vertex(5u, {position = hpos4(-1.0, 3.0, 0.0, 1.0), color = second})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(3u, 4u, 5u))
+
+pipeline layered:
+    mesh = layering
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
+// A patch of 8 x 8 vertices and 98 triangles a workgroup, the 64 x 64 workgroups of a draw tiling the target: what the
+// polyfill is benchmarked against the native stage with, in tests/pipeline/mesh-polyfill-benchmark.cc.
+@mesh(64, vertices = 64, triangles = 98)
+fun patch(@workgroup_id group: int3, @local_thread_index k: int, output: mut mesh_output[corner]):
+    output.set_counts(64u, 98u)
+    let cx = ((k % 8) as float) / 7.0
+    let cy = ((k / 8) as float) / 7.0
+    let x = (((group.x % 64) as float) + cx) / 32.0 - 1.0
+    let y = (((group.x / 64) as float) + cy) / 32.0 - 1.0
+    output.vertex(k as uint, {position = hpos4(x, y, 0.0, 1.0), color = float4(cx, cy, 0.5, 1.0)})
+    if k < 49:
+        let a = ((k / 7) * 8 + k % 7) as uint
+        output.triangle((2 * k) as uint, uint3(a, a + 1u, a + 9u))
+        output.triangle((2 * k + 1) as uint, uint3(a, a + 9u, a + 8u))
+
+pipeline patched:
+    mesh = patch
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm

@@ -7,7 +7,12 @@ rules:
   - kind: allow-include
     value: <filesystem>
     reason: walking tests/corpus/ and the other folders of SGL sources for their files, in the test binary only; clean-core has no directory listing yet
-    files: [tests/corpus/corpus-test.cc, tests/check/checked-prelude-test.cc]
+    files: [tests/corpus/corpus-test.cc, tests/check/checked-prelude-test.cc, tests/emit/spirv-emit-test.cc, tests/emit/native-line-table-test.cc, tests/ir/sweep-ir-test.cc]
+
+  - kind: allow-include
+    value: <cstdlib>
+    reason: std::system runs spirv-val over each module the SPIR-V route writes; clean-core runs no process yet
+    files: tests/emit/spirv-emit-test.cc
 
   - kind: allow-include
     value: <filesystem>

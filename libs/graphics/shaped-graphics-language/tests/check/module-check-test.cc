@@ -90,9 +90,8 @@ TEST("sgl check - what a `use` names must be a module of the library, and not th
     cc::string_view const library[] = {k_view, "module lights\nuse lights\n"};
     CHECK(reports_with(library, "use nowhere\n") == "unknown-module user:[use nowhere] nowhere\n");
     CHECK(reports_with(library, "use lights\n") == "use-of-own-module lib.1:[use lights] this file is of module lights\n");
-    CHECK(reports_with(library, "use shaped.view\n") == "unsupported-yet user:[use shaped.view] a dotted module path\n");
-    CHECK(reports_with(library, "module shaped.view\n")
-          == "unsupported-yet user:[module shaped.view] a dotted module name\n");
+    // a dotted path is one module's whole name, so `shaped.view` is no name of `view`
+    CHECK(reports_with(library, "use shaped.view\n") == "unknown-module user:[use shaped.view] shaped.view\n");
     CHECK(reports_with(library, "use view\nuse lights as view\n")
           == "duplicate-declaration user:[use lights as view] view names a module of this file already\n");
     CHECK(reports_with(library, "use view\nstruct view:\n    x: float\n")
@@ -101,6 +100,25 @@ TEST("sgl check - what a `use` names must be a module of the library, and not th
     CHECK(reports_with(library, "use view as float\nfun f(x: float) -> float => x\n")
           == "duplicate-declaration user:[use view as float] float names a module here, and a declaration of the "
              "prelude\n");
+}
+
+TEST("sgl check - a dotted module name is the whole name, and its `use` binds the last part (CHK-346, CHK-347)")
+{
+    cc::string_view const library[]
+        = {"module palette.warm\nfun tone() -> float => 2.0\n", "module heat.warm\nfun tone() -> float => 3.0\n",
+           "module heat\nuse heat.warm\nfun twice() -> float => warm.tone() * 2.0\n"};
+    CHECK(reports_with(library, "use palette.warm\nfun f() -> float => warm.tone()\n") == "");
+    CHECK(reports_with(library, "use palette.warm as p\nfun f() -> float => p.tone()\n") == "");
+    // the path binds nothing but its last part, and a module of its first part alone is another module
+    CHECK(reports_with(library, "use palette.warm\nfun f() -> float => palette.warm.tone()\n")
+          == "unknown-name user:[palette] palette\n");
+    CHECK(reports_with(library, "use heat\nuse heat.warm as w\nfun f() -> float => heat.twice() + w.tone()\n") == "");
+    // two paths ending alike bind one name, so the second needs `as`
+    CHECK(reports_with(library, "use palette.warm\nuse heat.warm\n")
+          == "duplicate-declaration user:[use heat.warm] warm names a module of this file already\n");
+    CHECK(reports_with(library, "use palette\n") == "unknown-module user:[use palette] palette\n");
+    // a program joining a dotted module sees its names unqualified
+    CHECK(reports_with(library, "module palette.warm\nfun f() -> float => tone()\n") == "");
 }
 
 TEST("sgl check - modules that use each other in a loop are module-cycle")

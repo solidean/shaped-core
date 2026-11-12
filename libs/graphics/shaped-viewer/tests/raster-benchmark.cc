@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -289,7 +290,7 @@ ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by oc
     CC_LOG_INFO("adapter: {}", created.value()->metrics.adapter().name);
 
     auto const loader = sv::asset_loader();
-    auto const asset = loader.load(SV_TEST_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf");
+    auto const asset = loader.load(nx::source_path(SV_TEST_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf"));
     if (asset.has_error())
         SKIP(cc::format("Sponza did not load ({}); uv run extern/sponza/fetch-sponza.py installs it",
                         asset.error().to_string()));
@@ -308,7 +309,7 @@ ASYNC_BENCHMARK("sv - raster on Bistro, culled by nothing, by the view and by oc
     CC_LOG_INFO("adapter: {}", created.value()->metrics.adapter().name);
 
     auto const loader = sv::asset_loader();
-    auto const asset = loader.load(SV_TEST_BISTRO_DIR "/BistroExterior.fbx");
+    auto const asset = loader.load(nx::source_path(SV_TEST_BISTRO_DIR "/BistroExterior.fbx"));
     if (asset.has_error())
         SKIP(cc::format("Bistro did not load ({}); uv run extern/bistro/fetch-bistro.py installs it",
                         asset.error().to_string()));

@@ -37,6 +37,8 @@ uv run dev.py <command> [options]
 
 `build` and `test` **auto-configure** when CMake inputs or the source listing change (fingerprinted); pass `--no-configure` to skip.
 `test` also builds first; pass `--no-build` to skip.
+It builds `all`, then by name every binary it selected that has an artifact already, so a binary outside `all` never runs stale.
+One outside `all` that was never built stays unbuilt and is reported so; `build -t <target>` builds it.
 
 ### Common invocations
 
@@ -155,14 +157,6 @@ uv run dev.py test  --preset "x64-linux-*"
 
 **When you touch assertion-gated code, build a `release-*` preset too.**
 The default preset only exercises the assertions-on branch the table above names.
-
-### No-PCH presets
-
-Every preset above builds against per-target precompiled headers.
-The `nopch-*` and `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON` instead, which is what catches a source relying on a header only the PCH's `/FI` supplied.
-`check --all-presets` runs `debug-nopch-*` as its debug leg and CI runs `nopch-linux-clang`, so you rarely reach for these by hand.
-`uv run dev.py build --preset nopch-clang` reproduces a CI canary failure locally.
-[precompiled-headers.md](precompiled-headers.md) is the tiers, how to pick one, and the ordering rule the SDK gates impose.
 
 ### Pinning toolset versions
 
@@ -321,6 +315,14 @@ A hung build prints nothing past its `[build] all` banner, so after 5 minutes wi
 
 [stall_report.py](../../tools/dev/lib/core/stall_report.py) has the details, and [its self-test](../../tools/dev/stall-report-self-test.py) runs with `check`.
 
+## Where a binary finds the source tree
+
+A test, example or tool that reads files of the source tree gets their directory relative to the top-level source directory, never absolute.
+dev.py sets `SC_SOURCE_ROOT` to the repository root for everything it starts, and `nx::source_root()` joins the two at run time.
+A binary started by hand finds the root without it, through the `CMakeCache.txt` above its build directory, wherever that build directory is.
+`SC_SOURCE_ROOT` set by hand wins over that, which is how one build reads another checkout's data on purpose.
+[nexus/source_root.hh](../../libs/base/nexus/src/nexus/source_root.hh) is the lookup, and the `abspaths` gate keeps absolute paths out of the build.
+
 ## A build directory keeps its environment
 
 On Windows a build directory is configured inside the MSVC developer environment or outside it, for life, and a configure that switches is refused with an error saying so.
@@ -328,6 +330,51 @@ CMake re-detects tools at every configure while the cache keeps what it found fi
 That is how a bare `cmake <build>` from a plain shell once gave SDL3's `version.rc` a rule for llvm-rc that ran rc.exe, which deadlocked the build with no output.
 dev.py enters the environment itself, so configuring through it is always right; a toolset or SDK update inside the environment only warns.
 [ConfigureEnvironment.cmake](../../tools/cmake/ConfigureEnvironment.cmake) is the check.
+
+## An optional build server
+
+`build` and `test` can hand their build step, and `test` its test runs, to an optional local build server, which keeps state such as a compile cache and test results between runs.
+It is opt-in and never required: without it, everything builds and tests exactly as before.
+
+- **Opting in**, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1` (or `0`), then the project's own default.
+  `--no-server` always wins.
+- **Where the client is**: `SC_BUILD_SERVER_CLIENT` names its executable, over the location the project's `Policy.build_server` gives.
+- **A checkout's `dev.toml`** (gitignored, at the repo root) sets the project's half in its `[build_server]` table:
+
+  ```toml
+  [build_server]
+  enabled = true                      # opt this checkout in; --no-server and SC_BUILD_SERVER=0 still win
+  client = "C:/path/to/client.exe"    # the client, over the project's default; SC_BUILD_SERVER_CLIENT wins over it
+  # speculative_tests = true          # BuildServer.speculative_tests, below
+  # ship_proof = true                 # BuildServer.ship_proof, below
+  ```
+
+  A project that builds on this one reads its own `dev.toml` the same way, through `dev.build_server_from_dev_toml`.
+- **Only the build step and the test runs move**: configure stays cmake's, and the server runs in the same developer environment dev.py builds in, which it passes to every command.
+- **When it cannot serve**, dev.py prints one warning naming the cause and how to install it, then builds as without it.
+  That covers a missing client, a server that cannot be started, another protocol version, a server restarting, and a server failing on its own.
+- **A compile error through the server is a failed build** with the compiler's output, as with ninja, and never a rebuild without it.
+- **Tests run through it too**: it serves a stored pass when nothing a test binary executes or reads changed, and runs the rest side by side.
+  Each binary's line says whether it `ran` or was `cached`, and the table marks the cached ones.
+  A failure reads as without the server: the output's tail, the run logs, resolved sites, and the kept failure folder test_diag reads.
+  A failing test is a failure, never rerun without the server; `--repeat` has every binary run, whatever is stored.
+- **Background test runs are the project's choice**: with `BuildServer.speculative_tests` set, dev.py asks the server (`test --speculate`)
+  to rerun the binaries it tested once the server has rebuilt them on its own after an edit, with the same arguments and environment,
+  so the next `test` finds their results stored; off by default, and a request without it withdraws it.
+- **Test runs writing what the server does not keep run without it**: `--sample`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
+- **`check` and `ship` build and test through it too**, under the same opt-in; `check --no-server` and `ship --no-server` keep the whole gate off it.
+  The gate's two single-test steps, `shader-grammar` and `ccrec-reader`, always run the plain way, the latter because it writes a fixture the gate reads next.
+- **`ship` can prove instead of gating, when asked**: with the server opted in and `ship --proof` or the project's `BuildServer.ship_proof`,
+  the server's `proof` replaces the gate's build and test steps: a green build of exactly this tree, every test green at least once,
+  the tests without such a result run, then the ones most likely affected within a short budget; old tests' failures it only reports.
+  It judges the change being pushed: what its likely affected tests ran while it was made counts toward the budget,
+  and a red blocks only when the change turned it red; a flaky one, or one red before it, is listed to be filed as an issue.
+  Every other red runs again at the change's base, in a worktree at `build/proof-base/` with each submodule a worktree of the checkout's own:
+  red there too, and red in that worktree at the commit pushed, it is listed to be filed; green there, it blocks.
+  Fetched dependencies are linked in where the base pins the same version, so a run there needs nothing fetched.
+  The static gates run as always, `--no-proof` runs the full gate, and so does any problem with the server; off by default.
+
+[build_server.py](../../tools/dev/lib/pipeline/build_server.py) has the client contract, and [its self-test](../../tools/dev/build-server-self-test.py) runs with `check`.
 
 ## Quiet by default, and how to diagnose
 
@@ -365,6 +412,30 @@ The binaries are hard links into `crashes/.binaries/`, one copy per build howeve
 The newest 20 reports per preset are kept, within 2 GB ([crash_reports.py](../../tools/dev/lib/core/crash_reports.py)).
 Open a minidump against the binary beside it, never the build directory's, which a rebuild has replaced: `lldb` inside the folder, then `target create <binary>.exe --core <report>.dmp`.
 WinDbg takes the folder as both paths, `windbg -z <report>.dmp -i . -y .`.
+
+### Failure sites
+
+**The clang development presets build at `SC_SOURCE_SITES=OPAQUE`, so a failed check, assert or test names its site `<binary>+0x<offset>`**.
+[platforms](../platforms.md#source-sites-sc_source_sites) has why and which presets.
+After a failed run dev.py resolves every such site the logs name and prints it under `sites:`, here abridged:
+
+```text
+  sites:
+  clean-core-test.exe+0x1a52d5 -> libs/base/clean-core/tests/span-test.cc:46 (_nx_test_fn_4)
+      46 | CHECK(x + 1 == 5);
+  clean-core-test.exe+0x12ebe -> libs/base/clean-core/src/clean-core/container/impl/allocating_container.hh:133 (cc::allocating_container<int,cc::vector<int> >::operator[])
+      133 | CC_ASSERT(_data.obj_start <= p_obj && p_obj < _data.obj_end, "index out of bounds");
+      inlined into _nx_test_fn_5 at libs/base/clean-core/tests/span-test.cc:55
+  clean-core-test.exe+0x12de0 -> libs/base/clean-core/tests/span-test.cc:52 (_nx_test_fn_5)
+      51 | TEST("span - a failing test")
+      52 | {
+```
+
+The source line under each site is where an assert's condition is read: below `FULL` its message keeps no condition text.
+A test's own site is its body's opening brace, with its `TEST` line printed above it.
+The same lines are appended to the run's stderr log, so the kept failure folder and `test_diag` carry them.
+One `llvm-symbolizer` runs per binary, the one beside the build's compiler, else on `PATH`, or the one `LLVM_SYMBOLIZER` names.
+Without one dev.py prints the raw sites and that hint, and the run's result is the same either way ([sites.py](../../tools/dev/lib/pipeline/sites.py)).
 
 So the loop is **dev.py, then diagnose with the `repo_tools` MCP tools**:
 
@@ -461,7 +532,10 @@ Registered checks (`check --list` shows what each watches); the fixers run in th
 | `fixed-int-gen` | typed-geometry's generated `fixed_int` headers and golden tests are what `tools/gen-fixed-int.py` writes. | yes (regenerates them) |
 | `format`     | clang-format our C++ sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
+| `abspaths`   | No compile definition or generated source of the default preset's build carries an absolute source or build path ([where a binary finds the source tree](#where-a-binary-finds-the-source-tree)). Known exceptions name their issue in [abspaths.py](../../tools/dev/lib/quality/abspaths.py). | no (report only) |
 | `sgl-prelude`| SGL's committed `prelude/builtins.sgl` and slib's `impl/pipeline_fields.hh` are what `sgl` generates. Builds the `sgl` tool. | yes (rewrites the files) |
+| `sgl-format`| Every tracked `.sgl` file is what `sgl format` writes; a block around a syntax error passes as written. Builds the `sgl` tool. | yes (formats the files) |
+| `sgl-native-size` | SGL's own SPIR-V and DXIL of the repo's shaders stay within 2% of the committed baseline in operations ([native-parity](../../libs/graphics/shaped-graphics-language/docs/native-parity.md#how-to-measure)). Builds the `sgl` tool; DXIL is counted where DXC is fetched. | no (report only) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
 
 ### What it prints about its own cost
@@ -473,7 +547,7 @@ static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (w
 
 timing, per preset:
   relwithdebinfo-clang  build    2.0 s   test   72.5 s  (18 binaries)
-  debug-nopch-clang     build    3.0 s   test   95.1 s  (18 binaries)
+  debug-clang           build    3.0 s   test   95.1 s  (18 binaries)
   release-clang         build   164 ms   test   80.5 s  (18 binaries)
   singlethreaded-clang  build    1.9 s   test   77.5 s  (18 binaries)
   total 332.5 s across 4 preset(s)
@@ -533,11 +607,12 @@ The step runs the generator with `--check`, or `--write` under `--fix`, and pass
 The generator formats its own output with it, so a regenerated file is already what `format` would leave, and standing ahead of `format` is the ordinary place for a fixer.
 [its docstring](../../libs/base/typed-geometry/tools/gen-fixed-int.py) has the rule that picks what is generated.
 
-**`sgl-prelude` needs the `sgl` tool, and it is the one fixer that stands behind `format`.**
+**`sgl-prelude` and `sgl-format` need the `sgl` tool, and they are the fixers that stand behind `format`.**
 SGL's builtins live in a C++ registry, and `libs/graphics/shaped-graphics-language/prelude/builtins.sgl` is that registry written out and committed.
 slib's `libs/graphics/shaped-shader-library/src/shaped-shader-library/impl/pipeline_fields.hh` is the prelude's mirror of sg's raster pipeline description, written out the same way.
 The step declares `sgl` in `builds` and runs `sgl prelude --check` and `sgl pipeline-fields --check` on the two files; under `--fix` it runs `--write` instead.
 Standing behind `format` breaks nothing: `builtins.sgl` is SGL, which no other gate reads, and the C++ file opens with `// clang-format off`, so the ordering argument above does not reach either.
+`sgl-format` runs `sgl format --check` over every tracked `.sgl` file, and `sgl format` under `--fix`; what it writes is SGL too, and the prelude it may follow is already a fixpoint of it.
 Where the tool cannot be built — `SC_BUILD_TOOLS` off, or an emscripten preset — the step says so and passes, and the library's own test still compares the two texts.
 [adding-a-builtin.md](../../libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md) is what the registry is.
 
@@ -566,8 +641,9 @@ A glob matching no tracked file is an error, so a moved file cannot silently dis
 It builds and runs the suite on the platform default **relwithdebinfo**, `CC_ASSERT` on.
 Each further variant is a whole build of its own, so they are opt-in: `--all-presets` adds them, each under `--smoke`, and CI runs them all:
 
-- **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**
-  (`debug-nopch-*`, the cheapest of the four to give a PCH up on, so a source that dropped an include the PCH's `/FI` was supplying fails here — see [precompiled-headers.md](precompiled-headers.md))
+- **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and the runtime checks only the clang debug presets turn on
+  (`SC_CHECK_GEOMETRY_SPECIAL_CASES`, `SC_SIMD_EXHAUSTIVE_TESTS` — see [platforms.md](../platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases));
+  `SC_CHECK_WIDE_ARITH` and `SC_ASYNC_AMBIENT_TRACE` are on in no preset, so neither `check` nor CI runs them ([platforms.md](../platforms.md#wide-arithmetic-checks-sc_check_wide_arith))
 - the **release** sibling — `CC_ASSERT` off
 - a **single-threaded** sibling — `SC_THREADS=OFF`, otherwise reachable only through a wasm build
 - on **Linux and macOS**, a **sanitizer** preset — ASan + UBSan

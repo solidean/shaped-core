@@ -33,6 +33,20 @@ the concrete IA topology also encodes the control-point count (`D3D_PRIMITIVE_TO
 The backend asserts these invariants.
 For barrier tracking, geometry/tessellation reads fold into the `vertex` pipeline stage (as `pipeline_stage_flag` already documents), so no new draw-time hazard wiring is needed.
 
+## Mesh and task stages
+
+`mesh_shader` replaces the vertex stage and the input assembler: each of its workgroups writes its own vertices and primitives for the rasterizer.
+`task_shader` stands before it, and each of its workgroups launches mesh workgroups and hands them one payload.
+Both need `sg::feature::mesh_shader`: dx12's mesh shader tier 1, vulkan's `VK_EXT_mesh_shader` with `meshShader` and `taskShader`.
+metal has them as a mesh render pipeline's object and mesh functions, and WebGPU has neither.
+
+A mesh-shaded description sets no vertex stage, no vertex input, and no tessellation or geometry stage, which the frontend refuses before any backend sees it.
+It renders one view so far.
+dx12 builds it as a pipeline-state stream with `AS` and `MS` subobjects, the only form that states one, and vulkan passes no vertex-input or input-assembly state.
+Such a pipeline draws with `draw_mesh_tasks(x, y, z)`, the workgroup counts of its first stage, and `draw` and `draw_indexed` assert on it, as `draw_mesh_tasks` does on any other.
+`draw_mesh_tasks_indirect` reads the counts from a buffer of `sg::dispatch_args` when the draw runs, a record per draw, so a culling pass decides how many meshlets draw.
+Its reads fold into the `vertex` pipeline stage, as the geometry stages' do; vulkan's pre-rasterization stage bit covers mesh and task.
+
 ### Vertex input: explicit or type-driven
 
 `vertex_input_layout` can be filled by hand (one `vertex_input_slot` per bound vertex buffer + a flat list of `vertex_attribute`s, each naming its slot),
@@ -107,8 +121,8 @@ See [bindings](bindings.md#array-bindings).
 
 ## Deferred
 
-**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), and **mesh / task** stages.
-Geometry and tessellation stages are **in** (dx12 and vulkan).
+**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), and an indirect mesh draw.
+Geometry, tessellation, mesh and task stages are **in** (dx12 and vulkan).
 What is still open is [epic-sg-raster-gaps](../issues/epic-sg-raster-gaps.md).
 
 ## See also

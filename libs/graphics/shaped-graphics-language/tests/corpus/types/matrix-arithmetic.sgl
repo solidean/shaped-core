@@ -1,0 +1,67 @@
+// A matrix's sum, difference, negation and scale act on each element (EVAL-109), unlike its product
+
+const a2 = mat2(float2(1.0, 2.0), float2(3.0, 4.0))
+const b2 = mat2(float2(5.0, 6.0), float2(7.0, 8.0))
+
+fun same2(a: mat2, b: mat2) => a.column(0) == b.column(0) and a.column(1) == b.column(1)
+fun same3(a: mat3, b: mat3) => a.column(0) == b.column(0) and a.column(1) == b.column(1) and a.column(2) == b.column(2)
+
+test:
+    same2(a2 + b2, mat2(float2(6.0, 8.0), float2(10.0, 12.0)))
+    same2(b2 - a2, mat2(float2(4.0, 4.0), float2(4.0, 4.0)))
+    same2(-a2, mat2(float2(-1.0, -2.0), float2(-3.0, -4.0)))
+    same2(a2 * 2.0, mat2(float2(2.0, 4.0), float2(6.0, 8.0)))
+    same2(2.0 * a2, a2 * 2.0)
+
+// a scale of a matrix scales what it does, where a product would compose
+test:
+    let m = mat3(float3(1.0, 0.0, 0.0), float3(0.0, 2.0, 0.0), float3(0.0, 0.0, 3.0))
+    same3(m + m, m * 2.0)
+    same3(m - m, 0.0 * m)
+    (m * 2.0) * float3(1.0, 1.0, 1.0) == float3(2.0, 4.0, 6.0)
+    (-m) * float3(1.0, 1.0, 1.0) == float3(-1.0, -2.0, -3.0)
+
+test:
+    let i = mat4(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float4(0.0, 0.0, 0.0, 1.0))
+    let m = (i + i * 3.0 - 2.0 * i) * 0.5
+    let v = float4(1.0, 2.0, 3.0, 4.0)
+    m * v == v
+    (-m) * v == -v
+
+// an assignment takes the operator, and a const computes it
+const doubled = a2 + a2
+
+test:
+    let mut m = a2
+    m += a2
+    same2(m, doubled)
+    m -= a2
+    same2(m, a2)
+    m *= 3.0
+    same2(m, a2 + doubled)
+
+// a blend of two matrices, which is what the operators are for
+fun blend(a: mat2, b: mat2, s: float) => a * (1.0 - s) + b * s
+
+test same2(blend(a2, b2, 0.5), mat2(float2(3.0, 4.0), float2(5.0, 6.0)))
+
+// each one has a derivative, forward and backward
+fun scaled_entry(s: float) -> float:
+    let m = s * a2 + b2 * s - (-a2) * s
+    return (m * float2(1.0, 0.0)).x
+
+test nearly_equal(fwd_diff(scaled_entry, 2.0, 1.0), 7.0, within = 1e-5)
+
+test:
+    let mut dx = 0.0
+    bwd_diff(scaled_entry, 2.0, mut dx, 1.0)
+    nearly_equal(dx, 7.0, within = 1e-5)
+
+fun of_matrix(m: mat2) -> float:
+    let n = (m + m) * 3.0 - (-m)
+    return (n * float2(1.0, 1.0)).y
+
+test:
+    let mut dm = mat2(float2(0.0), float2(0.0))
+    bwd_diff(of_matrix, a2, mut dm, 1.0)
+    same2(dm, mat2(float2(0.0, 7.0), float2(0.0, 7.0)))

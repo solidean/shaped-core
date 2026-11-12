@@ -40,6 +40,29 @@ located locate(cc::span<module_file const> files, origin const& from)
     return {.where = where, .text = cc::string(text)};
 }
 
+/// EVAL-140: the lanes a test runs as: every subgroup size a target has where it reaches a subgroup operation or asks
+/// for its lane, one quad where it reaches only derivatives and quad operations, and one invocation otherwise.
+cc::vector<i32> lane_counts_of(checked_module const& m, flat_entry_point const& unit)
+{
+    auto is_subgroup = false;
+    auto is_quad = false;
+    for (auto const& x : unit.exprs)
+    {
+        auto const* const c = x.node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? m.builtin_function(c->intrinsic) : nullptr;
+        if (record == nullptr)
+            continue;
+        is_subgroup = is_subgroup || (record->is_subgroup_operation && !record->is_quad_operation)
+                   || (record->is_test_only && record->name.starts_with("test_lane"));
+        is_quad = is_quad || record->is_quad_operation || record->uses_derivatives;
+    }
+    if (is_subgroup)
+        return {4, 8, 16, 32, 64, 128};
+    if (is_quad)
+        return {4};
+    return {1};
+}
+
 /// Narrows the false node `index` of `nodes` into the parts that made it false (CHK-229).
 struct narrower
 {
@@ -241,6 +264,18 @@ cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
             return cc::format("{}", leaf.as_int());
         case value_kind::scalar_uint:
             return cc::format("{}u", leaf.as_uint());
+        // a 64-bit value reads with the suffix that spells its literal (CHK-357)
+        case value_kind::scalar_long:
+            return cc::format("{}i64", leaf.as_long());
+        case value_kind::scalar_ulong:
+            return cc::format("{}u64", leaf.as_ulong());
+        case value_kind::scalar_double:
+        {
+            auto const f = leaf.as_double();
+            if (f != f || f - f != 0.0)
+                return cc::format("{}", f != f ? "nan" : f < 0.0 ? "-inf" : "inf");
+            return cc::format("{}f64", f);
+        }
         case value_kind::boolean:
             return cc::string(leaf.as_bool() ? "true" : "false");
         default:
@@ -285,7 +320,18 @@ test_result sgl::test::run_test(checked_module const& m,
     auto inputs = resolve_inputs(m, unit, bindings);
     if (inputs.has_error())
         return {.test = t, .status = test_status::invalid_bindings, .detail = inputs.error().to_string()};
-    auto const o = interpret(m, unit, inputs.value(), limits);
+    // EVAL-140: once per subgroup size a target has where it exchanges values, the first that fails deciding it
+    auto const sizes = lane_counts_of(m, unit);
+    auto o = outcome();
+    auto lanes = i32(1);
+    for (auto const size : sizes)
+    {
+        inputs.value().lane_count = size;
+        o = interpret(m, unit, inputs.value(), limits);
+        lanes = size;
+        if (o.status != run_status::ok || !o.failures.empty() || o.failures_dropped > 0)
+            break;
+    }
     write_back(m, o, bindings);
     for (auto s = isize(0); s < unit.check_sites.size() && s < o.sites.size(); ++s)
     {
@@ -322,6 +368,8 @@ test_result sgl::test::run_test(checked_module const& m,
                 auto const name = ref != nullptr ? cc::string_view(unit.at(ref->local).name) : cc::string_view("?");
                 report.loop_values.push_back(cc::format("{} = {}", name, text_of_value(m, f.loop_values[i])));
             }
+        if (lanes > 1)
+            report.loop_values.push_back(cc::format("lane {} of {}", f.lane, lanes));
         if (site.message >= 0)
             report.message = text_of_message(m, unit, site.message, f.message_values);
         result.failures.push_back(cc::move(report));

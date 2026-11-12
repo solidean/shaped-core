@@ -147,6 +147,8 @@ ASYNC_INVOCABLE_TEST("sg - indirect indexed draws read every field from the GPU,
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::indirect_first_instance))
+        SKIP("this device has no indirect first instance");
 
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::indexed_points);
     auto const grid = point_grid(*ctx);

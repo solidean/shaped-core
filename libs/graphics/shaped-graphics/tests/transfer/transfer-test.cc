@@ -289,7 +289,8 @@ ASYNC_INVOCABLE_TEST("sg - an inline upload larger than the ring is staged anywa
     CC_DEFER
     {
         ctx->upload.set_inline_budget(sg::context_upload_scope::default_inline_budget_bytes);
-        ctx->advance_epoch();
+        if (!ctx->is_device_lost()) // a lost device throws, and this runs in the unwind of that very throw
+            ctx->advance_epoch();
     };
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -334,7 +335,8 @@ ASYNC_INVOCABLE_TEST("sg - one epoch's inline transfers may exceed the ring", (s
     CC_DEFER
     {
         ctx->upload.set_inline_budget(sg::context_upload_scope::default_inline_budget_bytes);
-        ctx->advance_epoch();
+        if (!ctx->is_device_lost()) // a lost device throws, and this runs in the unwind of that very throw
+            ctx->advance_epoch();
     };
     ctx->advance_epoch();
     co_await ctx->idle_completion();

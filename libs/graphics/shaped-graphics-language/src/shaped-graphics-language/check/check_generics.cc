@@ -373,23 +373,32 @@ bool checker::unify(type_id pattern, type_id actual, cc::vector<type_id>& bindin
     }
 }
 
-void checker::instantiate_generics()
+bool checker::is_closed(cc::span<type_id const> bindings) const
+{
+    for (auto i = isize(1); i < bindings.size(); i += 2)
+        if (is_open(bindings[i]))
+            return false;
+    return true;
+}
+
+void checker::instantiate_generics(isize first_call, isize first_type)
 {
     // CHK-340: every instance an inlined body will name exists before flattening, which only looks them up.
     // Starting from each call whose arguments are known, a generic callee's calls are followed with the arguments
     // theirs stand for there; recursion is refused, so this ends.
     auto pending = cc::vector<cc::vector<type_id>>();
     auto done = cc::vector<cc::vector<type_id>>();
-    auto const is_closed = [&](cc::span<type_id const> bindings)
-    {
-        for (auto i = isize(1); i < bindings.size(); i += 2)
-            if (is_open(bindings[i]))
-                return false;
-        return true;
-    };
-    for (auto const& r : out.call_records)
-        if (auto const b = out.at(r.type_arguments); !b.empty() && is_closed(b))
+    for (auto i = first_call; i < out.call_records.size(); ++i)
+        if (auto const b = out.at(out.call_records[i].type_arguments); !b.empty() && is_closed(b))
             pending.push_back(cc::vector<type_id>::create_copy_of(b));
+    // the calls with open arguments, the layers below's first, in the order they were recorded
+    auto const open_calls = [&](auto&& each)
+    {
+        for (auto const i : open_calls_below)
+            each(out.call_records[i]);
+        for (auto i = first_call; i < out.call_records.size(); ++i)
+            each(out.call_records[i]);
+    };
 
     while (!pending.empty())
     {
@@ -397,22 +406,25 @@ void checker::instantiate_generics()
         pending.remove_back();
         if (done.values().any([&](cc::vector<type_id> const& d) { return ast::impl::is_equal(d, bindings); }))
             continue;
-        // every open type of the module, as these arguments make it
+        // every open type of the module, as these arguments make it, in the order the types were made
+        for (auto const t : open_types_below)
+            (void)substitute(t, bindings);
         auto const count = out.types.size();
-        for (auto i = isize(0); i < count; ++i)
+        for (auto i = first_type; i < count; ++i)
             if (is_open(type_id(i)))
                 (void)substitute(type_id(i), bindings);
-        for (auto const& r : out.call_records)
-        {
-            auto const inner = cc::vector<type_id>::create_copy_of(out.at(r.type_arguments));
-            if (inner.empty() || is_closed(inner))
-                continue;
-            auto composed = inner;
-            for (auto i = isize(1); i < composed.size(); i += 2)
-                composed[i] = substitute(composed[i], bindings);
-            if (is_closed(composed))
-                pending.push_back(cc::move(composed));
-        }
+        open_calls(
+            [&](call_record const& r)
+            {
+                auto const inner = cc::vector<type_id>::create_copy_of(out.at(r.type_arguments));
+                if (inner.empty() || is_closed(inner))
+                    return;
+                auto composed = inner;
+                for (auto i = isize(1); i < composed.size(); i += 2)
+                    composed[i] = substitute(composed[i], bindings);
+                if (is_closed(composed))
+                    pending.push_back(cc::move(composed));
+            });
         done.push_back(cc::move(bindings));
     }
 }
@@ -456,6 +468,7 @@ i32 checker::instantiate(symbol_id function, cc::span<type_id const> bindings, i
     }
     if (auto const found = existing_function_instance(function, key); found >= 0)
         return found;
+    note_body_read(function);
     // recursion was or will be reported where the calls loop, and an instance of it would never end
     for (auto const& at : instantiating)
         if (out.function_instances[at.instance].function == function)
@@ -743,6 +756,12 @@ type_id checker::scalar_of_closed(type_id of) const
             return prelude_type("short");
         case value_kind::scalar_ushort:
             return prelude_type("ushort");
+        case value_kind::scalar_long:
+            return prelude_type("long");
+        case value_kind::scalar_ulong:
+            return prelude_type("ulong");
+        case value_kind::scalar_double:
+            return prelude_type("double");
         case value_kind::boolean:
             return prelude_type("bool");
         default:

@@ -1,0 +1,78 @@
+// A package built with SOFTWARE_TRACE: its inline traces take the software walk on dx12 and vulkan too.
+require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+    ids: mut buffer[int4]
+
+// One ray per cell of an 8 × 8 grid, along +z from z = -1, a quarter cell off each cell's centre in x, halfway through
+// the frame's interval, where moving vertices and instances stand.
+fun midway_ray(id: int3) -> ray => ray(
+    origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+    direction = vec3(0.0, 0.0, 1.0)
+    time = 0.5
+)
+
+@compute(8, 8) fun trace_midway(@thread_id id: int3){scene}:
+    let h = scene.world.trace(midway_ray(id), flags = ray_flags.force_opaque)
+    let at = id.x + id.y * 8
+    let mut is_hit = 0
+    if h.is_hit => is_hit = 1
+    scene.hits[at] = float4(h.t, h.barycentrics.y, h.barycentrics.z, 0.0)
+    scene.ids[at] = int4(is_hit, h.instance_id, h.primitive_index, h.instance_index)
+
+// ---- rays through the edge two triangles share --------------------------------------------------------------------
+
+fun other_primitive(c: triangle_candidate, primitive: int) -> hit_decision:
+    if c.primitive_index == primitive => return hit_decision.ignore
+    return hit_decision.accept
+
+// 64 rays through the square's diagonal, from (0, 4) to (4, 0): whether one triangle took each, and whether a second did.
+@compute(8, 8) fun trace_shared_edge(@thread_id id: int3){scene}:
+    let at = id.x + id.y * 8
+    let along = ((at as float) + 0.5) / 16.0
+    let r = ray(origin = pos3(along, 4.0 - along, -1.0), direction = vec3(0.0, 0.0, 1.0), time = 0.5)
+    let first = scene.world.trace(r, c => other_primitive(c, -1), flags = ray_flags.force_non_opaque)
+    let second = scene.world.trace(r, c => other_primitive(c, first.primitive_index), flags = ray_flags.force_non_opaque)
+    let mut is_hit = 0
+    if first.is_hit => is_hit = 1
+    let mut is_second = 0
+    if second.is_hit => is_second = 1
+    scene.hits[at] = float4(first.t, 0.0, 0.0, 0.0)
+    scene.ids[at] = int4(is_hit, is_second, first.primitive_index, first.instance_index)
+
+// ---- the same rays from a pixel stage, whose set 3 a draw binds --------------------------------------------------
+
+binding pixel_scene:
+    world: acceleration_structure[.triangles]
+
+@vertex struct traced_corner:
+    position: float2
+
+struct traced_varyings:
+    @position position: hpos4
+
+@pixel struct traced_target:
+    value: float4
+
+@vertex fun traced_vs(v: traced_corner) -> traced_varyings:
+    return {
+        position = hpos4(v.position.x, v.position.y, 0.5, 1.0)
+    }
+
+// t, and last the instance's id, or -1 for a miss
+@pixel fun trace_pixel_ps(p: traced_varyings){pixel_scene} -> traced_target:
+    let cell = int3(p.position.x as int, p.position.y as int, 0)
+    let h = pixel_scene.world.trace(midway_ray(cell), flags = ray_flags.force_opaque)
+    let mut tag = -1.0
+    if h.is_hit => tag = h.instance_id as float
+    return {
+        value = float4(h.t, 0.0, 0.0, tag)
+    }
+
+pipeline traced_pixels:
+    vertex = traced_vs
+    pixel = trace_pixel_ps
+    cull = .none
+    format = .rgba32_float

@@ -447,7 +447,7 @@ It also removes the O(capacity) array copy at every bind, which would otherwise 
 The scalar buffer, texture and tlas copies can move the same way; the arrays are the part this plan needs.
 Clearing bound groups at rendering-scope begin stays: it ends nothing, since bind events never do.
 metal counts each barrier in `metal_command_list::barriers_emitted` and in the context's `global_barriers` and `barrier_calls`.
-An MTL4 barrier names no resource, so metal counts no `buffer_barriers`, `texture_barriers` or `texture_transitions`, and its tests read `barriers_emitted`.
+An MTL4 barrier names no resource, so metal counts each resource whose hazard one settled as a `buffer_barriers` or `texture_barriers`, and no `texture_transitions`.
 
 **webgpu.** Has no arrays: the virtuals assert empty spans as today, and return an id so the value works.
 Its withdraw keeps nothing.

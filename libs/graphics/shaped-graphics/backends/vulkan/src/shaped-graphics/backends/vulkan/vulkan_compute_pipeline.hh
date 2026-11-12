@@ -38,6 +38,8 @@ public:
 
     /// The pipeline cache's serialized form; empty when it holds nothing or serialization fails.
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;
+    [[nodiscard]] cc::vector<sg::driver_statistic> driver_statistics() const override;
+    [[nodiscard]] cc::vector<sg::driver_representation> driver_representations() const override;
 
     vulkan_context& _ctx;
     vulkan_pipeline_layout_handle layout;

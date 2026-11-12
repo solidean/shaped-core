@@ -151,6 +151,8 @@ So an unreachable path does not fail at load — it costs a network timeout per 
 **The identity matters as much as the base.**
 Two builds of the same path are different binaries, and resolving against the wrong one produces confident nonsense rather than an error.
 On Windows it is the PE `TimeDateStamp` and `SizeOfImage` as hex — literally the key a symbol server URL is built from.
+On macOS it is the image's LC_UUID, which is what a dSYM is matched on.
+macOS resolves such a table to modules and offsets alone, since `dladdr` knows only this process's images; `atos` names the rest offline.
 
 The two writers gather it at different times, for the same reason they differ everywhere else.
 `cc::rec::serialize` enumerates the modules when it writes, once per process.
@@ -161,9 +163,53 @@ A recording that carries no table means "this process's own", and symbolizing it
 
 ---
 
+## Reading a recording in Python
+
+Record once, query many times: [tools/ccrec/](../../tools/ccrec/__init__.py) decodes a `.ccrec` into Python objects, with the standard library alone.
+It mirrors `load_recording`, so it reads everything the C++ loader reads: every table, every event, every payload field by its descriptor's layout, the pinned blobs and the module table.
+
+**It reads exactly one format version, and refuses every other with `ccrec.FormatError`.**
+So a version bump here means updating `reader.VERSION` and whatever the bump changed, never a reader that guesses.
+
+```bash
+uv run libs/base/clean-core/tools/ccrec-cli.py summary run.ccrec    # threads, and what each recorded
+uv run libs/base/clean-core/tools/ccrec-cli.py scopes run.ccrec     # scope names by total time
+uv run libs/base/clean-core/tools/ccrec-cli.py events run.ccrec --thread 3
+```
+
+A script imports the package from beside the CLI:
+
+```python
+import sys
+sys.path.insert(0, "path/to/shaped-core/libs/base/clean-core/tools")
+import ccrec
+
+rec = ccrec.load("run.ccrec")
+a = ccrec.analyze(rec)                         # one pass over every thread's stream
+for s in a.scopes_named("upload-pass"):        # intervals: thread, begin/end cycles, depth, parent
+    print(s.thread.name, rec.secs(s.duration_cycles), a.scope_path(s.index))
+slow = [v for v in a.values if a.scope_path(v.scope).endswith("upload-pass")]   # values, by enclosing scope
+busy = ccrec.concurrency(a, ["task"], begin, end)   # how many threads were inside "task", over time
+off = a.off_cpu()                              # the record.thread_run stretches a thread mostly sat off the CPU
+```
+
+`analyze` also attributes every value, stat, marker and log to the innermost scope open around it, and to the trace and owner in effect.
+A sample comes with the sampled thread's scopes open at its time, which name the frames a sample stops short of.
+Its addresses stay unsymbolized, and `rec.modules` is the table to resolve them against.
+`ccrec.columns` and `ccrec.to_numpy` turn any of the tables into columns, the second for a script that declares numpy itself.
+
+`dev.py check` keeps the reader in step through its `ccrec-reader` gate.
+clean-core-test records a fixture of every event kind and payload type, and writes what the C++ loader reads back out of it as a manifest.
+[ccrec-self-test.py](../../tools/ccrec-self-test.py) must read the same file to the same manifest, and checks the reader's struct sizes and enums against these headers.
+
+---
+
 ## Known gaps
 
 - **Nexus does not install a dump yet.** It belongs with the rest of the nexus wiring, which waits on ambient filtering.
 - **A dump is not a minidump.** It carries what was recorded, not the machine state; `cc::install_crash_handler` still owns the stack traces.
+- **A block does not record where in its chunk it starts.**
+  A sample's anchor is a chunk offset, so it resolves against a file's blocks only where a block is a whole chunk from its start.
+  The Python reader places a sample by time instead.
 - **Stacktrace events carry return addresses, never names.**
   Symbolizing them needs [the module table](#the-module-table) plus the matching binaries, which is why analysis happens offline and a capture stays cheap.

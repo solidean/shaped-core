@@ -135,8 +135,8 @@ Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to n
 
 | Level | Kept at a site | For |
 |---|---|---|
-| `FULL` (default) | file, line and function, as strings, as `std::source_location` keeps them | development |
-| `OPAQUE` | the site's code address, nothing else | a shipped binary that should name none of its source, yet whose reports stay resolvable |
+| `FULL` (default) | file, line and function, as strings, as `std::source_location` keeps them | a binary that prints its own sites readably |
+| `OPAQUE` | the site's code address, nothing else | the clang development presets; a shipped binary that should name none of its source, yet whose reports stay resolvable |
 | `OFF` | nothing | a binary that should say nothing at all |
 
 The sites are every capture of `cc::any_error`, `cc::error`, `async_fail`, the `CC_ASSERT` family, `cc::rec` and nexus.
@@ -144,15 +144,28 @@ Below `FULL`, `file_name()` and `function_name()` are `""` and `line()` and `col
 `CC_SITE_TEXT(text)` is `text` at `FULL` and `""` below it: always-on checks lose their condition text, and an unnamed `cc::rec` scope its default name.
 `cc::describe_site` prints a site at every level, `module+0xoffset` at `OPAQUE`.
 
-**An `OPAQUE` site resolves through the build's debug info**, offline: the PDB on Windows, the DWARF or split debug file elsewhere.
+**An `OPAQUE` site resolves through the build's debug info**, offline: the PDB on Windows, the objects' DWARF through the debug map on macOS, the DWARF or split debug file elsewhere.
 `llvm-symbolizer --inlining --obj=<module>` on the module's address plus the offset names it, inlined sites included.
+On macOS the offset is from the Mach-O header, so `atos -fullPath -i -o <module> -l <vmaddr>` on `__TEXT`'s vmaddr plus the offset names it; `llvm-symbolizer` finds no line there without a dSYM.
 The innermost frames are `source_location.hh`'s own, since the address is taken by an instruction inlined into the site; the first frame outside it is the site.
 On clang and GCC that instruction is one `lea` (`adr` on arm64), the cost of `std::source_location`'s capture; cl.exe has no inline assembly there, so it is a call.
 A site evaluated in a constant expression has no code address, so it is unnamed below `FULL`: `cc::rec`'s descriptors are the case.
 wasm has no address to take either, so there `OPAQUE` keeps nothing, as `OFF` does.
 
+**`dev.py test` resolves the sites a failed run printed**: one `llvm-symbolizer` per binary, from the compiler's own LLVM install, against its PDB or DWARF, and `atos` for a Mach-O.
+It prints each as `file:line (function)` with the source line there, which stands in for the condition text an assert drops below `FULL`.
+Without a symbolizer it prints the raw sites and how to point it at one, and the run's result is untouched.
+`LLVM_SYMBOLIZER` names a specific one.
+
+A test's own site, below `FULL`, is the entry of its body, which resolves to the line of its `TEST`.
+nexus keeps a test's source file at every level, so test selection by file and the listings work below `FULL` too; the listings' line is 0 there.
+
 A whole-build switch, never per-target: `cc::source_location`'s layout changes with it.
-The `singlethreaded-*` presets build at `OPAQUE`, so `check` exercises a level below `FULL`; a test reading what only `FULL` keeps skips below it.
+**The clang development presets on Windows, Linux and macOS build at `OPAQUE`**: `debug`, `relwithdebinfo`, `coverage` and `sanitize-*`.
+There an edit that only moves lines, a comment or a reformat, changes the objects' debug info and nothing else, since no line or column is in code or data.
+`release-*`, `pgo-*` and `frozen` keep the default.
+The `singlethreaded-*` presets build at `FULL`, so `check --all-presets` still exercises it with assertions on; a test reading what only `FULL` keeps skips below it.
+The MSVC, GCC, iOS, Android and wasm presets stay at `FULL`: wasm has no address to take, and the others have not been verified below it.
 
 ## x86-64 feature level (`SC_X64_LEVEL`)
 
@@ -246,7 +259,9 @@ These sit in the hottest loops of exact geometry predicates, which is why they a
 The asserts themselves are tested where the switch is on.
 
 Like `SC_THREADS` it is whole-build, never per-target: an inline function compiled with and without the check in one program is an ODR violation.
-The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+Every preset leaves it off, since the checks cost noticeable test time in some binaries and have not yet caught a real bug;
+a build dir configured with `-DSC_CHECK_WIDE_ARITH=ON` runs them, now and then rather than on every commit.
+`dev.py check`, with or without `--all-presets`, and CI do not exercise them.
 
 ## Geometry special-case checks (`SC_CHECK_GEOMETRY_SPECIAL_CASES`)
 
@@ -257,7 +272,7 @@ Checked, each such assumption that an input violates logs a warning in the `tg` 
 A warning rather than an assert, because a test that feeds a special case on purpose has to be writable.
 nexus fails a passing test that logs an undeclared warning, so in a test it is a failure unless declared with `nx::expect_warning`; in an application it is a log line.
 
-Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same `debug-nopch` presets.
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason; the clang debug presets turn it on.
 
 ## Who holds a test's context (`SC_ASYNC_AMBIENT_TRACE`)
 
@@ -271,7 +286,8 @@ Off, the release path is exactly what it is without the feature.
 On, every release of a context link loads the watched link and compares, and only a watched link takes the slow path.
 `cc::async_ambient_watch_releases` is the hook; it returns false in a build without the switch, so a caller needs no `#if`.
 
-Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline; the `debug-nopch` presets turn it on.
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline.
+Every preset leaves it off, as it does `SC_CHECK_WIDE_ARITH`: a build dir configured with `-DSC_ASYNC_AMBIENT_TRACE=ON` is where it runs.
 A Release build captures stacks without names, as every capture there does; a build with names, or a sidecar, is what reads them.
 
 ## Exhaustive SIMD tests (`SC_SIMD_EXHAUSTIVE_TESTS`)
@@ -282,7 +298,7 @@ On, at 128, 256, 512 and 1024 bits, which instantiates every kernel four times o
 The targeted tests — rounding, signed zeros, the edge lanes, permute, the looped shapes — run in both modes.
 
 Only the test binary sees it, and the dispatched battery's kernel TUs through it, so it is no ODR hazard and may differ between targets.
-The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
+The clang debug presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
 
 ## Frozen shaders (`SC_FROZEN_SHADERS`)
 
@@ -305,12 +321,14 @@ A dx12, a vulkan and a webgpu context bind it so far; metal shaders write no rec
 
 ## Operations with no value (`SC_SHADER_UNDEFINED`)
 
-`SC_SHADER_UNDEFINED` (default `NONE`) is the robustness profile of every SGL shader slib compiles: what an integer division by zero or an array index outside the array does.
+`SC_SHADER_UNDEFINED` (default `NONE`) is the robustness profile of every SGL shader slib compiles: what an integer division by zero, or an index outside an array, a buffer or a `bytes`, does.
 `NONE` leaves it the target's undefined behaviour, at no cost.
-`REPORT` logs the operation and its operands as a failed assert, at the `.sgl` line, and ends that invocation; it needs `SC_SHADER_DIAGNOSTICS`, and is `ABORT` without it or on metal.
+`REPORT` logs the operation and its operands as a failed assert, at the `.sgl` line, and ends that invocation; it needs `SC_SHADER_DIAGNOSTICS`, and is `ABORT` without it.
 `ABORT` ends the invocation alone, with no debug window, so a shader that reaches one stops working rather than working by accident.
-Both cost a test and a branch at each guarded operation, which a literal divisor or index does not need.
-SGL's [LEGAL-65](../libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md) is the rule, and `sgl emit --undefined` shows what it writes.
+`DEFINE` runs the operation on a substitute operand instead and goes on: a divisor of 1, so `x / 0` is `x` and `x % 0` is 0 as in WGSL, and an index of 0.
+It is for a shader that must survive untrusted input, and it hides a bug the other two would show.
+Each costs a test and a branch at each guarded operation, which a literal divisor or index does not need.
+SGL's [LEGAL-65](../libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md) to LEGAL-68 are the rules, and `sgl emit --undefined` shows what they write.
 [epic-sgl-robustness-profiles](../libs/graphics/shaped-graphics-language/docs/issues/epic-sgl-robustness-profiles.md) is the plan, and what is not guarded yet.
 
 ## Example backend (`SC_EXAMPLE_BACKEND`)
@@ -350,6 +368,31 @@ That gate is about what the machine has; this setting is about what the build wa
 
 It is declared unconditionally in the root `CMakeLists.txt`, so the cache entry is present whether or not any example is gated out by a missing shader compiler.
 
+## Preview Agility SDK (`SC_AGILITY_PREVIEW`)
+
+`SC_AGILITY_PREVIEW` (default OFF) builds the dx12 backend against the **pre-release** D3D12 Agility SDK in `extern/agility-preview` rather than the retail one in `extern/agility`.
+It exists for DXR's clustered geometry and partitioned TLAS, which no retail runtime carries yet.
+[The plan](../libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md) is what sg builds on them.
+
+**It is a development switch, and nothing shipped may be built with it.**
+The preview's terms forbid distributing it, and end 30 days after a retail release carries the same features; `extern/agility-preview/dependency.yml` has the rest.
+
+```bash
+uv run extern/agility/fetch-agility.py --preview --accept-license   # after reading its terms
+uv run dev.py test --agility-preview "<pattern>"
+```
+
+- **It redirects the build directory**, to `build/<preset>-agility-preview`, as `--example-backend` does, since the headers it swaps in rebuild everything that includes `d3d12.h`.
+- **ON with no preview fetched is a configure error**, rather than a retail build under the preview's name.
+- **The backend says which it is built against** through `SG_HAS_AGILITY_PREVIEW` (1/0), beside `SG_HAS_AGILITY`.
+- **The preview runtime needs Windows Developer Mode**, and does not load at all without it (`D3D12_ERROR_INVALID_REDIST`).
+  dx12 then falls back to the system runtime with a warning, which fails every dx12 test of that build, as a fetched SDK that fails to load always has.
+- **The backend enables the preview features as experimental features on its own device factory**, so no other D3D12 user in the process is affected.
+  A runtime that loads and refuses them logs that at info level and reports them absent.
+- **The dx12 tests keep the WARP they always had**, which lacks the preview features.
+  The preview WARP creates no device under the preview runtime: [the issue](../libs/graphics/shaped-graphics/docs/issues/bug-sg-dx12-preview-warp-refuses-agility-preview.md).
+- **A hardware adapter reports the features only on a driver that implements them**, which a vendor's current release need not be.
+
 ## Build types
 
 The standard **Debug / RelWithDebInfo / Release** build types should all work on every supported platform.
@@ -366,6 +409,6 @@ CMake pairs whichever it finds with our compiler.
 The Android CI runner had one for its Linux clang jobs, and a scanner cannot read a precompiled header the NDK's clang produced, so every scan failed there.
 Turn it back on with the first `import`, and make sure the scanner matches the compiler.
 
-Every build type builds against per-target precompiled headers.
-The `nopch-*` and `debug-nopch-*` presets turn them off.
-Linux clang's CI matrix carries `nopch-linux-clang`, so a source relying on a header only the PCH supplied cannot land — see [precompiled-headers.md](guides/precompiled-headers.md).
+**No build uses precompiled headers.**
+They were removed: incremental rebuilds after header edits matter more than the cold-build gain.
+[notes/build-times.md](notes/build-times.md#precompiled-headers-removed) has the decision.

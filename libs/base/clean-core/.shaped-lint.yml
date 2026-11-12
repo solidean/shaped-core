@@ -157,6 +157,11 @@ rules:
     files: src/clean-core/platform/symbolize.cc
 
   - kind: allow-include
+    value: [<cxxabi.h>, <dlfcn.h>, <stdlib.h>]
+    reason: dladdr is the only route from an address to a name on macOS, and its names are mangled - __cxa_demangle reads them, and free releases what it allocated
+    files: src/clean-core/platform/symbolize.cc
+
+  - kind: allow-include
     value: <tlhelp32.h>
     reason: the thread and module snapshots are the only way to find what the recorder was never told about
     files:
@@ -176,6 +181,16 @@ rules:
   - kind: allow-include
     value: <pthread.h>
     reason: a thread's stack bounds are what a frame-chain walk validates against, and pthread is the only source
+    files: src/clean-core/platform/stack_capture.cc
+
+  - kind: allow-include
+    value: <pthread.h>
+    reason: a Mach thread's pthread is what knows its stack's bounds, which a walk of it from outside is checked against
+    files: src/clean-core/record/sampling.cc
+
+  - kind: allow-include
+    value: [<sys/ucontext.h>, <ucontext.h>]
+    reason: a signal handler's interrupted registers are where a walk of the thread it interrupted starts, and ucontext_t is their only spelling
     files: src/clean-core/platform/stack_capture.cc
 
   - kind: allow-include
@@ -316,8 +331,8 @@ rules:
     files: src/clean-core/platform/system_metrics.cc
 
   - kind: allow-include
-    value: [<sched.h>, <unistd.h>]
-    reason: sched_getaffinity is the mask a container narrows, and sysconf is the fallback count
+    value: [<fcntl.h>, <sched.h>, <unistd.h>]
+    reason: sched_getaffinity is the mask a container narrows, sysconf is the fallback count, and open lets the memory watchdog read /proc without allocating
     files: src/clean-core/platform/resource_limits.cc
 
   - kind: allow-include
@@ -449,6 +464,11 @@ rules:
     reason: std::sort is the baseline cc::sort is measured against, which is the whole point of this file
     files: tests/benchmarks/sort-benchmark.cc
 
+  - kind: allow-include
+    value: <ctime>
+    reason: clock_gettime(CLOCK_THREAD_CPUTIME_ID), the per-thread CPU clock a scope's cost is measured against off Windows
+    files: tests/benchmarks/record-scope-cost-benchmark.cc
+
   # Blocking waits kept in tests, each where the wait or a scheduler the test drives is what is under test.
   - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
@@ -487,6 +507,10 @@ rules:
       - tests/record/record-trace-test.cc
 
   - kind: allow-include
-    value: [<cerrno>, <cstdio>, <cstring>, <fcntl.h>, <semaphore.h>, <signal.h>, <sys/syscall.h>, <time.h>, <unistd.h>, <unwind.h>]
-    reason: asking another thread to report its own stack is a POSIX-only mechanism with no portable half - a real-time signal, a semaphore the handler posts, the unwinder the handler walks itself with, and /proc/self/task read by raw syscall for the thread list
+    value: [<cerrno>, <cstdint>, <cstdio>, <cstring>, <fcntl.h>, <pthread.h>, <semaphore.h>, <signal.h>, <sys/syscall.h>, <time.h>, <unistd.h>, <unwind.h>]
+    reason: reaching another thread's stack has no portable half - on Linux a real-time signal, a semaphore the handler posts, the unwinder the handler walks itself with, and /proc/self/task read by raw syscall; on macOS a thread's stack bounds and name from pthread
     files: src/clean-core/error/impl/posix_thread_stacks.cc
+  - kind: allow-include
+    value: [<cstddef>, <cstdint>, <pthread.h>, <signal.h>, <sys/mman.h>]
+    reason: a per-thread stack for the crash handler's signals is POSIX-only - sigaltstack over memory mmap'd for it, and the thread's own stack bounds from pthread to tell an overflow from any other fault
+    files: src/clean-core/error/impl/signal_stack.cc

@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
@@ -136,8 +137,14 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         return a;
     };
 
+    // an unbounded binding, the table's tail, takes as many descriptors as its views
+    auto unbounded_count = 0;
+    for (auto const& nv : views)
+        if (layout->view_slots[nv.slot_index].binding.is_unbounded())
+            unbounded_count = int(nv.view->span().size());
+    group->unbounded_length = u32(unbounded_count);
     {
-        auto r = alloc_table(ctx._descriptor_heap, layout->descriptor_count);
+        auto r = alloc_table(ctx._descriptor_heap, layout->descriptor_count + unbounded_count);
         CC_RETURN_IF_ERROR(r);
         group->table = cc::move(r.value());
     }
@@ -166,7 +173,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         auto const& s = layout->view_slots[slot_index];
         bool const is_array = s.binding.is_array();
         auto const element_views = nv.view->span();
-        if (element_views.size() != isize(s.binding.count))
+        if (s.binding.is_unbounded() ? element_views.empty() : element_views.size() != isize(s.binding.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
                                         "exactly one per element; a vacant element is sg::vacant_view)",
                                         nv.name, s.binding.count, element_views.size()));
@@ -208,21 +215,35 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
 
                 // A null handle is the null acceleration structure, not a mistake: it binds a valid descriptor that
                 // every ray misses, so there is no storage to keep alive and nothing to declare a hazard on.
-                auto dx_tlas = std::shared_ptr<dx12_tlas const>();
-                if (av->tlas != nullptr)
+                auto const storage = av->tlas != nullptr ? trace_storage_of(*av->tlas) : dx12_buffer_handle();
+                create_accel_view(ctx._device.Get(), storage.get(), dst);
+
+                auto const software
+                    = av->tlas != nullptr ? sg::impl::software_region_of(*av->tlas) : sg::impl::software_region{};
+                if (software.is_moving && !s.binding.traced_in_software)
+                    return cc::error(
+                        cc::format("binding_group: '{}' binds a tlas that moves, which only the software walk "
+                                   "sees: the shader's package takes SOFTWARE_TRACE in sc_add_shader_package",
+                                   nv.name));
+                if (s.binding.traced_in_software)
                 {
-                    dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
-                    CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
+                    if (av->tlas != nullptr && software.pool == nullptr)
+                        return cc::error(cc::format("binding_group: '{}' is traced in software, so its tlas is built "
+                                                    "with accel_build_flag::software_trace",
+                                                    nv.name));
+                    auto const position = sg::impl::acceleration_position(layout->bindings(), s.binding.index);
+                    while (group->acceleration_roots.size() <= position)
+                        group->acceleration_roots.push_back(0);
+                    group->acceleration_roots[position] = software.unit;
+                    if (av->tlas != nullptr)
+                        group->software_tlases.push_back(av->tlas);
                 }
 
-                create_accel_view(ctx._device.Get(), dx_tlas.get(), dst);
-
-                if (dx_tlas != nullptr)
+                if (storage != nullptr)
                 {
                     // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
-                    group->referenced.push_back(dx_tlas->_dx12_storage);
-                    group->hazard_views.push_back(
-                        {dx_tlas->_dx12_storage, sg::view_class::acceleration_structure, binding});
+                    group->referenced.push_back(storage);
+                    group->hazard_views.push_back({storage, sg::view_class::acceleration_structure, binding});
                 }
             }
             else if (auto const* tv = sg::try_as_texture_view(view))
@@ -277,8 +298,9 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
 
     // Match each provided dynamic sampler to a sampler slot by name and create its descriptor.
     // Static samplers live in the root signature, so they must not be provided here.
+    // one flag per element, at the slot's table offset plus the element, as the descriptors lie
     cc::vector<char> sampler_filled;
-    for (isize i = 0; i < layout->sampler_slots.size(); ++i)
+    for (int i = 0; i < layout->sampler_descriptor_count; ++i)
         sampler_filled.push_back(char(0));
 
     int const sampler_base = group->sampler_table.offset;
@@ -295,14 +317,15 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
             return cc::error(cc::format("binding_group: no dynamic sampler binding named '{}' in the layout (a static "
                                         "sampler must not be supplied per group)",
                                         ns.name));
-        CC_ASSERT(sampler_filled[slot_index] == char(0), "binding_group: a sampler was provided more than once");
-        CC_ASSERT(layout->sampler_slots[slot_index].binding.count == 1, "dynamic sampler arrays are not supported "
-                                                                        "yet");
-        sampler_filled[slot_index] = char(1);
+        auto const& slot = layout->sampler_slots[slot_index];
+        if (ns.element < 0 || ns.element >= int(slot.binding.count))
+            return cc::error(cc::format("binding_group: sampler '{}' has no element {}", ns.name, ns.element));
+        auto const descriptor = slot.table_offset + ns.element;
+        CC_ASSERT(sampler_filled[descriptor] == char(0), "binding_group: a sampler was provided more than once");
+        sampler_filled[descriptor] = char(1);
 
         D3D12_SAMPLER_DESC const desc = to_d3d12_sampler_desc(ns.sampler);
-        ctx._device->CreateSampler(
-            &desc, ctx._sampler_heap.cpu_at(sampler_base + layout->sampler_slots[slot_index].table_offset));
+        ctx._device->CreateSampler(&desc, ctx._sampler_heap.cpu_at(sampler_base + descriptor));
     }
 
     // Every declared view and dynamic sampler must be provided (no null / default descriptors yet).
@@ -310,10 +333,13 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         if (view_filled[i] == char(0))
             return cc::error(
                 cc::format("binding_group: binding '{}' was not provided", layout->view_slots[i].binding.name));
-    for (isize i = 0; i < sampler_filled.size(); ++i)
-        if (sampler_filled[i] == char(0))
-            return cc::error(
-                cc::format("binding_group: sampler '{}' was not provided", layout->sampler_slots[i].binding.name));
+    for (auto const& slot : layout->sampler_slots)
+        for (int e = 0; e < int(slot.binding.count); ++e)
+            if (sampler_filled[slot.table_offset + e] == char(0))
+                return cc::error(slot.binding.count == 1
+                                     ? cc::format("binding_group: sampler '{}' was not provided", slot.binding.name)
+                                     : cc::format("binding_group: element {} of sampler array '{}' was not provided", e,
+                                                  slot.binding.name));
 
     return dx12_binding_group_handle(cc::move(group));
 }

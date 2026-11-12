@@ -425,7 +425,18 @@ bool vulkan_download_async_system::run_one_window()
             // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
             VkResult const r = _ctx->queue_guard().lock(
                 [&](int&) { return vkQueueSubmit(_ctx->download_queue(), 1, &submit, VK_NULL_HANDLE); });
-            CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async download) failed");
+            if (r != VK_SUCCESS)
+            {
+                if (!_ctx->note_device_lost_if_lost(r, "vkQueueSubmit (async download)"))
+                    CC_ASSERT(false, "vkQueueSubmit (async download) failed");
+                // nothing was queued, so the staging window holds no bytes of this job and must not be delivered
+                _window_values[slot] = 0;
+                job.ambient.reset();
+                if (job.stream != nullptr && job.stream->completion != nullptr && !job.stream->completion->is_ready())
+                    job.stream->completion->push_error(cc::async_error::make_cancelled());
+                settle_and_drop(index, /*delivered =*/false, /*signal_here =*/true);
+                return true;
+            }
             if (signal_count == 2)
                 note_signal_submitted(job.completion_value.group->forward_waits, job.completion_value.value);
 

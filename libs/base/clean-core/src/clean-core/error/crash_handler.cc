@@ -3,6 +3,8 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/impl/posix_thread_stacks.hh>
+#include <clean-core/error/impl/signal_stack.hh>
+#include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp_if_free, so the walk never waits on a suspended thread's lock
 #include <clean-core/record/thread_scopes.hh>
@@ -48,6 +50,11 @@ bool g_report_minidump = false;
 int g_report_count = 0; // reports this process kept: a second in the same second gets a name of its own
 char g_report_stem[k_max_report_path] = {}; // the last report's path without its extension
 int g_report_stem_length = 0;
+
+#ifndef CC_OS_WINDOWS
+/// The interrupted registers of the thread a signal is reporting, which its frames are walked from; null outside one.
+void* g_fault_context = nullptr;
+#endif
 
 void append_text(char* out, int& length, char const* text) noexcept
 {
@@ -574,6 +581,38 @@ void run_hooks() noexcept
             g_hooks[i]();
 }
 
+/// The top frames of a thread a signal interrupted, walked from its interrupted registers rather than from here.
+/// A handler running on a signal stack of its own starts a plain walk outside the thread's stack, which finds nothing.
+/// Each frame carries `module+offset` beside its name, which `atos` resolves to a file and a line offline.
+/// False where there is no such context, or no walk from one, which leaves the plain walk to the caller.
+[[nodiscard]] bool report_fault_frames() noexcept
+{
+#if defined(CC_OS_WINDOWS)
+    return false;
+#else
+    if (g_fault_context == nullptr)
+        return false;
+
+    void* frames[64] = {};
+    auto const captured
+        = cc::capture_stack_from_native_context(g_fault_context, cc::unwind_snapshot{}, cc::span<void*>(frames));
+    if (captured.count == 0)
+        return false;
+
+    auto symbols = cc::symbolizer();
+    for (auto i = 0; i < int(captured.count); ++i)
+    {
+        auto const& info = symbols.resolve(frames[i]);
+        auto const name = info.has_function() ? info.to_string() : cc::string("<unknown>");
+        std::fprintf(stderr, "  #%-2d %.*s  (%.*s+0x%llx)\n", int(i), int(name.size()), name.data(),
+                     int(info.module.size()), info.module.data(), static_cast<unsigned long long>(info.module_offset));
+    }
+    if (captured.truncated)
+        std::fputs("  ... deeper frames not printed\n", stderr);
+    return true;
+#endif
+}
+
 // Shared best-effort reporter: a banner, the reason, registered context, then a stacktrace of this thread and of
 // every other one.
 // Uses stdio (not std::cerr) to keep the crash path as small as possible.
@@ -590,9 +629,12 @@ void run_hooks() noexcept
 
 #if CC_HAS_STACKTRACE
     std::fputs("\nstacktrace (faulting thread):\n", stderr);
-    auto const text = cc::to_string(cc::stacktrace::current());
-    std::fwrite(text.data(), 1, text.size(), stderr);
-    std::fputc('\n', stderr);
+    if (!report_fault_frames())
+    {
+        auto const text = cc::to_string(cc::stacktrace::current());
+        std::fwrite(text.data(), 1, text.size(), stderr);
+        std::fputc('\n', stderr);
+    }
 #else
     std::fputs("\n<stacktrace unavailable on this platform>\n", stderr);
 #endif
@@ -736,8 +778,22 @@ void start_overflow_reporter() noexcept
     g_reporter_id = id;
 }
 
+LONG g_abort_owner = 0;
+
 void abort_handler(int) noexcept
 {
+    // The CRT resets SIGABRT to its default before calling this, so a second thread's abort would otherwise end the
+    // process mid-report, as 0xC0000409 with no stacks: that thread waits for this report instead.
+    // Only the reporting thread's own abort, inside the report, takes the default path.
+    std::signal(SIGABRT, abort_handler);
+    auto const self = static_cast<LONG>(GetCurrentThreadId());
+    if (auto const owner = InterlockedCompareExchange(&g_abort_owner, self, 0); owner != 0)
+    {
+        if (owner != self)
+            Sleep(INFINITE); // the process ends once the first report is out
+        std::signal(SIGABRT, SIG_DFL);
+        return;
+    }
     auto const capture = report_crash("abort() / std::terminate");
     write_minidump(GetCurrentThreadId(), nullptr);
     release_report(capture);
@@ -775,24 +831,47 @@ char const* signal_reason(int sig) noexcept
     }
 }
 
-void signal_handler(int sig) noexcept
+/// A fault at or just below the faulting thread's own stack is that stack running out, which macOS reports as SIGBUS.
+[[nodiscard]] bool is_stack_overflow(int sig, siginfo_t const* info) noexcept
 {
-    release_report(report_crash(signal_reason(sig)));
+#ifdef SIGBUS
+    auto const is_access = sig == SIGSEGV || sig == SIGBUS;
+#else
+    auto const is_access = sig == SIGSEGV;
+#endif
+    return is_access && info != nullptr && cc::impl::is_stack_overflow_address(info->si_addr);
+}
+
+void signal_handler(int sig, siginfo_t* info, void* context) noexcept
+{
+    g_fault_context = context;
+    release_report(report_crash(is_stack_overflow(sig, info) ? "stack overflow" : signal_reason(sig)));
     // Restore the default disposition and re-raise so the process exits with the
     // signal's normal status (and can still produce a core dump).
     std::signal(sig, SIG_DFL);
     std::raise(sig);
 }
 
+/// `SA_ONSTACK`, so a thread with a signal stack of its own runs the handler there: an overflowed stack has no room for it.
+void install_signal_handler(int sig) noexcept
+{
+    struct sigaction action = {};
+    action.sa_sigaction = signal_handler;
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&action.sa_mask);
+    (void)sigaction(sig, &action, nullptr);
+}
+
 void install_platform_handlers() noexcept
 {
-    std::signal(SIGSEGV, signal_handler);
-    std::signal(SIGABRT, signal_handler);
-    std::signal(SIGILL, signal_handler);
-    std::signal(SIGFPE, signal_handler);
+    install_signal_handler(SIGSEGV);
+    install_signal_handler(SIGABRT);
+    install_signal_handler(SIGILL);
+    install_signal_handler(SIGFPE);
 #ifdef SIGBUS
-    std::signal(SIGBUS, signal_handler);
+    install_signal_handler(SIGBUS);
 #endif
+    cc::impl::enable_thread_signal_stacks();
 }
 
 #endif

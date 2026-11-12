@@ -74,6 +74,8 @@ sg::pipeline_stage_flags sg::impl::stages_of(shader_stage stage)
     case shader_stage::tessellation_control:
     case shader_stage::tessellation_evaluation:
     case shader_stage::geometry:
+    case shader_stage::task:
+    case shader_stage::mesh:
         return pipeline_stage_flag::vertex;
     case shader_stage::fragment:
         return pipeline_stage_flag::fragment;

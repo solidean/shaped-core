@@ -55,10 +55,13 @@ struct frag:
     return target(float4(w * p.a, 0.0, 0.0, 1.0))
 
 // a workgroup size may name an int const, which the attribute reads as its value (CHK-370)
+const tile = 2 * steps
+const also_tile = tile
+
 binding cells:
     values: mut buffer[float]
 
-@compute(steps, also_steps) fun spread(@thread_id id: int3){cells}:
+@compute(tile, also_tile) fun spread(@thread_id id: int3){cells}:
     cells.values[id.x + id.y * steps] = scale
 
 // any other value is computed once, as the abstract machine runs it, which is what every target then reads
@@ -126,7 +129,7 @@ test (shift * float4(0.0, 0.0, 0.0, 1.0)) == float4(1.0, 2.0, 3.0, 1.0)
 binding taps_out:
     values: mut buffer[float2]
 
-@compute(4) fun spread_taps(@thread_id id: int3){taps_out}:
+@compute(64) fun spread_taps(@thread_id id: int3){taps_out}:
     taps_out.values[id.x] = offsets[id.x % 3] * g2 + (sun.tint.xy * norm)
 
 // a function's own const is computed as a file-scope one is, and reads the consts before it (CHK-413)

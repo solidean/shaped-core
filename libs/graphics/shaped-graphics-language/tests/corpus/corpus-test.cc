@@ -1,11 +1,14 @@
 #include "../check/check-test-support.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/platform/file_access.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 
 // clean-core has no directory listing yet, and a corpus file needs no CMake entry of its own only when it is found by one.
+#include <nexus/source_root.hh>
+
 #include <filesystem>
 
 // The corpus is how SGL's semantics are tested: one `.sgl` file per topic under tests/corpus/, each a program whose
@@ -36,10 +39,14 @@ cc::vector<sgl_corpus_file> corpus_files()
 {
     namespace fs = std::filesystem;
     auto out = cc::vector<sgl_corpus_file>();
-    auto const root = fs::path(SGL_CORPUS_DIR);
+    auto const root = fs::path(nx::source_path(SGL_CORPUS_DIR).c_str_materialize());
     auto ec = std::error_code();
+    // Listed past clean-core, so declared for file-access recording (cc::file_access); the files are read through clean-core.
+    cc::file_access::note_list(root.string().c_str());
     for (auto const& e : fs::recursive_directory_iterator(root, ec))
     {
+        if (e.is_directory())
+            cc::file_access::note_list(e.path().string().c_str());
         if (!e.is_regular_file() || e.path().extension() != ".sgl")
             continue;
         // lexical: every entry lies under root, and canonicalizing breaks where wasm reads a Windows host's paths
@@ -119,8 +126,10 @@ INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes e
     CHECK(texts.value().size() == tested.entry_points.size() * isize(sgl::emit::all_targets().size()));
     for (auto const& e : texts.value())
     {
-        // EMIT-109: WebGPU has some features on no device, and an entry point that requires one is refused there alone
-        if (e.target == sgl::emit::target::wgsl && e.text.has_error() && is_lacking_feature(e.text.error()))
+        // EMIT-109 and EMIT-192: WebGPU and Metal have some features on no device, and an entry point that requires one
+        // is refused there alone
+        if ((e.target == sgl::emit::target::wgsl || e.target == sgl::emit::target::msl) && e.text.has_error()
+            && is_lacking_feature(e.text.error()))
             continue;
         CHECK(e.text.has_value()).dump("entry point", e.entry_point).dump("target", sgl::emit::to_string(e.target));
         if (e.text.has_error())

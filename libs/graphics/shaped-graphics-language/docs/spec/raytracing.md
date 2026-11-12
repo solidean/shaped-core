@@ -41,6 +41,7 @@ HLSL writes `RaytracingAccelerationStructure`, MSL `instance_acceleration_struct
 ## The vocabulary
 
 * **`ray`** is `origin: pos3`, `direction: vec3`, `t_min: float = 0.0` and `t_max: float = 3.0e38`, in world space.
+  Its `time: float = 0.0` is where in the frame's interval it is cast, which a moving instance and moving triangles are placed at (EVAL-130, EVAL-132); a static scene ignores it.
 * **`ray_flags`** is DXR's `RAY_FLAG_*` without the prefix, a builtin `@bitflags` enum (CHK-321).
   Flags combine with `|`, intersect with `&`, and `flags.has(f)` asks whether every flag of `f` is set.
   They are `none`, `force_opaque`, `force_non_opaque`, `accept_first_hit_and_end_search`, `skip_closest_hit`,
@@ -48,6 +49,8 @@ HLSL writes `RaytracingAccelerationStructure`, MSL `instance_acceleration_struct
 * **`hit_decision`** is what an any-hit decision says of a candidate: `accept`, `ignore`, or `accept_and_end_search`.
 * **`triangle_candidate`** is a triangle the traversal could not decide alone, a non-opaque one.
   It holds `t`, `ray`, the instance's `instance_id` and `instance_index`, `geometry_index`, `primitive_index`, `barycentrics` and `is_front_face`.
+  `cluster_id` is the cluster the triangle is in, as its build numbered it, and -1 in a BLAS built from no clusters (EMIT-260).
+  Its `primitive_index` is then the triangle's within its cluster.
 * **`triangle_hit`** is the nearest triangle a trace accepted, with the candidate's fields and `is_hit`.
   **Where `is_hit` is false, `t` is the ray's `t_max` and nothing else is set.**
 * **`procedural_box`** is a box the traversal entered, which an intersection is handed.
@@ -161,8 +164,10 @@ The prelude's `trace` holds both through an internal `by_target(native, emulated
 * **The native form** steps through the target's own query, HLSL's `RayQuery` or MSL's `intersection_query`, with each decision inlined into the branch of its candidate.
 * **The emulated form** is a software traversal written in SGL, in the prelude and `@internal` (CHK-323), over sg's acceleration pool.
   WGSL writes it, since WebGPU has no query, and the interpreter runs it too, so a `test` traces against a pool its driver binds (EVAL-95).
+  HLSL writes it where a compile asks, which a package's `SOFTWARE_TRACE` does and nothing does on its own.
   Its pool layout is an internal contract between sg and the prelude, [raytracing-polyfill.md](../raytracing-polyfill.md).
-* `t` and the barycentrics of the two forms agree within a tolerance, never bit for bit, and the emulated triangle test is not watertight yet.
+* `t` and the barycentrics of the two forms agree within a tolerance, never bit for bit.
+* **The emulated triangle test is watertight**: a ray through an edge two triangles of one structure share meets exactly one of them, and so does a ray through a corner they share.
 
 ## The pipeline
 
@@ -256,11 +261,13 @@ The call writes through the payload: what the miss or the closest hit wrote is t
 
 **`maybe_reorder(hint, bits)` lets the target regroup a raygen's invocations** by the low `bits` bits of `hint`, before the traces they go on to make.
 It is a hint: each invocation goes on as it was, and only which ones share a wave changes.
-It is dx12's `dx::MaybeReorderThread` where the device has `shader_execution_reordering`, which needs Shader Model 6.9 from the Agility SDK, and nothing elsewhere.
-The prelude writes it as a text body under `const if has(…)`, so the compile that takes the text asks the feature of the pipeline (CHK-427).
+It is dx12's `dx::MaybeReorderThread` and vulkan's `OpReorderThreadWithHintEXT` where the device has `shader_execution_reordering`, and nothing elsewhere.
+On dx12 the feature needs Shader Model 6.9 from the Agility SDK, and on vulkan `VK_EXT_ray_tracing_invocation_reorder` on a device that reorders.
+The prelude writes dx12's as a text body under `const if has(…)`, so the compile that takes the text asks the feature of the pipeline (CHK-427).
 
 **`trace(…, reorder = true)` regroups by what the trace hit**, and `reorder = hint, reorder_bits = n` by the hit and the hint's low `n` bits (CHK-433).
-On dx12 with the feature, the trace is a hit object: traced, regrouped by it, then its shaders run, so invocations meeting one material shade together.
+On dx12 and vulkan with the feature, the trace is a hit object: traced, regrouped by it, then its shaders run, so invocations meeting one material shade together.
+DXC lowers none of this to SPIR-V, so vulkan's text writes SPIR-V's own instructions (EMIT-225).
 Everywhere else it is the plain trace, which computes the same.
 
 **A hit object is a trace whose closest hit or miss has not run yet** (CHK-434), so a raygen can read what was hit before its shaders run:
@@ -276,6 +283,8 @@ else:
 ```
 
 Nothing but a device with the feature can trace without running those shaders, so a hit object has no fallback, and the `else` is the program's to write.
+
+A hit object stays where its trace put it (CHK-516): a function may read it, and no struct, array, `if` or `return` holds it.
 
 ### Hit groups
 
@@ -395,6 +404,13 @@ An intersection's report is `ReportHit`, and a procedural record's shaders take 
 
 **webgpu** traces inline through the emulated form, and has no pipeline: WebGPU has neither binding indexing nor function pointers, which a table needs.
 A pipeline there waits for a polyfill, which the [incubator](incubator/raytracing-futures.md) sketches.
+
+**Motion blur** is a property of what sg builds, and `time` is the whole of a shader's side, so no shader changes when a target gains hardware.
+An instance may move from one transform at time 0 to another at time 1, and a triangle's vertices from one pose to another.
+The emulated trace places both at the ray's `time` (EVAL-130, EVAL-132), so webgpu and a test on the interpreter see motion.
+So do dx12 and vulkan, in a package that takes `SOFTWARE_TRACE`, whose inline traces are the emulated form on every device (EMIT-135).
+DXR has none, and vulkan's `VK_NV_ray_tracing_motion_blur` reaches a pipeline's trace alone, never a ray query, so neither native trace takes the time yet.
+sg refuses a moving instance or geometry where a build does not write the emulated form, and a group that binds one to a native trace; metal has neither yet.
 
 **metal** runs a pipeline as a kernel that intersects, then calls a miss or a closest hit through sg's tables (EMIT-139, CHK-345).
 

@@ -32,14 +32,16 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-109's, EMIT-122's and EMIT-261's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
+  And it is `wgsl` against `shader_int64`, `shader_f64` and `shader_int64_atomics`, which no WebGPU has.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
-* **EMIT-67** A `print` is `unsupported`: no target writes one yet, so the driver legalizes every entry point without them (LEGAL-63).
+* **EMIT-67** A `print` is `unsupported` without diagnostics, which is why the driver legalizes every entry point without them there (LEGAL-63).
+  A description holds whichever a compile asks for, so no print keeps `sgl describe` from writing one.
 
 ## Names
 
@@ -76,6 +78,10 @@ struct target_ {
 * **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
 * **EMIT-118** An array is `array<T, N>` in WGSL and MSL, and in HLSL its element type with the lengths after the declared name, `float weights[3]`.
   A square literal is WGSL's constructor, and in HLSL and MSL a local assigned element by element, as a struct is (EMIT-55).
+* **EMIT-230** In HLSL, a `let` array whose every element is a literal, or a vector or an array of them, is `static const` with an initializer: `static const float kernel[5] = {0.0625, ...};`.
+  Each invocation filling a local of its own costs a store per element where an index into it is dynamic, which DXC's SPIR-V keeps.
+* **EMIT-231** `T[N].filled(v)` (CHK-289) of at most 64 elements in all is an assignment per element at a constant index, and a larger one a loop per level.
+  A loop's dynamic index keeps the array in memory wherever the target's compiler does not unroll it, as DXC's SPIR-V backend does not.
 * **EMIT-119** Each member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`: `groupshared` in HLSL and `var<workgroup>` in WGSL at file scope,
   and `threadgroup` at the top of the kernel in MSL, which has it nowhere else.
   It takes no group, so the groups after it in a list keep their numbers.
@@ -119,6 +125,14 @@ struct target_ {
 * **EMIT-140** HLSL writes a 16-bit float as `float16_t` and never as `half`, which without `-enable-16bit-types` silently means a 32-bit float (EMIT-4).
   A literal of a 16-bit type is a construction of its type around it on every target, `float16_t(0.5)`, `f16(0.5)` and `half(0.5)`.
   MSL's bare `0.5` is a 32-bit float, and would widen the expression it stands in.
+* **EMIT-190** HLSL writes a 64-bit integer as `int64_t` and `uint64_t` and a double as `double`, MSL as `long` and `ulong`.
+  A 64-bit literal carries its width's suffix, `5LL` and `5ULL` in HLSL and `5L` and `5UL` in MSL, so no target reads it as 32 bits; the most negative long is `(-9223372036854775807LL - 1LL)`.
+  A double literal is suffixed `L` in HLSL, whose bare `0.1` is a float rounded to 24 bits.
+  A shift of a 64-bit value masks a count that is no literal to its low six bits, which HLSL and MSL leave undefined past 63.
+* **EMIT-191** A constant block's array of one value per row (EMIT-172) is one of two-vectors for a 64-bit scalar, `int64_t2` in HLSL, since a 16-byte row holds two.
+* **EMIT-192** `msl` refuses an entry point that needs `shader_f64`, `shader_int64_atomics` or `shader_shared_int64_atomics` as `target-lacks-feature`, as EMIT-109 says.
+  `shader_int64_min_max_atomics` alone it writes (EMIT-218).
+  MSL has no double, and its 64-bit atomics are a ulong's min and max alone.
 * **EMIT-141** WGSL enables what its text uses ahead of every declaration: `enable f16;` where it names a 16-bit float, and `enable subgroups;` where it holds a subgroup operation or stage input.
 
 ## Enums
@@ -152,6 +166,10 @@ const light_kind_sun: i32 = 2;
   `sgl describe` states each member's semantic, which is what the host's input layout names the member by.
 * **EMIT-29** A member of a stage link at location i has the generated semantic `SGLi`, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
 * **EMIT-30** A member of a render target struct at location i is `SV_Targeti` in HLSL and `@location(i)` in WGSL.
+* **EMIT-235** A DXIL signature is packed as DXC's default `-pack-prefix-stable` packs it, so a stage of SGL's own DXIL links against a stage DXC compiled from the same plan, in either direction.
+  An element takes the first row, and the lowest free columns, that hold it, in declared order: a struct's members, then the stage inputs.
+  A row holds one interpolation mode, and an ordinary element never follows a system one in it.
+  A vertex input takes a row of its own, a render target the row of its index, and `SV_TessFactor` and `SV_InsideTessFactor` their fixed places.
 * **EMIT-31** A semantic is made from the name as the program writes it, whatever EMIT-18 made of the member.
 * **EMIT-32** A vertex input member whose semantic would start with `SV_` is `system-value-semantic`.
 * **EMIT-33** A member of an edge struct is of a builtin type whose record says it crosses an edge, which `mat4`, `int` and `bool` do not, or it is `unsupported`.
@@ -173,13 +191,31 @@ const light_kind_sun: i32 = 2;
 
 * **EMIT-122** `msl` refuses a geometry and a tessellation entry point as `target-lacks-feature`, naming the stage's feature as EMIT-109 says.
   Metal has neither stage, and tessellates by a compute kernel instead.
+* **EMIT-205** HLSL writes a mesh stage as `[outputtopology("triangle")]` and `[numthreads(x, y, z)]` over `void`.
+  Its output `o` is two parameters, `out vertices T o_vertices[N]` and `out indices uint3 o_triangles[M]`.
+  `set_counts` is `SetMeshOutputCounts`, and `vertex` and `triangle` are writes to those arrays.
+  A mesh stage of `lines` is `[outputtopology("line")]` over `out indices uint2 o_lines[M]`, which `line` writes.
+* **EMIT-207** HLSL writes a task stage as `[numthreads(x, y, z)]` over `void`, and declares `groupshared P sgl_payload` for its payload's struct `P`.
+  `dispatch_mesh` stores its payload there and calls `DispatchMesh(x, y, z, sgl_payload)`, since HLSL hands a payload over from groupshared memory alone.
+* **EMIT-208** A mesh stage's payload parameter is `in payload P p`.
+* **EMIT-209** A mesh output's `F` is a third array, `out primitives F o_primitives[M]`, and `primitive` writes to it.
+  `F`'s locations follow the vertex struct's, in the one space the pixel stage reads both from, and the pixel stage takes it as a parameter of its own.
+  There its members are `nointerpolation`; for vulkan each also carries SPIR-V's `PerPrimitiveEXT`, as `[[vk::ext_decorate(5271)]]`.
+  The entry point then declares `SPV_EXT_mesh_shader` and its `MeshShadingEXT` capability, which DXC leaves out of a pixel stage.
+* **EMIT-206** MSL writes a mesh entry point as a `[[mesh]]` function of a `metal::mesh<V, F, N, M, topology>` output, F `void` where nothing is written per primitive.
+  It writes a task entry point as an `[[object]]` function; WGSL refuses both by EMIT-109.
+* **EMIT-261** WGSL refuses a pixel entry point that takes a mesh stage's per-primitive struct (CHK-489) as `target-lacks-feature`, naming `mesh_shader`.
+  Only the pipeline of a polyfilled mesh stage hands it one there, and that pipeline's pixel stage is written in the form CHK-524 gives it, which takes no such struct.
+  Metal counts the primitives alone, so `set_counts` is `set_primitive_count` of its second argument, and `triangle` and `line` set one index per corner.
+  The object stage writes its payload and its grid of mesh workgroups from its first invocation, and a pixel stage's per-primitive struct arrives in one `[[stage_in]]` beside the link.
 * **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
   * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
   * a control stage is a passthrough hull function that returns `patch[point_index]`, named by its `domain`, `partitioning`, `outputtopology`, `outputcontrolpoints` and `patchconstantfunc`;
   * the SGL body is that patch-constant function, `<name>_patch`, taking the `InputPatch`;
+  * a stated `max_factor` (CHK-304) is `[maxtessfactor(N)]`, and every return of the body caps each factor at it;
   * an evaluation stage is `[domain(…)]` over the function, taking the `const OutputPatch`, the patch constants, and `SV_DomainLocation`;
   * in patch constants, `@edge_factors` is `SV_TessFactor` and `@inside_factors` `SV_InsideTessFactor`;
-  * the other members of patch constants take the locations after the control point's, so vulkan's two never collide.
+  * the other members of patch constants take the locations after those the control point's members and pieces take, so vulkan's two never collide.
 * **EMIT-134** A control stage's `.counter_clockwise` is HLSL's `triangle_cw` and `.clockwise` its `triangle_ccw`.
   HLSL names the winding in its domain's own orientation, which mirrors the patch the domain location weighs (CHK-304).
 
@@ -395,6 +431,117 @@ fn main_ps(p: pixel_input) -> target_ {
 }
 ```
 
+## SPIR-V
+
+* **EMIT-232** Where a compile asks, `hlsl-vulkan` is written as a SPIR-V 1.6 module by SGL itself rather than as text for DXC: `text_request::native`, `sgl emit --target spirv`.
+  The plan is the text's, so every name, address and layout the host reads is the same on either route.
+  `require` makes an entry point with no lowering yet the error `unsupported`, naming what it holds, and `prefer` writes the text and says why in `emitted_source::native_gap`.
+  Every stage lowers, and what does not yet is named by [feat-sgl-native-compute-gaps](../../issues/feat-sgl-native-compute-gaps.md); a target's own text never does.
+  Float `!=` is unordered, a shift's count is masked to its width, and `and` and `or` branch where their right side could go wrong; nothing here widens what a program may do.
+* **EMIT-233** A float operation of an entry point past `fast` is decorated `NoContraction`, and the entry point states `SignedZeroInfNanPreserve` per float width, and `DenormPreserve` for `ieee`.
+  This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
+* **EMIT-234** Where a compile asks, `hlsl-dx12` is written as a DXIL container by SGL itself: `text_request::native`, `sgl emit --target dxil`.
+  It takes what EMIT-232 says of a plan, of `require` and `prefer`, and of what a program may do.
+  The container states shader model 6.6, or 6.8 where EMIT-128 reads a start location, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
+  A `fast` float operation carries LLVM's fast flags, and one past it carries none, which is what `-Gis` writes; only a `fast` addition may reorder.
+  `ieee` states `fp32-denorm-mode` on the entry point, as `-denorm preserve` does.
+* **EMIT-236** A vertex or pixel entry point of a native route reads each element of its edge ahead of its body, and each `return` stores each output element.
+  So a stage of either route links against a stage of the text route, in both directions.
+  A pixel stage's `@position.w` on SPIR-V is the reciprocal of `FragCoord.w`, as `-fvk-use-dx-position-w` writes it.
+  `@vertex_index` and `@instance_index` add the draw's base on DXIL alone (EMIT-128), since `VertexIndex` and `InstanceIndex` already hold it.
+  A 64-bit link crosses as its words on DXIL (EMIT-196) and as itself on SPIR-V, and a pixel stage's second struct is what a mesh stage wrote per primitive (CHK-489), `PerPrimitiveEXT` on SPIR-V.
+  A link of 16-bit numbers is `unsupported` so far.
+* **EMIT-237** DXIL's `dx.viewIdState` and `PSV0` state that every declared input lane reaches every declared output lane.
+  A table may say too much and never too little, and the validator takes this one.
+  A signature's usage masks are read off the module's final operations, so a lane the passes dropped is no use.
+  A stage that reads `@view_index` also states that every output lane depends on the view, which may say too much in the same way.
+* **EMIT-238** A native route writes a pixel stage's surface as its target's own operations, and `discard` terminates on neither.
+  It is `OpDemoteToHelperInvocation` and `dx.op.discard(true)`, and the invocation goes on as a helper, so a neighbour's derivatives stay whole.
+  `ddx`, `ddy` and `fwidth` are `OpDPdx`, `OpDPdy` and `OpFwidth`, and on DXIL `derivCoarseX`, `derivCoarseY` and the sum of their absolute values, which is what HLSL's own names compile to.
+  `@depth` is `FragDepth` with `DepthReplacing`, plus `DepthGreater` or `DepthLess`, and DXIL's three depth elements.
+  `@sample_mask` is SPIR-V's array of one on both sides of the stage, and on DXIL an output element with no row or `dx.op.coverage`.
+  `@sample_index` stands in a signature with no row, and DXIL reads it with `dx.op.sampleIndex`; such an element is unallocated in `PSV0`.
+  `@view_index` is `dx.op.viewID` and in no signature, and `@layer` from a vertex stage is `ShaderLayer` and DXIL's shader flag for it.
+  Every built-in a pixel stage reads but `FragCoord` is `Flat` on SPIR-V.
+  A sample's offset is EMIT-253's.
+* **EMIT-239** A binding array is one global of an array of resources, an unbounded one of a runtime array, and an `access_chain` picks the element.
+  On DXIL that element's handle is made where the chain stands, `createHandleFromBinding` over the array's whole range, since no handle exists ahead of its index.
+  `nonuniform i` marks the chain and what reads through it.
+  SPIR-V decorates the index, the chain, the load and the sampled image `NonUniform`, and DXIL sets `createHandleFromBinding`'s last argument.
+* **EMIT-240** A geometry or tessellation entry point of a native route keeps the shape of the stage it stands for, so it links against the text route's in either direction.
+  A parameter's array stays where the stage holds it: `tri[i]` reads that vertex's elements at `i`, whatever `i` is, and only the array read whole loads every vertex.
+  `emit` stores the output elements and is `OpEmitVertex` or `dx.op.emitStream`; `end_strip` is `OpEndPrimitive` or `dx.op.cutStream`.
+  A control stage's body is one function, EMIT-123's patch-constant function, and each writer generates the rest from the elements.
+  On DXIL the entry point is the function that hands control point `outputControlPointID` on, and the patch-constant function is named in the entry's hull state.
+  On SPIR-V the entry point hands point `InvocationId` on, then `OpControlBarrier`, then calls the body where that id is 0.
+  A patch's elements are `Patch` on SPIR-V, `storePatchConstant` and `loadPatchConstant` on DXIL, read in an evaluation stage.
+  `@edge_factors` and `@inside_factors` are one element per factor.
+  SPIR-V holds them in `TessLevelOuter` of four and `TessLevelInner` of two, always that long, and DXIL states each array as one element of as many rows.
+  `@domain_location` is `TessCoord`, three lanes on any domain, or `dx.op.domainLocation`, and `@primitive_id` outside a pixel stage is `dx.op.primitiveID`.
+  `ISG1`, `OSG1` and `PSG1` list elements by register and then by the offset of the name, so a factor that declares first leads a link standing before it in its row.
+  EMIT-237's table reaches across patch constants too: every input to every patch constant in a control stage, and every patch constant to every output in an evaluation stage.
+* **EMIT-241** A native route has no `print` of its own: it lowers what LEGAL-70 wrote, so sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
+  `DXIL` states `UAVs at every shader stage` wherever a vertex, geometry or tessellation stage declares a UAV.
+* **EMIT-242** A mesh or task entry point of a native route writes what its text writes, in its target's own operations, so it links against the text route's in either direction.
+  `set_counts` is `OpSetMeshOutputsEXT` or `dx.op.setMeshOutputCounts`.
+  `vertex` and `primitive` store each element at their index, through `storeVertexOutput` and `storePrimitiveOutput` on DXIL and an access chain on SPIR-V.
+  `triangle` and `line` are `dx.op.emitIndices`, a line's third index zero, or a store into `PrimitiveTriangleIndicesEXT` or `PrimitiveLineIndicesEXT`, an array no element holds.
+  Per-primitive elements are `PerPrimitiveEXT` on SPIR-V, and stand in `PSG1` on DXIL, a part it holds only where it writes any.
+  A task stage stores its payload whole in one global, and `dispatch_mesh` ends the stage on both targets: `OpEmitMeshTasksEXT`, or `dx.op.dispatchMesh` and a return.
+  A mesh stage reads the payload through that place, so reading an element of an array copies no array.
+  On SPIR-V the payload is `TaskPayloadWorkgroupEXT` of the struct itself, and a workgroup of more than one invocation has an `OpControlBarrier` ahead of the dispatch, as DXC writes.
+  On DXIL it is a struct of the shape DXC gives it, whatever the route: a vector or a matrix is an array of scalars, a `bool` an `i32`, and each lies at its natural alignment with no 16-byte rule.
+  So `float` then `float4` takes 20 bytes, the size the entry's metadata and `PSV0` both state, and a mesh stage reads it with `getMeshPayload`.
+* **EMIT-243** An inline trace of a native route holds one query, which its target's text would hold, and reads it by the operations that text compiles to.
+  On SPIR-V the query is an `OpVariable` of `Function` at the top of the body, however deep it begins.
+  On DXIL it is one `dx.op.allocateRayQuery` where it begins, with the flags every trace of it states.
+  A read of a query gives a value and goes where nothing uses it, but it neither moves nor merges, since each is valid only in the state the query is in where it stands.
+  A row of a hit's transform is taken from the whole transform, which SPIR-V hands over by column and DXIL by row and column.
+  An `affine3` is a value of three rows, and GPU memory holds one as EMIT-259 writes it.
+  A query of an entry point that states opacity micromaps is EMIT-184's.
+  What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
+* **EMIT-244** A ray-tracing stage of a native route is one entry point of its target's own, so a pipeline may take each stage from either route.
+  A payload, a callable's parameter and a hit's attributes are each one variable of the stage, and a trace or a call copies into a variable of the caller's, one per type, and back.
+  An any hit's decision ends the stage: `OpIgnoreIntersectionKHR` or `OpTerminateRayKHR`, `dx.op.ignoreHit` or `dx.op.acceptHitAndEndSearch`.
+  An intersection stores what it reports, then `OpReportIntersectionKHR` or `dx.op.reportHit`, with hit kind 0.
+  On SPIR-V what a stage reads of its launch, ray and hit is a `BuiltIn`, and on DXIL an operation of each.
+  On DXIL a stage is a library of one export under its own name, its payload and attributes parameters by pointer.
+  A resource there is an external handle a function loads, through `createHandleForLib`.
+  The container holds `SFI0`, `RDAT` and `DXIL`, and `RDAT` states what the module implies, since the validator compares the two.
+  An intersection fused with its any hit is metal's alone (EMIT-139), and `unsupported` here, and so is a closest hit of no payload on DXIL.
+  A hit object and a reordering trace are EMIT-246's.
+* **EMIT-245** A source a host compiles at run time takes the context's options as a package's shader does: what the device has, its float guarantees and its native route.
+  So a generated hit group, a host's callable and a generated kernel lower where the context prefers SGL's binary, and `has` answers for the device.
+* **EMIT-246** A hit object of a native route is the value of its trace and nothing else, so EMIT-225's rule holds of the program and not only of its text.
+  No local, global or member holds one, and no phi, `select`, load, store or composite moves one, which `ir::verify` refuses after every pass.
+  Only `op::hit_object_trace` and `op::trace_reorder_execute` give one; only a read, a regrouping and an invocation take one.
+  A `let` of a trace names that value, and a parameter stands for it as EMIT-225 says.
+  On SPIR-V it is a `Function` variable of `OpTypeHitObjectEXT` at the top of the body, reached by its pointer, and a trace and an invocation hand their payload over in a `RayPayloadKHR` variable.
+  A trace with `reorder` is `OpHitObjectTraceReorderExecuteEXT`, and `maybe_reorder` is `OpReorderThreadWithHintEXT`.
+  On DXIL it is a value of `%dx.types.HitObject`, from `hitObject_TraceRay`, at Shader Model 6.9.
+  A trace with `reorder` is that, `maybeReorderThread` and `hitObject_Invoke`, and `maybe_reorder` regroups a `hitObject_MakeNop`.
+  A regrouping with no hint states an undefined hint of 0 bits, as DXC's does.
+* **EMIT-247** A native route's atomic on a 64-bit integer is its target's own, as an `i32` one is.
+  On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
+  A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.
+  One in workgroup memory states the shader flag for 64-bit atomics on group-shared memory, and one on a buffer needs nothing past 64-bit integers.
+* **EMIT-248** A native route declares LEGAL-69's shadow as one workgroup global `sgl_written` of a `uint` per 32 scalars, and a word of it is that global's element.
+  What reads, marks and clears it is LEGAL-71's statements, which it lowers as any other, so neither writer knows of a prologue.
+* **EMIT-249** DXIL writes each subgroup and quad operation as the operations HLSL's text compiles to.
+  A shuffle by an offset reads `waveReadLaneAt` at the lane it computes from `waveGetLaneIndex`, as EMIT-146's text does.
+  An inclusive sum or product is `wavePrefixOp` and then this invocation's own value folded in, since DXIL's prefix is exclusive alone.
+  A ballot is `waveActiveBallot`'s four words, a quad swap `quadOp` of its axis, and a quad broadcast `quadReadLaneAt`.
+* **EMIT-250** A native route's `atomic[float]` held as a `uint`'s bits is that `uint`'s atomic, bitcast either side, in shared lowering.
+  Its add is the text's loop: a compare-exchange of the bits of the sum, retried with what it read until no other update came between.
+  The first guess is an atomic load where the text reads plainly, since either is only a guess the exchange checks.
+* **EMIT-251** A native route holds a `bool32` as a `uint` of 0 or 1, in memory and as a value alike.
+  `x as bool32` is a `select` of 1 and 0, and `x as bool` is a comparison with 0, so any word but 0 reads as `true`, as the text's does.
+* **EMIT-252** A native route updates an `@atomic` image's texel through a place of its own, the image and the coordinate, with an array's layer as the coordinate's last lane.
+  On SPIR-V it is `OpImageTexelPointer` of the image's variable, sample 0, in `Image` storage, which the atomics take as they take any pointer.
+  On DXIL it is `atomicBinOp` or `atomicCompareExchange` of the image's handle, the coordinate's lanes as its offsets and `undef` past them.
+* **EMIT-253** A native route takes a `sample` or a `gather` offset as the constant CHK-280 makes it.
+  On SPIR-V it is the `ConstOffset` image operand of an `OpConstantComposite`, and on DXIL the immediate offsets of `sample` and `textureGather`, `undef` past its lanes.
+
 ## Lines
 
 * **EMIT-181** Each line of the function body maps to the source line it writes, and to every call it was inlined through, innermost first.
@@ -405,20 +552,30 @@ fn main_ps(p: pixel_input) -> target_ {
   So the target's compiler and debugger name the SGL line themselves, and a run of statements on consecutive lines takes one directive.
   Where the inlined calls change, a comment names them first, `// inlined from shade.sgl:12 > main.sgl:40`, each file by its name alone.
   The file name is a string literal, so a backslash or a quote in it is escaped.
+  A body in a target's own text names its own first line, and keeps its empty lines, so the compiler names the `.sgl` line of an error inside it.
+  After the text, a directive names the statement's line again.
   WGSL has no such directive, and its messages map back through the table (EMIT-181).
+* **EMIT-257** Asked for a native line table, a native route writes each operation's line of EMIT-181 into its binary, and nothing else changes.
+  It is opt-in, `text_request::native_line_table`, since it carries the text of each file a line names.
+  SPIR-V states an `OpString` and an `OpSource` with the text per file, and an `OpLine` before an operation whose line differs from the last in its block.
+  Core SPIR-V has no inlined calls, so an `OpLine` names the innermost line, where the operation stands.
+  The files' ids are the module's last, so every other id is the one it has without the table.
+  DXIL keeps its `DXIL` part byte for byte and writes DXC's `-Zi` form beside it: an `ILDB` part and an `ILDN` part naming `<entry>.pdb`.
+  `ILDB` is the module again, each instruction with a `DILocation`, an inlined statement's in a `DISubprogram` of its file with the chain of `inlinedAt` calls.
+  It holds `dx.source.contents`, so a debugger shows each line without the file, and no variable is described.
+  A function's expression inlines into the statement that calls it, so only a function's own statements keep an inlined line.
 
 ## Diagnostics
 
-* **EMIT-183** Asked for diagnostics, a text writes each `print` into sg's debug buffer as one record, and describes its site to the host.
-  The tree must keep its prints and lower its asserts (LEGAL-64); without diagnostics the driver drops both (LEGAL-63).
-  The buffer is a header of three words, a cursor, a capacity and a dropped count, then 32-bit words.
-  A record is the site's id, its word count, then each value's lanes in order, one word each: a float's bits, an int's, a bool as 0 or 1, and a `half` widened to a float first.
-  It reserves its words with one atomic add on the cursor, writes them where they fit under the capacity, and otherwise adds one to the dropped count.
-  The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
-  It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
-  A text declares it only where it writes a record.
-  WebGPU's vertex stage has no writable storage, vulkan's vertex, geometry and tessellation stages write none without a feature sg does not ask for, and MSL's ray-tracing stages take no buffer.
-  There a print is dropped and the text declares none.
+* **EMIT-183** Asked for diagnostics, a compile writes each `print` into sg's debug window as one record, and describes its site to the host.
+  No target and no route holds this: the tree must keep its prints and lower its asserts (LEGAL-64), LEGAL-70 writes them as statements, and a target writes those like any others.
+  Without diagnostics the driver drops both (LEGAL-63).
+  The window, its record and its address on each target are [the contract with sg](../../reserved-bindings.md).
+  A compile declares the window only where a statement reaches it.
+  A stage the contract says cannot reach it drops its prints and declares none.
+  That is WebGPU's vertex stage, and vulkan's vertex, geometry and tessellation stages without `vertex_pipeline_stores`, which no program names.
+  On metal a ray-tracing pipeline's raygen takes the window and hands it on in `sgl_context`, since every other stage of it is a function the raygen calls.
+  It takes it whether it prints or not, and each stage that prints reads it from there.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
 
 
@@ -456,11 +613,16 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-138** A member whose name is the name of a struct type one of its struct's members has is minted with trailing underscores, on every target ([why](why/emitting.md#emit-138)).
   In HLSL and MSL the member would hide the type from the members after it, so `ray: ray` is written `ray ray_;`.
 * **EMIT-135** A trace's native form is what HLSL and MSL write, and its emulated form what WGSL writes: the legalizer keeps the one its target has ([why](why/emitting.md#emit-135)).
+  A compile with `software_trace` keeps the emulated form on HLSL and MSL too, an MSL entry point taking the pool and the roots at their argument-table slots.
+  An MSL pipeline trace stays native, with the motion tags (EMIT-139) and its ray's time, since Metal's intersector places what moves and its query does not.
   An acceleration member is `RaytracingAccelerationStructure` in HLSL and `instance_acceleration_structure` in MSL, and WGSL declares none: it keeps its slot and takes no binding.
   An entry point whose code reads sg's acceleration pool declares it and the dispatch's roots in sg's reserved group, beside the inline constants:
   `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
   The root of the entry point's k-th acceleration member (CHK-325) is `sg_acceleration_roots[k / 4][k % 4]`.
   So WGSL traces the first 16 acceleration members, and a trace of a later one is `too-many-acceleration-structures`.
+  HLSL's are the same pool and roots, as a `StructuredBuffer<uint4>` and a `cbuffer` holding `sg_acceleration_roots`.
+  dx12 places them at `register(t0, space12)` and `register(b0, space12)`, and vulkan at `[[vk::binding(17, 3)]]` and `[[vk::binding(18, 3)]]`.
+  The member stays declared there, and takes the same 16-member limit.
 * **EMIT-159** HLSL's `RayQuery` takes a trace's flags as its template where they are a constant, each by its `RAY_FLAG_` name, and `RAY_FLAG_NONE` where they are not.
   A local given a constant and never assigned again is that constant, which is how a mixed world's trace hands its flags on.
   The template is ORed with the trace's own flags, so naming them there changes nothing but what a driver may specialize on.
@@ -471,11 +633,79 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   An entry point with such a query declares `SPV_EXT_opacity_micromap`'s capability, which DXC leaves out.
   Either one on a query that needs neither makes DXC take minutes over a large kernel and can make it write invalid SPIR-V.
   `ray_flags.force_omm_2_state` is in a `RayQuery`'s template only there, since only 6.9 names it; elsewhere the template leaves it out, and the trace's flags still carry it.
+  A native route states the same: `SPV_EXT_opacity_micromap`'s capability on SPIR-V, whose traces see micromaps with no flag of their own.
+  On DXIL `dx.op.allocateRayQuery2` with the flag that allows them, at Shader Model 6.9, a library's function row included.
+* **EMIT-260** A hit's `cluster_id` is read only where the device builds a BLAS from clusters, `clustered_geometry`, and is -1 everywhere else.
+  The prelude asks with `has`, so no program names the feature, and an entry point on any other device needs nothing of it.
+  SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.
+  HLSL for vulkan reaches them through inline SPIR-V, a template over both of a `RayQuery`'s parameters and a builtin input, which DXC has no names for.
+  HLSL for dx12 writes Shader Model 6.10's `CandidateClusterID`, `CommittedClusterID` and `ClusterID`, and DXIL refuses it as `unsupported-yet` until then.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
   `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order, and is not known to keep denormals.
-  `hlsl-vulkan` and `wgsl` keep `.fast` alone for now: vulkan's float execution modes wait for the device features they need.
+  `hlsl-vulkan` keeps every level through the same flags: DXC writes `SignedZeroInfNanPreserve` and `NoContraction` on every float operation for `-Gis`, and `DenormPreserve` for `-denorm preserve`.
+  Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
+  `wgsl` keeps `.fast` alone.
   A host may weaken a guarantee on WGSL alone, which compiles at `.fast` with the warning `float-guarantee-weakened`.
+* **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
+  DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
+  WGSL and MSL write `!=`, which is unordered in both.
+* **EMIT-210** HLSL writes an unbounded binding array (CHK-490) as `name[]`, at the register or vulkan binding its slot gives, and the pipeline layout leaves its range open.
+* **EMIT-211** An entry point that needs `unbounded_binding_arrays` is `target-lacks-feature` in WGSL, which has no binding arrays.
+  MSL takes no unsized member in an argument buffer, so an unbounded array's slot is a `constant <name>_table*` to a table its group sizes.
+  The table is its element count, then `entries[1]` its elements are read through, then each element's byte length, which a length reads (EMIT-195).
+* **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
+  A Metal buffer is a pointer, so each argument buffer ends in `uint sgl_lengths[n]`, one per slot, which sg fills with the byte length of each slot's buffer view.
+  MSL reads a buffer's length as its slot's entry, plus the element of a binding array, divided by the element's size, and a `bytes`' as the entry itself.
+  An element of a binding array takes a helper with the index as its parameter, and one per mark, since `NonUniformResourceIndex` must stand inside it.
+* **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so on `hlsl-dx12` and MSL a link's 64-bit scalar crosses as a `uint2` of its words.
+  A two-vector crosses as a `uint4`, each low word first, and either keeps the member's one location.
+  A three- or four-vector crosses as two `uint4`s at its two locations, the second holding its last one or two lanes; a three-vector's last two words are zero.
+  The member is declared as its piece `<name>_0`, and an array of them as one per element, as EMIT-174 declares a link's array.
+  A write splits the value, through `asuint` for a double in HLSL and `as_type` in MSL, and a read joins the words back, so the program never sees them.
+  SPIR-V carries the value itself, so `hlsl-vulkan` writes it as declared, a three- or four-vector at the first of its two locations.
+* **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
+  So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
+  HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.
+* **EMIT-219** On dx12 a double's maths (CHK-458) is the SGL of `core.sgl`, over a double's bits (CHK-517), its arithmetic and `fma` ([why](why/emitting.md#emit-219)).
+  DXIL has no double `sqrt`, rounding or root, and DXC hands a double to its own `sqrt` or `floor` as a float, so neither dx12 route calls a target's.
+  `sqrt` and `inverse_sqrt` start from the float `inverse_sqrt` of the mantissa brought to 1 to 4, take two Newton steps, and `sqrt` corrects by the residual `fma` gives.
+  A rounding clears the fraction's bits, so `trunc`, `floor`, `ceil`, `round` and `fract` are exact there.
+  `sign` and `saturate` are HLSL's own, which take a double.
+* **EMIT-256** A double's maths is one SGL body per function in `core.sgl`, which chooses by `target_api` (CHK-426) what it lowers to ([why](why/emitting.md#emit-256)).
+  dx12 takes EMIT-219's bodies, on both its routes.
+  vulkan takes GLSL.std.450's own on a double, on both its routes: `Trunc`, `Floor`, `Ceil`, `RoundEven`, `Fract`, `Sqrt` and `InverseSqrt`.
+  The native SPIR-V route writes them as instructions, and `hlsl-vulkan` as functions of DXC's inline SPIR-V the text declares, `sgl_spirv_floor` and its siblings, since DXC's own take a float.
+  So the two routes of one API compute alike, and the two APIs need not.
+  The interpreter runs EMIT-219's bodies, except that `sqrt`, `inverse_sqrt` and `smoothstep` take its own answer where the language is `.sgl` (EVAL-108).
+* **EMIT-255** HLSL writes a double's bits (CHK-517) as functions of the text, `sgl_double_bits` over `asuint` and `sgl_double_from_bits` over `asdouble`.
+  `asuint` hands a double's words to two out parameters, which no expression can take.
+  A native route bitcasts: SPIR-V's `OpBitcast` between a double and a `uint2`, and DXIL's `splitDouble` and `makeDouble` (EMIT-196).
+* **EMIT-258** SPIR-V's atomics of workgroup memory state `Workgroup` scope, and every other `Device`.
+  A 64-bit atomic store of workgroup memory is an `OpAtomicExchange`, and a load an `OpAtomicOr` of 0, as DXC writes them.
+  Intel's vulkan driver reads wrong after either plain form: [bug-sgl-intel-vulkan-shared-64-bit-atomic-load-store](../../issues/bug-sgl-intel-vulkan-shared-64-bit-atomic-load-store.md).
+* **EMIT-259** Every target writes an `affine3` in GPU memory as CHK-518's three rows.
+  HLSL declares it `row_major float3x4`, and a buffer of them holds each in a struct of one field: DXC's DXIL drops a `row_major` written in a buffer's template.
+  WGSL's `mat3x4f` and MSL's `float3x4` hold the rows as their own columns.
+  A native route holds it as a matrix of three `float4` columns, one per row, at a stride of 16, which SPIR-V decorates `ColMajor`, as DXC does for HLSL's `row_major float3x4`.
+* **EMIT-254** `fma` is each target's own: HLSL's `fma` of a double and `mad` of a float or a half, and WGSL's and MSL's `fma`.
+  A native route writes DXIL's `dx.op.fma` of a double and `dx.op.fmad` of the others, and SPIR-V's GLSL.std.450 `Fma`, as DXC writes them.
+  Only a double's on DXIL is stated to round once, as HLSL's documentation of `fma` says, and every other may round the product first.
+  `mad` and `dx.op.fmad` are free to fuse or not, and Vulkan's precision table states `Fma` as a multiply followed by an add, so a vulkan double may round twice too.
+  WGSL states `fma` as `e1 * e2 + e3`, and nothing here relies on MSL's rounding once.
+* **EMIT-225** `hlsl-vulkan` writes a hit object (CHK-434) and every reordering (CHK-433) as `SPV_EXT_shader_invocation_reorder`'s instructions, since DXC lowers none of HLSL's to SPIR-V.
+  Each instruction is a function of DXC's inline SPIR-V the text declares ahead of the entry point, and a hit object is `vk::SpirvOpaqueType<5313>`, SPIR-V's `OpTypeHitObjectEXT`.
+  An instruction that hands a payload over takes a variable of the ray-payload storage class, one per payload type, which the call fills before and reads back after.
+  A reordering trace is one `OpHitObjectTraceReorderExecuteEXT`, and `maybe_reorder` is `OpReorderThreadWithHintEXT`.
+  A hit object's `let` declares nothing: SPIR-V forbids loading or storing a hit object, so the `let` names the variable its trace filled.
+  That variable is a `Function` pointer to the type, which is how the instructions take a hit object, and all a module may do with it.
+  A parameter holding one is the same name, since a call is inlined with its arguments standing in, so a hit object handed to a function is no copy.
+  What would be a copy, CHK-516 refuses before any text: DXC would lower it to `OpLoad` and `OpStore`, which `spirv-val` and the validation layer accept and a driver may crash on.
+  `sgl hit object spirv` in slib's tests reads DXC's module word by word to hold this, every path at `-O3` and `-Od`, and every raygen of the repo that reorders.
+* **EMIT-229** A compute stage whose workgroup memory LEGAL-69 shadows declares the shadow `sgl_written`, a `uint` atomic word per 32 scalars, beside that memory.
+  A word of the shadow is `sgl_written[w]`, and the prologue that clears it, or zeroes workgroup memory under `define`, is statements LEGAL-71 wrote.
+  WGSL has none, since WebGPU's workgroup memory starts at zero, the shadow's included.
+  An invocation's index is its `@local_thread_index` where the stage takes one, and a parameter legalize adds where it does not.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.
@@ -486,6 +716,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A payload a stage hands on to a trace or a callable is read and written by that stage, since what the nested shaders write must survive its exit.
   A stage that writes a field reads it too, since a write on some paths keeps the rest, and whatever some stage writes the caller reads, and the reverse.
   A payload type that a pipeline with `.host` groups traces, or that no pipeline of the module traces, states the widest access instead.
+  SGL's own DXIL states the same access in `!dx.dxrPayloadAnnotations`, field for field as DXC writes it for the text.
   An intersection's report is `ReportHit(t, 0, attributes)` where it hits, and a procedural record's shaders take the attributes as a parameter of their own.
 * **EMIT-139** MSL writes a pipeline as a kernel that intersects and then calls through sg's tables ([why](why/emitting.md#emit-139)).
   Every function of the pipeline agrees on the shapes below, since each is compiled apart.
@@ -504,6 +735,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
     A shader that traces or stands in traversal, held by two whose sets' payloads differ, is `ray-data-conflict`, since one text cannot agree with both.
   * Every table, intersection function and intersector carries `world_space_data`, the tag under which Metal hands over the instance's transforms.
     A closest hit's object ray is the world ray through the world-to-object transform.
+  * Every one closes its tags with `sgl_motion`, which a file that traces defines once after `<metal_raytracing>`.
+    A compile with `software_trace` defines it as `, instance_motion, primitive_motion`, and every other compile as nothing.
+    `sgl_motion_time(t)` beside it passes a trace's time to `intersect` under the tags, and nothing where there are none.
 
 ## Subgroups, coherence and image atomics
 
@@ -579,6 +813,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
   A read of a value rebuilds it from its fields, and a write stores each field; a whole struct is stored once into a local, then field by field.
 * **EMIT-114** A struct has one layout, so every binding places it by one rule: in a constant block, in a buffer's element, packed in either, never two of them.
   A struct placed by two is `layout-conflict`.
+  A struct with a target layout (CHK-522) places its fields in another order per compile, and each compile places that order by this one rule.
 * **EMIT-115** `@no_padding` on a struct or on a binding makes a gap before any of its members `padding-forbidden`, and the detail says where.
   The rest of a block's last row follows no member, so it is no gap.
 * **EMIT-116** A layout carries no guarantee without an annotation that asks for one ([why](why/emitting.md#emit-116)).
@@ -637,10 +872,10 @@ The C++ struct a package generates is that layout byte for byte, padding include
   An element of a split array reads its scalars at `k * i + c`, its index evaluated once, and a whole array reads and writes element by element.
   A packed matrix is split column by column, a `mat2` too.
 * **EMIT-171** A packed array of structs or of arrays waits, `unsupported` alike on every target, as does a packed block's array other than EMIT-154's.
-  So does a multi-dimensional array of `mat3`, whose last column DXC's SPIR-V loses (bug-nested-mat3-array-spirv).
   A packed block's array of whole rows is the exception, which EMIT-154 places.
   Any other multi-dimensional array nests the natural stride: each inner array strides by its size rounded up to its alignment, and every target declares it as nested arrays.
   HLSL widens a 3-vector at any depth, `float4 dirs[2][3]`, and only the innermost element reads through its lanes.
+  A `mat3` two or more dimensions deep stands in a `sgl_mat3_cell` of HLSL, one `column_major float4x3 m`, of the same 48 bytes, and is read through `.m` ([why](why/emitting.md#emit-171)).
 * **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
   A read narrows it, `((float3x3)m)`, and a write widens a value through `sgl_widen_mat3`, which the text declares wherever it holds one.
   A struct that stands in memory declares the `float4x3` as its field, so a read of the field narrows wherever the struct is.
@@ -669,7 +904,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
-| `target-lacks-feature` | EMIT-109, EMIT-122 |
+| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206, EMIT-261 |
 
 ## Open
 

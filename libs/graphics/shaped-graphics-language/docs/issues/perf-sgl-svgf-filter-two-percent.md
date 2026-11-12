@@ -10,3 +10,4 @@ refs:
 `sr - SGL against the HLSL it was ported from` times one pass of SVGF's filter, `svgf.sgl`'s `atrous_cs` against the HLSL `svgf_atrous.hlsl` it replaced.
 Three runs on an RTX 5070 Ti gave 1.023x, 1.021x and 1.018x: about 2%, every time, where à-trous and the convolution are even.
 Not looked into yet; comparing the DXIL of the two is the first step.
+On an Arc B580 the filter is 0.995× on dx12 and 0.98× on vulkan (2026-11-06), so the gap needs an RTX to look into.

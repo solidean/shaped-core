@@ -116,11 +116,25 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
         {
             d.path;                               // cc::string — one event per dropped file
         },
-        [](auto const&) {});           // catch-all; SPELL ALL SIX instead and a new event kind fails to compile here
+        [&](sr::gamepad_button_event const& g)
+        {
+            g.gamepad;  g.button;  g.is_down;     // u32, sr::gamepad_button by POSITION (south = A / cross), bool
+        },
+        // gamepad_axis_event {gamepad, axis, value}: sticks -1..1 with up positive, triggers 0..1, NO dead zone
+        // gamepad_connection_event {gamepad, name, is_connected}: pads already plugged in report on the first poll
+        [](auto const&) {});           // catch-all; SPELL ALL NINE instead and a new event kind fails to compile here
 
     e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel/_file_drop too) — for predicates, and loops that `continue`
     e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_*/_file_drop too)
 }
+
+for (auto const& pad : wsys->gamepads())  // polled state, for what a held stick never sends an event for
+{
+    pad.left_stick;  pad.right_stick;     // tg::vec2f, up and right positive, NO dead zone
+    pad.left_trigger;  pad.right_trigger; // float 0..1
+    pad.is_held(sr::gamepad_button::south);
+}
+// gamepads report only while a window of this app has focus; no rumble, and imgui does not navigate with them yet
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
 win->start_text_input();              // begin text_events + IME for this window; stop_text_input() to end

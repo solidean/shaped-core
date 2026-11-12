@@ -1,0 +1,155 @@
+// long, ulong and double: the 64-bit int, uint and float, and their vectors (CHK-450)
+
+require shader_int64, shader_f64, shader_int64_atomics
+
+// a literal converts to a long or a ulong whole, and a suffix of 64 names them (CHK-253, CHK-357)
+test:
+    let big: long = 5'000'000'000
+    big > 4'000'000'000 and big == 5'000'000'000i64
+    let u: ulong = 0x7fff'ffff'ffff'ffff
+    u == 9223372036854775807u64
+    -9223372036854775807i64 - 1i64 < 0i64
+
+@expect(error = "literal-not-representable")
+test:
+    let u: ulong = -1
+    u == 0u64
+
+// the top half of a ulong is a literal too, which no other type holds
+test:
+    let top: ulong = 18'446'744'073'709'551'615
+    top == ~0u64
+    0xffff'ffff'ffff'ffffu64 == top
+    let middle: ulong = 9223372036854775808
+    middle == 1u64 << 63u64
+    (top >> 60u64) == 15u64
+
+fun largest() -> ulong => 18446744073709551615
+
+test largest() == ~0u64
+
+@expect(error = "literal-not-representable")
+test:
+    let n: long = 9223372036854775808
+    n == 0i64
+
+@expect(error = "literal-not-representable")
+test:
+    let n = 9223372036854775808
+    n == 0
+
+@expect(error = "literal-not-representable")
+test 9223372036854775808i64 == 0i64
+
+@expect(error = "unsupported-yet")
+test:
+    let n: ulong = 18446744073709551616
+    n == 0u64
+
+// long and ulong wrap at 64 bits, as int and uint do at 32
+test:
+    let top = 9223372036854775807i64
+    top + 1i64 == -9223372036854775807i64 - 1i64
+    0u64 - 1u64 == ~0u64
+    4294967296i64 * 4294967296i64 == 0i64
+    3'000'000'000i64 * 3i64 == 9'000'000'000i64
+    -7i64 / 2i64 == -3i64 and -7i64 % 3i64 == -1i64
+    abs(-5i64) == 5i64 and min(3u64, 9u64) == 3u64 and clamp(40i64, 0i64, 10i64) == 10i64
+
+// the bits of a long: a shift counts to 63, a long's right shift keeps its sign and a ulong's does not
+test:
+    (1i64 << 40) == 1'099'511'627'776i64
+    (-8i64 >> 1) == -4i64
+    ((~0u64) >> 60) == 15u64
+    (0xff00i64 & 0x0ff0i64) == 0x0f00i64 and (1u64 | 2u64) ^ 3u64 == 0u64
+
+@expect(error = "shift-out-of-range")
+test (1i64 << 64) == 0i64
+
+// a double holds what a float rounds away
+test:
+    // 2^24 + 1 is no float, and is a double
+    let d: double = 16777217.0
+    d - 16777216.0f64 == 1.0f64
+    (d as float as double) == 16777216.0f64
+    (16777217i64 as double) == d
+    let third = 1.0f64 / 3.0f64
+    third * 3.0f64 == 1.0f64
+    abs(-0.0f64) == 0.0f64 and max(1.5f64, -2.5f64) == 1.5f64
+    -(2.5f64) == -2.5f64
+
+// the families convert between their widths, and among themselves at 64 bits (CHK-197)
+test:
+    (-1 as long) == -1i64
+    (0xffff'ffffu as ulong) == 4294967295u64
+    (5'000'000'003i64 as int) == 705'032'707
+    (-1i64 as ulong) == ~0u64
+    (2.75f64 as long) == 2i64 and (-2.75f64 as long) == -2i64
+    (3i64 as double) == 3.0f64
+    (0.1f64 as float) == 0.1
+    // a double past a long saturates in the interpreter, which no target is held to (CHK-197)
+    (1.0e30f64 as long) == 9223372036854775807i64
+
+// the vectors swizzle and compare as the others do
+test:
+    let v = long3(1i64, 2i64, 3i64)
+    v.zyx == long3(3i64, 2i64, 1i64)
+    v * 2i64 == long3(2i64, 4i64, 6i64) and 10i64 - v == long3(9i64, 8i64, 7i64)
+    any(v < long3(2i64)) and not all(v < long3(2i64))
+    select(v > long3(1i64), v, long3(0i64)) == long3(0i64, 2i64, 3i64)
+    let w = double2(0.5f64, -1.0f64)
+    w * 2.0f64 == double2(1.0f64, -2.0f64) and abs(w) == double2(0.5f64, 1.0f64)
+    (w as float2) == float2(0.5, -1.0)
+    (ulong2(1u64, 2u64) << ulong2(4u64, 8u64)) == ulong2(16u64, 512u64)
+
+// a double's `!=` is true for a NaN (EMIT-186)
+test:
+    let zero = 0.0f64
+    let nan = zero / zero
+    nan != nan and not (nan == nan)
+
+// a value of long needs shader_int64 of every entry point that holds one, and a double shader_f64 (CHK-451)
+binding counters:
+    totals: mut buffer[ulong2]
+
+binding scaling:
+    scale: double
+
+@compute(64) fun accumulate(@thread_id id: int3){counters}:
+    let t = counters.totals[id.x]
+    counters.totals[id.x] = t + ulong2(id.x as uint as ulong, 1u64 << 40)
+
+@compute(64) fun scaled(@thread_id id: int3){counters, scaling}:
+    let t = counters.totals[id.x]
+    counters.totals[id.x] = ulong2(((t.x as long as double) * scaling.scale) as long as ulong, t.y)
+
+// an integer divided by zero has no value, as at 32 bits (EVAL-84)
+@expect(error = "constant-without-value")
+test 1i64 / 0i64 == 0i64
+
+// a 64-bit atomic stands in a buffer, behind shader_int64_atomics (CHK-296)
+binding tallies:
+    totals: mut buffer[atomic[ulong]]
+    lows: mut buffer[atomic[long]]
+
+@compute(64) fun tally(@thread_id id: int3){tallies}:
+    let v = (id.x as uint as ulong) << 33
+    let before = tallies.totals[0].add(v)
+    tallies.totals[id.x].max(before + v)
+    tallies.lows[0].min(-(before as long))
+
+// a 64-bit atomic in workgroup memory, under a feature of its own (CHK-510)
+require shader_shared_int64_atomics
+
+@workgroup binding wide_local:
+    total: atomic[ulong]
+    low: atomic[long]
+
+test:
+    wide_local.total.store(1u64 << 40)
+    wide_local.total.add(5u64) == 1'099'511'627'776u64
+    wide_local.total.max(1u64 << 50) == 1'099'511'627'781u64
+    wide_local.total.load() == 1'125'899'906'842'624u64
+    wide_local.low.store(-3i64)
+    wide_local.low.min(-9'000'000'000i64) == -3i64
+    wide_local.low.load() == -9'000'000'000i64

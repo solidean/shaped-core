@@ -362,6 +362,10 @@ public:
     /// Invalidated by the next poll_events, text included — copy anything you need to keep.
     [[nodiscard]] cc::span<input_event const> events() const { return _events; }
 
+    /// Every connected gamepad as of the last poll_events, oldest connection first.
+    /// Invalidated by the next poll_events, like events().
+    [[nodiscard]] cc::span<gamepad_state const> gamepads() const { return _gamepads; }
+
     /// Whether the OS asked the application as a whole to quit — a session logout, the platform's quit gesture.
     /// Latched, like a window's close request.
     /// A quit also raises the close request on every live window, so a single-window app can ignore this.
@@ -423,6 +427,9 @@ private:
 
     /// This frame's events, cleared at the top of every poll_events and handed out by events().
     cc::vector<input_event> _events;
+
+    /// Every connected gamepad, kept up to date by the events poll_events reads.
+    cc::vector<gamepad_state> _gamepads;
 
     /// Modifiers as of the last key event seen, carried across polls.
     /// Mouse events are stamped from this rather than from a live query, so a click reads the state as of its own position in the event stream.

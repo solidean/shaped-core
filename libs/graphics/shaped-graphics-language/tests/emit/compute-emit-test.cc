@@ -1,5 +1,7 @@
 #include "emit-test-support.hh"
 
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
@@ -105,7 +107,7 @@ TEST("sgl emit - a compute entry point that needs legalizing keeps its workgroup
                              "    return x\n"
                              "\n"
                              "@compute(8, 4, 2) fun main(@thread_id id: int3){work}:\n"
-                             "    work.values[id.x] = clamp_to(work.values[id.x], 4.0)\n";
+                             "    work.values[id.x] = clamp_to(work.values[id.x], float(id.z) + 4.0)\n";
     auto const wgsl = text_of(clamped, target::wgsl);
     CHECK(wgsl.contains("@compute @workgroup_size(8, 4, 2)\n"));
     CHECK(wgsl.contains("    let id: vec3i = vec3i(id_in);\n"));
@@ -191,6 +193,29 @@ TEST("sgl emit - @first_instance is the draw's first instance on its own")
     auto const hlsl = text_of(both, target::hlsl_dx12);
     CHECK(hlsl.contains("varyings vs(uint i_in : SV_InstanceID, uint f_in : SV_StartInstanceLocation)\n"));
     CHECK(hlsl.contains("    const int i = int(i_in + f_in);\n"));
+}
+
+TEST("sgl emit - @view_index is the view a draw of several renders, in the vertex and the pixel stage")
+{
+    constexpr auto source = "require view_instancing\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@vertex fun vs(@view_index v: int) -> varyings:\n"
+                            "    return { position = hpos4(v as float, 0.0, 0.0, 1.0) }\n"
+                            "\n"
+                            "@pixel fun ps(p: varyings, @view_index v: int) -> float4:\n"
+                            "    return float4(v as float, 0.0, 0.0, 1.0)\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("varyings vs(uint v_in : SV_ViewID)\n"));
+        CHECK(hlsl.contains("    const int v = int(v_in);\n"));
+    }
+    CHECK(text_of(source, target::msl).contains("vertex varyings vs(uint v_in [[amplification_id]])\n"));
+    // CHK-437: WGSL has no multiview on any device
+    CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::wgsl))
+          == "target-lacks-feature vs needs view_instancing, which WebGPU does not have\n");
 }
 
 TEST("sgl emit - WGSL enables primitive_index before it reads one")
@@ -522,10 +547,51 @@ TEST("sgl emit - a WebGPU trace of the 17th acceleration member is too-many-acce
     };
     CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::wgsl))
               .contains("too-many-acceleration-structures cs traces the acceleration member at position 16, and "
-                        "WebGPU binds 16 roots"));
+                        "sg binds 16 roots"));
     CHECK(text_of(source_tracing(15), target::wgsl).contains("sg_acceleration_roots[15 / 4][15 % 4]"));
     // a native trace names its member, and takes no root
     CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::hlsl_dx12)) == "");
+}
+
+TEST("sgl emit - a software trace writes the emulated form on HLSL, and reads sg's pool (EMIT-135)")
+{
+    constexpr auto source
+        = "require ray_query\n"
+          "\n"
+          "binding scene:\n"
+          "    world: acceleration_structure[.triangles]\n"
+          "    dst: out image_2d[.rgba8_unorm]\n"
+          "\n"
+          "@compute(8, 8) fun cs(@thread_id id: int3){scene}:\n"
+          "    let h = scene.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, "
+          "1.0), time = 0.5))\n"
+          "    scene.dst.store(int2(id.x, id.y), float4(h.t, 0.0, 0.0, 1.0))\n";
+    auto const text_at = [&](target t, bool software)
+    {
+        auto const emitted = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = t, .software_trace = software, .device_features = {}});
+        REQUIRE(emitted.has_value());
+        return cc::string(emitted.value().text);
+    };
+
+    auto const dx12 = text_at(target::hlsl_dx12, true);
+    CHECK(dx12.contains("StructuredBuffer<uint4> sg_acceleration_pool : register(t0, space12);"));
+    CHECK(dx12.contains("cbuffer sg_acceleration_roots_block : register(b0, space12)"));
+    CHECK(dx12.contains("sg_acceleration_roots[0 / 4][0 % 4]"));
+    CHECK(!dx12.contains("RayQuery<"));
+
+    auto const vulkan = text_at(target::hlsl_vulkan, true);
+    CHECK(vulkan.contains("[[vk::binding(17, 3)]] StructuredBuffer<uint4> sg_acceleration_pool;"));
+    CHECK(vulkan.contains("[[vk::binding(18, 3)]] cbuffer sg_acceleration_roots_block"));
+
+    // without it HLSL stays native
+    CHECK(text_at(target::hlsl_dx12, false).contains("RayQuery<"));
+    CHECK(!text_at(target::hlsl_dx12, false).contains("sg_acceleration_pool"));
+    // MSL walks too, so a pipeline's native motion and an inline trace's walk agree; the pool and roots are parameters
+    auto const msl = text_at(target::msl, true);
+    CHECK(msl.contains("const device uint4* sg_acceleration_pool [[buffer(28)]]")).dump("text", msl);
+    CHECK(msl.contains("constant uint4* sg_acceleration_roots [[buffer(29)]]")).dump("text", msl);
+    CHECK(!msl.contains("intersection_query")).dump("text", msl);
 }
 
 TEST("sgl emit - a library calls back into its shader, whose callback reads bindings the library never names")
@@ -542,7 +608,7 @@ TEST("sgl emit - a library calls back into its shader, whose callback reads bind
                                    "fun mine(c: uint){io}:\n"
                                    "    io.scatter[0] = c * io.scale\n"
                                    "\n"
-                                   "@compute(4) fun main(@thread_id id: int3){io}:\n"
+                                   "@compute(64) fun main(@thread_id id: int3){io}:\n"
                                    "    print_char(id.x as uint, mine)\n");
     for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
     {

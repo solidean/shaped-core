@@ -39,7 +39,7 @@ test (framed(float2(2.0, 3.0)) * float3(1.0)).y == 3.0
 @pixel fun shade_ps(p: varyings) -> target:
     let turned = p.turn * float2(1.0, 0.0)
     let lit = p.frame * float3(p.weights[0], p.weights[1], p.weights[2])
-    return { color = float4(lit.x + turned.y, lit.y, (p.ids[0] + p.ids[1]) as float, p.tint.w) }
+    return {color = float4(lit.x + turned.y, lit.y, (p.ids[0] + p.ids[1]) as float, p.tint.w)}
 
 pipeline linked:
     vertex = corners_vs

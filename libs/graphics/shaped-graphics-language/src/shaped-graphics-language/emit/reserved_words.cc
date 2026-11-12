@@ -661,6 +661,7 @@ constexpr cc::string_view k_msl[] = {
     "gradientcube",
     "imageblock",
     "instance_acceleration_structure",
+    "instance_motion",
     "instancing",
     "interpolant",
     "intersection_function_table",
@@ -676,6 +677,7 @@ constexpr cc::string_view k_msl[] = {
     "numeric_limits",
     "patch_control_point",
     "primitive_acceleration_structure",
+    "primitive_motion",
     "r_address",
     "raytracing",
     "render_command",
@@ -1659,10 +1661,32 @@ cc::span<cc::string_view const> sgl::emit::reserved_words(target t)
     return {};
 }
 
+cc::set<cc::string> const& sgl::emit::reserved_set(target t)
+{
+    auto const make = [](cc::span<cc::string_view const> words)
+    {
+        auto set = cc::set<cc::string>();
+        for (auto const word : words)
+            (void)set.insert(word);
+        return set;
+    };
+    static auto const hlsl = make(k_hlsl);
+    static auto const wgsl = make(k_wgsl);
+    static auto const msl = make(k_msl);
+    switch (t)
+    {
+    case target::hlsl_dx12:
+    case target::hlsl_vulkan:
+        return hlsl;
+    case target::wgsl:
+        return wgsl;
+    case target::msl:
+        return msl;
+    }
+    return hlsl;
+}
+
 bool sgl::emit::is_reserved(target t, cc::string_view name)
 {
-    for (auto const word : reserved_words(t))
-        if (word == name)
-            return true;
-    return false;
+    return reserved_set(t).contains(name);
 }

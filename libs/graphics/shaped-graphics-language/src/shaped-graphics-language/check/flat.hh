@@ -125,6 +125,8 @@ struct sgl::check::name_mint
     cc::set<cc::string> const* also_taken = nullptr;
     /// A lower layer's names, such as the prelude's every module-level name, which every program behind it shares.
     cc::set<cc::string> const* also_taken_below = nullptr;
+    /// A target's reserved words, which no name of the program written there may be.
+    cc::set<cc::string> const* also_reserved = nullptr;
     /// For each name `mint` found taken, the suffix it tries first the next time it is asked for that name.
     /// A name once taken stays taken, so the first free suffix only grows, and minting a name a thousand times is linear.
     cc::map<cc::string, i32> next_suffix;
@@ -185,6 +187,8 @@ struct sgl::check::flat_local
     bool is_mut = false;
     /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.
     bool is_undefined = false;
+    /// LEGAL-68: declared with no value, and reading as a zero of its type.
+    bool is_zeroed = false;
 
     bool operator==(flat_local const&) const = default;
 };
@@ -225,6 +229,14 @@ struct sgl::check::flat_int_literal
     bool is_hex = false;
 
     constexpr bool operator==(flat_int_literal const&) const = default;
+};
+
+/// Of `long` or `ulong`, its 64 bits two's complement either way (CHK-450).
+struct sgl::check::flat_wide_literal
+{
+    u64 bits = 0;
+
+    constexpr bool operator==(flat_wide_literal const&) const = default;
 };
 
 /// Of the prelude's type `bool`.
@@ -290,7 +302,7 @@ struct sgl::check::flat_member
 };
 
 /// `values[i]` on a `buffer`: the element a shader loads, and the place it stores to.
-/// `buffer` is what names the resource, which today is always a `flat_binding_member`.
+/// `buffer` is what names the resource: a `flat_binding_member`, or a `flat_element` of a binding array of them.
 /// As a place, `index` is evaluated before the value that is stored.
 struct sgl::check::flat_buffer_element
 {
@@ -298,6 +310,25 @@ struct sgl::check::flat_buffer_element
     flat_expr_id index = flat_expr_id::none;
 
     constexpr bool operator==(flat_buffer_element const&) const = default;
+};
+
+/// `values.length` of a buffer or of `bytes`: how many elements, or bytes, the bound memory holds (CHK-460).
+/// `buffer` is a `flat_binding_member`, or a `flat_element` of a binding array of them.
+struct sgl::check::flat_buffer_length
+{
+    flat_expr_id buffer = flat_expr_id::none;
+
+    constexpr bool operator==(flat_buffer_length const&) const = default;
+};
+
+/// Word `word` of the shadow of workgroup memory (LEGAL-69), an `atomic[uint]` place that only an atomic's call reaches.
+/// Only the last step of legalize writes it, so no pass between sees one, and each target declares the shadow beside
+/// that memory, `written_words` long.
+struct sgl::check::flat_written_word
+{
+    flat_expr_id word = flat_expr_id::none;
+
+    constexpr bool operator==(flat_written_word const&) const = default;
 };
 
 /// `object[index]` on an array value: its element, read or, as a place, assigned.
@@ -394,6 +425,7 @@ struct sgl::check::flat_expr
     cc::variant<flat_invalid,
                 flat_literal,
                 flat_int_literal,
+                flat_wide_literal,
                 flat_bool_literal,
                 flat_enum_value,
                 flat_local_ref,
@@ -401,7 +433,9 @@ struct sgl::check::flat_expr
                 flat_file_sampler,
                 flat_member,
                 flat_buffer_element,
+                flat_buffer_length,
                 flat_element,
+                flat_written_word,
                 flat_construct,
                 flat_call,
                 flat_not,
@@ -667,6 +701,65 @@ struct sgl::check::flat_switch
     constexpr bool operator==(flat_switch const&) const = default;
 };
 
+/// A line of an SGL source: a position in `checked_module::files`, and the line there, counted from 1.
+struct sgl::check::source_line
+{
+    /// -1 for no line at all.
+    i32 file = -1;
+    i32 line = 0;
+
+    constexpr bool operator==(source_line const&) const = default;
+};
+
+/// Where one line of the text came from (EMIT-181).
+struct sgl::check::line_origin
+{
+    /// The line of the text, counted from 1.
+    i32 emitted = 0;
+    /// The innermost source line outside the prelude: a prelude function's body maps to the line that called it.
+    source_line at;
+    /// The calls `at` was inlined through, innermost first, the prelude's left out; empty for the entry point's own body.
+    cc::vector<source_line> inlined_from;
+
+    bool operator==(line_origin const& rhs) const
+    {
+        return emitted == rhs.emitted && at == rhs.at && ast::impl::is_equal(inlined_from, rhs.inlined_from);
+    }
+};
+
+/// One value a debug record holds: its scalar family and its lanes, each lane one 32-bit word.
+struct sgl::check::debug_value
+{
+    /// `float`, `half`, `int`, `uint` or `bool`; an enum is `int`, and `type` names it.
+    cc::string family;
+    i32 lanes = 1;
+    /// The value's type as the program names it: `float3`, `material_kind`.
+    cc::string type;
+
+    bool operator==(debug_value const&) const = default;
+};
+
+/// One print or assert the text writes into sg's debug buffer (EMIT-183).
+/// Its record is `id`, the record's word count, then each value's lanes in order, one word each.
+struct sgl::check::debug_site
+{
+    /// What the record starts with, stable for one source line and message wherever the text is written.
+    u32 id = 0;
+    /// An assert's, which writes only where its condition was false.
+    bool is_assert = false;
+    /// The message around its values, one piece more than `values`; empty for a print of one bare value.
+    cc::vector<cc::string> pieces;
+    cc::vector<debug_value> values;
+    /// Where the print or assert stands; empty without the source files (EMIT-181).
+    line_origin origin;
+
+    bool operator==(debug_site const& rhs) const
+    {
+        return id == rhs.id && is_assert == rhs.is_assert && ast::impl::is_equal(pieces, rhs.pieces)
+            && ast::impl::is_equal(values, rhs.values) && origin == rhs.origin;
+    }
+};
+
 struct sgl::check::flat_stmt
 {
     origin from;
@@ -739,7 +832,10 @@ struct sgl::check::flat_entry_point
     /// The bindings of the function's `{...}` list in the order written, which is what decides the pipeline layout.
     cc::vector<symbol_id> bindings;
     /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
-    i32 workgroup[3] = {1, 1, 1};
+    cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
+    /// CHK-520: the compile chose `workgroup`, so the host dispatches the entry point by threads alone, and a thread
+    /// past the grid sg passes in returns before the body.
+    bool is_auto_workgroup = false;
     /// `function_info::preferred_subgroup_size`, which the host asks the device for and no text but dx12's states.
     i32 preferred_subgroup_size = 0;
     /// What a device needs to run it, `function_info::features`.
@@ -763,6 +859,21 @@ struct sgl::check::flat_entry_point
     /// Set where a metal traversal's fused any hit decided `accept_and_end_search`, which the traversal's result then
     /// says (CHK-345); `none` for every other entry point.
     local_id ends_search = local_id::none;
+    /// LEGAL-69: the 32-bit words of the shadow that says which scalars of workgroup memory were stored, which every
+    /// target declares (EMIT-229) and LEGAL-71 clears before the body; 0 where nothing tests it.
+    i32 written_words = 0;
+    /// LEGAL-69 under `define`: LEGAL-71 zeroes workgroup memory before the body, as WGSL's starts.
+    bool zeroes_workgroup = false;
+    /// LEGAL-69: the bytes of workgroup memory a profile left unshadowed, since its shadow would not fit beside them in
+    /// CHK-294's budget; 0 where every read is tested or nothing asked for it.
+    i32 unshadowed_bytes = 0;
+    /// The local holding the invocation's index in its workgroup, which that prologue strides by; `none` where there is
+    /// none.
+    local_id workgroup_index = local_id::none;
+    /// The entries of `k_reserved_bindings` the tree reaches, which no `bindings` list holds: legalize adds them.
+    cc::vector<symbol_id> reserved;
+    /// EMIT-183: each print legalize wrote as a record.
+    cc::vector<debug_site> debug_sites;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -805,14 +916,17 @@ struct sgl::check::flat_entry_point
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
-            && preferred_subgroup_size == rhs.preferred_subgroup_size && is_equal(stage_inputs, rhs.stage_inputs)
-            && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels) && root == rhs.root
-            && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists)
-            && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
-            && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes)
-            && is_equal(messages, rhs.messages) && body == rhs.body && names == rhs.names
-            && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
+            && is_auto_workgroup == rhs.is_auto_workgroup && preferred_subgroup_size == rhs.preferred_subgroup_size
+            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
+            && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
+            && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
+            && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
+            && is_equal(check_nodes, rhs.check_nodes) && is_equal(messages, rhs.messages) && body == rhs.body
+            && names == rhs.names && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
             && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee
-            && float_raised_by == rhs.float_raised_by;
+            && float_raised_by == rhs.float_raised_by && written_words == rhs.written_words
+            && zeroes_workgroup == rhs.zeroes_workgroup && unshadowed_bytes == rhs.unshadowed_bytes
+            && workgroup_index == rhs.workgroup_index && is_equal(reserved, rhs.reserved)
+            && is_equal(debug_sites, rhs.debug_sites);
     }
 };

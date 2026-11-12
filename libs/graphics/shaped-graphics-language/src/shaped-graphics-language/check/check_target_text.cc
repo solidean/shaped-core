@@ -127,8 +127,12 @@ void checker::register_text_run(symbol_id function, i32 file, cc::span<ast::stmt
         {
             auto const& t = tokens[i];
             auto const between = source.text_of({.offset = previous_end, .length = t.where.offset - previous_end});
-            if (has_content && between.contains('\n'))
-                text.pieces.back() += '\n';
+            if (has_content)
+                for (auto const c : between)
+                    if (c == '\n')
+                        text.pieces.back() += '\n';
+            if (!has_content)
+                text.offset = t.where.offset;
             previous_end = t.where.end();
             if (t.kind == token_kind::string_body)
             {

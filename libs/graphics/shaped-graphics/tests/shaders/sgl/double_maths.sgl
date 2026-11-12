@@ -1,0 +1,14 @@
+// The maths of a double as the GPU runs it (CHK-458), where a device has shader_f64.
+// No target has a double's sqrt or rounding of its own, so each is the HLSL the text declares; WGSL and MSL run none.
+
+require shader_f64
+
+binding double_maths:
+    values: buffer[double]
+    results: mut buffer[double4]
+
+// Two results per value: its roots and roundings, then its other rounding, its fraction and two functions of a vector.
+@compute(64) fun double_functions(@thread_id id: int3){double_maths}:
+    let x = double_maths.values[id.x]
+    double_maths.results[2 * id.x] = double4(sqrt(x), inverse_sqrt(x), floor(x), ceil(x))
+    double_maths.results[2 * id.x + 1] = double4(round(x), fract(x), trunc(x), length(double2(x, 1.0f64)))

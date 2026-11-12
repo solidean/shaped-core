@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -17,6 +18,7 @@
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
+#include <shaped-graphics/backends/dx12/dx12_software_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_swapchain.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
@@ -92,6 +94,14 @@ struct sg::backend::dx12::dx12_config
     /// Best-effort: skipped when the layer isn't installed.
     bool activate_global_debug_layer = false;
 
+    /// SGL shaders are DXIL that SGL writes itself, and an entry point it has no lowering for yet goes through DXC.
+    /// `false` takes the text route, SGL's HLSL through DXC, for every SGL shader of this context.
+    bool native_dxil = true;
+
+    /// SGL's own DXIL carries each operation's `.sgl` line, in a debug module beside the program, for PIX (EMIT-257).
+    /// The program part keeps its bytes, and what DXC compiles is untouched.
+    bool native_line_tables = false;
+
     /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
     ///
     /// Auto-breadcrumbs cost a write per command-list operation, which is why this is off by default and worth
@@ -102,6 +112,13 @@ struct sg::backend::dx12::dx12_config
 
     /// The adapter the device is created on.
     dx12_adapter adapter = dx12_adapter::hardware;
+
+    /// The adapter with this LUID, in place of `adapter`: what an XR runtime names, or another context's `sg::adapter_info::luid`.
+    /// Creation fails where no adapter has it, rather than falling back to another, and where `SC_DX12_ADAPTER` hides the one that does.
+    cc::optional<u64> adapter_luid;
+
+    /// The least feature level the device is created at, for a runtime that demands more than sg's own floor of 11_0.
+    D3D_FEATURE_LEVEL minimum_feature_level = D3D_FEATURE_LEVEL_11_0;
 
     /// What `execution()` reports: `may_block` for a real renderer, `never_block` to run this context under a browser's rules on the dev box.
     ///
@@ -199,12 +216,37 @@ public:
     /// Whether this device supports ray tracing (DXR tier >= 1.0), cached from CheckFeatureSupport at creation.
     /// That is the pipeline and acceleration structures, so a build_blas / build_tlas requires it.
     /// Surfaced through cmd.raytracing.is_supported().
+    [[nodiscard]] sg::impl::software_acceleration_pool* software_pool() override { return &_software_pool; }
+
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
+    {
+        return f == sg::feature::ray_tracing_motion_blur ? sg::feature_implementation::emulated
+                                                         : sg::feature_implementation::native;
+    }
+
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
 
     /// Whether this device supports inline `RayQuery` (DXR tier >= 1.1).
     [[nodiscard]] bool supports_ray_query() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_1; }
 
+    /// Whether this device builds clustered geometry and partitioned TLAS through `ExecuteIndirectRTASOperations`.
+    /// Only the preview Agility SDK, with its experimental features enabled, ever answers true.
+    /// `sg::feature::partitioned_tlas` reports it; clusters wait for libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md.
+    [[nodiscard]] bool supports_clusters_and_ptlas() const { return _clusters_and_ptlas; }
+
+    /// Sizes and allocates a partitioned tlas through the preview runtime; refused on any other.
+    [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
+        sg::partitioned_tlas_description const& desc) override;
+    [[nodiscard]] u64 blas_address_of(sg::blas const& blas) const override;
+    [[nodiscard]] u64 buffer_address_of(sg::raw_buffer const& buffer) const override;
+    /// Sizes and allocates a cluster pool through the preview runtime; refused on any other.
+    [[nodiscard]] cc::result<sg::cluster_pool_handle> try_create_cluster_pool(
+        sg::cluster_pool_description const& desc) override;
+
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+    [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
+    [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
+    [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
 
     /// D3D12 has every stage sg models, and headless present is always available here.
     ///
@@ -234,10 +276,11 @@ public:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
         case sg::feature::depth32_float_stencil8:
-        case sg::feature::device_coherence:       // `globallycoherent` is core HLSL
-        case sg::feature::image_atomics:          // typed UAV atomics on r32 integer formats are required
-        case sg::feature::texture_compression_bc: // BC1-BC7 are required at feature level 11_0
-        case sg::feature::first_instance:         // SV_StartInstanceLocation, of the shader model 6.8 SGL emits
+        case sg::feature::device_coherence:        // `globallycoherent` is core HLSL
+        case sg::feature::image_atomics:           // typed UAV atomics on r32 integer formats are required
+        case sg::feature::texture_compression_bc:  // BC1-BC7 are required at feature level 11_0
+        case sg::feature::first_instance:          // SV_StartInstanceLocation, of the shader model 6.8 SGL emits
+        case sg::feature::indirect_first_instance: // StartInstanceLocation is a plain field of the indirect arguments
         // `IsHelperLane()` needs SM 6.6 and SGL compiles at SM 6.8; `InterlockedCompareExchange` is strong, so no loop asks it
         case sg::feature::helper_lane_query:
             return true;
@@ -252,13 +295,49 @@ public:
             return _native_16bit_shader_ops;
         case sg::feature::subgroups:
             return _wave_ops;
+        case sg::feature::shader_int64:
+            return _int64_shader_ops;
+        case sg::feature::shader_f64:
+            return _double_shader_ops;
+        case sg::feature::shader_int64_atomics:
+        case sg::feature::shader_int64_min_max_atomics:
+            return _int64_atomics;
+        case sg::feature::shader_shared_int64_atomics:
+            return _shared_int64_atomics;
+        case sg::feature::unbounded_binding_arrays:
+            return _unbounded_binding_arrays;
         case sg::feature::vertex_layer_output:
             return _vertex_layer_output;
         case sg::feature::shader_execution_reordering:
             return _shader_execution_reordering;
+        case sg::feature::float_specials:
+            // DXIL keeps them on every device once DXC compiles with -Gis
+            return true;
+        case sg::feature::float_denormals:
+            // -denorm preserve, from Shader Model 6.2, which every shader of this backend compiles at or above
+            return true;
+        case sg::feature::view_instancing:
+            return _view_instancing;
+        case sg::feature::pixel_view_read_workaround:
+            // docs/bugs-external/intel-d3d12-view-instancing-draws-nothing
+            return _view_instancing && metrics.adapter().vendor_id == 0x8086 && !metrics.adapter().is_software;
+        case sg::feature::mesh_shader:
+            return _mesh_shader;
+        case sg::feature::ray_tracing_motion_blur:
+            // DXR has no motion, so a package's SOFTWARE_TRACE walks it in software
+            return supports_ray_query();
+        case sg::feature::vertex_pipeline_stores:
+            // a UAV is visible to every stage of a root signature
+            return true;
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;
+        case sg::feature::partitioned_tlas:
+            // the preview runtime's, which reports it for clusters and partitioned tlas together
+            return _clusters_and_ptlas;
+        case sg::feature::clustered_geometry:
+            // the preview runtime's, reported with the partitioned tlas under one cap
+            return _clusters_and_ptlas;
         }
         return false;
     }
@@ -282,6 +361,20 @@ public:
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
+
+    /// An sg texture over a resource someone else created.
+    ///
+    /// **The resource must be in COMMON whenever a list using it is submitted, and sg leaves it there.**
+    /// sg barriers with enhanced barriers, which D3D12 lets meet a legacy resource state only at COMMON; a resource
+    /// handed out in any other state — an OpenXR D3D12 swapchain image, in RENDER_TARGET — is refused by the debug
+    /// layer at the first submit.
+    /// Such a resource is filled from a native scope with legacy barriers of its own instead.
+    ///
+    /// The texture holds a reference and never destroys the resource, so the owner's own release is what ends it.
+    /// Its views are made in `desc.format`, which must be one the resource's format admits, a typeless one included.
+    /// Errors where the resource's shape is not `desc`'s, or it lacks a flag `desc.usage` needs.
+    [[nodiscard]] cc::result<dx12_texture_handle> wrap_dx12_texture(ID3D12Resource* resource,
+                                                                    sg::texture_description const& desc);
     [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes,
                                                                               sg::memory_heap_contents contents);
     [[nodiscard]] cc::result<dx12_swapchain_handle> create_dx12_swapchain(sg::swapchain_description const& desc);
@@ -324,6 +417,7 @@ public:
                                                                                   sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_staging_binding_group_handle> create_dx12_staging_binding_group(
         dx12_binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope);
 
     // Render-target / depth-stencil descriptors.
@@ -409,6 +503,7 @@ public:
                                                                                 sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
         sg::binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope) override;
 
     // The swapchain uses note_device_removed_if_lost (below) to mark the context lost on a failed Present.
@@ -650,6 +745,11 @@ public:
     // create_dx12_context fills these in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
 
+    /// The native objects this context runs on, for whoever must name them to another API, such as an XR runtime's session.
+    /// Both are owned by the context; a caller that keeps one past it holds its own reference.
+    [[nodiscard]] ID3D12Device* device() const { return _device.Get(); }
+    [[nodiscard]] ID3D12CommandQueue* queue() const { return _queue.Get(); }
+
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
 
@@ -659,8 +759,12 @@ public:
 
     // What ExecuteIndirect reads a `sg::dispatch_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _dispatch_signature;
+    // What ExecuteIndirect reads a `D3D12_DRAW_ARGUMENTS` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _draw_signature;
     // What ExecuteIndirect reads a `sg::draw_indexed_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _draw_indexed_signature;
+    // A mesh draw's, made only where the device has mesh shaders.
+    ComPtr<ID3D12CommandSignature> _draw_mesh_signature;
 
     // Kept for QueryVideoMemoryInfo, which is on IDXGIAdapter3 and has no route through the device.
     // Re-obtaining it per query via EnumAdapterByLuid would work and would cost a COM round trip on a call a dashboard
@@ -676,9 +780,19 @@ public:
     bool _withhold_primitive_index = false;    // dx12_config::withhold_primitive_index
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
+    bool _native_dxil = false;                 // dx12_config::native_dxil
+    bool _native_line_tables = false;          // dx12_config::native_line_tables
+    bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
+    bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
+    bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation
+    bool _shared_int64_atomics = false;        // D3D12_OPTIONS9's AtomicInt64OnGroupSharedSupported, cached at creation
+    bool _unbounded_binding_arrays = false;    // resource binding tier 3, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
+    bool _clusters_and_ptlas = false;          // ClustersAndPTLASSupported, from the preview Agility SDK alone
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
+    bool _view_instancing = false;             // D3D12_OPTIONS3's ViewInstancingTier, cached at creation
+    bool _mesh_shader = false;                 // D3D12_OPTIONS7's MeshShaderTier, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.
@@ -768,6 +882,7 @@ public:
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.
     dx12_descriptor_heap _descriptor_heap;
+    dx12_software_pool _software_pool = {*this};
 
     // Shader-visible SAMPLER heap dynamic samplers are written into — a separate heap, since D3D12 binds one of each type.
     // Same transient/persistent split as _descriptor_heap; initialized in create_dx12_context.

@@ -72,7 +72,12 @@ A diagnostic, an origin and a side table all name a file that way, and the front
 **Modules are planned before anything is declared** (`check/check_modules.cc`).
 The library's files are grouped by their `module` line, the program's `use` lines are followed to the modules it reaches, and a loop among them is reported.
 Each module then has a scope of its own over the prelude's, and `m.name` looks into it through the `use` that named `m`.
-Everything reached is checked in one pass with the program; there are no interfaces yet, which is [the compilation model](spec/incubator/compilation-model.md)'s next step.
+Checked beside the library, everything reached is checked in one pass with the program.
+Behind the driver, the library is a chain of layers instead, one per module (`check::library_chain`, `check::check_next_module`), so each module is checked once per process.
+A module the program does not use is in the chain too, so a pass over every symbol, pipeline or require line asks `checked_module::is_reached_file` before it counts one.
+An edit of a module checks its layer again and moves the ones after it (`check/relocate.cc`); [the compilation model](spec/incubator/compilation-model.md) has the rules.
+**A new list or a new raw position in a record of the check pass is one the relocation must know**: an id names a table by its type, and an integer `relocator` reads by hand.
+The test "a link relocated past an edit of a module" holds every relocated link to a fresh check's bytes, and `check::layer_difference` names the field where one goes wrong.
 
 **The library's prelude is checked once per process.**
 `sgl::checked_prelude()` is `check::check_prelude` over `parsed_prelude()`: the checker's whole state after the prelude, behind an empty program file.
@@ -80,6 +85,13 @@ Every driver continues from a copy of it with `check::check(checked, program)`, 
 A prelude that reports anything is never kept, and a custom prelude, or a source that stands in for a prelude file, takes the whole pass.
 It stays one pass because nothing the prelude checks depends on the program: a lookup from a prelude file, operators included, sees the prelude alone.
 `tests/check/checked-prelude-test.cc` compares the two paths over the corpus, the samples and sg's shaders.
+
+**A checked layer can be written as bytes and read back** (`check/artifact.hh`), the prelude's and each set of modules' alike.
+No process keeps one for another: a compile reads nothing but its arguments, so it does no I/O and stays synchronous.
+`save_artifact` writes the checker's state after the prelude as bytes, and `load_artifact` makes that state again, a copy rather than a check.
+One walk does both, and it walks each struct by its fields (`check/impl/fields.hh`), so a field added to the checker's state is in every artifact with nothing listed.
+Such a struct is an aggregate with no C array field, and one the walk cannot take fails to compile there.
+The same test file runs every program behind the layer read back and requires the very checked module, ids included.
 
 **A diagnostic judged of an inlined body belongs to the entry points it was judged of** (CHK-402).
 The flattener and the uniformity pass judge each entry point's flat tree, so their diagnostics carry `located_diagnostic::entry_points`, and identical ones merge into one that names them all.
@@ -177,10 +189,11 @@ The registry has no signature language of its own: `registry::finalize` parses t
 A family of overloads is a C++ loop that formats one signature per type, unless SGL's generics can say it once, in `prelude/core.sgl`.
 `builtins::default_registry()` is the one cached value in the library: it is immutable, and building it parses the whole prelude.
 
-**The prelude is three files.**
-`prelude/builtins.sgl` is generated from the registry and committed, and `prelude/core.sgl` and `prelude/raytracing.sgl` are hand-written SGL.
+**The prelude is four files.**
+`prelude/builtins.sgl` is generated from the registry and committed, and `prelude/core.sgl`, `prelude/raytracing.sgl` and `prelude/tessellation.sgl` are hand-written SGL.
 `raytracing.sgl` holds the trace, its vocabulary, and the software traversal webgpu runs ([spec/raytracing.md](spec/raytracing.md)).
-The compiler never opens the committed file: it generates the same text in memory, and the hand-written two are embedded when CMake configures.
+`tessellation.sgl` holds D3D's fixed-function tessellator, for a device without one (CHK-527); a test reaches its `@internal` functions by appending to the file itself.
+The compiler never opens the committed file: it generates the same text in memory, and the hand-written three are embedded when CMake configures.
 The two texts are byte-identical, which is why a diagnostic's line and column are right in the committed file, and why `*.sgl` is `eol=lf` in `.gitattributes`.
 A library test compares them as well, so a plain test run catches drift without the tool.
 The `sgl-prelude` step of `dev.py check` refuses a generated file that differs from the registry, and `--fix` regenerates it.
@@ -202,6 +215,33 @@ The size and alignment the layout rules place a value by, and each target's own,
 * **The `msl` text compiles**, through `shaped-shader-compiler-msl` and slib's metal edge.
 
 [semantics/emitting.md](spec/semantics/emitting.md) has the rules.
+
+## The native layer
+
+`ir/` is one entry point below the flat tree, which a binary target writes out with no compiler behind it: `ir::lower` fills an `ir::program`, and `ir::construct_ssa` promotes its locals.
+`ir::state_constant_tables` then makes a local SSA left in memory a `storage::table` where it is a constant written once: an initialized `Private` variable on SPIR-V, an internal constant on DXIL.
+`ir/pipeline.hh` is each target's whole way, one plain function per target, `ir::compile_spirv` and `ir::compile_dxil`; a pass joins a route there.
+A stage's edge is `program::stage_elements`, filled by `ir/lower_stage.cc` from the plan, which `op::stage_load` and `op::stage_store` reach; `ir/dxil/signature.hh` places it in DXIL's rows.
+Every stage but the ray-tracing ones lowers: a vertex or pixel entry reads its edge ahead of its body, and each `return` stores its outputs.
+A geometry or tessellation entry reads an array parameter where the body indexes it, and a control stage's body is its patch-constant function, beside a pass-through each writer generates (EMIT-240).
+A mesh stage stores its elements at the index `vertex` and `primitive` name, and a task stage's payload is one global, which a mesh stage reads through rather than copies (EMIT-242).
+A `discard` is an operation with an effect and no terminator, so a pass keeps it in its branch and the path goes on as a helper.
+A binding array is one global, and an `access_chain` picks the element, so DXIL makes that element's handle where the chain stands.
+`ir::write_spirv` ends the first, whose writer stands in `ir/spirv/`, and `ir::write_dxil` the second, whose backend stands in `ir/dxil/`.
+The optimizing passes stand in `ir/`, on values as they are, so each keeps every operation's statement and guarantee: `ir/passes.hh`, with `ir::simplify` beside it.
+`ir::simplify` and `ir::flatten_branches` each take a `control_flow`, and keep structured control flow under `structured`.
+There a selection `simplify` decides branches to one side and leaves the other unreachable, as SPIR-V allows, and `flatten_branches` folds only a selection whose arms head nothing.
+SPIR-V's route runs both so, and `ir::regroup_lanes`, which gathers the phis SSA made per lane back into one phi of the vector.
+Below them the DXIL module sweeps only what exists once a value is its lanes: `share_common_values`, `merge_buffer_loads` and `remove_unused` of `llvm_passes.cc`.
+[native-parity.md](native-parity.md) is how both routes measure against DXC's, and what is left between them.
+It reads the same `plan` a text target does, so it decides no name and no address, and it hangs off `emit_entry_point` rather than being a target of its own.
+A program is flat tables of small ids, an operation being 24 bytes, because this path exists to be fast.
+`ir::verify` says what every program must hold, and a compile runs it after lowering and after each pass wherever assertions are on.
+Nothing else stands between a pass's mistake and a driver, since no validator runs on a shipped compile.
+A query is a value of `type_kind::ray_query` that no store or phi moves, and `ir/lower_query.cc` lowers every step of it; `dxil/impl/writer_query.cc` is DXIL's half.
+A ray-tracing stage's edge is `ir/lower_ray.cc`, and `dxil/impl/writer_ray.cc` is what a DXIL library adds: its function's parameters, its roots and its operations.
+What has no lowering yet is one named gap, never a guess, and [epic-sgl-native-ir-targets](issues/epic-sgl-native-ir-targets.md) has the design and the numbers.
+A builtin reaches it by its record's name rather than by a spelling of its own: `lower_call.cc`'s table maps a name's stem to what it does, once per process.
 
 ## The tool
 

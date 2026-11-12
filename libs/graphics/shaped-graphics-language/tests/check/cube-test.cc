@@ -1,12 +1,14 @@
 #include "check-test-support.hh"
 
+#include <nexus/source_root.hh>
+
 using namespace sgl_test;
 
 namespace
 {
 cc::string read_cube()
 {
-    return read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl");
+    return read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl");
 }
 } // namespace
 
@@ -88,7 +90,7 @@ TEST("sgl check - the pass is total: every truncation of the cube checks, settle
             all_settled = all_settled
                        && (s.state == sgl::check::symbol_state::checked || s.state == sgl::check::symbol_state::failed);
         CHECK(all_settled);
-        CHECK(m.files.size() == 4);
+        CHECK(m.files.size() == 5);
         CHECK(checked.tables().type_of.size() == checked.user_ast.exprs.size());
         CHECK(m.entry_points.size() <= 2);
         // the dumps walk every id the module holds

@@ -47,6 +47,7 @@ inline void color_targets_write_mask_b(sg::raster_pipeline_description& d, int t
 inline void color_targets_write_mask_a(sg::raster_pipeline_description& d, int target, bool v) { d.color_targets[target].write_mask.set(sg::color_channel::a, v); }
 inline void depth_stencil_format(sg::raster_pipeline_description& d, sg::pixel_format v) { d.depth_stencil_format = v; }
 inline void sample_count(sg::raster_pipeline_description& d, int v) { d.sample_count = decltype(d.sample_count)(v); }
+inline void view_count(sg::raster_pipeline_description& d, int v) { d.view_count = decltype(d.view_count)(v); }
 /// `blend = .none`: the target does not blend.
 inline void color_targets_blend_none(sg::raster_pipeline_description& d, int target) { d.color_targets[target].blend = {}; }
 
@@ -220,6 +221,7 @@ inline constexpr field all[] = {
     {"color_targets.*.write_mask.a", field_kind::boolean, {}, [](sg::raster_pipeline_description& d, int target, field_value v) { color_targets_write_mask_a(d, target, v.integer != 0); }},
     {"depth_stencil_format", field_kind::enum_case, cases_pixel_format, [](sg::raster_pipeline_description& d, int, field_value v) { depth_stencil_format(d, sg::pixel_format(v.integer)); }},
     {"sample_count", field_kind::integer, {}, [](sg::raster_pipeline_description& d, int, field_value v) { sample_count(d, int(v.integer)); }},
+    {"view_count", field_kind::integer, {}, [](sg::raster_pipeline_description& d, int, field_value v) { view_count(d, int(v.integer)); }},
     {"color_targets.*.blend", field_kind::none, {}, [](sg::raster_pipeline_description& d, int target, field_value) { color_targets_blend_none(d, target); }},
 };
 } // namespace slib::impl::fields

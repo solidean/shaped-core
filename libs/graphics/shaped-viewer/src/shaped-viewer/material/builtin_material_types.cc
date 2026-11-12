@@ -116,7 +116,8 @@ surface.emission_luminance = 1.0
 surface.emission_color = color
 )sgl";
 
-[[nodiscard]] material_type make_openpbr()
+/// OpenPBR's signature, which `openpbr` and `openpbr_relief` share.
+[[nodiscard]] cc::vector<material_signature_entry> openpbr_signature()
 {
     // The defaults are the specification's own, so a material binding nothing is OpenPBR's default surface.
     auto signature = cc::vector<material_signature_entry>();
@@ -201,9 +202,13 @@ surface.emission_color = color
     // fall back to the geometric frame rather than trusting the identity.
     signature.push_back(material_signature_entry::of_rotation("tangent_frame", tg::quat_f::make_identity()));
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
+    return signature;
+}
 
+[[nodiscard]] material_type make_openpbr()
+{
     return material_type::create({.name = cc::string(builtin_material::openpbr),
-                                  .signature = cc::move(signature),
+                                  .signature = openpbr_signature(),
                                   .shader = cc::string(openpbr_shader),
                                   .opacity_attribute = "opacity",
                                   .opacity_cutoff_attribute = "alpha_cutoff",
@@ -217,6 +222,41 @@ surface.emission_color = color
                                   .transmission_attribute = "transmission_weight",
                                   .thin_walled_attribute = "thin_walled",
                                   .tangent_frame_attribute = "tangent_frame"});
+}
+
+// OpenPBR for a tileable material whose relief is finer than the scene's geometry.
+// Its occlusion is that relief's own, which no trace can find, so the tracer applies it as a visibility per direction.
+// The plain `openpbr` type leaves occlusion to the raster path, since an imported asset's is baked from geometry the tracer traces.
+[[nodiscard]] material_type make_openpbr_relief()
+{
+    // The relief's height in meters, and the band it fills: the face stands at the top, the relief is carved to the bottom.
+    auto signature = openpbr_signature();
+    signature.push_back(material_signature_entry::of("height", 0.0f));
+    signature.push_back(material_signature_entry::of("height_top", 0.0f));
+    signature.push_back(material_signature_entry::of("height_bottom", 0.0f));
+    // The horizon its relief rises to in 8 directions of the tangent frame, as sines; 0 is open, and casts no shadow.
+    signature.push_back(material_signature_entry::of("horizon_lo", tg::vec4f(0, 0, 0, 0)));
+    signature.push_back(material_signature_entry::of("horizon_hi", tg::vec4f(0, 0, 0, 0)));
+    return material_type::create(
+        {.name = cc::string(builtin_material::openpbr_relief),
+         .signature = cc::move(signature),
+         .shader = cc::string(openpbr_shader) + "surface.micro_occlusion = saturate(occlusion)\n"
+                 + "surface.horizon_lo = saturate(horizon_lo)\n" + "surface.horizon_hi = saturate(horizon_hi)\n",
+         .height_attribute = "height",
+         .height_top_attribute = "height_top",
+         .height_bottom_attribute = "height_bottom",
+         .opacity_attribute = "opacity",
+         .opacity_cutoff_attribute = "alpha_cutoff",
+         .occlusion_attribute = "occlusion",
+         .emission_color_attribute = "emission_color",
+         .emission_scale_attribute = "emission_luminance",
+         .base_color_attribute = "base_color",
+         .roughness_attribute = "specular_roughness",
+         .metalness_attribute = "base_metalness",
+         .specular_weight_attribute = "specular_weight",
+         .transmission_attribute = "transmission_weight",
+         .thin_walled_attribute = "thin_walled",
+         .tangent_frame_attribute = "tangent_frame"});
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -262,6 +302,7 @@ surface.emission_color = color
 void register_builtin_material_types(material_library& lib)
 {
     lib.register_type(make_openpbr());
+    lib.register_type(make_openpbr_relief());
     lib.register_type(make_pbr());
     lib.register_type(make_unlit());
 }

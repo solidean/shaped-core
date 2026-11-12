@@ -325,9 +325,11 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
             s.failed = true;
             return nullptr;
         }
-        s.shader
-            = lib.value()->compile_source(source, sg::shader_stage::fragment, stage_entry_of(shading), format.value(),
-                                          {.language = slib::shader_language::sgl, .label = p->label});
+        auto context_options = cc::vector<slib::shader_option>();
+        slib::add_context_options(context_options, ctx);
+        s.shader = lib.value()->compile_source(
+            source, sg::shader_stage::fragment, stage_entry_of(shading), format.value(),
+            {.language = slib::shader_language::sgl, .label = p->label, .options = context_options});
         (void)ctx.backlog.start(s.shader);
         return nullptr;
     }

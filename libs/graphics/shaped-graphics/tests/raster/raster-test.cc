@@ -17,6 +17,13 @@ namespace shaders = sg::test::sgl_shaders;
 
 namespace
 {
+/// Workaround: this call inside a coroutine crashes MSVC 14.44's arm64-hosted compiler (C1001).
+[[nodiscard]] auto small_color_target(sg::context& ctx)
+{
+    return ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba8_unorm, .width = 4, .height = 4, .usage = sg::texture_usage::render_target});
+}
+
 /// Why building `desc` failed, or empty when it built.
 cc::shared_async<cc::string> refusal_of(sg::context& ctx, sg::raster_pipeline_description desc)
 {
@@ -330,8 +337,7 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a renderi
     });
     CHECK(pipeline->target_set() == "sg::test::sgl_shaders::quads::overlay");
 
-    auto const image = ctx->persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba8_unorm, .width = 4, .height = 4, .usage = sg::texture_usage::render_target});
+    auto const image = small_color_target(*ctx);
 
     auto cmd = ctx->create_command_list();
     {

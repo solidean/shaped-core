@@ -1,0 +1,164 @@
+// The geometry and tessellation stages, each built three ways, which the mixed-route test links across routes.
+// The links walk the packing rules, the control points cross as their pieces, and the patch constants mix links with factors.
+require geometry_shader
+require tessellation_shader
+
+struct primitive_link:
+    @position position: hpos4
+    near: float3
+    // shares `near`'s row
+    tail: float
+    @interpolate(.linear) screen: float2
+    @interpolate(.flat) id: int
+
+struct control_link:
+    place: float2
+    weight: float
+    @interpolate(.flat) id: int
+    // crosses as its columns
+    frame: mat2
+
+@pixel struct colors:
+    first: float4
+    second: float4
+
+@pixel fun primitive_ps(l: primitive_link) -> colors:
+    return {
+        first = float4(l.near.x, l.near.y, l.near.z, l.tail)
+        second = float4(l.screen.x, l.screen.y, l.id as float, 1.0)
+    }
+
+// The target's whole area, from no vertex buffer.
+@vertex fun corner_vs(@vertex_index v: int, @instance_index i: int) -> primitive_link:
+    let x = ((v & 1) as float) * 4.0 - 1.0
+    let y = ((v >> 1) as float) * 4.0 - 1.0
+    return {
+        position = hpos4(x, y, 0.5, 1.0)
+        near = float3(x, y, x * y)
+        tail = x - y
+        screen = float2(x * 0.5, y * 0.25)
+        id = 3 + v + i
+    }
+
+// A square's corners counter-clockwise from the bottom left, inside the target, as a patch's control points.
+@vertex fun point_vs(@vertex_index v: int) -> control_link:
+    let x = (((v + 1) >> 1) & 1) as float
+    let y = ((v >> 1) & 1) as float
+    return {
+        place = float2(x * 1.5 - 0.75, y * 1.5 - 0.75)
+        weight = 2.0 + (v as float)
+        id = 11 + v
+        frame = mat2(float2(x, 1.0), float2(y, 2.0))
+    }
+
+// An index no constant folds, and the whole array read as a value.
+@geometry(max_vertices = 3)
+fun turned_gs(tri: primitive_link[3], @primitive_id primitive: int, stream: mut triangle_stream[primitive_link]):
+    let all = tri
+    for i in 0 ..< 3:
+        let next = (i + 1) % 3
+        stream.emit({
+            position = tri[i].position
+            near = all[next].near
+            tail = tri[i].tail + 1.0
+            screen = tri[next].screen
+            id = tri[i].id + primitive * 2
+        })
+    stream.end_strip()
+
+// Each triangle's outline, whose stream is a line.
+@geometry(max_vertices = 4)
+fun outline_gs(tri: primitive_link[3], stream: mut line_stream[primitive_link]):
+    for i in 0 ..< 4:
+        stream.emit(tri[i % 3])
+    stream.end_strip()
+
+// A point grown into a square of two triangles, which an array of one holds.
+@geometry(max_vertices = 4)
+fun grown_gs(dot: primitive_link[1], stream: mut triangle_stream[primitive_link]):
+    let p = dot[0].position
+    for i in 0 ..< 4:
+        let x = (i & 1) as float
+        let y = (i >> 1) as float
+        stream.emit({
+            position = hpos4(x - 0.5, y - 0.5, p.z, p.w)
+            near = float3(x, y, 0.5)
+            tail = dot[0].tail
+            screen = float2(y, x)
+            id = dot[0].id
+        })
+    stream.end_strip()
+
+struct triangle_patch:
+    @edge_factors edges: float[3]
+    @inside_factors inside: float
+    scale: float
+    lift: float2
+
+@tessellation_control(partitioning = .fractional_odd, winding = .counter_clockwise)
+fun triangle_tc(patch: control_link[3], @primitive_id primitive: int) -> triangle_patch:
+    return {
+        edges = [patch[0].weight, 2.0, patch[1].weight]
+        inside = patch[2].weight
+        scale = (primitive as float) + 0.5
+        lift = patch[1].frame * patch[2].place
+    }
+
+@tessellation_evaluation
+fun triangle_te(patch: control_link[3], f: triangle_patch, @domain_location uvw: float3) -> primitive_link:
+    let mut p = float2(0.0, 0.0)
+    for i in 0 ..< 3:
+        p += patch[i].place * uvw[i]
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        near = uvw
+        tail = f.edges[1] + f.inside + f.scale + patch[0].weight
+        screen = f.lift + patch[1].frame * p
+        id = patch[2].id
+    }
+
+struct quad_patch:
+    // ahead of the factors, which take their rows all the same
+    tint: float
+    @edge_factors edges: float[4]
+    @inside_factors inside: float[2]
+
+@tessellation_control(partitioning = .integer, winding = .clockwise)
+fun quad_tc(patch: control_link[4]) -> quad_patch:
+    return {
+        tint = patch[3].weight
+        edges = [2.0, 3.0, 4.0, 5.0]
+        inside = [patch[0].weight, patch[1].weight]
+    }
+
+@tessellation_evaluation
+fun quad_te(patch: control_link[4], f: quad_patch, @domain_location uv: float2, @primitive_id primitive: int) -> primitive_link:
+    let bottom = patch[0].place + (patch[1].place - patch[0].place) * uv.x
+    let top = patch[3].place + (patch[2].place - patch[3].place) * uv.x
+    let p = bottom + (top - bottom) * uv.y
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        near = float3(uv.x, uv.y, f.tint + patch[2].weight)
+        tail = f.edges[3] + f.inside[1]
+        screen = patch[1].frame * uv
+        id = patch[0].id + primitive
+    }
+
+struct line_patch:
+    @edge_factors edges: float[2]
+
+@tessellation_control(partitioning = .integer, winding = .clockwise)
+fun line_tc(patch: control_link[2]) -> line_patch:
+    return {edges = [3.0, patch[1].weight]}
+
+@tessellation_evaluation
+fun line_te(patch: control_link[2], f: line_patch, @domain_location uv: float2) -> primitive_link:
+    let along = patch[0].place + (patch[1].place - patch[0].place) * uv.x
+    let p = float2(along.x, along.y + uv.y * 0.5)
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        near = float3(uv.x, uv.y, f.edges[0])
+        tail = f.edges[1] + patch[0].weight
+        screen = patch[0].frame * patch[0].place
+        id = patch[1].id
+    }

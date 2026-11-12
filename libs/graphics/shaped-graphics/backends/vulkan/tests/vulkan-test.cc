@@ -1,6 +1,7 @@
 #include "vulkan-test-common.hh"
 
 #include <clean-core/common/utility.hh> // CC_DEFER
+#include <clean-core/platform/environment.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -93,6 +94,60 @@ TEST("sg vulkan - software-preferred context", exclusive("vulkan-device"))
 
     CHECK(ctx->backend() == sg::backend_kind::vulkan);
     exercise_context(*ctx);
+}
+
+// SC_GPU is process-wide, so this runs beside nothing; on a machine with two GPUs it reaches both.
+TEST("sg vulkan - SC_GPU puts a context on the vendor or the name it gives, and fails where none matches", exclusive())
+{
+    struct vendor
+    {
+        char const* name;
+        u32 id;
+    };
+    auto found = 0;
+    for (auto const v : {vendor{.name = "intel", .id = 0x8086}, vendor{.name = "amd", .id = 0x1002},
+                         vendor{.name = "nvidia", .id = 0x10DE}})
+    {
+        auto const pin = cc::scoped_environment_variable("SC_GPU", v.name);
+        auto const ctx = sg::create_vulkan_context({.enable_validation_layers = true});
+        if (ctx.has_error())
+        {
+            CHECK(ctx.error().to_string().contains("SC_GPU"));
+            continue;
+        }
+        ++found;
+        CHECK(ctx.value()->metrics.adapter().vendor_id == v.id);
+
+        // The device's own name reaches it as well.
+        auto const name = ctx.value()->metrics.adapter().name;
+        auto const by_name = cc::scoped_environment_variable("SC_GPU", name);
+        auto const again = sg::create_vulkan_context({.enable_validation_layers = true});
+        REQUIRE(again.has_value());
+        CHECK(again.value()->metrics.adapter().name == name);
+    }
+    if (found == 0)
+        SKIP("no Intel, AMD or NVIDIA vulkan device");
+
+    auto const pin = cc::scoped_environment_variable("SC_GPU", "no such gpu");
+    auto const missing = sg::create_vulkan_context({.enable_validation_layers = true});
+    REQUIRE(missing.has_error());
+    CHECK(missing.error().to_string().contains("SC_GPU='no such gpu'"));
+}
+
+// AMD's DMA family copies only whole 16×16×8 blocks, and an upload names arbitrary rows.
+INVOCABLE_TEST("sg vulkan - async transfers run on a family that copies any texel region",
+               (vulkan::vulkan_context_handle const& handle))
+{
+    auto& c = *handle;
+    auto count = u32(0);
+    vkGetPhysicalDeviceQueueFamilyProperties(c.physical_device(), &count, nullptr);
+    auto families = cc::vector<VkQueueFamilyProperties>::create_uninitialized(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(c.physical_device(), &count, families.data());
+    REQUIRE(c.transfer_queue_family() < count);
+    auto const g = families[c.transfer_queue_family()].minImageTransferGranularity;
+    CHECK(g.width == 1);
+    CHECK(g.height == 1);
+    CHECK(g.depth == 1);
 }
 
 ASYNC_INVOCABLE_TEST("sg vulkan - epoch advance and retire", (vulkan::vulkan_context_handle const& handle))

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import argparse
 import platform
+import subprocess
 import sys
 from pathlib import Path
 
 from tools import dev
 from tools.dev import Watch, console
+from tools.dev.lib.pipeline import build_server
 from tools.dev.lib.pipeline.eligibility import nexus_filter, query_listing
 from tools.dev.lib.toolchain import jsruntime as jsr
 
@@ -40,6 +42,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--fix", action="store_true",
                    help="Let fixable checks apply unambiguous fixes (e.g. clang-format -i)")
     a.change_scope(p, default_all=False)
+    a.server(p)
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")
@@ -186,11 +189,16 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ("tools/dev/roots-self-test.py", [], (core, f"{dev_lib}/quality/**")),
             ("tools/dev/jsruntime-self-test.py", [], (core, f"{dev_lib}/toolchain/**", "tools/dev/js/*.json")),
             ("tools/dev/ui-self-test.py", [], (core,)),
-            ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py")),
+            ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py", f"{dev_lib}/pipeline/sites.py")),
             ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
             ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
+            ("tools/dev/build-server-self-test.py", [], (core, f"{dev_lib}/pipeline/build_server.py", f"{dev_lib}/pipeline/build.py",
+                                                        f"{dev_lib}/pipeline/test.py", "tools/dev/cmd/ship.py")),
             ("tools/dev/memory-guard-self-test.py", [], (core,)),
             ("tools/dev/stall-report-self-test.py", [], (core,)),
+            ("tools/dev/monado-self-test.py", [], (core, f"{dev_lib}/toolchain/monado.py", "tools/monado.version")),
+            ("tools/dev/android-sdk-self-test.py", [], (core, f"{dev_lib}/toolchain/android_sdk.py", "tools/dev/cmd/install_android_sdk.py",
+                                                        "tools/android-sdk.version")),
             ("extern/manifest-self-test.py", [], ("extern/**",)),
             ("libs/base/clean-simd/tools/check-link-map.py", ["--self-test"], ("libs/base/clean-simd/tools/**",)),
         )
@@ -259,6 +267,48 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
 
         return dev.report.summarize_tests(records, presets, ctx.root)
 
+    def check_ccrec_reader(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The `.ccrec` format exists twice -- the C++ writer and loader, and clean-core's Python reader -- and this
+        # round trip is what keeps the two agreeing.
+        # The C++ half records a fixture and writes what its loader reads back; the Python half must read the same.
+        # clean-core-test is declared in `builds`, so the runner built it ahead.
+        # Not fixable and not scopable, so fix and scope are ignored.
+        import os
+        import tempfile
+
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        with tempfile.TemporaryDirectory(prefix="ccrec-reader-") as tmp:
+            # Never through the build server: a stored pass would leave the fixture this gate reads next unwritten.
+            records = dev.test(
+                presets, ["clean-core-test"], root=ctx.root,
+                test_name="the Python reader's fixture round-trips through the C++ loader",
+                env={**os.environ, "CC_REC_READER_FIXTURE_DIR": tmp},
+                timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+            )
+
+            # Selected by name, so zero cases means renamed or removed rather than passed, exactly as in shader-grammar.
+            ran = sum(r["junit"]["tests"] for r in records if r.get("junit"))
+            if ran == 0:
+                dev.ui.write_line(console.red(
+                    "ccrec-reader: the fixture test did not run -- this gate selects it by name, so zero cases "
+                    "means it was renamed or removed, not that it passed"))
+                return False
+            if not dev.report.summarize_tests(records, presets, ctx.root):
+                return False
+
+            runner = ctx.root / "libs" / "base" / "clean-core" / "tools" / "ccrec-self-test.py"
+            result = dev.run_step(
+                ["uv", "run", str(runner), "--fixture-dir", tmp],
+                step_type="lint", name="ccrec-self-test",
+                build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            if not result.ok and not mirror:
+                for log in (result.stdout_log, result.stderr_log):
+                    text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                    if text:
+                        dev.ui.write_line(text)
+            return result.ok
+
     def check_sgl_prelude(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # SGL's builtins live in a C++ registry, and prelude/builtins.sgl is that registry written out and committed.
         # slib's impl/pipeline_fields.hh is the prelude's mirror of sg's raster pipeline description, written out the same way.
@@ -309,6 +359,76 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             dev.ui.write_line(console.red(f"sgl-prelude: run `uv run dev.py check sgl-prelude --fix` to regenerate {rel}"))
             ok = False
         return ok
+
+    def check_sgl_format(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # Every tracked .sgl file is what `sgl format` writes; --fix formats them in place.
+        # The tool is the formatter itself, so the gate cannot disagree with Format Document in the editor.
+        # Repo-wide, since a formatter change reaches files nobody touched; 250 files take well under a second.
+        # A block around a syntax error is left as written by the tool, and passes: a corpus file may hold one on purpose.
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        preset = presets[0]
+        has_tool = any(t.name == "sgl" and t.kind == "EXECUTABLE" for t in ctx.discover(preset))
+        if not has_tool or preset.is_emscripten:
+            reason = "is an emscripten preset" if has_tool else "has no `sgl` target (SC_BUILD_TOOLS is off)"
+            dev.ui.write_line(f"sgl-format: skipped -- preset {preset.name!r} {reason}")
+            return True
+        artifact = next((t.artifact for t in ctx.discover(preset) if t.name == "sgl" and t.artifact), None)
+        if artifact is None:
+            dev.ui.write_line(console.red(f"sgl-format: target 'sgl' has no built artifact for preset {preset.name!r}"))
+            return False
+
+        listed = subprocess.run(["git", "ls-files", "*.sgl"], cwd=ctx.root, capture_output=True, text=True, check=False)
+        if listed.returncode != 0:
+            dev.ui.write_line(console.red(f"sgl-format: git ls-files failed: {listed.stderr.strip()}"))
+            return False
+        files = [f for f in listed.stdout.splitlines() if f]
+
+        # in batches, which keep each command line well inside Windows' limit
+        ok = True
+        batch = 80
+        for start in range(0, len(files), batch):
+            result = dev.run_step(
+                [str(artifact), "format", *([] if fix else ["--check"]), *files[start:start + batch]],
+                step_type="lint", name=f"sgl-format-{start // batch}",
+                build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            if result.ok:
+                continue
+            for log in (result.stdout_log, result.stderr_log):
+                text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                if text and not mirror:
+                    dev.ui.write_line(text)
+            ok = False
+        if ok:
+            dev.ui.write_line(f"sgl-format: {len(files)} .sgl file(s) {'formatted' if fix else 'are formatted'}")
+        else:
+            dev.ui.write_line(console.red("sgl-format: run `uv run dev.py check sgl-format --fix` to format them"))
+        return ok
+
+    def check_sgl_native_size(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # SGL's own SPIR-V and DXIL of the repo's real shaders, counted in operations against a committed baseline.
+        # A change that grows an entry past it fails here, before a benchmark would notice; libs/graphics/shaped-graphics-language/docs/native-parity.md says why size is a lead.
+        # Not fixable: `native-parity.py update` commits a new baseline, which is a decision rather than a repair.
+        # Repo-wide by nature, so fix and scope are ignored.
+        script = ctx.root / "libs" / "graphics" / "shaped-graphics-language" / "tools" / "native-parity.py"
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        preset = presets[0]
+        targets = ctx.discover(preset)
+        artifact = next((t.artifact for t in targets if t.name == "sgl" and t.kind == "EXECUTABLE" and t.artifact), None)
+        if artifact is None or preset.is_emscripten:
+            dev.ui.write_line(f"sgl-native-size: skipped -- preset {preset.name!r} builds no `sgl` program to run")
+            return True
+        result = dev.run_step(
+            [sys.executable, str(script), "check", "--sgl", str(artifact)],
+            step_type="lint", name="sgl-native-size",
+            build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        if not result.ok and not mirror:
+            for log in (result.stdout_log, result.stderr_log):
+                text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                if text:
+                    dev.ui.write_line(text)
+        return result.ok
 
     def check_sgl_vscode_bundle(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The SGL VS Code extension commits its esbuild bundle, so users link the folder without an `npm install`.
@@ -385,6 +505,15 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
 
         return run
 
+    def check_abspaths(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The default preset's build, configured where it was not: its definitions, and the sources its generators wrote.
+        # Not fixable, and repo-wide by nature, so fix and scope are ignored.
+        from tools.dev.lib.quality import abspaths
+
+        preset = ctx.resolve_presets([ctx.default_preset_name()])[0]
+        ctx.discover(preset)
+        return abspaths.gate(preset.build_dir, ctx.root, abspaths.SHAPED_CORE_EXCEPTIONS, dev.ui.write_line)
+
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
         # Not fixable, so fix and scope are ignored.
@@ -404,7 +533,8 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                 specs.append(sibling)
         presets = ctx.resolve_presets(specs)
 
-        results = dev.build(presets, None, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        results = dev.build(presets, None, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose,
+                            server=ctx.build_server(gate=True))
         if not all(r.ok for r in results):
             dev.report.print_build_failure(results, presets, ctx.root)
             return False
@@ -413,6 +543,15 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
         if not test_targets:
             print(console.red("No test binaries found (expected '*-test' executables)"), file=sys.stderr)
             return False
+
+        # A project may leave a test binary out of `all` (EXCLUDE_FROM_ALL); the gate still runs it, so it builds it by name.
+        unbuilt = [t.name for t in test_targets if t.artifact is None or not Path(t.artifact).exists()]
+        if unbuilt:
+            results = dev.build(presets, unbuilt, root=ctx.root, auto_configure=False, mirror=mirror, verbose=verbose,
+                                server=ctx.build_server(gate=True))
+            if not all(r.ok for r in results):
+                dev.report.print_build_failure(results, presets, ctx.root)
+                return False
 
         # Everything is built above, so a compile break anywhere still fails here; the selection is what RUNS.
         candidates = [t.name for t in test_targets]
@@ -442,7 +581,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             preset_records = dev.test(
                 [preset], to_run, root=ctx.root,
                 test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
-                extra_args=[] if preset == presets[0] else ["--smoke"],
+                extra_args=[] if preset == presets[0] else ["--smoke"], server=ctx.build_server(gate=True),
             )
             records += preset_records
             if memo is not None:
@@ -461,6 +600,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                 presets[:1], [binary], root=ctx.root, test_name=None,
                 extra_args=["--thorough", *(nexus_filter(t) for t in tests)],
                 timeout=60.0 * THOROUGH_TIMEOUT_FACTOR, write_xml=True, mirror=mirror, verbose=verbose,
+                server=ctx.build_server(gate=True),
             )
             ran = sum(r["junit"]["tests"] for r in thorough_records if r.get("junit"))
             if ran < len(tests):
@@ -500,6 +640,12 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   "(--fix regenerates them)",
                   True, committed_codegen("fixed-int-gen", Path("libs/base/typed-geometry/tools/gen-fixed-int.py")),
                   watches=("libs/base/typed-geometry/**",)),
+        dev.Check("spirv-opcodes-gen",
+                  "babel-data's SPIR-V opcode table is what gen-spirv-opcodes.py makes of the SPIR-V headers "
+                  "(--fix regenerates it)",
+                  True, committed_codegen("spirv-opcodes-gen", Path("libs/data/babel-data/tools/gen-spirv-opcodes.py")),
+                  watches=("libs/data/babel-data/tools/**", "libs/data/babel-data/src/babel-data/shader/**",
+                           "extern/spirv-reflect/include/**")),
         dev.Check("simd-gen",
                   "clean-simd's generated register and fixed layers are what gen-simd.py writes (--fix regenerates them)",
                   True, committed_codegen("simd-gen", Path("libs/base/clean-simd/tools/gen-simd.py")),
@@ -531,12 +677,37 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   False, check_shader_grammar,
                   watches=("libs/graphics/shaped-shader-library/**",),
                   builds=("shaped-shader-library-test",)),
+        dev.Check("ccrec-reader",
+                  "clean-core's Python .ccrec reader reads a fresh C++ recording exactly as the C++ loader does",
+                  False, check_ccrec_reader,
+                  watches=("libs/base/clean-core/src/clean-core/record/**", "libs/base/clean-core/tools/ccrec*",
+                           "libs/base/clean-core/tools/ccrec/**",
+                           "libs/base/clean-core/tests/record/record-reader-fixture-test.cc"),
+                  builds=("clean-core-test",)),
         dev.Check("sgl-prelude",
                   "SGL's prelude/builtins.sgl and slib's impl/pipeline_fields.hh are what `sgl` generates (--fix rewrites them)",
                   True, check_sgl_prelude,
                   watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-shader-library/**",
                            "libs/graphics/shaped-graphics/**"),
                   builds=("sgl",)),
+        dev.Check("sgl-format",
+                  "every tracked .sgl file is what `sgl format` writes (--fix formats them)",
+                  True, check_sgl_format,
+                  watches=("**/*.sgl", "libs/graphics/shaped-graphics-language/src/shaped-graphics-language/driver/format.*",
+                           "libs/graphics/shaped-graphics-language/tools/sgl/format_command.cc"),
+                  builds=("sgl",)),
+        dev.Check("sgl-native-size",
+                  "SGL's own SPIR-V and DXIL of the repo's shaders stay within 2% of native-size-baseline.json, in operations",
+                  False, check_sgl_native_size,
+                  watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-rendering/shaders/**",
+                           "libs/graphics/shaped-viewer/shaders/**", "libs/graphics/shaped-viewer/tests/data/**"),
+                  builds=("sgl",)),
+        dev.Check("abspaths",
+                  "no compile definition or generated source carries an absolute source or build path "
+                  "(sc_target_source_paths + nx::source_path instead)",
+                  False, check_abspaths,
+                  watches=("**/CMakeLists.txt", "**/*.cmake", "CMakePresets.json", "**/generate_*.py",
+                           "tools/dev/lib/quality/abspaths.py")),
         dev.Check("test",
                   "build + run the full suite on the default preset; with --all-presets also on the debug, release, "
                   "single-threaded and sanitizer ones, under --smoke",
@@ -653,7 +824,8 @@ def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
         wanted = [t for t in targets if t in known]
         if not wanted:
             return True
-        results = dev.build(presets, wanted, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        results = dev.build(presets, wanted, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose,
+                            server=ctx.build_server(gate=True))
         if not all(r.ok for r in results):
             dev.report.print_build_failure(results, presets, ctx.root)
             return False
@@ -663,6 +835,8 @@ def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    # Every gate build and test run asks the environment, so that is where the flags go (Context.build_server).
+    build_server.export(a.server_flag(args))
     # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads, unless --memo asks; both still record.
     memo = _memo(ctx, read=args.memo or not (args.all or bool(args.names)))
     try:

@@ -22,7 +22,7 @@ sc_add_shader_package(
     NAME       my_shaders       # package id -> header name <my_shaders.hh>, and the mount point
     NAMESPACE  my::shaders      # where the generated symbols live
     SOURCE_DIR shaders          # relative to the calling CMakeLists (must define TARGET)
-    LANGUAGE   hlsl             # optional, hlsl by default; also wgsl and sgl
+    LANGUAGE   hlsl             # optional, hlsl by default; also wgsl, msl (shader_language::metal) and sgl
     SHADERS
         vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
@@ -66,6 +66,10 @@ sc_add_shader_package(
     ...
     LANGUAGE    sgl
     MODULE_DIRS shaders/modules         # more module directories; SOURCE_DIR always is one
+    NATIVE_SPIRV                        # SGL: its SPIR-V is SGL's own, no DXC; an entry point with no lowering yet fails to compile
+    NATIVE_DXIL                         # SGL: its DXIL is SGL's own, no DXC or dxil.dll; an entry point with no lowering yet is an error
+    # without either, a context's default prefers SGL's own binary and logs once, at info, each entry point that falls back to DXC
+    SOFTWARE_TRACE                      # SGL: inline traces take the software walk on dx12 and vulkan too, on every device, and see what moves
     SHADERS
         module:view                     # export module `view`: its types into <NAMESPACE>::view
         blit.sgl:*)                     # `use view` in it resolves through the module directories
@@ -77,6 +81,9 @@ sc_add_shader_package(
 #   a module nobody exports fails as a missing <sgl_modules/view.hh>, whose include line names the entry to add.
 # every module file is embedded; a new one in a module dir re-runs configure and the generator on the next build.
 # a module is exported by one package; a second `module:view` anywhere in the build is a configure error.
+# a dotted module `module:post.blur` writes <sgl_modules/post/blur.hh>, its types reached as sgl_modules::post::blur::frame.
+#   one package exports a module and those under its name, `post` and `post.blur`: two packages exporting them is a
+#   configure error, since `sgl_modules::post` is an alias the other cannot reopen.
 ```
 
 ```cpp
@@ -111,6 +118,9 @@ lib.read_modules();                         // -> module_library { paths, texts,
                                             //    directory by directory as added, each sorted by name; files() views the two vectors
 // an SGL package adds its own module dirs; every SGL compile, compile_source and compile_hit_group included, sees all of them.
 // a module file a compile reached is a dependency like an include: editing it reloads the shader.
+lib.prefetch_modules();                     // -> cc::shared_async<cc::unit>: fetches the SGL compilers' kept modules
+                                            //    (keeps_module_artifacts) ahead of compiles; AWAIT it while loading so
+                                            //    the first compiles load their modules; adding a package starts it anyway
 lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts); does nothing in a frozen build
 // Frozen builds (SC_FROZEN_SHADERS): no source dir mounted, no reload — docs/frozen-shaders.md.
 // SC_SHADER_RECORD=<file> makes a run write a bundle of every shader it obtains; sc_embed_shader_bundle(TARGET exe) embeds
@@ -212,14 +222,18 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_o
                                    //   so a test compiling a shader that warns declares it: nx::expect_warning("unroll-too-long", ...)
                                    // options: {.diagnostics = true} writes print/assert records;
                                    //   {.guards_undefined = sgl_undefined_guard::report} logs a division by zero or an
-                                   //   index past an array as a failed assert and ends that invocation (abort: ends it only);
+                                   //   index past an array as a failed assert and ends that invocation (abort: ends it only;
+                                   //   define: gives it WGSL's value and goes on);
                                    //   add_available_compilers takes SC_SHADER_UNDEFINED
                                    // an entry point's @float picks DXC's flags (-Gis, -denorm preserve) through preprocessed_source::dxc_args;
                                    //   on WebGPU one it cannot keep is refused, unless acquire is passed
                                    //   {.name = slib::k_weakens_float_option, .value = "true"}, which compiles at .fast and warns
                                    //   every target's text carries its final addresses, so the binding pass never runs behind it
                                    //   preprocess is cached under everything it reads: in memory, and in a persistent store
-slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; }
+slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; bool diagnostics;
+                                   //   sgl_undefined_guard guards_undefined; bool keeps_module_artifacts; }
+                                   //   keeps_module_artifacts: each SGL module's checked layer kept in that store too,
+                                   //   so a later process loads its modules rather than checking them; off by default
                                    //   unset = bcache::default_cache(), looked up per compile, off under SC_SG_COLD=shaders
                                    //   nullptr = memory only (a test off the user's cache); a store given must outlive the edge
                                    //   no persistent tier on wasm or without threads, whatever is given
@@ -404,6 +418,7 @@ auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::co
 //   under `@padding(.none)` it is plain tg::mat3f, 36 bytes.
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // SGL `half` -> tg::f16, `short`/`ushort` -> cc::i16/cc::u16, their vectors tg::vec<N, T>; a 2-byte gap is `cc::u16 _padN`.
+// SGL `long`/`ulong` -> cc::i64/cc::u64, `double` -> double, their vectors tg::vec<N, T>.
 // within one file a name is generated once, so a binding named like the file's entry point type (`main_t`) or options
 //   struct (`options`) is a generator error.
 // a module's types live in NS::<module> instead, whichever of its files declares them, reached as
@@ -424,6 +439,8 @@ auto const quality = shaders::taa::options{.tile = 16, .lowres = true};
 auto const tuned = co_await shaders::taa::reproject.acquire_pipeline(ctx, quality); // a compile per set it reaches
 shaders::taa::reproject.acquire(ctx, quality)      // the shader alone; .values() is the struct as an acquire's span takes it
 shaders::taa::reproject_t::reached_options         // span<string_view const>: the names it keys on; the rest multiply nothing
+//   bool, int, cc::u32 and float fields, sg::pixel_format for a format; an option that follows another is a
+//   cc::optional left unset, so it follows what the host sets (CHK-519)
 //   an option of a type the generator has no C++ for (a program's own enum) is left out of the struct, and a wrapper
 //   reaching one is a generator error
 // an image whose format names an option is an sg::any_texture_view field, and the group's layout is per set of values:

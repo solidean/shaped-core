@@ -6,6 +6,7 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/to_string.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-rendering/capture.hh>
@@ -22,7 +23,7 @@ namespace
 using namespace cc::primitive_defines;
 
 /// The mean display value in the middle of a quad of albedo 0.5 filling the view, under a sky of `sky` nits, at an automatic exposure.
-cc::shared_async<f32> captured_middle(sg::context& ctx, f32 sky)
+cc::shared_async<f32> captured_middle(sg::context& ctx, f32 sky, u32 samples)
 {
     constexpr auto size = tg::vec2i(48, 32);
     auto const path = cc::format("{}/sv-auto-exposure.png", cc::temp_directory_path());
@@ -30,9 +31,7 @@ cc::shared_async<f32> captured_middle(sg::context& ctx, f32 sky)
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", size[0], size[1]));
-    // Enough frames for the exposure to settle: it moves a fifth of the way per reading, a reading lands every frame or two,
-    // and the count is samples, four to a frame, so this is about 128 frames.
-    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "512");
+    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::to_string(samples));
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "60");
 
     auto& lib = sv_test::shared_material_library();
@@ -96,7 +95,20 @@ ASYNC_INVOCABLE_TEST("sv - an automatic exposure shows an image's mean as middle
     // Fifty times apart, and both read sRGB 118, the neutral curve's 0.18.
     for (auto const sky : {1.0f, 50.0f})
     {
-        auto const value = co_await captured_middle(ctx, sky);
+        auto const value = co_await captured_middle(ctx, sky, 512);
         CHECK(tg::abs(value - 118.0f) <= 3.0f).dump("sky", sky).dump("middle", value);
     }
+}
+
+ASYNC_INVOCABLE_TEST("sv - a still capture shows its automatic exposure as read off the finished image, however few "
+                     "frames it took",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx))
+        SKIP("no ray tracing or no SGL compiler, so the tracer does not build");
+
+    // Four samples a frame, so this finishes in two frames, long before an exposure adapting by a fifth per reading could.
+    auto const value = co_await captured_middle(ctx, 1.0f, 8);
+    CHECK(tg::abs(value - 118.0f) <= 3.0f).dump("middle", value);
 }

@@ -61,12 +61,15 @@ struct slib::pipeline_definition
     /// The file and the pipeline's name, for what a diagnostic says.
     cc::string_view file;
     cc::string_view name;
-    /// The package's handles, filled when the package is added to a library; each but `vertex` is null without its stage.
+    /// The package's handles, filled when the package is added to a library; each is null without its stage.
+    /// One of `vertex` and `mesh` is set, and never both.
     shader_asset_handle const* vertex = nullptr;
     shader_asset_handle const* pixel = nullptr;
     shader_asset_handle const* geometry = nullptr;
     shader_asset_handle const* tessellation_control = nullptr;
     shader_asset_handle const* tessellation_evaluation = nullptr;
+    shader_asset_handle const* mesh = nullptr;
+    shader_asset_handle const* task = nullptr;
     /// The layout its stages' binding lists state, from their generated group types.
     sg::pipeline_layout_handle (*acquire_layout)(sg::context& ctx) = nullptr;
     /// Null for a vertex stage that draws from no vertex buffer.

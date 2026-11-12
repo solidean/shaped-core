@@ -113,7 +113,7 @@ namespace impl
 /// The acquisition is thread-safe — two threads asking at once get one object, not two — and so is the library it hands back.
 [[nodiscard]] cc::result<material_library*> acquire_material_library();
 
-/// Registers the builtin types into `lib` — `sv::builtin_material::openpbr`, `pbr` and `unlit`.
+/// Registers the builtin types into `lib` — `sv::builtin_material::openpbr`, `openpbr_relief`, `pbr` and `unlit`.
 /// Public so a caller supplying their own library still gets them without reaching into the default.
 void register_builtin_material_types(material_library& lib);
 
@@ -131,6 +131,9 @@ namespace sv::builtin_material
 {
 /// The OpenPBR Surface subset the renderer models — the type to reach for when a material is authored rather than imported.
 inline constexpr cc::string_view openpbr = "openpbr";
+
+/// OpenPBR for a tileable material: its `occlusion` is its own relief's, too fine for any geometry, and the tracer applies it.
+inline constexpr cc::string_view openpbr_relief = "openpbr_relief";
 
 /// glTF-style metallic-roughness, which is what an imported asset carries; its fragment maps onto the same OpenPBR surface.
 inline constexpr cc::string_view pbr = "pbr";

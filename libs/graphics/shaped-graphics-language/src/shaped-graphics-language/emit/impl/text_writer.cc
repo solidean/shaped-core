@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
+#include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 namespace
@@ -38,6 +39,20 @@ cc::string int_literal_text(i32 value)
     return cc::to_string(value);
 }
 
+/// A 64-bit integer literal of `kind` in `language`, suffixed so no target reads it as 32 bits (EMIT-190):
+/// `5LL` and `5ULL` in HLSL, `5L` and `5UL` in MSL, whose long is 64 bits.
+/// The most negative long is a minus in front of a number that does not fit, as for an int.
+cc::string wide_literal_text(u64 bits, value_kind kind, builtins::language language)
+{
+    auto const is_hlsl = language == builtins::language::hlsl;
+    if (kind == value_kind::scalar_ulong)
+        return cc::format("{}{}", bits, is_hlsl ? "ULL" : "UL");
+    auto const suffix = is_hlsl ? "LL" : "L";
+    if (bits == u64(1) << 63)
+        return cc::format("(-9223372036854775807{0} - 1{0})", suffix);
+    return cc::format("{}{}", i64(bits), suffix);
+}
+
 struct writer
 {
     plan& p;
@@ -55,10 +70,9 @@ struct writer
 
     /// EMIT-181: the files the line table reads, and the statement whose source line the next line writes.
     options const& sources;
+    check::source_lines origins;
     flat_stmt const* current = nullptr;
     cc::vector<line_origin> lines;
-    /// Per file, the offset each of its lines starts at; built on the first line asked of the file.
-    cc::vector<cc::vector<u32>> line_starts;
     /// The text's lines up to `counted`, which the next emitted line number counts on from.
     isize counted = 0;
     i32 newlines = 0;
@@ -67,95 +81,6 @@ struct writer
     cc::vector<source_line> commented;
     /// The statement just begun, until its first line is written.
     flat_stmt const* unwritten = nullptr;
-    /// EMIT-183: every print written into sg's debug buffer.
-    cc::vector<debug_site> debug_sites;
-
-    /// FNV-1a over `text`, continuing from `hash`.
-    [[nodiscard]] static u32 hashed(u32 hash, cc::string_view text)
-    {
-        for (auto const c : text)
-            hash = (hash ^ u32(u8(c))) * 16777619u;
-        return (hash ^ 0xFFu) * 16777619u;
-    }
-
-    /// The family and lanes of a printable type (CHK-424): `float3` is `float` in 3, and an enum one `int`.
-    [[nodiscard]] debug_value debug_value_of(type_id type) const
-    {
-        auto result = debug_value{.family = "int", .type = cc::string(p.m.name_of(type))};
-        // the prelude declares `bool` an enum, which is no enum a message writes as its int
-        if (p.m.at(type).kind == check::type_kind::enumeration && result.type != "bool")
-            return result;
-        auto name = cc::string_view(result.type);
-        if (!name.empty() && name[name.size() - 1] >= '2' && name[name.size() - 1] <= '4')
-        {
-            result.lanes = name[name.size() - 1] - '0';
-            name = name.subview({.offset = 0, .size = name.size() - 1});
-        }
-        result.family = cc::string(name);
-        return result;
-    }
-
-    /// EMIT-183: a print as one record in sg's debug buffer, written whole or counted as dropped.
-    void print_record(flat_stmt const& s, flat_print const& n)
-    {
-        if (!p.writes_debug)
-            return;
-        auto site = debug_site();
-        if (n.message >= 0 && n.message < p.e.messages.size())
-        {
-            site.pieces = p.e.messages[n.message].pieces;
-            site.is_assert = p.e.messages[n.message].is_assert;
-        }
-        if (!sources.files.empty())
-            site.origin = origin_of(s);
-
-        auto words = cc::vector<cc::string>();
-        for (auto const id : p.e.at(n.values))
-        {
-            auto const type = p.e.at(id).type;
-            auto value = debug_value_of(type);
-            // bound once, so a value is computed once whatever its lanes
-            auto const name = p.names.mint("printed");
-            auto declaration = cc::string();
-            auto const value_text = expr(id).text;
-            d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = value_text});
-            line(declaration);
-            for (auto lane = 0; lane < value.lanes; ++lane)
-            {
-                auto const lane_text = value.lanes == 1 ? cc::string(name) : cc::format("{}.{}", name, "xyzw"[lane]);
-                words.push_back(d.debug_word(lane_text, value.family));
-            }
-            site.values.push_back(cc::move(value));
-        }
-
-        auto id = hashed(2166136261u, p.entry_name);
-        id = hashed(id, cc::format("{}", n.message));
-        for (auto const& piece : site.pieces)
-            id = hashed(id, piece);
-        if (site.origin.at.file >= 0)
-            id = hashed(id, cc::format("{}:{}", name_of(site.origin.at.file), site.origin.at.line));
-        // one line inlined along two call chains is two sites, which another permutation of this entry point may hold
-        for (auto const& from : site.origin.inlined_from)
-            if (from.file >= 0)
-                id = hashed(id, cc::format("<{}:{}", name_of(from.file), from.line));
-        site.id = id;
-
-        auto const count = isize(words.size()) + 2;
-        auto const at = p.names.mint("debug_at");
-        if (auto const declaration = d.debug_declare(at); !declaration.empty())
-            line(declaration);
-        line(d.debug_reserve(at, count));
-        open(condition_text("if", d.debug_fits(at, count)));
-        line(d.debug_store(at, 0, cc::format("{}u", id)));
-        line(d.debug_store(at, 1, cc::format("{}u", count)));
-        for (auto i = isize(0); i < words.size(); ++i)
-            line(d.debug_store(at, i + 2, words[i]));
-        reopen("else");
-        line(d.debug_drop());
-        close();
-        debug_sites.push_back(cc::move(site));
-    }
-
     /// The name a target writes member `name` of struct `type` with, which the plan may have renamed.
     [[nodiscard]] cc::string_view member_of(type_id type, cc::string_view name) const
     {
@@ -176,7 +101,7 @@ struct writer
     void line(cc::string_view text)
     {
         if (current != nullptr && !sources.files.empty())
-            map_line(origin_of(*current));
+            map_line(origins.origin_of(p.e, *current));
         indent(out, depth);
         out += text;
         out += "\n";
@@ -188,68 +113,6 @@ struct writer
         }
     }
 
-    /// The line of `file` that byte `offset` is on; a line ends at `\n`, `\r\n` or a bare `\r`.
-    [[nodiscard]] i32 line_at(i32 file, u32 offset)
-    {
-        if (line_starts.size() < sources.files.size())
-            line_starts.resize_to_defaulted(sources.files.size());
-        auto& starts = line_starts[file];
-        if (starts.empty())
-        {
-            auto const text = cc::string_view(sources.files[file].file.source);
-            starts.push_back(0);
-            for (auto i = isize(0); i < text.size(); ++i)
-                if (text[i] == '\n' || (text[i] == '\r' && (i + 1 >= text.size() || text[i + 1] != '\n')))
-                    starts.push_back(u32(i + 1));
-        }
-        auto line = isize(1);
-        while (line < starts.size() && starts[line] <= offset)
-            ++line;
-        return i32(line);
-    }
-
-    /// The source line of an expression or a statement of `file`; none where the file is not one of `sources`.
-    [[nodiscard]] source_line line_of(i32 file, ast::expr_id expr, ast::stmt_id stmt)
-    {
-        if (file < 0 || file >= sources.files.size())
-            return {};
-        auto const& f = sources.files[file];
-        auto const form = ast::is_valid(expr) ? f.ast.at(expr).form
-                        : ast::is_valid(stmt) ? f.ast.at(stmt).form
-                                              : form_id::none;
-        if (!is_valid(form))
-            return {};
-        return {.file = file, .line = line_at(file, f.file.at(form).where.offset)};
-    }
-
-    /// Where statement `s` came from: its own line, and the calls it was inlined through.
-    /// The prelude's frames are left out wherever another frame remains.
-    [[nodiscard]] line_origin origin_of(flat_stmt const& s)
-    {
-        // innermost first: the statement, then its calls from the inside out
-        auto frames = cc::vector<source_line>();
-        frames.push_back(line_of(s.from.file, s.from.expr, s.from.stmt));
-        auto const calls = p.e.at(s.inlined_through);
-        for (auto i = calls.size(); i > 0; --i)
-            frames.push_back(line_of(calls[i - 1].file, calls[i - 1].call, ast::stmt_id::none));
-
-        auto const is_prelude = [&](source_line const& l) { return l.file >= 0 && l.file < p.m.prelude_files; };
-        auto any_outside = false;
-        for (auto const& f : frames)
-            any_outside = any_outside || (f.file >= 0 && !is_prelude(f));
-        auto result = line_origin();
-        for (auto const& f : frames)
-        {
-            if (f.file < 0 || (any_outside && is_prelude(f)))
-                continue;
-            if (result.at.file < 0)
-                result.at = f;
-            else
-                result.inlined_from.push_back(f);
-        }
-        return result;
-    }
-
     /// The line the text's next line is, counted from 1.
     [[nodiscard]] i32 next_line()
     {
@@ -258,15 +121,10 @@ struct writer
         return newlines + 1;
     }
 
-    [[nodiscard]] cc::string_view name_of(i32 file) const
-    {
-        return file >= 0 && file < sources.names.size() ? sources.names[file] : cc::string_view("<sgl>");
-    }
-
     /// The name of `file` without its directories, which a comment is short enough with.
     [[nodiscard]] cc::string_view base_name_of(i32 file) const
     {
-        auto const name = name_of(file);
+        auto const name = origins.name_of(file);
         auto start = name.size();
         while (start > 0 && name[start - 1] != '/' && name[start - 1] != '\\')
             --start;
@@ -299,21 +157,25 @@ struct writer
                 }
             }
             if (assumed != o.at)
-            {
-                out.appendf("#line {} \"", o.at.line);
-                // a `#line` name is a string literal, so a Windows path's backslashes are escaped
-                for (auto const c : name_of(o.at.file))
-                {
-                    if (c == '\\' || c == '"')
-                        out += '\\';
-                    out += c;
-                }
-                out += "\"\n";
-                assumed = o.at;
-            }
+                write_directive(o.at);
         }
         o.emitted = next_line();
         lines.push_back(cc::move(o));
+    }
+
+    /// `#line` naming `at` (EMIT-182), from which the target counts the lines after it.
+    void write_directive(check::source_line at)
+    {
+        out.appendf("#line {} \"", at.line);
+        // a `#line` name is a string literal, so a Windows path's backslashes are escaped
+        for (auto const c : origins.name_of(at.file))
+        {
+            if (c == '\\' || c == '"')
+                out += '\\';
+            out += c;
+        }
+        out += "\"\n";
+        assumed = at;
     }
 
     /// `head` and the brace that opens its body, where the target puts it.
@@ -443,6 +305,35 @@ struct writer
             }
     }
 
+    /// EMIT-230: a literal, or an array or a vector built of nothing else.
+    [[nodiscard]] bool is_constant_leaf(flat_expr_id id) const
+    {
+        auto const& x = p.e.at(id);
+        if (x.node.is<flat_literal>())
+            return true;
+        auto const* const c = x.node.try_as<flat_construct>();
+        if (c == nullptr || !(is_array(x.type) || (is_builtin_type(p.m, x.type) && p.m.at(x.type).has_swizzles)))
+            return false;
+        for (auto const a : p.e.at(c->arguments))
+            if (!is_constant_leaf(a))
+                return false;
+        return true;
+    }
+
+    /// `{a, b, c}` of an array whose leaves are constants, nested per dimension.
+    [[nodiscard]] cc::string initializer_of(flat_expr_id id)
+    {
+        auto const& x = p.e.at(id);
+        if (!is_array(x.type))
+            return expr(id).text;
+        auto out = cc::string("{");
+        auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
+        for (auto i = isize(0); i < arguments.size(); ++i)
+            out.appendf("{}{}", i == 0 ? "" : ", ", initializer_of(arguments[i]));
+        out += "}";
+        return out;
+    }
+
     bool needs_member_assignment(flat_expr const& x) const
     {
         return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type)
@@ -473,8 +364,23 @@ struct writer
                 declaration,
                 {.name = name, .type = type_text(p, d, type), .dimensions = array_dimensions(p, type), .is_mut = true});
             line(declaration);
+            auto const element = p.m.at(type).element;
+            auto const is_words = is_word_split(p, element);
             for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
-                line(cc::format("{}[{}] = {}_{};", name, i, raw, i));
+                line(cc::format("{}[{}] = {};", name, i,
+                                is_words ? joined_words(element, raw, i32(i) * word_pieces(p, element))
+                                         : cc::format("{}_{}", raw, i)));
+            return name;
+        }
+        if (is_word_split(p, type))
+        {
+            auto const text = joined_words(type, raw, 0);
+            if (!is_local)
+                return text;
+            auto const name = p.names.mint("gathered");
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = text, .is_mut = true});
+            line(declaration);
             return name;
         }
         // a matrix from its columns, which HLSL's constructor reads as rows
@@ -546,6 +452,8 @@ struct writer
     /// EMIT-174: stores `value`, of `type`, into `raw`'s pieces, its elements or its columns, from one evaluation.
     void store_pieces(cc::string_view raw, type_id type, cc::string_view value)
     {
+        if (is_word_split(p, type))
+            return store_words(raw, 0, type, value);
         auto const is_hlsl_matrix = !is_array(type) && d.language() == builtins::language::hlsl;
         auto name = cc::string(value);
         if (is_hlsl_matrix || !is_name(value))
@@ -566,8 +474,107 @@ struct writer
                      : p.m.name_of(type) == "mat2" ? 2
                      : p.m.name_of(type) == "mat3" ? 3
                                                    : 4;
+        auto const element = is_array(type) ? p.m.at(type).element : type_id::none;
         for (auto i = 0; i < n; ++i)
-            line(cc::format("{}_{} = {}[{}];", raw, i, name, i));
+            if (is_array(type) && is_word_split(p, element))
+                store_words(raw, i * word_pieces(p, element), element, cc::format("{}[{}]", name, i));
+            else
+                line(cc::format("{}_{} = {}[{}];", raw, i, name, i));
+    }
+
+    /// EMIT-196: a 64-bit value of `type` joined back from the pieces `<raw>_<first>` on, which hold its 32-bit words.
+    /// A scalar is one uint2, a two-vector one uint4, and a three- or four-vector two uint4s, the third's tail unused.
+    [[nodiscard]] cc::string joined_words(type_id type, cc::string_view raw, i32 first) const
+    {
+        auto const* const record = p.m.builtin_type_of(type);
+        auto const piece = [&](i32 i) { return cc::format("{}_{}", raw, first + i); };
+        auto const text = type_text(p, d, type);
+        if (d.language() != builtins::language::hlsl)
+        {
+            if (record->leaf_count <= 2)
+                return cc::format("as_type<{}>({})", text, piece(0));
+            // the scalar and the two-vector of the same leaf, by the spelling of the vector
+            auto const scalar = cc::string_view(text).subview({.offset = 0, .size = isize(text.size()) - 1});
+            auto const tail = record->leaf_count == 3 ? cc::format("as_type<{}>({}.xy)", scalar, piece(1))
+                                                      : cc::format("as_type<{}2>({})", scalar, piece(1));
+            return cc::format("{}(as_type<{}2>({}), {})", text, scalar, piece(0), tail);
+        }
+        auto const join = [&](cc::string_view words, char low, char high)
+        {
+            if (record->leaf_kind == check::value_kind::scalar_double)
+                return cc::format("asdouble({}.{}, {}.{})", words, low, words, high);
+            auto const bits = cc::format("((uint64_t({}.{}) << 32) | uint64_t({}.{}))", words, high, words, low);
+            return record->leaf_kind == check::value_kind::scalar_long ? cc::format("int64_t{}", bits) : bits;
+        };
+        if (record->leaf_count == 1)
+            return join(piece(0), 'x', 'y');
+        auto result = cc::format("{}(", text);
+        for (auto lane = 0; lane < record->leaf_count; ++lane)
+        {
+            auto const even = lane % 2 == 0;
+            result.appendf("{}{}", lane == 0 ? "" : ", ", join(piece(lane / 2), even ? 'x' : 'z', even ? 'y' : 'w'));
+        }
+        return result + ")";
+    }
+
+    /// EMIT-196: stores `value`, a 64-bit value of `type`, into the pieces `<raw>_<first>` on, its 32-bit words low first.
+    void store_words(cc::string_view raw, i32 first, type_id type, cc::string_view value)
+    {
+        auto const* const record = p.m.builtin_type_of(type);
+        auto const piece = [&](i32 i) { return cc::format("{}_{}", raw, first + i); };
+        if (d.language() != builtins::language::hlsl && record->leaf_count <= 2)
+            return line(cc::format("{} = as_type<{}>({});", piece(0), record->leaf_count == 1 ? "uint2" : "uint4", value));
+        auto name = cc::string(value);
+        if (!is_name(value))
+        {
+            name = p.names.mint("scattered");
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = cc::string(value)});
+            line(declaration);
+        }
+        if (d.language() != builtins::language::hlsl)
+        {
+            line(cc::format("{} = as_type<uint4>({}.xy);", piece(0), name));
+            if (record->leaf_count == 3)
+                return line(cc::format("{} = uint4(as_type<uint2>({}.z), 0u, 0u);", piece(1), name));
+            return line(cc::format("{} = as_type<uint4>({}.zw);", piece(1), name));
+        }
+        auto lanes = cc::vector<cc::string>();
+        if (record->leaf_count == 1)
+            lanes.push_back(name);
+        else
+            for (auto lane = 0; lane < record->leaf_count; ++lane)
+                lanes.push_back(cc::format("{}.{}", name, "xyzw"[lane]));
+        auto parts = cc::vector<cc::string>();
+        for (auto const& lane : lanes)
+        {
+            if (record->leaf_kind != check::value_kind::scalar_double)
+            {
+                // masked, since DXC warns of a constant whose value a narrowing changes
+                parts.push_back(cc::format("uint(uint64_t({}) & 0xffffffffULL)", lane));
+                parts.push_back(cc::format("uint(uint64_t({}) >> 32)", lane));
+                continue;
+            }
+            // HLSL splits a double only into out parameters
+            auto const low = p.names.mint("low");
+            auto const high = p.names.mint("high");
+            line(cc::format("uint {}, {};", low, high));
+            line(cc::format("asuint({}, {}, {});", lane, low, high));
+            parts.push_back(low);
+            parts.push_back(high);
+        }
+        // a three-vector's second piece is a uint4 too, its last two words zero
+        while (parts.size() > 4 && parts.size() < 8)
+            parts.push_back("0u");
+        for (auto at = isize(0); at < parts.size(); at += 4)
+        {
+            auto const count = cc::min(isize(4), parts.size() - at);
+            auto text = cc::format("{} = uint{}(", piece(i32(at / 4)), count);
+            for (auto k = isize(0); k < count; ++k)
+                text.appendf("{}{}", k == 0 ? "" : ", ", parts[at + k]);
+            text += ");";
+            line(text);
+        }
     }
 
     /// `nonuniform i`, whose own text is `i`; `uniform i` is no such mark, since it is written as the plain index.
@@ -612,13 +619,14 @@ struct writer
         // EMIT-168: an element of an array of mat3 is a float4x3, which narrows as one does
         auto const is_matrix = is_mat3(p.m, innermost_of(p.m, x.type));
         for (auto const& at : index_paths(x.type))
-            line(is_matrix ? cc::format("{}{} = ((float3x3){}{});", name, at, raw, at)
+            line(is_matrix ? cc::format("{}{} = ((float3x3){}{}{});", name, at, raw, at, lanes)
                            : cc::format("{}{} = {}{}{};", name, at, raw, at, lanes));
         return name;
     }
 
     /// Stores `value`, an array of 3-vectors, into `raw`, which holds it as 4-vectors, element by element.
-    void widen_array_into(cc::string_view raw, type_id type, cc::string_view value)
+    /// `cell` is what reaches a matrix from an element of `raw` (EMIT-168), for an array of mat3.
+    void widen_array_into(cc::string_view raw, type_id type, cc::string_view value, cc::string_view cell)
     {
         auto const name = p.names.mint("widened");
         auto declaration = cc::string();
@@ -628,7 +636,7 @@ struct writer
         line(declaration);
         auto const is_matrix = is_mat3(p.m, innermost_of(p.m, type));
         for (auto const& at : index_paths(type))
-            line(is_matrix ? cc::format("{}{} = sgl_widen_mat3({}{});", raw, at, name, at)
+            line(is_matrix ? cc::format("{}{}{} = sgl_widen_mat3({}{});", raw, at, cell, name, at)
                            : cc::format("{}{}.xyz = {}{};", raw, at, name, at));
     }
 
@@ -691,7 +699,8 @@ struct writer
                              p.e.at(arguments[i]).type, expr(arguments[i]).text);
             else if (planned.member_of[i] >= 0 && holds_widened_array(p, x.type, i))
                 widen_array_into(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
-                                 p.e.at(arguments[i]).type, expr(arguments[i]).text);
+                                 p.e.at(arguments[i]).type, expr(arguments[i]).text,
+                                 mat3_cell_field(p, p.e.at(arguments[i]).type));
             else if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name,
                                 holds_widened_mat3(p, x.type, i)
@@ -1146,7 +1155,7 @@ struct writer
         if (held == held_as::widened_array)
         {
             auto const value = expr(a.value, true).text;
-            return widen_array_into(expr(a.place).text, p.e.at(a.place).type, value);
+            return widen_array_into(expr(a.place).text, p.e.at(a.place).type, value, p.accesses[index_of(a.place)].lanes);
         }
         auto value = expr(a.value, true).text;
         if (held == held_as::widened_mat3)
@@ -1188,21 +1197,40 @@ struct writer
             text += t.slots[i] < 0 ? cc::string_view(result) : cc::string_view(arguments[t.slots[i]]);
             text += t.pieces[i + 1];
         }
-        // each line of the text a line of its own, indented where the call stands
+        // EMIT-182: the text's lines name their own lines in its file, and the statement's lines after it theirs again
+        auto const marks
+            = sources.write_directives && d.has_line_directives() && current != nullptr && !sources.files.empty();
+        auto const at = marks ? origins.line_at(t.file, t.offset) : check::source_line();
+        if (at.file >= 0)
+        {
+            unwritten = nullptr;
+            write_directive(at);
+        }
+        // each line of the text a line of its own, indented where the call stands; an empty one keeps the count
         auto start = isize(0);
-        for (auto i = isize(0); i <= text.size(); ++i)
-            if (i == text.size() || text[i] == '\n')
+        for (auto i = isize(0); i < text.size(); ++i)
+            if (text[i] == '\n')
             {
                 if (i > start)
                     line(cc::string(cc::string_view(text).subview({.offset = start, .size = i - start})));
+                else
+                {
+                    out += "\n";
+                    assumed.line += assumed.file >= 0 ? 1 : 0;
+                }
                 start = i + 1;
             }
+        if (start < text.size())
+            line(cc::string(cc::string_view(text).subview({.offset = start, .size = text.size() - start})));
+        if (at.file >= 0)
+            write_directive(origins.origin_of(p.e, *current).at);
         return {.text = cc::move(result)};
     }
 
     /// EMIT-139: the per-instance hit-group offsets of the acceleration structure `id` names, which sg's metal backend
-    /// mirrors slot for slot beside each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
-    /// Empty where `id` is no acceleration-structure member, or an element of one.
+    /// mirrors slot for slot in the tail of each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
+    /// Empty where `id` is no acceleration structure; one is always a member or an element of one, since the checker
+    /// refuses an acceleration structure as a value and inlining hands a parameter on as its member.
     cc::string hit_offsets_of(flat_expr_id id)
     {
         if (p.m.at(p.e.at(id).type).kind != type_kind::acceleration_structure)
@@ -1217,9 +1245,53 @@ struct writer
         auto const* const member = p.e.at(named).node.try_as<flat_binding_member>();
         auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
         if (found < 0)
-            return {};
+            CC_UNREACHABLE("every acceleration structure a trace names is a member the plan placed, or an element of "
+                           "one");
         auto const& r = p.resources[found];
         return cc::format("sgl_ctx.hit_offsets->groups[{}][{}{}].instances", r.group, r.slot, element);
+    }
+
+    /// CHK-491: an unbounded array's length on metal, the count sg writes into the array's table.
+    cc::string msl_array_length(flat_expr_id array)
+    {
+        auto const& member = p.e.at(array).node.as<flat_binding_member>();
+        auto const found = resource_of(p, member.binding, member.member);
+        CC_ASSERT(found >= 0, "an unbounded array whose length is read is a member the plan placed");
+        auto const& r = p.resources[found];
+        auto parameter = cc::string_view();
+        for (auto const& a : p.argument_buffers)
+            if (a.group == r.group)
+                parameter = a.parameter;
+        return cc::format("int({}.{}->count)", parameter, r.name);
+    }
+
+    /// EMIT-195: a Metal buffer is a pointer, so its length is the byte length sg writes into its group's `sgl_lengths`,
+    /// at its slot, plus the element of a binding array; a `bytes` is counted in bytes, anything else in elements.
+    cc::string msl_buffer_length(flat_expr_id buffer, bool is_bytes)
+    {
+        auto named = buffer;
+        auto element = cc::string();
+        if (auto const* const e = p.e.at(buffer).node.try_as<flat_element>())
+        {
+            named = e->object;
+            element = cc::format(" + {}", wrapped(expr(e->index), level::additive));
+        }
+        auto const& member = p.e.at(named).node.as<flat_binding_member>();
+        auto const found = resource_of(p, member.binding, member.member);
+        CC_ASSERT(found >= 0, "a buffer whose length is read is a member the plan placed");
+        auto const& r = p.resources[found];
+        auto parameter = cc::string_view();
+        for (auto const& a : p.argument_buffers)
+            if (a.group == r.group)
+                parameter = a.parameter;
+        // EMIT-211: an unbounded array's lengths follow its table's entries
+        auto const stored
+            = r.count == 0 ? cc::format("reinterpret_cast<constant uint*>(&{0}.{1}->entries[{0}.{1}->count])[{2}]",
+                                        parameter, r.name, element.empty() ? cc::string_view("0") : element.subview(3))
+                           : cc::format("{}.sgl_lengths[{}{}]", parameter, r.slot, element);
+        if (is_bytes)
+            return stored;
+        return cc::format("({} / uint(sizeof({}[0])))", stored, wrapped(expr(buffer), level::primary));
     }
 
     /// Every call is written from its registry record; nothing here knows one builtin from another.
@@ -1244,11 +1316,15 @@ struct writer
         case builtins::spelling_kind::custom:
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            // the types a helper is given, which a record with one may read too; another's need not be spelled
+            auto const types = how.helper != nullptr ? argument_types_of(p, d, c) : cc::vector<cc::string>();
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
             auto result = how.custom({.target = d.language(),
+                                      .is_vulkan = p.which == emit::target::hlsl_vulkan,
                                       .arguments = arguments,
+                                      .argument_types = types,
                                       .builtins = *p.m.builtins,
                                       .data = how.data,
                                       .mint = mint,
@@ -1305,6 +1381,9 @@ struct writer
         auto const* const literal_type = p.m.builtin_type_of(x.type);
         auto const narrow = [&](rendered r)
         {
+            // EMIT-190: a double literal is suffixed in HLSL, where a bare one is a float
+            if (literal_type != nullptr && literal_type->leaf_kind == value_kind::scalar_double)
+                return rendered{.text = r.text + "L", .binds = r.binds};
             if (literal_type == nullptr || !is_16_bit(literal_type->leaf_kind))
                 return r;
             return rendered{.text = cc::format("{}({})", literal_type->spelled_in(d.language()), r.text)};
@@ -1322,6 +1401,13 @@ struct writer
                 result = narrow(
                     {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary});
             },
+            [&](flat_wide_literal const& l)
+            {
+                auto const kind = literal_type != nullptr ? literal_type->leaf_kind : value_kind::scalar_long;
+                auto const is_negative = kind == value_kind::scalar_long && i64(l.bits) < 0 && l.bits != u64(1) << 63;
+                result = {.text = wide_literal_text(l.bits, kind, d.language()),
+                          .binds = is_negative ? level::unary : level::primary};
+            },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
             [&](flat_enum_value const& v)
             { result = {.text = p.enums[p.enum_of_type[index_of(x.type)]].case_names[v.case_index]}; },
@@ -1331,7 +1417,10 @@ struct writer
                 // A buffer is a global of its own; every other member is a field of a block, `@inline` or its group's.
                 if (auto const found = resource_of(p, b.binding, b.member); found >= 0)
                 {
-                    result = {.text = p.resources[found].name};
+                    auto by_address = p.m.at(p.resources[found].type).kind == type_kind::acceleration_structure
+                                        ? d.acceleration_by_address(p, found)
+                                        : cc::string();
+                    result = {.text = by_address.empty() ? p.resources[found].name : cc::move(by_address)};
                     return;
                 }
                 if (auto const found = workgroup_of(p, b.binding, b.member); found >= 0)
@@ -1344,11 +1433,36 @@ struct writer
                 result = read_as_value(id, result);
             },
             [&](flat_file_sampler const& smp) { result = {.text = p.samplers[sampler_of(p, smp.sampler)].name}; },
+            [&](flat_buffer_length const& b)
+            {
+                auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
+                // CHK-491: an unbounded binding array's length; dx12 and vulkan read sg's reserved block instead
+                if (p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::array)
+                {
+                    CC_ASSERT(d.language() == builtins::language::msl, "only metal reads an unbounded array's length "
+                                                                       "from its table");
+                    result = {.text = msl_array_length(b.buffer), .binds = level::primary};
+                    return;
+                }
+                if (d.language() == builtins::language::msl)
+                {
+                    result = {.text = msl_buffer_length(b.buffer, is_bytes), .binds = level::primary};
+                    return;
+                }
+                if (auto const* const element = p.e.at(b.buffer).node.try_as<flat_element>())
+                    result = {.text = d.buffer_length_at(expr(element->object).text, expr(element->index).text,
+                                                         is_nonuniform_mark(element->index)),
+                              .binds = level::primary};
+                else
+                    result = {.text = d.buffer_length(expr(b.buffer).text, is_bytes), .binds = level::primary};
+            },
             [&](flat_buffer_element const& b)
             {
                 auto const buffer = wrapped(expr(b.buffer), level::primary);
                 result = {.text = cc::format("{}[{}]", buffer, expr(b.index).text), .binds = level::primary};
             },
+            [&](flat_written_word const& w)
+            { result = {.text = cc::format("sgl_written[{}]", expr(w.word).text), .binds = level::primary}; },
             [&](flat_element const& a)
             {
                 auto const object = wrapped(expr(a.object), level::primary);
@@ -1484,9 +1598,24 @@ struct writer
     {
         auto const& local = p.e.at(id);
         auto const name = cc::string_view(p.locals[index_of(id)]);
+        // EMIT-230: an array of constants that nothing writes is HLSL's `static const`, which no invocation fills
+        if (!is_mut && is_valid(value) && d.language() == builtins::language::hlsl && is_array(local.type)
+            && p.e.at(value).node.is<flat_construct>() && is_constant_leaf(value))
+        {
+            line(cc::format("static const {} {}{} = {};", type_text(p, d, local.type), name,
+                            array_dimensions(p, local.type), initializer_of(value)));
+            return;
+        }
         if (is_valid(value) && needs_member_assignment(p.e.at(value)))
         {
             build_struct(p.e.at(value), name);
+            return;
+        }
+        // EMIT-225: SPIR-V forbids loading or storing a hit object, so on vulkan its let is no copy.
+        // The let takes the name of the variable its trace filled, which the trace's own lines declare.
+        if (p.which == emit::target::hlsl_vulkan && is_valid(value) && p.m.name_of(local.type) == "hit_object")
+        {
+            p.locals[index_of(id)] = expr(value, true).text;
             return;
         }
         // a value only a local may hold, such as a ray query: declared without an initializer, and never `const`
@@ -1515,7 +1644,7 @@ struct writer
                                     .value = text,
                                     .dimensions = dimensions,
                                     .is_mut = is_mut || declares_only,
-                                    .is_zeroed = text.empty() && is_padded(local.type)});
+                                    .is_zeroed = text.empty() && (is_padded(local.type) || local.is_zeroed)});
         line(declaration);
     }
 
@@ -1582,22 +1711,26 @@ struct writer
             [&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
             [&](flat_var const& var) { declare(var.local, var.value, true); }, [&](flat_assign const& a) { assign(a); },
             // `validate` refuses a tree that holds one
-            [&](flat_print const& n) { print_record(s, n); }, //
+            [&](flat_print const&) {}, //
             [&](flat_eval const& v)
             {
                 // an atomic HLSL writes as statements alone has nothing left to evaluate, nor has a target's own text
                 auto const* const evaluated = p.e.at(v.value).node.try_as<flat_call>();
+                auto const value = expr(v.value);
                 if (is_hlsl_atomic(v.value) || (evaluated != nullptr && evaluated->text >= 0))
+                    return;
+                // and one written as statements alone, as MSL's ulong min and max are (EMIT-218), left no text
+                if (value.text.empty())
                 {
-                    (void)expr(v.value);
+                    fence_after(v.value);
                     return;
                 }
                 // A call that gives nothing is a statement as it stands, in every target.
                 auto text = cc::string();
                 if (p.e.at(v.value).type == checked_module::void_type)
-                    text = cc::format("{};", expr(v.value).text);
+                    text = cc::format("{};", value.text);
                 else
-                    d.write_eval(text, expr(v.value).text);
+                    d.write_eval(text, value.text);
                 line(text);
                 fence_after(v.value);
             },
@@ -1711,6 +1844,21 @@ struct writer
             });
     }
 };
+
+/// The shadow of LEGAL-69: a bit per scalar of workgroup memory, `words` words of it.
+cc::string written_shadow_declaration(builtins::language language, i32 words)
+{
+    switch (language)
+    {
+    case builtins::language::hlsl:
+        return cc::format("groupshared uint sgl_written[{}];", words);
+    case builtins::language::wgsl:
+        return cc::format("var<workgroup> sgl_written: array<atomic<u32>, {}>;", words);
+    case builtins::language::msl:
+        return cc::format("threadgroup atomic_uint sgl_written[{}];", words);
+    }
+    return {};
+}
 } // namespace
 
 void sgl::emit::impl::write_enum_constants(cc::string& out, plan const& p, dialect const& d)
@@ -1741,6 +1889,14 @@ void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect cons
                           cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = last - first}));
         first = last;
     }
+    // legalize's own bindings stand behind every group's, and a target declares each like any other resource
+    if (first < p.resources.size())
+        d.write_group(
+            out, p, nullptr,
+            cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = p.resources.size() - first}));
+    for (auto const& block : p.group_blocks)
+        if (block.is_reserved)
+            d.write_group(out, p, &block, {});
     for (auto const& s : p.samplers)
         d.write_file_sampler(out, p, s);
     if (!p.samplers.empty())
@@ -1753,7 +1909,9 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     if (type == check::checked_module::void_type)
         return "void";
     if (auto const* const record = p.m.builtin_type_of(type))
-        return record->spelled_in(d.language());
+        return p.which == emit::target::hlsl_vulkan && !record->hlsl_vulkan.empty()
+                 ? cc::string_view(record->hlsl_vulkan)
+                 : record->spelled_in(d.language());
     // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.
     if (is_valid(type) && p.m.at(type).kind == check::type_kind::enumeration && p.m.builtins != nullptr)
     {
@@ -1772,6 +1930,18 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 
+
+cc::vector<cc::string> sgl::emit::impl::argument_types_of(plan const& p, dialect const& d, check::flat_call const& c)
+{
+    auto types = cc::vector<cc::string>();
+    for (auto const argument : p.e.at(c.arguments))
+    {
+        auto const type = p.e.at(argument).type;
+        types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
+                                                              : cc::string(type_text(p, d, type)));
+    }
+    return types;
+}
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
@@ -1798,14 +1968,38 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
         if (record == nullptr || record->write.helper == nullptr)
             continue;
-        auto types = cc::vector<cc::string>();
-        for (auto const argument : p.e.at(call->arguments))
-        {
-            auto const type = p.e.at(argument).type;
-            types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
-                                                                  : cc::string(type_text(p, d, type)));
-        }
-        auto text = record->write.helper({.target = d.language(), .argument_types = types, .data = record->write.data});
+        auto const types = argument_types_of(p, d, *call);
+        auto text = record->write.helper({.target = d.language(),
+                                          .is_vulkan = p.which == emit::target::hlsl_vulkan,
+                                          .argument_types = types,
+                                          .data = record->write.data});
+        auto is_known = text.empty();
+        for (auto const& w : written)
+            is_known = is_known || w == text;
+        if (!is_known)
+            written.push_back(cc::move(text));
+    }
+    // CHK-460: a length the target reads through a helper, once per buffer
+    for (auto const& x : p.e.exprs)
+    {
+        auto const* const length = x.node.try_as<check::flat_buffer_length>();
+        if (length == nullptr)
+            continue;
+        auto const* const element = p.e.at(length->buffer).node.try_as<check::flat_element>();
+        auto const named = element != nullptr ? element->object : length->buffer;
+        auto const* const member = p.e.at(named).node.try_as<check::flat_binding_member>();
+        auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
+        if (found < 0)
+            continue;
+        auto const is_bytes = p.m.at(p.e.at(length->buffer).type).kind == check::type_kind::bytes;
+        auto const* const call = element != nullptr ? p.e.at(element->index).node.try_as<check::flat_call>() : nullptr;
+        auto const* const mark = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+        auto const is_nonuniform = mark != nullptr && mark->mark == builtins::index_mark::nonuniform;
+        auto text = element != nullptr
+                      ? d.buffer_length_at_helper(
+                            p.resources[found].name, is_nonuniform, is_bytes, p.resources[found].count,
+                            p.e.entry_stage == check::stage::compute || p.e.entry_stage == check::stage::pixel)
+                      : d.buffer_length_helper(p.resources[found].name, is_bytes);
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;
@@ -1818,11 +2012,8 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
 
 sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const& d, options const& sources)
 {
-    auto w = writer{.p = p, .d = d, .sources = sources};
-    // EMIT-183: a stage that cannot write the buffer drops its prints, and declares no buffer
-    if (sources.diagnostics && d.writes_debug_in(p.e.entry_stage))
-        for (auto const& s : p.e.stmts)
-            p.writes_debug = p.writes_debug || s.node.is<flat_print>();
+    auto w
+        = writer{.p = p, .d = d, .sources = sources, .origins = {.m = p.m, .files = sources.files, .names = sources.names}};
     for (auto const& r : p.resources)
         w.is_device_coherent = w.is_device_coherent || r.is_coherent;
     if (d.fences_image_stores())
@@ -1833,20 +2024,32 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
+    for (auto const& x : p.e.exprs)
+        if (auto const* const call = x.node.try_as<flat_call>())
+            if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                record != nullptr && record->name == "acceleration_pool_load")
+            {
+                d.write_acceleration_pool(w.out);
+                break;
+            }
+    if (p.e.written_words > 0 && !d.declares_workgroup_in_function())
+        w.out.appendf("{}\n\n", written_shadow_declaration(d.language(), p.e.written_words));
     write_helpers(w.out, p, d);
-    if (p.writes_debug)
-        d.write_debug_buffer(w.out);
     d.write_function_head(w.out, p);
     if (d.declares_workgroup_in_function())
+    {
         for (auto const& memory : p.workgroup)
         {
             auto declaration = cc::string();
             d.write_workgroup(declaration, memory, p);
             w.line(declaration);
         }
+        if (p.e.written_words > 0)
+            w.line(written_shadow_declaration(d.language(), p.e.written_words));
+    }
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
     w.out += "}\n";
     d.write_function_tail(w.out, p);
-    return {.text = cc::move(w.out), .lines = cc::move(w.lines), .debug_sites = cc::move(w.debug_sites)};
+    return {.text = cc::move(w.out), .lines = cc::move(w.lines)};
 }

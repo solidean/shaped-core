@@ -241,7 +241,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `sample(…, level = l)` | the same, and every stage | an explicit level: a `float`, and an `int` of a depth texture, which WGSL takes whole |
 | `sample(…, bias = b)` | a texture of floats | a bias on the level derivatives pick, in a pixel stage |
 | `sample(…, grad_x = …, grad_y = …)` | a texture of floats | the derivatives themselves |
-| `gather(…, component = texel_component.y)` | a 2D or cube texture of floats | one channel of the four texels a bilinear sample reads; `.x` by default |
+| `gather(…, component = texel_component.y)` | a 2D or cube texture | one channel of the four texels a bilinear sample reads, as a 4-vector of its component type; `.x` by default |
 | `sample_compare(…, reference = r)` | a depth texture | a comparison, through a `comparison_sampler`, in a pixel stage |
 | `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
 | `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
@@ -308,6 +308,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
 | filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
 | `T[N]` of a resource | `sg::feature::binding_arrays`, which WebGPU lacks ([Binding arrays](#binding-arrays)) |
+| `T[]` of a resource | `sg::feature::unbounded_binding_arrays`, which WebGPU lacks |
 | `acceleration_structure[.geometry]` | `sg::feature::ray_query`, or `raytracing_pipeline` in a file that grants that one |
 | a call that traces inline, `world.trace(r)` | `sg::feature::ray_query`, emulated on WebGPU; counted where the entry point reaches the call (CHK-322) |
 | a ray-tracing stage, a trace of a ray type, a callable's call | `sg::feature::raytracing_pipeline`, which WebGPU lacks |
@@ -318,6 +319,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
 | `compare_exchange_strong` in a pixel stage ([Atomics](#atomics)) | `sg::feature::helper_lane_query`, which WebGPU lacks |
 | a `@layer` field of a vertex stage's result ([CHK-419](semantics/checking.md#entry-points)) | `sg::feature::vertex_layer_output`, which WebGPU lacks |
+| `@view_index` in a vertex or pixel stage ([CHK-437](semantics/checking.md#entry-points)) | `sg::feature::view_instancing`, which WebGPU lacks |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.
@@ -423,8 +425,14 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
   A mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
 * A function's index is judged by what each call reaching it passes, in each entry point alone (CHK-401, CHK-402).
   A helper that one call reaches with a uniform index and another with a varying one is split in two, or marked `nonuniform` and pays on both.
-* `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
-  An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
+* `T[]` is an unbounded array, whose length each binding group decides by the views the host gives it (CHK-490).
+  It needs `unbounded_binding_arrays` beside `binding_arrays`, and is its binding's last member, since both APIs size only a group's last binding.
+  Its `length` is the views the group was given, a staging group's capacity, which sg writes per dispatch or draw and no host sets (CHK-491).
+  A binding whose code reads it gains that constant, and with it a constant block, so a group built by hand binds and fills one; a staging group's is its capacity.
+* An element of a buffer or `bytes` array has its own `length`, how many elements or bytes that view holds (CHK-460).
+* `sampler[N]` and `comparison_sampler[N]` are arrays of samplers, read by element and handed to a sample as the member would be.
+  Each element is the host's per group, since sg has no static sampler array, and the generated field is a `cc::fixed_array<sg::sampler, N>`.
+  An unbounded one and one of more than one dimension are `unsupported-yet`.
 * HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a `nonuniform` index, and a `uniform` one plain, as MSL writes both.
   WebGPU has no binding arrays, so WGSL refuses by the feature.
 
@@ -451,6 +459,7 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 * Everything it holds together fits 16 KiB, WebGPU's default limit and vulkan's required minimum (CHK-293).
 * Nothing is defined before it is stored: no target but WGSL zeroes it, and a shader that relies on either pays for it on every target.
   The interpreter reports a read of what was never stored as a program error (EVAL-92).
+  On a GPU, the `abort` and `report` profiles find such a read through a shadow of the memory, and `define` zeroes it everywhere (LEGAL-69).
 * A test holds workgroup memory of its own run, so it uses a `@workgroup` binding without listing it (CHK-295).
   Every other binding a test reads it lists, `test {frame}:`, and the driver that runs it gives the values (CHK-333).
 
@@ -485,7 +494,8 @@ On metal not where the entry point's workgroup memory holds an `atomic[float]`: 
 Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, adds in float, and retries a compare-exchange until no other update came between.
 Either way it is exact once per update and in no promised order.
 A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
-64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+**An `atomic[ulong]` and an `atomic[long]` have every operation an `atomic[uint]` has**, behind `shader_int64_atomics`, and stand in a `mut buffer` alone (CHK-296).
+dx12 and vulkan have them, metal and WebGPU do not; workgroup memory's and a vertex stage are [the incubator's](incubator/atomics.md).
 
 **`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
 Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.
@@ -543,7 +553,7 @@ Its caveats are the other atomics' and a few of its own:
   There, a weak one in a retry loop, or a compute stage, is the way.
 * The result of either is non-uniform (CHK-283): an index taken from it into a binding array is `nonuniform`, and a barrier under a branch on it is refused.
   The strong form's loop is the target's, and leaves the control flow as uniform as it found it, so a barrier after the call is fine.
-* A test runs one invocation, which no other ever races ([EVAL-100](semantics/evaluation.md#errors-of-the-program)).
+* A test's lanes run one after another, so none of them ever races another ([EVAL-142](semantics/evaluation.md#lanes)).
   It fails a weak compare-exchange spuriously every other time each call meets `expected`, the first time first.
   So a weak one without its retry loop fails its test, as it may on a GPU.
 * A spin lock built from either, where one invocation waits for another to release it, may hang a GPU whose SIMD group cannot run both sides; SGL does not detect one.
@@ -666,14 +676,18 @@ The syntax above is what the AST builds; the check pass is what limits it.
 Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out at natural alignment (EMIT-111), or as C++ lays it out under `@padding(.none)` (EMIT-167).
+  A `T` with a target layout, such as `accel.ptlas_write`, is laid out in the order of the branch the compile takes (CHK-522), and has no C++ struct.
 * `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
-* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)); a texture's is not built.
+* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)).
+* A subscript on a texture, as its `load` alone ([CHK-514](semantics/checking.md#bindings)).
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
   The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
+* Any resource handed to a function of the program, which takes it as a parameter of exactly its type ([CHK-366](semantics/checking.md#bindings)).
+  A buffer parameter is subscripted as its member is, `values[i]`, and a body in a target's own text names it as `$values`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
 * Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform` and `uniform`.
@@ -698,8 +712,6 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 
 ## Open
 
-* `values.length` — WGSL, HLSL and SPIR-V can all answer it without packing data, and MSL cannot: a Metal buffer argument is a pointer and carries no length.
-  Until metal is a target with a compiler behind it, a shader passes the count in.
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).

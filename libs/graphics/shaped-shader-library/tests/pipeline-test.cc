@@ -2,6 +2,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/logs.hh>
 #include <shaped-graphics-language/driver/describe.hh>
@@ -28,8 +29,8 @@ using namespace cc::primitive_defines;
 TEST("slib pipeline - the committed field setters are what the prelude's mirror of sg's description generates")
 {
     // `uv run dev.py check sgl-prelude --fix` rewrites the file; this is the same comparison, for a tree without the tool.
-    auto const committed
-        = slib::real_filesystem(SLIB_SOURCE_DIR).read_text("src/shaped-shader-library/impl/pipeline_fields.hh");
+    auto const committed = slib::real_filesystem(nx::source_path(SLIB_SOURCE_DIR))
+                               .read_text("src/shaped-shader-library/impl/pipeline_fields.hh");
     REQUIRE(committed.has_value());
     CHECK(committed.value() == sgl::pipeline_fields_text());
 }
@@ -43,7 +44,8 @@ TEST("slib pipeline - sg's mirrored structs keep the fields the prelude mirrors"
     auto [b1, b2, b3] = sg::blend_component{};
     auto [c1, c2] = sg::blend_state{};
     auto [t1, t2, t3] = sg::color_target_state{};
-    auto [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16] = sg::raster_pipeline_description{};
+    auto [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, p21]
+        = sg::raster_pipeline_description{};
     SUCCEED();
 }
 

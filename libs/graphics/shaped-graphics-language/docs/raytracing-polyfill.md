@@ -1,7 +1,8 @@
 # The ray-query polyfill: pool, layout and binding
 
-For whoever works on the webgpu ray-query polyfill, on either side of it.
-sg's webgpu backend builds acceleration structures into the layout below, and SGL's prelude traverses them.
+For whoever works on the ray-query polyfill, on either side of it.
+sg builds acceleration structures into the layout below, and SGL's prelude traverses them.
+webgpu always does, and dx12 and vulkan do for a package that takes `SOFTWARE_TRACE`.
 **This is an internal contract, not part of the language.**
 A shader that reads the pool other than through `trace` is undefined, and nothing here promises stability across versions.
 Both sides change together, in one commit.
@@ -24,6 +25,15 @@ Binding 0 is the inline constants and bindings 1 to 16 are the bound samplers, s
   An entry point lists at most 16 acceleration members.
 * **The acceleration member itself takes no WGSL binding.**
   sg's webgpu layout keeps its slot in the group's numbering, so every other member's slot is what it is on the other targets.
+
+dx12 and vulkan carry the same two where a group's binding says `traced_in_software`, which is the one way a layout pays for them.
+
+* **dx12:** a root SRV at `t0, space12`, and 16 root constants at `b0, space12`, set right before each op.
+* **vulkan:** bindings 17 and 18 of set 3, a storage buffer and a uniform buffer.
+  Such a set is written per op into a transient range of the descriptor heap, which also holds the roots it names.
+  A run of ops under one pipeline and one set of roots shares a range.
+* **The pool** is one host-visible buffer per context, written as a build records.
+  Growing it copies it to a new one, and the old one stays until no recorded work can read it.
 
 ## Units
 
@@ -51,9 +61,9 @@ A box is closed: a ray touching its surface enters it.
 
 | units | holds |
 |---|---|
-| 1 | header: x node count, y first instance unit, z instance count, w kinds present (bit 0 triangles, bit 1 boxes) |
+| 1 | header: x node count, y first instance unit, z instance count, w kinds present (bit 0 triangles, bit 1 boxes) and bit 2 where an instance moves |
 | 2 per node | the nodes; a leaf's primitives are instance indices |
-| 7 per instance | the instances |
+| 7 per instance, 10 where one moves | the instances |
 
 An instance, 7 units:
 
@@ -66,15 +76,20 @@ An instance, 7 units:
 The instance flags are:
 * bit 24: forced opaque;
 * bit 25: forced non-opaque;
-* bits 26 and 27: the triangle cull mode (0 back, 1 front, 2 none).
+* bits 26 and 27: the triangle cull mode (0 back, 1 front, 2 none);
+* bit 28: the instance moves.
+
+In a TLAS whose header sets bit 2, every instance takes 10 units, and units 7 to 9 are its object-to-world rows at time 1.
+A static instance writes its transform there again; a moving one's units 0 to 2 are unread, since the walk inverts the map at the ray's time.
+Its TLAS nodes bound the instance over the whole interval, as the boxes of both its transforms do.
 
 ## BLAS region
 
 | units | holds |
 |---|---|
-| 1 | header: x node count, y first primitive unit, z primitive count, w kind (0 triangles, 1 boxes) |
+| 1 | header: x node count, y first primitive unit, z primitive count, w kind (0 triangles, 1 boxes) and bit 2 where its triangles move |
 | 2 per node | the nodes; a leaf's primitives are primitive indices within this BLAS |
-| 3 or 2 per primitive | the primitives |
+| 3 or 2 per primitive, 6 per triangle that moves | the primitives |
 
 A triangle, 3 units, in object space and pre-fetched, so traversal never reads an index buffer:
 
@@ -83,6 +98,11 @@ A triangle, 3 units, in object space and pre-fetched, so traversal never reads a
 | 0 | vertex 0 | the primitive index within its geometry |
 | 1 | vertex 1 | the geometry index |
 | 2 | vertex 2 | 1 when the geometry is opaque, else 0 |
+
+In a BLAS whose header sets bit 2, every triangle takes 6 units, and units 3 to 5 are its vertices at time 1, their `w` unused.
+A still geometry of that BLAS writes its vertices there again.
+Its nodes bound the triangle over the whole interval, as the box of both poses does, widened by 1e-6 of the coordinates, since the mix rounds.
+A TLAS box over it needs nothing more: a point of a moving instance is a mix of two places of a point in that box.
 
 A box, 2 units:
 
@@ -93,7 +113,8 @@ A box, 2 units:
 
 ## Building
 
-Every build is recorded compute work, ordered like any other command, so a trace recorded after it sees the result.
+On webgpu every build is recorded compute work, ordered like any other command, so a trace recorded after it sees the result.
+On dx12 and vulkan a build computes the same words on the CPU, boxes included, from the description's `cpu_*` spans.
 
 * **The records are sorted by the Morton code of their box centers first**, quantized to 10 bits an axis over the centers' own box.
   A GPU radix sort does it, after the records are written and before any box is, for a BLAS of triangles or boxes and for a TLAS alike.
@@ -115,8 +136,15 @@ A test's driver binds a pool and each acceleration member's root (EVAL-95), and 
 * Two levels with one stack: a TLAS leaf pushes its instances' BLAS roots, with the ray moved into object space.
 * A BLAS leaf is read as its region's header `w` says, triangles or boxes, so a mixed TLAS needs no marker of its own.
   The TLAS header's kinds are not read yet.
-* **Triangles are not tested watertight yet**: Möller–Trumbore with a determinant cutoff, so a ray through an edge two triangles share may hit both or neither.
-  A watertight test is what hardware promises, and until the traversal has one, a test of it keeps its rays off shared edges.
+* **Triangles are tested watertight**, as Woop, Benthin and Wald do: the ray is sheared onto +z through the origin, and a triangle's three edges are judged in that plane.
+  A rounded difference of rounded products is 0 or has the true sign, so only a tie is left to decide, and no target needs doubles for it.
+  A tie goes one way for an edge taken in its sorted direction, as if the ray stood infinitesimally beside every edge at once.
+  So two triangles sharing an edge take a ray through it exactly once, whatever their winding, and a fan takes a ray through its corner exactly once.
+  Sorting an edge has both triangles evaluate one expression, so a target that fuses a product still negates it exactly.
+  A product that rounds to a tie it is not can still decide a corner wrongly, within a rounding of that corner.
+  Only vertices equal bit for bit are shared, so an edge between two instances need not be.
+* **A box is entered a little past its sides**, by the rounding of the slab test's products, and a ray running along a side enters it, so a watertight triangle behind a box's face is reached.
+* A stack of nodes is written before it is read, so neither of its arrays is filled.
 * The intersection runs for every box the ray enters.
   The any-hit decision sees a non-opaque triangle, or the report of a non-opaque box, with the instance's forced opacity and the ray flags applied first.
 * `t` and the barycentrics agree with hardware within a tolerance, never bit for bit.

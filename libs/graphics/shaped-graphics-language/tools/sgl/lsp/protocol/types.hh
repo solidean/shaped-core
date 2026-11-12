@@ -82,6 +82,22 @@ enum class lsp::inlay_hint_kind : lsp::i32
     parameter = 2,
 };
 
+/// What an editor draws beside a completion, in the specification's numbering; a subset.
+enum class lsp::completion_item_kind : lsp::i32
+{
+    method = 2,
+    function = 3,
+    field = 5,
+    variable = 6,
+    property = 10,
+    enum_ = 13,
+    keyword = 14,
+    enum_member = 20,
+    constant = 21,
+    struct_ = 22,
+    type_parameter = 25,
+};
+
 namespace lsp
 {
 
@@ -96,6 +112,8 @@ inline constexpr i32 internal_error = -32603;
 inline constexpr i32 server_not_initialized = -32002;
 inline constexpr i32 request_cancelled = -32800;
 inline constexpr i32 content_modified = -32801;
+/// The request was valid and the server declines it, as a rename to a keyword.
+inline constexpr i32 request_failed = -32803;
 } // namespace error_code
 } // namespace lsp
 
@@ -212,6 +230,127 @@ struct lsp::code_action
     cc::vector<text_edit> edits;
 };
 
+/// The params of a request about one position of one document: hover, definition, completion.
+struct lsp::text_document_position_params
+{
+    cc::string uri;
+    lsp::position position;
+};
+
+/// A hover's contents, which are markdown.
+struct lsp::hover
+{
+    cc::string markdown;
+    cc::optional<lsp::range> range;
+};
+
+struct lsp::completion_item
+{
+    cc::string label;
+    completion_item_kind kind = completion_item_kind::variable;
+    cc::string detail;
+};
+
+/// One signature of a call; each parameter label is a substring of `label`, as the specification allows.
+struct lsp::signature_information
+{
+    cc::string label;
+    /// Markdown; empty for none.
+    cc::string documentation;
+    cc::vector<cc::string> parameters;
+};
+
+struct lsp::signature_help
+{
+    cc::vector<signature_information> signatures;
+    i32 active_signature = 0;
+    i32 active_parameter = 0;
+};
+
+struct lsp::reference_params
+{
+    cc::string uri;
+    lsp::position position;
+    bool include_declaration = true;
+};
+
+struct lsp::rename_params
+{
+    cc::string uri;
+    lsp::position position;
+    cc::string new_name;
+};
+
+/// The edits of one document within a `workspace_edit`.
+struct lsp::document_edits
+{
+    cc::string uri;
+    cc::vector<text_edit> edits;
+};
+
+struct lsp::workspace_edit
+{
+    cc::vector<document_edits> changes;
+};
+
+/// What `textDocument/prepareRename` answers: the name's range, and the name an editor offers to replace.
+struct lsp::prepare_rename_result
+{
+    lsp::range range;
+    cc::string placeholder;
+};
+
+/// What an editor draws beside a symbol, in the specification's numbering; a subset.
+enum class lsp::symbol_kind : lsp::i32
+{
+    module = 2,
+    namespace_ = 3,
+    method = 6,
+    property = 7,
+    field = 8,
+    enum_ = 10,
+    function = 12,
+    variable = 13,
+    constant = 14,
+    object = 19,
+    enum_member = 22,
+    struct_ = 23,
+    event = 24,
+    type_parameter = 26,
+};
+
+/// One declaration of a document's outline, with the ones it holds.
+struct lsp::document_symbol
+{
+    cc::string name;
+    cc::string detail;
+    symbol_kind kind = symbol_kind::function;
+    lsp::range range;
+    lsp::range selection_range;
+    cc::vector<document_symbol> children;
+};
+
+struct lsp::folding_range
+{
+    i32 start_line = 0;
+    i32 end_line = 0;
+    bool is_comment = false;
+};
+
+struct lsp::workspace_symbol_params
+{
+    cc::string query;
+};
+
+/// A declaration somewhere in the workspace, flat, with the declaration that holds it.
+struct lsp::symbol_information
+{
+    cc::string name;
+    symbol_kind kind = symbol_kind::function;
+    lsp::location location;
+    cc::string container_name;
+};
+
 struct lsp::log_message_params
 {
     message_type type = message_type::log;
@@ -233,6 +372,10 @@ namespace lsp
 [[nodiscard]] bool read(json::ref in, did_close_params& out);
 [[nodiscard]] bool read(json::ref in, inlay_hint_params& out);
 [[nodiscard]] bool read(json::ref in, code_action_params& out);
+[[nodiscard]] bool read(json::ref in, text_document_position_params& out);
+[[nodiscard]] bool read(json::ref in, reference_params& out);
+[[nodiscard]] bool read(json::ref in, rename_params& out);
+[[nodiscard]] bool read(json::ref in, workspace_symbol_params& out);
 
 // writing
 void write_fields(json::writer& w, position const& v);
@@ -247,4 +390,13 @@ void write_fields(json::writer& w, semantic_tokens const& v);
 void write_fields(json::writer& w, inlay_hint const& v);
 void write_fields(json::writer& w, code_action const& v);
 void write_fields(json::writer& w, log_message_params const& v);
+void write_fields(json::writer& w, hover const& v);
+void write_fields(json::writer& w, completion_item const& v);
+void write_fields(json::writer& w, signature_information const& v);
+void write_fields(json::writer& w, signature_help const& v);
+void write_fields(json::writer& w, workspace_edit const& v);
+void write_fields(json::writer& w, prepare_rename_result const& v);
+void write_fields(json::writer& w, document_symbol const& v);
+void write_fields(json::writer& w, folding_range const& v);
+void write_fields(json::writer& w, symbol_information const& v);
 } // namespace lsp

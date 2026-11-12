@@ -81,6 +81,33 @@ cc::shared_async<lsp::answer<cc::vector<lsp::code_action>>> actions_request(sgl_
         co_return lsp::answer<cc::vector<lsp::code_action>>(cc::error(cancelled()));
     co_return lsp::answer<cc::vector<lsp::code_action>>(sgl_lsp::code_actions_of(*analysis, around, e));
 }
+
+/// A request about one position, answered by `feature` from the analysis of the version it was asked about.
+template <class R>
+cc::shared_async<lsp::answer<R>> position_request(sgl_lsp::analysis_cache::handle a,
+                                                  lsp::position at,
+                                                  lsp::position_encoding e,
+                                                  cc::shared_ptr<lsp::cancel_flag> flag,
+                                                  R (*feature)(sgl_lsp::analysis const&,
+                                                               lsp::position,
+                                                               lsp::position_encoding))
+{
+    auto const& analysis = co_await a;
+    if (flag->is_raised.load())
+        co_return lsp::answer<R>(cc::error(cancelled()));
+    co_return lsp::answer<R>(feature(*analysis, at, e));
+}
+/// A request answered by `feature(analysis)` from the analysis of the version it was asked about.
+template <class R, class F>
+cc::shared_async<lsp::answer<R>> analysis_request(sgl_lsp::analysis_cache::handle a,
+                                                  cc::shared_ptr<lsp::cancel_flag> flag,
+                                                  F feature)
+{
+    auto const& analysis = co_await a;
+    if (flag->is_raised.load())
+        co_return lsp::answer<R>(cc::error(cancelled()));
+    co_return lsp::answer<R>(feature(*analysis));
+}
 } // namespace
 
 cc::unique_ptr<sgl_lsp::language_server> sgl_lsp::language_server::create()
@@ -101,6 +128,27 @@ sgl_lsp::language_server::language_server()
             w.end_object();
             w.write("inlayHintProvider", true);
             w.write("codeActionProvider", true);
+            w.write("hoverProvider", true);
+            w.write("definitionProvider", true);
+            w.write("referencesProvider", true);
+            w.write("documentFormattingProvider", true);
+            w.write("documentSymbolProvider", true);
+            w.write("foldingRangeProvider", true);
+            w.write("workspaceSymbolProvider", true);
+            w.begin_object("renameProvider");
+            w.write("prepareProvider", true);
+            w.end_object();
+            w.begin_object("signatureHelpProvider");
+            w.begin_array("triggerCharacters");
+            w.write("(");
+            w.write(",");
+            w.end_array();
+            w.end_object();
+            w.begin_object("completionProvider");
+            w.begin_array("triggerCharacters");
+            w.write(".");
+            w.end_array();
+            w.end_object();
         },
     })
 {
@@ -135,6 +183,113 @@ sgl_lsp::language_server::language_server()
                                                     return actions_request(cc::move(a), p.range, _server.encoding(),
                                                                            ctx.flag);
                                                 });
+
+    // hover, definition and completion: each one position, answered from the analysis of the version asked about
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/hover",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::optional<lsp::hover>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &hover_of);
+        });
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/definition",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::optional<lsp::location>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &definition_of);
+        });
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/completion",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::vector<lsp::completion_item>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &completions_of);
+        });
+
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/signatureHelp",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::optional<lsp::signature_help>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &signature_help_of);
+        });
+    _server.on_request<lsp::reference_params>(
+        "textDocument/references",
+        [this](lsp::request_context const& ctx, lsp::reference_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::vector<lsp::location>());
+            return analysis_request<cc::vector<lsp::location>>(
+                cc::move(a), ctx.flag, [p, e = _server.encoding()](analysis const& an)
+                { return references_of(an, p.position, p.include_declaration, e); });
+        });
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/prepareRename",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::optional<lsp::prepare_rename_result>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &prepare_rename_of);
+        });
+    _server.on_request<lsp::rename_params>(
+        "textDocument/rename",
+        [this](lsp::request_context const& ctx, lsp::rename_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return cc::make_async_from_value(lsp::answer<lsp::workspace_edit>(cc::error(
+                    lsp::response_error{.code = lsp::error_code::request_failed, .message = "the document is not open"})));
+            return analysis_request<lsp::workspace_edit>(cc::move(a), ctx.flag,
+                                                         [p, e = _server.encoding()](analysis const& an)
+                                                         { return rename_of(an, p.position, p.new_name, e); });
+        });
+
+    _server.on_request<lsp::text_document_params>(
+        "textDocument/formatting",
+        [this](lsp::request_context const& ctx, lsp::text_document_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::vector<lsp::text_edit>());
+            return analysis_request<cc::vector<lsp::text_edit>>(
+                cc::move(a), ctx.flag, [e = _server.encoding()](analysis const& an) { return formatting_of(an, e); });
+        });
+
+    _server.on_request<lsp::text_document_params>("textDocument/documentSymbol",
+                                                  [this](lsp::request_context const& ctx, lsp::text_document_params p)
+                                                  {
+                                                      auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+                                                      if (!a)
+                                                          return answer_now(cc::vector<lsp::document_symbol>());
+                                                      return analysis_request<cc::vector<lsp::document_symbol>>(
+                                                          cc::move(a), ctx.flag,
+                                                          [e = _server.encoding()](analysis const& an)
+                                                          { return document_symbols_of(an, e); });
+                                                  });
+    _server.on_request<lsp::text_document_params>("textDocument/foldingRange",
+                                                  [this](lsp::request_context const& ctx, lsp::text_document_params p)
+                                                  {
+                                                      auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+                                                      if (!a)
+                                                          return answer_now(cc::vector<lsp::folding_range>());
+                                                      return analysis_request<cc::vector<lsp::folding_range>>(
+                                                          cc::move(a), ctx.flag,
+                                                          [](analysis const& an) { return folding_ranges_of(an); });
+                                                  });
+    _server.on_request<lsp::workspace_symbol_params>(
+        "workspace/symbol", [this](lsp::request_context const&, lsp::workspace_symbol_params p)
+        { return answer_now(workspace_symbols_of(_server.workspace().snapshot(), p.query, _server.encoding())); });
 
     _server.on_request<prelude_text_params>(
         "sgl/preludeText",

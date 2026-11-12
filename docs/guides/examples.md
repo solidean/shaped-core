@@ -309,7 +309,6 @@ Both are no-ops when `SC_BUILD_EXAMPLES` is off, so a call site never needs an `
 sc_add_single_file_examples(clean-core
     FILES vector.cc string.cc result.cc map.cc
     LINK clean-core
-    PCH CC_STD NEXUS
 )
 
 # One binary from several sources, for an example with real internal structure.
@@ -373,6 +372,9 @@ and `--shell-file` supplies the page itself instead of emcc's default shell.
 
 `examples/graphics/sgl-cube` builds `graphics-sgl-cube-example-web` the same way, into `web/sgl-cube.html`.
 It is the same cube with its shader written in SGL: one `cube.sgl` where `rotating-cube` has an HLSL file and two WGSL ones.
+Its page shows `cube.sgl` beside the canvas, and an edit there is built in the page as you type: the cube redraws with it, or keeps the last shader that built and shows why the edit does not.
+In Chrome and Edge it can follow a `cube.sgl` on disk instead, so a save in your editor reaches the page.
+Natively the example watches its source directory, so the same edit works there by saving the file.
 
 **`sc_add_example_web_page`** (nexus's `Examples.cmake`) is that second link: `sc_add_example_web_page(<target> EXAMPLE <name> OUTPUT <stem> SHELL <html>)`.
 It generates the `--pre-js` naming the example, so an example's page needs only its shell.

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/platform/stack_capture.hh>
@@ -23,6 +24,9 @@
 #if defined(_WIN32)
 #include <clean-core/platform/win32_sanitized.hh>
 #include <tlhelp32.h> // the thread snapshot, which <Windows.h> does not pull in under LEAN_AND_MEAN
+#elif defined(__APPLE__)
+#include <mach/mach.h> // task_threads, thread_suspend, thread_get_state: walking a thread from outside
+#include <pthread.h>   // a Mach thread's pthread, which knows its stack's bounds
 #endif
 
 using namespace cc::primitive_defines;
@@ -78,7 +82,10 @@ struct sample
     u32 chunk_offset = 0;
     u64 chunk_seq = 0;
     u64 native_tid = 0;
+    u64 owner = 0;
     cc::stack_capture_result capture;
+    /// Whether the thread had a recorded scope open, read while it was suspended.
+    bool in_scope = false;
 };
 
 [[nodiscard]] bool is_sampleable(cc::rec::impl::thread_state const& ts)
@@ -90,7 +97,7 @@ struct sample
     return cc::string_view(ts.name) != actor_thread_name && cc::string_view(ts.name) != sampler_thread_name;
 }
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
 /// Every OS thread the recorder already knows, collected in ONE pass under the registry lock.
 ///
 /// Asking per thread instead would take the lock once per thread in the process, on a path that already costs a
@@ -114,7 +121,13 @@ void read_anchor(cc::rec::impl::thread_state const& ts, sample& out)
     out.thread_index = ts.index;
 
     auto const* const w = ts.tls;
-    if (w == nullptr || w->current == nullptr)
+    if (w == nullptr)
+        return;
+
+    // What its next event would carry: a pending reset means it has left every context.
+    out.owner = w->ambient_reset_pending ? 0 : w->last_owner;
+
+    if (w->current == nullptr)
         return; // a thread that has recorded nothing has no position, and no state to recover either
 
     out.chunk_seq = w->current->seq;
@@ -279,6 +292,7 @@ public:
             if (ts != nullptr)
             {
                 read_anchor(*ts, out);
+                out.in_scope = ts->tls != nullptr && ts->tls->scope_frame != nullptr;
                 if (stop_at_scope)
                     stop = ts->tls != nullptr ? ts->tls->scope_frame : nullptr;
             }
@@ -290,6 +304,246 @@ public:
 
     ::ResumeThread(HANDLE(handle));
     return ok;
+}
+#endif
+
+#if defined(__APPLE__) && CC_HAS_THREADS
+/// One thread of this process as Mach names it: a port to suspend it by, and its own stack's bounds.
+struct mach_thread
+{
+    u64 tid = 0;
+    thread_act_t port = MACH_PORT_NULL;
+    u64 stack_low = 0;
+    u64 stack_high = 0;
+};
+
+/// Every thread of this process, listed on a wall-clock interval rather than per tick.
+///
+/// The bounds are read here, while every thread runs: asking for them goes through the pthread list's lock, which a
+/// suspended thread could hold.
+/// A thread no pthread owns keeps bounds of 0, and is skipped, since its chain cannot be checked against anything.
+struct mach_threads
+{
+    cc::vector<mach_thread> threads;
+
+    mach_threads() = default;
+    mach_threads(mach_threads const&) = delete;
+    mach_threads& operator=(mach_threads const&) = delete;
+    ~mach_threads() { clear(); }
+
+    void refresh(u64 exclude)
+    {
+        clear();
+        thread_act_array_t list = nullptr;
+        auto count = mach_msg_type_number_t(0);
+        if (task_threads(mach_task_self(), &list, &count) != KERN_SUCCESS)
+            return;
+
+        for (auto i = mach_msg_type_number_t(0); i < count; ++i)
+        {
+            auto t = mach_thread{.port = list[i]};
+            auto identifier = thread_identifier_info_data_t{};
+            auto info_count = mach_msg_type_number_t(THREAD_IDENTIFIER_INFO_COUNT);
+            if (thread_info(list[i], THREAD_IDENTIFIER_INFO, reinterpret_cast<thread_info_t>(&identifier), &info_count)
+                == KERN_SUCCESS)
+                t.tid = identifier.thread_id;
+
+            // suspending the sampler would suspend the thing doing the suspending
+            if (t.tid == 0 || t.tid == exclude)
+            {
+                (void)mach_port_deallocate(mach_task_self(), list[i]);
+                continue;
+            }
+
+            if (auto const owner = pthread_from_mach_thread_np(list[i]); owner != nullptr)
+            {
+                t.stack_high = u64(reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(owner)));
+                t.stack_low = t.stack_high - u64(pthread_get_stacksize_np(owner));
+            }
+            threads.push_back(t);
+        }
+        (void)vm_deallocate(mach_task_self(), vm_address_t(list), vm_size_t(count * sizeof(thread_act_t)));
+    }
+
+    [[nodiscard]] mach_thread* find(u64 tid)
+    {
+        for (auto& t : threads)
+            if (t.tid == tid)
+                return &t;
+        return nullptr;
+    }
+
+    void clear()
+    {
+        for (auto const& t : threads)
+            (void)mach_port_deallocate(mach_task_self(), t.port);
+        threads.clear();
+    }
+};
+
+/// What the sampler loop suspends a thread by: here, its entry in the Mach list.
+struct handle_cache
+{
+    mach_threads* table = nullptr;
+
+    [[nodiscard]] void* get(u64 native_tid) { return table->find(native_tid); }
+    void clear() {}
+};
+
+/// The threads the recorder does NOT know, so a round-robin slot is never spent on one the known half covers.
+struct os_thread_list
+{
+    cc::vector<u64> tids;
+
+private:
+    cc::vector<u64> _registered;
+
+public:
+    void refresh(mach_threads const& table)
+    {
+        tids.clear();
+        collect_registered(_registered);
+        for (auto const& t : table.threads)
+        {
+            auto known = false;
+            for (auto const r : _registered)
+                known = known || r == t.tid;
+            if (!known)
+                tids.push_back(t.tid);
+        }
+    }
+};
+
+/// Suspends the thread `handle` names, fills `out`, and resumes it.
+/// Between the suspend and the resume only its registers and its own stack are read, into `frames`: nothing allocates
+/// and nothing locks.
+/// `ts` is null for a thread the recorder has never heard of, which then contributes frames and nothing else.
+[[nodiscard]] bool sample_suspended(void* handle,
+                                    cc::unwind_snapshot const&,
+                                    cc::rec::impl::thread_state const* ts,
+                                    cc::span<void*> frames,
+                                    bool stop_at_scope,
+                                    sample& out)
+{
+    auto const& t = *static_cast<mach_thread const*>(handle);
+    if (t.stack_low == 0 || thread_suspend(t.port) != KERN_SUCCESS)
+        return false;
+
+    auto ok = false;
+#if defined(__aarch64__)
+    auto state = arm_thread_state64_t{};
+    auto count = mach_msg_type_number_t(ARM_THREAD_STATE64_COUNT);
+    auto const read = thread_get_state(t.port, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count);
+    auto const fp = read == KERN_SUCCESS ? u64(arm_thread_state64_get_fp(state)) : u64(0);
+    auto const pc = read == KERN_SUCCESS ? u64(arm_thread_state64_get_pc(state)) : u64(0);
+#else
+    auto state = x86_thread_state64_t{};
+    auto count = mach_msg_type_number_t(x86_THREAD_STATE64_COUNT);
+    auto const read = thread_get_state(t.port, x86_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count);
+    auto const fp = read == KERN_SUCCESS ? u64(state.__rbp) : u64(0);
+    auto const pc = read == KERN_SUCCESS ? u64(state.__rip) : u64(0);
+#endif
+    if (read == KERN_SUCCESS)
+    {
+        void const* stop = nullptr;
+        if (ts != nullptr)
+        {
+            read_anchor(*ts, out);
+            out.in_scope = ts->tls != nullptr && ts->tls->scope_frame != nullptr;
+            if (stop_at_scope)
+                stop = ts->tls != nullptr ? ts->tls->scope_frame : nullptr;
+        }
+        out.capture = cc::capture_stack_from_frame(reinterpret_cast<void const*>(fp), reinterpret_cast<void*>(pc),
+                                                   t.stack_low, t.stack_high, frames, stop);
+        ok = out.capture.count > 0;
+    }
+
+    (void)thread_resume(t.port);
+    return ok;
+}
+#endif
+
+#if defined(_WIN32) || (defined(__APPLE__) && CC_HAS_THREADS)
+/// Where a thread's running time stood at the sampler's previous tick of it, both in the timestamp counter's ticks.
+struct run_mark
+{
+    u64 tsc = 0;
+    u64 cycles = 0;
+};
+
+/// How much of a stretch a thread ran, both in the timestamp counter's ticks; `interval` 0 when there is none to tell.
+struct thread_run
+{
+    u64 interval = 0;
+    u64 ran = 0;
+};
+
+/// The stretch since `mark` given the thread's running time now, `cycles`, moving `mark` to now.
+thread_run advance_run_mark(run_mark& mark, u64 cycles)
+{
+    auto const tsc = cc::current_cycles();
+    auto const first = mark.tsc == 0;
+    auto const out = thread_run{.interval = tsc - mark.tsc, .ran = cycles - mark.cycles};
+    mark = {.tsc = tsc, .cycles = cycles};
+    return first ? thread_run{} : out;
+}
+#endif
+
+#if defined(_WIN32)
+
+/// How much of the stretch since `mark` the thread behind `handle` ran, moving `mark` to now.
+/// QueryThreadCycleTime counts in the timestamp counter's ticks, so the two are one unit; the thread need not be
+/// suspended for it, and is read before the sampler suspends it, so the walk does not count as time it did not run.
+thread_run read_thread_run(void* handle, run_mark& mark)
+{
+    auto cycles = ULONG64(0);
+    if (::QueryThreadCycleTime(HANDLE(handle), &cycles) == 0)
+        return {};
+    return advance_run_mark(mark, u64(cycles));
+}
+#elif defined(__APPLE__) && CC_HAS_THREADS
+/// How much of the stretch since `mark` the thread behind `handle` ran, moving `mark` to now.
+/// THREAD_EXTENDED_INFO counts user and system time in nanoseconds, converted here to the counter's ticks at the
+/// recorder's calibrated rate, so `ran` and `interval` share the unit they have on Windows.
+/// THREAD_BASIC_INFO would give the same in whole microseconds, a tenth of a 1 kHz tick.
+/// The thread need not be suspended for it, and is read before the sampler suspends it.
+thread_run read_thread_run(void* handle, run_mark& mark)
+{
+    auto const rate = cc::rec::cycles_per_second();
+    if (rate <= 0)
+        return {};
+    auto info = thread_extended_info_data_t{};
+    auto count = mach_msg_type_number_t(THREAD_EXTENDED_INFO_COUNT);
+    auto const port = static_cast<mach_thread*>(handle)->port;
+    if (thread_info(port, THREAD_EXTENDED_INFO, reinterpret_cast<thread_info_t>(&info), &count) != KERN_SUCCESS)
+        return {};
+    auto const ran_ns = info.pth_user_time + info.pth_system_time;
+    return advance_run_mark(mark, u64(f64(ran_ns) * rate * 1e-9));
+}
+#endif
+
+#if defined(_WIN32) || (defined(__APPLE__) && CC_HAS_THREADS)
+/// Records `run` for a thread, with whether the walk that followed found a recorded scope open.
+void record_thread_run(thread_run const& run, u32 thread_index, u64 native_tid, bool in_scope)
+{
+    auto const& d = cc::rec::impl::thread_run_desc();
+    if (run.interval == 0 || !cc::rec::is_recording(d))
+        return;
+    auto const interval = run.interval;
+    auto const ran = run.ran;
+    auto writer = cc::rec::open_event(d, cc::rec::impl::thread_run_payload_size, cc::rec::impl::thread_run_payload_size);
+    if (!writer.is_open())
+        return;
+    auto const out = writer.payload();
+    if (out.size() < cc::rec::impl::thread_run_payload_size)
+        return;
+    auto const scope_flag = u32(in_scope ? 1 : 0);
+    cc::memcpy(out.data() + 0, &thread_index, sizeof(thread_index));
+    cc::memcpy(out.data() + 4, &scope_flag, sizeof(scope_flag));
+    cc::memcpy(out.data() + 8, &native_tid, sizeof(native_tid));
+    cc::memcpy(out.data() + 16, &interval, sizeof(interval));
+    cc::memcpy(out.data() + 24, &ran, sizeof(ran));
+    writer.commit(cc::rec::impl::thread_run_payload_size, cc::rec::impl::flag_none);
 }
 #endif
 
@@ -346,6 +600,8 @@ void sampler_main()
     isize cursor = 0; // where the round-robin got to, so no thread is starved by registration order
 
     handle_cache handles;
+    auto run_marks
+        = cc::map<u64, run_mark>(); // per thread the sampler knows, where its running time stood at its last tick
     precise_timer const timer;
     os_thread_list os_threads;
     auto const self_tid = cc::native_thread_id();
@@ -367,6 +623,25 @@ void sampler_main()
     auto unwind_is_stale = false;
     constexpr f64 unwind_refresh_secs = 0.25;
     auto next_unwind_refresh_at = cc::current_time_steady_secs() + unwind_refresh_secs;
+#elif defined(__APPLE__)
+    isize cursor = 0; // where the round-robin got to, so no thread is starved by registration order
+
+    // The Mach list is what both halves suspend by, so it is taken at once and then on the same wall-clock interval
+    // the unknown half is: listing costs far less than a Windows snapshot, but it allocates a port per thread.
+    mach_threads table;
+    auto handles = handle_cache{.table = &table};
+    auto run_marks
+        = cc::map<u64, run_mark>(); // per thread the sampler knows, where its running time stood at its last tick
+    os_thread_list os_threads;
+    auto const self_tid = cc::native_thread_id();
+    auto known_count = isize(1); // corrected by the first known-half tick
+    constexpr f64 refresh_interval_secs = 0.1;
+    table.refresh(self_tid);
+    if (cfg.include_unknown_threads)
+        os_threads.refresh(table);
+    auto next_refresh_at = cc::current_time_steady_secs() + refresh_interval_secs;
+    auto const unwind = cc::unwind_snapshot::create(); // empty: a frame chain needs no tables
+    auto unwind_is_stale = false;
 #endif
 
     while (!g_stop.load(cc::memory_order_acquire))
@@ -390,6 +665,7 @@ void sampler_main()
 
         sample s;
 
+#if defined(_WIN32) || defined(__APPLE__)
 #if defined(_WIN32)
         if (unwind_is_stale && cc::current_time_steady_secs() >= next_unwind_refresh_at)
         {
@@ -403,6 +679,15 @@ void sampler_main()
             os_threads.refresh(self_tid);
             next_refresh_at = cc::current_time_steady_secs() + refresh_interval_secs;
         }
+#else
+        if (cc::current_time_steady_secs() >= next_refresh_at)
+        {
+            table.refresh(self_tid);
+            if (cfg.include_unknown_threads)
+                os_threads.refresh(table);
+            next_refresh_at = cc::current_time_steady_secs() + refresh_interval_secs;
+        }
+#endif
 
         // One round-robin over both halves, so a thread with no stream competes for slots on equal terms.
         // The two differ only in whether there is a stream to anchor into; the walk is the same.
@@ -445,7 +730,12 @@ void sampler_main()
                             attempted = true;
                             s.native_tid = ts.native_tid;
                             if (auto* const h = handles.get(ts.native_tid); h != nullptr)
+                            {
+                                auto const run
+                                    = cfg.thread_run ? read_thread_run(h, run_marks[ts.native_tid]) : thread_run{};
                                 took = sample_suspended(h, unwind, &ts, frames, cfg.stop_at_scope, s);
+                                record_thread_run(run, ts.index, ts.native_tid, took && s.in_scope);
+                            }
                         });
                 }
                 else
@@ -463,7 +753,14 @@ void sampler_main()
                 {
                     // Inside the tick scope, so the sample and its cost stay together until splicing moves the sample
                     // onto the thread it caught.
-                    write_sample(s, frames);
+                    if (cfg.sink != nullptr)
+                        cfg.sink(cc::rec::sample_view{.native_tid = s.native_tid,
+                                                      .owner = s.owner,
+                                                      .frames = cc::span<void* const>(frames.data(), s.capture.count),
+                                                      .truncated = s.capture.truncated},
+                                 cfg.sink_user);
+                    else
+                        write_sample(s, frames);
                     g_taken.fetch_add(1, cc::memory_order_relaxed);
                 }
                 else if (attempted)
@@ -473,8 +770,8 @@ void sampler_main()
             }
         }
 
-        // Inside the guard, with the `per_tick` it advances by: every target this loop knows about is Windows-only,
-        // and off Windows the tick body does nothing to advance past.
+        // Inside the guard, with the `per_tick` it advances by: every target this loop knows about is Windows' or
+        // macOS's, and elsewhere the tick body does nothing to advance past.
         cursor += per_tick > 0 ? per_tick : 1;
         g_ticks.fetch_add(1, cc::memory_order_relaxed);
 #endif
@@ -486,6 +783,29 @@ void sampler_main()
 }
 #endif
 } // namespace
+
+bool cc::rec::sampling_available()
+{
+#if CC_HAS_THREADS && (defined(_WIN32) || defined(__APPLE__))
+    return true;
+#else
+    return false;
+#endif
+}
+
+cc::rec::desc const& cc::rec::impl::thread_run_desc()
+{
+    static constexpr rec::desc d = {
+        .kind = rec::event_kind::value,
+        .enable_bit = rec::enable_bit_of(rec::category::profiling),
+        .name = "record.thread_run",
+        .dom = &cc::rec::g_system_domain,
+        .fields = rec::impl::thread_run_fields,
+        .field_count = u16(CC_ARRAY_COUNT_OF(rec::impl::thread_run_fields)),
+        .fixed_payload_size = rec::impl::thread_run_payload_size,
+    };
+    return d;
+}
 
 cc::rec::desc const& cc::rec::impl::sample_desc()
 {
@@ -519,7 +839,7 @@ void cc::rec::start_sampling(cc::rec::sampling_config const& cfg)
     // outside, and a platform with no such operation cannot do a cheaper version of it.
     // wasm is the case — a worker can be walked by nobody but itself — and a silent return left a caller believing
     // a profile was being taken.
-    if (!cc::stack_capture_from_context_available())
+    if (!cc::rec::sampling_available())
     {
         CC_LOG_WARNING("sampling is unavailable: this platform cannot walk a thread other than the calling one");
         return;

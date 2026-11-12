@@ -160,7 +160,9 @@ struct sg::binding
     cc::optional<u32> space;
 
     u32 index = 0; ///< binding within the group / @binding / HLSL register number
-    u32 count = 1; ///< array length; 0 = unbounded array
+    /// The array's length; 0 is an unbounded array, whose length each binding group decides by the views it is given.
+    /// An unbounded one needs `feature::unbounded_binding_arrays`, and is the last binding of its layout.
+    u32 count = 1;
     binding_type type = binding_type::constants_buffer;
 
     /// What the shader does with the resource; must be `is_valid_access(type, access)`.
@@ -199,9 +201,17 @@ struct sg::binding
     /// See sampler_binding_type.
     cc::optional<sampler_binding_type> sampler_type;
 
-    /// Whether this is an array binding (count > 1): one descriptor per element, vacant elements as
+    /// For `acceleration_structure` bindings on dx12, vulkan and metal: its shader's inline traces take the software walk.
+    /// A layout holding one carries sg's acceleration pool and roots in the reserved group, and only such a binding takes a tlas that moves.
+    /// A shader package's `SOFTWARE_TRACE` sets it; webgpu has no other walk and ignores it.
+    bool traced_in_software = false;
+
+    /// Whether this is an unbounded array binding (count 0), which a binding group sizes.
+    [[nodiscard]] constexpr bool is_unbounded() const { return count == 0; }
+
+    /// Whether this is an array binding (count > 1, or unbounded): one descriptor per element, vacant elements as
     /// `sg::vacant_view`, and access declared explicitly per dispatch rather than inferred.
-    [[nodiscard]] constexpr bool is_array() const { return count > 1; }
+    [[nodiscard]] constexpr bool is_array() const { return count != 1; }
 
     /// Whether the shader may write the resource, which WebGPU forbids in the vertex stage.
     [[nodiscard]] constexpr bool is_writable() const { return access != access_mode::read; }

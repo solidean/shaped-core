@@ -32,6 +32,10 @@ struct nx::test_declaration
     nx::config::cfg test_config;
     cc::source_location location;
 
+    // The source file the test is declared in, at every source-sites level, unlike location.file_name().
+    // Test selection by file and the listings read it.
+    char const* file = "";
+
     // Ordinary (nullary) tests: `signature` is empty and `function` is the body.
     cc::unique_function<void()> function;
 
@@ -80,28 +84,33 @@ struct nx::test_registry
     // Populated by run_setup_callbacks (from NX_TEST_SETUP bodies) before scheduling/listing.
     cc::vector<test_alias> aliases;
 
+    // `file` is the caller's at every source-sites level, where `loc` names one only at FULL.
     void add_declaration(cc::string name,
                          config::cfg test_config,
                          cc::unique_function<void()> function,
-                         cc::source_location loc = cc::source_location::current());
+                         cc::source_location loc = cc::source_location::current(),
+                         char const* file = __builtin_FILE());
 
     void add_async_declaration(cc::string name,
                                config::cfg test_config,
                                cc::unique_function<void(impl::async_test_sink&)> async_function,
-                               cc::source_location loc = cc::source_location::current());
+                               cc::source_location loc = cc::source_location::current(),
+                               char const* file = __builtin_FILE());
 
     void add_invocable_declaration(cc::string name,
                                    config::cfg test_config,
                                    cc::vector<std::type_index> signature,
                                    cc::unique_function<void(cc::span<nx::typed_value*>)> invocable_function,
-                                   cc::source_location loc = cc::source_location::current());
+                                   cc::source_location loc = cc::source_location::current(),
+                                   char const* file = __builtin_FILE());
 
     void add_async_invocable_declaration(
         cc::string name,
         config::cfg test_config,
         cc::vector<std::type_index> signature,
         cc::unique_function<void(cc::span<nx::typed_value*>, impl::async_test_sink&)> async_invocable_function,
-        cc::source_location loc = cc::source_location::current());
+        cc::source_location loc = cc::source_location::current(),
+        char const* file = __builtin_FILE());
 
     void add_alias(test_alias alias);
 };

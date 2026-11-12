@@ -87,7 +87,7 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
 
                 auto t = tests.write_object(json::layout::compact);
                 t.write("name", decl.name);
-                t.write("file", decl.location.file_name());
+                t.write("file", decl.file);
                 t.write("line", decl.location.line());
                 t.write("bucket", bucket_name(tc.bucket));
                 t.write("manual", tc.manual); // runs only when named exactly, even within its bucket

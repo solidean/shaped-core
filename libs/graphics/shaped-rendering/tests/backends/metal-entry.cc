@@ -10,10 +10,6 @@
 // Metal has no software device, so a host below the backend's floor cannot create a context and this SKIPs.
 // Metal's validation has no callback to fail one test through: main() arms it for the whole binary instead.
 
-// Under a check's parallel GPU load, unretired epochs can hold the whole upload ring, and the overflow is correct but warns.
-// issue: bug-sr-metalfx-rr-upload-ring-overflow-flake
-NX_ALLOW_LOGS(cc::rec::level::warning, "sg.metal", "did not fit the *-byte upload ring");
-
 // No exclusion tags, for the reason dx12-entry.cc gives.
 ASYNC_TEST("sr metal")
 {
@@ -23,7 +19,8 @@ ASYNC_TEST("sr metal")
     else
     {
         (void)sr_test::shader_fixtures(); // alive before any child acquires through it
-        co_await nx::async_invoke_tests_in_sequence("metal", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "metal", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device loss during our own tests is a defect rather than an environment quirk to tolerate.
         CHECK(!ctx.value()->is_device_lost())

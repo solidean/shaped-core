@@ -56,7 +56,7 @@ memory_access access_of(plan const& p, cc::span<planned_member const> members, i
     if (is_hlsl(p.which) && is_3_vector_array(p.m, member.type))
         return {.held = held_as::widened_array, .lanes = lanes[3]};
     if (is_hlsl(p.which) && is_mat3_array(p.m, member.type))
-        return {.held = held_as::widened_array};
+        return {.held = held_as::widened_array, .lanes = mat3_cell_field(p, member.type)};
     if (p.which == emit::target::msl && shares_tail(p, members, index))
         return {.held = held_as::packed_tail};
     return {};
@@ -79,6 +79,14 @@ void mark_place(plan& p, flat_expr_id id)
 }
 } // namespace
 
+cc::string_view sgl::emit::impl::mat3_cell_field(plan const& p, check::type_id type)
+{
+    if (!is_hlsl(p.which) || !is_mat3_array(p.m, type))
+        return {};
+    auto const element = p.m.at(type).element;
+    return p.m.builtin_type_of(element) == nullptr && p.m.at(element).kind == type_kind::array ? ".m" : "";
+}
+
 bool sgl::emit::impl::holds_widened_mat3(plan const& p, check::type_id object_type, isize member)
 {
     auto const* const s = struct_in_memory(p, object_type);
@@ -96,7 +104,27 @@ bool sgl::emit::impl::is_piece(plan const& p, flat_element const& element)
 {
     auto const type = p.e.at(element.object).type;
     return p.accesses[index_of(element.object)].held == held_as::pieces && p.m.builtin_type_of(type) == nullptr
-        && p.m.at(type).kind == type_kind::array && p.e.at(element.index).node.is<flat_int_literal>();
+        && p.m.at(type).kind == type_kind::array && p.e.at(element.index).node.is<flat_int_literal>()
+        && !is_word_split(p, p.m.at(type).element);
+}
+
+bool sgl::emit::impl::is_word_split(plan const& p, check::type_id type)
+{
+    if (p.which != emit::target::hlsl_dx12 && p.which != emit::target::msl)
+        return false;
+    auto const* const record = is_valid(type) ? p.m.builtin_type_of(type) : nullptr;
+    return record != nullptr && check::is_64_bit(record->leaf_kind) && record->leaf_count <= 4;
+}
+
+i32 sgl::emit::impl::word_pieces(plan const& p, check::type_id type)
+{
+    return is_wide_64_bit(p, type) ? 2 : 1;
+}
+
+bool sgl::emit::impl::is_wide_64_bit(plan const& p, check::type_id type)
+{
+    auto const* const record = is_valid(type) ? p.m.builtin_type_of(type) : nullptr;
+    return record != nullptr && check::is_64_bit(record->leaf_kind) && record->leaf_count >= 3 && record->leaf_count <= 4;
 }
 
 void sgl::emit::impl::plan_memory_accesses(plan& p)

@@ -150,8 +150,7 @@ TEST("sgl check - a function of the program takes a texture, an image or a sampl
     CHECK(with("fun keep(t: texture_2d[float4]):\n    let u = t\n", "")
               .contains("unsupported-yet user:[t] texture_2d[float4] as a value"));
     CHECK(with("fun pass(t: texture_2d[float4]) -> texture_2d[float4] => t\n", "").contains("unsupported-yet"));
-    // a buffer is read through its binding alone, and an entry point is handed values
-    CHECK(with("fun first(b: buffer[float]) -> float => b[0]\n", "").contains("unsupported-yet"));
+    // an entry point is handed values
     CHECK(reports_for("@pixel struct target:\n    color: float4\n"
                       "@pixel fun main_ps(t: texture_2d[float4]) -> target => {color = float4(1.0, 1.0, 1.0, 1.0)}\n")
               .contains("unsupported-yet"));
@@ -160,4 +159,36 @@ TEST("sgl check - a function of the program takes a texture, an image or a sampl
     CHECK(with(fetch, "    let c = fetch(uv, work.s)\n").contains("no-matching-overload"));
     CHECK(with("fun write(i: out image_2d[.r32_float]) => i.store(int2(0, 0), 1.0)\n", "    write(work.img)\n")
               .contains("no-matching-overload"));
+}
+
+TEST("sgl check - a function of the program takes a buffer or bytes, subscripted or handed on as a member is (CHK-366)")
+{
+    auto const members = cc::string_view("    values: buffer[float]\n"
+                                         "    sums: mut buffer[float]\n"
+                                         "    counts: mut buffer[atomic[uint]]\n"
+                                         "    raw: mut bytes\n");
+    auto const with = [&](cc::string_view functions, cc::string_view body)
+    { return reports_for(cc::format("{}\n{}", functions, listing(members, body))); };
+
+    // read, measured, written, updated by its atomics, and handed on to another function
+    CHECK(with("fun first(b: buffer[float]) -> float => b[0] + (b.length as float)\n"
+               "fun put(b: mut buffer[float], v: float):\n    b[0] = v\n    b[1] += v\n"
+               "fun tally(c: mut buffer[atomic[uint]]) => c[0].add(1u)\n"
+               "fun copied(b: buffer[float], into: mut buffer[float]) => put(into, first(b))\n"
+               "fun stamp(r: mut bytes) => r.store(0u, r.length)\n",
+               "    copied(work.values, work.sums)\n    tally(work.counts)\n    stamp(work.raw)\n")
+          == "");
+
+    // the parameter stands where its member would: subscripted, measured or handed, and no value of a local or a result
+    CHECK(with("fun keep(b: buffer[float]):\n    let u = b\n", "")
+              .contains("unsupported-yet user:[b] buffer[float] as a value"));
+    CHECK(with("fun pass(b: buffer[float]) -> buffer[float] => b\n", "").contains("unsupported-yet"));
+
+    // the access is the type's: a read-only buffer is no `mut` argument, and a `mut` one no read-only one
+    auto const put = cc::string_view("fun put(b: mut buffer[float]):\n    b[0] = 1.0\n");
+    CHECK(with(put, "    put(work.values)\n").contains("no-matching-overload"));
+    CHECK(with("fun first(b: buffer[float]) -> float => b[0]\n", "    let f = first(work.sums)\n")
+              .contains("no-matching-overload"));
+    // a read-only parameter is no place
+    CHECK(with("fun put(b: buffer[float]):\n    b[0] = 1.0\n", "").contains("not-assignable"));
 }

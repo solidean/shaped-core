@@ -53,6 +53,46 @@ public:
     [[nodiscard]] tlas_handle build_tlas(cc::span<tlas_instance const> instances,
                                          accel_build_flags flags = accel_build_flag::fast_trace);
 
+    /// Applies `ops` to `ptlas` in place, rebuilding only the partitions they touch; its first update builds it.
+    /// A slot is named once at most across the writes, updates and clears, and each blas they name must be built.
+    /// The partitioned_tlas holds every blas its slots name, and this list keeps the ones it replaces until it has run.
+    /// Under `context::hit_record_checks` it also keeps each slot's blas, offset and mask, which is what dispatch_rays checks.
+    /// Requires `sg::feature::partitioned_tlas`.
+    void update(partitioned_tlas const& ptlas, ptlas_operations const& ops);
+
+    /// Applies records a compute pass wrote to `ptlas`, as `update` applies its operations: the GPU-written tier.
+    /// sg writes the operation array and copies each count into it, so a shader writes the records and bumps a count.
+    /// The records are SGL's `accel` module's, and each count must not exceed its `max_count`.
+    /// `ops.tables` are every table a record may name after this update, which the structure then holds in place of
+    /// the earlier update's; a record naming a BLAS of no such table is a caller bug sg cannot see.
+    /// No check follows the records, so under `context::hit_record_checks` the structure stops being checked.
+    /// Requires `sg::feature::partitioned_tlas`.
+    void update_indirect(partitioned_tlas const& ptlas, ptlas_indirect_operations const& ops);
+
+    /// Builds `clusters` into one immutable set, cluster k at position k, which `build_cluster_blas` then lists.
+    /// Each must be indexed, with 1 to `max_cluster_triangles` triangles over 1 to `max_cluster_vertices` vertices.
+    /// `fast_trace` / `fast_build` are mutually exclusive, and nothing else applies.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception if the set cannot be allocated.
+    [[nodiscard]] cluster_set_handle build_clusters(cc::span<cluster_triangles const> clusters,
+                                                    accel_build_flags flags = accel_build_flag::fast_trace);
+
+    /// Replaces every cluster of `pool` with those a compute pass wrote as `accel.clas_triangles` records, in place.
+    /// The records and their count carry `buffer_usage::accel_structure_build_input`, which the build reads them as.
+    /// The count must not exceed `build.clusters.max_count`, nor that the pool's capacity, and every record's buffers
+    /// must be addresses of `build.tables`, whose index format is the pool's.
+    /// Every cluster BLAS built from the pool before is stale from then on.
+    /// Requires `sg::feature::clustered_geometry`.
+    void build_clusters_indirect(cluster_pool const& pool, cluster_indirect_build const& build);
+
+    /// Builds one BLAS per range, each listing those clusters of `clusters`, and each holding the set.
+    /// A range is non-empty and within the set, and ranges may overlap.
+    /// A cluster BLAS has `max_geometry_index() + 1` geometries, and `hit_record_stride` is build_blas's.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception if a BLAS cannot be allocated.
+    [[nodiscard]] cc::vector<blas_handle> build_cluster_blas(cluster_set_handle const& clusters,
+                                                             cc::span<cluster_range const> ranges,
+                                                             accel_build_flags flags = accel_build_flag::fast_trace,
+                                                             int hit_record_stride = 1);
+
     /// Binds a raytracing_pipeline for the following bind_group / dispatch_rays.
     /// Requires is_supported().
     void bind_pipeline(raytracing_pipeline const& pipeline);

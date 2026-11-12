@@ -383,6 +383,57 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     co_await ctx.idle_completion();
 }
 
+ASYNC_INVOCABLE_TEST("sv - a texture already on the GPU is adopted as it is, and settles as an upload does",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    // A producer writes the base level on the manager's context, in a list submitted before anything samples it.
+    auto const description = sv::adoptable_texture(ctx, sg::pixel_format::rgba8_unorm, 16, 16);
+    CHECK(description.mip_levels == sv::impl::mip_count_of(16, 16));
+    auto gpu = ctx.persistent.create_texture_2d(description);
+    auto const pixels = make_pixels(16, 16, 3, false);
+    {
+        auto cmd = ctx.create_command_list();
+        cmd->upload.bytes_to_texture(gpu.raw(), cc::span<byte const>(pixels));
+        ctx.submit_command_list(cc::move(cmd));
+    }
+
+    auto const key = cc::hash128::create(cc::span<byte const>(pixels), 42);
+    auto const summary = sv::value_summary{.mean = tg::vec4f(0.5f, 0.5f, 0.5f, 1)};
+    auto const id = m.acquire_texture(sv::texture_data::adopt(gpu, key, 1, summary));
+
+    // Taken as it is: the very texture, with nothing streaming, and the budget charged for its chain.
+    auto const* record = m.textures.get_ptr(id);
+    REQUIRE(record != nullptr);
+    CHECK(record->texture.raw() == gpu.raw());
+    CHECK(record->state == sv::residency::pending);
+    REQUIRE(record->summary.has_value());
+    CHECK(record->summary.value().mean == summary.mean);
+    CHECK(m.textures.used_bytes() > 16 * 16 * 4);
+
+    // It settles at the next collect, and its missing levels are queued like an upload's.
+    m.wait_for_pending_uploads();
+    CHECK(m.textures.get_ptr(id)->state == sv::residency::base_resident);
+    CHECK(m.pending_work_count() == 1); // the default policy generates mips
+
+    // The same key is the same texture, and a different key is another.
+    CHECK(m.acquire_texture(sv::texture_data::adopt(gpu, key)) == id);
+    auto const other_key = cc::hash128::create(cc::span<byte const>(pixels), 43);
+    CHECK(m.acquire_texture(sv::texture_data::adopt(gpu, other_key)) != id);
+
+    // A signed normal map, which a producer writes from a kernel, takes an image view and a full chain.
+    auto const normal = sv::adoptable_texture(ctx, sg::pixel_format::rgba8_snorm, 16, 16);
+    CHECK(normal.usage.has(sg::texture_usage::image));
+    CHECK(normal.mip_levels == sv::impl::mip_count_of(16, 16));
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
 ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

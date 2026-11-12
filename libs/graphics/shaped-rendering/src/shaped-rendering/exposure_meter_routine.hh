@@ -20,8 +20,8 @@ class sr::exposure_meter_routine : public sg::render_routine<exposure_meter_rout
 public:
     static constexpr int partial_count = 256;
 
-    /// The luminance a black cell meters at, `darkest` in exposure_meter.sgl, which must match.
-    /// An image that meters at it holds nothing to expose for, like the black frames while a renderer's shaders compile.
+    /// The luminance the meter takes a darker cell for, `darkest` in shaders/exposure_meter.sgl.
+    /// A reading at it says the image holds no light yet, not how bright it is.
     static constexpr f32 darkest = 0.0001f;
 
     /// Meters `image`, which must be a float or normalized color texture with `texture` usage, into a fresh buffer of `partial_count` partials.

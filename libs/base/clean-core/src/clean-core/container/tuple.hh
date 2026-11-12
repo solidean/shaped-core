@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/hash.hh>
+#include <clean-core/common/macros.hh> // CC_NO_UNIQUE_ADDRESS
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 
@@ -16,7 +17,7 @@ namespace cc::impl
 template <std::size_t I, class T>
 struct tuple_leaf
 {
-    [[no_unique_address]] T _value = {};
+    CC_NO_UNIQUE_ADDRESS T _value = {};
 
     [[nodiscard]] friend constexpr bool operator==(tuple_leaf const&, tuple_leaf const&) = default;
     [[nodiscard]] friend constexpr auto operator<=>(tuple_leaf const&, tuple_leaf const&) = default;

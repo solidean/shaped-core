@@ -1,4 +1,5 @@
 #include "../shader_fixtures.hh"
+#include "bench_support.hh"
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/log.hh>
@@ -12,6 +13,11 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#if SR_BENCH_HAS_VULKAN
+#include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#endif
+#include <shaped-shader-library/compiler/shader_compiler.hh>
+#include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <sr_bench_hlsl_shaders.hh>
 #include <sr_sgl_shaders.hh>
@@ -31,65 +37,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-constexpr auto k_extent = tg::vec2i(1024, 1024);
-constexpr int k_rounds = 64;
-
-/// One side of a pair: what it is called, and what records one dispatch of it, ready once its pipeline is.
-struct contender
-{
-    cc::string name;
-    cc::unique_function<bool()> is_ready;
-    cc::unique_function<void(sg::command_list&)> record;
-};
-
-/// The GPU milliseconds of each span, sorted.
-[[nodiscard]] cc::vector<f64> sorted_ms(cc::span<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp> const> spans)
-{
-    auto ms = cc::vector<f64>();
-    for (auto const& [from, to] : spans)
-        ms.push_back(1e3 * (to.try_get_seconds().value() - from.try_get_seconds().value()));
-    cc::sort(ms);
-    return ms;
-}
-
-/// A value of `n` spread over [0, 1) by a fixed hash, so every run sees the same inputs.
-[[nodiscard]] f32 noise(u32 n)
-{
-    n ^= n >> 16;
-    n *= 0x7feb352du;
-    n ^= n >> 15;
-    n *= 0x846ca68bu;
-    n ^= n >> 16;
-    return f32(n >> 8) / f32(1u << 24);
-}
-
-/// An rgba32_float texture of `k_extent`, filled from `texel` and uploaded on a list of its own.
-cc::shared_async<sg::texture_2d> filled_texture(sg::context& ctx, u32 seed, cc::function_ref<tg::vec4f(i32, i32, u32)> texel)
-{
-    auto texels = cc::vector<tg::vec4f>();
-    texels.reserve(isize(k_extent[0]) * k_extent[1]);
-    for (auto y = 0; y < k_extent[1]; ++y)
-        for (auto x = 0; x < k_extent[0]; ++x)
-            texels.push_back(texel(x, y, seed * 0x9e3779b9u + u32(y * k_extent[0] + x) * 31u));
-    auto t = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
-                                               .width = k_extent[0],
-                                               .height = k_extent[1],
-                                               .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
-    auto cmd = ctx.create_command_list();
-    cmd->upload.bytes_to_texture(t.raw(), cc::span<tg::vec4f const>(texels).as_bytes());
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
-    co_await ctx.idle_completion();
-    co_return t;
-}
-
-[[nodiscard]] sg::texture_2d target_texture(sg::context& ctx)
-{
-    return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
-                                             .width = k_extent[0],
-                                             .height = k_extent[1],
-                                             .usage = sg::texture_usage::texture | sg::texture_usage::image});
-}
+using namespace sr_bench::impl;
 
 /// The pipeline of a compiled HLSL shader under its one group and its reflected constants, once both have built.
 /// Empty while either is still building, and stays empty for one that failed, which `is_ready` then never reports.
@@ -122,61 +70,52 @@ struct hlsl_pipeline
     }
 };
 
-/// Records `rounds` dispatches of each contender, alternating, and logs what they took.
-cc::shared_async<cc::unit> measure(sg::context& ctx, cc::string_view kernel, cc::span<contender> contenders)
+/// Which two of a kernel are timed against each other.
+enum class pairing : u8
 {
-    // Untimed until every contender has executed once, which is what its shaders compiling takes.
-    auto const start = cc::current_time_steady_secs();
-    for (auto& c : contenders)
-    {
-        while (!c.is_ready())
-        {
-            REQUIRE(cc::current_time_steady_secs() - start < 120.0);
-            (void)ctx.routines.tick();
-            ctx.advance_epoch();
-            co_await ctx.idle_completion();
-        }
-        auto cmd = ctx.create_command_list();
-        c.record(*cmd);
-        ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch();
-        co_await ctx.idle_completion();
-    }
+    /// The hand-written HLSL through DXC, then SGL by the context's own route.
+    hlsl_against_sgl,
+    /// SGL's text through DXC, then SGL's own binary of the same source, so only the route differs.
+    text_against_native,
+};
 
-    auto spans = cc::vector<cc::vector<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp>>>();
-    for (auto i = isize(0); i < contenders.size(); ++i)
-        spans.push_back({});
-    for (auto r = 0; r < k_rounds; ++r)
-        for (auto i = isize(0); i < contenders.size(); ++i)
-        {
-            auto cmd = ctx.create_command_list();
-            auto const from = cmd->query.record_gpu_timestamp();
-            contenders[i].record(*cmd);
-            auto const to = cmd->query.record_gpu_timestamp();
-            ctx.submit_command_list(cc::move(cmd));
-            ctx.advance_epoch();
-            spans[i].push_back({from, to});
-        }
-    co_await ctx.idle_completion();
+/// What SGL's side of each pair wrote, which holds two routes of one source to one answer.
+struct kernel_outputs
+{
+    cc::vector<byte> atrous;
+    cc::vector<byte> svgf;
+    cc::vector<f32> convolution;
+};
 
-    auto const baseline = sorted_ms(spans[0]);
-    for (auto i = isize(0); i < contenders.size(); ++i)
+/// The largest difference between two runs of floats, and how many differ at all.
+void compare_floats(cc::string_view kernel, cc::span<f32 const> a, cc::span<f32 const> b)
+{
+    REQUIRE(a.size() == b.size());
+    auto largest = 0.0f;
+    auto differing = isize(0);
+    for (auto i = isize(0); i < a.size(); ++i)
     {
-        auto const ms = sorted_ms(spans[i]);
-        auto const median = ms[ms.size() / 2];
-        CC_LOG_INFO("{}: {} median {} ms, min {} ms, {}x {}", kernel, contenders[i].name, median, ms[0],
-                    median / baseline[baseline.size() / 2], contenders[0].name);
+        auto const difference = a[i] > b[i] ? a[i] - b[i] : b[i] - a[i];
+        differing += a[i] == b[i] ? 0 : 1;
+        largest = difference > largest ? difference : largest;
+        // both NaN is agreement, which a difference of them does not say
+        if (a[i] != a[i] || b[i] != b[i])
+            CHECK((a[i] != a[i]) == (b[i] != b[i]));
     }
+    CC_LOG_INFO("{}: {} of {} floats differ, by at most {}", kernel, differing, a.size(), largest);
+    // DXC and SGL contract and reorder differently under `fast`, so a few ulps of each pass through a kernel are allowed
+    CHECK(largest < 1e-3f);
 }
 } // namespace
 
-ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch")
+/// Every pair on `ctx`: the HLSL through DXC to DXIL or SPIR-V, beside SGL's text through the same compiler.
+/// `outputs`, where given, takes what SGL's side wrote.
+static cc::shared_async<cc::unit> compare_on(sg::context& ctx,
+                                             kernel_outputs* outputs = nullptr,
+                                             pairing pair = pairing::hlsl_against_sgl)
 {
-    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (created.has_error())
-        SKIP("no dx12 hardware device");
-    auto& ctx = *created.value();
-    CC_LOG_INFO("adapter: {}", ctx.metrics.adapter().name);
+    CC_LOG_INFO("{} adapter: {}", ctx.backend() == sg::backend_kind::vulkan ? "vulkan" : "dx12",
+                ctx.metrics.adapter().name);
 
     // The fixture's library holds sr's own packages; the HLSL originals join it here, in the one binary that has them.
     static auto const registered = []
@@ -212,6 +151,10 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
             sr::sgl_shaders::atrous_denoise::atrous_images::declared_bindings(sgl_values),
             sr::sgl_shaders::atrous_denoise::atrous_images::declared_samplers());
         auto const sgl_pipeline = sr::sgl_shaders::atrous_denoise::main_cs.acquire_pipeline(ctx, sgl_values);
+        auto const native_pipeline
+            = slib::acquire_compute_pipeline(&ctx, sr::sgl_shaders::atrous_denoise::main_cs.asset,
+                                             sr::sgl_shaders::atrous_denoise::main_cs.acquire_layout(ctx, sgl_values),
+                                             with_native(ctx, sgl_values.values()));
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::atrous_bindings>{
             .shader = sr_bench::hlsl::atrous_denoise.compute.main_cs->acquire(ctx)};
 
@@ -240,40 +183,49 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                        .depth_sigma = 1.0f});
                                   cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
                               }});
-        contenders.push_back(
-            {.name = "sgl",
-             .is_ready =
-                 [&]
-             {
-                 (void)ctx.backlog.start(sgl_pipeline);
-                 return sgl_pipeline->is_ready() && sgl_pipeline->try_value() != nullptr;
-             },
-             .record =
-                 [&](sg::command_list& cmd)
-             {
-                 auto const group = ctx.transient.create_binding_group(
-                     cmd, sgl_layout,
-                     sr::sgl_shaders::atrous_denoise::atrous_images{.source = color.as_texture_view(),
-                                                                    .albedo = albedo.as_texture_view(),
-                                                                    .specular_albedo = albedo.as_texture_view(),
-                                                                    .normal = normal.as_texture_view(),
-                                                                    .depth = depth.as_texture_view(),
-                                                                    .sample_counts = color.as_texture_view(),
-                                                                    .input = color.as_texture_view(),
-                                                                    .target = target.as_any_image_view()});
-                 cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
-                 cmd.compute.bind_group(0, *group);
-                 cmd.compute.set_inline_constants(
-                     sr::sgl_shaders::atrous_denoise::atrous_constants{.step = 2,
-                                                                       .flags = flags,
-                                                                       .luminance_scale = 0.5f,
-                                                                       .normal_power = 128.0f,
-                                                                       .depth_sigma = 1.0f,
-                                                                       .ceiling = 3.4028234e38f}
-                         .to_block());
-                 cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
-             }});
+        auto record_sgl = cc::unique_function<void(sg::command_list&, sg::compute_pipeline const&)>(
+            [&](sg::command_list& cmd, sg::compute_pipeline const& pipeline)
+            {
+                auto const group = ctx.transient.create_binding_group(
+                    cmd, sgl_layout,
+                    sr::sgl_shaders::atrous_denoise::atrous_images{.source = color.as_texture_view(),
+                                                                   .albedo = albedo.as_texture_view(),
+                                                                   .specular_albedo = albedo.as_texture_view(),
+                                                                   .normal = normal.as_texture_view(),
+                                                                   .depth = depth.as_texture_view(),
+                                                                   .sample_counts = color.as_texture_view(),
+                                                                   .input = color.as_texture_view(),
+                                                                   .target = target.as_any_image_view()});
+                cmd.compute.bind_pipeline(pipeline);
+                cmd.compute.bind_group(0, *group);
+                cmd.compute.set_inline_constants(
+                    sr::sgl_shaders::atrous_denoise::atrous_constants{.step = 2,
+                                                                      .flags = flags,
+                                                                      .luminance_scale = 0.5f,
+                                                                      .normal_power = 128.0f,
+                                                                      .depth_sigma = 1.0f,
+                                                                      .ceiling = 3.4028234e38f}
+                        .to_block());
+                cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
+            });
+        if (pair == pairing::text_against_native)
+        {
+            contenders.clear();
+            contenders.push_back(contender_of("text", ctx, sgl_pipeline, &record_sgl));
+            contenders.push_back(contender_of("native", ctx, native_pipeline, &record_sgl));
+        }
+        else
+            contenders.push_back(contender_of("sgl", ctx, sgl_pipeline, &record_sgl));
         co_await measure(ctx, "à-trous", contenders);
+        if (outputs != nullptr)
+        {
+            auto cmd = ctx.create_command_list();
+            contenders[1].record(*cmd);
+            auto const written = cmd->download.bytes_from_texture(target.raw());
+            ctx.submit_command_list(cc::move(cmd));
+            auto const data = co_await written.bytes();
+            outputs->atrous = cc::vector<byte>::create_copy_of(cc::span<byte const>(data));
+        }
     }
 
     // ---- SVGF's filter, one pass at step 2 ---------------------------------------------------------------------------
@@ -283,6 +235,9 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
             sr::sgl_shaders::svgf::svgf_atrous_images::declared_bindings(sgl_values),
             sr::sgl_shaders::svgf::svgf_atrous_images::declared_samplers());
         auto const sgl_pipeline = sr::sgl_shaders::svgf::atrous_cs.acquire_pipeline(ctx, sgl_values);
+        auto const native_pipeline = slib::acquire_compute_pipeline(
+            &ctx, sr::sgl_shaders::svgf::atrous_cs.asset,
+            sr::sgl_shaders::svgf::atrous_cs.acquire_layout(ctx, sgl_values), with_native(ctx, sgl_values.values()));
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::svgf_atrous_bindings>{
             .shader = sr_bench::hlsl::svgf_atrous.compute.main_cs->acquire(ctx)};
 
@@ -310,37 +265,46 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                                         .depth_sigma = 1.0f});
                  cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
              }});
-        contenders.push_back(
-            {.name = "sgl",
-             .is_ready =
-                 [&]
-             {
-                 (void)ctx.backlog.start(sgl_pipeline);
-                 return sgl_pipeline->is_ready() && sgl_pipeline->try_value() != nullptr;
-             },
-             .record =
-                 [&](sg::command_list& cmd)
-             {
-                 auto const group = ctx.transient.create_binding_group(
-                     cmd, sgl_layout,
-                     sr::sgl_shaders::svgf::svgf_atrous_images{.source = color.as_texture_view(),
-                                                               .normal_depth = normal_depth.as_texture_view(),
-                                                               .albedo = albedo.as_texture_view(),
-                                                               .specular_albedo = albedo.as_texture_view(),
-                                                               .color = color.as_texture_view(),
-                                                               .target = target.as_any_image_view()});
-                 cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
-                 cmd.compute.bind_group(0, *group);
-                 cmd.compute.set_inline_constants(sr::sgl_shaders::svgf::svgf_atrous_constants{.step = 2,
-                                                                                               .flags = 0u,
-                                                                                               .luminance_sigma = 4.0f,
-                                                                                               .normal_power = 128.0f,
-                                                                                               .depth_sigma = 1.0f,
-                                                                                               .ceiling = 3.4028234e38f}
-                                                      .to_block());
-                 cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
-             }});
+        auto record_sgl = cc::unique_function<void(sg::command_list&, sg::compute_pipeline const&)>(
+            [&](sg::command_list& cmd, sg::compute_pipeline const& pipeline)
+            {
+                auto const group = ctx.transient.create_binding_group(
+                    cmd, sgl_layout,
+                    sr::sgl_shaders::svgf::svgf_atrous_images{.source = color.as_texture_view(),
+                                                              .normal_depth = normal_depth.as_texture_view(),
+                                                              .albedo = albedo.as_texture_view(),
+                                                              .specular_albedo = albedo.as_texture_view(),
+                                                              .color = color.as_texture_view(),
+                                                              .target = target.as_any_image_view()});
+                cmd.compute.bind_pipeline(pipeline);
+                cmd.compute.bind_group(0, *group);
+                cmd.compute.set_inline_constants(sr::sgl_shaders::svgf::svgf_atrous_constants{.step = 2,
+                                                                                              .flags = 0u,
+                                                                                              .luminance_sigma = 4.0f,
+                                                                                              .normal_power = 128.0f,
+                                                                                              .depth_sigma = 1.0f,
+                                                                                              .ceiling = 3.4028234e38f}
+                                                     .to_block());
+                cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
+            });
+        if (pair == pairing::text_against_native)
+        {
+            contenders.clear();
+            contenders.push_back(contender_of("text", ctx, sgl_pipeline, &record_sgl));
+            contenders.push_back(contender_of("native", ctx, native_pipeline, &record_sgl));
+        }
+        else
+            contenders.push_back(contender_of("sgl", ctx, sgl_pipeline, &record_sgl));
         co_await measure(ctx, "svgf filter", contenders);
+        if (outputs != nullptr)
+        {
+            auto cmd = ctx.create_command_list();
+            contenders[1].record(*cmd);
+            auto const written = cmd->download.bytes_from_texture(target.raw());
+            ctx.submit_command_list(cc::move(cmd));
+            auto const data = co_await written.bytes();
+            outputs->svgf = cc::vector<byte>::create_copy_of(cc::span<byte const>(data));
+        }
     }
 
     // ---- the network's convolution, one 32-in 32-out layer over 512 x 512 -------------------------------------------
@@ -365,7 +329,8 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
             features.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
         auto const weight_buffer = ctx.persistent.create_buffer<f32>(
             weights.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        auto const conv_target = ctx.persistent.create_buffer<f32>(features.size(), sg::buffer_usage::readwrite_buffer);
+        auto const conv_target = ctx.persistent.create_buffer<f32>(
+            features.size(), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
         {
             auto cmd = ctx.create_command_list();
             cmd->upload.data_to_buffer(source, features);
@@ -378,7 +343,12 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
         REQUIRE(source4.has_value());
 
         auto const sgl_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv::nn_conv_buffers>();
+        auto const sgl_shader = co_await sr::sgl_shaders::nn_conv::main_cs->acquire(ctx);
+        CC_LOG_INFO("the convolution's SGL came through {}", sgl_shader.compiler.name);
         auto const sgl_pipeline = sr::sgl_shaders::nn_conv::main_cs.acquire_pipeline(ctx);
+        auto const native_pipeline = slib::acquire_compute_pipeline(
+            &ctx, sr::sgl_shaders::nn_conv::main_cs.asset, sr::sgl_shaders::nn_conv::main_cs.acquire_layout(ctx),
+            with_native(ctx, {}));
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::nn_conv_bindings>{
             .shader = sr_bench::hlsl::nn_conv.compute.main_cs->acquire(ctx)};
         auto const dispatch = [&](sg::command_list& cmd)
@@ -408,38 +378,129 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                         .in_channels_a = u32(channels)});
                                   dispatch(cmd);
                               }});
-        contenders.push_back(
-            {.name = "sgl",
-             .is_ready =
-                 [&]
-             {
-                 (void)ctx.backlog.start(sgl_pipeline);
-                 return sgl_pipeline->is_ready() && sgl_pipeline->try_value() != nullptr;
-             },
-             .record =
-                 [&](sg::command_list& cmd)
-             {
-                 auto const group = ctx.transient.create_binding_group(
-                     cmd, sgl_layout,
-                     sr::sgl_shaders::nn_conv::nn_conv_buffers{.source_a = source4.value().as_readonly_buffer(),
-                                                               .source_b = source4.value().as_readonly_buffer(),
-                                                               .weights = weight_buffer.as_readonly_buffer(),
-                                                               .target = conv_target.as_readwrite_buffer()});
-                 cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
-                 cmd.compute.bind_group(0, *group);
-                 cmd.compute.set_inline_constants(
-                     sr::sgl_shaders::nn_conv::nn_conv_constants{.width = u32(width),
-                                                                 .height = u32(height),
-                                                                 .in_channels = u32(channels),
-                                                                 .out_channels = u32(channels),
-                                                                 .weight_offset = 0u,
-                                                                 .bias_offset = bias_offset,
-                                                                 .in_channels_a = u32(channels)}
-                         .to_block());
-                 dispatch(cmd);
-             }});
+        auto record_sgl = cc::unique_function<void(sg::command_list&, sg::compute_pipeline const&)>(
+            [&](sg::command_list& cmd, sg::compute_pipeline const& pipeline)
+            {
+                auto const group = ctx.transient.create_binding_group(
+                    cmd, sgl_layout,
+                    sr::sgl_shaders::nn_conv::nn_conv_buffers{.source_a = source4.value().as_readonly_buffer(),
+                                                              .source_b = source4.value().as_readonly_buffer(),
+                                                              .weights = weight_buffer.as_readonly_buffer(),
+                                                              .target = conv_target.as_readwrite_buffer()});
+                cmd.compute.bind_pipeline(pipeline);
+                cmd.compute.bind_group(0, *group);
+                cmd.compute.set_inline_constants(
+                    sr::sgl_shaders::nn_conv::nn_conv_constants{.width = u32(width),
+                                                                .height = u32(height),
+                                                                .in_channels = u32(channels),
+                                                                .out_channels = u32(channels),
+                                                                .weight_offset = 0u,
+                                                                .bias_offset = bias_offset,
+                                                                .in_channels_a = u32(channels)}
+                        .to_block());
+                dispatch(cmd);
+            });
+        if (pair == pairing::text_against_native)
+        {
+            contenders.clear();
+            contenders.push_back(contender_of("text", ctx, sgl_pipeline, &record_sgl));
+            contenders.push_back(contender_of("native", ctx, native_pipeline, &record_sgl));
+        }
+        else
+            contenders.push_back(contender_of("sgl", ctx, sgl_pipeline, &record_sgl));
         co_await measure(ctx, "convolution", contenders);
+        if (outputs != nullptr)
+        {
+            auto cmd = ctx.create_command_list();
+            contenders[1].record(*cmd);
+            auto const written = cmd->download.data_from_buffer(conv_target);
+            ctx.submit_command_list(cc::move(cmd));
+            auto const data = co_await written.data();
+            outputs->convolution = cc::vector<f32>::create_copy_of(cc::span<f32 const>(data));
+        }
     }
 
     co_await ctx.idle_completion();
 }
+
+ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch")
+{
+    auto created = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (created.has_error())
+        SKIP("no dx12 hardware device");
+    co_await compare_on(*created.value());
+}
+
+// The same kernels with SGL's own DXIL against DXC's of the hand-written HLSL, on a device that loads it unsigned.
+ASYNC_BENCHMARK("sr - SGL's own DXIL against the HLSL it was ported from, GPU time per dispatch, on dx12")
+{
+    auto created = sg::create_dx12_context({.native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (created.has_error())
+        SKIP("no dx12 hardware device");
+    co_await compare_on(*created.value());
+}
+
+// One SGL source through both routes, on one device: an answer of its own, beside the speed above.
+ASYNC_BENCHMARK("sr - SGL's own DXIL computes what its text through DXC computes, on dx12")
+{
+    auto through_dxc = kernel_outputs();
+    auto native = kernel_outputs();
+    {
+        auto created
+            = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+        if (created.has_error())
+            SKIP("no dx12 hardware device");
+        created.value()->download.set_budget(isize(128) << 20);
+        co_await compare_on(*created.value(), &through_dxc);
+    }
+    {
+        auto created
+            = sg::create_dx12_context({.native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+        REQUIRE(created.has_value());
+        created.value()->download.set_budget(isize(128) << 20);
+        co_await compare_on(*created.value(), &native);
+    }
+    auto const floats = [](cc::vector<byte> const& bytes)
+    { return cc::span<f32 const>(reinterpret_cast<f32 const*>(bytes.data()), bytes.size() / isize(sizeof(f32))); };
+    compare_floats("à-trous", floats(through_dxc.atrous), floats(native.atrous));
+    compare_floats("svgf filter", floats(through_dxc.svgf), floats(native.svgf));
+    compare_floats("convolution", through_dxc.convolution, native.convolution);
+}
+
+// One SGL source, its text through DXC against SGL's own binary, interleaved on one device: the parity the native route
+// is held to (libs/graphics/shaped-graphics-language/docs/native-parity.md).
+ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time per dispatch, on dx12")
+{
+    auto created = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (created.has_error())
+        SKIP("no dx12 hardware device");
+    co_await compare_on(*created.value(), nullptr, pairing::text_against_native);
+}
+
+#if SR_BENCH_HAS_VULKAN
+ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time per dispatch, on vulkan")
+{
+    // what the driver made of each route's pipeline, beside the time it takes
+    auto created = sg::create_vulkan_context({.native_spirv = false, .capture_driver_statistics = true});
+    if (created.has_error())
+        SKIP("no vulkan device");
+    co_await compare_on(*created.value(), nullptr, pairing::text_against_native);
+}
+
+ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch, on vulkan")
+{
+    auto created = sg::create_vulkan_context({.native_spirv = false});
+    if (created.has_error())
+        SKIP("no vulkan device");
+    co_await compare_on(*created.value());
+}
+
+// The same kernels with SGL's own SPIR-V against DXC's of the hand-written HLSL, which is what DXC's optimizer is worth.
+ASYNC_BENCHMARK("sr - SGL's own SPIR-V against the HLSL it was ported from, GPU time per dispatch, on vulkan")
+{
+    auto created = sg::create_vulkan_context({.native_spirv = true});
+    if (created.has_error())
+        SKIP("no vulkan device");
+    co_await compare_on(*created.value());
+}
+#endif

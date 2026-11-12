@@ -90,6 +90,16 @@ VkBufferUsageFlags vulkan_context::vk_buffer_usage(sg::buffer_usages usage) cons
     return flags;
 }
 
+isize vulkan_context::vk_buffer_alignment(sg::buffer_usages usage, VkDeviceSize required) const
+{
+    // A build reads its instances, transforms and AABBs through addresses that must be 16-aligned, and its vertices
+    // and indices at less, which no memory requirement reports: a placement at the reported alignment alone can
+    // misalign them, which a driver may answer with a lost device.
+    if (usage.has(sg::buffer_usage::accel_structure_build_input))
+        return cc::max(isize(required), isize(16));
+    return isize(required);
+}
+
 cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size_in_bytes,
                                                                       sg::buffer_usages usage,
                                                                       sg::allocation_info const& alloc,
@@ -139,7 +149,8 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
             CC_ASSERT(heap != nullptr, "allocation heap is not a vulkan memory heap");
             CC_ASSERT(alloc.offset >= 0 && alloc.offset + isize(req.size) <= heap->size_in_bytes(),
                       "placement does not fit inside the heap");
-            CC_ASSERT(alloc.offset % isize(req.alignment) == 0, "placement offset violates the buffer's alignment");
+            CC_ASSERT(alloc.offset % vk_buffer_alignment(usage, req.alignment) == 0, "placement offset violates the "
+                                                                                     "buffer's alignment");
 
             if (VkResult r = vkBindBufferMemory(_device, buffer, heap->_memory, VkDeviceSize(alloc.offset));
                 r != VK_SUCCESS)

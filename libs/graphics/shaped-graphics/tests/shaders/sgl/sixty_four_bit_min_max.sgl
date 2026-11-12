@@ -1,0 +1,16 @@
+// A buffer's ulong min and max, where a device has shader_int64_min_max_atomics: the only 64-bit atomics Metal has (EMIT-218).
+// A file of its own, since sixty_four_bit.sgl's atomics need shader_int64_atomics, which Metal lacks.
+
+require shader_int64, shader_int64_min_max_atomics
+
+binding ulong_extremes:
+    lowest: mut buffer[atomic[ulong]]
+    highest: mut buffer[atomic[ulong]]
+
+// Each invocation offers its id in the high word and the id's complement in the low word, so a comparison of the low
+// word alone would pick the opposite end of the group.
+@compute(64) fun extremes(@thread_id id: int3, @workgroup_id group: int3){ulong_extremes}:
+    let i = id.x as uint as ulong
+    let offered = (i << 32) | (0xffffffffu64 - i)
+    ulong_extremes.lowest[group.x].min(offered)
+    ulong_extremes.highest[group.x].max(offered)

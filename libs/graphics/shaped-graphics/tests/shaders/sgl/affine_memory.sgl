@@ -1,0 +1,22 @@
+// An `affine3` in GPU memory, its three rows 16 bytes apart (CHK-518): in a constant block, as a buffer's element,
+// as a struct's member after a float, and written back.
+
+struct placed:
+    tag: float
+    xf: affine3
+
+binding placing:
+    lead: float
+    camera: affine3
+    xfs: buffer[affine3]
+    items: buffer[placed]
+    points: mut buffer[float4]
+    written: mut buffer[affine3]
+
+@compute fun place(@thread_id id: int3){placing}:
+    let i = id.x
+    let a = placing.xfs[i]
+    let b = placing.items[i].xf
+    let p = placing.camera * (a * (b * pos3(1.0, 2.0, 3.0)))
+    placing.points[i] = float4(p.x, p.y, p.z, placing.items[i].tag + placing.lead)
+    placing.written[i] = affine3.from_rows(a.row(2), b.row(0), placing.camera.row(1))

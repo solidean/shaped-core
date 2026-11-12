@@ -4,5 +4,4 @@ sc_add_single_file_examples(babel-serializer
     FILES
     chrome-trace.cc
     LINK babel-serializer
-    PCH CC_ALL NEXUS
 )

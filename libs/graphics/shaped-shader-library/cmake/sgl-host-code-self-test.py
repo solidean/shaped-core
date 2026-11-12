@@ -207,9 +207,23 @@ def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
     expect_in('{.name = "shadow_compare", .sampler = {.min_filter = sg::sampler_filter::linear, '
               ".compare = sg::compare_op::less}}", source, "the static sampler's table entry")
     expect_in("return k_sgl_samplers_shadow;", source, "declared_samplers")
-    expect_in('samplers.push_back({.name = "shadow_picked", .sampler = picked});', source, "the dynamic sampler")
+    expect_in('samplers.push_back({.name = "shadow_picked", .sampler = this->picked});', source, "the dynamic sampler")
     expect_not_in('.sampler = compare}', source, "a static sampler gathered as a dynamic one")
     expect_in("views.reserve(3);", source, "only views are gathered as views")
+
+
+@test
+def a_sampler_array_is_a_fixed_array_gathered_an_element_at_a_time():
+    group = {"name": "set", "inline": False, "members": [
+        {"kind": "sampler", "name": "samplers", "type": "sampler", "host_name": "set.samplers", "slot": 0, "count": 3,
+         "sampler_type": "filtering"}]}
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, group)
+    expect_in("cc::fixed_array<sg::sampler, 3> samplers;", header, "a sampler array's field")
+    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FILE, group)
+    # a member named like the gather's parameter is reached through `this`
+    expect_in("for (auto i = 0; i < int(this->samplers.size()); ++i)", source, "a loop over the elements")
+    expect_in('samplers.push_back({.name = "set.samplers", .sampler = this->samplers[i], .element = i});', source,
+              "each element, naming its element")
 
 
 ARRAYS = {

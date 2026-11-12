@@ -20,7 +20,7 @@
 /// What `finalize` fills in — a name, the parameter types — is read back from that parse, never stated a second time.
 /// libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md is the walk-through.
 
-/// The three text formats; the two HLSL targets spell every builtin alike.
+/// The three text formats; the two HLSL targets spell every builtin alike, but for what `is_vulkan` tells apart.
 enum class sgl::builtins::language : sgl::u8
 {
     hlsl,
@@ -59,7 +59,11 @@ struct sgl::builtins::written
 struct sgl::builtins::call_context
 {
     language target = language::hlsl;
+    /// HLSL for vulkan, whose DXC lowers some of HLSL's calls to no SPIR-V, which the text then states itself.
+    bool is_vulkan = false;
     cc::span<written const> arguments;
+    /// Each argument's type as the target spells it, for a record with a `helper`; empty for any other.
+    cc::span<cc::string const> argument_types;
     registry const& builtins;
     /// The record's `spelling::data`, which lets one writer serve a family of records.
     u32 data = 0;
@@ -84,10 +88,18 @@ struct sgl::builtins::call_context
 struct sgl::builtins::helper_context
 {
     language target = language::hlsl;
+    /// HLSL for vulkan.
+    bool is_vulkan = false;
     cc::span<cc::string const> argument_types;
     /// The record's `spelling::data`.
     u32 data = 0;
 };
+
+/// What every intersector, function table and intersection function of an MSL compile closes its tags with.
+/// The file defines `sgl_motion` once (EMIT-139): the motion tags in a package that takes `SOFTWARE_TRACE`, and nothing elsewhere.
+/// `sgl_motion_time(t)` beside it is the time argument a tagged `intersect` takes, and nothing where the tags are.
+/// The tags double a static scene's traversal on Apple GPUs, and only such a package is bound a structure that moves.
+#define SGL_MSL_MOTION_TAGS " sgl_motion"
 
 namespace sgl::builtins
 {
@@ -208,6 +220,8 @@ struct sgl::builtins::type_record
     cc::string doc;
 
     cc::string hlsl;
+    /// HLSL for vulkan, where it is not `hlsl`: a type DXC has no SPIR-V for, which the text spells as SPIR-V's own.
+    cc::string hlsl_vulkan;
     cc::string wgsl;
     cc::string msl;
     /// The HLSL spelling of a local whose flags are known constants, as `RayQuery<RAY_FLAG_FORCE_OPAQUE>`; none where its type takes none.
@@ -263,6 +277,9 @@ struct sgl::builtins::function_record
     /// Takes screen-space derivatives implicitly, as a sample that picks its own level does.
     /// So every pixel of the quad reaches the call together (CHK-282).
     bool uses_derivatives = false;
+    /// A texture or image call, whose `write.data` packs what it is (`texture::call`); the interpreter reads the
+    /// texels the run binds rather than evaluate it (EVAL-120).
+    bool is_texture_call = false;
     /// Waits for every thread of the workgroup, so every one of them reaches the call or none does (CHK-282).
     bool is_barrier = false;
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
@@ -286,6 +303,8 @@ struct sgl::builtins::function_record
     /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
     /// what it gives differs within a workgroup (CHK-377).
     bool is_subgroup_operation = false;
+    /// A step or a read of a `ray_query`, which `spelling::data` names as a `query_op`.
+    bool is_ray_query = false;
     /// Of those, one whose result is the same in every invocation of the subgroup, a vote, a reduction or a broadcast,
     /// so its value is unproven rather than varying whatever its argument is (CHK-399).
     bool agrees_in_subgroup = false;
@@ -314,6 +333,8 @@ struct sgl::builtins::function_record
     /// Takes, past its signature, the position of its acceleration-structure argument among the acceleration members
     /// of the entry point's binding list, which flatten appends as an int: the emulated trace's root (CHK-325).
     bool takes_acceleration_index = false;
+    /// Takes, past its signature and ahead of its payload, the ray's time, which MSL places what moves at (EVAL-130).
+    bool takes_ray_time = false;
     /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
     /// The call itself writes nothing, and a local it initializes is never copied.
     bool declares_only = false;
@@ -323,6 +344,9 @@ struct sgl::builtins::function_record
     /// Impure only for what its value depends on, with no effect: a call of it whose value nothing reads may go.
     /// It stays impure, since moving it would read state that may have changed in between.
     bool reads_only = false;
+    /// Called by a test alone, which it states what the run binds or which lane runs to (EVAL-127, EVAL-140).
+    /// No target writes it, so an entry point that reaches one is `stage-not-allowed` (CHK-512).
+    bool is_test_only = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;
@@ -438,6 +462,9 @@ constexpr cc::string_view k_bool = "bool";
 constexpr cc::string_view k_half = "half";
 constexpr cc::string_view k_short = "short";
 constexpr cc::string_view k_ushort = "ushort";
+constexpr cc::string_view k_long = "long";
+constexpr cc::string_view k_ulong = "ulong";
+constexpr cc::string_view k_double = "double";
 constexpr cc::string_view k_hpos4 = "hpos4";
 
 /// Every builtin SGL has, registered in a fixed order and finalized.

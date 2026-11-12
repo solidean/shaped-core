@@ -177,6 +177,7 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
                         .light_count = d.frame.light_count,
                         .decal_count = d.frame.decal_count,
                         .pixel_spread = d.frame.pixel_spread,
+                        .pixel_width = d.frame.pixel_width,
                         .size = tg::vec2f(f32(extent[0]), f32(extent[1])),
                         .jitter = d.frame.fixed_jitter != 0 ? d.frame.jitter - tg::vec2f(0.5f, 0.5f) : tg::vec2f(0, 0),
                         // the forward stage's seed, so both lightings cut the same pixels on the same frame

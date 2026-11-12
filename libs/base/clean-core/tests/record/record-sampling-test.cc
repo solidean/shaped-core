@@ -6,11 +6,17 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/stack_capture.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/record/trace.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
 #if defined(_WIN32)
@@ -92,7 +98,7 @@ CC_DONT_INLINE void busy_for_secs(f64 secs)
 /// Two independent reasons it might not: no way to walk a foreign thread, and no threads to run a sampler on.
 [[nodiscard]] bool sampling_possible()
 {
-    return cc::stack_capture_from_context_available() && CC_HAS_THREADS;
+    return cc::rec::sampling_available();
 }
 
 [[nodiscard]] isize count_samples(cc::rec::recording const& r)
@@ -145,6 +151,60 @@ REC_TEST("record/sampling - a sampler catches the running thread and names where
 
     CHECK(with_frames == samples);
     CHECK(with_anchor == samples);
+}
+
+namespace
+{
+/// What a sink saw: samples per owner, and whether each carried frames.
+struct sink_tally
+{
+    cc::mutex<cc::map<u64, isize>> by_owner;
+    cc::atomic<isize> without_frames = 0;
+
+    static void take(cc::rec::sample_view const& s, void* user)
+    {
+        auto& self = *static_cast<sink_tally*>(user);
+        if (s.frames.empty())
+            self.without_frames.fetch_add(1, cc::memory_order_relaxed);
+        self.by_owner.lock([&](cc::map<u64, isize>& m) { m[s.owner] += 1; });
+    }
+
+    [[nodiscard]] isize of(u64 owner)
+    {
+        return by_owner.lock(
+            [&](cc::map<u64, isize>& m)
+            {
+                auto const* n = m.get_ptr(owner);
+                return n == nullptr ? isize(0) : *n;
+            });
+    }
+};
+} // namespace
+
+REC_TEST("record/sampling - a sink receives each sample with the owner its thread was under")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture(deterministic_config());
+
+    sink_tally tally;
+    auto const owner = cc::rec::new_trace_id();
+    cc::rec::recording_listener rl;
+    {
+        scoped_listener const reg(rl);
+        {
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0, .sink = &sink_tally::take, .sink_user = &tally});
+            cc::rec::owner_scope const under(owner);
+            busy_until_sampled(20);
+        }
+        cc::rec::flush_blocking();
+    }
+
+    // Every sample went to the sink, and the stream got none of them.
+    CHECK(tally.of(u64(owner)) > 0);
+    CHECK(tally.without_frames.load() == 0);
+    CHECK(count_samples(rl.take()) == 0);
 }
 
 REC_THOROUGH_TEST("record/sampling - stopping is synchronous, so nothing arrives afterwards")
@@ -515,7 +575,7 @@ REC_TEST("record/sampling - a live rate change is picked up too")
 
 REC_TEST("record/sampling - a platform that cannot walk a foreign thread refuses to sample")
 {
-    if (cc::stack_capture_from_context_available())
+    if (cc::rec::sampling_available())
         SKIP("this platform can walk a foreign thread, so there is nothing to refuse");
 
     rec_fixture const fixture(deterministic_config());
@@ -572,5 +632,73 @@ REC_TEST("record/sampling - a thread sampled while it loads DLLs is walked rathe
 
     CHECK(loads > 0);
     CHECK(count_samples(r) > 0);
+#endif
+}
+
+REC_TEST("record/sampling - each tick tells a thread that ran from one the OS kept off the CPU, and whether it was in "
+         "a scope")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+#if !defined(_WIN32) && !defined(__APPLE__)
+    SKIP("record.thread_run is recorded on Windows and macOS only so far");
+#else
+    rec_fixture const fixture(deterministic_config());
+
+    // a thread the recorder knows, which then sleeps until told to stop
+    auto stop = cc::atomic<bool>(false);
+    auto sleeper_tid = cc::atomic<u64>(0);
+    auto const r = capture_sampled(
+        [&]
+        {
+            auto sleeper = cc::native_thread::start(
+                [&]
+                {
+                    CC_RECORD_MARK("sleeper");
+                    sleeper_tid.store(cc::native_thread_id(), cc::memory_order_release);
+                    // asleep inside a scope, as a task blocked in its work is
+                    CC_RECORD_SCOPE("sleeper waits");
+                    while (!stop.load(cc::memory_order_acquire))
+                        cc::this_thread_sleep_secs(0.001);
+                });
+            while (sleeper_tid.load(cc::memory_order_acquire) == 0)
+                cc::this_thread_yield();
+            busy_until_sampled(40);
+            stop.store(true, cc::memory_order_release);
+            sleeper.join();
+        },
+        {.rate_hz = 2000.0});
+
+    auto const busy_tid = cc::native_thread_id();
+    auto busy = cc::vector<f64>();
+    auto asleep = cc::vector<f64>();
+    auto asleep_in_scope = isize(0);
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() != cc::rec::event_kind::value || e.name() != cc::string_view("record.thread_run"))
+                return;
+            auto const interval = e.field_as_u64("interval").value_or(0);
+            if (interval == 0)
+                return;
+            auto const share = f64(e.field_as_u64("ran").value_or(0)) / f64(interval);
+            auto const tid = e.field_as_u64("native_tid").value_or(0);
+            if (tid == busy_tid)
+                busy.push_back(share);
+            else if (tid == sleeper_tid.load(cc::memory_order_acquire))
+            {
+                asleep.push_back(share);
+                asleep_in_scope += e.field_as_u64("in_scope").value_or(0) != 0 ? 1 : 0;
+            }
+        });
+    REQUIRE(busy.size() >= 10);
+    REQUIRE(asleep.size() >= 10);
+    cc::sort(busy);
+    cc::sort(asleep);
+    // loose on a loaded machine, strict about which side each median is on
+    CHECK(busy[busy.size() / 2] > 0.5);
+    CHECK(asleep[asleep.size() / 2] < 0.2);
+    // the sleeper's scope is open for all but its first ticks
+    CHECK(2 * asleep_in_scope > asleep.size());
 #endif
 }

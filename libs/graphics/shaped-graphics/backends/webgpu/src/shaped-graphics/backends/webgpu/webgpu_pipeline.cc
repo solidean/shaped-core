@@ -29,8 +29,10 @@ cc::string place_of(cc::span<sg::shader_source_line const> map, cc::string_view 
 }
 
 /// Asks the module for what its compiler said, and logs each message at the source line it is about (EMIT-181).
-/// Never waits: the messages are logged whenever the device delivers them.
-void report_messages_at_source(webgpu_context& ctx, WGPUShaderModule module, sg::compiled_shader const& shader)
+/// Never waits, and settles what it returns once the messages are logged, independently of any pipeline over the module.
+[[nodiscard]] cc::shared_async<cc::unit> report_messages_at_source(webgpu_context& ctx,
+                                                                   WGPUShaderModule module,
+                                                                   sg::compiled_shader const& shader)
 {
     struct request
     {
@@ -44,6 +46,7 @@ void report_messages_at_source(webgpu_context& ctx, WGPUShaderModule module, sg:
     // the handle captures the calling thread's context as it is made
     auto* const held = new request{.map = shader.source_map, .entry = shader.entry_point};
     ctx.backlog.track(held->done);
+    auto done = held->done;
     auto const info = WGPUCompilationInfoCallbackInfo{
         .nextInChain = nullptr,
         .mode = WGPUCallbackMode_AllowSpontaneous,
@@ -51,18 +54,21 @@ void report_messages_at_source(webgpu_context& ctx, WGPUShaderModule module, sg:
             [](WGPUCompilationInfoRequestStatus status, WGPUCompilationInfo const* compilation, void* userdata, void*)
         {
             auto* const r = static_cast<request*>(userdata);
-            cc::async_ambient_install_scope const ambient(r->ambient);
-            if (status == WGPUCompilationInfoRequestStatus_Success && compilation != nullptr)
-                for (auto i = size_t(0); i < compilation->messageCount; ++i)
-                {
-                    auto const& m = compilation->messages[i];
-                    auto const text = cc::string_view(m.message.data, isize(m.message.length));
-                    auto const place = place_of(r->map, r->entry, m.lineNum);
-                    if (m.type == WGPUCompilationMessageType_Error)
-                        CC_LOG_ERROR("{}: {}", place, text);
-                    else if (m.type == WGPUCompilationMessageType_Warning)
-                        CC_LOG_WARNING("{}: {}", place, text);
-                }
+            {
+                cc::async_ambient_install_scope const ambient(r->ambient);
+                if (status == WGPUCompilationInfoRequestStatus_Success && compilation != nullptr)
+                    for (auto i = size_t(0); i < compilation->messageCount; ++i)
+                    {
+                        auto const& m = compilation->messages[i];
+                        auto const text = cc::string_view(m.message.data, isize(m.message.length));
+                        auto const place = place_of(r->map, r->entry, m.lineNum);
+                        if (m.type == WGPUCompilationMessageType_Error)
+                            CC_LOG_ERROR("{}: {}", place, text);
+                        else if (m.type == WGPUCompilationMessageType_Warning)
+                            CC_LOG_WARNING("{}: {}", place, text);
+                    }
+            }
+            // the context goes before the settling, so whatever waits on `done` finds the request's hold gone
             auto const done = r->done;
             delete r;
             done->push_value(cc::unit{});
@@ -71,6 +77,7 @@ void report_messages_at_source(webgpu_context& ctx, WGPUShaderModule module, sg:
         .userdata2 = nullptr,
     };
     (void)wgpuShaderModuleGetCompilationInfo(module, info);
+    return done;
 }
 } // namespace
 } // namespace sg::backend::webgpu
@@ -79,9 +86,13 @@ namespace sg::backend::webgpu
 {
 namespace
 {
+/// Each module's report of its compiler's messages, which an async pipeline settles after (see settled_after).
+using pending_messages = cc::vector<cc::shared_async<cc::unit>>;
+
 [[nodiscard]] cc::result<wgpu_shader_module> create_module(webgpu_context& ctx,
                                                            sg::compiled_shader const& shader,
-                                                           sg::shader_stage expected)
+                                                           sg::shader_stage expected,
+                                                           pending_messages& messages)
 {
     ctx.assert_on_device_thread();
     if (shader.format != sg::shader_format::wgsl)
@@ -105,7 +116,7 @@ namespace
     if (!module)
         return cc::error("wgpuDeviceCreateShaderModule returned no module");
     if (!shader.source_map.empty())
-        report_messages_at_source(ctx, module.get(), shader);
+        messages.push_back(report_messages_at_source(ctx, module.get(), shader));
     return module;
 }
 
@@ -280,6 +291,7 @@ struct compute_pipeline_build
 {
     webgpu_pipeline_layout_handle layout;
     wgpu_shader_module module;
+    pending_messages messages;
     cc::string entry_point;
     cc::string label;
     sg::compute_dimensions workgroup_size;
@@ -291,7 +303,7 @@ cc::result<std::unique_ptr<compute_pipeline_build>> prepare_compute_pipeline(web
 {
     auto build = std::make_unique<compute_pipeline_build>();
     build->layout = as_webgpu_layout(desc.layout);
-    auto module = create_module(ctx, desc.shader, sg::shader_stage::compute);
+    auto module = create_module(ctx, desc.shader, sg::shader_stage::compute, build->messages);
     CC_RETURN_IF_ERROR(module);
     build->module = cc::move(module.value());
     build->entry_point = desc.shader.entry_point;
@@ -335,6 +347,7 @@ struct raster_pipeline_build
     webgpu_pipeline_layout_handle layout;
     wgpu_shader_module vertex_module;
     wgpu_shader_module fragment_module;
+    pending_messages messages;
     cc::string vertex_entry;
     cc::string fragment_entry;
     cc::string label;
@@ -355,6 +368,8 @@ cc::result<std::unique_ptr<raster_pipeline_build>> prepare_raster_pipeline(webgp
     if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value()
         || desc.topology == sg::primitive_topology::patch_list)
         return cc::error("webgpu has no tessellation stages (ctx.supports(sg::feature::tessellation_shader) is false)");
+    if (desc.mesh_shader.has_value())
+        return cc::error("webgpu has no mesh stage (ctx.supports(sg::feature::mesh_shader) is false)");
     if (desc.rasterization.fill == sg::fill_mode::wireframe)
         return cc::error("webgpu has no wireframe fill mode");
     if (desc.sample_count != 1 && desc.sample_count != 4)
@@ -363,7 +378,7 @@ cc::result<std::unique_ptr<raster_pipeline_build>> prepare_raster_pipeline(webgp
     auto build = std::make_unique<raster_pipeline_build>();
     build->layout = as_webgpu_layout(desc.layout);
 
-    auto vertex_module = create_module(ctx, desc.vertex_shader, sg::shader_stage::vertex);
+    auto vertex_module = create_module(ctx, desc.vertex_shader, sg::shader_stage::vertex, build->messages);
     CC_RETURN_IF_ERROR(vertex_module);
     build->vertex_module = cc::move(vertex_module.value());
     build->vertex_entry = desc.vertex_shader.entry_point;
@@ -437,7 +452,8 @@ cc::result<std::unique_ptr<raster_pipeline_build>> prepare_raster_pipeline(webgp
 
     if (desc.fragment_shader.has_value())
     {
-        auto fragment_module = create_module(ctx, desc.fragment_shader.value(), sg::shader_stage::fragment);
+        auto fragment_module
+            = create_module(ctx, desc.fragment_shader.value(), sg::shader_stage::fragment, build->messages);
         CC_RETURN_IF_ERROR(fragment_module);
         build->fragment_module = cc::move(fragment_module.value());
         build->fragment_entry = desc.fragment_shader.value().entry_point;
@@ -533,6 +549,17 @@ template <class Handle, class Start>
     co_return co_await inner;
 }
 
+/// `pipeline`, once its modules' messages are logged too.
+/// The two callbacks race, and a message holds its caller's context until it lands: without this a caller could finish on
+/// the pipeline alone with its shader's report still carrying that context, and its error would read after the failure.
+template <class Handle>
+[[nodiscard]] cc::shared_async<Handle> settled_after(pending_messages messages, cc::shared_async<Handle> pipeline)
+{
+    for (auto const& m : messages)
+        co_await m;
+    co_return co_await pipeline;
+}
+
 /// A build asked for off the device thread, started once a coroutine has moved there: WebGPU exists on that thread only.
 template <class Handle, class Start>
 [[nodiscard]] cc::shared_async<Handle> start_on_device_home(webgpu_context const& ctx, Start start)
@@ -583,6 +610,7 @@ cc::shared_async<sg::compute_pipeline_handle> webgpu_context::create_compute_pip
 
     auto node = cc::make_async_manual<sg::compute_pipeline_handle>();
     auto request = std::make_unique<pipeline_request<compute_pipeline_build, sg::compute_pipeline_handle>>();
+    auto messages = cc::move(build.value()->messages);
     request->anchor = _anchor;
     request->build = cc::move(build.value());
     request->node = node;
@@ -600,7 +628,7 @@ cc::shared_async<sg::compute_pipeline_handle> webgpu_context::create_compute_pip
         .userdata2 = nullptr,
     };
     (void)wgpuDeviceCreateComputePipelineAsync(device(), &descriptor, info);
-    return node;
+    return settled_after(cc::move(messages), cc::move(node));
 }
 
 cc::shared_async<sg::raster_pipeline_handle> webgpu_context::create_raster_pipeline_async(
@@ -625,6 +653,7 @@ cc::shared_async<sg::raster_pipeline_handle> webgpu_context::create_raster_pipel
 
     auto node = cc::make_async_manual<sg::raster_pipeline_handle>();
     auto request = std::make_unique<pipeline_request<raster_pipeline_build, sg::raster_pipeline_handle>>();
+    auto messages = cc::move(build.value()->messages);
     request->anchor = _anchor;
     request->build = cc::move(build.value());
     request->node = node;
@@ -642,6 +671,6 @@ cc::shared_async<sg::raster_pipeline_handle> webgpu_context::create_raster_pipel
         .userdata2 = nullptr,
     };
     (void)wgpuDeviceCreateRenderPipelineAsync(device(), &descriptor, info);
-    return node;
+    return settled_after(cc::move(messages), cc::move(node));
 }
 } // namespace sg::backend::webgpu

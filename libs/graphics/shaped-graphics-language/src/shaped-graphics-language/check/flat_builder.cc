@@ -20,7 +20,14 @@ flat_expr_id add_call(flat_builder& b, cc::string_view name, cc::span<flat_expr_
         auto const parameters = b.m.at(f.parameters);
         auto is_match = parameters.size() == arguments.size();
         for (auto k = isize(0); is_match && k < parameters.size(); ++k)
-            is_match = parameters[k].type == b.e.at(arguments[k]).type;
+        {
+            auto const given = b.e.at(arguments[k]).type;
+            auto const& wanted = b.m.at(parameters[k].type);
+            // `mut atomic[T]` is a type of its own, and what reaches it is the place an `atomic[T]` stands in
+            is_match = parameters[k].type == given
+                    || (wanted.kind == type_kind::atomic && b.m.at(given).kind == type_kind::atomic
+                        && wanted.element == b.m.at(given).element);
+        }
         if (!is_match)
             continue;
         return b.add_expr(f.result, flat_call{.callee = symbol_id(i),
@@ -139,9 +146,10 @@ flat_expr_id flat_builder::construct(type_id type, cc::span<flat_expr_id const> 
 
 flat_expr_id flat_builder::binding_member(symbol_id binding, i32 member)
 {
-    auto const members = m.at(m.bindings[m.at(binding).info].members);
+    auto const& info = m.bindings[m.at(binding).info];
+    auto const members = m.at(info.members);
     auto const type = member >= 0 && member < members.size() ? members[member].type : checked_module::error_type;
-    return add_expr(type, flat_binding_member{.binding = binding, .member = member});
+    return add_expr(type, flat_binding_member{.binding = binding, .member = member, .is_workgroup = info.is_workgroup});
 }
 
 flat_expr_id flat_builder::buffer_element(flat_expr_id buffer, flat_expr_id index)

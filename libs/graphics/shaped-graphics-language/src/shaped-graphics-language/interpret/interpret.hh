@@ -34,12 +34,57 @@ struct sgl::check::buffer_contents
     symbol_id binding = symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
+    /// The element of a binding array; 0 for a member that is no array.
+    i32 element = 0;
     cc::vector<scalar> leaves;
 
     [[nodiscard]] bool operator==(buffer_contents const& rhs) const
     {
-        return binding == rhs.binding && member == rhs.member && ast::impl::is_equal(leaves, rhs.leaves);
+        return binding == rhs.binding && member == rhs.member && element == rhs.element
+            && ast::impl::is_equal(leaves, rhs.leaves);
     }
+};
+
+/// One texture or image of a binding, or one element of a binding array of them, as a run holds it (EVAL-120).
+/// Its texels are the values the shader reads, never a format's encoding: a `float4` texel is four floats.
+/// Level after level, each layer after layer, slice after slice, row after row, texel after texel, and each texel's
+/// samples after one another; a cube's layers are its faces, +x, -x, +y, -y, +z, -z, cube after cube.
+struct sgl::check::texture_contents
+{
+    symbol_id binding = symbol_id::none;
+    /// A position in the binding's `members`.
+    i32 member = -1;
+    /// The element of a binding array; 0 for a member that is no array.
+    i32 element = 0;
+    /// Level 0's extent; each level halves each axis, down to 1.
+    i32 width = 0;
+    i32 height = 1;
+    /// A 3D texture's slices at level 0, halving as width and height do; 1 for every other shape.
+    i32 depth = 1;
+    /// An array's layers, a cube's 6 or a cube array's 6 per cube; 1 for every other shape.
+    i32 layers = 1;
+    i32 levels = 1;
+    /// A multisampled texture's samples per texel; 1 for every other shape.
+    i32 samples = 1;
+    /// How many scalars a texel has.
+    i32 channels = 4;
+    cc::vector<scalar> texels;
+
+    [[nodiscard]] bool operator==(texture_contents const& rhs) const
+    {
+        return binding == rhs.binding && member == rhs.member && element == rhs.element && width == rhs.width
+            && height == rhs.height && depth == rhs.depth && layers == rhs.layers && levels == rhs.levels
+            && samples == rhs.samples && channels == rhs.channels && ast::impl::is_equal(texels, rhs.texels);
+    }
+};
+
+/// The state a driver gives a dynamic sampler member, which the source cannot know (EVAL-123).
+struct sgl::check::sampler_binding
+{
+    symbol_id binding = symbol_id::none;
+    i32 member = -1;
+    i32 element = 0;
+    sampler_state state;
 };
 
 enum class sgl::check::run_status : sgl::u8
@@ -74,11 +119,33 @@ struct sgl::check::run_inputs
     cc::vector<value> bindings;
     /// What every buffer the tree reads or writes holds when the run starts; one it names and this lacks is a type error.
     cc::vector<buffer_contents> buffers;
+    /// Every texture and image the run binds; one the tree names and this lacks is empty, 0 by 0 with no level.
+    cc::vector<texture_contents> textures;
+    /// The state of each dynamic sampler member the driver set; one it did not is `sampler_state`'s default.
+    cc::vector<sampler_binding> samplers;
     /// sg's acceleration pool, units of 16 bytes, which `acceleration_pool_load` reads (EVAL-95).
     /// Empty reads as zero at every unit, which is the empty TLAS wherever a trace starts.
     cc::pinned_data<byte const> acceleration_pool;
     /// The root unit of each acceleration member of the entry point, counted across its binding list in order; a missing one is 0.
     cc::vector<u32> acceleration_roots;
+    /// How many lanes the run is, one invocation each of one subgroup of that size, which run one after another (EVAL-140).
+    /// Its subgroup operations and derivatives exchange values between them; one lane has derivatives of 0.
+    i32 lane_count = 1;
+};
+
+/// The texels a driver binds to a texture or an image, laid out as `texture_contents` holds them.
+/// Each scalar takes 4 bytes, as a value's do; the extent, the layers, the levels and the samples say how many.
+struct sgl::check::texture_data
+{
+    i32 width = 0;
+    i32 height = 1;
+    i32 depth = 1;
+    i32 layers = 1;
+    i32 levels = 1;
+    i32 samples = 1;
+    cc::pinned_data<byte const> texels;
+    /// For an image, in place of `texels`: what the run stored is written back into it (`write_back`).
+    cc::pinned_data<byte> mutable_texels;
 };
 
 /// What a driver binds to one member of a binding, found by the member's name.
@@ -93,6 +160,10 @@ struct sgl::check::member_data
     cc::pinned_data<byte> mutable_bytes;
     /// For an acceleration member: the pool unit of its TLAS, where 0 is the empty one.
     u32 acceleration_root = 0;
+    /// For a texture or an image: one, or one per element of a binding array of them, in order.
+    cc::vector<texture_data> textures;
+    /// For a dynamic sampler member: its state, or one per element of a binding array of them.
+    cc::vector<sampler_state> samplers;
 };
 
 /// What a driver binds to one `binding` of the module, found by the binding's name.
@@ -140,10 +211,12 @@ struct sgl::check::check_failure
     cc::vector<value> loop_values;
     /// Parallel to the site's `message_values`: what an `assert`'s message interpolates.
     cc::vector<value> message_values;
+    /// The lane whose run it was false in (EVAL-140).
+    i32 lane = 0;
 
     [[nodiscard]] bool operator==(check_failure const& rhs) const
     {
-        return site == rhs.site && ast::impl::is_equal(values, rhs.values)
+        return site == rhs.site && lane == rhs.lane && ast::impl::is_equal(values, rhs.values)
             && ast::impl::is_equal(is_evaluated, rhs.is_evaluated) && ast::impl::is_equal(loop_values, rhs.loop_values)
             && ast::impl::is_equal(message_values, rhs.message_values);
     }
@@ -182,6 +255,8 @@ struct sgl::check::outcome
     cc::vector<printed_message> printed;
     /// Every buffer the run stored to, as the run left it: a store is an effect, so two runs are compared by these too.
     cc::vector<buffer_contents> buffers;
+    /// Every image the run stored to, as the run left it, compared as the buffers are.
+    cc::vector<texture_contents> images;
     /// For a reader, and no part of what two runs are compared by.
     cc::string detail;
     /// Every check and `assert` that was false, up to `run_limits::max_failures`, in the order they ran.
@@ -199,7 +274,7 @@ struct sgl::check::outcome
     [[nodiscard]] bool operator==(outcome const& rhs) const
     {
         return status == rhs.status && result == rhs.result && ast::impl::is_equal(trace, rhs.trace)
-            && ast::impl::is_equal(buffers, rhs.buffers);
+            && ast::impl::is_equal(buffers, rhs.buffers) && ast::impl::is_equal(images, rhs.images);
     }
 };
 
@@ -229,7 +304,8 @@ namespace sgl::check
                                                     flat_entry_point const& e,
                                                     driver_bindings const& bound);
 
-/// Writes every buffer `o` stored to back into the `mutable_bytes` `bound` gave it, laid out as `resolve_inputs` read it.
+/// Writes every buffer `o` stored to back into the `mutable_bytes` `bound` gave it, laid out as `resolve_inputs` read it,
+/// and every image it stored to into its `mutable_texels`.
 /// A buffer bound through `bytes` alone keeps what it held.
 void write_back(checked_module const& m, outcome const& o, driver_bindings const& bound);
 
@@ -242,6 +318,6 @@ void write_back(checked_module const& m, outcome const& o, driver_bindings const
 /// under it has none (EVAL-85); a `type_error` for an `id` that is no constant.
 [[nodiscard]] outcome evaluate_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id);
 
-/// `ok 1.5` with one ` | print …` per printed value, then one ` | buffer …` per buffer, for a failing test to show.
+/// `ok 1.5` with one ` | print …` per printed value, one ` | buffer …` per buffer, then one ` | image …` per image.
 [[nodiscard]] cc::string dump(outcome const& o);
 } // namespace sgl::check

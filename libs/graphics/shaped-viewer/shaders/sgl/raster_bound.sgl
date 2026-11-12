@@ -232,7 +232,7 @@ fun pixel_context(p: varyings, primitive: uint){bound} -> material.shading_conte
     let o1 = material.position_of(inst, bound.vertices, corner.y)
     let o2 = material.position_of(inst, bound.vertices, corner.z)
     let bary = raster.barycentrics_of(p.object, o0, o1, o2)
-    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, corner, bary)
+    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, corner, bary, material.no_footprint, material.no_footprint, float2(0.0, 0.0))
 
 /// The face of `ctx`'s triangle of `inst` seen from `eye`, as `raster.face_of` describes it, its corners read from the pool.
 fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, eye: float3, surface: openpbr.surface, supplied_tangent_frame: bool){bound} -> raster.pixel_face:

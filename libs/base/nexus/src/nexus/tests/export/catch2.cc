@@ -86,7 +86,7 @@ void print_nested_executions(cc::string& out,
             auto const& decl = *child.instance.declaration;
 
             out.appendf("{}  <Section name=\"{}\" filename=\"{}\" line=\"{}\">\n", indent, xml_escape(decl.name),
-                        xml_escape(decl.location.file_name()), decl.location.line());
+                        xml_escape(decl.file), decl.location.line());
             print_section_recursive(out, child.root, indent + "    ", error_count, max_errors);
             print_nested_executions(out, child, indent + "    ", error_count, max_errors);
 
@@ -129,7 +129,7 @@ cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
         out += "    <ClassName/>\n";
         out += "    <Tags></Tags>\n";
         out += "    <SourceInfo>\n";
-        out.appendf("      <File>{}</File>\n", xml_escape(decl.location.file_name()));
+        out.appendf("      <File>{}</File>\n", xml_escape(decl.file));
         out.appendf("      <Line>{}</Line>\n", decl.location.line());
         out += "    </SourceInfo>\n";
         out += "  </TestCase>\n";
@@ -169,7 +169,7 @@ cc::string nx::write_catch2_results_xml(nx::test_schedule_execution const& execu
         bool const success = !exec.is_considered_failing();
 
         out.appendf("  <TestCase name=\"{}\" filename=\"{}\" line=\"{}\">\n", xml_escape(decl.name),
-                    xml_escape(decl.location.file_name()), decl.location.line());
+                    xml_escape(decl.file), decl.location.line());
 
         // Print all sections and expressions recursively (capped at max_errors)
         int const max_errors = 50;

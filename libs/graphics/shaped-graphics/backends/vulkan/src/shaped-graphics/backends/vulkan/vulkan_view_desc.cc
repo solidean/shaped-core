@@ -256,13 +256,9 @@ void write_view_descriptor(vulkan_context& ctx,
     if (sg::is_vacant(view))
     {
         // A vacant array element still occupies a descriptor, and an unwritten one in a bound set is undefined.
-        // Vulkan spells "a descriptor that reads as nothing" as an all-zero descriptor, which is defined only with
-        // the nullDescriptor feature of VK_EXT_robustness2 — required at device creation for exactly this.
-        //
         // The binding is the only source of shape here: the element carries no resource, which is exactly why the
         // declared type and dimension have to be on the binding rather than inferred from the view.
-        for (size_t i = 0; i < size; ++i)
-            dst[i] = byte(0);
+        write_null_descriptor(ctx, binding.type, dst);
         return;
     }
 
@@ -301,18 +297,33 @@ void write_view_descriptor(vulkan_context& ctx,
         // valid descriptor rather than an error, and there is nothing to keep alive for it.
         // It is the nullDescriptor feature that makes it writable at all; vkGetDescriptorEXT rejects address 0 without
         // it, which is why device creation requires VK_EXT_robustness2.
+        // A partitioned tlas has no structure object a descriptor could name, so it writes the null one: only a trace
+        // by address, SGL's own SPIR-V, reaches it.
         info.data.accelerationStructure = 0;
         if (tlas_view->tlas != nullptr)
         {
-            auto const& tlas = static_cast<vulkan_tlas const&>(*tlas_view->tlas);
-            CC_ASSERT(tlas._address != 0, "a bound acceleration structure has no device address");
-            info.data.accelerationStructure = u64(tlas._address);
+            auto const target = trace_target_of(*tlas_view->tlas);
+            CC_ASSERT(target.address != 0, "a bound acceleration structure has no device address");
+            info.data.accelerationStructure = u64(target.descriptor_address);
         }
     }
     else
         CC_UNREACHABLE("unhandled raw_view arm in write_view_descriptor");
 
     ctx._descriptor_functions.get_descriptor(ctx._device, &info, size, dst);
+}
+
+void write_null_descriptor(vulkan_context& ctx, sg::binding_type type, byte* dst)
+{
+    CC_ASSERT(dst != nullptr, "no destination for a descriptor write");
+    CC_ASSERT(!sg::is_sampler(type), "a sampler descriptor always names a sampler; there is no null one");
+
+    // Every member of the data union null, and an acceleration structure at address 0, which is what the
+    // nullDescriptor feature of VK_EXT_robustness2 — required at device creation — makes a valid request.
+    auto const info = VkDescriptorGetInfoEXT{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+                                             .type = descriptor_type_of(type),
+                                             .data = {}};
+    ctx._descriptor_functions.get_descriptor(ctx._device, &info, size_t(descriptor_size_of(ctx, type)), dst);
 }
 
 void write_sampler_descriptor(vulkan_context& ctx, VkSampler sampler, byte* dst)

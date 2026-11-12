@@ -1,5 +1,8 @@
 #include <clean-core/container/array.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/environment.hh>
+#include <clean-core/streams/file_stream.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
@@ -213,9 +216,12 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
     CHECK(g.source.contains("fun sv_attribute_base_color(ctx: material.shading_context){tracer.bindless} -> float3:"));
     CHECK(g.source.contains("let uv = material.interpolate_f2("));
     CHECK(g.source.contains("let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + "));
-    // An explicit level, because a ray tracing hit shader has no derivatives to pick a mip from.
+    // Explicit gradients, because a ray tracing hit shader has no derivatives of its own: the ray cone's footprint axes,
+    // through the triangle's uv edges.
+    CHECK(g.source.contains("let grads = material.texture_gradients(ctx, material.uv_edges(tracer.bindless.buffers["
+                            "nonuniform uv_desc_buffer], uv_desc, ctx.corner))"));
     CHECK(g.source.contains("let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, "
-                            "tracer.bindless.palette_linear_repeat_repeat, level = 0.0)"));
+                            "tracer.bindless.palette_linear_repeat_repeat, grad_x = grads.xy, grad_y = grads.zw)"));
     // An identity swizzle narrows to the declaration's three components and stays a letter swizzle.
     CHECK(g.source.contains("return texel.xyz\n"));
 
@@ -420,8 +426,8 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     CHECK(g.raster_source.contains("    if raster.is_cut(p, ctx) => discard\n"));
     CHECK(g.raster_source.find("raster.is_cut") < g.raster_source.find("raster.shade("));
 
-    // The hit group samples the same palette at level 0.
-    CHECK(g.source.contains("tracer.bindless.palette_linear_repeat_repeat, level = 0.0"));
+    // The hit group samples the same palette, with the ray cone's gradients.
+    CHECK(g.source.contains("tracer.bindless.palette_linear_repeat_repeat, grad_x = grads.xy, grad_y = grads.zw"));
 
     // A material that cannot cut out has no cut to make.
     auto const opaque = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
@@ -471,4 +477,34 @@ TEST("sv::generate_material_shader - the builtin pbr type generates")
         CHECK(g.source.contains(cc::format("    let {} = sv_attribute_{}(ctx)", d.name, d.name)));
     }
     CHECK(g.layout.slots.size() == lib.get_type(pbr).signature.size());
+}
+
+TEST("sv - the committed pbr shade kernel is what the generator writes, which the native size gate measures")
+{
+    // native-parity.py's `check` holds SGL's binaries of this file to a baseline, and it stands for every material's
+    // shade kernel, which the program generates at run time; SC_UPDATE_NATIVE_SAMPLES=1 writes it anew
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+    auto const type = materials.acquire_type(sv::builtin_material::pbr).value();
+    auto const id = materials.acquire(sv::material::create("pbr", type, {}));
+    auto const generated = sv::generate_material_shader(sv::resolve_material(materials, id, make_mesh())).shade_source;
+    auto const path = nx::source_path(SV_TEST_DATA_DIR "/pbr_shade_kernel.sgl");
+
+    if (cc::environment_variable("SC_UPDATE_NATIVE_SAMPLES").has_value())
+    {
+        auto file = cc::file_write_stream_adapter::create(path);
+        REQUIRE(file.has_value());
+        auto stream = file.value().stream();
+        REQUIRE(stream.write(generated.as_bytes()).has_value());
+        REQUIRE(stream.flush().has_value());
+    }
+    auto file = cc::file_read_stream_adapter::open(path);
+    REQUIRE(file.has_value());
+    auto stream = file.value().stream();
+    auto const bytes = stream.read_all();
+    REQUIRE(bytes.has_value());
+    auto const committed = cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size());
+    CHECK(committed == cc::string_view(generated))
+        .dump("fix", "run `SC_UPDATE_NATIVE_SAMPLES=1 uv run dev.py test \"the committed pbr shade kernel\"`, then "
+                     "`native-parity.py update` where the gate moves");
 }

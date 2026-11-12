@@ -32,6 +32,15 @@ fun store(id: int3, h: triangle_hit){scene}:
 @compute(8, 8) fun trace_cells_opaque(@thread_id id: int3){scene}:
     store(id, scene.world.trace(cell_ray(id), flags = ray_flags.force_opaque))
 
+// The same rays, keeping the cluster each hit is in where its primitive index stands: -1 for a BLAS of no clusters.
+@compute(8, 8) fun trace_cells_clusters(@thread_id id: int3){scene}:
+    let h = scene.world.trace(cell_ray(id), flags = ray_flags.force_opaque)
+    let at = id.x + id.y * 8
+    let mut is_hit = 0
+    if h.is_hit => is_hit = 1
+    scene.hits[at] = float4(h.t, h.barycentrics.y, h.barycentrics.z, 0.0)
+    scene.ids[at] = int4(is_hit, h.instance_id, h.cluster_id, h.instance_index)
+
 // The same rays, ignoring every candidate they are asked about.
 // So only what an opacity micromap marks opaque is hit, since there nothing is asked.
 @compute(8, 8) fun trace_cells_rejecting(@thread_id id: int3){scene}:
@@ -40,6 +49,12 @@ fun store(id: int3, h: triangle_hit){scene}:
 // The same rays, accepting every candidate: only what a micromap marks transparent is missed.
 @compute(8, 8) fun trace_cells_accepting(@thread_id id: int3){scene}:
     store(id, scene.world.trace(cell_ray(id), c => hit_decision.accept))
+
+// The same rays halfway through the frame's interval, which moving vertices and instances stand at.
+@compute(8, 8) fun trace_cells_midway(@thread_id id: int3){scene}:
+    let c = cell_ray(id)
+    let midway = ray(origin = c.origin, direction = c.direction, time = 0.5)
+    store(id, scene.world.trace(midway, flags = ray_flags.force_opaque))
 
 // ---- the same scene, traced by a pixel stage ------------------------------------------------------------------------
 //

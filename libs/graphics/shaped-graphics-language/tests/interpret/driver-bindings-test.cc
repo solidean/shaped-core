@@ -127,7 +127,7 @@ TEST("sgl driver bindings - a member the binding lacks, or bytes of no whole val
     CHECK(driven_failures_of(source, other) == "");
 }
 
-TEST("sgl driver bindings - a test lists values, buffers and acceleration structures, and no texture yet")
+TEST("sgl driver bindings - a test lists values, buffers, acceleration structures, textures and samplers")
 {
     // CHK-333: a callee's binding the test lists is the test's own, and no capture of the function it stands in
     CHECK(reports_for("binding frame:\n    exposure: float\n"
@@ -137,10 +137,14 @@ TEST("sgl driver bindings - a test lists values, buffers and acceleration struct
                       "    return frame.exposure\n"
                       "test {frame}:\n    exposed() == 0.0\n")
           == "");
-    CHECK(reports_for("binding material:\n    albedo: texture_2d[float4]\n    tint: float\n"
-                      "test {material}:\n    material.tint == 0.0\n")
-          == "unsupported-yet user:[test] a test that lists material, whose albedo is a texture, an image or a "
-             "sampler\n");
+    // EVAL-120: a texture and a sampler are bound by the driver too, and a file-scope sampler is the source's
+    CHECK(reports_for("binding material:\n    albedo: texture_2d[float4]\n    smp: sampler\n    tint: float\n"
+                      "sampler point:\n    filter = .nearest\n"
+                      "test {material}:\n"
+                      "    material.tint == 0.0\n"
+                      "    material.albedo.sample(float2(0.5), material.smp, level = 0.0).x == 0.0\n"
+                      "    material.albedo.sample(float2(0.5), point, level = 0.0).x == 0.0\n")
+          == "");
     CHECK(reports_for("binding frame:\n    exposure: float\nfun exposed(){frame} -> float => frame.exposure\n"
                       "test {frame, exposed}:\n    true\n")
           == "wrong-kind-of-name user:[exposed] exposed is no binding\n");

@@ -157,7 +157,7 @@ TEST("sgl emit - an atomic image's update is the target's own atomic on the texe
     auto const msl = text_of(k_reduce, target::msl);
     CHECK(msl.contains("    const uint before = set_depth.atomic_fetch_max(uint2(xy / 2), 7u).x;\n"));
     CHECK(msl.contains("    const int shifted = set_offsets.atomic_fetch_add(uint2(xy), uint(1), -3).x;\n"));
-    CHECK(msl.contains("set_depth.atomic_store(uint2(xy), uint4(before + set_depth.atomic_load(uint2(xy)).x));\n"));
+    CHECK(msl.contains("set_depth.atomic_store(uint4(before + set_depth.atomic_load(uint2(xy)).x), uint2(xy));\n"));
 
     // EMIT-109: WebGPU has neither, and an entry point needing both names each
     CHECK(sgl::emit::dump_errors(emit_source(k_reduce, 0, target::wgsl))
@@ -267,5 +267,5 @@ TEST("sgl emit - a texel of an option's format is the texel of the format the co
     auto const same = picked_text(".rg32_float", target::hlsl_vulkan);
     CHECK(same.contains("[[vk::image_format(\"rg32f\")]] RWTexture2D<float2> io_picked;\n"));
     CHECK(same.contains("    io_picked[id.xy] = c.xy;\n"));
-    CHECK(picked_text(".r32_float", target::msl).contains("    io_picked.write(float4(c.xy.x, 0.0, 0.0, 0.0), "));
+    CHECK(picked_text(".r32_float", target::msl).contains("    io_picked.write(float4(c.x, 0.0, 0.0, 0.0), "));
 }

@@ -1,5 +1,7 @@
 #include "emit-test-support.hh"
 
+#include <nexus/source_root.hh>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
@@ -7,7 +9,7 @@ namespace
 {
 cc::string emit_cube(isize index, target t)
 {
-    auto const e = emit_source(read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"), index, t);
+    auto const e = emit_source(read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl"), index, t);
     CHECK(sgl::emit::dump_errors(e) == "");
     return e.text;
 }
@@ -288,7 +290,7 @@ TEST("sgl emit - the cube's pixel stage as MSL")
 
 TEST("sgl emit - emitting is deterministic, and a stage's text never names the other stage")
 {
-    auto const checked = check_sources(read_prelude(), read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"));
+    auto const checked = check_sources(read_prelude(), read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl"));
     for (auto const t : sgl::emit::all_targets())
         for (auto index = isize(0); index < 2; ++index)
         {

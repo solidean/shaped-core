@@ -115,7 +115,9 @@ public:
         cc::vector<vulkan_texture_handle> referenced_textures,
         cc::vector<vulkan_hazard_view> hazard_views,
         cc::vector<vulkan_texture_hazard_view> texture_hazard_views,
-        cc::vector<vulkan_array_binding> array_bindings);
+        cc::vector<vulkan_array_binding> array_bindings,
+        u32 unbounded_length = 0,
+        cc::vector<u64> acceleration_addresses = {});
 
     vulkan_binding_group() = default;
 
@@ -125,7 +127,17 @@ public:
 
     vulkan_context* _ctx = nullptr; // creating context — outlives this group (for the deferred free)
     vulkan_binding_group_layout_handle layout;
-    vulkan_descriptor_range range;                         // this group's descriptors within the heap
+    vulkan_descriptor_range range; // this group's descriptors within the heap
+    /// Each acceleration member's root in the software pool, by binding index; 0, the empty TLAS, for a null one.
+    /// Filled only by a binding traced in software, and `software_tlases` keeps their regions alive.
+    cc::vector<u32> acceleration_roots;
+    /// Each acceleration member's device address, by its position among the group's; 0 for a null one.
+    /// What SGL's own SPIR-V traces, through `sg_acceleration_addresses`.
+    cc::vector<u64> acceleration_addresses;
+    /// The length of the layout's unbounded binding array, the views it binds; 0 where it holds none.
+    u32 unbounded_length = 0;
+    cc::vector<sg::tlas_handle> software_tlases;
+
     cc::vector<vulkan_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives
     cc::vector<vulkan_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives
     cc::vector<vulkan_hazard_view> hazard_views;           // (buffer + view class) — declared for hazards at dispatch

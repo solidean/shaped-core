@@ -23,18 +23,19 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    // EMIT-185: vulkan's execution modes wait for their device features, and WebGPU keeps nothing above .fast
-    if (ctx->backend() != sg::backend_kind::metal && ctx->backend() != sg::backend_kind::dx12)
-        SKIP("only metal and dx12 keep @float(.specials) so far");
+    // EMIT-185: vulkan keeps the specials where the device has the execution mode, and WebGPU keeps nothing above .fast
+    if (!ctx->supports(sg::feature::float_specials))
+        SKIP("this device keeps no NaNs, infinities and signed zeros a shader asks for");
 
     auto const pipeline = co_await shaders::float_specials::probe.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::float_specials::float_specials>();
 
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
-    auto const inputs = ctx->persistent.create_buffer_from_data(cc::vector<float>{0.0f, 1.0f, 1.0e30f},
-                                                                sg::buffer_usage::readonly_buffer);
-    auto const results = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_defaulted(7), usage);
-    auto const comparisons = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(4), usage);
+    auto const least_denormal = cc::bit_cast<float>(u32(1));
+    auto const inputs = ctx->persistent.create_buffer_from_data(
+        cc::vector<float>{0.0f, 1.0f, 1.0e30f, 1.0e-38f, least_denormal, 1.0e-3f}, sg::buffer_usage::readonly_buffer);
+    auto const results = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_defaulted(10), usage);
+    auto const comparisons = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(5), usage);
 
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
@@ -50,14 +51,14 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     ctx->submit_command_list(cc::move(cmd));
 
     auto const got = co_await results_back.data();
-    REQUIRE(got.size() == 7);
+    REQUIRE(got.size() == 10);
     auto const bits = [&](isize i) { return cc::bit_cast<u32>(got[i]); };
     CHECK(bits(0) == 0x7f800000u);
     CHECK(cc::is_nan(got[1]));
-    // an infinity times zero, which Intel's dx12 driver folds to 0 from the strict fmul DXC writes:
-    // bug-sg-intel-dx12-zero-times-inf
+    // an infinity times zero, whose `(one / zero) * zero` Intel's driver cancels to 1 even from strict DXIL and SPIR-V,
+    // on dx12 and on vulkan: bug-sg-intel-dx12-zero-times-inf
     auto const& adapter = ctx->metrics.adapter();
-    if (ctx->backend() != sg::backend_kind::dx12 || adapter.is_software || adapter.vendor_id != 0x8086)
+    if (adapter.is_software || adapter.vendor_id != 0x8086)
         CHECK(cc::is_nan(got[2]));
     // -0 + 0 is +0
     CHECK(bits(3) == 0x00000000u);
@@ -67,7 +68,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     CHECK(bits(6) == 0xff800000u);
 
     auto const compared = co_await comparisons_back.data();
-    REQUIRE(compared.size() == 4);
+    REQUIRE(compared.size() == 5);
     // nan != nan
     CHECK(compared[0] == 1u);
     // nan == nan
@@ -76,4 +77,15 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     CHECK(compared[2] == 0u);
     // inf > 1e30
     CHECK(compared[3] == 1u);
+
+    // A copy keeps a denormal's bits on every device.
+    CHECK(bits(9) == 1u);
+    // Metal's safe math flushes them, read and written, measured on an M4: why metal reports no float_denormals.
+    // A device that kept them would fail here, and could then report the feature and keep `.ieee`.
+    if (ctx->backend() == sg::backend_kind::metal)
+    {
+        CHECK(bits(7) == 0u);
+        CHECK(bits(8) == 0u);
+        CHECK(compared[4] == 0u);
+    }
 }

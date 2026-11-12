@@ -13,6 +13,16 @@
 /// So a `feature` earns its place only when a whole code path is present or absent, never to describe a difference of
 /// degree.
 
+/// When a stage is drawn as its polyfill rather than natively.
+enum class sg::polyfill_use : sg::u8
+{
+    never,
+    /// Where the device lacks the stage.
+    where_missing,
+    /// On every device, the stage's own included: what compares the two on one device.
+    always,
+};
+
 /// A capability a context either has or does not.
 /// Absent means the code path does not exist on this backend or device — not that it is slow.
 enum class sg::feature
@@ -40,6 +50,11 @@ enum class sg::feature
     /// The tessellation control + evaluation stages exist.
     /// Both or neither, which is why they are one feature rather than two.
     tessellation_shader,
+
+    /// The mesh stage exists, and the task stage that launches it, so a raster pipeline may draw from workgroups rather than vertices.
+    /// D3D12 grants it with mesh shader tier 1, Vulkan with VK_EXT_mesh_shader's `meshShader` and `taskShader`.
+    /// Metal grants it with its object and mesh stages, and WebGPU has neither.
+    mesh_shader,
 
     /// A binding may be an array (`count > 1`), and so `staging_binding_group` and `bindless_array` work.
     /// WebGPU core has no binding arrays at all, so a bindless renderer asks once rather than finding out at layout creation.
@@ -128,6 +143,11 @@ enum class sg::feature
     /// WGSL has no builtin for it.
     first_instance,
 
+    /// An indirect draw's `first_instance` may be other than 0.
+    /// Without it such a record is invalid on vulkan and draws nothing on WebGPU, with no error on either.
+    /// D3D12 and Metal always have it; vulkan needs `drawIndirectFirstInstance` and WebGPU `indirect-first-instance`.
+    indirect_first_instance,
+
     /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-163).
     /// D3D12 has HLSL's `IsHelperLane()` from SM 6.6, Vulkan has the core `HelperInvocation` built-in, Metal has `simd_is_helper_thread()`.
     /// D3D12's and Vulkan's compare-exchange is strong already, so their strong form needs no loop and asks no test.
@@ -154,12 +174,87 @@ enum class sg::feature
 
     /// A ray-generation shader may reorder its invocations by a coherence hint, so threads that will run alike run together.
     /// D3D12 grants it from Shader Model 6.9 beside ray-tracing pipelines, which only the Agility SDK's runtime has.
-    /// Vulkan's `VK_EXT_ray_tracing_invocation_reorder` has no compiler path from HLSL yet, and metal and WebGPU have none.
+    /// Vulkan grants it through `VK_EXT_ray_tracing_invocation_reorder` on a device that reorders rather than only accepting the calls.
+    /// Metal and WebGPU have none.
     /// SGL's `maybe_reorder` is a hint: without the feature it does nothing, so it is what `has` asks.
     shader_execution_reordering,
+
+    /// A shader may ask its 32-bit floats to keep NaNs, infinities and signed zeros, as SGL's `@float(.specials)` does.
+    /// Vulkan grants it with `shaderSignedZeroInfNanPreserveFloat32`, which SPIR-V's `SignedZeroInfNanPreserve` needs.
+    /// D3D12 and Metal keep them under a compile flag, `-Gis` and safe math, so they grant it; WebGPU keeps none.
+    float_specials,
+
+    /// A shader may ask its 32-bit floats to keep denormals rather than flush them, as SGL's `@float(.ieee)` does.
+    /// Vulkan grants it with `shaderDenormPreserveFloat32`, which SPIR-V's `DenormPreserve` needs.
+    /// D3D12 grants it, Shader Model 6.2 on, through DXC's `-denorm preserve`; Metal is not known to keep them, and
+    /// WebGPU keeps none.
+    float_denormals,
+
+    /// One draw renders several views, view `i` into layer `i` of every target, as a pipeline's `view_count` asks and
+    /// SGL's `@view_index` reads.
+    /// What a stereo frame wants on a tiled GPU, where the driver bins both views together: layered rendering through
+    /// `vertex_layer_output` rasterises them separately.
+    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`, Metal with vertex amplification of two views,
+    /// and WebGPU has no such thing.
+    view_instancing,
+
+    /// Not a capability: this device's driver may write nothing for a draw of several views whose pixel stage ignores the view.
+    /// SGL's `keep_view` reads it where this is set, and is free everywhere else.
+    /// See docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
+    pixel_view_read_workaround,
+
+    /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.
+    /// D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none.
+    vertex_pipeline_stores,
+
+    /// A shader may compute and store 64-bit integers (SGL's `long` and `ulong`), in registers and in buffers.
+    /// D3D12 grants it with `Int64ShaderOps`, Vulkan with `shaderInt64`, and Metal always; WebGPU has none.
+    shader_int64,
+
+    /// A shader may compute and store 64-bit floats (SGL's `double`), in registers and in buffers.
+    /// D3D12 grants it with `DoublePrecisionFloatShaderOps`, Vulkan with `shaderFloat64`; Metal and WebGPU have none.
+    shader_f64,
+
+    /// A shader may update a 64-bit integer of a buffer atomically (SGL's `atomic[long]` in a `mut buffer`).
+    /// D3D12 grants it with `Int64ShaderOps`, since Shader Model 6.6 makes raw and structured buffers' 64-bit atomics
+    /// part of it; Vulkan grants it with `shaderBufferInt64Atomics`.
+    /// Workgroup memory's are optional on both, and are `shader_shared_int64_atomics`.
+    /// Metal's 64-bit atomics are a ulong's min and max alone, and WebGPU has none.
+    shader_int64_atomics,
+
+    /// A binding of `count == 0`, an array whose length each binding group decides by the views it is given.
+    /// It is the last binding of its layout, and of its kind's table, which is where both APIs allow one.
+    /// D3D12 grants it at resource binding tier 3, Vulkan with `descriptorBindingVariableDescriptorCount`.
+    /// Metal reaches it through a table each group sizes behind its argument buffer, and WebGPU has no binding arrays.
+    unbounded_binding_arrays,
+
+    /// A shader may update a 64-bit integer of workgroup memory atomically (SGL's `atomic[long]` in a `@workgroup` binding).
+    /// D3D12 grants it with `AtomicInt64OnGroupSharedSupported`, Vulkan with `shaderSharedInt64Atomics`; both make it optional.
+    shader_shared_int64_atomics,
+
+    /// A shader may take the minimum or the maximum of a buffer's 64-bit unsigned integer atomically, and do nothing else to it.
+    /// Every device with `shader_int64_atomics` has it; Metal grants it alone, on the Apple GPUs that have 64-bit atomics.
+    shader_int64_min_max_atomics,
+
+    /// A TLAS instance (`tlas_instance::transform_at_end`) and a BLAS's vertices (`blas_triangles::later_poses`) may move
+    /// over the frame, and a trace places them at its ray's time.
+    /// **Emulated wherever it is offered**: webgpu through its polyfill, dx12 and vulkan through a package's SOFTWARE_TRACE.
+    /// A native trace sees none of it, since DXR has no motion and vulkan's VK_NV_ray_tracing_motion_blur reaches no ray query.
+    /// metal offers it natively to a pipeline's trace, and through the software walk to an inline one, whose query has no motion.
+    ray_tracing_motion_blur,
+
+    /// A tlas may be a `partitioned_tlas`: created with fixed capacities, and updated in place by `cmd.raytracing.update`.
+    /// Vulkan grants it with `VK_NV_partitioned_acceleration_structure`, and traces it by its address.
+    /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
+    partitioned_tlas,
+
+    /// A blas may be built from clusters: `cmd.raytracing.build_clusters`, then `build_cluster_blas` over ranges of them.
+    /// Vulkan grants it with `VK_NV_cluster_acceleration_structure`, and a shader reads a hit's cluster as `cluster_id`.
+    /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
+    clustered_geometry,
 };
 
-CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
+CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
 
 namespace sg
 {
@@ -174,6 +269,7 @@ inline constexpr feature k_all_features[] = {
     feature::headless_present,
     feature::geometry_shader,
     feature::tessellation_shader,
+    feature::mesh_shader,
     feature::binding_arrays,
     feature::readwrite_image_formats,
     feature::float32_filtering,
@@ -191,13 +287,28 @@ inline constexpr feature k_all_features[] = {
     feature::device_coherence,
     feature::image_atomics,
     feature::first_instance,
+    feature::indirect_first_instance,
     feature::helper_lane_query,
     feature::opacity_micromap,
     feature::vertex_layer_output,
     feature::float_atomic_add,
     feature::shader_execution_reordering,
+    feature::float_specials,
+    feature::float_denormals,
+    feature::view_instancing,
+    feature::pixel_view_read_workaround,
+    feature::vertex_pipeline_stores,
+    feature::shader_int64,
+    feature::shader_f64,
+    feature::shader_int64_atomics,
+    feature::unbounded_binding_arrays,
+    feature::shader_shared_int64_atomics,
+    feature::shader_int64_min_max_atomics,
+    feature::ray_tracing_motion_blur,
+    feature::partitioned_tlas,
+    feature::clustered_geometry,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::shader_execution_reordering) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::clustered_geometry) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -217,6 +328,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "geometry_shader";
     case feature::tessellation_shader:
         return "tessellation_shader";
+    case feature::mesh_shader:
+        return "mesh_shader";
     case feature::binding_arrays:
         return "binding_arrays";
     case feature::readwrite_image_formats:
@@ -251,6 +364,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "image_atomics";
     case feature::first_instance:
         return "first_instance";
+    case feature::indirect_first_instance:
+        return "indirect_first_instance";
     case feature::helper_lane_query:
         return "helper_lane_query";
     case feature::opacity_micromap:
@@ -261,6 +376,34 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_atomic_add";
     case feature::shader_execution_reordering:
         return "shader_execution_reordering";
+    case feature::float_specials:
+        return "float_specials";
+    case feature::float_denormals:
+        return "float_denormals";
+    case feature::view_instancing:
+        return "view_instancing";
+    case feature::pixel_view_read_workaround:
+        return "pixel_view_read_workaround";
+    case feature::vertex_pipeline_stores:
+        return "vertex_pipeline_stores";
+    case feature::shader_int64:
+        return "shader_int64";
+    case feature::shader_f64:
+        return "shader_f64";
+    case feature::shader_int64_atomics:
+        return "shader_int64_atomics";
+    case feature::unbounded_binding_arrays:
+        return "unbounded_binding_arrays";
+    case feature::shader_shared_int64_atomics:
+        return "shader_shared_int64_atomics";
+    case feature::shader_int64_min_max_atomics:
+        return "shader_int64_min_max_atomics";
+    case feature::ray_tracing_motion_blur:
+        return "ray_tracing_motion_blur";
+    case feature::partitioned_tlas:
+        return "partitioned_tlas";
+    case feature::clustered_geometry:
+        return "clustered_geometry";
     }
     return "";
 }

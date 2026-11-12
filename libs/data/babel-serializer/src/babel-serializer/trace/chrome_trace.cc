@@ -275,6 +275,43 @@ void write_events(babel::json::array_writer& events,
 
         last_ts_us = ts_us;
 
+        // A thread's running time since the sampler's previous tick of it: a stretch it mostly sat off the CPU is a span
+        // on the thread's off-CPU lane, and the event itself, the sampler's bookkeeping, is not shown.
+        if (kind == cc::rec::event_kind::value && e.name() == cc::string_view("record.thread_run"))
+        {
+            if (!opts.include_off_cpu)
+                continue;
+            auto const interval = e.field_as_u64("interval").value_or(0);
+            auto const ran = e.field_as_u64("ran").value_or(0);
+            if (interval == 0 || 2 * ran >= interval)
+                continue;
+            auto const lane = opts.off_cpu_tid_offset + i32(e.field_as_u64("thread_index").value_or(0));
+            if (!named_sample_tracks.contains(lane))
+            {
+                named_sample_tracks.insert(lane);
+                auto ev = events.write_object(event_layout);
+                ev.write("ph", "M");
+                ev.write("name", "thread_name");
+                ev.write("pid", opts.process_id);
+                ev.write("tid", lane);
+                auto args = ev.write_object("args");
+                args.write("name", cc::format("thread {} off cpu", e.field_as_u64("thread_index").value_or(0)));
+            }
+            auto const begin_us = (le.view.wall_secs_of(e.cycles - interval) - origin_secs) * 1e6;
+            auto ev = events.write_object(event_layout);
+            ev.write("ph", "X");
+            ev.write("pid", opts.process_id);
+            ev.write("tid", lane);
+            ev.write("ts", begin_us, cc::float_notation::fixed, 3);
+            ev.write("dur", ts_us - begin_us, cc::float_notation::fixed, 3);
+            // inside a recorded scope the thread was kept from its work; outside one it was waiting for some
+            ev.write("name", e.field_as_u64("in_scope").value_or(0) != 0 ? "(off cpu, in a scope)" : "(off cpu, idle)");
+            ev.write("cat", e.domain()->name());
+            auto args = ev.write_object("args");
+            args.write("ran", f64(ran) / f64(interval));
+            continue;
+        }
+
         if (kind == cc::rec::event_kind::sample)
         {
             if (!opts.include_samples)

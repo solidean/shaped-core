@@ -328,6 +328,7 @@ bool strip_matching_prefix_with(string_view s, EqPred&& eq)
 
 - `[[nodiscard]]` for non-void functions, **except** obvious getters (`get_xyz`, `is_xyz`, `has_xyz`).
 - All single-argument constructors must be `explicit` unless there's a **documented** reason for implicit conversion.
+- `CC_NO_UNIQUE_ADDRESS`, never bare `[[no_unique_address]]`: the MSVC ABI ignores the standard spelling, under clang-cl too.
 
 ### Constructors vs Factory Methods
 
@@ -582,6 +583,23 @@ Debug validations should be handled via additional CMake options and remain avai
 This applies equally to features like logging levels.
 
 **Keep compiler optimization level orthogonal to other features.**
+
+**Absolute paths are never baked into binaries.**
+No compile definition and no generated source carries a path of the checkout or of its build directory.
+Such a path ties every file compiled with it to where the checkout sits: no compile is shared with another checkout, and a copied build directory reads the old checkout's data.
+A test, example or tool that reads the source tree gets the directory from `sc_target_source_paths`, relative to the top-level source directory, and joins it with `nx::source_path` at run time:
+
+```cmake
+sc_target_source_paths(my-lib-test PRIVATE MY_LIB_CORPUS_DIR tests/corpus)
+```
+
+```cpp
+auto const corpus = nx::source_path(MY_LIB_CORPUS_DIR); // nexus/source_root.hh
+```
+
+`nx::source_root()` reads `SC_SOURCE_ROOT`, which `dev.py` sets for every binary it runs, and otherwise the `CMakeCache.txt` above the executable.
+A shipped library never needs a source root: what it reads at run time is staged beside the executable, embedded, or named by its caller.
+`dev.py check`'s `abspaths` gate refuses a definition or generated source that carries such a path.
 
 ---
 

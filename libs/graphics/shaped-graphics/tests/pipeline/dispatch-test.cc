@@ -819,3 +819,58 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     // The draw used the rects' vertex buffers, whose uploads nothing else waits on.
     co_await ctx->idle_completion();
 }
+
+ASYNC_INVOCABLE_TEST("sg - a bare SGL @compute runs the threads dispatch_threads asks for alone, and refuses a "
+                     "dispatch "
+                     "by groups (CHK-520)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const row = co_await shaders::dispatch::fill_row.acquire_pipeline(*ctx);
+    auto const tile = co_await shaders::dispatch::fill_tile.acquire_pipeline(*ctx);
+    CHECK(row->is_dispatched_by_threads());
+    CHECK(row->workgroup_size().x == 64);
+    CHECK(tile->workgroup_size().x == 8);
+    CHECK(tile->workgroup_size().y == 8);
+
+    // 100 threads in groups of 64, and 10 by 7 in tiles of 8 by 8: every last group reaches past the grid
+    constexpr auto cells = 256;
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::dispatch::filled>();
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const rows = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_filled(cells, -1), usage);
+    auto const tiles = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_filled(cells, -1), usage);
+    auto cmd = ctx->create_command_list();
+    auto const row_group = ctx->transient.create_binding_group(
+        *cmd, layout, shaders::dispatch::filled{.cells = rows.as_readwrite_buffer()});
+    auto const tile_group = ctx->transient.create_binding_group(
+        *cmd, layout, shaders::dispatch::filled{.cells = tiles.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*row);
+    cmd->compute.bind_group(0, *row_group);
+    cmd->compute.dispatch_threads(100);
+    cmd->compute.bind_pipeline(*tile);
+    cmd->compute.bind_group(0, *tile_group);
+    cmd->compute.dispatch_threads(10, 7);
+    auto const rows_back = cmd->download.data_from_buffer(rows);
+    auto const tiles_back = cmd->download.data_from_buffer(tiles);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_rows = co_await rows_back.data();
+    auto const got_tiles = co_await tiles_back.data();
+    REQUIRE(got_rows.size() == cells);
+    REQUIRE(got_tiles.size() == cells);
+    for (auto i = 0; i < cells; ++i)
+    {
+        CHECK(got_rows[i] == (i < 100 ? i + 1 : -1)).context(cc::format("row cell {}", i));
+        CHECK(got_tiles[i] == (i < 70 ? 1000 + i : -1)).context(cc::format("tile cell {}", i));
+    }
+
+    // its group count is no caller's to know
+    auto refused = ctx->create_command_list();
+    refused->compute.bind_pipeline(*row);
+    CHECK_ASSERTS(refused->compute.dispatch_groups(1));
+    ctx->drop_command_list(cc::move(refused));
+    co_await ctx->idle_completion();
+}

@@ -44,11 +44,14 @@ using crash_context_hook = void (*)() noexcept;
 /// It then lets the process terminate with the fault's normal disposition.
 ///
 /// The other threads are the point of a deadlock or a hung test, where the thread that noticed is never the one that matters.
-/// Reaching them means suspending each in turn and walking it with DbgHelp on Windows, and asking each to unwind itself through a signal on Linux.
+/// Reaching them means suspending each in turn and walking it with DbgHelp on Windows or through Mach on macOS, and asking each to unwind itself through a signal on Linux.
 /// Elsewhere only the faulting thread is reported, and a core dump carries the rest.
 ///
 /// On Windows a stack overflow is reported by a thread parked for it at install, since the overflowed stack has no room left for the report.
 /// It walks the faulting thread from the fault's context: the top frames, where the recursion shows, the bottom ones and the depth.
+/// On Linux and macOS the handler runs on a signal stack of the faulting thread's own, and names a fault at its stack's end an overflow.
+/// It walks the faulting thread from the registers the signal interrupted, printing each frame's name and `module+offset`, which `atos` or `addr2line` resolves to a line.
+/// Only the installing thread and every `cc::native_thread` have one: an overflow on any other thread still ends the process unreported.
 ///
 /// Idempotent — installing more than once is harmless.
 /// Implemented per platform (Windows SEH plus SIGABRT, POSIX signals); a best-effort no-op where unsupported.

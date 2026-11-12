@@ -45,7 +45,11 @@ TEST("sgl emit - a vector's == and != are the whole value on every target, and e
     {
         auto const text = text_of(k_vectors, t);
         CHECK(text.contains(" = all(v == w);\n")).dump("target", sgl::emit::to_string(t));
-        CHECK(text.contains(" = any(v != w);\n")).dump("target", sgl::emit::to_string(t));
+        // EMIT-186: HLSL's float `!=` is an ordered compare once DXC writes SPIR-V, so it is spelled through `==`
+        auto const is_hlsl = t == target::hlsl_dx12 || t == target::hlsl_vulkan;
+        CHECK(text.contains(is_hlsl ? " = any(!(v == w));\n" : " = any(v != w);\n"))
+            .dump("target", sgl::emit::to_string(t))
+            .dump("text", text);
         CHECK(text.contains(" = v == w;\n")).dump("target", sgl::emit::to_string(t));
         CHECK(text.contains(" = fwidth(v);\n")).dump("target", sgl::emit::to_string(t));
     }

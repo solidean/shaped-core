@@ -203,6 +203,7 @@ fun environment_is_black(env: float4[28]) -> bool:
 /// The 16 SH lanes of `env`, as `background_radiance` takes them.
 fun environment_sh(env: float4[28]) -> float4[16]:
     let mut sh = float4[16].filled(float4(0.0))
+    @unroll
     for k in 0 ..< 16:
         sh[k] = env[k]
     return sh
@@ -222,6 +223,7 @@ fun environment_radiance(env: float4[28], d: float3) -> float3:
     if not environment_is_dome(env) => return background_radiance(environment_sh(env), d)
     let count = env[16].y as int
     let mut radiance = dome_gradient(env, d)
+    @unroll
     for i in 0 ..< 4:
         if i < count:
             let lobe = env[19 + i]
@@ -239,6 +241,7 @@ fun environment_pdf(env: float4[28], d: float3) -> float:
     if not environment_is_dome(env) => return 1.0 / two_pi
     let count = env[16].y as int
     let mut pdf = env[27].x / four_pi
+    @unroll
     for i in 0 ..< 4:
         if i < count:
             let lobe = env[19 + i]
@@ -275,6 +278,7 @@ fun sample_environment_direction(env: float4[28], n: float3, u: float3) -> envir
     let mut wi = float3(rz * cos(two_pi * u.y), rz * sin(two_pi * u.y), z)
     let mut pick = u.z
     let mut chosen = false
+    @unroll
     for i in 0 ..< 4:
         if i < count and not chosen:
             let share = env[23 + i].w
@@ -324,6 +328,7 @@ fun background_radiance_signed(sh: float4[16], d: float3) -> float3:
     y_basis[15] = 0.590044 * x * (x * x - 3.0 * y * y)
 
     let mut radiance = float3(0.0, 0.0, 0.0)
+    @unroll
     for i in 0 ..< 16:
         radiance += sh[i].xyz * y_basis[i]
     return radiance

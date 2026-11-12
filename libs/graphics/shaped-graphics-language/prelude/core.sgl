@@ -102,10 +102,227 @@ fun float4.from_bits(u: uint4) => reinterpret_as_float(u)
 fun half.bits => reinterpret_as_uint(self)
 fun half.from_bits(u: uint) => reinterpret_as_half(u)
 
+// a double's bits are two words, the low first, so no ulong stands between and nothing needs shader_int64 (CHK-517)
+fun double.bits => reinterpret_as_uint(self)
+fun double.from_bits(u: uint2) => reinterpret_as_double(u)
+
 fun int.from_bits(u: uint) => reinterpret_as_int(u)
 fun int2.from_bits(u: uint2) => reinterpret_as_int(u)
 fun int3.from_bits(u: uint3) => reinterpret_as_int(u)
 fun int4.from_bits(u: uint4) => reinterpret_as_int(u)
+
+// ---- the maths of a double ------------------------------------------------------------------------------------------
+//
+// CHK-458's functions, written once, each choosing by the API what it lowers to (EMIT-256).
+// dx12 has no double rounding or root, so it takes the bodies below, over a double's arithmetic, its bits and `fma` (EMIT-219).
+// vulkan has its own in GLSL.std.450, which both its routes write, since the bodies' `fma` need not round once there.
+// Rounding is exact, so the interpreter runs the same bodies; `sqrt`, `inverse_sqrt` and `smoothstep` keep its own answer,
+// the nearest root and smoothstep's missing value, where the language is `.sgl` (EVAL-108).
+
+
+/// 2^k, for a k a double's exponent holds.
+@internal fun double_power_of_two(k: int) -> double => double.from_bits(uint2(0u, ((1023 + k) as uint) << 20u))
+
+/// The integral part, its sign kept, by clearing the bits of the fraction.
+@internal fun double_trunc(x: double) -> double:
+    let w = x.bits
+    let e = (((w.y >> 20u) & 0x7ffu) as int) - 1023
+    if e < 0 => return double.from_bits(uint2(0u, w.y & 0x80000000u))
+    if e >= 52 => return x
+    if e < 20 => return double.from_bits(uint2(0u, w.y & ~(0xfffffu >> (e as uint))))
+    return double.from_bits(uint2(w.x & ~(0xffffffffu >> ((e - 20) as uint)), w.y))
+
+@internal fun double_floor(x: double) -> double:
+    let t = double_trunc(x)
+    if t > x => return t - 1.0f64
+    return t
+
+@internal fun double_ceil(x: double) -> double:
+    let t = double_trunc(x)
+    if t < x => return t + 1.0f64
+    return t
+
+/// To the nearest integer, a tie to the even one; a zero keeps the sign of `x`.
+@internal fun double_round(x: double) -> double:
+    let t = double_trunc(x)
+    let rest = abs(x - t)
+    let mut away = t + 1.0f64
+    if x < 0.0f64 => away = t - 1.0f64
+    if rest > 0.5f64 => return away
+    if rest == 0.5f64 and double_trunc(t * 0.5f64) * 2.0f64 != t => return away
+    return t
+
+@internal fun double_is_nan(x: double) -> bool:
+    let w = x.bits
+    let high = w.y & ~0x80000000u
+    return high > 0x7ff00000u or (high == 0x7ff00000u and w.x != 0u)
+
+@internal fun double_is_inf(x: double) -> bool:
+    let w = x.bits
+    return (w.y & ~0x80000000u) == 0x7ff00000u and w.x == 0u
+
+/// x = m * 2^(2j) * 2^-(2 scale), with m in 1 to 4.
+@internal struct double_root_parts:
+    m: double
+    j: int
+    scale: int
+
+/// The exponent split off by its bits, for a positive finite nonzero x.
+/// A subnormal's mantissa becomes the normal number 1.M - 1 by its bits, since a device that flushes subnormals would read
+/// x * 2^54 as zero.
+@internal fun double_root_parts_of(x: double) -> double_root_parts:
+    let mut w = x.bits
+    let mut e = (w.y >> 20u) & 0x7ffu
+    let mut scale = 0
+    if e == 0u:
+        w = (double.from_bits(uint2(w.x, (w.y & 0xfffffu) | 0x3ff00000u)) - 1.0f64).bits
+        e = (w.y >> 20u) & 0x7ffu
+        scale = 511
+    let j = ((e as int) - 1023) >> 1
+    let exponent = ((e as int) - 2 * j) as uint
+    return {m = double.from_bits(uint2(w.x, (w.y & 0x800fffffu) | (exponent << 20u))), j = j, scale = scale}
+
+/// 1 / sqrt(m) for m in 1 to 4: the float's estimate, then two Newton steps take it from 22 bits past 53.
+@internal fun double_inverse_root_of_mantissa(m: double) -> double:
+    let mut y = inverse_sqrt(m as float) as double
+    y = y * (1.5f64 - 0.5f64 * m * y * y)
+    return y * (1.5f64 - 0.5f64 * m * y * y)
+
+/// Within an ULP of the root: the last step corrects by the residual `fma` computes.
+@internal fun double_sqrt(x: double) -> double:
+    let w = x.bits
+    if (w.y & 0x7ff00000u) == 0x7ff00000u:
+        if (w.y >> 31u) == 0u or double_is_nan(x) => return x
+        return double.from_bits(uint2(0u, 0x7ff80000u))
+    if ((w.y & ~0x80000000u) | w.x) == 0u => return x
+    if (w.y >> 31u) != 0u => return double.from_bits(uint2(0u, 0x7ff80000u))
+    let parts = double_root_parts_of(x)
+    let y = double_inverse_root_of_mantissa(parts.m)
+    let s = parts.m * y
+    return fma(fma(-s, s, parts.m), 0.5f64 * y, s) * double_power_of_two(parts.j - parts.scale)
+
+/// Within two ULP of 1 / sqrt(x).
+@internal fun double_inverse_sqrt(x: double) -> double:
+    let w = x.bits
+    if (w.y & 0x7ff00000u) == 0x7ff00000u:
+        if double_is_nan(x) => return x
+        if (w.y >> 31u) == 0u => return 0.0f64
+        return double.from_bits(uint2(0u, 0x7ff80000u))
+    if ((w.y & ~0x80000000u) | w.x) == 0u => return double.from_bits(uint2(0u, (w.y & 0x80000000u) | 0x7ff00000u))
+    if (w.y >> 31u) != 0u => return double.from_bits(uint2(0u, 0x7ff80000u))
+    let parts = double_root_parts_of(x)
+    return double_inverse_root_of_mantissa(parts.m) * double_power_of_two(parts.scale - parts.j)
+
+fun trunc(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_trunc(x)
+    return double_trunc(x)
+fun floor(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_floor(x)
+    return double_floor(x)
+fun ceil(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_ceil(x)
+    return double_ceil(x)
+fun round(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_round(x)
+    return double_round(x)
+fun fract(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_fract(x)
+    return x - double_floor(x)
+fun is_nan(x: double) -> bool => double_is_nan(x)
+fun is_inf(x: double) -> bool => double_is_inf(x)
+
+/// The double nearest the root on the interpreter, within an ULP of it on dx12, and vulkan's own `Sqrt` there (EVAL-108).
+fun sqrt(x: double) -> double:
+    const if target_language == .sgl:
+        return nearest_sqrt(x)
+    const if target_api == .vulkan:
+        return spirv_sqrt(x)
+    return double_sqrt(x)
+
+/// `1 / sqrt(x)` on the interpreter, within two ULP of it on dx12, and vulkan's own `InverseSqrt` there (EVAL-108).
+fun inverse_sqrt(x: double) -> double:
+    const if target_language == .sgl:
+        return 1.0f64 / nearest_sqrt(x)
+    const if target_api == .vulkan:
+        return spirv_inverse_sqrt(x)
+    return double_inverse_sqrt(x)
+
+fun trunc(x: double2) -> double2 => double2(trunc(x.x), trunc(x.y))
+fun trunc(x: double3) -> double3 => double3(trunc(x.x), trunc(x.y), trunc(x.z))
+fun trunc(x: double4) -> double4 => double4(trunc(x.x), trunc(x.y), trunc(x.z), trunc(x.w))
+fun floor(x: double2) -> double2 => double2(floor(x.x), floor(x.y))
+fun floor(x: double3) -> double3 => double3(floor(x.x), floor(x.y), floor(x.z))
+fun floor(x: double4) -> double4 => double4(floor(x.x), floor(x.y), floor(x.z), floor(x.w))
+fun ceil(x: double2) -> double2 => double2(ceil(x.x), ceil(x.y))
+fun ceil(x: double3) -> double3 => double3(ceil(x.x), ceil(x.y), ceil(x.z))
+fun ceil(x: double4) -> double4 => double4(ceil(x.x), ceil(x.y), ceil(x.z), ceil(x.w))
+fun round(x: double2) -> double2 => double2(round(x.x), round(x.y))
+fun round(x: double3) -> double3 => double3(round(x.x), round(x.y), round(x.z))
+fun round(x: double4) -> double4 => double4(round(x.x), round(x.y), round(x.z), round(x.w))
+fun fract(x: double2) -> double2 => double2(fract(x.x), fract(x.y))
+fun fract(x: double3) -> double3 => double3(fract(x.x), fract(x.y), fract(x.z))
+fun fract(x: double4) -> double4 => double4(fract(x.x), fract(x.y), fract(x.z), fract(x.w))
+fun sqrt(x: double2) -> double2 => double2(sqrt(x.x), sqrt(x.y))
+fun sqrt(x: double3) -> double3 => double3(sqrt(x.x), sqrt(x.y), sqrt(x.z))
+fun sqrt(x: double4) -> double4 => double4(sqrt(x.x), sqrt(x.y), sqrt(x.z), sqrt(x.w))
+fun inverse_sqrt(x: double2) -> double2 => double2(inverse_sqrt(x.x), inverse_sqrt(x.y))
+fun inverse_sqrt(x: double3) -> double3 => double3(inverse_sqrt(x.x), inverse_sqrt(x.y), inverse_sqrt(x.z))
+fun inverse_sqrt(x: double4) -> double4 => double4(inverse_sqrt(x.x), inverse_sqrt(x.y), inverse_sqrt(x.z), inverse_sqrt(x.w))
+fun is_nan(x: double2) -> bool2 => bool2(is_nan(x.x), is_nan(x.y))
+fun is_nan(x: double3) -> bool3 => bool3(is_nan(x.x), is_nan(x.y), is_nan(x.z))
+fun is_nan(x: double4) -> bool4 => bool4(is_nan(x.x), is_nan(x.y), is_nan(x.z), is_nan(x.w))
+fun is_inf(x: double2) -> bool2 => bool2(is_inf(x.x), is_inf(x.y))
+fun is_inf(x: double3) -> bool3 => bool3(is_inf(x.x), is_inf(x.y), is_inf(x.z))
+fun is_inf(x: double4) -> bool4 => bool4(is_inf(x.x), is_inf(x.y), is_inf(x.z), is_inf(x.w))
+
+/// The products of the components, summed from the first on.
+fun dot(a: double2, b: double2) -> double => a.x * b.x + a.y * b.y
+fun dot(a: double3, b: double3) -> double => a.x * b.x + a.y * b.y + a.z * b.z
+fun dot(a: double4, b: double4) -> double => a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+fun length(v: double2) -> double => sqrt(dot(v, v))
+fun length(v: double3) -> double => sqrt(dot(v, v))
+fun length(v: double4) -> double => sqrt(dot(v, v))
+fun distance(a: double2, b: double2) -> double => length(a - b)
+fun distance(a: double3, b: double3) -> double => length(a - b)
+fun distance(a: double4, b: double4) -> double => length(a - b)
+/// `v * inverse_sqrt(dot(v, v))`.
+fun normalize(v: double2) -> double2 => v * inverse_sqrt(dot(v, v))
+fun normalize(v: double3) -> double3 => v * inverse_sqrt(dot(v, v))
+fun normalize(v: double4) -> double4 => v * inverse_sqrt(dot(v, v))
+fun cross(a: double3, b: double3) -> double3 => double3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+fun mix(a: double, b: double, t: double) -> double => a * (1.0f64 - t) + b * t
+fun mix(a: double2, b: double2, t: double) -> double2 => a * (1.0f64 - t) + b * t
+fun mix(a: double3, b: double3, t: double) -> double3 => a * (1.0f64 - t) + b * t
+fun mix(a: double4, b: double4, t: double) -> double4 => a * (1.0f64 - t) + b * t
+/// `mix` of each component by its own `t`.
+fun mix(a: double2, b: double2, t: double2) -> double2 => a * (1.0f64 - t) + b * t
+fun mix(a: double3, b: double3, t: double3) -> double3 => a * (1.0f64 - t) + b * t
+fun mix(a: double4, b: double4, t: double4) -> double4 => a * (1.0f64 - t) + b * t
+
+/// 0 where `x` is below `edge`, and 1 from it on; a NaN on either side gives 0.
+fun step(edge: double, x: double) -> double:
+    if x >= edge => return 1.0f64
+    return 0.0f64
+fun step(edge: double2, x: double2) -> double2 => double2(step(edge.x, x.x), step(edge.y, x.y))
+fun step(edge: double3, x: double3) -> double3 => double3(step(edge.x, x.x), step(edge.y, x.y), step(edge.z, x.z))
+fun step(edge: double4, x: double4) -> double4 => double4(step(edge.x, x.x), step(edge.y, x.y), step(edge.z, x.z), step(edge.w, x.w))
+
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between; no value where `low` is not below `high`.
+fun smoothstep(low: double, high: double, x: double) -> double:
+    const if target_language == .sgl:
+        return ordered_smoothstep(low, high, x)
+    let t = saturate((x - low) / (high - low))
+    return t * t * (3.0f64 - 2.0f64 * t)
+fun smoothstep(low: double2, high: double2, x: double2) -> double2 => double2(smoothstep(low.x, high.x, x.x), smoothstep(low.y, high.y, x.y))
+fun smoothstep(low: double3, high: double3, x: double3) -> double3 => double3(smoothstep(low.x, high.x, x.x), smoothstep(low.y, high.y, x.y), smoothstep(low.z, high.z, x.z))
+fun smoothstep(low: double4, high: double4, x: double4) -> double4 => double4(smoothstep(low.x, high.x, x.x), smoothstep(low.y, high.y, x.y), smoothstep(low.z, high.z, x.z), smoothstep(low.w, high.w, x.w))
 
 // ---- comparing within a tolerance -----------------------------------------------------------------------------------
 //
@@ -346,3 +563,13 @@ struct raster_pipeline_description:
     color_targets: color_target_state
     depth_stencil_format: pixel_format
     sample_count: int
+    view_count: int
+
+/// What a pixel stage of a pipeline of several views multiplies its color by, always 1.
+/// It reads the view where a driver draws nothing otherwise, and is free everywhere else.
+/// See docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
+@stages(.pixel)
+fun keep_view(view: int) -> float:
+    const if has(.pixel_view_read_workaround):
+        return if view < 0 => 0.0 else 1.0
+    return 1.0

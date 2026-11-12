@@ -49,3 +49,36 @@ binding last_arrival:
         for g in 0 ..< (last_arrival.groups as int):
             total += last_arrival.values[g * 64 + li]
         last_arrival.sums[li] = total
+
+binding texel_shapes_of:
+    @atomic flat: mut image_1d[.r32_sint]
+    @atomic layered: mut image_2d_array[.r32_uint]
+    @atomic deep: mut image_3d[.r32_uint]
+    @atomic plain: mut image_2d[.r32_uint]
+    seen: mut buffer[uint]
+
+// Each invocation owns its texels, so what every atomic gives back and leaves behind is known exactly.
+// A layer or a depth of its own beside each one shows the coordinate reached the texel it names.
+@compute fun texel_shapes(@thread_id id: int3){texel_shapes_of}:
+    let i = id.x
+    let u = i as uint
+    let at = i * 10
+    let xy = int2(i, 0)
+    texel_shapes_of.flat[i].store(9)
+    texel_shapes_of.seen[at] = texel_shapes_of.flat[i].min(i) as uint
+    texel_shapes_of.seen[at + 1] = texel_shapes_of.flat[i].load() as uint
+    texel_shapes_of.layered[xy, layer = 0].store(77u)
+    texel_shapes_of.layered[xy, layer = 1].store(10u)
+    texel_shapes_of.seen[at + 2] = texel_shapes_of.layered[xy, layer = 1].add(u)
+    texel_shapes_of.seen[at + 3] = texel_shapes_of.layered[xy, layer = 1].load()
+    texel_shapes_of.deep[int3(i, 1, 0)].store(88u)
+    texel_shapes_of.deep[int3(i, 1, 2)].store(20u)
+    texel_shapes_of.seen[at + 4] = texel_shapes_of.deep[int3(i, 1, 2)].exchange(30u + u)
+    texel_shapes_of.seen[at + 5] = texel_shapes_of.deep[int3(i, 1, 2)].load()
+    texel_shapes_of.plain[xy].store(u)
+    texel_shapes_of.seen[at + 6] = texel_shapes_of.plain[xy].compare_exchange_strong(u, 40u + u)
+    let weak = texel_shapes_of.plain[xy].compare_exchange_weak(7u, 50u)
+    texel_shapes_of.seen[at + 7] = weak.old
+    if weak.exchanged => texel_shapes_of.seen[at + 7] = 999u
+    texel_shapes_of.seen[at + 8] = texel_shapes_of.layered[xy, layer = 0].load()
+    texel_shapes_of.seen[at + 9] = texel_shapes_of.deep[int3(i, 1, 0)].load()

@@ -147,6 +147,8 @@ namespace
 /// float, a shift by a count outside the bits of an int (CHK-270), and an integer result past 64 bits.
 number_literal folded(cc::string_view op, number_literal const& a, number_literal const& b)
 {
+    if (a.is_past_long || b.is_past_long)
+        return {};
     if (a.is_integer && b.is_integer)
     {
         auto result = i64(0);
@@ -277,7 +279,7 @@ number_literal checker::number_of(i32 file, ast::expr_id expr) const
         if (call->spelling == ast::call_spelling::prefix && arguments.size() == 1)
         {
             auto const operand = number_of(file, arguments[0].value);
-            if (!operand.is_number)
+            if (!operand.is_number || operand.is_past_long)
                 return {};
             if (op == "-" && operand.is_integer && operand.integer != i64(1ull << 63))
                 return {.is_number = true, .is_integer = true, .integer = -operand.integer};
@@ -304,6 +306,8 @@ number_literal checker::number_of(i32 file, ast::expr_id expr) const
     {
     case number_class::plain_integer:
     {
+        if (auto const past_long = parse_literal_past_long(text); past_long.has_value())
+            return {.is_number = true, .is_integer = true, .integer = i64(past_long.value()), .is_past_long = true};
         auto const value = parse_literal_integer(text);
         if (!value.has_value())
             return {};
@@ -460,6 +464,19 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2 && arguments.types[0] == void_type
             && arguments.types[1] == void_type)
             return type_of_builtin(builtins::k_bool, file, where);
+        // CHK-513: `==` and `!=` of two arrays of one type compare every element, unless the program declared its own
+        if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2
+            && arguments.types[0] == arguments.types[1] && out.at(arguments.types[0]).kind == type_kind::array)
+        {
+            type_id const both[] = {arguments.types[0], arguments.types[1]};
+            auto element = arguments.types[0];
+            while (out.at(element).kind == type_kind::array)
+                element = out.at(element).element;
+            auto const compared = out.is_plain_enum(element) ? type_of_builtin(builtins::k_int, file, where) : element;
+            type_id const elements[] = {compared, compared};
+            if (!is_valid(find_operator(file, spelling, both)) && is_valid(find_operator(file, "==", elements)))
+                return type_of_builtin(builtins::k_bool, file, where);
+        }
         auto const found = operators_of(file, spelling);
         auto const result = resolve_overload(scope, id, ast::expr_id::none, cc::span<symbol_id const>(found), arguments,
                                              cc::format("operator {}", spelling));
@@ -604,6 +621,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             }
     }
 
+    // CHK-485: a task stage's launch, whose payload is a struct of the program
+    if (text == "dispatch_mesh")
+        return check_dispatch_mesh(scope, id, call);
+
     return check_named_call(scope, id, call, text, seen_from(file, text), false);
 }
 
@@ -621,10 +642,38 @@ type_id checker::check_named_call(function_scope& scope,
 
     // CHK-247: the functions of its name, and those of its first argument's type scope, whatever else the name is
     auto const kind = found == nullptr || found->empty() ? symbol_kind::function : out.at(found->front()).kind;
-    if (kind == symbol_kind::unsupported)
+    if (kind == symbol_kind::alias)
     {
-        (void)check_arguments(scope, call.arguments, false);
-        return error_type;
+        // CHK-14: a call of an alias is a call of the struct it names, whose overload set is seen where it is declared
+        auto const alias = found->front();
+        set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = alias});
+        auto const named = declared_type_of(alias, file, callee_where);
+        if (!is_valid(named) || out.at(named).kind != symbol_kind::structure)
+        {
+            (void)check_arguments(scope, call.arguments, false);
+            if (out.at(alias).state == symbol_state::checked)
+                report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+                       cc::format("{} names {}, and a call needs a function or a struct", text,
+                                  out.name_of(out.at(alias).type)));
+            return error_type;
+        }
+        auto const& struct_name = out.at(named).name;
+        auto arguments = check_arguments(scope, call.arguments, true);
+        arguments.stated = cc::vector<stated_argument>::create_copy_of(stated);
+        auto const first_type
+            = arguments.written.empty() || arguments.written[0].splat_member > 0 ? type_id::none : arguments.types[0];
+        auto const candidates = candidates_of(out.at(named).file, struct_name, first_type);
+        if (demand(named, file, callee_where) != symbol_state::checked)
+            return error_type;
+        auto const type = out.at(named).type;
+        if (candidates.empty())
+        {
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{} is opaque and has no constructor", out.name_of(type)));
+            return type;
+        }
+        auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, struct_name);
+        return result == error_type ? type : result;
     }
     auto const is_structure = kind == symbol_kind::structure;
     auto arguments = check_arguments(scope, call.arguments, is_structure);
@@ -781,11 +830,11 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
     if (auto const* const found = symbols_named(file, member.object, &scope))
     {
-        auto const kind = out.at(found->front()).kind;
-        if (kind == symbol_kind::structure || kind == symbol_kind::enumeration)
+        // an alias of a struct or an enum reaches its type scope as the type's own name does (CHK-14)
+        auto const owner = declared_type_of(found->front(), file, span_of(file, member.object));
+        if (is_valid(owner))
         {
-            auto const owner = found->front();
-            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = owner});
+            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = found->front()});
             auto const arguments = check_arguments(scope, call.arguments, false);
             if (demand(owner, file, span_of(file, member.object)) != symbol_state::checked || member.name.empty())
                 return error_type;
@@ -804,7 +853,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
             return resolve_overload(scope, id, call.callee, candidates, arguments,
                                     cc::format("{}.{}", out.at(owner).name, name));
         }
-        if (kind == symbol_kind::binding)
+        if (out.at(found->front()).kind == symbol_kind::binding)
         {
             (void)check_arguments(scope, call.arguments, false);
             unsupported(file, span_of(file, call.callee), "a call through a binding");
@@ -816,8 +865,23 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     handed.push_back(member.object);
     auto const receiver = check_expr(scope, member.object);
     handed.remove_back();
-    if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
+    if (receiver != error_type && out.at(receiver).kind == type_kind::stream
+        && (out.at(receiver).count > 0 || name == "vertex" || name == "primitive"))
         return check_stream_call(scope, id, call, receiver);
+    // CHK-482: what a primitive is follows from the entry point's `@mesh`, which writes lines or triangles
+    if (receiver != error_type && out.at(receiver).kind == type_kind::stream && (name == "line" || name == "triangle")
+        && is_valid(scope.function) && out.at(scope.function).info >= 0)
+    {
+        auto const is_lines = out.functions[out.at(scope.function).info].is_line_mesh;
+        if (is_lines != (name == "line"))
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, member.name,
+                   is_lines ? cc::string("this mesh stage writes lines, so a primitive is `o.line(i, l)`")
+                            : cc::string("this mesh stage writes triangles, so a primitive is `o.triangle(i, t)`; "
+                                         "`@mesh(…, lines = M)` writes lines"));
+            return error_type;
+        }
+    }
     if (receiver != error_type && name == "invoke" && out.name_of(receiver) == "hit_object"
         && out.builtin_type_of(receiver) != nullptr)
         return check_hit_invoke(scope, id, call);
@@ -948,13 +1012,20 @@ type_id checker::resolve_overload(function_scope& scope,
                           spelling));
         return error_type;
     }
-    // CHK-270: a shift by a literal count outside the bits of an int can only be a mistake, as WGSL has it
+    // CHK-270: a shift by a literal count outside the bits of an int can only be a mistake, as WGSL has it, and
+    // CHK-452: of a long or a ulong, outside its 64 bits
+    auto const shift_bits = [&]
+    {
+        auto const* const record = out.builtin_type_of(out.functions[chosen_symbol.info].result);
+        return record != nullptr && is_64_bit(record->leaf_kind) ? i64(64) : i64(32);
+    };
     if ((spelling == "operator <<" || spelling == "operator >>") && arguments.numbers.size() == 2
         && arguments.numbers[1].is_number && arguments.numbers[1].is_integer
-        && (arguments.numbers[1].integer < 0 || arguments.numbers[1].integer > 31))
+        && (arguments.numbers[1].integer < 0 || arguments.numbers[1].integer >= shift_bits()))
     {
         report(diagnostic_kind::shift_out_of_range, file, where,
-               cc::format("a shift by {} moves every bit out of 32; a count is 0 to 31", arguments.numbers[1].integer));
+               cc::format("a shift by {} moves every bit out of {}; a count is 0 to {}", arguments.numbers[1].integer,
+                          shift_bits(), shift_bits() - 1));
         return error_type;
     }
     // CHK-313: `/` and `%` are the operators whose integer and float answers differ, so over integer literals alone

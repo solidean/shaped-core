@@ -21,3 +21,12 @@ binding blocks:
 @compute(64) fun pick(@thread_id id: int3){blocks}:
     let i = id.x % 3
     blocks.merged[id.x] = blocks.tables[nonuniform i].load((id.x as uint) * 4u)
+
+// A buffer's and a bytes' length, as the bound memory decides (CHK-460).
+binding measured:
+    sizes: mut buffer[uint]
+    raw: bytes
+
+@compute(1) fun measure(@thread_id id: int3){measured}:
+    measured.sizes[0] = measured.sizes.length
+    measured.sizes[1] = measured.raw.length

@@ -1,0 +1,18 @@
+// A matrix's sum, difference, negation and scale as the GPU runs them (EVAL-109), on every target.
+
+binding matrix_arithmetic:
+    scale: buffer[float]
+    results: mut buffer[float4]
+
+// Each matrix comes back as three times itself, by way of every operator, and the column that shows it.
+@compute(1) fun matrix_operations(){matrix_arithmetic}:
+    let s = matrix_arithmetic.scale[0]
+    let a2 = mat2(float2(s, 1.0), float2(3.0, s))
+    let a3 = mat3(float3(s, 0.0, 0.0), float3(0.0, s, 0.0), float3(1.0, 2.0, s))
+    let a4 = mat4(float4(s, 0.0, 0.0, 0.0), float4(0.0, s, 0.0, 0.0), float4(0.0, 0.0, s, 0.0), float4(1.0, 2.0, 3.0, s))
+    let m2 = a2 + a2 * 3.0 - 2.0 * a2 - (-a2)
+    let m3 = a3 + a3 * 3.0 - 2.0 * a3 - (-a3)
+    let m4 = a4 + a4 * 3.0 - 2.0 * a4 - (-a4)
+    matrix_arithmetic.results[0] = float4(m2.column(1).x, m2.column(1).y, 0.0, 0.0)
+    matrix_arithmetic.results[1] = float4(m3.column(2).x, m3.column(2).y, m3.column(2).z, 0.0)
+    matrix_arithmetic.results[2] = m4.column(3)

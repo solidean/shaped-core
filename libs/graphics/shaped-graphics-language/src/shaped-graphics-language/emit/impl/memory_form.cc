@@ -177,6 +177,13 @@ cc::string_view scalar_spelling(builtins::type_record const& record, emit::targe
         return is_hlsl(t) ? "int16_t" : "short";
     case value_kind::scalar_ushort:
         return is_hlsl(t) ? "uint16_t" : "ushort";
+    // WGSL has no 64-bit scalar, so a long never reaches a WGSL form either (EMIT-109)
+    case value_kind::scalar_long:
+        return is_hlsl(t) ? "int64_t" : "long";
+    case value_kind::scalar_ulong:
+        return is_hlsl(t) ? "uint64_t" : "ulong";
+    case value_kind::scalar_double:
+        return "double";
     default:
         return is_wgsl ? "f32" : "float";
     }
@@ -455,7 +462,8 @@ cc::optional<sgl::emit::impl::memory_form> sgl::emit::impl::element_form_of(chec
         for (auto const& leaf : placed.leaves)
             leaves.push_back({.path = {}, .type = leaf.type, .offset = leaf.offset, .size = leaf.size});
         // EMIT-112: HLSL strides a buffer by its element's own size, so a 3-vector's padding has to be a field
-        if (is_hlsl(t) && stride != record->leaf_count * scalar_size_of(*record))
+        // CHK-518: and DXC's DXIL drops a `row_major` written in the buffer's template, which a field keeps
+        if (is_hlsl(t) && (stride != record->leaf_count * scalar_size_of(*record) || record->name == "affine3"))
             return build(m, members, leaves, space, stride, stride, "value", t, false);
         return form_for(m, members, leaves, space, stride, stride, "value", t);
     }

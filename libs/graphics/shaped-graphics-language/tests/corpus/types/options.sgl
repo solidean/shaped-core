@@ -1,6 +1,7 @@
 // an option is a const the host sets for each compile, and its written value is its default (CHK-353)
 
 @option const taps = 4
+@option const tile = 8
 @option const sharpen = false
 @option const output_format: pixel_format = .rgba8_unorm
 @option const mode_of_blur: blur_mode = .box
@@ -32,7 +33,7 @@ binding outputs:
     image: out image_2d[output_format]
 
 @expect(footprint = "sources.plain: read, outputs.image: write")
-@compute(taps, taps) fun blur(@thread_id id: int3){sources, outputs}:
+@compute(tile, tile) fun blur(@thread_id id: int3){sources, outputs}:
     let i = id.x + id.y * taps
     let v = if sharpen => sources.sharpened[i] else sources.plain[i] * spread(mode_of_blur)
     outputs.image.store(id.xy, float4(v, v, v, 1.0))

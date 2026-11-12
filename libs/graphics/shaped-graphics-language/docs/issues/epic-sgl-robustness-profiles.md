@@ -34,11 +34,28 @@ slib's reflection check refused sg's debug window, and one line inlined along tw
 Left from it is [bug-sg-debug-readback-outlives-a-test](../../../shaped-graphics/docs/issues/bug-sg-debug-readback-outlives-a-test.md).
 And [bug-sv-guarded-raster-pipeline-stalls-intel-driver](../../../shaped-viewer/docs/issues/bug-sv-guarded-raster-pipeline-stalls-intel-driver.md), which stopped sv's part of the sweep.
 
+## Workgroup memory (2026-11-06)
+
+LEGAL-69 shadows a compute stage's workgroup memory with a bit per scalar, set by a store and tested by a read, under `abort` and `report`.
+`report` names the place and its indices, and a GPU test reports a read of what no invocation stored on dx12, vulkan and webgpu.
+`define` zeroes workgroup memory before the body instead, as WGSL does; legalize writes both prologues as statements every route lowers (LEGAL-71).
+
+## Binding arrays and memory that holds nothing (2026-11-06)
+
+A binding array's own index is guarded by its `N`, or by CHK-491's length, and an element of one has its own `length`.
+An access through an element is a block that pins that index once, tests the buffer index against that element, and then runs (LEGAL-66).
+`define` needs the same shape for every buffer access, since no index is safe in memory too short for the access: a read is zero, a store is dropped, and an atomic gives zero (LEGAL-68).
+
+## Task and mesh stages, and the depth a guard needs (2026-11-09)
+
+A task and a mesh stage shadow their workgroup memory as a compute stage does, which a mesh pipeline's GPU test reports on dx12 and vulkan (LEGAL-69).
+A shadow that would not fit beside its memory in 16 KiB is left out with the warning `workgroup-unshadowed`, rather than in silence.
+The later passes walk 44 levels against a program's 40 (CHK-268), so a guard's 4 levels always fit: a site at a program's deepest was left unguarded before, two of shaped-viewer's among them.
+
 ## Left
 
 The children, and:
 
-- A site nested past the legalizer's depth limit is left unguarded, silently.
 
 - Turning `report` on by default in a dev build, once the suite has run under it.
 - Range facts that drop a guard proven to hold, such as a `for` index into an array of its own length.

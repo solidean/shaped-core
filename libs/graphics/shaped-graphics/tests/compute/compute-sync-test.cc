@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <sg_test_sgl_shaders.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
@@ -174,6 +175,127 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
         CHECK(got[i] == (i % 3) * 1000 + i);
 }
 
+ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array takes as many views as the group is given (CHK-490)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+        SKIP("this context has no unbounded binding arrays");
+
+    auto const pipeline = co_await shaders::unbounded_arrays::gather_unbounded.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::unbounded_arrays::parts>();
+
+    // five sources, a count the shader never names, chosen here when the group is made
+    constexpr auto count = 64;
+    constexpr auto lanes = 5;
+    auto sources = cc::vector<sg::buffer<i32>>();
+    for (auto lane = 0; lane < lanes; ++lane)
+    {
+        auto data = cc::vector<i32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(lane * 1000 + i);
+        sources.push_back(ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer));
+    }
+    auto const merged = ctx->persistent.create_buffer_from_data(
+        cc::vector<i32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto parts = shaders::unbounded_arrays::parts{.merged = merged.as_readwrite_buffer()};
+    auto reads = cc::vector<sg::array_buffer_access>();
+    for (auto lane = 0; lane < lanes; ++lane)
+    {
+        parts.sources.push_back(sources[lane].as_readonly_buffer());
+        reads.push_back({.index = lane, .access = sg::access_flag::shader_read});
+    }
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout, parts);
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    auto const declared
+        = cmd->compute.declare_array_buffer_access(shaders::unbounded_arrays::parts::arrays::sources, reads);
+    cmd->compute.dispatch_threads(count);
+    auto const back = cmd->download.data_from_buffer(merged);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(got[i] == (i % lanes) * 1000 + i);
+}
+
+ASYNC_INVOCABLE_TEST("sg - a staging group over an unbounded binding array holds its capacity, set and replaced in "
+                     "place",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+        SKIP("this context has no unbounded binding arrays");
+
+    auto const pipeline = co_await shaders::unbounded_arrays::gather_unbounded.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::unbounded_arrays::parts>();
+
+    constexpr auto count = 64;
+    constexpr auto lanes = 5;
+    auto const source = [&](i32 base)
+    {
+        auto data = cc::vector<i32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(base + i);
+        return ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer);
+    };
+    auto sources = cc::vector<sg::buffer<i32>>();
+    for (auto lane = 0; lane < lanes; ++lane)
+        sources.push_back(source(lane * 1000));
+    auto const merged = ctx->persistent.create_buffer_from_data(
+        cc::vector<i32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    // room for 16, of which the shader reads the first five and the rest stay vacant
+    auto const staging = ctx->persistent.create_staging_binding_group(group_layout, 16);
+    auto const slot = staging->slot_of(shaders::unbounded_arrays::parts::arrays::sources.name);
+    REQUIRE(staging->array_size(slot) == 16);
+    staging->set_binding(staging->slot_of("parts.merged"), merged.as_readwrite_buffer());
+    auto views = cc::vector<sg::raw_view>();
+    for (auto const& b : sources)
+        views.push_back(b.as_readonly_buffer());
+    staging->set_array(slot, views);
+
+    auto const run = [&]() -> cc::shared_async<cc::vector<i32>>
+    {
+        auto reads = cc::vector<sg::array_buffer_access>();
+        for (auto lane = 0; lane < lanes; ++lane)
+            reads.push_back({.index = lane, .access = sg::access_flag::shader_read});
+        auto cmd = ctx->create_command_list();
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.bind_group(0, *staging->snapshot());
+        auto const declared
+            = cmd->compute.declare_array_buffer_access(shaders::unbounded_arrays::parts::arrays::sources, reads);
+        cmd->compute.dispatch_threads(count);
+        auto const back = cmd->download.data_from_buffer(merged);
+        ctx->submit_command_list(cc::move(cmd));
+        auto const got = co_await back.data();
+        auto out = cc::vector<i32>();
+        for (auto const v : got)
+            out.push_back(v);
+        co_return out;
+    };
+
+    auto const first = co_await run();
+    REQUIRE(first.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(first[i] == (i % lanes) * 1000 + i);
+
+    // one element replaced, and the next snapshot reads it
+    auto const replaced = source(70000);
+    staging->set_array_element(slot, 2, replaced.as_readonly_buffer());
+    auto const second = co_await run();
+    REQUIRE(second.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(second[i] == (i % lanes == 2 ? 70000 : (i % lanes) * 1000) + i);
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and picked per thread from an array",
                      (sg::context_handle const& ctx))
 {
@@ -318,6 +440,61 @@ ASYNC_INVOCABLE_TEST("sg - SGL's quad swap, subgroup sum and uniform load agree 
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - SGL's shuffles, ballot, quad reads and inclusive sums read the lanes they name",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("this context has no subgroup operations");
+
+    auto const pipeline = co_await shaders::subgroups::exchange.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::subgroups::wave_exchange>();
+
+    constexpr auto count = 2 * 64;
+    constexpr auto per = 12;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const words = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count * per), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout, shaders::subgroups::wave_exchange{.words = words.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const words_back = cmd->download.data_from_buffer(words);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await words_back.data();
+    REQUIRE(got.size() == isize(count * per));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const* const w = got.data() + i * per;
+        auto const lane = w[10];
+        auto const size = w[11];
+        REQUIRE(size >= 4u);
+        REQUIRE(lane < size);
+        CHECK(w[0] == (lane + 1u) % size).context(cc::format("shuffle, lane {} of {}", lane, size));
+        CHECK(w[1] == (lane ^ 1u)).context(cc::format("shuffle_xor, lane {}", lane));
+        if (lane > 0)
+            CHECK(w[2] == lane - 1u).context(cc::format("shuffle_up, lane {}", lane));
+        if (lane + 1u < size)
+            CHECK(w[3] == lane + 1u).context(cc::format("shuffle_down, lane {}", lane));
+        // the even lanes of the subgroup's first 32
+        auto const lanes = size < 32u ? size : 32u;
+        auto ballot = u32(0);
+        for (auto k = u32(0); k < lanes; k += 2)
+            ballot |= 1u << k;
+        CHECK(w[4] == ballot).context(cc::format("ballot, size {}", size));
+        CHECK(w[5] == (lane & ~3u) + 2u).context(cc::format("quad_broadcast, lane {}", lane));
+        CHECK(w[6] == (lane ^ 2u)).context(cc::format("quad_swap_y, lane {}", lane));
+        CHECK(w[7] == (lane ^ 3u)).context(cc::format("quad_swap_diagonal, lane {}", lane));
+        CHECK(w[8] == lane + 1u).context(cc::format("inclusive add, lane {}", lane));
+        CHECK(w[9] == lane + 1u).context(cc::format("inclusive float add, lane {}", lane));
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at its own iteration counts every lane",
                      (sg::context_handle const& ctx))
 {
@@ -357,5 +534,137 @@ ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at i
         auto const size = got_sizes[i];
         CHECK(size > 0u);
         CHECK(got_sums[i] == size * (size - 1u) / 2u);
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL buffer's length and a bytes' length are what the bound memory holds (CHK-460)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::bytes::measure.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::bytes::measured>();
+    auto const sizes = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(8), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const raw = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(12),
+                                                             sg::buffer_usage::readonly_buffer);
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::bytes::measured{.sizes = sizes.as_readwrite_buffer(),
+                                 .raw = raw.raw()->as_raw_readonly().as_readonly<byte>()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(1);
+    auto const back = cmd->download.data_from_buffer(sizes);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 8);
+    CHECK(got[0] == 8u);
+    CHECK(got[1] == 48u);
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array's length in a staging group is its capacity, which sg writes "
+                     "without the host (CHK-491)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+        SKIP("this context has no unbounded binding arrays");
+
+    auto const pipeline = co_await shaders::unbounded_arrays::gather_counted.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::unbounded_arrays::counted>();
+    constexpr auto count = 64;
+    constexpr auto lanes = 3;
+    auto sources = cc::vector<sg::buffer<i32>>();
+    for (auto lane = 0; lane < lanes; ++lane)
+    {
+        auto data = cc::vector<i32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(lane * 1000 + i);
+        sources.push_back(ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer));
+    }
+    auto const merged = ctx->persistent.create_buffer_from_data(
+        cc::vector<i32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    // a capacity of three, every element set: the shader wraps by three, a length nobody but sg wrote
+    auto const staging = ctx->persistent.create_staging_binding_group(group_layout, lanes);
+    auto const slot = staging->slot_of(shaders::unbounded_arrays::counted::arrays::sources.name);
+    staging->set_binding(staging->slot_of("counted.merged"), merged.as_readwrite_buffer());
+    auto views = cc::vector<sg::raw_view>();
+    for (auto const& b : sources)
+        views.push_back(b.as_readonly_buffer());
+    staging->set_array(slot, views);
+
+    auto reads = cc::vector<sg::array_buffer_access>();
+    for (auto lane = 0; lane < lanes; ++lane)
+        reads.push_back({.index = lane, .access = sg::access_flag::shader_read});
+    auto cmd = ctx->create_command_list();
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *staging->snapshot());
+    auto const declared
+        = cmd->compute.declare_array_buffer_access(shaders::unbounded_arrays::counted::arrays::sources, reads);
+    cmd->compute.dispatch_threads(count);
+    auto const back = cmd->download.data_from_buffer(merged);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(got[i] == (i % lanes) * 1000 + i).context(cc::format("thread {}", i));
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array's length is the views its group was given (CHK-491)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+        SKIP("this context has no unbounded binding arrays");
+
+    auto const pipeline = co_await shaders::unbounded_arrays::gather_counted.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::unbounded_arrays::counted>();
+    constexpr auto count = 64;
+    auto sources = cc::vector<sg::buffer<i32>>();
+    for (auto lane = 0; lane < 4; ++lane)
+    {
+        auto data = cc::vector<i32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(lane * 1000 + i);
+        sources.push_back(ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer));
+    }
+
+    // three views, then four: the shader wraps by whichever the group holds
+    for (auto const lanes : {3, 4})
+    {
+        auto const merged = ctx->persistent.create_buffer_from_data(
+            cc::vector<i32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        auto counted = shaders::unbounded_arrays::counted{.merged = merged.as_readwrite_buffer()};
+        auto reads = cc::vector<sg::array_buffer_access>();
+        for (auto lane = 0; lane < lanes; ++lane)
+        {
+            counted.sources.push_back(sources[lane].as_readonly_buffer());
+            reads.push_back({.index = lane, .access = sg::access_flag::shader_read});
+        }
+        auto cmd = ctx->create_command_list();
+        auto const group = ctx->transient.create_binding_group(*cmd, group_layout, counted);
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.bind_group(0, *group);
+        auto const declared
+            = cmd->compute.declare_array_buffer_access(shaders::unbounded_arrays::counted::arrays::sources, reads);
+        cmd->compute.dispatch_threads(count);
+        auto const back = cmd->download.data_from_buffer(merged);
+        ctx->submit_command_list(cc::move(cmd));
+
+        auto const got = co_await back.data();
+        REQUIRE(got.size() == isize(count));
+        for (auto i = 0; i < count; ++i)
+            CHECK(got[i] == (i % lanes) * 1000 + i).context(cc::format("{} views, thread {}", lanes, i));
     }
 }

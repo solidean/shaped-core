@@ -7,10 +7,10 @@ upstreams:
     source: git
     repo: https://github.com/KhronosGroup/SPIRV-Reflect
     track: tags
-    tag: vulkan-sdk-1.4.321.0
-    version: 1.4.321.0
+    tag: vulkan-sdk-1.4.363.0
+    version: 1.4.363.0
     digest_algo: git-commit
-    pin_hash: e55086b044225f9b511ae44dbf9b079d3625943f
+    pin_hash: f3e261fda74ca81b44d1941931c6b7b5fe236d0e
     license: Apache-2.0
     license_files: [LICENSE]
     used_by: shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module

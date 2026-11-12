@@ -75,5 +75,7 @@ if(_sgl_cube_backend STREQUAL "shaped-graphics-webgpu")
         EXAMPLE shaped-graphics/sgl-cube
         OUTPUT sgl-cube
         SHELL ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html
+        # what web-shell.html hands an edit over with
+        LINK_OPTIONS "SHELL:-s EXPORTED_RUNTIME_METHODS=ccall,stringToUTF8,lengthBytesUTF8"
     )
 endif()

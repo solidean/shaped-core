@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # ///
 
 """Self-test for tools/dev/lib/project/submodules.py — `dev.py submodules sync`.
@@ -282,25 +282,56 @@ def test_a_missing_submodule_is_initialized_then_synced(base: Path):
     assert git(w.lib, "symbolic-ref", "--short", "HEAD") == "main"
 
 
-def test_a_missing_nested_submodule_is_initialized(base: Path):
-    w = World(base)
-    # The submodule's remote gains a submodule of its own, which the superproject's checkout does not have yet.
+def add_deep(w: World, base: Path) -> str:
+    """The submodule's remote gains a submodule of its own, which the superproject's checkout does not have yet; its first commit."""
     git(base, "init", "-q", "--bare", "-b", "main", "deep.git")
     git(base, "clone", "-q", str(base / "deep.git"), "deep")
     identity(base / "deep")
-    deep = commit(base / "deep", "d1")
+    d1 = commit(base / "deep", "d1")
     git(base / "deep", "push", "-q", "origin", "HEAD:main")
     git(w.upstream, "submodule", "add", "-q", str(base / "deep.git"), "extern/deep")
     git(w.upstream, "commit", "-q", "-m", "add deep")
     git(w.upstream, "push", "-q", "origin", "main")
     assert w.sync(tip=True).status == "updated" and not (w.lib / "extern/deep/.git").exists()
+    return d1
 
-    o = lib.init_nested(w.parent, w.sub, dry_run=True)
+
+def test_a_missing_nested_submodule_is_initialized(base: Path):
+    w = World(base)
+    d1 = add_deep(w, base)
+    o = lib.sync_nested(w.parent, w.sub, dry_run=True)
     assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "would init")], o
-    o = lib.init_nested(w.parent, w.sub)
+    o = lib.sync_nested(w.parent, w.sub)
     assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "initialized")], o
-    assert git(w.lib / "extern/deep", "rev-parse", "HEAD") == deep
-    assert lib.init_nested(w.parent, w.sub) == [], "one checked out already is left alone"
+    assert git(w.lib / "extern/deep", "rev-parse", "HEAD") == d1
+    assert lib.sync_nested(w.parent, w.sub) == [], "one at its pointer is not reported"
+
+
+def test_a_nested_submodule_follows_the_pointer_its_parent_moved(base: Path):
+    w = World(base)
+    add_deep(w, base)
+    lib.sync_nested(w.parent, w.sub)
+    deep = w.lib / "extern/deep"
+    identity(deep)
+    # The submodule's remote moves its own pointer on; the parent's fast-forward leaves the nested checkout behind it.
+    d2 = commit(base / "deep", "d2")
+    git(base / "deep", "push", "-q", "origin", "HEAD:main")
+    git(w.upstream / "extern/deep", "pull", "-q", "origin", "main")
+    git(w.upstream, "commit", "-q", "-am", "bump deep")
+    git(w.upstream, "push", "-q", "origin", "main")
+    assert w.sync(tip=True).status == "updated" and git(deep, "rev-parse", "HEAD") != d2
+
+    o = lib.sync_nested(w.parent, w.sub, dry_run=True)
+    assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "would update")], o
+    o = lib.sync_nested(w.parent, w.sub)
+    assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "updated")], o
+    assert git(deep, "rev-parse", "HEAD") == d2
+    assert git(w.lib, "status", "--porcelain") == "", "the nested checkout matches its pointer"
+
+    # Local work in the nested checkout is left alone, as at the top level.
+    mine = commit(deep, "mine")
+    o = lib.sync_nested(w.parent, w.sub)
+    assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "ahead")] and git(deep, "rev-parse", "HEAD") == mine, o
 
 
 # ---------------------------------------------------------------------------

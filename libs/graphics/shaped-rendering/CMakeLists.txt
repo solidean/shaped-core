@@ -17,6 +17,7 @@ add_library(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/bloom_routine.cc
     src/shaped-rendering/exposure_meter_routine.cc
     src/shaped-rendering/micromap_bake_routine.cc
     src/shaped-rendering/dlss_rr_routine.cc
@@ -64,6 +65,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/bloom_routine.hh
     src/shaped-rendering/exposure_meter_routine.hh
     src/shaped-rendering/micromap_bake_routine.hh
     src/shaped-rendering/dlss_rr_routine.hh
@@ -116,8 +118,6 @@ target_link_libraries(shaped-rendering PUBLIC shaped-graphics shaped-shader-libr
 # PUBLIC because slug_shape.hh and slug_font.hh take a babel::font::face.
 target_link_libraries(shaped-rendering PUBLIC babel-serializer)
 
-sc_target_pch(shaped-rendering SG)
-
 target_compile_options(shaped-rendering
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -158,11 +158,14 @@ endif()
 # The trained OIDN weights the member runs, as a path rather than a target: nothing links them, and the member reads
 # the blob at run time.
 # Empty when they were not fetched, which makes the member report `unsupported` rather than fail to build.
+# TEMPORARY(debt-oidn-weights-source-tree-path): an absolute path into the source tree.
+# So it is defined on the one file that reads it, and the library's other files compile the same in any checkout.
 set(SR_OIDN_WEIGHTS_DIR_VALUE "")
 if(OIDN_WEIGHTS_DIR)
     set(SR_OIDN_WEIGHTS_DIR_VALUE "${OIDN_WEIGHTS_DIR}")
 endif()
-target_compile_definitions(shaped-rendering PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+set_property(SOURCE src/shaped-rendering/impl/oidn_network.cc APPEND PROPERTY
+    COMPILE_DEFINITIONS SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
 # NVIDIA DLSS Ray Reconstruction, when somebody has fetched the SDK (extern/dlss/fetch-dlss.py).
 #
 # It needs a dx12 native scope to hand NGX a command list, so it is built only where that backend is, and it links
@@ -298,6 +301,7 @@ sc_add_shader_package(
         nn_io.sgl:*
         slug_quads.sgl:*
         mix.sgl:*
+        bloom.sgl:*
         exposure_meter.sgl:*
         micromap_bake.sgl:*
         atrous_denoise.sgl:*
@@ -365,10 +369,8 @@ if(SC_BUILD_TESTS)
         nexus
         shaped-graphics-language # the slug module's own tests run on SGL's interpreter
     )
-    target_compile_definitions(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR="${SR_SGL_MODULE_DIR}")
+    sc_target_source_paths(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR "${SR_SGL_MODULE_DIR}")
     target_include_directories(shaped-rendering-test PRIVATE "${BABEL_TEST_DIR}") # font/font_builder.hh, for crafted fonts
-
-    sc_target_pch(shaped-rendering-test SG NEXUS) # 0.44
 
     if(SC_HAS_SDL3)
         # These two reach into impl/ and see SDL headers directly, so they exist only with a backend.
@@ -394,6 +396,7 @@ if(SC_BUILD_TESTS)
     set(_sr_test_backends "")
     if(TARGET shaped-graphics-dx12)
         target_sources(shaped-rendering-test PRIVATE tests/backends/dx12-entry.cc)
+        target_compile_definitions(shaped-rendering-test PRIVATE SR_TEST_HAS_DX12)
         list(APPEND _sr_test_backends shaped-graphics-dx12)
     endif()
     if(TARGET shaped-graphics-vulkan)
@@ -416,6 +419,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE
             tests/backends/backends.cc
             tests/shader_fixtures.cc
+            tests/bloom-test.cc
             tests/compression/bc-compress-test.cc
             tests/blit-routine-test.cc
             tests/debug-output-test.cc
@@ -440,6 +444,13 @@ if(SC_BUILD_TESTS)
             tests/oidn-network-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
+
+        # LLVM 22's CRC recognition inside LoopIdiomRecognize (HashRecognize) runs away on one coroutine's cleanup in
+        # this file at -O3: measured on an M4, 30 minutes for the file against 1.6 s with loop idioms off.
+        # Off for this file alone, where turning loops into memset and memcpy buys a test nothing; drop it once a
+        # fixed LLVM is the floor.
+        set_source_files_properties(tests/denoise-test.cc TARGET_DIRECTORY shaped-rendering-test PROPERTIES
+            COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-mllvm;-disable-loop-idiom-all>")
 
         # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
         # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
@@ -484,10 +495,14 @@ if(SC_BUILD_TESTS)
         )
     endif()
 
-    # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device.
+    # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device and a vulkan one.
     # The HLSL is kept under tests/bench/shaders as it stood before the port, and nothing but the benchmark reads it.
     if(_sr_test_backends AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
-        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-hlsl-benchmark.cc)
+        target_sources(shaped-rendering-test PRIVATE
+            tests/bench/sgl-against-hlsl-benchmark.cc
+            tests/bench/sgl-routes-benchmark.cc
+        )
+        target_compile_definitions(shaped-rendering-test PRIVATE SR_BENCH_HAS_VULKAN=$<TARGET_EXISTS:shaped-graphics-vulkan>)
         sc_add_shader_package(
             TARGET     shaped-rendering-test
             NAME       sr_bench_hlsl_shaders
@@ -507,6 +522,41 @@ if(SC_BUILD_TESTS)
         )
     endif()
 
+    # SGL against the same three kernels written by hand in WGSL, timed on WebGPU.
+    # Each WGSL file declares the bindings SGL's port does, slot for slot, so one binding group serves both.
+    if(TARGET shaped-graphics-webgpu)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-wgsl-benchmark.cc)
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_wgsl_shaders
+            NAMESPACE  sr_bench::wgsl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   wgsl
+            SHADERS
+                atrous_denoise.wgsl:compute:main_cs
+                svgf_atrous.wgsl:compute:atrous_cs
+                nn_conv.wgsl:compute:main_cs
+        )
+    endif()
+
+    # SGL against the same three kernels written by hand in MSL, timed on metal.
+    # Each MSL file declares SGL's argument buffer and inline constants slot for slot, so one binding group serves both.
+    # APPLE stands for slib's metal compiler, whose target is added after this directory and so is not one to test for.
+    if(APPLE AND TARGET shaped-graphics-metal)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-msl-benchmark.cc)
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_msl_shaders
+            NAMESPACE  sr_bench::msl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   msl
+            SHADERS
+                atrous_denoise.metal:compute:main_cs
+                svgf_atrous.metal:compute:atrous_cs
+                nn_conv.metal:compute:main_cs
+        )
+    endif()
+
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.
     # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
     # The probes' shader package stages them itself where it exists, and a second staging is a configure error.
@@ -521,7 +571,9 @@ if(SC_BUILD_TESTS)
         sc_stage_runtime_dlls(shaped-rendering-test DLLS "${SC_DLSS_RUNTIME}" TAG dlss)
     endif()
 
-    target_compile_definitions(shaped-rendering-test PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+    if(OIDN_WEIGHTS_DIR)
+        sc_target_source_paths(shaped-rendering-test PRIVATE SR_TEST_OIDN_WEIGHTS_DIR "${OIDN_WEIGHTS_DIR}")
+    endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.
     # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.

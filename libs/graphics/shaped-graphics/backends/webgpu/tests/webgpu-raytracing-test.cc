@@ -453,6 +453,120 @@ ASYNC_INVOCABLE_TEST("sg webgpu - builds lay the pool out as the ray-query polyf
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg webgpu - a moving instance's TLAS takes 10 units an instance, and its box holds the sweep",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    REQUIRE(ctx.supports(sg::feature::ray_tracing_motion_blur));
+
+    float const vertices[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    sg::blas_triangles const triangles[] = {{.vertices = build_input(ctx, vertices), .vertex_count = 3}};
+    auto cmd = ctx.create_command_list();
+    auto const blas = cmd->raytracing.build_blas(triangles);
+
+    // instance 0 moves from x = 0 to x = 10 over the frame, and instance 1 stands at y = 50
+    auto moving = sg::tlas_instance{.blas = blas, .instance_id = 1};
+    moving.transform_at_end = cc::fixed_array<float, 12>{1, 0, 0, 10, 0, 1, 0, 0, 0, 0, 1, 0};
+    auto const still
+        = sg::tlas_instance{.blas = blas, .transform = {1, 0, 0, 0, 0, 1, 0, 50, 0, 0, 1, 0}, .instance_id = 2};
+    sg::tlas_instance const instances[] = {moving, still};
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+    auto const future = static_cast<webgpu::webgpu_command_list&>(*cmd).download_acceleration_pool();
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    auto const pool = pool_reader{.bytes = bytes.span()};
+    auto const region = static_cast<webgpu::webgpu_tlas const&>(*tlas).unit();
+    // the header's kinds say triangles and motion, and the instances stride by 10
+    CHECK(pool.word(region, 3) == (1u | 4u));
+    auto const first = pool.word(region, 1);
+    CHECK(((pool.word(first + 6, 2) >> 24) & (1u << 4)) != 0);
+    CHECK(((pool.word(first + 10 + 6, 2) >> 24) & (1u << 4)) == 0);
+    CHECK((pool.word(first + 10 + 6, 1) & 0xffffffu) == 2u); // the id, below the mask
+    auto mismatches = 0;
+    for (auto k = 0; k < 12; ++k)
+    {
+        if (pool.real(first + 7 + u32(k / 4), k % 4) != moving.transform_at_end.value()[k])
+            ++mismatches;
+        if (pool.real(first + 10 + 7 + u32(k / 4), k % 4) != still.transform[k])
+            ++mismatches;
+    }
+    CHECK(mismatches == 0);
+
+    // the root holds the moving triangle at both ends, x from 0 to 11, and the still one at y = 50
+    auto const root = pool.node_box(region, 0);
+    CHECK(root.lo.x <= 0.0f);
+    CHECK(root.hi.x >= 11.0f);
+    CHECK(root.hi.y >= 51.0f);
+}
+
+ASYNC_INVOCABLE_TEST("sg webgpu - a moving BLAS takes 6 units a triangle, and its boxes and an instance's hold both "
+                     "poses",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    REQUIRE(ctx.supports(sg::feature::ray_tracing_motion_blur));
+
+    // indexed, in a transform that lifts everything by 1 in z, with a still geometry at x = 20 beside it
+    float const start[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    float const end[] = {0, 5, 0, 3, 5, 0, 0, 6, 7};
+    float const still[] = {20, 0, 0, 21, 0, 0, 20, 1, 0};
+    u32 const indices[] = {2, 0, 1};
+    float const lift[] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1};
+    sg::blas_triangles const triangles[] = {
+        {.vertices = build_input(ctx, still), .vertex_count = 3},
+        {.vertices = build_input(ctx, start),
+         .vertex_count = 3,
+         .later_poses = {{.vertices = build_input(ctx, end)}},
+         .indices = build_input(ctx, indices),
+         .index_count = 3,
+         .transform = build_input(ctx, lift)},
+    };
+    auto cmd = ctx.create_command_list();
+    auto const blas = cmd->raytracing.build_blas(triangles);
+    auto instance = sg::tlas_instance{.blas = blas};
+    instance.transform_at_end = cc::fixed_array<float, 12>{1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0};
+    sg::tlas_instance const instances[] = {instance};
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+    auto const future = static_cast<webgpu::webgpu_command_list&>(*cmd).download_acceleration_pool();
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    auto const pool = pool_reader{.bytes = bytes.span()};
+    auto const region = static_cast<webgpu::webgpu_blas const&>(*blas).unit();
+    CHECK(pool.word(region, 2) == 2u);
+    CHECK(pool.word(region, 3) == 4u); // triangles, and the bit that says they move
+    auto const first = pool.word(region, 1);
+
+    // the still geometry ends where it starts
+    for (auto k = 0; k < 3; ++k)
+    {
+        CHECK(pool.real(first + u32(k), 0) == pool.real(first + 3 + u32(k), 0));
+        CHECK(pool.real(first + u32(k), 1) == pool.real(first + 3 + u32(k), 1));
+    }
+
+    // the moving one's first vertex is index 2, at z = 1 under the transform, and at z = 8 in the pose at time 1
+    auto const moving = first + 6;
+    CHECK(pool.word(moving, 3) == 0u);
+    CHECK(pool.word(moving + 1, 3) == 1u);
+    CHECK(pool.real(moving, 1) == 1.0f);
+    CHECK(pool.real(moving, 2) == 1.0f);
+    CHECK(pool.real(moving + 3, 1) == 6.0f);
+    CHECK(pool.real(moving + 3, 2) == 8.0f);
+    CHECK(pool.real(moving + 5, 0) == 3.0f);
+
+    // the root holds both poses of both geometries, and the instance's holds them at both of its transforms
+    auto const root = pool.node_box(region, 0);
+    CHECK(root.lo.x <= 0.0f);
+    CHECK(root.hi.x >= 21.0f);
+    CHECK(root.hi.y >= 6.0f);
+    CHECK(root.hi.z >= 8.0f);
+    auto const world = pool.node_box(static_cast<webgpu::webgpu_tlas const&>(*tlas).unit(), 0);
+    CHECK(world.lo.x <= 0.0f);
+    CHECK(world.hi.x >= 121.0f);
+    CHECK(world.hi.z >= 8.0f);
+}
+
 ASYNC_INVOCABLE_TEST("sg webgpu - a grown pool keeps every region, the ones an open list wrote included",
                      (webgpu::webgpu_context_handle const& handle))
 {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <clean-core/error/optional.hh>
 #include <shaped-rendering/input.hh>
 
 /// The SDL-to-sr input mapping, split out from window_sdl.cc so a test can drive it directly.
@@ -35,6 +36,16 @@ namespace sr::impl
 /// SDL reports the raw direction plus a flag rather than pre-correcting it, so forgetting this inverts scrolling
 /// for every user who has natural scrolling on.
 [[nodiscard]] float wheel_amount(float raw, SDL_MouseWheelDirection direction);
+
+/// The button an SDL gamepad button names, or none for the paddles and touchpads sr does not model.
+[[nodiscard]] cc::optional<sr::gamepad_button> gamepad_button_from_sdl(u8 sdl_button);
+
+/// The axis an SDL gamepad axis names, or none for an invalid one.
+[[nodiscard]] cc::optional<sr::gamepad_axis> gamepad_axis_from_sdl(u8 sdl_axis);
+
+/// SDL's raw axis value as sr's range.
+/// SDL's y axes point down and sr's point up, and -32768 has no positive twin, so each side divides by its own extreme.
+[[nodiscard]] float gamepad_axis_value(sr::gamepad_axis axis, i16 raw);
 
 /// SDL's pixel density with its failure value replaced: SDL_GetWindowPixelDensity returns 0 on error, and a 0 here would collapse every position onto the origin.
 [[nodiscard]] float pixel_density_from_sdl(float density);

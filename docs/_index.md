@@ -23,7 +23,7 @@ Library-local docs live next to their library, under `libs/<category>/<lib>/docs
 Findings we want to keep, but that are not a guide to anything.
 
 - [notes/build-times.md](notes/build-times.md) — where a `dev.py check` spends its time, and the cold / semi-cold / warm scenarios it splits into.
-  Also what was measured before choosing precompiled headers over unity builds, and before deferring a prebuilt extern.
+  Also what was measured on precompiled headers and unity builds, and before deferring a prebuilt extern.
 - [bugs-external/_index.md](bugs-external/_index.md) — compiler and driver bugs we have hit, each with a standalone reproduction that runs without shaped-core.
   The entry is what says whether the bug is still there, and whether it was ever ours.
 
@@ -36,7 +36,6 @@ Findings we want to keep, but that are not a guide to anything.
 - [guides/examples.md](guides/examples.md) — the `examples/` corpus and `dev.py example`: how a library shows what it feels like to use.
 - [guides/prose.md](guides/prose.md) — `dev.py lint`, the prose rules in practice, and reworking a documentation surface.
 - [guides/compile-times.md](guides/compile-times.md) — `dev.py compile-time`: which headers and TUs the compiler spends its time on.
-- [guides/precompiled-headers.md](guides/precompiled-headers.md) — the per-target PCH tiers, how to pick one, and the no-PCH gate.
 - [guides/disassembly.md](guides/disassembly.md) — `dev.py assembly`: read the emitted codegen, or trace what one invocation actually ran.
 - [guides/profiling.md](guides/profiling.md) — hardware performance counters via `nx::bench` and `dev.py profiling`.
 - [guides/coverage.md](guides/coverage.md) — LLVM source-based coverage, and [guides/pgo.md](guides/pgo.md) — profile-guided optimization.

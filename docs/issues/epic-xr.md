@@ -16,27 +16,28 @@ shaped-viewer is out of scope.
 
 ## Targets
 
-- **Quest 3 standalone is first**: Android, vulkan, OpenXR.
-- **PCVR** (OpenXR over Link or SteamVR, dx12 and vulkan) and **WebXR** (webgpu) are in scope.
+- **The Quest 3 is the first headset, reached over Quest Link first**: a Windows app, OpenXR on Meta's Link runtime, vulkan.
+- **Quest 3 standalone follows**: Android, the same OpenXR and vulkan code, packaged as an APK.
+- **PCVR on dx12** and **WebXR** (webgpu) are in scope.
 - **AR passthrough is a major use case**, not an afterthought.
 - **Controller and hand input is needed soon.**
 - visionOS (Compositor Services, metal) is later and not designed for now.
 
 ## What exists
 
-- `sg::feature::vertex_layer_output` and SGL's `@layer` already draw both eyes into a texture array in one pass on dx12, vulkan and metal.
-- tg has `perspective_off_center` and `rigid_transform`, which is all an OpenXR eye projection and pose need.
-- Nothing mentions OpenXR, multiview or `SV_ViewID`.
-- sg cannot wrap a native image, and `dx12_config` / `vulkan_config` cannot take a runtime's device requirements.
-- The NDK presets build, but nothing packages an APK, so nothing runs on a Quest.
+- **`libs/graphics/shaped-xr`**: system, session and frames on vulkan and dx12, OpenXR's actions, and `XR_FB_passthrough`.
+  Its [design](../../libs/graphics/shaped-xr/docs/design.md) is the detail.
+- **`xr-cube`** ran in a Quest 3 over Quest Link: one SGL source, both eyes in one view-instanced pass, the room behind it, and the cube grabbed with a controller.
+- **The sg hooks are done on dx12 and vulkan**: external device requirements, wrapped native textures, view instancing and SGL's `@view_index`.
+- The NDK presets build, but nothing packages an APK, so nothing runs on a Quest by itself.
 
 ## Decided (2026-11-05)
 
-- **A new library, shaped-xr** (`libs/graphics/shaped-xr`, namespace `xr`), **on top of sr**.
+- **A new library, shaped-xr** (`libs/graphics/shaped-xr`, namespace `sxr`, because `xr` is too generic), **on top of sr**.
   It owns XR's own routines: occlusion against environment depth, controller and hand drawing, imgui panels on quad layers, a PCVR mirror window.
   The session and input core needs nothing from sr, so it may split into its own target later if a poses-only consumer appears.
 - **The runtime's graphics requirements are the primitive; shaped-xr creating the context is convenience on top.**
-  `xr` hands out what the runtime demands — adapter, extensions, and on `XR_KHR_vulkan_enable2` a device-creation hook — and an app may build the sg context from them itself.
+  `sxr` hands out what the runtime demands — adapter, extensions, and on `XR_KHR_vulkan_enable2` a device-creation hook — and an app may build the sg context from them itself.
 - **A frame wait blocks on native**, like a vsync present; wasm inverts it through the existing main-loop hook.
 - **SGL's stereo surface is a `@view_index` input**; the pipeline's view count says how many views.
   On webgpu it lowers to a per-draw value and a draw per view.
@@ -47,22 +48,42 @@ shaped-viewer is out of scope.
 - **Quest packaging is a gradle-free APK built in CMake**, with `dev.py` deploying and launching over adb.
 - **CI tries Monado headless**; the Meta XR Simulator and the Quest are for development by hand.
   Whether GitHub runners can host Monado is unknown, and not having it there is acceptable.
+- **Link before standalone, vulkan before dx12** (decided later the same day).
+  Link gives the Windows loop — debugger, RenderDoc, hot reload — with no APK.
+  Vulkan first keeps the Link code identical to the standalone code: the same `XR_KHR_vulkan_enable2` binding, the same multiview.
+  What Link hides is Adreno's performance profile, which standalone brings back.
+  Whether environment depth, scene and anchors reach Link is unverified; `question-xr-link-ar-probe` checks it.
 
-## Still to settle
+## Settled by building it
 
 - **Headset images are wrapped sg textures**, not an `sg::swapchain`: the frame is wait / begin / end, not acquire / present.
-  Proposed and not contested; it becomes settled with the sg hooks.
-- **View instancing is phase one**, because on Adreno multiview is the only fast stereo: an sg feature beside `vertex_layer_output`, a `view_count` on pass and pipeline.
+- **View instancing is phase one**, because on Adreno multiview is the only fast stereo.
 
-The design deck, its answers and annotations are in `.tmp/xr-design/` for now; what is decided here moves into shaped-xr's docs when the library starts.
+## Decided (2026-11-06): the AR capabilities
+
+The design is in [shaped-xr's design](../../libs/graphics/shaped-xr/docs/design.md#ar-capabilities).
+
+- **Capabilities are asked for on the system and reported per session**, since a user can refuse what a runtime has.
+- **Quest's scene and anchors are written against `XR_FB` and `XR_META` now**, with the public API shaped like `XR_EXT_spatial_*`, which is added once Quest has it.
+- **Depth is frame data plus an exported SGL module.**
+- **Scene is an immutable snapshot through `cc::shared_async`**, labels our enum with `other` and the raw string kept.
+- **Hit tests are sources read per frame**, everywhere.
+- **Anchors are created, located, persisted and restored on one headset**; sharing is out.
+- **WebXR stays compatible and `feat-xr-webxr` is parked** until the WebXR/WebGPU binding ships.
+- **Order: depth, hits, scene, anchors.**
+  If depth or scene does not reach Link, `feat-android-apk` moves ahead of them.
+
+The design decks, with answers and annotations, are `.tmp/xr-design/` and `.tmp/xr-ar-design/`, which are not committed.
 
 ## Phases
 
-1. Android APK and `dev.py` deploy over adb — a triangle on the Quest's 2D panel: `feat-android-apk`.
-2. sg hooks: `feat-sg-external-device-requirements`, `feat-sg-wrap-native-texture`, `feat-sg-view-instancing`, with `feat-sgl-view-index` beside them.
-3. shaped-xr core on OpenXR and vulkan: `feat-shaped-xr-core`, then `chore-xr-monado-ci`.
-4. One SGL source, multiview, in the headset: `feat-xr-cube-example`.
-5. `feat-xr-passthrough` and `feat-xr-controller-actions`; the AR capability API is designed first, in `question-xr-ar-capability-api`.
-6. `feat-xr-pcvr-dx12`, `feat-xr-webxr` and `feat-xr-hand-tracking`.
+Done: the sg hooks, shaped-xr's core, `xr-cube` in the headset, actions, passthrough, the dx12 binding and the AR design.
 
-`feat-sr-gamepads` follows from the input decision and blocks nothing.
+1. `question-xr-link-ar-probe`, which needs the headset and decides the order below.
+2. `feat-xr-capabilities`, the seam the rest plug into.
+3. `feat-xr-environment-depth`, then `feat-xr-hit-sources`, `feat-xr-scene` and `feat-xr-anchors`.
+4. Tests without a headset, where a runtime has what they need: `chore-xr-monado-ci`.
+5. The rest of what started: `feat-xr-controller-actions` (drawing the controllers), `feat-xr-passthrough` (blend modes) and `feat-xr-pcvr-dx12` (mirror window, SteamVR).
+6. Standalone on the Quest: `feat-android-apk`, ahead of step 3 if the probe says so.
+7. `feat-xr-hand-tracking`, and `feat-xr-webxr` once the web platform allows it.
+

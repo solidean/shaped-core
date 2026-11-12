@@ -398,6 +398,8 @@ struct expr_lowering
             element->buffer = lowered[0];
             element->index = lowered[1];
         }
+        else if (auto* const length = copy.node.try_as<flat_buffer_length>())
+            length->buffer = lowered[0];
         else if (auto* const element = copy.node.try_as<flat_element>())
         {
             element->object = lowered[0];
@@ -494,7 +496,8 @@ struct expr_lowering
             auto const is_leaf
                 = is_known(out.e, value)
                && (out.e.at(value).node.is<flat_local_ref>() || out.e.at(value).node.is<flat_literal>()
-                   || out.e.at(value).node.is<flat_int_literal>() || out.e.at(value).node.is<flat_bool_literal>());
+                   || out.e.at(value).node.is<flat_int_literal>() || out.e.at(value).node.is<flat_wide_literal>()
+                   || out.e.at(value).node.is<flat_bool_literal>());
             if (!is_leaf || value == eval->value)
                 into.push_back(attributed().eval(value));
         }

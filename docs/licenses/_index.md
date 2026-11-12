@@ -9,6 +9,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | Dependency | Version | License | Used by | Text |
 |---|---|---|---|---|
 | [Agility SDK](https://www.nuget.org/packages/Microsoft.Direct3D.D3D12) | 1.620.1 | `LicenseRef-Microsoft-DirectX` | shaped-graphics' dx12 backend, which creates its devices through this runtime where it was fetched | [agility-sdk.txt](agility-sdk.txt), [agility-sdk-code.txt](agility-sdk-code.txt) |
+| [Agility SDK preview](https://www.nuget.org/packages/Microsoft.Direct3D.D3D12) | 1.722.1-preview | `LicenseRef-Microsoft-DirectX-Preview` | shaped-graphics' dx12 backend in a build configured with SC_AGILITY_PREVIEW, for clustered geometry and partitioned TLAS | [agility-sdk-preview.txt](agility-sdk-preview.txt), [agility-sdk-preview-code.txt](agility-sdk-preview-code.txt) |
 | [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) | v5.2 | `CC-BY-4.0` | shaped-viewer — the bistro example; and tests that skip without it (babel's FBX reader and DDS / TGA decode, sv's FBX importer) | [amazon-lumberyard-bistro.txt](amazon-lumberyard-bistro.txt) |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.6 | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | clean-core — cc::blake3 / cc::hash256 (the cryptographic hash) | [blake3-cc0.txt](blake3-cc0.txt), [blake3-a2.txt](blake3-a2.txt), [blake3-a2llvm.txt](blake3-a2llvm.txt) |
 | [DLSS](https://github.com/NVIDIA/DLSS) | v310.9.1 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::dlss_rr_routine (the DLSS Ray Reconstruction denoise member) | [dlss.txt](dlss.txt) |
@@ -31,8 +32,9 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [MathLib](https://github.com/NVIDIA-RTX/MathLib) | v11 | `MIT` | extern/nrd — the header-only math NRD's sources are written against | [mathlib.txt](mathlib.txt) |
 | [OIDN](https://www.openimagedenoise.org) | v2.5.1 | `Apache-2.0` | shaped-rendering-test — the reference oracle sr::denoise_method::oidn is compared against | [oidn.txt](oidn.txt), [oidn-third-party-programs.txt](oidn-third-party-programs.txt), [oidn-onetbb.txt](oidn-onetbb.txt) |
 | [OIDN-Weights](https://github.com/RenderKit/oidn-weights) | 28883d1769d5930e13cf7f1676dd852bd81ed9e7 | `Apache-2.0` | shaped-rendering — the trained network sr::denoise_method::oidn runs | [oidn-weights.txt](oidn-weights.txt) |
+| [OpenXR loader](https://github.com/KhronosGroup/OpenXR-SDK) | release-1.1.65 | `Apache-2.0 OR MIT` | the xr-cube example, which talks to OpenXR directly until shaped-xr exists | [openxr-loader.txt](openxr-loader.txt) |
 | [SDL3](https://github.com/libsdl-org/SDL) | release-3.4.12 | `Zlib` | shaped-rendering — sr::window_system and sr::window | [sdl3.txt](sdl3.txt) |
-| [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.321.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
+| [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.363.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the JPEG codec behind babel::jpg | [stb.txt](stb.txt) |
 | [ufbx](https://github.com/ufbx/ufbx) | v0.23.1 | `MIT OR Unlicense` | babel-serializer — the FBX reader behind babel::fbx | [ufbx.txt](ufbx.txt) |

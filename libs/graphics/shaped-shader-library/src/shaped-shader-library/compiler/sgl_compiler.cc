@@ -1,5 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/byte_stream_builder.hh>
+#include <clean-core/container/pinned_data.hh>
+#include <clean-core/math/float.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics-language/check/resources.hh>
@@ -10,6 +12,7 @@
 #include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
 #include <shaped-shader-library/impl/sgl_emit_cache.hh>
 #include <shaped-shader-library/impl/sgl_library.hh>
+#include <shaped-shader-library/impl/sgl_module_artifacts.hh>
 
 using namespace cc::primitive_defines;
 
@@ -170,20 +173,24 @@ static_assert(
 class sgl_shader_compiler final : public slib::shader_compiler
 {
 public:
+    /// `inner` may be null for spirv alone, which SGL then writes itself and nothing compiles.
     sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
                         cc::optional<bcache::blob_cache*> persistent_cache,
                         bool diagnostics,
-                        sgl::check::undefined_guard guards_undefined)
+                        sgl::check::undefined_guard guards_undefined,
+                        bool keeps_module_artifacts)
       : _inner(cc::move(inner)),
-        _target(target_of(_inner->target_format())),
+        _format(_inner != nullptr ? _inner->target_format() : sg::shader_format::spirv),
+        _target(target_of(_format)),
         _persistent_cache(persistent_cache),
         _diagnostics(diagnostics),
-        _guards_undefined(guards_undefined)
+        _guards_undefined(guards_undefined),
+        _keeps_module_artifacts(keeps_module_artifacts)
     {
     }
 
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::sgl; }
-    [[nodiscard]] sg::shader_format target_format() const override { return _inner->target_format(); }
+    [[nodiscard]] sg::shader_format target_format() const override { return _format; }
 
     [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
                                                                    slib::include_resolver resolve) const override
@@ -195,6 +202,19 @@ public:
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
+        // SGL wrote the binary itself, so nothing is left to compile and nothing can crash doing it
+        if (!desc.bytecode.empty())
+            return cc::make_async_from_value(sg::compiled_shader{
+                .stage = desc.stage,
+                .format = _format,
+                .entry_point = desc.entry_point,
+                .bytecode = cc::make_pinned_data(cc::span<byte const>(desc.bytecode)),
+                .compiler = {.name = cc::string("sgl"),
+                             .version = cc::string(sgl::compiler_fingerprint()),
+                             .signature = cc::string(_format == sg::shader_format::dxil ? "dxil" : "spirv")}});
+        if (_inner == nullptr)
+            return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::format(
+                "'{}' has no binary of SGL's own, and this build has no DXC to compile its text", desc.entry_point))));
         // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
         auto inner = desc;
         if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)
@@ -206,8 +226,19 @@ public:
         return _inner->compile(inner);
     }
 
+    [[nodiscard]] cc::shared_async<cc::unit> prefetch_modules(cc::function_ref<slib::module_library()> read) const override
+    {
+        auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
+        if (store == nullptr)
+            return cc::make_async_from_value(cc::unit{});
+        auto const modules = read();
+        return slib::impl::prefetch_sgl_modules(modules.files(), *store);
+    }
+
     [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
     {
+        if (_inner == nullptr)
+            return {};
         return _inner->reflect_layouts(shader);
     }
 
@@ -224,6 +255,9 @@ private:
         b.add_pod(_target);
         b.add_pod(_diagnostics);
         b.add_pod(_guards_undefined);
+        b.add_pod(desc.software_trace);
+        b.add_pod(desc.native_spirv);
+        b.add_pod(desc.native_dxil);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -256,6 +290,12 @@ private:
             break;
         case sg::shader_stage::geometry:
             stage = sgl::check::stage::geometry;
+            break;
+        case sg::shader_stage::mesh:
+            stage = sgl::check::stage::mesh;
+            break;
+        case sg::shader_stage::task:
+            stage = sgl::check::stage::task;
             break;
         case sg::shader_stage::fragment:
             stage = sgl::check::stage::pixel;
@@ -290,11 +330,63 @@ private:
         auto options = cc::vector<sgl::check::option_value>();
         auto device_features = sgl::check::feature_set();
         auto weakens_float = false;
+        auto native_line_table = false;
+        auto mesh = sgl::emit::mesh_form::native;
+        auto polyfill_vertex = cc::string();
+        auto polyfill_task = cc::string();
+        auto polyfill_control = cc::string();
+        auto polyfill_pass = cc::string();
+        auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
+        auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
+        auto const requires_native
+            = (is_spirv && (_inner == nullptr || desc.native_spirv)) || (is_dxil && desc.native_dxil);
+        auto native = requires_native ? sgl::emit::native_route::require : sgl::emit::native_route::text;
         for (auto const& o : desc.options)
         {
             if (o.name == slib::k_weakens_float_option)
             {
                 weakens_float = o.value == "true";
+                continue;
+            }
+            if (o.name == slib::k_native_line_table_option)
+            {
+                native_line_table = o.value == "true";
+                continue;
+            }
+            if (o.name == slib::k_mesh_form_option)
+            {
+                mesh = o.value == "compute"  ? sgl::emit::mesh_form::compute
+                     : o.value == "vertex"   ? sgl::emit::mesh_form::vertex_fetch
+                     : o.value == "scan"     ? sgl::emit::mesh_form::scan
+                     : o.value == "launched" ? sgl::emit::mesh_form::launched
+                                             : sgl::emit::mesh_form::native;
+                continue;
+            }
+            if (o.name == slib::k_polyfill_task_option)
+            {
+                polyfill_task = o.value;
+                continue;
+            }
+            if (o.name == slib::k_polyfill_vertex_option)
+            {
+                polyfill_vertex = o.value;
+                continue;
+            }
+            if (o.name == slib::k_polyfill_control_option)
+            {
+                polyfill_control = o.value;
+                continue;
+            }
+            if (o.name == slib::k_polyfill_pass_option)
+            {
+                polyfill_pass = o.value;
+                continue;
+            }
+            if (o.name == slib::k_native_spirv_option || o.name == slib::k_native_dxil_option)
+            {
+                auto const is_for_this = o.name == slib::k_native_spirv_option ? is_spirv : is_dxil;
+                if (native == sgl::emit::native_route::text && is_for_this)
+                    native = sgl::emit::native_route::prefer;
                 continue;
             }
             if (o.name != slib::k_device_features_option)
@@ -313,36 +405,92 @@ private:
                 rest = end < rest.size() ? rest.subview(end + 1) : cc::string_view();
             }
         }
+        // A hit's cluster needs Shader Model 6.10 on dx12, which the pinned DXC lacks and SGL's DXIL refuses, so a dx12
+        // compile reads -1 for it until the preview DXC is pinned (the plan's D8), rather than failing every trace.
+        if (is_dxil)
+            device_features.remove(sgl::check::feature::clustered_geometry);
         auto const library = slib::impl::sgl_library_of(desc.modules);
         auto text = sgl::compile_to_text(
             {.source = desc.source,
              .source_name = desc.label.empty() ? cc::string_view("<sgl>") : cc::string_view(desc.label),
              .library = library,
-             .entry_point = desc.entry_point,
-             .stage = stage,
+             // CHK-527: a polyfill's pass of the prelude in place of the asset's own entry point
+             .entry_point = polyfill_pass.empty() ? cc::string_view(desc.entry_point) : cc::string_view(polyfill_pass),
+             .stage = polyfill_pass.empty() ? stage : sgl::check::stage::compute,
              .target = _target,
              .options = options,
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
              .line_directives = true,
              .diagnostics = _diagnostics,
              .guards_undefined = _guards_undefined,
+             .software_trace = desc.software_trace,
              .weakens_float = weakens_float,
-             .device_features = device_features});
+             .device_features = device_features,
+             .native = native,
+             .native_line_table = native_line_table,
+             .mesh = mesh,
+             .polyfill_vertex = polyfill_vertex,
+             .polyfill_task = polyfill_task,
+             .polyfill_control = polyfill_control});
+        // what the front end checked rather than loaded, kept for the next process
+        if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
+            store != nullptr)
+            slib::impl::keep_made_sgl_modules(*store);
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
-        auto shader = sg::compiled_shader{.stage = desc.stage,
-                                          .format = _inner->target_format(),
-                                          .entry_point = emitted.entry_point};
+        // CHK-524: a polyfilled mesh stage's half is the stage it became, which the compile after this one builds; the
+        // pixel stage after it stays one
+        auto const is_polyfilled = desc.stage == sg::shader_stage::mesh || desc.stage == sg::shader_stage::geometry
+                                || desc.stage == sg::shader_stage::task
+                                || desc.stage == sg::shader_stage::tessellation_control
+                                || desc.stage == sg::shader_stage::tessellation_evaluation;
+        auto const form_stage = !polyfill_pass.empty()                     ? sg::shader_stage::compute
+                              : !is_polyfilled                             ? desc.stage
+                              : mesh == sgl::emit::mesh_form::compute      ? sg::shader_stage::compute
+                              : mesh == sgl::emit::mesh_form::scan         ? sg::shader_stage::compute
+                              : mesh == sgl::emit::mesh_form::launched     ? sg::shader_stage::compute
+                              : mesh == sgl::emit::mesh_form::vertex_fetch ? sg::shader_stage::vertex
+                                                                           : desc.stage;
+        auto shader = sg::compiled_shader{.stage = form_stage, .format = _format, .entry_point = emitted.entry_point};
+        if (emitted.mesh_layout.has_value())
+        {
+            auto const& l = emitted.mesh_layout.value();
+            shader.mesh_polyfill_corners = l.corners;
+            shader.mesh_polyfill_primitives = l.max_primitives;
+            shader.mesh_polyfill_words = l.group_words;
+        }
+        if (emitted.tessellation_layout.has_value())
+        {
+            auto const& l = emitted.tessellation_layout.value();
+            shader.tessellation_domain = l.domain;
+            shader.tessellation_control_points = l.control_points;
+            shader.tessellation_patch_words = l.patch_words();
+            shader.tessellation_vertex_words = l.vertex_words;
+            shader.tessellation_partitioning = l.partitioning;
+            shader.tessellation_output = l.output;
+            shader.tessellation_max_factor = l.max_factor;
+        }
+        if (emitted.task_layout.has_value())
+        {
+            shader.task_polyfill_record_words = emitted.task_layout.value().record_words();
+            shader.task_polyfill_meshes = emitted.task_layout.value().max_meshes;
+        }
         auto result = slib::preprocessed_source{.source = emitted.text,
                                                 .entry_point = emitted.entry_point,
                                                 .used_modules = emitted.library_files,
-                                                .warnings = emitted.warnings};
-        // EMIT-185: DXIL keeps the special values and the order only with every float operation strict, and
-        // denormals only where Shader Model 6.2 is asked to preserve them
-        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee != sgl::check::float_level::fast)
+                                                .warnings = emitted.warnings,
+                                                .native_gap = emitted.native_gap};
+        if (!emitted.spirv.empty())
+            result.bytecode = cc::vector<byte>::create_copy_of(cc::span<u32 const>(emitted.spirv).as_bytes());
+        if (!emitted.dxil.empty())
+            result.bytecode = cc::vector<byte>::create_copy_of(cc::span<byte const>(emitted.dxil));
+        // EMIT-185: DXC keeps the special values and the order only with every float operation strict, which in
+        // SPIR-V is SignedZeroInfNanPreserve and NoContraction, and denormals only where it is asked to preserve them
+        auto const is_hlsl = _target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan;
+        if (is_hlsl && emitted.float_guarantee != sgl::check::float_level::fast)
             result.dxc_args.push_back(cc::string("-Gis"));
-        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee == sgl::check::float_level::ieee)
+        if (is_hlsl && emitted.float_guarantee == sgl::check::float_level::ieee)
         {
             result.dxc_args.push_back(cc::string("-denorm"));
             result.dxc_args.push_back(cc::string("preserve"));
@@ -354,11 +502,16 @@ private:
                 shader.bindings.push_back(binding);
             result.declared_bindings.push_back(cc::move(binding));
         }
-        if (stage == sgl::check::stage::compute)
+        // a mesh and a task stage's workgroup too, which Metal's mesh draw states and no MSL text does; and a polyfilled
+        // stage's compute form's, whatever stage it was declared as
+        if (form_stage == sg::shader_stage::compute
+            || ((stage == sgl::check::stage::mesh || stage == sgl::check::stage::task)
+                && form_stage != sg::shader_stage::vertex))
             shader.workgroup_size
                 = sg::compute_dimensions{.x = emitted.workgroup[0], .y = emitted.workgroup[1], .z = emitted.workgroup[2]};
         if (emitted.preferred_subgroup_size > 0)
             shader.preferred_subgroup_size = emitted.preferred_subgroup_size;
+        shader.is_dispatched_by_threads = emitted.is_dispatched_by_threads;
         if (emitted.color_targets >= 0)
             shader.color_output_count = emitted.color_targets;
         shader.target_set = emitted.target_struct;
@@ -427,11 +580,13 @@ private:
     }
 
     std::unique_ptr<slib::shader_compiler> _inner;
+    sg::shader_format _format;
     sgl::emit::target _target;
     /// As `sgl_compiler_options` holds it, resolved at each compile so the default follows whatever is installed then.
     cc::optional<bcache::blob_cache*> _persistent_cache = {};
     bool _diagnostics = false;
     sgl::check::undefined_guard _guards_undefined = sgl::check::undefined_guard::none;
+    bool _keeps_module_artifacts = false;
 };
 } // namespace
 
@@ -445,6 +600,20 @@ slib::shader_option slib::option_of(cc::string_view name, int value)
     return {.name = cc::string(name), .value = cc::format("{}", value)};
 }
 
+slib::shader_option slib::option_of(cc::string_view name, u32 value)
+{
+    return {.name = cc::string(name), .value = cc::format("{}", value)};
+}
+
+slib::shader_option slib::option_of(cc::string_view name, float value)
+{
+    CC_ASSERT(cc::is_finite(value), "an option's float is finite");
+    auto text = cc::to_string(value);
+    if (!text.contains('.') && !text.contains('e'))
+        text += ".0";
+    return {.name = cc::string(name), .value = cc::move(text)};
+}
+
 slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value)
 {
     for (auto const& c : slib::impl::fields::cases_pixel_format)
@@ -454,12 +623,21 @@ slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value
 }
 
 static_assert(int(slib::sgl_undefined_guard::abort) == int(sgl::check::undefined_guard::abort)
-              && int(slib::sgl_undefined_guard::report) == int(sgl::check::undefined_guard::report));
+              && int(slib::sgl_undefined_guard::report) == int(sgl::check::undefined_guard::report)
+              && int(slib::sgl_undefined_guard::define) == int(sgl::check::undefined_guard::define));
 
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
                                                                  sgl_compiler_options const& options)
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
     return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics,
-                                                 sgl::check::undefined_guard(options.guards_undefined));
+                                                 sgl::check::undefined_guard(options.guards_undefined),
+                                                 options.keeps_module_artifacts);
+}
+
+std::unique_ptr<slib::shader_compiler> slib::create_sgl_spirv_compiler(sgl_compiler_options const& options)
+{
+    return std::make_unique<sgl_shader_compiler>(nullptr, options.persistent_cache, options.diagnostics,
+                                                 sgl::check::undefined_guard(options.guards_undefined),
+                                                 options.keeps_module_artifacts);
 }

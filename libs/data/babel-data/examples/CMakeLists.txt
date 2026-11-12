@@ -4,5 +4,4 @@ sc_add_single_file_examples(babel-data
     FILES
     json.cc
     LINK babel-data
-    PCH CC_ALL NEXUS
 )

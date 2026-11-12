@@ -13,7 +13,9 @@ void sgl::builtins::register_builtins(registry& r)
     register_transforms(r);
     register_conversions(r);
     register_bit_math(r);
+    register_64_bit_math(r);
     register_math(r);
+    register_double_math(r);
     register_textures(r);
     register_bytes(r);
     register_sync(r);
@@ -32,6 +34,38 @@ void impl::add_infix(registry& r,
                      undefined_check undefined_when)
 {
     add_operator(r, op, name, lhs, rhs, result, evaluate, infix(op), undefined_when);
+}
+
+namespace
+{
+constexpr cc::string_view k_any_name[] = {"any"};
+
+written write_float_not_equal(call_context const& c)
+{
+    if (c.target != language::hlsl)
+        return write_infix("!=", precedence::comparison, c.arguments[0], c.arguments[1]);
+    auto const equal = write_infix("==", precedence::comparison, c.arguments[0], c.arguments[1]);
+    return {.text = cc::format("!({})", equal.text), .binds = precedence::unary};
+}
+
+written write_float_vectors_differ(call_context const& c)
+{
+    return {.text = cc::format("any({})", write_float_not_equal(c).text)};
+}
+} // namespace
+
+sgl::builtins::spelling impl::float_not_equal()
+{
+    return {.kind = spelling_kind::custom, .custom = write_float_not_equal};
+}
+
+sgl::builtins::spelling impl::float_vectors_differ()
+{
+    return {.kind = spelling_kind::custom,
+            .custom = write_float_vectors_differ,
+            .hlsl_names = k_any_name,
+            .wgsl_names = k_any_name,
+            .msl_names = k_any_name};
 }
 
 void impl::add_operator(registry& r,
@@ -241,11 +275,15 @@ cc::string_view impl::clamp_undefined(cc::span<scalar const> in)
     {
         auto const low = in[width + i];
         auto const high = in[2 * width + i];
-        auto is_above = low.bits > high.bits;
+        auto is_above = low.wide_bits() > high.wide_bits();
         if (low.kind == value_kind::scalar_float)
             is_above = low.as_float() > high.as_float();
         else if (low.kind == value_kind::scalar_int)
             is_above = low.as_int() > high.as_int();
+        else if (low.kind == value_kind::scalar_double)
+            is_above = low.as_double() > high.as_double();
+        else if (low.kind == value_kind::scalar_long)
+            is_above = low.as_long() > high.as_long();
         if (is_above)
             return "clamp whose low bound is above its high one";
     }

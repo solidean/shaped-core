@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # dependencies = ["pyyaml>=6"]
 # ///
 
@@ -101,15 +101,10 @@ COMMANDS = [
 DEFAULT_BUILD_PRESETS: dict[str, str] = dev.DEFAULT_BUILD_PRESETS
 
 # Debug sibling of each default preset, run by the `test` check alongside the others.
-# Deliberately the *-nopch variants: precompiled headers reach every TU through /FI, so a source that dropped an
-# include it still uses compiles anyway, and nothing else in the repo would catch it — `blessed-includes` checks that
-# an include is allowed, not that a use is covered.
-# The debug leg is the cheapest of the four to give that up on.
-# It only covers Debug, so a Release-only ordering problem still reaches CI's nopch-linux-clang leg first.
 DEFAULT_DEBUG_PRESETS: dict[str, str] = {
-    "Windows": "debug-nopch-clang",
-    "Linux": "debug-nopch-linux-clang",
-    "Darwin": "macos-arm-llvm-debug-nopch",
+    "Windows": "debug-clang",
+    "Linux": "debug-linux-clang",
+    "Darwin": "macos-arm-llvm-debug",
 }
 
 # Release sibling of each default preset — the `test` check's CC_ASSERT-off leg.
@@ -208,6 +203,8 @@ def build_policy() -> cmd.Policy:
         layout=LAYOUT,
         default_branch=DEFAULT_BRANCH,
         companions=COMPANIONS,
+        # The optional build server, off unless this checkout's dev.toml `[build_server]` names a client and opts in.
+        build_server=dev.build_server_from_dev_toml(ROOT),
     )
 
 
@@ -285,6 +282,9 @@ def main() -> None:
     dev.ui.configure("off" if args.no_progress else "on" if args.progress else "auto",
                      tail_lines=16 if args.verbose else 8)
     dev.configure_mirroring(mirror_test_output=args.mirror_test_output)
+    # Before anything configures or runs: every child inherits it, CMake's FindVulkan and the validation layer's loader alike.
+    dev.activate_vulkan_sdk()
+    dev.activate_android_sdk()
     if args.profile:
         dev.profile.configure(
             args.profile, fmt=args.profile_type, lane_mode=args.profile_lanes,

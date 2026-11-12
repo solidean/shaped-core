@@ -77,9 +77,14 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
           == "unknown-feature user:[timestamp_query] timestamp_query; a shader may require binding_arrays, "
              "extended_image_formats, readwrite_image_formats, multisampled_array_textures, ray_query, "
              "raytracing_pipeline, primitive_index, "
-             "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
+             "sample_rate_shading, geometry_shader, tessellation_shader, mesh_shader, shader_f16, shader_int16, "
+             "subgroups, "
              "device_coherence, image_atomics, first_instance, helper_lane_query, vertex_layer_output, "
-             "float_atomic_add, shader_execution_reordering, opacity_micromap\n");
+             "float_atomic_add, shader_execution_reordering, opacity_micromap, float_specials, float_denormals, "
+             "view_instancing, pixel_view_read_workaround, vertex_pipeline_stores, shader_int64, shader_f64, "
+             "shader_int64_atomics, "
+             "unbounded_binding_arrays, shader_shared_int64_atomics, shader_int64_min_max_atomics, "
+             "clustered_geometry\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 
@@ -231,11 +236,42 @@ TEST("sgl check - a stage input some device lacks needs its feature, as a bindin
                       + "@vertex fun vs(@first_instance first: int) -> vout:\n"
                         "    return { p = hpos4(first as float, 0.0, 0.0, 1.0) }\n")
               .contains("feature-not-declared user:[vs] vs needs first_instance"));
+    // CHK-437: `@view_index` needs view_instancing in every stage that reads it, the pixel stage included
+    CHECK(reports_for(cc::string(edges)
+                      + "@pixel fun ps(v: vout, @view_index view: int) -> target:\n"
+                        "    return { c = float4(view as float, 0.0, 0.0, 1.0) }\n")
+              .contains("feature-not-declared user:[ps] ps needs view_instancing"));
     // one every device has needs nothing
     CHECK(reports_for(cc::string(edges)
                       + "@pixel fun ps(v: vout, @is_front_facing f: bool) -> target:\n"
                         "    return { c = float4(1.0, 1.0, 1.0, 1.0) }\n")
           == "");
+}
+
+TEST("sgl check - a pipeline of several views warns of a pixel stage that takes no view")
+{
+    // CHK-515
+    constexpr auto start = cc::string_view("@pixel struct target:\n"
+                                           "    c: float4\n"
+                                           "struct vout:\n"
+                                           "    @position p: hpos4\n"
+                                           "@vertex fun vs(@vertex_index i: int, @view_index view: int) -> vout:\n"
+                                           "    require view_instancing\n"
+                                           "    return { p = hpos4(view as float, i as float, 0.0, 1.0) }\n");
+    auto const pipeline_of = [](int views)
+    {
+        return cc::format(
+            "pipeline:\n    vertex = vs\n    pixel = ps\n    format = .rgba8_unorm\n    view_count = {}\n", views);
+    };
+    constexpr auto ignoring = cc::string_view("@pixel fun ps(v: vout) -> target:\n"
+                                              "    return { c = float4(1.0, 1.0, 1.0, 1.0) }\n");
+    constexpr auto taking = cc::string_view("@pixel fun ps(v: vout, @view_index view: int) -> target:\n"
+                                            "    require view_instancing\n"
+                                            "    return { c = float4(keep_view(view), 1.0, 1.0, 1.0) }\n");
+
+    CHECK(reports_for(cc::string(start) + ignoring + pipeline_of(2)).contains("pixel-stage-ignores-view"));
+    CHECK(reports_for(cc::string(start) + ignoring + pipeline_of(1)) == "");
+    CHECK(reports_for(cc::string(start) + taking + pipeline_of(2)) == "");
 }
 
 TEST("sgl check - a 16-bit value needs its feature wherever an entry point or a binding holds one")
@@ -295,4 +331,79 @@ TEST("sgl check - an @inline binding holds no 16-bit value, at any depth")
     // a group's constant block holds one, and an @inline binding a 32-bit value
     CHECK(reports_for(listing("require shader_f16\n\n", "    gain: half\n")) == "");
     CHECK(reports_for(listing("@inline ", "    gain: float\n")) == "");
+}
+
+TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and stands in no @inline binding")
+{
+    // CHK-451: a long needs shader_int64 and a double shader_f64
+    CHECK(reports_for("@compute(64) fun cs(@thread_id id: int3):\n    let s = 3i64 + 1i64\n")
+              .contains("cs needs shader_int64"));
+    CHECK(reports_for(listing("", "    scale: double\n"))
+          == "needs-feature user:[double] a value of double needs shader_f64, which `require shader_f64` grants\n");
+    CHECK(reports_for(listing("require shader_int64\n\n", "    keys: mut buffer[ulong3]\n")) == "");
+    // a test runs on no device, and needs nothing
+    CHECK(reports_for("test (1i64 << 40) > 0i64\n") == "");
+
+    // CHK-454: a stage link carries a 64-bit value flat, a three- or four-vector over two locations
+    auto const crossing = [](cc::string_view member)
+    {
+        return reports_for(cc::format("require shader_int64\n\n"
+                                      "struct varyings:\n"
+                                      "    @position position: hpos4\n"
+                                      "    {}\n"
+                                      "\n"
+                                      "@vertex fun vs() -> varyings:\n"
+                                      "    return {{position = hpos4(0.0, 0.0, 0.0, 1.0)}}\n",
+                                      member));
+    };
+    CHECK(crossing("@interpolate(.flat) key: long = 1i64") == "");
+    CHECK(crossing("@interpolate(.flat) key: ulong2 = ulong2(1u64)") == "");
+    CHECK(crossing("@interpolate(.flat) key: long3 = long3(1i64)") == "");
+    CHECK(crossing("@interpolate(.flat) keys: ulong4[2] = [ulong4(1u64), ulong4(2u64)]") == "");
+    CHECK(crossing("key: long = 1i64").contains("crosses stages only flat"));
+    CHECK(reports_for(listing("require shader_int64\n\n@inline ", "    seed: long\n"))
+          == "unsupported-yet user:[long] a 64-bit value in an @inline binding, in work.seed: long\n");
+}
+
+TEST("sgl check - a 64-bit atomic needs shader_int64_atomics, and stands in a buffer alone")
+{
+    // CHK-296: a buffer's, which needs the atomics' feature beside the integer's
+    CHECK(reports_for(listing("require shader_int64\n\n", "    totals: mut buffer[atomic[ulong]]\n"))
+              .contains("needs shader_int64_min_max_atomics"));
+    CHECK(reports_for(listing("require shader_int64\n\n", "    totals: mut buffer[atomic[long]]\n"))
+              .contains("needs shader_int64_atomics"));
+    CHECK(reports_for(listing("require shader_int64, shader_int64_atomics\n\n", "    totals: mut "
+                                                                                "buffer[atomic[long]]\n"))
+          == "");
+    // CHK-510: workgroup memory's are optional on every device that has a buffer's
+    CHECK(reports_for("require shader_int64, shader_int64_atomics\n\n@workgroup binding local:\n    sum: "
+                      "atomic[ulong]\n")
+              .contains("a 64-bit atomic in workgroup memory needs shader_shared_int64_atomics"));
+    CHECK(reports_for("require shader_int64, shader_int64_atomics, shader_shared_int64_atomics\n\n"
+                      "@workgroup binding local:\n    sum: atomic[ulong]\n")
+          == "");
+    // CHK-511: a ulong's min and max need less than its other operations, and shader_int64_atomics grants both
+    constexpr auto maxed = "require shader_int64{}\n\n"
+                           "binding work:\n"
+                           "    top: mut buffer[atomic[ulong]]\n"
+                           "\n"
+                           "@compute(1) fun cs(@thread_id id: int3){{work}}:\n"
+                           "    work.top[0].{}(5u64)\n";
+    CHECK(reports_for(cc::format(maxed, ", shader_int64_min_max_atomics", "max")) == "");
+    CHECK(reports_for(cc::format(maxed, ", shader_int64_min_max_atomics", "add")).contains("needs shader_int64_atomics"));
+    CHECK(reports_for(cc::format(maxed, ", shader_int64_atomics", "add")) == "");
+    CHECK(reports_for(listing("require shader_int64\n\n", "    counts: mut buffer[atomic[short]]\n"))
+              .contains("an atomic holds a `uint`, an `int`, a `float`, a `ulong` or a `long`"));
+}
+
+TEST("sgl check - a constant block holds no 64-bit vector wider than a 16-byte row")
+{
+    // CHK-453: a long3 is 24 bytes, which no row of a constant block holds
+    CHECK(reports_for(listing("require shader_int64\n\n", "    corner: long3\n"))
+          == "unsupported-yet user:[long3] a 64-bit vector wider than a 16-byte row in a constant block, in "
+             "work.corner: long3\n");
+    CHECK(reports_for(listing("require shader_f64\n\nstruct frame:\n    origin: double4\n\n", "    f: frame\n"))
+              .contains("in work.f.origin: double4"));
+    // a long2 is a row, and a buffer holds the wider ones
+    CHECK(reports_for(listing("require shader_int64\n\n", "    pair: long2\n    corners: buffer[long4]\n")) == "");
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/record/desc.hh>
 #include <clean-core/record/fwd.hh>
 
@@ -25,7 +26,29 @@ namespace cc::rec
 struct sampling_config;
 struct sampling_stats;
 struct sampling_scope;
+struct sample_view;
 } // namespace cc::rec
+
+/// One sample as a sink receives it (`sampling_config::sink`).
+struct cc::rec::sample_view
+{
+    /// The OS's id of the sampled thread.
+    u64 native_tid = 0;
+
+    /// The owner id (cc::rec::owner_scope) the sampled thread was running under, or 0 for none.
+    ///
+    /// Read while the thread was suspended, from the same state its ambient deltas are written from, so it is exactly
+    /// the owner an event recorded at that instant would carry.
+    /// A thread that left every context and has not recorded since counts as under none.
+    /// Always 0 for a thread the recorder does not know, and while attribution is not recorded.
+    u64 owner = 0;
+
+    /// Innermost first.
+    cc::span<void* const> frames;
+
+    /// The walk stopped at `max_frames` (or at a scope, under `stop_at_scope`).
+    bool truncated = false;
+};
 
 struct cc::rec::sampling_config
 {
@@ -76,6 +99,24 @@ struct cc::rec::sampling_config
     /// core to 7.4%.
     /// Turn it on when you are hunting a thread that records nothing, which is exactly what it is for.
     bool include_unknown_threads = false;
+
+    /// Each tick also reads, per thread it samples, how much of the time since its last tick the thread ran (`record.thread_run`).
+    ///
+    /// A scope's wall time cannot tell work from a thread the OS kept off the CPU, and reading a thread clock in every
+    /// scope would cost it several times over (a scope 29 ns, QueryThreadCycleTime 179 ns, on Windows).
+    /// Read here, it costs the sampler alone, per thread per tick about 180 ns on Windows and 340 ns on an M4 (thread_info).
+    /// A trace then shows each stretch a thread mostly sat off the CPU (babel::chrome_trace's off-CPU lanes).
+    /// Windows and macOS only so far: elsewhere nothing is recorded.
+    bool thread_run = true;
+
+    /// Where samples go instead of the recording, or null for the recording.
+    ///
+    /// For a consumer that aggregates as it goes — which functions ran under which owner, say — rather than keeping
+    /// every stack: the samples then cost no chunk space and reach no listener.
+    /// Called on the sampler thread, after the sampled thread runs again, with `sink_user`.
+    /// The next tick waits for it, so it should be quick; it may allocate and lock.
+    void (*sink)(rec::sample_view const& sample, void* user) = nullptr;
+    void* sink_user = nullptr;
 };
 
 namespace cc::rec
@@ -87,9 +128,13 @@ namespace cc::rec
 /// `include_unknown_threads` widens it to every OS thread in the process, at the cost documented on that field.
 ///
 /// Requires an initialized recorder, and does nothing where a foreign thread's stack cannot be walked
-/// (`cc::stack_capture_from_context_available`).
+/// (`cc::rec::sampling_available`).
 /// Calling it while already sampling replaces the configuration.
 void start_sampling(rec::sampling_config const& cfg = {});
+
+/// Whether this build can sample at all: a thread walked from outside, by its `CONTEXT` on Windows and through Mach
+/// on macOS.
+[[nodiscard]] bool sampling_available();
 
 /// Stops the sampler and waits for it, so nothing is in flight when this returns.
 void stop_sampling();
@@ -177,6 +222,24 @@ inline constexpr rec::field sample_fields[] = {
     {.name = "native_tid", .type = rec::type_code::u64_, .offset = 16, .size = 8},
     {.name = "frames", .type = rec::type_code::u64_array, .offset = 24, .size = 4},
 };
+
+/// The layout of a thread's running time since the sampler's previous tick of it: `ran` of `interval`, both in the
+/// timestamp counter's ticks, so `ran / interval` is the share of the stretch the thread was on a CPU.
+/// On macOS `ran` is the kernel's nanoseconds converted at the recorder's calibrated rate, so it is no exact count of ticks.
+/// The stretch ends when the event was recorded; a thread's first tick only starts it, and records nothing.
+/// `in_scope` is 1 where the thread had a recorded scope open at the stretch's end: a thread off the CPU inside its work
+/// rather than a worker waiting for some.
+inline constexpr rec::field thread_run_fields[] = {
+    {.name = "thread_index", .type = rec::type_code::u32_, .offset = 0, .size = 4},
+    {.name = "in_scope", .type = rec::type_code::u32_, .offset = 4, .size = 4},
+    {.name = "native_tid", .type = rec::type_code::u64_, .offset = 8, .size = 8},
+    {.name = "interval", .type = rec::type_code::u64_, .offset = 16, .size = 8},
+    {.name = "ran", .type = rec::type_code::u64_, .offset = 24, .size = 8},
+};
+inline constexpr isize thread_run_payload_size = 32;
+
+/// The descriptor every `record.thread_run` is written through, a value event of the system domain.
+[[nodiscard]] rec::desc const& thread_run_desc();
 
 /// What `thread_index` says when the sampled thread has no stream of its own.
 /// Its `native_tid` is then the only identity it has, and there is nothing to anchor into.

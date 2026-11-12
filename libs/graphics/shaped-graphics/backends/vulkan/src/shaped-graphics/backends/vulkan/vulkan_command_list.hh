@@ -14,6 +14,7 @@
 #include <shaped-graphics/barrier/array_declarations.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -55,6 +56,13 @@ public:
                                                sg::pipeline_stage_flags stages,
                                                sg::access_flags access,
                                                bool from_array_application = false);
+
+    /// One polyfilled mesh draw, of the grid `x, y, z`, or of the record of `dispatch_args` at `offset_in_bytes` of
+    /// `args` where it is non-null.
+    void draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                              cc::fixed_array<int, 3> grid,
+                              std::shared_ptr<vulkan_buffer const> const& args,
+                              isize offset_in_bytes);
 
     /// The texture equivalent, scoped to one subresource range and carrying the layout the op needs it in.
     /// Declare one access, returning the layout this call asked the tracker for — which is not always `layout`, since
@@ -131,6 +139,8 @@ public:
     // What compute_bind_* set up and the next dispatch consumes.
     // The layout supplies each slot's schema; the groups supply the resources whose accesses are declared at dispatch.
     vulkan_pipeline_layout const* _bound_pipeline_layout = nullptr;
+    /// The bound compute pipeline, which a polyfilled mesh draw binds again after its own compute half.
+    VkPipeline _bound_compute_pipeline = VK_NULL_HANDLE;
     cc::vector<vulkan_binding_group const*> _bound_groups;
     // The bound compute or raytracing pipeline's footprint, which the dispatch declares its groups' accesses from.
     // The pipeline itself is kept alive by keep_bound.
@@ -178,6 +188,7 @@ public:
     VkRect2D _rendering_area = {};
     /// The layers every target of the scope spans, which a vertex stage's `@layer` picks among.
     u32 _rendering_layer_count = 1;
+    u32 _rendering_view_mask = 0; // nonzero for a rendering of several views; a reopen repeats it
 
     // Opens the rendering instance from the stored attachments, forcing every load op to LOAD.
     // Body in vulkan_command_list.raster.cc.
@@ -249,6 +260,25 @@ public:
                                 sg::impl::array_declaration_book& book);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
+    /// Binds set 3 of a layout traced in software, right before an op runs.
+    void bind_software_trace(vulkan_pipeline_layout const& layout,
+                             cc::span<vulkan_binding_group const* const> groups,
+                             VkPipelineBindPoint bind_point);
+    vulkan_pipeline_layout const* _software_set_layout = nullptr;
+    u64 _software_set_pool = 0;
+    u32 _software_set_roots[16] = {};
+    u32 _software_set_grid[4] = {};
+    u32 _software_set_addresses[2 * sg::impl::acceleration_address_capacity] = {};
+    u32 _software_set_lengths[16] = {};
+    VkDeviceAddress _software_set_mesh_slots = 0;
+    VkDeviceAddress _software_set_task_slots = 0;
+    /// The slot buffer of the polyfilled mesh draw being recorded, which set 3 names where the layout holds its slots.
+    VkDeviceAddress _mesh_slots = 0;
+    isize _mesh_slots_bytes = 0;
+    /// The record buffer of its task stage, likewise.
+    VkDeviceAddress _task_slots = 0;
+    isize _task_slots_bytes = 0;
+
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
                                 sg::pipeline_stage_flags op_stages);
@@ -329,8 +359,15 @@ protected:
     void raster_set_blend_constants(tg::vec4f constants) override;
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
+    void raster_draw_mesh_tasks(int x, int y, int z) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
+    void raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                              sg::raw_buffer_handle const& args,
+                                              isize offset_in_bytes,
+                                              isize count) override;
 
     // Ray tracing (reached through cmd.raytracing).
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.
@@ -344,6 +381,22 @@ protected:
                                                               int hit_record_stride) override;
     [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
                                                         sg::accel_build_flags flags) override;
+    void raytracing_update_partitioned_tlas(sg::partitioned_tlas const& ptlas,
+                                            sg::ptlas_operations const& ops,
+                                            bool is_first,
+                                            cc::vector<sg::blas_handle>&& released) override;
+    [[nodiscard]] sg::cluster_set_handle raytracing_build_clusters(cc::span<sg::cluster_triangles const> clusters,
+                                                                   sg::accel_build_flags flags) override;
+    void raytracing_build_clusters_indirect(sg::cluster_pool const& pool,
+                                            sg::cluster_indirect_build const& build) override;
+    [[nodiscard]] cc::vector<sg::blas_handle> raytracing_build_cluster_blas(sg::cluster_set_handle const& clusters,
+                                                                            cc::span<sg::cluster_range const> ranges,
+                                                                            sg::accel_build_flags flags,
+                                                                            int hit_record_stride) override;
+    void raytracing_update_partitioned_tlas_indirect(sg::partitioned_tlas const& ptlas,
+                                                     sg::ptlas_indirect_operations const& ops,
+                                                     bool is_first,
+                                                     cc::vector<sg::blas_table_handle>&& released) override;
     void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;
     void raytracing_bind_group(int group_index, sg::binding_group const& group) override;
     void raytracing_dispatch_rays(sg::raytracing_shader_table const& table,

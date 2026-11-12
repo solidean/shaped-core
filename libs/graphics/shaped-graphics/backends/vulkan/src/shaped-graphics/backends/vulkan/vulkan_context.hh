@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_binding_group.hh>
@@ -25,6 +27,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_software_pool.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_swapchain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
@@ -52,6 +55,24 @@ struct sg::backend::vulkan::vulkan_config
     /// this context is unvalidated whatever any other context did, and a later context can validate without touching this one.
     /// D3D12 has only a process-wide switch, which is why its flag is named for activating something global.
     bool enable_validation_layers = false;
+
+    /// SGL shaders are SPIR-V that SGL writes itself, and an entry point it has no lowering for yet goes through DXC.
+    /// `false` takes the text route, SGL's HLSL through DXC, for every SGL shader of this context.
+    bool native_spirv = true;
+
+    /// Ask the driver to keep what it reports of each pipeline it compiles, through VK_KHR_pipeline_executable_properties:
+    /// registers, spills, instruction counts, which `compute_pipeline::driver_statistics` hands back.
+    /// Off by default, since capturing costs at pipeline creation; a device without the extension reports nothing.
+    bool capture_driver_statistics = false;
+
+    /// Ask the driver to keep its forms of each pipeline's code too, its ISA among them, which
+    /// `compute_pipeline::driver_representations` hands back; implies `capture_driver_statistics`.
+    /// Off by default, since keeping them costs more at pipeline creation than the statistics do.
+    bool capture_driver_representations = false;
+
+    /// SGL's own SPIR-V carries each operation's `.sgl` line and the sources it names, for RenderDoc (EMIT-257).
+    /// It changes no instruction, only the module's size, and does nothing for what DXC compiles.
+    bool native_line_tables = false;
 
     /// Additionally enable the layer's *synchronization* validation, which tracks every resource access across
     /// submissions and reports hazards no other check can see — a read racing an earlier submission's write.
@@ -92,7 +113,40 @@ struct sg::backend::vulkan::vulkan_config
     /// A bindless group takes its whole table per snapshot, so this must hold several of the largest one.
     isize descriptor_heap_bytes = isize(16) * 1024 * 1024;
     float descriptor_transient_fraction = 0.25f;
+
+    // How a context is created to a spec someone else dictates, such as an XR runtime's.
+    // Each is empty by default, and sg then decides alone.
+
+    /// Instance extensions enabled beside sg's own.
+    /// Creation fails naming the first one the loader does not offer.
+    cc::vector<cc::string> extra_instance_extensions;
+
+    /// Device extensions enabled beside sg's own.
+    /// Creation fails naming the first one the chosen device does not offer, rather than choosing another device.
+    cc::vector<cc::string> extra_device_extensions;
+
+    /// Creates the instance in place of `vkCreateInstance`, from the create info sg built.
+    /// For a runtime that adds what it needs and creates the instance itself, as OpenXR's `xrCreateVulkanInstanceKHR` does.
+    /// The instance it hands back in `out` is the context's from then on, and the context destroys it.
+    cc::unique_function<VkResult(VkInstanceCreateInfo const& info, VkInstance& out)> create_instance;
+
+    /// The physical device to use, chosen on the instance sg created, in place of sg's own ranking.
+    /// VK_NULL_HANDLE fails creation.
+    /// It must have a graphics queue family and meet sg's floor like any other device; a device that does not is refused, not replaced.
+    cc::unique_function<VkPhysicalDevice(VkInstance instance)> choose_physical_device;
+
+    /// Creates the device in place of `vkCreateDevice`, from the create info sg built.
+    /// For a runtime that creates the device itself, as OpenXR's `xrCreateVulkanDeviceKHR` does.
+    /// The device it hands back in `out` is the context's from then on, and the context destroys it.
+    cc::unique_function<VkResult(VkPhysicalDevice physical_device, VkDeviceCreateInfo const& info, VkDevice& out)> create_device;
 };
+
+namespace sg::backend::vulkan
+{
+/// The Vulkan version every context is created at, and the least a device must report.
+/// What a runtime with a version range of its own — OpenXR's graphics requirements — is checked against.
+inline constexpr u32 required_api_version = VK_API_VERSION_1_3;
+} // namespace sg::backend::vulkan
 
 /// Severity of a validation-layer message, mapped from VkDebugUtilsMessageSeverityFlagBitsEXT.
 /// Ordered worst-first so `severity <= vulkan_message_severity::warning` reads as "warning or worse",
@@ -144,6 +198,16 @@ public:
         _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
         _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
         _texture_compression_bc = features.textureCompressionBC == VK_TRUE;
+        _indirect_first_instance = features.drawIndirectFirstInstance == VK_TRUE;
+
+        // a property rather than a feature: no creation enables it, and SPIR-V asks it of each entry point
+        auto vulkan12
+            = VkPhysicalDeviceVulkan12Properties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+        auto properties
+            = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &vulkan12};
+        vkGetPhysicalDeviceProperties2(_physical_device, &properties);
+        _float_specials = vulkan12.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
+        _float_denormals = vulkan12.shaderDenormPreserveFloat32 == VK_TRUE;
 
         // A device must have D24S8 or D32S8 as a depth-stencil attachment, and not necessarily the one sg names.
         auto d32s8 = VkFormatProperties{};
@@ -167,6 +231,14 @@ public:
         }
     }
 
+    [[nodiscard]] sg::impl::software_acceleration_pool* software_pool() override { return &_software_pool; }
+
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
+    {
+        return f == sg::feature::ray_tracing_motion_blur ? sg::feature_implementation::emulated
+                                                         : sg::feature_implementation::native;
+    }
+
     // Runs shutdown() before the base dtor asserts it, and swallows what shutdown() throws.
     // A lost device makes the drain inside shutdown() throw sg::device_lost_exception, and a destructor reached while
     // that same exception is unwinding would then call std::terminate — turning a recoverable device loss into an
@@ -180,6 +252,14 @@ public:
     // create_vulkan_context fills these in once it has picked a physical device.
     using sg::context::set_adapter_info;
 
+    /// The native objects this context runs on, for whoever must name them to another API, such as an XR runtime's session.
+    /// All are owned by the context and outlive nothing it does not.
+    /// **The queue is externally synchronized**: anything else that submits to it, or calls an API that does, holds `queue_guard()` meanwhile.
+    [[nodiscard]] VkInstance instance() const { return _instance; }
+    [[nodiscard]] VkPhysicalDevice physical_device() const { return _physical_device; }
+    [[nodiscard]] VkDevice device() const { return _device; }
+    [[nodiscard]] VkQueue queue() const { return _queue; }
+
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
 
@@ -190,6 +270,14 @@ public:
 
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
+
+    /// Whether VK_NV_cluster_acceleration_structure is enabled, with its entry points loaded: sg::feature::clustered_geometry.
+    [[nodiscard]] bool is_clustered_geometry_supported() const { return _clusters.has_value(); }
+    /// The device's cluster limits and alignments, which only a context with clustered geometry has.
+    [[nodiscard]] VkPhysicalDeviceClusterAccelerationStructurePropertiesNV const& cluster_properties() const
+    {
+        return _clusters.value();
+    }
 
     /// Whether VK_EXT_opacity_micromap is enabled, with its entry points loaded: sg::feature::opacity_micromap.
     [[nodiscard]] bool is_opacity_micromap_supported() const { return _opacity_micromap.has_value(); }
@@ -203,6 +291,10 @@ public:
     /// The VkBufferUsageFlags a buffer of `usage` is created with, here and by every requirements probe alike.
     /// Where micromaps are enabled, an acceleration-structure usage carries its micromap twin too, so one buffer serves either build.
     [[nodiscard]] VkBufferUsageFlags vk_buffer_usage(sg::buffer_usages usage) const;
+
+    /// The alignment a buffer of `usage` is placed at, here and by every requirements probe alike: `required`, raised
+    /// to what Vulkan demands of the addresses a use reads through, which no memory requirement reports.
+    [[nodiscard]] isize vk_buffer_alignment(sg::buffer_usages usage, VkDeviceSize required) const;
 
     /// Serializes every queue operation on this device.
     ///
@@ -257,6 +349,9 @@ public:
     }
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+    [[nodiscard]] bool prefers_native_spirv() const override { return _native_spirv; }
+    [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
+    [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
 
     /// Vulkan has every stage sg models, and most of the rest are device facts.
     [[nodiscard]] bool supports(sg::feature f) const override
@@ -276,6 +371,8 @@ public:
             return _geometry_shader;
         case sg::feature::tessellation_shader:
             return _tessellation_shader;
+        case sg::feature::mesh_shader:
+            return _mesh_shader;
         case sg::feature::binding_arrays:
         case sg::feature::readwrite_image_formats:
         case sg::feature::unaligned_block_compression:
@@ -283,6 +380,8 @@ public:
             return true;
         case sg::feature::texture_compression_bc:
             return _texture_compression_bc;
+        case sg::feature::indirect_first_instance:
+            return _indirect_first_instance;
         case sg::feature::primitive_index:
             // SPIR-V's PrimitiveId in a fragment shader needs the Geometry capability, which the device feature grants.
             return _geometry_shader;
@@ -300,6 +399,17 @@ public:
             return _shader_f16;
         case sg::feature::shader_int16:
             return _shader_int16;
+        case sg::feature::shader_int64:
+            return _shader_int64;
+        case sg::feature::shader_f64:
+            return _shader_f64;
+        case sg::feature::shader_int64_atomics:
+        case sg::feature::shader_int64_min_max_atomics:
+            return _shader_int64_atomics;
+        case sg::feature::shader_shared_int64_atomics:
+            return _shader_shared_int64_atomics;
+        case sg::feature::unbounded_binding_arrays:
+            return _unbounded_binding_arrays;
         case sg::feature::subgroups:
             return _subgroups;
         case sg::feature::vertex_layer_output:
@@ -307,8 +417,21 @@ public:
         case sg::feature::float_atomic_add:
             return _float_atomic_add;
         case sg::feature::shader_execution_reordering:
-            // VK_EXT_ray_tracing_invocation_reorder is a device's, but no DXC lowers HLSL's reordering to SPIR-V yet.
+            return _shader_execution_reordering;
+        case sg::feature::float_specials:
+            return _float_specials;
+        case sg::feature::float_denormals:
+            return _float_denormals;
+        case sg::feature::view_instancing:
+            return _view_instancing;
+        case sg::feature::pixel_view_read_workaround:
             return false;
+        case sg::feature::ray_tracing_motion_blur:
+            // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet, so a
+            // package's SOFTWARE_TRACE walks it in software
+            return is_raytracing_supported();
+        case sg::feature::vertex_pipeline_stores:
+            return _vertex_pipeline_stores;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -319,6 +442,10 @@ public:
             return true;
         case sg::feature::opacity_micromap:
             return is_opacity_micromap_supported();
+        case sg::feature::partitioned_tlas:
+            return _partitioned_tlas;
+        case sg::feature::clustered_geometry:
+            return _clusters.has_value();
         }
         return false;
     }
@@ -428,6 +555,17 @@ public:
                                                                         VkBufferUsageFlags extra_usage = 0);
     [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
                                                                           sg::allocation_info const& alloc);
+    /// An sg texture over an image someone else created, such as an XR runtime's swapchain image.
+    ///
+    /// `layout` is the layout the image is in when the first list using the texture runs, and sg tracks it from there;
+    /// `undefined` makes the first list transition it out of UNDEFINED, discarding its contents, as for any new texture.
+    /// Hand it back in the layout its owner expects with `cmd.ensure_layout`, since sg leaves it where the last list did.
+    /// The texture never destroys the image, so the image must outlive it and every list that used it.
+    /// Vulkan cannot be asked an image's shape, so `desc` must be the one it was created with; nothing checks it.
+    [[nodiscard]] cc::result<vulkan_texture_handle> wrap_vulkan_texture(VkImage image,
+                                                                        sg::texture_description const& desc,
+                                                                        sg::texture_layout layout);
+
     /// The VkImage a texture of `desc` is, created with no memory bound: what create_vulkan_texture binds, and what a heap asks requirements of.
     [[nodiscard]] cc::result<VkImage> create_vk_image(sg::texture_description const& desc);
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
@@ -472,6 +610,15 @@ public:
     {
         return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes, contents));
     }
+
+    /// Sizes and allocates a partitioned tlas for `desc`'s capacities; its first update builds it.
+    [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
+        sg::partitioned_tlas_description const& desc) override;
+    [[nodiscard]] u64 blas_address_of(sg::blas const& blas) const override;
+    [[nodiscard]] u64 buffer_address_of(sg::raw_buffer const& buffer) const override;
+    /// Sizes and allocates a cluster pool for `desc`'s capacities; its first build fills it.
+    [[nodiscard]] cc::result<sg::cluster_pool_handle> try_create_cluster_pool(
+        sg::cluster_pool_description const& desc) override;
 
     [[nodiscard]] cc::result<vulkan_swapchain_handle> create_vulkan_swapchain(sg::swapchain_description const& desc);
 
@@ -571,13 +718,16 @@ public:
     }
     [[nodiscard]] cc::result<vulkan_staging_binding_group_handle> create_vulkan_staging_binding_group(
         sg::binding_group_layout_handle const& layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope);
 
     [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
         sg::binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope) override
     {
-        return cc::result<sg::staging_binding_group_handle>(create_vulkan_staging_binding_group(layout, scope));
+        return cc::result<sg::staging_binding_group_handle>(
+            create_vulkan_staging_binding_group(layout, unbounded_capacity, scope));
     }
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
@@ -795,6 +945,7 @@ public:
 
     /// Descriptors live here, and a binding group is a range of it.
     vulkan_descriptor_heap _descriptor_heap;
+    vulkan_software_pool _software_pool = {*this};
 
     /// The objects a descriptor can only name, rather than describe inline.
     /// Both are caches for the context's life: a view or sampler an sg value type describes has no lifetime of its
@@ -819,6 +970,8 @@ public:
 
     // Set once at creation where VK_EXT_opacity_micromap is enabled; see is_opacity_micromap_supported.
     cc::optional<VkPhysicalDeviceOpacityMicromapPropertiesEXT> _opacity_micromap;
+    // Set once at creation where VK_NV_cluster_acceleration_structure is enabled; see is_clustered_geometry_supported.
+    cc::optional<VkPhysicalDeviceClusterAccelerationStructurePropertiesNV> _clusters;
 
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;
@@ -861,18 +1014,51 @@ public:
     /// The device features of the same names, enabled wherever the device has them.
     bool _geometry_shader = false;
     bool _texture_compression_bc = false;
+    bool _indirect_first_instance = false;
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
+    bool _float_specials = false;
+    bool _float_denormals = false;
     bool _wireframe_fill = false;
     bool _depth32_float_stencil8 = false;
     /// The 16-bit kinds each with the 16-bit buffer storage they need, and the whole subgroup family in compute and pixel.
     /// Creation enables the device features behind them wherever the device has them.
     bool _shader_f16 = false;
     bool _shader_int16 = false;
+    bool _shader_int64 = false;
+    bool _shader_f64 = false;
+    bool _shader_int64_atomics = false;
+    bool _shader_shared_int64_atomics = false;
+    /// `descriptorBindingVariableDescriptorCount`, enabled wherever the device has it.
+    bool _unbounded_binding_arrays = false;
     bool _subgroups = false;
     bool _vertex_layer_output = false;
+    /// `multiview`, enabled wherever the device has it.
+    bool _view_instancing = false;
+    /// `vertexPipelineStoresAndAtomics`, enabled wherever the device has it.
+    bool _vertex_pipeline_stores = false;
     /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
     bool _float_atomic_add = false;
+    /// `VK_EXT_ray_tracing_invocation_reorder`, enabled where the device reorders rather than only accepting the calls.
+    bool _shader_execution_reordering = false;
+    /// `VK_NV_partitioned_acceleration_structure`, enabled with its entry points loaded.
+    bool _partitioned_tlas = false;
+    bool _native_spirv = false;
+    bool _native_line_tables = false; // vulkan_config::native_line_tables
+    /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.
+    bool _mesh_shader = false;
+    PFN_vkCmdDrawMeshTasksEXT _cmd_draw_mesh_tasks = nullptr;
+    /// VK_KHR_pipeline_executable_properties, where `vulkan_config::capture_driver_statistics` asked and the device has it.
+    PFN_vkGetPipelineExecutablePropertiesKHR _get_pipeline_executable_properties = nullptr;
+    PFN_vkGetPipelineExecutableStatisticsKHR _get_pipeline_executable_statistics = nullptr;
+    [[nodiscard]] bool captures_driver_statistics() const { return _get_pipeline_executable_statistics != nullptr; }
+    /// Where `vulkan_config::capture_driver_representations` asked too.
+    PFN_vkGetPipelineExecutableInternalRepresentationsKHR _get_pipeline_executable_representations = nullptr;
+    [[nodiscard]] bool captures_driver_representations() const
+    {
+        return _get_pipeline_executable_representations != nullptr;
+    }
+    PFN_vkCmdDrawMeshTasksIndirectEXT _cmd_draw_mesh_tasks_indirect = nullptr;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.
     struct subgroup_size_control
     {
@@ -918,6 +1104,10 @@ public:
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
     // cc::mutex's value ctor is explicit, so the type is named rather than left to `= {…}`.
     cc::mutex<sg::submission_token> _next_submission = cc::mutex<sg::submission_token>(sg::submission_token::first);
+
+    /// The epoch of the last list submitted, read and written only under `_next_submission`.
+    /// The first list of a newer epoch carries the barrier that makes the epoch boundary one (see submit_command_list).
+    sg::epoch _last_submitted_epoch = sg::epoch::first;
     cc::mutex<vulkan_command_pool_set> _command_pools;
 
     // Hands each open command list a dense access-tracking slot, acquired at create and released at submit/drop.

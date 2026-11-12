@@ -131,6 +131,39 @@ TEST("sg metal - a binding group refuses an unknown binding name")
     CHECK(group.has_error());
 }
 
+TEST("sg metal - a sampler array is supplied element by element, each once and every one")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto const b = sg::binding{.name = "Samplers", .space = 0, .index = 0, .count = 3, .type = sg::binding_type::sampler};
+    auto layout
+        = ctx->create_metal_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
+    REQUIRE(layout.has_value()).context(layout.has_error() ? layout.error().to_string() : cc::string());
+
+    auto const group_of = [&](cc::span<int const> elements)
+    {
+        auto samplers = cc::vector<sg::named_sampler>();
+        for (auto const e : elements)
+            samplers.push_back({.name = "Samplers", .sampler = {}, .element = e});
+        return ctx->create_metal_binding_group(layout.value(), {}, samplers, sg::lifetime_scope::persistent);
+    };
+    auto const message_of = [](auto const& r) { return r.has_error() ? r.error().to_string() : cc::string(); };
+
+    auto const all = group_of(cc::vector<int>{2, 0, 1});
+    CHECK(all.has_value()).context(message_of(all));
+
+    auto const missing = group_of(cc::vector<int>{0, 2});
+    CHECK(message_of(missing).contains("element 1 of sampler array 'Samplers' was not provided"));
+
+    auto const twice = group_of(cc::vector<int>{0, 1, 1, 2});
+    CHECK(message_of(twice).contains("element 1 of sampler 'Samplers' was provided twice"));
+
+    auto const past = group_of(cc::vector<int>{0, 1, 3});
+    CHECK(message_of(past).contains("sampler 'Samplers' has no element 3"));
+}
+
 TEST("sg metal - a staging group snapshots, caches and re-mints")
 {
     auto const ctx = mtl::test::make_context();

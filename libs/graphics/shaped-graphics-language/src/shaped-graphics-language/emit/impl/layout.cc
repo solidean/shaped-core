@@ -135,7 +135,7 @@ placed_members place_from(checked_module const& m,
 
 sgl::i32 sgl::emit::impl::scalar_size_of(builtins::type_record const& record)
 {
-    return check::is_16_bit(record.leaf_kind) ? 2 : 4;
+    return check::scalar_bytes_of(record.leaf_kind);
 }
 
 sgl::i32 sgl::emit::impl::natural_alignment_of(builtins::type_record const& record)

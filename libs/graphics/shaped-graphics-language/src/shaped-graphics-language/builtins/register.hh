@@ -27,8 +27,12 @@ void register_textures(registry& r);
 void register_bytes(registry& r);
 /// `&`, `|`, `^`, `~`, `<<` and `>>` of `int`, `uint` and their vectors.
 void register_bit_math(registry& r);
+/// Arithmetic, comparisons, bits and `abs`, `min`, `max` and `clamp` of `long`, `ulong`, `double` and their vectors.
+void register_64_bit_math(registry& r);
 /// Transcendentals, rounding, derivatives, geometry, integer bit functions, packing and reinterpreting bits.
 void register_math(registry& r);
+/// The rounding, roots, geometry and tests of a double and its vectors, which the text writes as HLSL of its own.
+void register_double_math(registry& r);
 /// The barriers of a compute workgroup, its uniform load, the atomics and a geometry stage's streams.
 void register_sync(registry& r);
 /// The subgroup and quad operations.
@@ -44,9 +48,10 @@ namespace sgl::builtins::impl
 {
 /// Every builtin type a value of passes through `select` whole, and through `workgroup_uniform_load` (CHK-365, CHK-374).
 inline constexpr cc::string_view k_selectable[]
-    = {"float", "float2", "float3", "float4", "int",    "int2",   "int3",    "int4",    "uint",   "uint2", "uint3",
-       "uint4", "bool",   "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half",   "half2", "half3",
-       "half4", "short",  "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4"};
+    = {"float", "float2", "float3", "float4", "int",    "int2",   "int3",    "int4",    "uint",    "uint2",  "uint3",
+       "uint4", "bool",   "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half",    "half2",  "half3",
+       "half4", "short",  "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4", "long",   "long2",
+       "long3", "long4",  "ulong",  "ulong2", "ulong3", "ulong4", "double",  "double2", "double3", "double4"};
 
 /// `@pure @operator("op") fun name(a: lhs, b: rhs) -> result`, written `a op b` by every target.
 void add_infix(registry& r,
@@ -68,6 +73,12 @@ void add_operator(registry& r,
                   evaluator evaluate,
                   spelling write,
                   undefined_check undefined_when = nullptr);
+
+/// `!=` of float or half lanes, true where either is a NaN (EMIT-186): HLSL writes it `!(a == b)`, since DXC lowers its
+/// own float `!=` to SPIR-V as an ordered compare, false for a NaN; every other target writes `a != b`.
+[[nodiscard]] spelling float_not_equal();
+/// The whole-vector `!=` of float or half lanes, `any` over each lane's `float_not_equal`.
+[[nodiscard]] spelling float_vectors_differ();
 
 /// `/` and `%` of `int`, `uint` and their vectors, componentwise, each reading its kind off its leaves.
 /// Both truncate toward zero, as every target does: `-7 / 2 == -3` and `-7 % 3 == -1`.

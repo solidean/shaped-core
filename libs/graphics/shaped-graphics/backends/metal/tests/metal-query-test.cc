@@ -54,28 +54,58 @@ TEST("sg metal - timestamps are nanoseconds on the CPU's own timebase")
     CHECK(measured_seconds < 1.1);
 }
 
-TEST("sg metal - a counter heap goes back to the free list and comes out clean")
+TEST("sg metal - a counter heap range goes back to the free list and comes out clean")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    // Heaps are pooled, so the slots one list wrote are what the next list would read had they not been invalidated.
+    // Ranges are pooled, so the slots one list wrote are what the next list would read had they not been invalidated.
     auto& queries = ctx->queries();
     if (!queries.supports_timestamps())
         SKIP("this metal device hands out no counter heap");
 
-    auto lease = queries.acquire_heap();
+    auto lease = queries.acquire_lease();
     REQUIRE(lease != nullptr);
     auto* const heap = lease->heap;
+    auto const first = lease->first_slot;
     lease->next_slot = 3;
 
-    queries.release_heap(cc::move(lease));
+    queries.release_lease(cc::move(lease));
 
-    auto again = queries.acquire_heap();
+    auto again = queries.acquire_lease();
     REQUIRE(again != nullptr);
-    CHECK(again->heap == heap);               // pooled rather than remade
+    CHECK(again->heap == heap); // pooled rather than remade
+    CHECK(again->first_slot == first);
     CHECK(again->next_slot == 0);             // bump allocator reset
     CHECK(!again->shared_future->is_valid()); // and a fresh future, so the previous leaseholder's handles keep theirs
-    queries.release_heap(cc::move(again));
+    queries.release_lease(cc::move(again));
+}
+
+TEST("sg metal - one counter heap serves many lists at once, in disjoint ranges")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+    auto& queries = ctx->queries();
+    if (!queries.supports_timestamps())
+        SKIP("this metal device hands out no counter heap");
+
+    // Metal grants a process 32 counter heaps whatever their size, measured on an M4 on 2026-11-10.
+    // So a heap is shared: as many lists as it has ranges hold one at once, and only the next makes a second heap.
+    auto constexpr ranges = mtl::metal_query_system::SlotsPerHeap / mtl::metal_query_system::SlotsPerLease;
+    auto leases = cc::vector<cc::unique_ptr<mtl::metal_counter_heap_lease>>();
+    for (auto i = 0; i < ranges; ++i)
+    {
+        leases.push_back(queries.acquire_lease());
+        REQUIRE(leases.back() != nullptr);
+        CHECK(leases.back()->heap == leases[0]->heap);
+        CHECK(leases.back()->first_slot == i * mtl::metal_query_system::SlotsPerLease);
+    }
+    leases.push_back(queries.acquire_lease());
+    REQUIRE(leases.back() != nullptr);
+    CHECK(leases.back()->heap != leases[0]->heap);
+
+    for (auto& lease : leases)
+        queries.release_lease(cc::move(lease));
 }

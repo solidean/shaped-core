@@ -8,6 +8,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
 #include <geometry/fbx_fixtures.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
 #include <shaped-viewer/asset/uri_resolver.hh>
@@ -1174,13 +1175,13 @@ TEST("sv::asset_loader - Bistro exterior imports when present")
         SKIP("thorough only: imports a 114 MB scene");
 
     // Absent is a skip; present and failing to load is a failure, which is what this test is for.
-    if (cc::file_read_stream_adapter::open(SV_TEST_BISTRO_DIR "/BistroExterior.fbx").has_error())
+    if (cc::file_read_stream_adapter::open(nx::source_path(SV_TEST_BISTRO_DIR "/BistroExterior.fbx")).has_error())
         SKIP("Bistro is not fetched; uv run extern/bistro/fetch-bistro.py installs it");
 
     auto lib = make_library();
     auto const loader = sv::asset_loader(
         {.materials = &lib, .import_textures = false, .fbx_materials = sv::fbx_material_convention::orca_metal_rough});
-    auto const asset = REQUIRED_VALUE(loader.load(SV_TEST_BISTRO_DIR "/BistroExterior.fbx"));
+    auto const asset = REQUIRED_VALUE(loader.load(nx::source_path(SV_TEST_BISTRO_DIR "/BistroExterior.fbx")));
 
     CHECK(asset.materials.size() >= 132);
     CHECK(asset.lights.size() == 1);

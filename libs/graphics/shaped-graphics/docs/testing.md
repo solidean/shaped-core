@@ -43,6 +43,18 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   `SG_HAS_PINNED_WARP` tells a test which of the two WARPs it runs on.
   `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.
   `pipelines` or `shaders` turns off one of the two, and the driver's own cache is out of its reach.
+- **On Intel, a test process keeps to the system D3D12 runtime**, as every process does there by default ([backends.md](concepts/backends.md)).
+  A process that loaded the Agility SDK there compiles every shader anew, vulkan's too.
+  [The external entry](../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the reproduction.
+  `shaped-graphics-test` starts itself again on the Agility SDK for the invocables listed in `tests/backends/dx12-agility-process.cc`.
+  Those are the ones whose dx12 path needs SM 6.9, shader execution reordering or opacity micromaps.
+  **An invocable that comes to need the Agility SDK on dx12 is added to that list**, or no Intel run reaches that path.
+  `SC_DX12_RUNTIME=system` or `agility` overrides the choice for a whole process, on any vendor.
+- **`SC_GPU` moves a whole run onto one GPU**, on dx12 and vulkan alike: `SC_GPU=amd uv run dev.py test` runs every hardware driver on the AMD one.
+  `intel`, `amd` and `nvidia` match by vendor, and anything else is a case-insensitive substring of the adapter's name, as `B580`.
+  A selector that matches nothing fails each context rather than falling back, so a run never reports results from a GPU it did not ask for.
+  It narrows the hardware search only: WARP, `SC_DX12_ADAPTER`'s hiding, and an adapter chosen in code are untouched by it.
+  Every context logs at info which adapter and driver it runs on, so a run's log says which GPU it reached.
 - **A test passes on any adapter.**
   Hardware and WARP differ in precision, in timing and in what a driver does with a blob, and a test is written against the contract rather than against one of them.
   Pinning a test to an adapter is reserved for a **known bug** in that adapter, named where it is pinned, and the list of those stays short.

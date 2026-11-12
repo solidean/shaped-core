@@ -2,6 +2,7 @@
 #include "lsp-test-support.hh"
 
 #include <clean-core/string/uri.hh>
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 
 using namespace lsp_test;
@@ -139,7 +140,7 @@ TEST("sgl lsp - opening a document publishes its diagnostics, with a summary whe
 
 TEST("sgl lsp - a file of the prelude is checked in its own place, not behind a second copy of itself", main_thread)
 {
-    auto const dir = cc::string(sgl::impl::prelude_directory());
+    auto const dir = nx::source_path(SGL_PRELUDE_DIR);
     auto const uri_of = [&](cc::string_view name)
     {
         return cc::string(dir.starts_with("/") ? "file://" : "file:///")
@@ -273,6 +274,81 @@ TEST("sgl lsp - a diagnostic the checker knows a fix for offers it as a preferre
     CHECK(elsewhere["result"].size() == 0);
 }
 
+namespace
+{
+/// The params of a request about one position of `file:///t.sgl`.
+cc::string at_position(i32 line, i32 character)
+{
+    return cc::format(R"({{"textDocument":{{"uri":"file:///t.sgl"}},"position":{{"line":{},"character":{}}}}})", line,
+                      character);
+}
+} // namespace
+
+TEST("sgl lsp - a hover shows the declaration as SGL writes it, with its doc comment, over the name's range", main_thread)
+{
+    auto s = session("/// Half of `x`.\nfun half(x: float) -> float => x * 0.5\nfun f() -> float => half(2.0)\n");
+    auto const r = s.ask(5, "textDocument/hover", at_position(2, 22));
+    auto const contents = r["result"]["contents"];
+    CHECK(contents["kind"].as_string() == "markdown");
+    CHECK(contents["value"].as_string() == "```sgl\nfun half(x: float) -> float\n```\n\nHalf of `x`.");
+    CHECK(r["result"]["range"]["start"]["line"].as_double() == 2);
+    CHECK(r["result"]["range"]["start"]["character"].as_double() == 20);
+    CHECK(r["result"]["range"]["end"]["character"].as_double() == 24);
+
+    // a keyword has nothing to show, which is a null result
+    auto const nothing = s.ask(6, "textDocument/hover", at_position(2, 1));
+    CHECK(nothing.has("result"));
+    CHECK(nothing["result"].is_null());
+}
+
+TEST("sgl lsp - go to definition lands on the declared name, a builtin's in its virtual prelude document", main_thread)
+{
+    auto s = session("fun f(v: vec3) -> float:\n    let d = dot(v, v)\n    return d\n");
+    auto const local = s.ask(5, "textDocument/definition", at_position(2, 11));
+    CHECK(local["result"]["uri"].as_string() == "file:///t.sgl");
+    CHECK(local["result"]["range"]["start"]["line"].as_double() == 1);
+    CHECK(local["result"]["range"]["start"]["character"].as_double() == 8);
+
+    auto const builtin = s.ask(6, "textDocument/definition", at_position(1, 13));
+    CHECK(builtin["result"]["uri"].as_string().starts_with("sgl-prelude:/"));
+    // the virtual document the client fetches holds the declaration at that line
+    auto const text = s.ask(7, "sgl/preludeText", cc::format(R"({{"uri":"{}"}})", builtin["result"]["uri"].as_string()));
+    auto const line = i32(builtin["result"]["range"]["start"]["line"].as_double());
+    auto const prelude = text["result"]["text"].as_string();
+    auto start = isize(0);
+    for (auto i = 0; i < line; ++i)
+    {
+        start = prelude.find('\n', start) + 1;
+        REQUIRE(start > 0);
+    }
+    auto const end = prelude.find('\n', start);
+    CHECK(prelude.subview({.start = start, .end = end < 0 ? prelude.size() : end}).contains("fun dot("));
+}
+
+TEST("sgl lsp - completion after a dot lists the object's members, and announces the dot as its trigger", main_thread)
+{
+    auto s = session("struct light:\n    power: float\nfun f(l: light) -> float:\n    let p = l.\n    return 0.0\n");
+    auto const r = s.ask(5, "textDocument/completion", at_position(3, 14));
+    auto const items = r["result"];
+    REQUIRE(items.size() == 1);
+    CHECK(items[0]["label"].as_string() == "power");
+    CHECK(items[0]["kind"].as_double() == i32(lsp::completion_item_kind::field));
+    CHECK(items[0]["detail"].as_string() == "light.power : float");
+
+    // a name's completions include the parameter, the prelude's builtins and the keywords
+    auto const names = s.ask(6, "textDocument/completion", at_position(4, 11));
+    auto has = [&](cc::string_view label)
+    {
+        for (auto i = isize(0); i < names["result"].size(); ++i)
+            if (names["result"][i]["label"].as_string() == label)
+                return true;
+        return false;
+    };
+    CHECK(has("l"));
+    CHECK(has("dot"));
+    CHECK(has("return"));
+}
+
 TEST("sgl lsp - positions count UTF-16 units unless the client offers UTF-8", main_thread)
 {
     // `é` is two bytes and one UTF-16 unit, so the unknown name after it on its line sits one character further left
@@ -388,7 +464,7 @@ TEST("sgl lsp - a test judged by the diagnostics it expects is one mark on its k
 TEST("sgl lsp - an error in a module the document uses is shown on its `use`, pointing into the module's file",
      main_thread)
 {
-    sgl_lsp::set_module_dirs({cc::string(SGL_LSP_TEST_MODULES_DIR)});
+    sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_MODULES_DIR)});
     auto s = session("// uses a broken module\nuse broken\nfun g() -> float => broken.f()\n");
     sgl_lsp::set_module_dirs({});
     auto const p = s.last("textDocument/publishDiagnostics");
@@ -398,9 +474,156 @@ TEST("sgl lsp - an error in a module the document uses is shown on its `use`, po
     CHECK(related["location"]["range"]["start"]["line"].as_double() == 3);
 }
 
+TEST("sgl lsp - every edit of a document continues from one parse and one check of the modules it uses", main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR)});
+    auto const first = sgl_lsp::analyze(document_of("use shading\nfun g() -> float => shading.lit(1.0)\n"));
+    auto const edited = sgl_lsp::analyze(document_of("use shading\nfun g() -> float => shading.lit(2.0)\n"));
+    auto const other = sgl_lsp::analyze(document_of("use noise\nfun h() -> float => noise.grain(1.0)\n"));
+    sgl_lsp::set_module_dirs({});
+
+    REQUIRE(first->layer != nullptr);
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    CHECK(other->diagnostics.empty());
+    CHECK(edited->library == first->library);
+    CHECK(edited->layer == first->layer);
+    CHECK(other->layer == first->layer);
+    // the layer holds both modules, and each document reaches only what it uses
+    CHECK(first->module.reached_library_files.size() == 2);
+    REQUIRE(other->module.reached_library_files.size() == 1);
+    CHECK(other->library->names[other->module.reached_library_files[0]].ends_with("noise.sgl"));
+    CHECK(first->text_of(first->module.prelude_file_count()).contains("module "));
+}
+
+TEST("sgl lsp - an edit of a module checks it and the modules after it again, and keeps the layers of those before",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\nfun g() -> float => shading.lit(1.0)\n");
+    auto const first = sgl_lsp::analyze(doc);
+    // `shading` uses `noise`, so it comes after it in the chain; an unsaved edit of it is a new last layer
+    auto const shading_uri = lsp::uri_of_path(dir + "/shading.sgl");
+    auto const edited_text
+        = cc::string("module shading\n\nuse noise\n\nfun lit(x: float) -> float => noise.grain(x) * 3.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = shading_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(first->layer != nullptr);
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer != first->layer);
+    auto const before_of = [](sgl::shared_library const& library)
+    {
+        return library.checked.lock([](sgl::shared_library::layers& l)
+                                    { return l.library != nullptr ? l.library->before : nullptr; });
+    };
+    auto const kept = before_of(*first->library);
+    REQUIRE(kept != nullptr);
+    CHECK(before_of(*edited->library) == kept);
+}
+
+TEST("sgl lsp - an edit of a module that leaves what it declares alone moves the modules using it rather than checking "
+     "them again",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\ntest shading.lit(4.0) == 2.0\n");
+    auto const first = sgl_lsp::analyze(doc);
+    // `noise` comes first, since `shading` uses it; its body changes, and nothing it declares
+    auto const noise_uri = lsp::uri_of_path(dir + "/noise.sgl");
+    auto const edited_text
+        = cc::string("module noise\n\n// a line more\nfun grain(x: float) -> float => x * 0.25 + 0.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = noise_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer != first->layer);
+    CHECK(edited->layer->module == "shading");
+    CHECK(edited->layer->layer->is_relocated());
+    CHECK(!edited->layer->before->layer->is_relocated());
+    // the document's test reads the module as it moved, and still passes
+    CHECK(edited->module.tests.size() == first->module.tests.size());
+}
+
+TEST("sgl lsp - an edit moves the modules after it from the library last used, though another edit was made since",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\ntest shading.lit(4.0) == 2.0\n");
+    auto const clean = sgl_lsp::analyze(doc);
+    // an edit of `shading` that makes `lit` triple, then the clean files again: found in the library cache, or made
+    // again where other tests' libraries pushed it out, and the last library either way
+    auto const shading_uri = lsp::uri_of_path(dir + "/shading.sgl");
+    auto const tripled
+        = cc::string("module shading\n\nuse noise\n\nfun lit(x: float) -> float => noise.grain(x) * 3.0\n");
+    auto const other_edit = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = shading_uri, .text = tripled}});
+    auto const found_again = sgl_lsp::analyze(doc);
+    // an edit of `noise` starts from the clean library, so `shading` moves as the clean text, never as the tripled one
+    auto const noise_uri = lsp::uri_of_path(dir + "/noise.sgl");
+    auto const edited_text
+        = cc::string("module noise\n\n// a line more\nfun grain(x: float) -> float => x * 0.25 + 0.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = noise_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(found_again->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer->module == "shading");
+    CHECK(edited->layer->layer->is_relocated());
+    // the document's test reads `shading` as it is on disk: `lit` doubles, where the other edit's tripled
+    REQUIRE(edited->module.tests.size() == clean->module.tests.size());
+    for (auto t = isize(0); t < edited->module.tests.size(); ++t)
+        if (edited->module.tests[t].file == edited->user_file())
+            CHECK(sgl::test::run_test(edited->module, edited->module_files(), i32(t), {}).is_passed());
+    CHECK(other_edit->diagnostics.empty());
+}
+
 TEST("sgl lsp - a module file open in the editor is what the documents using it are checked against", main_thread)
 {
-    sgl_lsp::set_module_dirs({cc::string(SGL_LSP_TEST_MODULES_DIR)});
+    sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_MODULES_DIR)});
     auto s = session("use broken\nfun g() -> float => broken.f()\n");
     auto const last_of_document = [&]
     {
@@ -413,10 +636,153 @@ TEST("sgl lsp - a module file open in the editor is what the documents using it 
     CHECK(last_of_document() == "0:0 unknown-name module broken does not check: nope\n");
 
     // the module opened with an unsaved fix: the document that uses it is checked again, against the fix
-    auto const dir = cc::string(SGL_LSP_TEST_MODULES_DIR);
+    auto const dir = nx::source_path(SGL_LSP_TEST_MODULES_DIR);
     auto const module_uri = dir.starts_with("/") ? "file://" + dir + "/broken.sgl" : "file:///" + dir + "/broken.sgl";
     s.send_open("module broken\n\nfun f() -> float => 1.0\n", module_uri);
     s.settle();
     sgl_lsp::set_module_dirs({});
     CHECK(last_of_document() == "");
+}
+
+TEST("sgl lsp - signature help shows the call's overloads and the argument the cursor is in", main_thread)
+{
+    auto s = session("/// Half of `x`.\nfun halve(x: float, y: float) -> float => x * y\nfun f() -> float => "
+                     "halve(2.0, 1.0)\n");
+    auto const r = s.ask(5, "textDocument/signatureHelp", at_position(2, 31));
+    auto const help = r["result"];
+    REQUIRE(help["signatures"].size() == 1);
+    CHECK(help["signatures"][0]["label"].as_string() == "halve(x: float, y: float) -> float");
+    CHECK(help["signatures"][0]["documentation"]["value"].as_string() == "Half of `x`.");
+    REQUIRE(help["signatures"][0]["parameters"].size() == 2);
+    CHECK(help["signatures"][0]["parameters"][1]["label"].as_string() == "y: float");
+    CHECK(help["activeParameter"].as_double() == 1);
+
+    // outside any call's parens it is a null result
+    auto const nothing = s.ask(6, "textDocument/signatureHelp", at_position(2, 5));
+    CHECK(nothing["result"].is_null());
+}
+
+TEST("sgl lsp - references list the declaration and every use, and leave the declaration out when asked", main_thread)
+{
+    auto s = session("fun halve(x: float) -> float => x * 0.5\nfun f() -> float => halve(2.0) + halve(4.0)\n");
+    auto const params = [](bool include)
+    {
+        return cc::format(R"({{"textDocument":{{"uri":"file:///t.sgl"}},"position":{{"line":1,"character":22}},)"
+                          R"("context":{{"includeDeclaration":{}}}}})",
+                          include ? "true" : "false");
+    };
+    auto const all = s.ask(5, "textDocument/references", params(true));
+    REQUIRE(all["result"].size() == 3);
+    CHECK(all["result"][0]["range"]["start"]["line"].as_double() == 0);
+    CHECK(all["result"][0]["range"]["start"]["character"].as_double() == 4);
+    CHECK(all["result"][2]["range"]["start"]["character"].as_double() == 33);
+    auto const uses = s.ask(6, "textDocument/references", params(false));
+    CHECK(uses["result"].size() == 2);
+}
+
+TEST("sgl lsp - a rename edits every occurrence, and refuses a keyword and a name the prelude declares", main_thread)
+{
+    auto s = session("fun f(v: vec3) -> float:\n    let d = dot(v, v)\n    return d * d\n");
+    auto const rename = [&](i32 id, i32 line, i32 character, cc::string_view name)
+    {
+        return s.ask(id, "textDocument/rename",
+                     cc::format(R"({{"textDocument":{{"uri":"file:///t.sgl"}},"position":{{"line":{},"character":{}}},)"
+                                R"("newName":"{}"}})",
+                                line, character, name));
+    };
+    auto const ok = rename(5, 2, 11, "len2");
+    auto const edits = ok["result"]["changes"]["file:///t.sgl"];
+    REQUIRE(edits.size() == 3);
+    for (auto i = isize(0); i < edits.size(); ++i)
+        CHECK(edits[i]["newText"].as_string() == "len2");
+    CHECK(edits[0]["range"]["start"]["line"].as_double() == 1);
+
+    CHECK(rename(6, 2, 11, "return")["error"]["message"].as_string().contains("keyword"));
+    CHECK(rename(7, 2, 11, "2d")["error"]["message"].as_string().contains("no name"));
+    // `dot` is the prelude's, so neither a rename nor its preparation is offered
+    CHECK(rename(8, 1, 13, "inner")["error"]["message"].as_string().contains("prelude"));
+    auto const prepare = s.ask(9, "textDocument/prepareRename", at_position(1, 13));
+    CHECK(prepare["result"].is_null());
+    auto const local = s.ask(10, "textDocument/prepareRename", at_position(2, 11));
+    CHECK(local["result"]["placeholder"].as_string() == "d");
+}
+
+TEST("sgl lsp - a hover on an overloaded function lists the rest of the set after a rule", main_thread)
+{
+    auto s = session("fun halve(x: float) -> float => x * 0.5\nfun halve(x: int) -> int => x / 2\nfun f() -> int => "
+                     "halve(2)\n");
+    auto const r = s.ask(5, "textDocument/hover", at_position(2, 20));
+    CHECK(r["result"]["contents"]["value"].as_string()
+          == "```sgl\nfun halve(x: int) -> int\n```\n\n---\n\nOther overloads:\n\n```sgl\nfun halve(x: float) -> "
+             "float\n```");
+}
+
+TEST("sgl lsp - formatting replaces the whole document, edits nothing where it is formatted, and skips around errors",
+     main_thread)
+{
+    auto const doc = R"({"textDocument":{"uri":"file:///t.sgl"},"options":{"tabSize":4,"insertSpaces":true}})";
+    auto s = session("fun f(a: float,b: float) -> float => a*b\n");
+    auto const r = s.ask(5, "textDocument/formatting", doc);
+    REQUIRE(r["result"].size() == 1);
+    CHECK(r["result"][0]["newText"].as_string() == "fun f(a: float, b: float) -> float => a * b\n");
+    CHECK(r["result"][0]["range"]["start"]["line"].as_double() == 0);
+    CHECK(r["result"][0]["range"]["end"]["line"].as_double() == 1);
+
+    auto tidy = session("fun f(a: float, b: float) -> float => a * b\n");
+    CHECK(tidy.ask(5, "textDocument/formatting", doc)["result"].size() == 0);
+
+    // the block around a syntax error stays as written, and the rest is formatted
+    auto broken = session("fun f(a:float) -> float:\n    return (1.0\n");
+    auto const edits = broken.ask(5, "textDocument/formatting", doc)["result"];
+    REQUIRE(edits.size() == 1);
+    CHECK(edits[0]["newText"].as_string() == "fun f(a: float) -> float:\n    return (1.0\n");
+}
+
+TEST("sgl lsp - the outline is the document's declarations, each holding its members, with its first line as detail",
+     main_thread)
+{
+    auto s = session("struct light:\n    power: float\n\nfun shade(l: light) -> float:\n    return l.power\n");
+    auto const r = s.ask(5, "textDocument/documentSymbol", R"({"textDocument":{"uri":"file:///t.sgl"}})");
+    auto const symbols = r["result"];
+    REQUIRE(symbols.size() == 2);
+    CHECK(symbols[0]["name"].as_string() == "light");
+    CHECK(symbols[0]["kind"].as_double() == i32(lsp::symbol_kind::struct_));
+    REQUIRE(symbols[0]["children"].size() == 1);
+    CHECK(symbols[0]["children"][0]["name"].as_string() == "power");
+    CHECK(symbols[1]["name"].as_string() == "shade");
+    CHECK(symbols[1]["detail"].as_string() == "fun shade(l: light) -> float");
+    CHECK(symbols[1]["range"]["end"]["line"].as_double() == 4);
+    CHECK(symbols[1]["selectionRange"]["start"]["character"].as_double() == 4);
+}
+
+TEST("sgl lsp - folding ranges are the lines that own deeper ones, and runs of comments", main_thread)
+{
+    auto s = session("// a\n// b\nfun f() -> float:\n    return 1.0\n");
+    auto const r = s.ask(5, "textDocument/foldingRange", R"({"textDocument":{"uri":"file:///t.sgl"}})");
+    auto const folds = r["result"];
+    REQUIRE(folds.size() == 2);
+    auto has = [&](i32 start, i32 end, bool is_comment)
+    {
+        for (auto i = isize(0); i < folds.size(); ++i)
+            if (folds[i]["startLine"].as_double() == start && folds[i]["endLine"].as_double() == end
+                && folds[i].has("kind") == is_comment)
+                return true;
+        return false;
+    };
+    CHECK(has(2, 3, false));
+    CHECK(has(0, 1, true));
+}
+
+TEST("sgl lsp - workspace symbols match the query's characters in order, across the open documents", main_thread)
+{
+    auto s = session("struct light:\n    power: float\nfun shade_light(l: light) -> float => l.power\n");
+    auto const r = s.ask(5, "workspace/symbol", R"({"query":"shli"})");
+    auto const found = r["result"];
+    REQUIRE(found.size() == 1);
+    CHECK(found[0]["name"].as_string() == "shade_light");
+    CHECK(found[0]["location"]["uri"].as_string() == "file:///t.sgl");
+    // a member names the declaration that holds it
+    auto const member = s.ask(6, "workspace/symbol", R"({"query":"power"})");
+    REQUIRE(member["result"].size() == 1);
+    CHECK(member["result"][0]["containerName"].as_string() == "light");
 }

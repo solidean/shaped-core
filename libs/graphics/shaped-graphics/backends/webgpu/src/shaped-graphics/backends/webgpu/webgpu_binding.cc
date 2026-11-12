@@ -6,6 +6,7 @@
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
 
 namespace sg::backend::webgpu
@@ -236,7 +237,8 @@ cc::span<WGPUSampler const> webgpu_binding_group_layout::slot_samplers() const
 webgpu_pipeline_layout::webgpu_pipeline_layout(webgpu_context& ctx,
                                                cc::hash128 hash,
                                                sg::pipeline_layout_description const& desc)
-  : sg::pipeline_layout(hash, desc.groups, desc.inline_constants), _ctx(ctx)
+  : sg::pipeline_layout(hash, desc.groups, desc.inline_constants, desc.dispatch_grid, desc.static_samplers, desc.mesh_polyfill),
+    _ctx(ctx)
 {
 }
 
@@ -319,6 +321,32 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
     }
     else
         layout->_reserved_block_bytes = layout->_inline_constants_bound_bytes;
+
+    // The threads of a dispatch by threads, behind the roots in the same block.
+    if (desc.dispatch_grid)
+    {
+        auto grid = WGPUBindGroupLayoutEntry{};
+        grid.binding = u32(sg::reserved_dispatch_grid.webgpu_binding);
+        grid.visibility = WGPUShaderStage_Compute;
+        grid.buffer.type = WGPUBufferBindingType_Uniform;
+        grid.buffer.hasDynamicOffset = WGPU_TRUE;
+        grid.buffer.minBindingSize = u64(dispatch_grid_bytes);
+        reserved.push_back(grid);
+        layout->_grid_offset_in_block = layout->_reserved_block_bytes == 0
+                                          ? 0
+                                          : align_up(layout->_reserved_block_bytes, ctx.uniform_offset_alignment());
+        layout->_reserved_block_bytes = layout->_grid_offset_in_block + dispatch_grid_bytes;
+    }
+
+    // A polyfill's slots: what one half writes another reads, never through one layout.
+    for (auto const& slot : sg::impl::polyfill_slots_of(desc.mesh_polyfill))
+    {
+        auto entry = WGPUBindGroupLayoutEntry{};
+        entry.binding = u32(slot.address->webgpu_binding);
+        entry.visibility = slot.is_vertex ? WGPUShaderStage_Vertex : WGPUShaderStage_Compute;
+        entry.buffer.type = slot.is_writable ? WGPUBufferBindingType_Storage : WGPUBufferBindingType_ReadOnlyStorage;
+        reserved.push_back(entry);
+    }
 
     // The context's debug window, which a print or an assert writes (EMIT-183); WebGPU's vertex stage writes no storage.
     if (sg::impl::debug_windows::k_enabled)
@@ -403,6 +431,21 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
         }
     }
 
+    // Before the compare, since the first use creates the scratch buffer and so moves its generation.
+    if (mesh_polyfill() != sg::mesh_polyfill_slots::none)
+    {
+        (void)_ctx.mesh_scratch_for(0);
+        (void)_ctx.task_scratch_for(0);
+        // both only grow, so the sum moves whenever either is replaced
+        auto const generation = _ctx._mesh_scratch.generation + _ctx._task_scratch.generation;
+        if (_reserved_groups_scratch_generation != generation)
+        {
+            _reserved_groups.clear();
+            _reserved_groups_without_page.clear();
+            _reserved_groups_scratch_generation = generation;
+        }
+    }
+
     auto const build = [&](WGPUBuffer page_buffer)
     {
         auto entries = cc::vector<WGPUBindGroupEntry>();
@@ -437,6 +480,24 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             roots.offset = 0;
             roots.size = u64(acceleration_roots_bytes);
             entries.push_back(roots);
+        }
+        if (has_dispatch_grid())
+        {
+            auto grid = WGPUBindGroupEntry{};
+            grid.binding = u32(sg::reserved_dispatch_grid.webgpu_binding);
+            grid.buffer = page_buffer;
+            grid.offset = 0;
+            grid.size = u64(dispatch_grid_bytes);
+            entries.push_back(grid);
+        }
+        for (auto const& slot : sg::impl::polyfill_slots_of(mesh_polyfill()))
+        {
+            auto entry = WGPUBindGroupEntry{};
+            entry.binding = u32(slot.address->webgpu_binding);
+            entry.buffer = slot.is_task ? _ctx._task_scratch.buffer.get() : _ctx._mesh_scratch.buffer.get();
+            entry.offset = 0;
+            entry.size = WGPU_WHOLE_SIZE;
+            entries.push_back(entry);
         }
         if (debug_window != nullptr)
         {
@@ -492,6 +553,8 @@ isize webgpu_pipeline_layout::reserved_dynamic_offsets(u32 block_offset, cc::spa
         out[count++] = block_offset;
     if (_has_acceleration)
         out[count++] = block_offset + u32(_roots_offset_in_block);
+    if (has_dispatch_grid())
+        out[count++] = block_offset + u32(_grid_offset_in_block);
     return count;
 }
 

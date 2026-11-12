@@ -113,7 +113,6 @@ ASYNC_INVOCABLE_TEST("sv - a view stepping sideways in front of a wall reports t
         auto settled = -1;
         auto index = u64(0);
         auto was_traced = false;
-        auto const start = cc::current_time_steady_secs();
         auto guide = cc::vector<tg::vec2f>();
         while (settled < 4)
         {
@@ -144,7 +143,11 @@ ASYNC_INVOCABLE_TEST("sv - a view stepping sideways in front of a wall reports t
             ctx.advance_epoch();
             co_await ctx.idle_completion();
             sv_test::drive_ambient_work();
-            REQUIRE(cc::current_time_steady_secs() - start < 60.0);
+            // a frame that traced nothing was declined while a compile is pending: wait for it rather than spin
+            if (!is_traced)
+                co_await cc::async_settled(sv::background_work(ctx));
+            // frames rather than seconds, since a loaded machine is slow without being wrong
+            REQUIRE(index < 2000);
             if (!motion.is_valid())
             {
                 // Only a layer a temporal member denoises writes the guide.

@@ -284,8 +284,18 @@ shaders::tracer::frame_constants default_frame_constants()
     auto fc = shaders::tracer::frame_constants{};
     fc.samples_per_pixel = 16;
     fc.max_bounces = 5;
+    // a primary ray reads its textures through a whole pixel's footprint unless a layer narrows it
+    fc.primary_scale = 1.0f;
     fc.rng_seed = 1;
     return fc;
+}
+
+void set_pixel_footprint(shaders::tracer::frame_constants& fc, i32 height)
+{
+    auto const extent = 2.0f * fc.camera.up_scaled.length() / f32(height > 0 ? height : 1);
+    auto const orthographic = fc.camera.orthographic > 0.5f;
+    fc.pixel_spread = orthographic ? 0.0f : extent;
+    fc.pixel_width = orthographic ? extent : 0.0f;
 }
 
 namespace

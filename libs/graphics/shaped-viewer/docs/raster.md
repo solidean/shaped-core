@@ -84,7 +84,7 @@ The hybrid joins as a fourth value of the same switch: rasterized primaries, tra
 The generated pixel stage opens with `material_body`: the `sv_supplied_*` constants, one `sv_attribute_*` load per attribute, and `sv_evaluate_material` around the type's own fragment.
 That is byte for byte the text the hit group holds, with one exception:
 
-- **A texture samples at the level the pixel's derivatives pick**, where a hit names level 0.
+- **A texture samples with the pixel's derivatives**, where a hit takes its ray cone's footprint axes as gradients; both filter anisotropically.
 
 Both sample through the same sampler palette, which sits in `tracer.bindless` beside the tables rather than in either path's group 0.
 A generated load names the group that holds its sampler, a raster pipeline binds no `tracer.traced`, and sg allows three groups, all of which a raster pipeline already lists.

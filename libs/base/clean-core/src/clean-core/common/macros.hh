@@ -301,6 +301,12 @@
 // Usage: [[nodiscard]] CC_PURE u64 hash_of(span<byte const> data);
 #define CC_PURE CC_IMPL_PURE
 
+// CC_NO_UNIQUE_ADDRESS - [[no_unique_address]] that also holds under the MSVC ABI.
+// The MSVC ABI ignores the standard spelling, under clang-cl too, and honors only [[msvc::no_unique_address]].
+// Always use this instead of the bare attribute: a layout the bare one promises does not hold on Windows.
+// Usage: CC_NO_UNIQUE_ADDRESS Hash _hasher = {};
+#define CC_NO_UNIQUE_ADDRESS CC_IMPL_NO_UNIQUE_ADDRESS
+
 // CC_BUILTIN_UNREACHABLE - Mark code path as unreachable (UB if reached)
 // Usage: default: CC_BUILTIN_UNREACHABLE;
 #define CC_BUILTIN_UNREACHABLE CC_IMPL_BUILTIN_UNREACHABLE
@@ -389,6 +395,14 @@
 #define CC_IMPL_PURE [[gnu::pure]] // C++ spelling: unambiguous in a leading attribute-seq (vs __attribute__)
 #else
 #define CC_IMPL_PURE
+#endif
+
+// CC_NO_UNIQUE_ADDRESS: keyed on _MSC_VER, the MSVC ABI itself, not on CC_COMPILER_* or CC_ABI_MSVC.
+// clang-cl is CC_COMPILER_CLANG but lays out by the MSVC ABI, and MinGW is CC_ABI_MSVC but lays out by the Itanium ABI.
+#if defined(_MSC_VER)
+#define CC_IMPL_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+#define CC_IMPL_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #endif
 
 #define CC_IMPL_MACRO_JOIN(arg1, arg2) arg1##arg2

@@ -168,6 +168,27 @@ public:
     [[nodiscard]] memory_heap_handle create_memory_heap(isize size_in_bytes,
                                                         memory_heap_contents contents = memory_heap_contents::buffers);
 
+    // acceleration structures
+public:
+    /// Allocates an empty partitioned_tlas for `desc`'s capacities, which `cmd.raytracing.update` then fills.
+    /// Unlike build_tlas this records nothing: the size follows from the capacities alone.
+    /// Requires `sg::feature::partitioned_tlas`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] partitioned_tlas_handle create_partitioned_tlas(partitioned_tlas_description const& desc);
+
+    /// A table of `blases` a shader copies addresses from into GPU-written records, holding each of them.
+    /// Each must be built and unexpired, and the list non-empty; the addresses are uploaded once, here.
+    /// Requires `sg::feature::partitioned_tlas`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] blas_table_handle create_blas_table(cc::span<blas_handle const> blases);
+
+    /// A table of `buffers` a shader copies addresses from into GPU-written cluster records, holding each of them.
+    /// Each must carry `buffer_usage::accel_structure_build_input`, and the list be non-empty.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] buffer_table_handle create_buffer_table(cc::span<raw_buffer_handle const> buffers);
+
+    /// An empty cluster pool for `desc`'s capacities, which `cmd.raytracing.build_clusters_indirect` fills in place.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] cluster_pool_handle create_cluster_pool(cluster_pool_description const& desc);
+
     // bind path
     // binding_group_layout / pipeline_layout / compute_pipeline creation is not here — those are schemas / PSOs, not lifetime-scoped GPU resources.
     // They live on the raw `ctx.uncached` scope; prefer `ctx.cached`.
@@ -218,7 +239,12 @@ public:
     /// Opens a staging_binding_group over `layout`: a mutable descriptor image that `set` updates one slot at a time and `snapshot` mints binding_groups from.
     /// It starts fully vacant, so every scalar view binding must be set before the first snapshot.
     /// Throws sg::binding_group_exception if the staging descriptors cannot be allocated.
-    [[nodiscard]] staging_binding_group_handle create_staging_binding_group(binding_group_layout_handle layout);
+    ///
+    /// A layout with an unbounded binding needs `unbounded_capacity`, at least 1: the elements that binding holds in this group, all of them vacant until set.
+    /// Every snapshot is a group of that size, so a bindless table picks its capacity once, as it would a fixed array's.
+    /// A layout without one takes 0.
+    [[nodiscard]] staging_binding_group_handle create_staging_binding_group(binding_group_layout_handle layout,
+                                                                            int unbounded_capacity = 0);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_persistent_scope(context_persistent_scope const&) = delete;
@@ -255,8 +281,8 @@ private:
                                                                             cc::span<slotted_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 
-    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
-        binding_group_layout_handle layout);
+    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                            int unbounded_capacity);
 
     /// A generated group's constant block, in a persistent buffer the group keeps alive through its view.
     /// Filled through `ctx.upload`, which a later command list reading it waits for.

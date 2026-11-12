@@ -36,6 +36,12 @@ struct slib::compile_source_options
 
     /// what a preprocessing or compile error names, since there is no path to name
     cc::string_view label = "<generated>";
+
+    /// what a source of the host's compiles with: for a context's, `add_context_options`
+    cc::span<shader_option const> options = {};
+
+    /// SGL: compile as a package that takes `SOFTWARE_TRACE` does, as a host's hit group of such a package's pipeline must
+    bool software_trace = false;
 };
 
 /// How the reload watcher runs.
@@ -109,6 +115,13 @@ public:
     /// The directories come in the order they were added, and each one's files sorted by name, so a diagnostic about the
     /// library never depends on the filesystem's order.
     [[nodiscard]] module_library read_modules() const;
+
+    /// Starts fetching what each SGL compiler keeps across runs of the modules `read_modules` reads, where one keeps
+    /// anything (`sgl_compiler_options::keeps_module_artifacts`); adding a package, a module directory or a compiler
+    /// starts it too.
+    /// Ready once every fetch answered: what an app awaits, while it loads, so its first compiles load their modules
+    /// rather than check them; a compile never waits for it.
+    [[nodiscard]] cc::shared_async<cc::unit> prefetch_modules() const;
 
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
     /// Call after every add_package: the watcher walks the asset list, which registration grows.
@@ -215,6 +228,9 @@ private:
     {
         cc::string name;
         shader_language language = shader_language::hlsl;
+        bool software_trace = false;
+        bool native_spirv = false;
+        bool native_dxil = false;
     };
 
     [[nodiscard]] shader_compiler const* find_compiler(shader_language language, sg::shader_format format) const;
@@ -240,7 +256,10 @@ private:
                        sg::shader_stage stage,
                        cc::string_view entry_point,
                        sg::shader_format format,
-                       cc::span<shader_option const> options = {}) const;
+                       cc::span<shader_option const> options = {},
+                       bool software_trace = false,
+                       bool native_spirv = false,
+                       bool native_dxil = false) const;
 
     /// Alive-token handed to every asset as a weak reference, cleared first thing on destruction.
     /// Aliasing with a no-op deleter — it owns nothing, it only tracks whether we are still here.

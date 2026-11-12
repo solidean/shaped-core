@@ -57,6 +57,13 @@ public:
     [[nodiscard]] cc::result<sg::compiled_shader> compile(shader_description const& desc,
                                                           compile_options const& options = {});
 
+    /// What DXIL's validator says of a container, whoever wrote it; empty for a container it accepts.
+    /// The validator is `dxil.dll`, so this answers what a signed shader would have to pass and needs that library.
+    [[nodiscard]] cc::optional<cc::string> validate(cc::span<byte const> container) const;
+
+    /// The LLVM text of a container's DXIL, whoever wrote it, or the reason there is none.
+    [[nodiscard]] cc::result<cc::string> disassemble(cc::span<byte const> container) const;
+
     /// The DXC version behind this instance, as "major.minor"; empty where DXC would not report one.
     /// Belongs in any cache key that outlives the process, or a DXC upgrade keeps serving the old compiler's DXIL.
     [[nodiscard]] cc::string_view version() const;

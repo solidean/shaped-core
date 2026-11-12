@@ -47,7 +47,8 @@ using light_id = stable_id<light_id_tag>;
 
 struct camera;
 struct camera_basis;
-struct perspective_projection;
+enum class projection_kind : u8; // perspective or orthographic (view/camera.hh)
+struct camera_projection;
 struct camera_matrices;
 struct orbit_state;
 enum class camera_style;
@@ -85,6 +86,7 @@ struct shadow_settings;           // a raster_bound layer's shadows (view/render
 struct screen_space_reflections;  // a raster_bound layer's mirror reflections (view/render_settings.hh)
 struct temporal_antialiasing;     // a raster_bound layer's temporal antialiasing (view/render_settings.hh)
 struct traced_indirect;           // a raster_bound layer's traced indirect light (view/render_settings.hh)
+enum class render_channel : u32; // a quantity a traced layer averages beside its image (render_settings.hh)
 enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
@@ -319,9 +321,15 @@ class async_frames; // interactive_async's awaited frame loop, the one a browser
 // capturing a run to an image (see capture.hh); the protocol itself is sr::capture_request
 struct capture_context;
 
+// a render that settles inside one call and hands its image back (see settled.hh)
+struct settled_options;
+struct settled_image;
+struct settled_channel;
+
 namespace impl
 {
 class capture_session;
+struct settled_landing; // where a settled render's readback lands (impl/settled_landing.hh)
 } // namespace impl
 
 // authoring handles (see refs.hh) — all non-owning {frame*, index} pairs

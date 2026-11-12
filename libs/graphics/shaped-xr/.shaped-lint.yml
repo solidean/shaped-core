@@ -1,0 +1,19 @@
+# shaped-xr's lint policy, on top of the repo-root .shaped-lint.yml.
+# See tools/shaped-linter/docs/configuration.md.
+
+rules:
+  - kind: allow-include
+    value: <memory>
+    reason: sg's command lists are std::unique_ptr, so the session that submits one names it
+
+  # OpenXR, confined to impl/openxr.hh: no public header of ours names an OpenXR type.
+  - kind: allow-include
+    value: <openxr/openxr.h>
+    reason: the OpenXR API, reached through impl/openxr.hh alone
+    files:
+      - src/shaped-xr/impl/openxr.hh
+  - kind: allow-include
+    value: <openxr/openxr_platform.h>
+    reason: OpenXR's Vulkan and D3D12 bindings, reached through impl/openxr.hh alone
+    files:
+      - src/shaped-xr/impl/openxr.hh

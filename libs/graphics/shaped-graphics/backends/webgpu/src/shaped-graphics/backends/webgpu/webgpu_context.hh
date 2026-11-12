@@ -31,6 +31,10 @@ struct sg::backend::webgpu::webgpu_config
     /// Ask for the low-power adapter rather than the high-performance one; only a hint to the browser.
     bool prefer_low_power = false;
 
+    /// Run an SGL entry point whose `@float` WGSL cannot keep at `.fast`, with a warning, rather than refusing it.
+    /// WGSL keeps no float guarantee above `.fast`, so this is the host accepting that for every pipeline it builds.
+    bool weakens_float_guarantees = false;
+
     /// Capacity of the staging ring behind cmd.upload, in bytes.
     /// The ring rewinds whenever no open list holds a span, so it bounds one list's uploads rather than one epoch's.
     isize upload_ring_bytes = 16 * 1024 * 1024;
@@ -115,6 +119,7 @@ public:
     using sg::context::settle_due_completions;
 
     [[nodiscard]] sg::execution_model execution() const override { return sg::execution_model::never_block; }
+    [[nodiscard]] bool weakens_float_guarantees() const override { return _config.weakens_float_guarantees; }
 
     /// Free-threaded, so every case reads what creation recorded: `device()` asserts the device thread.
     [[nodiscard]] bool supports(sg::feature f) const override
@@ -146,6 +151,7 @@ public:
         case sg::feature::wireframe_fill:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
+        case sg::feature::mesh_shader:
         case sg::feature::binding_arrays:
         case sg::feature::multisampled_array_textures:
         case sg::feature::primitive_index:
@@ -167,18 +173,53 @@ public:
         case sg::feature::shader_execution_reordering:
             // WebGPU has no ray-tracing pipeline to reorder.
             return false;
+        case sg::feature::float_specials:
+        case sg::feature::float_denormals:
+            // WGSL may assume no NaN or infinity arises, and nothing a shader says reaches the compiler's float handling
+            return false;
+        case sg::feature::shader_int64:
+        case sg::feature::shader_f64:
+        case sg::feature::shader_int64_atomics:
+        case sg::feature::shader_shared_int64_atomics:
+        case sg::feature::shader_int64_min_max_atomics:
+            // WGSL has no 64-bit integer and no double, on any device.
+            return false;
+        case sg::feature::unbounded_binding_arrays:
+            // WebGPU has no binding arrays at all
+            return false;
+        case sg::feature::view_instancing:
+            // WebGPU has no multiview; WebXR hands out a texture per view instead
+            return false;
+        case sg::feature::pixel_view_read_workaround:
+            return false;
+        case sg::feature::ray_tracing_motion_blur:
+            // the polyfill's walk places a moving instance at the ray's time
+            return true;
+        case sg::feature::partitioned_tlas:
+            // the polyfill's structures are rebuilt whole, with no partitions to update in place
+            return false;
+        case sg::feature::clustered_geometry:
+            // the polyfill builds no structure from clusters
+            return false;
+        case sg::feature::vertex_pipeline_stores:
+            // a vertex stage binds no writable storage on any WebGPU device
+            return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;
         case sg::feature::texture_compression_bc:
             return _texture_compression_bc;
+        case sg::feature::indirect_first_instance:
+            return _indirect_first_instance;
         }
         return false;
     }
 
     [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
     {
-        return f == sg::feature::ray_query ? sg::feature_implementation::emulated : sg::feature_implementation::native;
+        return f == sg::feature::ray_query || f == sg::feature::ray_tracing_motion_blur
+                 ? sg::feature_implementation::emulated
+                 : sg::feature_implementation::native;
     }
 
     /// Routes this device's validation and out-of-memory errors to `callback` too, as they arrive.
@@ -316,9 +357,8 @@ public:
     }
 
     /// A staging group is a mutable array of descriptors, and WebGPU core has neither arrays nor mutable groups.
-    [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
-        sg::binding_group_layout_handle,
-        sg::lifetime_scope) override
+    [[nodiscard]] cc::result<sg::staging_binding_group_handle>
+    try_create_staging_binding_group(sg::binding_group_layout_handle, int, sg::lifetime_scope) override
     {
         return cc::error("webgpu has no binding arrays, so it has no staging binding groups "
                          "(ctx.supports(sg::feature::binding_arrays) is false)");
@@ -548,6 +588,27 @@ public:
     webgpu_query_system _queries;
     webgpu_acceleration_pool _acceleration;
 
+    /// The buffer every polyfilled mesh draw's halves write and read (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
+    /// One serves every draw, since WebGPU orders each pass after the one before it, and a draw writes its slots before
+    /// it reads them; it only grows, and `generation` counts its buffers, which a cached reserved group keys on.
+    struct mesh_scratch_buffer
+    {
+        wgpu_buffer buffer;
+        isize bytes = 0;
+        u64 generation = 0;
+    };
+    mesh_scratch_buffer _mesh_scratch;
+    /// The same for a polyfilled task stage's records, which also hold the indirect arguments of the draw after them.
+    mesh_scratch_buffer _task_scratch;
+
+    /// `_mesh_scratch`'s buffer, grown first to hold at least `bytes`; on the device thread only.
+    WGPUBuffer mesh_scratch_for(isize bytes);
+    /// `_task_scratch`'s, likewise.
+    WGPUBuffer task_scratch_for(isize bytes);
+    WGPUBuffer scratch_for(mesh_scratch_buffer& scratch, isize bytes, bool is_task);
+
+    [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
+
     /// The optional device features creation was granted.
     struct granted_features
     {
@@ -559,6 +620,7 @@ public:
         bool shader_f16 = false;              ///< shader-f16
         bool subgroups = false;               ///< subgroups
         bool texture_compression_bc = false;  ///< texture-compression-bc
+        bool indirect_first_instance = false; ///< indirect-first-instance
     };
 
     // Set once at creation.
@@ -581,6 +643,7 @@ private:
     bool _shader_f16 = false; // shader-f16 was granted
     bool _subgroups = false;  // subgroups was granted
     bool _texture_compression_bc = false;
+    bool _indirect_first_instance = false;
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);

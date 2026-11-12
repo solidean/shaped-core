@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <sg_test_sgl_shaders.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
@@ -256,4 +257,90 @@ ASYNC_INVOCABLE_TEST("sg - a comparison sampler passes each compare_op's own ref
             CHECK(got[r] == (passes(ops[o], references[r]) ? 1.0f : 0.0f))
                 .context(cc::format("compare_op #{} against reference {}", o, references[r]));
     }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an array of samplers binds each element, through a group and staged in place",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this context has no binding arrays");
+
+    using address = sg::sampler_address_mode;
+    // Two texels, red 0 and 1, read at u = 1.1: repeat folds it to 0.1, which is texel 0 nearest and 0.3 filtered
+    // across the wrap; clamp keeps it past the end, on texel 1.
+    auto const repeat_point = point_sampler(address::repeat, address::clamp_edge);
+    auto repeat_linear = repeat_point;
+    repeat_linear.min_filter = sg::sampler_filter::linear;
+    repeat_linear.mag_filter = sg::sampler_filter::linear;
+    auto const clamp_point = point_sampler(address::clamp_edge, address::clamp_edge);
+
+    auto const pipeline = co_await shaders::sampler_arrays::sample_each.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampler_arrays::through>();
+    auto const source
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 2,
+                                             .height = 1,
+                                             .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+    u8 const texels[] = {0, 0, 0, 255, 255, 0, 0, 255};
+    constexpr auto count = 64;
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<float>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto const run = [&](sg::binding_group const* group) -> cc::shared_async<cc::vector<float>>
+    {
+        auto cmd = ctx->create_command_list();
+        if (group == nullptr)
+        {
+            cmd->upload.bytes_to_texture(source.raw(), cc::as_bytes(cc::span<u8 const>(texels)), {.mip_level = 0});
+            auto const made = ctx->transient.create_binding_group(
+                *cmd, layout,
+                shaders::sampler_arrays::through{.source = source.as_texture_view(),
+                                                 .samplers = {repeat_point, repeat_linear, clamp_point},
+                                                 .values = values.as_readwrite_buffer()});
+            cmd->compute.bind_pipeline(*pipeline);
+            cmd->compute.bind_group(0, *made);
+        }
+        else
+        {
+            cmd->compute.bind_pipeline(*pipeline);
+            cmd->compute.bind_group(0, *group);
+        }
+        cmd->compute.dispatch_threads(count);
+        auto const back = cmd->download.data_from_buffer(values);
+        ctx->submit_command_list(cc::move(cmd));
+        auto const got = co_await back.data();
+        auto out = cc::vector<float>();
+        for (auto const v : got)
+            out.push_back(v);
+        co_return out;
+    };
+
+    auto const through_group = co_await run(nullptr);
+    REQUIRE(through_group.size() == isize(count));
+    float const expected[] = {0.0f, 0.3f, 1.0f};
+    for (auto i = 0; i < count; ++i)
+        CHECK(near(through_group[i], expected[i % 3])).context(cc::format("thread {}: {}", i, through_group[i]));
+
+    // staged: the same three, then element 0 replaced by the clamping one
+    auto const staging = ctx->persistent.create_staging_binding_group(layout);
+    staging->set_binding(staging->slot_of("through.source"), source.as_texture_view());
+    staging->set_binding(staging->slot_of("through.values"), values.as_readwrite_buffer());
+    auto const samplers = staging->slot_of("through.samplers");
+    REQUIRE(samplers != sg::binding_slot::invalid);
+    staging->set_sampler_element(samplers, 0, repeat_point);
+    staging->set_sampler_element(samplers, 1, repeat_linear);
+    staging->set_sampler_element(samplers, 2, clamp_point);
+    auto const staged = co_await run(staging->snapshot().get());
+    REQUIRE(staged.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(near(staged[i], expected[i % 3])).context(cc::format("staged thread {}: {}", i, staged[i]));
+
+    staging->set_sampler_element(samplers, 0, clamp_point);
+    auto const replaced = co_await run(staging->snapshot().get());
+    REQUIRE(replaced.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(near(replaced[i], i % 3 == 1 ? 0.3f : 1.0f)).context(cc::format("replaced thread {}: {}", i, replaced[i]));
 }

@@ -29,7 +29,9 @@ ASYNC_TEST("sg vulkan backend")
     // two submissions, which is what the cross-list and cross-queue ordering work is about.
     // It needs a validation layer from SDK 1.4.350 or newer: older ones report WRITE_RACING_READ between queues that
     // never raced — docs/bugs-external/vulkan-syncval-wait-before-signal-false-race.
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .enable_sync_validation = true});
+    // The text route, SGL's HLSL through DXC, which `sg vulkan native-spirv backend` is the default's counterpart to.
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .native_spirv = false, .enable_sync_validation = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
     else
@@ -37,11 +39,34 @@ ASYNC_TEST("sg vulkan backend")
         (void)sg_test::shader_fixtures(); // alive before any child acquires through it
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
-        co_await nx::async_invoke_tests_in_sequence("vulkan", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "vulkan", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.
         // Vulkan has no equivalent of dx12's poll, so this sees only a loss some operation already noticed --
         // which every submitting test does.
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
+    }
+}
+
+// The whole sweep again with SGL's shaders in SGL's own SPIR-V, where it has a lowering for them, and in DXC's elsewhere.
+// One test body holds both routes to one answer, and the validation layer reads every module this route writes.
+ASYNC_TEST("sg vulkan native-spirv backend")
+{
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .native_spirv = true, .enable_sync_validation = true});
+    if (ctx.has_error())
+        SKIP("no vulkan device");
+    else
+    {
+        (void)sg_test::shader_fixtures(); // alive before any child acquires through it
+        ctx.value()->set_portability_checks(true);
+        ctx.value()->set_hit_record_checks(true);
+        co_await nx::async_invoke_tests_in_sequence(
+            "vulkan-native-spirv", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())},
+            ctx.value());
         CHECK(!ctx.value()->is_device_lost())
             .context(cc::format("the device was lost while running this binary's GPU tests: {}",
                                 ctx.value()->device_loss_reason()));
@@ -63,7 +88,9 @@ ASYNC_TEST("sg vulkan never-block backend")
     {
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
-        co_await nx::async_invoke_tests_in_sequence("vulkan-never-block", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "vulkan-never-block", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())},
+            ctx.value());
 
         // Nothing here can wait, so what the tests left running is awaited before the context goes.
         co_await cc::async_settled(ctx.value()->backlog.settled());
@@ -75,6 +102,8 @@ ASYNC_TEST("sg vulkan never-block backend")
 }
 
 static bool const sg_vulkan_registered = sg_test::register_backend("sg vulkan backend", "vulkan");
+static bool const sg_vulkan_native_spirv_registered
+    = sg_test::register_backend("sg vulkan native-spirv backend", "vulkan-native-spirv");
 static bool const sg_vulkan_never_block_registered
     = sg_test::register_backend("sg vulkan never-block backend", "vulkan-never-block");
 static bool const sg_vulkan_factory_registered

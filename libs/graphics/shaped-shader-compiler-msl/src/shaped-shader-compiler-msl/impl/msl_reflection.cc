@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/fwd.hh>
 
 namespace
@@ -219,6 +220,8 @@ struct argument_buffer
 [[nodiscard]] cc::vector<argument_buffer> collect_argument_buffers(cc::string_view text)
 {
     auto buffers = cc::vector<argument_buffer>();
+    // EMIT-211: an unbounded array's table, by its struct's name, and the declaration of its entries
+    auto tables = cc::vector<declaration>();
 
     for (auto at = find_word(text, "struct"); at >= 0; at = find_word(text, "struct", at + 1))
     {
@@ -248,13 +251,32 @@ struct argument_buffer
         auto const body = text.subview({.start = i + 1, .end = body_end - 1});
         for (auto const member_text : split_top_level(body, ';'))
         {
-            auto const member = parse_declaration(trimmed(member_text));
+            auto member = parse_declaration(trimmed(member_text));
             if (!member.has_value())
                 continue;
+
+            // a table's entries: what a member pointing at it binds, with as many elements as each group gives it
+            if (name.ends_with("_table") && member.value().name == "entries")
+            {
+                auto entries = member.value();
+                entries.name = cc::string(name);
+                entries.count = 0;
+                tables.push_back(cc::move(entries));
+                continue;
+            }
+            for (auto const& table : tables)
+                if (has_word(member.value().type, table.name))
+                {
+                    member.value().type = table.type;
+                    member.value().count = 0;
+                }
 
             auto const id = attribute_index(member.value().attributes, "id");
             if (id < 0)
                 continue; // a plain struct member: this is only an argument buffer if its members are addressed
+            // each slot's byte length, which sg writes behind the slots and no layout declares (EMIT-195)
+            if (member.value().name == "sgl_lengths")
+                continue;
 
             buffer.members.push_back(member.value());
             buffer.ids.push_back(u32(id));
@@ -470,6 +492,10 @@ cc::result<cc::string_view> ssc::msl::impl::entry_qualifier_for(sg::shader_stage
                          "and a post-tessellation vertex function");
     case sg::shader_stage::geometry:
         return cc::error("metal has no geometry stage at all");
+    case sg::shader_stage::task:
+        return cc::string_view("object");
+    case sg::shader_stage::mesh:
+        return cc::string_view("mesh");
     }
     return cc::error("unknown shader stage");
 }
@@ -555,8 +581,12 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
             continue;
 
         // sg's own addresses, which the backend binds and no layout declares: the reserved group (a raygen's function
-        // tables, shader diagnostics) and a raygen's hit-group offsets.
-        if (buffer_index == sg::reserved_binding_group)
+        // tables), every reserved binding's slot (the debug window, the software walk's pool and roots), and a
+        // raygen's hit-group offsets.
+        auto is_reserved = buffer_index == sg::reserved_binding_group;
+        for (auto const& r : sg::reserved_bindings)
+            is_reserved = is_reserved || (r.metal_buffer >= 0 && buffer_index == r.metal_buffer);
+        if (is_reserved)
             continue;
         if (buffer_index == k_hit_group_offsets_buffer_index && stage == sg::shader_stage::raygen)
             continue;

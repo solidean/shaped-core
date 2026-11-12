@@ -1,0 +1,86 @@
+// generated from material type 'pbr' — do not edit
+require ray_query
+require raytracing_pipeline
+
+use material
+use openpbr
+use slug
+use tracer
+
+const sv_supplied_base_color = false
+const sv_supplied_metallic = false
+const sv_supplied_roughness = false
+const sv_supplied_emissive = false
+const sv_supplied_normal = false
+const sv_supplied_occlusion = false
+const sv_supplied_tangent_frame = false
+const sv_supplied_tangent_handedness = false
+
+fun sv_attribute_base_color(ctx: material.shading_context){tracer.bindless} -> float3:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load3(ctx.param_offset + 0u))
+
+fun sv_attribute_metallic(ctx: material.shading_context){tracer.bindless} -> float:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 12u))
+
+fun sv_attribute_roughness(ctx: material.shading_context){tracer.bindless} -> float:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 16u))
+
+fun sv_attribute_emissive(ctx: material.shading_context){tracer.bindless} -> float3:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load3(ctx.param_offset + 20u))
+
+fun sv_attribute_normal(ctx: material.shading_context){tracer.bindless} -> float3:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load3(ctx.param_offset + 32u))
+
+fun sv_attribute_occlusion(ctx: material.shading_context){tracer.bindless} -> float:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 44u))
+
+fun sv_attribute_tangent_frame(ctx: material.shading_context){tracer.bindless} -> float4:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4(ctx.param_offset + 48u))
+
+fun sv_attribute_tangent_handedness(ctx: material.shading_context){tracer.bindless} -> float:
+    let block = ctx.param_buffer as int
+    return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 64u))
+
+fun sv_parallax(ctx: material.shading_context, g: tracer.hit_geometry){tracer.bindless} -> material.shading_context:
+    return ctx
+
+fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:
+    let base_color = sv_attribute_base_color(ctx)
+    let metallic = sv_attribute_metallic(ctx)
+    let roughness = sv_attribute_roughness(ctx)
+    let emissive = sv_attribute_emissive(ctx)
+    let normal = sv_attribute_normal(ctx)
+    let occlusion = sv_attribute_occlusion(ctx)
+    let tangent_frame = sv_attribute_tangent_frame(ctx)
+    let tangent_handedness = sv_attribute_tangent_handedness(ctx)
+    let mut surface = openpbr.default_surface()
+
+    // --- pbr ---
+
+    surface.base_weight = saturate(occlusion)
+    surface.base_color = base_color
+    surface.base_metalness = saturate(metallic)
+    surface.specular_roughness = saturate(roughness)
+
+    surface.geometry_normal = normalize(normal)
+    surface.geometry_tangent_frame = tangent_frame
+    surface.geometry_handedness = tangent_handedness
+
+    // --- the declared emission ---
+    surface.emission_color = max(float3(0.0), emissive)
+    surface.emission_luminance = 1.0
+    return surface
+
+@compute(64) fun sv_shade(@thread_id id: int3){tracer.traced, tracer.bindless, slug.tables, tracer.wavefront_step}:
+    let slot = tracer.shade_slot(tracer.thread_index(id))
+    if slot == tracer.no_slot => return
+    let coned = tracer.stored_triangle_context(slot)
+    let ctx = sv_parallax(coned, tracer.stored_hit_geometry(slot, coned))
+    tracer.shade_stored_triangle(slot, ctx, sv_evaluate_material(ctx), sv_supplied_tangent_frame)

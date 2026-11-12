@@ -47,6 +47,12 @@ inline cc::string_view family_of(value_kind kind)
         return "short";
     case value_kind::scalar_ushort:
         return "ushort";
+    case value_kind::scalar_long:
+        return "long";
+    case value_kind::scalar_ulong:
+        return "ulong";
+    case value_kind::scalar_double:
+        return "double";
     case value_kind::boolean:
         return "bool";
     case value_kind::none:

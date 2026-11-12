@@ -326,13 +326,14 @@ def apply_overrides(
     build_suffix: str | None = None,
     build_dir: str | None = None,
     example_backend: str | None = None,
+    agility_preview: bool = False,
 ) -> list[Preset]:
     """Rewrite each preset's build_dir and attach the pinned toolset, validating eagerly.
 
     Build-dir precedence (highest first): --build-dir replaces the whole directory;
-    --build-suffix appends `-<suffix>` to the preset folder; otherwise a pinned --toolset
-    and a chosen --example-backend each auto-derive a tag so neither clobbers the default
-    build's CMake cache.
+    --build-suffix appends `-<suffix>` to the preset folder; otherwise a pinned --toolset,
+    a chosen --example-backend and --agility-preview each auto-derive a tag so none clobbers
+    the default build's CMake cache.
     With no override the preset is returned unchanged.
     """
     if build_dir is not None and len(presets) > 1:
@@ -345,7 +346,8 @@ def apply_overrides(
     out: list[Preset] = []
     for preset in presets:
         # A tag per override that changes the cache, so a matrix of them stays one folder each.
-        auto = [_sanitize(t) for t in (toolset, example_backend) if t is not None]
+        auto = [_sanitize(t) for t in (toolset, example_backend, "agility-preview" if agility_preview else None)
+                if t is not None]
         if build_dir is not None:
             bd = Path(build_dir)
             bd = bd if bd.is_absolute() else root / bd
@@ -356,7 +358,8 @@ def apply_overrides(
         else:
             bd = preset.build_dir
 
-        new = dataclasses.replace(preset, build_dir=bd, toolset=toolset, example_backend=example_backend)
+        new = dataclasses.replace(preset, build_dir=bd, toolset=toolset, example_backend=example_backend,
+                                  agility_preview=agility_preview)
         _validate(new, root)
         out.append(new)
     return out

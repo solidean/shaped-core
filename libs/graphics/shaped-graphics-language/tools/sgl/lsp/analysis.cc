@@ -1,5 +1,7 @@
 #include "analysis.hh"
 
+#include "../module_dirs.hh"
+
 #include <clean-core/string/format.hh>
 #include <clean-core/string/uri.hh>
 #include <clean-core/thread/mutex.hh>
@@ -60,8 +62,8 @@ cc::vector<sgl::check::module_file> sgl_lsp::analysis::module_files() const
         out.push_back(i == own_file ? sgl::check::module_file{.file = file, .ast = ast}
                                     : sgl::check::module_file{.file = p.files[i].file, .ast = p.files[i].ast});
     // the library files the document reached, as the check placed them
-    for (auto i = isize(0); i < module.library_files.size(); ++i)
-        out.push_back({.file = *library_parsed[i], .ast = *library_asts[i]});
+    for (auto const i : module.library_files)
+        out.push_back(library->files[i]);
     if (own_file < p.files.size())
         out.push_back({.file = empty_file, .ast = empty_ast});
     else
@@ -77,8 +79,9 @@ cc::string_view sgl_lsp::analysis::text_of(i32 f) const
     if (f < p.files.size())
         return cc::string_view(p.files[f].file.source);
     auto const reached = f - p.files.size();
-    return reached < module.library_files.size() ? cc::string_view(library.sources[module.library_files[reached]])
-                                                 : cc::string_view();
+    return reached < module.library_files.size()
+             ? cc::string_view(library->files[module.library_files[reached]].file.source)
+             : cc::string_view();
 }
 
 lsp::text_index const& sgl_lsp::analysis::index_of(i32 f) const
@@ -100,7 +103,7 @@ cc::string sgl_lsp::analysis::uri_of(i32 f) const
     if (f < p.files.size())
         return p.uri_of(f);
     auto const reached = f - p.files.size();
-    return reached < module.library_files.size() ? uri_of_path(library.names[module.library_files[reached]])
+    return reached < module.library_files.size() ? uri_of_path(library->names[module.library_files[reached]])
                                                  : document->uri;
 }
 
@@ -127,30 +130,6 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
     auto const own = sgl::prelude_file_of(a->document->uri);
     a->own_file = own >= 0 ? own : i32(p.files.size());
 
-    // The prelude's own files are checked alone; any other document behind the modules of the configured directories,
-    // its own file among them left out.
-    auto library = cc::vector<sgl::check::module_file>();
-    auto parsed_of = cc::vector<isize>();
-    if (own < 0)
-    {
-        if (auto read = sgl_tool::read_module_dirs(module_dirs()); read.has_value())
-            a->library = cc::move(read.value());
-        // a module file open in the client is what the client shows, saved or not
-        for (auto i = isize(0); i < a->library.names.size(); ++i)
-            for (auto const& o : open)
-                if (sgl::is_same_path(a->library.names[i], o.uri))
-                    a->library.sources[i] = o.text;
-        for (auto i = isize(0); i < a->library.files.size(); ++i)
-        {
-            if (sgl::is_same_path(a->library.names[i], a->document->uri))
-                continue;
-            a->library_parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(a->library.sources[i])));
-            a->library_asts.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*a->library_parsed.back())));
-            library.push_back({.file = *a->library_parsed.back(), .ast = *a->library_asts.back()});
-            parsed_of.push_back(i);
-        }
-    }
-
     auto const& prelude_files = p.files;
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < prelude_files.size(); ++i)
@@ -159,21 +138,35 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
     auto const behind = own >= 0 ? sgl::check::module_file{.file = a->empty_file, .ast = a->empty_ast}
                                  : sgl::check::module_file{.file = a->file, .ast = a->ast};
     auto const* const checked = own >= 0 ? nullptr : sgl::checked_prelude();
-    a->module = checked != nullptr ? sgl::check::check(*checked, library, behind)
-                                   : sgl::check::check(files, library, behind, sgl::builtins::default_registry());
 
-    // what the check reached, renumbered from the parsed files to the library read, and in the check's order
-    auto reached_parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
-    auto reached_asts = cc::vector<cc::unique_ptr<sgl::ast::file_ast>>();
-    for (auto& index : a->module.library_files)
-    {
-        reached_parsed.push_back(cc::move(a->library_parsed[index]));
-        reached_asts.push_back(cc::move(a->library_asts[index]));
-        index = i32(parsed_of[index]);
-        a->library_indices.push_back(lsp::text_index(a->library.sources[index]));
-    }
-    a->library_parsed = cc::move(reached_parsed);
-    a->library_asts = cc::move(reached_asts);
+    // The prelude's own files are checked alone; any other document behind the modules of the configured directories,
+    // its own file among them left out.
+    // Parsed and checked once for every analysis that reads them the same, so an edit of the document checks it alone.
+    if (own < 0)
+        if (auto read = sgl_tool::read_module_dirs(module_dirs()); read.has_value())
+        {
+            auto& l = read.value();
+            auto handed = cc::vector<sgl::library_file>();
+            for (auto i = isize(0); i < l.names.size(); ++i)
+            {
+                // a module file open in the client is what the client shows, saved or not
+                auto source = cc::string_view(l.sources[i]);
+                for (auto const& o : open)
+                    if (sgl::is_same_path(l.names[i], o.uri))
+                        source = o.text;
+                handed.push_back({.name = l.names[i], .source = source});
+            }
+            a->library = sgl::shared_library_of(handed, a->document->uri);
+            if (a->library != nullptr && checked != nullptr)
+                a->layer = sgl::layer_of(*a->library, behind);
+        }
+    auto const library = a->library != nullptr ? cc::span<sgl::check::module_file const>(a->library->files)
+                                               : cc::span<sgl::check::module_file const>();
+    a->module = a->layer != nullptr ? sgl::check::check(*a->layer->layer, library, behind)
+              : checked != nullptr  ? sgl::check::check(*checked, library, behind)
+                                    : sgl::check::check(files, library, behind, sgl::builtins::default_registry());
+    for (auto const i : a->module.library_files)
+        a->library_indices.push_back(lsp::text_index(a->library->files[i].file.source));
     if (own < 0)
         a->own_file = a->module.program_file();
 
@@ -183,12 +176,13 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
     for (auto const& d : a->ast.diagnostics)
         a->diagnostics.push_back({.what = d, .file = user});
     // a reached module's own parse errors, which the check did not see
-    for (auto i = isize(0); i < a->library_parsed.size(); ++i)
+    for (auto i = isize(0); i < a->module.library_files.size(); ++i)
     {
         auto const file = a->module.prelude_file_count() + i32(i);
-        for (auto const& d : a->library_parsed[i]->diagnostics)
+        auto const& f = a->library->files[a->module.library_files[i]];
+        for (auto const& d : f.file.diagnostics)
             a->diagnostics.push_back({.what = d, .file = file});
-        for (auto const& d : a->library_asts[i]->diagnostics)
+        for (auto const& d : f.ast.diagnostics)
             a->diagnostics.push_back({.what = d, .file = file});
     }
     for (auto const& d : a->module.diagnostics)

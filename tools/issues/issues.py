@@ -946,14 +946,33 @@ class _Resolver:
         found = self.ws.lookup(qid, self.repo)
         return found.type if found else None
 
+    def _in_submodule(self, rel: str) -> tuple[Path, str, str] | None:
+        """Where `rel` lies when it crosses a submodule at `self.at`: its checkout, the commit recorded there, and `rel` inside it.
+        The parent's tree holds only that commit, so a path into a submodule is no path of the parent's at all."""
+        parts = rel.split("/")
+        for i in range(1, len(parts)):
+            prefix = "/".join(parts[:i])
+            entry = _git(self.repo.root, "ls-tree", self.at, "--", prefix, check=False).stdout.split()
+            if len(entry) < 3:
+                return None
+            if entry[1] == "commit":
+                return self.repo.root / prefix, entry[2], "/".join(parts[i:])
+            if entry[1] != "tree":
+                return None
+        return None
+
     def file_lines(self, rel: str) -> int | None:
         """The line count of the file `rel`, -1 for a directory or an ignored path, None when it does not exist."""
         if self.at is not None:
-            kind = _git(self.repo.root, "cat-file", "-t", f"{self.at}:{rel}", check=False)
+            root, at, inner = self.repo.root, self.at, rel
+            kind = _git(root, "cat-file", "-t", f"{at}:{inner}", check=False)
+            if kind.returncode != 0 and (crossed := self._in_submodule(rel)) is not None:
+                root, at, inner = crossed
+                kind = _git(root, "cat-file", "-t", f"{at}:{inner}", check=False)
             if kind.returncode == 0:
                 if kind.stdout.strip() != "blob":
                     return -1
-                return len(_git(self.repo.root, "show", f"{self.at}:{rel}").stdout.splitlines())
+                return len(_git(root, "show", f"{at}:{inner}").stdout.splitlines())
         else:
             target = self.repo.root / rel
             if target.is_dir():

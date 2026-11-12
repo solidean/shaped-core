@@ -4,7 +4,6 @@ using namespace sgl_test;
 
 // The emulated trace run on the interpreter, against pools written by hand as the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md lays them out.
 // Every expectation is worked out from the geometry by hand.
-// No ray passes through an edge or a corner, since the triangle test is not watertight yet.
 
 namespace
 {
@@ -39,6 +38,8 @@ struct instance
     u32 mask = 0xFF;
     /// Bits 24 to 31 of unit 6's z: bit 0 forced opaque, bit 1 forced non-opaque, bits 2 and 3 the cull mode.
     u32 flags = 0;
+    /// Where the translation has moved to at time 1, which makes the instance a moving one (EVAL-130).
+    cc::optional<float3> end_translation = {};
 };
 
 /// A pool as sg's webgpu backend writes it: units of four words, unit 0 the empty TLAS.
@@ -83,6 +84,24 @@ struct pool_writer
         return at;
     }
 
+    /// A BLAS whose triangles move from `start` to `end`: its header's w sets bit 2, and each triangle takes 6 units.
+    /// `root` holds both poses.
+    u32 moving_blas(cc::span<triangle const> start, cc::span<triangle const> end, bool is_opaque, box root)
+    {
+        auto const at = unit(1, size() + 3, u32(start.size()), 4);
+        leaf(root, u32(start.size()));
+        for (auto i = isize(0); i < start.size(); ++i)
+        {
+            point(start[i].v0, u32(i));
+            point(start[i].v1, 0);
+            point(start[i].v2, is_opaque ? 1 : 0);
+            point(end[i].v0, 0);
+            point(end[i].v1, 0);
+            point(end[i].v2, 0);
+        }
+        return at;
+    }
+
     /// A BLAS of procedural boxes, one geometry, index `geometry`, whose root leaf has the box `root`.
     u32 blas_of_boxes(cc::span<box const> boxes, bool is_opaque, box root, u32 geometry = 0)
     {
@@ -97,9 +116,13 @@ struct pool_writer
     }
 
     /// A TLAS whose root leaf has the box `root`; `kinds` is bit 0 for triangles and bit 1 for boxes.
+    /// A TLAS with a moving instance sets its header's kinds bit 2, and every instance of it takes 10 units.
     u32 tlas(cc::span<instance const> instances, box root, u32 kinds = 1)
     {
-        auto const at = unit(1, size() + 3, u32(instances.size()), kinds);
+        auto is_moving = false;
+        for (auto const& n : instances)
+            is_moving = is_moving || n.end_translation.has_value();
+        auto const at = unit(1, size() + 3, u32(instances.size()), kinds | (is_moving ? 4u : 0u));
         leaf(root, u32(instances.size()));
         for (auto i = isize(0); i < instances.size(); ++i)
         {
@@ -112,7 +135,15 @@ struct pool_writer
             row(s, 0, 0, t.x);
             row(0, s, 0, t.y);
             row(0, 0, s, t.z);
-            unit(n.blas, n.id | n.mask << 24, n.flags << 24, u32(i));
+            auto const moving_flag = n.end_translation.has_value() ? 1u << 4 : 0u;
+            unit(n.blas, n.id | n.mask << 24, (n.flags | moving_flag) << 24, u32(i));
+            if (is_moving)
+            {
+                auto const e = n.end_translation.has_value() ? n.end_translation.value() : t;
+                row(s, 0, 0, e.x);
+                row(0, s, 0, e.y);
+                row(0, 0, s, e.z);
+            }
         }
         return at;
     }
@@ -137,7 +168,37 @@ struct scenes
     u32 ball = 0;
     u32 flipped = 0;
     u32 flipped_mixed = 0;
+    u32 moving = 0;
+    u32 morphing = 0;
+    u32 morphing_moved = 0;
+    u32 morphing_mixed = 0;
+    u32 sheet = 0;
+    u32 sheet_flipped = 0;
+    u32 abutting = 0;
+    u32 tiny = 0;
 };
+
+/// A bumpy sheet over the 4 by 4 cells from (0, 0): a height on each corner, so no two neighbours share a plane.
+/// Its diagonals alternate, and with `is_flipped` every other triangle winds the other way.
+/// So a corner of it is met by four triangles or by eight, and an edge by two, of either winding.
+cc::vector<triangle> sheet_triangles(bool is_flipped)
+{
+    auto const corner = [](int x, int y) { return float3{f32(x), f32(y), 2 + f32((x * 7 + y * 3) % 5) * 0.25f}; };
+    auto out = cc::vector<triangle>();
+    for (auto y = 0; y < 4; ++y)
+        for (auto x = 0; x < 4; ++x)
+        {
+            auto const a = corner(x, y);
+            auto const b = corner(x + 1, y);
+            auto const c = corner(x, y + 1);
+            auto const d = corner(x + 1, y + 1);
+            auto const first = (x + y) % 2 == 0 ? triangle{a, b, d} : triangle{a, b, c};
+            auto const second = (x + y) % 2 == 0 ? triangle{a, d, c} : triangle{b, d, c};
+            out.push_back(first);
+            out.push_back(is_flipped ? triangle{second.v0, second.v2, second.v1} : second);
+        }
+    return out;
+}
 
 // One box around the unit sphere at (3, 1, 1), which the tests' intersection reports.
 constexpr box k_ball_box = {{2, 0, 0}, {4, 2, 2}};
@@ -185,6 +246,58 @@ scenes build_scenes()
     instance const flipped[] = {{.blas = opaque, .id = 17, .flags = 1u << 2}};
     s.flipped = s.pool.tlas(flipped, k_pair_box);
     s.flipped_mixed = s.pool.tlas(flipped, k_pair_box, 3);
+
+    // the pair moving from where it stands at time 0 to x = 10 at time 1 (id 21), beside a static copy at y = 50
+    // (id 22), which the moving TLAS strides over by 10 units too; the root box holds the whole sweep
+    instance const moving[] = {
+        {.blas = opaque, .id = 21, .end_translation = float3{10, 0, 0}},
+        {.blas = opaque, .translation = {0, 50, 0}, .id = 22},
+    };
+    s.moving = s.pool.tlas(moving, {{0, 0, 2}, {11, 51, 5}});
+
+    // Primitive 0 falls from z = 5 to z = 1 and leans: its second vertex goes from x = 1 to x = 3.
+    // Primitive 1 stands at x = 20 in both poses, so one structure holds a moving triangle and a still one.
+    constexpr triangle morph_start[] = {
+        {{0, 0, 5}, {1, 0, 5}, {0, 1, 5}},
+        {{20, 0, 5}, {21, 0, 5}, {20, 1, 5}},
+    };
+    constexpr triangle morph_end[] = {
+        {{0, 0, 1}, {3, 0, 1}, {0, 1, 1}},
+        {{20, 0, 5}, {21, 0, 5}, {20, 1, 5}},
+    };
+    auto const morphing = s.pool.moving_blas(morph_start, morph_end, true, {{0, 0, 1}, {21, 1, 5}});
+    instance const morphs[] = {{.blas = morphing, .id = 31}};
+    s.morphing = s.pool.tlas(morphs, {{0, 0, 1}, {21, 1, 5}});
+
+    // the same vertices in an instance that moves too, from where it stands to x = 10
+    instance const morphs_moved[] = {{.blas = morphing, .id = 32, .end_translation = float3{10, 0, 0}}};
+    s.morphing_moved = s.pool.tlas(morphs_moved, {{0, 0, 1}, {31, 1, 5}});
+
+    // beside the ball's box, for the mixed walk
+    instance const morphs_mixed[] = {{.blas = morphing, .id = 33}, {.blas = ball, .id = 11}};
+    s.morphing_mixed = s.pool.tlas(morphs_mixed, {{0, 0, 0}, {21, 2, 5}}, 3);
+
+    constexpr box sheet_box = {{0, 0, 2}, {4, 4, 3}};
+    instance const sheet[] = {{.blas = s.pool.blas(sheet_triangles(false), false, sheet_box), .id = 41}};
+    s.sheet = s.pool.tlas(sheet, sheet_box);
+    instance const sheet_flipped[] = {{.blas = s.pool.blas(sheet_triangles(true), false, sheet_box), .id = 42}};
+    s.sheet_flipped = s.pool.tlas(sheet_flipped, sheet_box);
+
+    // Two triangles meeting along x = 1 with a structure each, whose boxes' sides a ray along that edge runs along.
+    constexpr triangle left[] = {{{0, 0, 2}, {1, 0, 2}, {1, 1, 2}}};
+    constexpr box left_box = {{0, 0, 2}, {1, 1, 2}};
+    constexpr triangle right[] = {{{0, 0, 2}, {1, 1, 2}, {0, 1, 2}}};
+    constexpr box right_box = {{0, 0, 2}, {1, 1, 2}};
+    instance const abutting[] = {
+        {.blas = s.pool.blas(left, true, left_box), .id = 51},
+        {.blas = s.pool.blas(right, true, right_box), .translation = {1, 0, 0}, .id = 52},
+    };
+    s.abutting = s.pool.tlas(abutting, {{0, 0, 2}, {2, 1, 2}});
+
+    constexpr triangle tiny[] = {{{0, 0, 2}, {1e-7f, 0, 2}, {0, 1e-7f, 2}}};
+    constexpr box tiny_box = {{0, 0, 2}, {1e-7f, 1e-7f, 2}};
+    instance const tiny_instance[] = {{.blas = s.pool.blas(tiny, true, tiny_box), .id = 61}};
+    s.tiny = s.pool.tlas(tiny_instance, tiny_box);
     return s;
 }
 
@@ -204,6 +317,14 @@ sgl::check::driver_bindings bindings_of(scenes const& s)
                 {.name = "ball", .acceleration_root = s.ball},
                 {.name = "flipped", .acceleration_root = s.flipped},
                 {.name = "flipped_mixed", .acceleration_root = s.flipped_mixed},
+                {.name = "moving", .acceleration_root = s.moving},
+                {.name = "morphing", .acceleration_root = s.morphing},
+                {.name = "morphing_moved", .acceleration_root = s.morphing_moved},
+                {.name = "morphing_mixed", .acceleration_root = s.morphing_mixed},
+                {.name = "sheet", .acceleration_root = s.sheet},
+                {.name = "sheet_flipped", .acceleration_root = s.sheet_flipped},
+                {.name = "abutting", .acceleration_root = s.abutting},
+                {.name = "tiny", .acceleration_root = s.tiny},
             },
         }},
         .acceleration_pool = bytes_of(s.pool.words),
@@ -222,16 +343,24 @@ constexpr cc::string_view k_declarations = "require ray_query\n"
                                            "    ball: acceleration_structure[.procedural]\n"
                                            "    flipped: acceleration_structure[.triangles]\n"
                                            "    flipped_mixed: acceleration_structure[.mixed]\n"
+                                           "    moving: acceleration_structure[.triangles]\n"
+                                           "    morphing: acceleration_structure[.triangles]\n"
+                                           "    morphing_moved: acceleration_structure[.triangles]\n"
+                                           "    morphing_mixed: acceleration_structure[.mixed]\n"
+                                           "    sheet: acceleration_structure[.triangles]\n"
+                                           "    sheet_flipped: acceleration_structure[.triangles]\n"
+                                           "    abutting: acceleration_structure[.triangles]\n"
+                                           "    tiny: acceleration_structure[.triangles]\n"
                                            "fun is_near(a: float, b: float) -> bool => abs(a - b) < 1.0e-5\n"
                                            "fun along_z(x: float, y: float) -> ray => ray(origin = pos3(x, y, -1.0), "
                                            "direction = vec3(0.0, 0.0, 1.0))\n";
 
 /// Every failing test of `tests`, run behind the declarations against the scenes.
-cc::string failures_of(cc::string_view tests)
+cc::string failures_of(cc::string_view tests, i64 fuel = 1'000'000)
 {
     auto source = cc::string(k_declarations);
     source += tests;
-    return driven_failures_of(source, bindings_of(build_scenes()));
+    return driven_failures_of(source, bindings_of(build_scenes()), {.fuel = fuel});
 }
 } // namespace
 
@@ -284,6 +413,99 @@ TEST("sgl emulated trace - an instance moves the ray into object space, and the 
                       "    scenes.instanced.trace(ray(origin = pos3(100.25, 100.25, 0.0), direction = vec3(0.0, 0.0, "
                       "1.0))).instance_id == 5\n"
                       "    not scenes.instanced.trace(along_z(0.25, 0.25)).is_hit\n")
+          == "");
+}
+
+// How many of the sheet's triangles a ray meets: 0 or 1, or 2 where a second one takes it too.
+// A slant `from` reaches its target at t = 1 and stops there, since a bump could stand before it.
+constexpr cc::string_view k_sheet_counts
+    = "fun other(c: triangle_candidate, primitive: int) -> hit_decision:\n"
+      "    if c.primitive_index == primitive => return hit_decision.ignore\n"
+      "    return hit_decision.accept\n"
+      "fun meets(r: ray){scenes} -> int:\n"
+      "    let h = scenes.sheet.trace(r, c => other(c, -1), flags = ray_flags.force_non_opaque)\n"
+      "    if not h.is_hit => return 0\n"
+      "    if scenes.sheet.trace(r, c => other(c, h.primitive_index), flags = ray_flags.force_non_opaque).is_hit => "
+      "return "
+      "2\n"
+      "    return 1\n"
+      "fun meets_flipped(r: ray){scenes} -> int:\n"
+      "    let h = scenes.sheet_flipped.trace(r, c => other(c, -1), flags = ray_flags.force_non_opaque)\n"
+      "    if not h.is_hit => return 0\n"
+      "    if scenes.sheet_flipped.trace(r, c => other(c, h.primitive_index), flags = "
+      "ray_flags.force_non_opaque).is_hit => return 2\n"
+      "    return 1\n"
+      "fun from(o: float3, target: float3) -> ray:\n"
+      "    let d = target - o\n"
+      "    return ray(origin = pos3(o.x, o.y, o.z), direction = vec3(d.x, d.y, d.z), t_min = 0.999, t_max = 1.001)\n"
+      "fun height(x: int, y: int) -> float => 2.0 + (((x * 7 + y * 3) % 5) as float) * 0.25\n"
+      "fun corner(x: int, y: int) -> float3 => float3(x as float, y as float, height(x, y))\n";
+
+TEST("sgl emulated trace - a ray through an edge two triangles share meets exactly one of them")
+{
+    auto source = cc::string(k_sheet_counts);
+    // the midpoint of every inner edge along x and along y, along +z, along -z, and from a slant
+    source += "test {scenes}:\n"
+              "    for y in 1 ..= 3:\n"
+              "        for x in 0 ..= 3:\n"
+              "            let m = (corner(x, y) + corner(x + 1, y)) * 0.5\n"
+              "            meets(along_z(m.x, m.y)) == 1\n"
+              "            meets_flipped(along_z(m.x, m.y)) == 1\n"
+              "            meets(ray(origin = pos3(m.x, m.y, 9.0), direction = vec3(0.0, 0.0, -1.0))) == 1\n"
+              "            meets(from(float3(-3.25, -2.5, -7.0), m)) == 1\n"
+              "            meets_flipped(from(float3(7.5, 11.0, 13.25), m)) == 1\n"
+              "test {scenes}:\n"
+              "    for y in 0 ..= 3:\n"
+              "        for x in 1 ..= 3:\n"
+              "            let m = (corner(x, y) + corner(x, y + 1)) * 0.5\n"
+              "            meets(along_z(m.x, m.y)) == 1\n"
+              "            meets_flipped(along_z(m.x, m.y)) == 1\n"
+              "            meets(from(float3(-3.25, -2.5, -7.0), m)) == 1\n"
+              // each cell's diagonal, through its centre
+              "test {scenes}:\n"
+              "    for y in 0 ..= 3:\n"
+              "        for x in 0 ..= 3:\n"
+              "            meets(along_z((x as float) + 0.5, (y as float) + 0.5)) == 1\n"
+              "            meets_flipped(along_z((x as float) + 0.5, (y as float) + 0.5)) == 1\n";
+    CHECK(failures_of(source, 64'000'000) == "");
+}
+
+TEST("sgl emulated trace - a ray through a corner a fan of triangles shares meets exactly one of them")
+{
+    auto source = cc::string(k_sheet_counts);
+    source
+        += "test {scenes}:\n"
+           "    for y in 1 ..= 3:\n"
+           "        for x in 1 ..= 3:\n"
+           "            meets(along_z(x as float, y as float)) == 1\n"
+           "            meets_flipped(along_z(x as float, y as float)) == 1\n"
+           "            meets(ray(origin = pos3(x as float, y as float, 9.0), direction = vec3(0.0, 0.0, -1.0))) == 1\n"
+           "            meets(from(float3(-3.25, -2.5, -7.0), corner(x, y))) == 1\n"
+           "            meets_flipped(from(float3(7.5, 11.0, 13.25), corner(x, y))) == 1\n"
+           "            meets(from(float3(2.0, 2.0, -5.0), corner(x, y))) == 1\n";
+    CHECK(failures_of(source, 64'000'000) == "");
+}
+
+TEST("sgl emulated trace - a ray along the side of a box enters it, and the shared edge is met once")
+{
+    // x = 1 is the side of both structures' boxes, and d.x is 0, which a slab test's infinity would make a NaN of
+    CHECK(failures_of("test {scenes}:\n"
+                      "    let h = scenes.abutting.trace(along_z(1.0, 0.25))\n"
+                      "    h.is_hit\n"
+                      "    is_near(h.t, 3.0)\n"
+                      "    is_near(h.barycentrics.x + h.barycentrics.y + h.barycentrics.z, 1.0)\n")
+          == "");
+}
+
+TEST("sgl emulated trace - a triangle far smaller than the old determinant cutoff is still met")
+{
+    // its determinant is 1e-14, which the test this one replaced took for edge-on
+    CHECK(failures_of("test {scenes}:\n"
+                      "    let h = scenes.tiny.trace(along_z(0.25e-7, 0.25e-7))\n"
+                      "    h.is_hit\n"
+                      "    is_near(h.t, 3.0)\n"
+                      "    is_near(h.barycentrics.y, 0.25) and is_near(h.barycentrics.z, 0.25)\n"
+                      "    not scenes.tiny.trace(along_z(1.0e-6, 1.0e-6)).is_hit\n")
           == "");
 }
 
@@ -488,5 +710,84 @@ TEST("sgl emulated trace - a trace skipping all its structure holds meets nothin
               "ray_flags.cull_back_facing).is_hit\n"
               "    scenes.mixed.trace(along_z(2.75, 0.75), ball_report, flags = ray_flags.skip_triangles | "
               "ray_flags.cull_front_facing).kind == hit_kind.procedural\n")
+          == "");
+}
+
+TEST("sgl emulated trace - a moving instance stands where its ray's time puts it, and its hit says so (EVAL-130)")
+{
+    // the pair's near triangle is at z = 2, t = 3 from z = -1; at time 0.5 it stands at x = 5
+    CHECK(failures_of("fun at(x: float, y: float, time: float) -> ray => ray(origin = pos3(x, y, -1.0), direction = "
+                      "vec3(0.0, 0.0, 1.0), time = time)\n"
+                      "test {scenes}:\n"
+                      "    let h = scenes.moving.trace(at(0.25, 0.25, 0.0))\n"
+                      "    h.is_hit and h.instance_id == 21 and is_near(h.t, 3.0)\n"
+                      "    not scenes.moving.trace(at(0.25, 0.25, 1.0)).is_hit\n"
+                      "    scenes.moving.trace(at(10.25, 0.25, 1.0)).instance_id == 21\n"
+                      "    not scenes.moving.trace(at(10.25, 0.25, 0.0)).is_hit\n"
+                      "    let m = scenes.moving.trace(at(5.25, 0.25, 0.5))\n"
+                      "    m.is_hit and is_near(m.barycentrics.y, 0.25) and is_near(m.barycentrics.z, 0.25)\n"
+                      "    let p = m.to_world(pos3(0.0, 0.0, 2.0))\n"
+                      "    is_near(p.x, 5.0) and is_near(p.y, 0.0) and is_near(p.z, 2.0)\n"
+                      "    let q = m.to_object(pos3(5.25, 0.25, 2.0))\n"
+                      "    is_near(q.x, 0.25) and is_near(q.y, 0.25) and is_near(q.z, 2.0)\n"
+                      // a time outside 0 to 1 is held at its end, and a ray with none is cast at 0
+                      "test {scenes}:\n"
+                      "    scenes.moving.trace(at(0.25, 0.25, -3.0)).instance_id == 21\n"
+                      "    scenes.moving.trace(at(10.25, 0.25, 7.0)).instance_id == 21\n"
+                      "    scenes.moving.trace(along_z(0.25, 0.25)).instance_id == 21\n"
+                      // the static instance beside it stands still at every time, in a TLAS of 10-unit instances
+                      "test {scenes}:\n"
+                      "    scenes.moving.trace(at(0.25, 50.25, 0.0)).instance_id == 22\n"
+                      "    scenes.moving.trace(at(0.25, 50.25, 1.0)).instance_id == 22\n")
+          == "");
+}
+
+TEST("sgl emulated trace - a moving triangle stands where its ray's time puts it, each vertex on its own (EVAL-132)")
+{
+    // z falls from 5 to 1, so a ray from z = -1 meets it at t = 6 - 4 * time
+    CHECK(failures_of("fun at(x: float, y: float, time: float) -> ray => ray(origin = pos3(x, y, -1.0), direction = "
+                      "vec3(0.0, 0.0, 1.0), time = time)\n"
+                      "test {scenes}:\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 0.0)).t, 6.0)\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 1.0)).t, 2.0)\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 0.25)).t, 5.0)\n"
+                      // a time outside 0 to 1 is held at its end, and a ray with none is cast at 0
+                      "test {scenes}:\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, -3.0)).t, 6.0)\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 7.0)).t, 2.0)\n"
+                      "    is_near(scenes.morphing.trace(along_z(0.25, 0.25)).t, 6.0)\n"
+                      // the vertices move apart: x = 1.5 is past the edge at time 0 and inside it at time 1
+                      "test {scenes}:\n"
+                      "    not scenes.morphing.trace(at(1.5, 0.1, 0.0)).is_hit\n"
+                      "    scenes.morphing.trace(at(1.5, 0.1, 1.0)).is_hit\n"
+                      // at time 0.5 the second vertex is at x = 2, and barycentrics are of the triangle at that time
+                      "test {scenes}:\n"
+                      "    let m = scenes.morphing.trace(at(1.0, 0.25, 0.5))\n"
+                      "    m.is_hit and m.primitive_index == 0 and m.geometry_index == 0\n"
+                      "    is_near(m.t, 4.0) and is_near(m.barycentrics.y, 0.5) and is_near(m.barycentrics.z, 0.25)\n"
+                      // the still triangle of the same structure stands at every time
+                      "test {scenes}:\n"
+                      "    let s = scenes.morphing.trace(at(20.25, 0.25, 0.75))\n"
+                      "    s.primitive_index == 1 and is_near(s.t, 6.0)\n")
+          == "");
+}
+
+TEST("sgl emulated trace - moving vertices in a moving instance take the same time, on the mixed walk too")
+{
+    CHECK(mixed_failures_of("fun at(x: float, y: float, time: float) -> ray => ray(origin = pos3(x, y, -1.0), "
+                            "direction = "
+                            "vec3(0.0, 0.0, 1.0), time = time)\n"
+                            // at time 0.5 the instance stands at x = 5 and the triangle at z = 3
+                            "test {scenes}:\n"
+                            "    let h = scenes.morphing_moved.trace(at(5.25, 0.25, 0.5))\n"
+                            "    h.instance_id == 32 and is_near(h.t, 4.0)\n"
+                            "    not scenes.morphing_moved.trace(at(0.25, 0.25, 0.5)).is_hit\n"
+                            "    let p = h.to_world(pos3(0.0, 0.0, 3.0))\n"
+                            "    is_near(p.x, 5.0) and is_near(p.z, 3.0)\n"
+                            "test {scenes}:\n"
+                            "    let h = scenes.morphing_mixed.trace(at(0.25, 0.25, 1.0), ball_report)\n"
+                            "    h.kind == hit_kind.triangle and is_near(h.t, 2.0)\n"
+                            "    let i = scenes.morphing_mixed.trace(at(0.25, 0.25, 0.0), ball_report)\n"
+                            "    i.kind == hit_kind.triangle and is_near(i.t, 6.0)\n")
           == "");
 }

@@ -77,6 +77,8 @@ Everything below is session judgement; the mechanisms, flags and artifact format
 
 - Scope `build_diag` / `test_diag` to the right build with the selector dev.py printed: `base_path=` for builds, `path=…*.results.xml` for tests.
 - `test_diag … errors_only=true`, with a larger `limit`, expands every failure.
+- **A site printed as `<binary>+0x<offset>` is resolved under the run's `sites:` lines**: `file:line (function)` and the source line, since the clang dev presets build at `SC_SOURCE_SITES=OPAQUE`.
+  Read the condition of an assert from that source line; [Failure sites](../../../docs/guides/building-and-testing.md#failure-sites) has the rest.
 - The positional `<pattern>` is a test-name substring applied across binaries, or the exact name of a whole `*-test` binary.
   A pattern that matches no name anywhere is retried as a glob over the tests' **source files**, so `vector-test.cc`, `libs/base/clean-core/tests/memory` or an absolute path all select.
   That is a filter like any other: it does not open the disabled or bucket gates, so a file of benchmarks still needs `--manual` / `--pgo-benchmarks` / `--benchmarks`.

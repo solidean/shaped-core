@@ -279,9 +279,9 @@ TEST("sgl check - a buffer is a resource and never a value")
     constexpr auto members = "    src: buffer[float]\n    dst: mut buffer[float]\n";
     constexpr auto value = "a buffer as a value";
 
-    // Read through a subscript and nowhere else: not bound to a local, not passed, not returned.
+    // Read through a subscript, or handed to a parameter that stands for it (CHK-366): not bound to a local, not returned.
     CHECK(reports_for(listing(members, "    let b = work.src\n")).contains(value));
-    CHECK(reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
+    CHECK(!reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
     CHECK(reports_for(cc::string("fun pass(x: float) -> buffer[float] => x\n\n") + listing(members)).contains(value));
     CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n")).contains(value));
 
@@ -329,8 +329,13 @@ TEST("sgl check - a compute entry point takes the thread id and returns nothing"
                         "    return 1\n")
               .contains("a @compute fun returns nothing"));
 
+    // CHK-520: a bare @compute chooses its own size, and more than three are none
     CHECK(reports_for(cc::string(work)
                       + "@compute fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+          == "");
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(4, 4, 4, 4) fun go(@thread_id id: int3){work}:\n"
                         "    work.values[0] = 1.0\n")
               .contains("@compute takes one to three workgroup sizes"));
 
@@ -397,7 +402,7 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
                                     "@pixel struct target:\n    color: float4\n\n"
                                     "@pixel fun ps(p: pixel_input){tile} -> target:\n"
                                     "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n");
-    CHECK(raster.contains("tile is @workgroup memory, which only a compute stage has"));
+    CHECK(raster.contains("tile is @workgroup memory, which only a compute, a task and a mesh stage have"));
 }
 
 TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memory as C++ does (CHK-369)")
@@ -464,7 +469,7 @@ TEST("sgl check - an atomic is memory a builtin updates, in a mut buffer or in w
               .contains("a buffer of atomics is written by every update, so it is a `mut buffer`"));
     CHECK(reports_for("binding stats:\n    hits: atomic[uint]\n").contains("a constant block holds none"));
     CHECK(reports_for("binding stats:\n    hits: mut buffer[atomic[half]]\n")
-              .contains("an atomic holds a `uint`, an `int` or a `float`: `atomic[uint]`"));
+              .contains("an atomic holds a `uint`, an `int`, a `float`, a `ulong` or a `long`: `atomic[uint]`"));
     CHECK(reports_for("binding stats:\n    hits: mut buffer[atomic[float]]\n").empty());
     CHECK(reports_for("fun f() -> int:\n    let a: atomic[int] = 0\n    return 0\n")
               .contains("an atomic is memory in a `mut buffer` or a @workgroup binding, and never a value"));
@@ -478,13 +483,39 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                  granted))
           == "");
     CHECK(reports_for("binding b:\n    t: texture_2d[float4][8]\n").contains("needs binding_arrays"));
+    // CHK-490: an unbounded array is its binding's last member, under a feature of its own
     CHECK(reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][]\n", granted))
-              .contains("an unbounded binding array, which sg binds none of yet"));
-    CHECK(
-        reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)).contains("an array of samplers"));
+              .contains("needs unbounded_binding_arrays"));
+    CHECK(reports_for(
+              cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n", granted))
+          == "");
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n"
+                                 "    s: buffer[float]\n",
+                                 granted))
+              .contains("member-not-allowed-here"));
+    // CHK-491: the host decides the length per group, and the binding holds it as a constant `.length` reads
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n\n"
+                                 "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
+                                 granted))
+          == "");
+    // the length is sg's, which no member of the binding holds, so a member may take any name beside it
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n\n"
+                                 "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t_length\n",
+                                 granted))
+              .contains("unknown-member"));
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t_length: int\n"
+                                 "    t: texture_2d[float4][]\n\n"
+                                 "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
+                                 granted))
+          == "");
+    // an array of samplers is a binding array like any other, bound per group element by element
+    CHECK(reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)) == "");
     // `sampler` is a keyword, and subscripted in a type position it reads as the name does (AST-135)
-    CHECK(reports_for(cc::format("{}binding b:\n    s: sampler[2]\n", granted))
-              .contains("unsupported-yet user:[sampler[2]] an array of samplers"));
+    CHECK(reports_for(cc::format("{}binding b:\n    s: sampler[2]\n", granted)) == "");
+    CHECK(reports_for("binding b:\n    s: sampler[2]\n").contains("binding_arrays"));
+    // sg sizes no sampler array per group
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    s: sampler[]\n", granted))
+              .contains("an unbounded array of samplers"));
     CHECK(reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][2, 2]\n", granted))
               .contains("a binding array of more than one dimension"));
 

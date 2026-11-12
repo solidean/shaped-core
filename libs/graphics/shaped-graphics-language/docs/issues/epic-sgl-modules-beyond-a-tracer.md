@@ -7,9 +7,10 @@ refs:
 
 # Modules are a tracer
 
-Every compile parses the library and checks the modules the program reaches, in one pass with it, and keeps nothing between compiles.
-Interfaces, separate compilation and a parsed library shared across compiles are the [compilation model](../spec/incubator/compilation-model.md)'s.
+A process parses a library once and checks each module once, as a chain of layers every compile continues from.
+That is the [compilation model](../spec/incubator/compilation-model.md)'s, and [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md) is the work that builds it.
 The front end parses a library file only where its first line may be a `module` line, which keeps a module directory of programs cheap for the tool and slib.
-The language server still parses every file of its module directories.
+A module's name may be dotted since 2026-11-09, `module a.b`, as one flat name that `use a.b` binds as `b` (CHK-346, CHK-347).
+slib exports one as `module:a.b`, into `<sgl_modules/a/b.hh>` and `sgl_modules::a::b`.
 
 The children are what the tracer cannot carry yet, and the tooling around module directories.

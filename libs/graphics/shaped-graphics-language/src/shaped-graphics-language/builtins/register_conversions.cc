@@ -6,7 +6,6 @@ using namespace sgl::builtins;
 
 namespace
 {
-using check::is_16_bit;
 using check::scalar;
 using check::value_kind;
 using check::wide_kind_of;
@@ -31,14 +30,34 @@ constexpr numeric k_numerics[] = {
     {.name = "half", .hlsl = "float16_t", .wgsl_scalar = "f16", .wgsl_vector_suffix = "h", .kind = value_kind::scalar_half},
     {.name = "short", .hlsl = "int16_t", .wgsl_scalar = "i16", .wgsl_vector_suffix = "", .kind = value_kind::scalar_short},
     {.name = "ushort", .hlsl = "uint16_t", .wgsl_scalar = "u16", .wgsl_vector_suffix = "", .kind = value_kind::scalar_ushort},
+    {.name = "long", .hlsl = "int64_t", .wgsl_scalar = "i64", .wgsl_vector_suffix = "", .kind = value_kind::scalar_long},
+    {.name = "ulong", .hlsl = "uint64_t", .wgsl_scalar = "u64", .wgsl_vector_suffix = "", .kind = value_kind::scalar_ulong},
+    {.name = "double", .hlsl = "double", .wgsl_scalar = "f64", .wgsl_vector_suffix = "", .kind = value_kind::scalar_double},
 };
+
+/// The float, int or uint family of `k`, whatever its width.
+value_kind family_of(value_kind k)
+{
+    switch (k)
+    {
+    case value_kind::scalar_long:
+        return value_kind::scalar_int;
+    case value_kind::scalar_ulong:
+        return value_kind::scalar_uint;
+    case value_kind::scalar_double:
+        return value_kind::scalar_float;
+    default:
+        return wide_kind_of(k);
+    }
+}
 
 /// CHK-197: the families of one width convert among themselves, and each family between its widths.
 bool converts(numeric const& from, numeric const& to)
 {
     if (from.name == to.name)
         return false;
-    return is_16_bit(from.kind) == is_16_bit(to.kind) || wide_kind_of(from.kind) == wide_kind_of(to.kind);
+    return check::scalar_bytes_of(from.kind) == check::scalar_bytes_of(to.kind)
+        || family_of(from.kind) == family_of(to.kind);
 }
 
 /// A float to an integer truncates toward zero; out of range, and for a NaN, the value is unspecified (CHK-197).
@@ -76,8 +95,59 @@ u32 saturated_ushort(f32 x)
     return x >= 65535.0f ? 65535u : u32(x);
 }
 
+/// The same at 64 bits, whose bounds 2^63 and 2^64 are exact doubles too.
+i64 saturated_long(f64 x)
+{
+    if (!(x == x))
+        return 0;
+    if (x >= 9223372036854775808.0)
+        return i64((u64(1) << 63) - 1);
+    if (x <= -9223372036854775808.0)
+        return i64(u64(1) << 63);
+    return i64(x);
+}
+u64 saturated_ulong(f64 x)
+{
+    if (!(x > 0.0))
+        return 0;
+    if (x >= 18446744073709551616.0)
+        return ~u64(0);
+    return u64(x);
+}
+
+/// A conversion that has a 64-bit side: a float of either width as the double it is exactly, an integer of either
+/// width as its value, so the result rounds or wraps once.
+scalar converted_wide(scalar from, value_kind to)
+{
+    auto const is_float = from.kind == value_kind::scalar_float || from.kind == value_kind::scalar_double;
+    auto const real = from.kind == value_kind::scalar_double ? from.as_double() : f64(from.as_float());
+    // an int sign-extends, and a uint zero-extends, as every target converts
+    auto const bits = from.kind == value_kind::scalar_int ? u64(i64(from.as_int())) : from.wide_bits();
+    auto const is_signed = from.kind == value_kind::scalar_int || from.kind == value_kind::scalar_long;
+    switch (to)
+    {
+    case value_kind::scalar_double:
+        return scalar::of_double(is_float ? real : is_signed ? f64(i64(bits)) : f64(bits));
+    case value_kind::scalar_float:
+        return scalar::of(is_float ? f32(real) : is_signed ? f32(i64(bits)) : f32(bits));
+    case value_kind::scalar_long:
+        return scalar::of_long(is_float ? saturated_long(real) : i64(bits));
+    case value_kind::scalar_ulong:
+        return scalar::of_ulong(is_float ? saturated_ulong(real) : bits);
+    // between widths of one integer family the low 32 bits stay, as every target converts
+    case value_kind::scalar_int:
+        return {.kind = value_kind::scalar_int, .bits = u32(bits)};
+    case value_kind::scalar_uint:
+        return scalar::of_uint(u32(bits));
+    default:
+        return from;
+    }
+}
+
 scalar converted(scalar from, value_kind to)
 {
+    if (check::is_64_bit(from.kind) || check::is_64_bit(to))
+        return converted_wide(from, to);
     switch (to)
     {
     case value_kind::scalar_float:
@@ -133,6 +203,12 @@ evaluator converter_to(value_kind kind)
         return convert<value_kind::scalar_short>;
     case value_kind::scalar_ushort:
         return convert<value_kind::scalar_ushort>;
+    case value_kind::scalar_long:
+        return convert<value_kind::scalar_long>;
+    case value_kind::scalar_ulong:
+        return convert<value_kind::scalar_ulong>;
+    case value_kind::scalar_double:
+        return convert<value_kind::scalar_double>;
     default:
         return convert<value_kind::scalar_uint>;
     }
@@ -293,6 +369,13 @@ void sgl::builtins::register_conversions(registry& r)
         .signature = "@pure @operator(\"as\") fun convert_bool32_to_bool(x: bool32) -> bool",
         .evaluate = bool32_to_bool,
         .write = {.kind = spelling_kind::custom, .custom = write_bool32_to_bool},
+    });
+
+    r.add_comment("// an enum as the int of its case (CHK-150), which is what every target and the interpreter hold");
+    r.add(function_record{
+        .signature = "@internal @pure fun enum_as_int(x: int) -> int",
+        .evaluate = same,
+        .write = {.kind = spelling_kind::custom, .custom = write_same},
     });
 
     r.add_comment("// a direction or a position as the plain vector of its width, which every target writes it as "

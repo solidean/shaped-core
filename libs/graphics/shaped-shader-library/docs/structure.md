@@ -128,6 +128,11 @@ The shape the seam is built for, and what is still `[planned]`:
   **Neither fingerprint covers clean-core**, though it shapes the text too: SGL writes its numeric literals through `cc::to_string`.
   So a clean-core change that alters SGL's output needs `SC_SG_COLD=shaders`, or a wiped cache, before a run shows it.
   `SC_SG_COLD=shaders` turns the persistent tier off as it does DXC's.
+  **The same store can keep SGL's checked modules**, under `sgl_compiler_options::keeps_module_artifacts`, which is off.
+  Then a process loads each module's checked layer rather than checking it, where the modules it uses keep their interfaces.
+  A compile reads nothing but its arguments, so the library fetches the modules' artifacts ahead of it: adding a package, a module directory or an SGL compiler starts the fetch.
+  `shader_library::prefetch_modules` is the same fetch as something to await, so the process's first compiles find them; a compile that comes first checks its modules.
+  What a compile checked rather than loaded is put into the store after it.
   It is off on wasm and under `SC_THREADS=OFF` as well: a lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
   A failed preprocess is never stored.
   **A stored result keeps SGL's warnings**, so a hit is not silent where the miss warned.
@@ -177,6 +182,11 @@ For packages that is enumerable at build time; for run-time generated sources su
 The reload watcher subscribes to the distinct parent directory of each dependency.
 The notification wakes the actor's mailbox, so a watched watcher has no interval and no periodic wakeup at all.
 `nullopt` selects the polling fallback instead — [`filesystem::watch`](../src/shaped-shader-library/filesystem/filesystem.hh) carries the contract.
+
+**[done] — live edits on wasm.** A page has no source tree, so its edits arrive as text: a `memory_filesystem` mounted at a package's name shadows the embedded copy file by file.
+Its first write is a revision change like any other, and removing the file lands back on the embedded copy.
+Hot reload runs unthreaded there, so a frame's `poll_hot_reload` is the in-page recompile, and a broken edit keeps the last good shader as it does natively.
+`examples/graphics/sgl-cube`'s page is the loop end to end: an editor beside the canvas, or a file on disk the page follows where the browser lets it.
 
 **[in progress] — the other two backends.** Windows has `ReadDirectoryChangesW` over one IOCP and one thread.
 **Linux (inotify)** and **macOS (FSEvents)** are next; both currently take `watch_backend_none` and poll.

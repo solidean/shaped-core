@@ -276,6 +276,15 @@ struct surface:
     /// A frame that hid handedness there could not be quantized without a content migration.
     geometry_handedness: float = 1.0
 
+    /// How much of the hemisphere above it a texel's own relief leaves open, 1 for all of it: a tileable material's
+    /// occlusion, too fine for the scene's geometry to cast. The tracer turns it into a visibility per direction.
+    micro_occlusion: float = 1.0
+
+    /// The sine of the horizon a texel's own relief rises to, in 8 directions of its tangent frame a 45 degrees apart,
+    /// the first along the tangent and the fifth against it; 0 is open to the plane. The tracer shadows what lies below it.
+    horizon_lo: float4 = float4(0.0, 0.0, 0.0, 0.0)
+    horizon_hi: float4 = float4(0.0, 0.0, 0.0, 0.0)
+
 /// The surface a material fragment starts from: OpenPBR's own defaults, so one that writes nothing is the specification's default surface.
 fun default_surface() -> surface => surface()
 

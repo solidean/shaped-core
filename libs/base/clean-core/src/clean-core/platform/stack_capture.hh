@@ -129,8 +129,10 @@ namespace cc
 /// Captures a stack from a thread's saved machine context rather than from here.
 ///
 /// This is what sampling needs: a thread is suspended, its context read, and its stack walked from outside.
-/// `native_context` is a `CONTEXT*` on Windows and null elsewhere, since no other platform walks a foreign thread
-/// this way — POSIX sampling runs the walk ON the target, from a signal handler, where plain capture_stack works.
+/// `native_context` is a `CONTEXT*` on Windows, and a `ucontext_t*` on Linux and macOS where the frame chain is kept.
+/// The POSIX form is for a signal handler walking the thread it interrupted from the interrupted registers: running on a
+/// signal stack of its own, plain capture_stack starts outside the thread's stack and stops at once.
+/// It walks no foreign thread, so stack_capture_from_context_available stays false there.
 ///
 /// **The target must not be running.** Walking a live thread's stack reads a chain that is being rewritten underneath.
 /// Functions are looked up in `unwind` alone, never through the OS, so the walk takes no lock the target may hold.
@@ -140,6 +142,20 @@ namespace cc
                                                                          isize skip = 0,
                                                                          void const* stop_frame = nullptr,
                                                                          cc::stack_walk walk = cc::stack_walk::automatic);
+
+/// Captures a stack from a frame pointer and a program counter read off a thread stopped from outside.
+///
+/// Where a foreign thread is walked by its registers rather than by a `CONTEXT`: macOS, through Mach.
+/// `stack_low` and `stack_high` are that thread's own stack, which every link is checked against; the caller reads them
+/// before the thread stops, since asking for them may take a lock it holds.
+/// `program_counter` comes first, since no link of the chain records where the thread IS.
+/// Returns an empty capture where this build keeps no frame chain, or where the bounds are unknown.
+[[nodiscard]] cc::stack_capture_result capture_stack_from_frame(void const* frame_pointer,
+                                                                void* program_counter,
+                                                                u64 stack_low,
+                                                                u64 stack_high,
+                                                                cc::span<void*> out,
+                                                                void const* stop_frame = nullptr);
 
 /// Whether `walk` is a real option in this build.
 /// `automatic` is always available where any walk is.

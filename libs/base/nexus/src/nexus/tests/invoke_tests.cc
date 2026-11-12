@@ -141,7 +141,7 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
             matches.push_back(&decl);
 
     cc::sort(matches, cc::compare_by([](test_declaration const* d) { return cc::string_view(d->name); },
-                                     [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
+                                     [](test_declaration const* d) { return cc::string_view(d->file); },
                                      [](test_declaration const* d) { return d->location.line(); }));
 
     // Shuffled before -c scoping, by the driver's seed, so narrowing to one child never changes the order the others ran in.
@@ -176,6 +176,14 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
             if (child_scopes.empty())
                 continue; // this child is scoped out
         }
+
+        if (is_parked(*decl, *config, child_scopes, consumed))
+            continue;
+
+        // --shard: a driver that runs in every shard dispatches only this shard's children
+        if (parent->instance.shards_children
+            && !config->in_shard(cc::format("{} / {} / {}", parent->instance.declaration->name, name, decl->name)))
+            continue;
 
         // Cycle guard: this invocable is already running further up the chain, so invoking it again would recurse forever.
         // Fail the current test with a clear message instead of overflowing the stack.

@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
+#include <clean-core/platform/file_access.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
@@ -61,6 +62,7 @@ cc::string temp_directory_path()
 
 bool remove_file(cc::string_view path)
 {
+    cc::file_access::note_write(path);
     auto wpath = cc::utf8_to_utf16(path);
     wpath.push_back(u'\0');
 
@@ -90,6 +92,7 @@ cc::string temp_directory_path()
 
 bool remove_file(cc::string_view path)
 {
+    cc::file_access::note_write(path);
     auto c_path = cc::string::create_copy_of(path);
     if (std::remove(c_path.c_str_materialize()) == 0)
         return true;

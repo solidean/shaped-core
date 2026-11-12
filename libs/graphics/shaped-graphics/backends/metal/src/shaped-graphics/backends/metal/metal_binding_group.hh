@@ -74,14 +74,44 @@ public:
                         cc::vector<bound_texture> bound_textures = {},
                         cc::vector<sg::tlas_handle> bound_tlases = {},
                         cc::vector<array_binding> array_bindings = {},
-                        MTL::Buffer* hit_offsets = nullptr);
+                        isize hit_offsets_at = -1,
+                        cc::vector<u32> acceleration_roots = {});
     ~metal_binding_group() override;
 
-    /// The mirror of an argument buffer, one entry per slot, that a ray-tracing kernel finds a closest hit's record by.
+    /// What a group's argument buffer is written from, slot for slot of its layout.
+    struct argument_contents
+    {
+        /// One per slot, and behind the last one the further elements of an unbounded binding.
+        cc::span<u64 const> slots;
+        /// Each slot's byte length, parallel to `slots`: a buffer view's, zero for anything else.
+        cc::span<u32 const> lengths;
+        /// The slot of the layout's unbounded binding, its last; -1 where it has none.
+        isize unbounded_at = -1;
+        cc::span<u64 const> mirror;
+    };
+    struct created_arguments
+    {
+        MTL::Buffer* buffer = nullptr;
+        isize hit_offsets_at = -1;
+    };
+
+    /// A group's argument buffer: its 8-byte slots, each slot's byte length as a `u32`, which SGL's MSL reads as
+    /// `sgl_lengths` (EMIT-195), the hit-offsets mirror where a slot holds a TLAS, and an unbounded binding's table.
+    /// That binding's slot holds the table's address: its element count, a slot per element and a length per element,
+    /// since Metal sizes no argument buffer member per group.
+    /// The buffer is resident and owned by the caller; an error means the device refused it.
+    [[nodiscard]] static cc::result<created_arguments> create_arguments(metal_context& ctx,
+                                                                        cc::string_view label,
+                                                                        argument_contents const& contents);
+
+    /// The bytes a buffer view makes visible, which is what its slot's length holds.
+    [[nodiscard]] static u32 byte_length_of(sg::raw_buffer_view const& view);
+
+    /// The mirror of an argument buffer, one address per slot, that a ray-tracing kernel finds a closest hit's record by.
     /// Slot `n` holds the per-instance hit-group offsets of `tlas_at_slot[n]`, and zero where that is null.
-    /// Null where no slot holds a TLAS, since nothing could trace through this group then.
-    [[nodiscard]] static cc::result<MTL::Buffer*> create_hit_offsets(metal_context& ctx,
-                                                                     cc::span<sg::tlas_handle const> tlas_at_slot);
+    /// Empty where no slot holds a TLAS, since nothing could trace through this group then.
+    /// It is written into the argument buffer's tail, at the `hit_offsets_at` the group is constructed with.
+    [[nodiscard]] static cc::vector<u64> hit_offsets_mirror(cc::span<sg::tlas_handle const> tlas_at_slot);
 
     /// The address an argument table binds this group at.
     [[nodiscard]] u64 argument_address() const { return _arguments != nullptr ? u64(_arguments->gpuAddress()) : 0; }
@@ -89,7 +119,7 @@ public:
     /// The address of this group's hit-offsets mirror, which `dispatch_rays` hands the kernel; 0 where it has none.
     [[nodiscard]] u64 hit_offsets_address() const
     {
-        return _hit_offsets != nullptr ? u64(_hit_offsets->gpuAddress()) : 0;
+        return _hit_offsets_at >= 0 ? argument_address() + u64(_hit_offsets_at) : 0;
     }
 
     [[nodiscard]] metal_binding_group_layout const& layout() const { return *_layout; }
@@ -104,6 +134,10 @@ public:
     /// The acceleration structures this group names — a trace against one declares `accel_read` on it.
     [[nodiscard]] cc::span<sg::tlas_handle const> bound_tlases() const { return _bound_tlases; }
 
+    /// The software walk's root of each acceleration member traced in software, by its position among the group's
+    /// acceleration members, zero for one traced natively (EMIT-135).
+    [[nodiscard]] cc::span<u32 const> acceleration_roots() const { return _acceleration_roots; }
+
     /// The array bindings this group holds, each keeping its elements alive as the scalar lists do theirs.
     [[nodiscard]] cc::span<array_binding const> array_bindings() const { return _array_bindings; }
 
@@ -111,9 +145,11 @@ private:
     metal_context& _ctx;
     metal_binding_group_layout_handle _layout;
     MTL::Buffer* _arguments = nullptr;
-    MTL::Buffer* _hit_offsets = nullptr;
+    /// The mirror's byte offset in `_arguments`, -1 where there is none.
+    isize _hit_offsets_at = -1;
     cc::vector<bound_buffer> _bound_buffers;
     cc::vector<bound_texture> _bound_textures;
     cc::vector<sg::tlas_handle> _bound_tlases;
     cc::vector<array_binding> _array_bindings;
+    cc::vector<u32> _acceleration_roots;
 };

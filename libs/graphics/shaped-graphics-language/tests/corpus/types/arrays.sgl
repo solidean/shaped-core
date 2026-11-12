@@ -82,4 +82,66 @@ struct varyings:
     let palette = [float4(1.0, 0.0, 0.0, 1.0), float4(0.0, 1.0, 0.0, 1.0), float4(0.0, 0.0, 1.0, 1.0), float4(1.0, 1.0, 1.0, 1.0)]
     let mut ramp = float[4].filled(0.25)
     ramp[band] = 1.0
-    return { color = palette[band] * ramp[band] }
+    return {color = palette[band] * ramp[band]}
+
+// `==` and `!=` compare every element (CHK-513, EVAL-110), an array of arrays or of enums included
+enum tone:
+    warm
+    cold
+
+test:
+    [1, 2, 3] == [1, 2, 3]
+    [1, 2, 3] != [1, 2, 4]
+    not ([1, 2, 3] != [1, 2, 3])
+    [float2(1.0, 2.0)] == [float2(1.0, 2.0)]
+    [tone.warm, tone.cold] != [tone.warm, tone.warm]
+    let grid: int[2, 2] = [[1, 2], [3, 4]]
+    let same: int[2, 2] = [[1, 2], [3, 4]]
+    let other: int[2, 2] = [[1, 2], [3, 5]]
+    grid == same
+    grid != other
+
+// a NaN compares unequal, so its array does too
+test:
+    let zero = 0.0
+    let nan = zero / zero
+    [nan] != [nan]
+
+// a side is evaluated once, even where an element already decided the answer
+fun counted(n: mut int) -> int[2]:
+    n += 1
+    return [n, 0]
+
+test:
+    let mut n = 0
+    counted(mut n) != [9, 9]
+    n == 1
+
+// an array of a const compares like any other
+const primes = [2, 3, 5]
+const first = int[1].filled(2)
+
+test:
+    primes == [2, 3, 5]
+    primes[2] == 5
+    first == [2]
+
+// inside a shader it is a loop of the target's own
+binding compared:
+    values: mut buffer[int]
+
+@compute(1) fun compare_arrays(){compared}:
+    let a = [compared.values[0], compared.values[1]]
+    let b = [compared.values[1], compared.values[0]]
+    if a == b:
+        compared.values[2] = 1
+
+// nothing compares an array whose element has no `==`
+struct pair:
+    x: int
+
+@expect(error = "no-matching-overload")
+test [pair(x = 1)] == [pair(x = 1)]
+
+@expect(error = "no-matching-overload")
+test [1, 2] == [1.0, 2.0]

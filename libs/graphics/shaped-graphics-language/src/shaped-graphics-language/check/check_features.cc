@@ -38,6 +38,9 @@ feature_set checker::read_require(i32 file, ast::require_decl const& r, require_
         }
         auto const f = feature(index);
         result.set(f);
+        // CHK-511: every 64-bit atomic includes a ulong's min and max
+        if (f == feature::shader_int64_atomics)
+            result.set(feature::shader_int64_min_max_atomics);
         // CHK-265: a file's `require` states what the whole file may do, and a binding's what its listers need,
         // so neither is ever unused.
         if (scope == require_scope::body)
@@ -71,6 +74,9 @@ void checker::judge_entry_features(symbol_id id)
     // CHK-301, CHK-304, CHK-306: the geometry and the tessellation stages are features a device grants
     if (info.entry_stage == stage::geometry)
         needed.set(feature::geometry_shader);
+    // CHK-480: so is the mesh stage
+    if (info.entry_stage == stage::mesh || info.entry_stage == stage::task)
+        needed.set(feature::mesh_shader);
     if (info.entry_stage == stage::tessellation_control || info.entry_stage == stage::tessellation_evaluation)
         needed.set(feature::tessellation_shader);
     // CHK-326: the ray-tracing stages are the pipeline's, which a device grants
@@ -145,9 +151,17 @@ feature_set checker::features_of_type(type_id type) const
     switch (t.kind)
     {
     case type_kind::array:
-    case type_kind::atomic:
     case type_kind::buffer:
         return features_of_type(t.element);
+    // CHK-296: a 64-bit atomic needs its integer's feature and an atomic's; a ulong's the min and max alone (CHK-511)
+    case type_kind::atomic:
+    {
+        auto result = features_of_type(t.element);
+        if (auto const* const record = out.builtin_type_of(t.element); record != nullptr && is_64_bit(record->leaf_kind))
+            result |= record->leaf_kind == value_kind::scalar_ulong ? feature::shader_int64_min_max_atomics
+                                                                    : feature::shader_int64_atomics;
+        return result;
+    }
     case type_kind::structure:
     {
         auto result = feature_set();
@@ -160,24 +174,44 @@ feature_set checker::features_of_type(type_id type) const
     }
 }
 
-cc::string checker::sixteen_bit_path(type_id type) const
+cc::string checker::sized_value_path(type_id type, i32 bits) const
 {
     if (type == checked_module::error_type)
         return {};
     if (auto const* const record = out.builtin_type_of(type))
-        return is_16_bit(record->leaf_kind) ? cc::format(": {}", out.name_of(type)) : cc::string();
+        return (bits == 16 ? is_16_bit(record->leaf_kind) : is_64_bit(record->leaf_kind))
+                 ? cc::format(": {}", out.name_of(type))
+                 : cc::string();
     auto const& t = out.at(type);
     if (t.kind == type_kind::array)
-        return sixteen_bit_path(t.element);
+        return sized_value_path(t.element, bits);
     if (t.kind != type_kind::structure)
         return {};
     for (auto const& m : out.at(t.members))
-        if (auto inner = sixteen_bit_path(m.type); !inner.empty())
+        if (auto inner = sized_value_path(m.type, bits); !inner.empty())
             return cc::format(".{}{}", m.name, inner);
     return {};
 }
 
-void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
+cc::string checker::wide_vector_path(type_id type) const
+{
+    if (type == checked_module::error_type)
+        return {};
+    if (auto const* const record = out.builtin_type_of(type))
+        return is_64_bit(record->leaf_kind) && record->leaf_count >= 3 ? cc::format(": {}", out.name_of(type))
+                                                                       : cc::string();
+    auto const& t = out.at(type);
+    if (t.kind == type_kind::array)
+        return wide_vector_path(t.element);
+    if (t.kind != type_kind::structure)
+        return {};
+    for (auto const& m : out.at(t.members))
+        if (auto inner = wide_vector_path(m.type); !inner.empty())
+            return cc::format(".{}{}", m.name, inner);
+    return {};
+}
+
+void checker::judge_edge_16_bit(i32 file, source_span where, type_id type, bool is_link)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
     while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
@@ -186,8 +220,13 @@ void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return;
-    if (auto const found = sixteen_bit_path(type); !found.empty())
+    if (auto const found = sized_value_path(type, 16); !found.empty())
         unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
+    // CHK-454: a stage link carries a 64-bit value; no vertex input or target does
+    if (!is_link)
+        if (auto const found = sized_value_path(type, 64); !found.empty())
+            unsupported(file, where,
+                        cc::format("a 64-bit value in a vertex input or a target, in {}{}", out.name_of(type), found));
 }
 
 checker::local_only_found checker::local_only_path(type_id type, bool in_memory, bool in_link) const
@@ -207,6 +246,13 @@ checker::local_only_found checker::local_only_path(type_id type, bool in_memory,
     if (t.kind == type_kind::structure && t.is_text_type)
         return {.path = cc::format(": {}", out.name_of(type)),
                 .reason = "a compile may spell it in its target's own text",
+                .type = type};
+    // CHK-522: a struct with a target layout is a buffer's element, laid out as the compile's branch, and nothing else
+    if (t.kind == type_kind::buffer && has_target_layout(t.element))
+        return {};
+    if (t.kind == type_kind::structure && t.has_target_layout)
+        return {.path = cc::format(": {}", out.name_of(type)),
+                .reason = "it stands in each target's own order, which only a buffer's element follows",
                 .type = type};
     if (t.kind == type_kind::array || t.kind == type_kind::buffer)
     {
@@ -267,7 +313,7 @@ void checker::mark_requires_used(cc::span<symbol_id const> functions, feature_se
 void checker::report_unused_requires()
 {
     for (auto const& line : require_lines)
-        if (!line.is_used)
+        if (!line.is_used && out.is_reached_file(line.file))
             report(diagnostic_kind::unused_require, line.file, line.where,
                    cc::format("nothing in {} needs {} of it",
                               out.at(line.owner).name.empty() ? cc::string_view("the test")

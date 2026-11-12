@@ -27,7 +27,7 @@ template <sg::pixel_format Format>
 }
 } // namespace
 
-wavefront_state wavefront_state::create(sg::context& ctx, tg::vec2i extent, i32 max_permutations)
+wavefront_state wavefront_state::create(sg::context& ctx, tg::vec2i extent, i32 max_permutations, u32 channel_mask)
 {
     CC_ASSERT(extent[0] > 0 && extent[1] > 0, "a wavefront state needs at least one pixel");
     CC_ASSERT(max_permutations > 0, "a wavefront state needs room for at least one permutation");
@@ -44,6 +44,10 @@ wavefront_state wavefront_state::create(sg::context& ctx, tg::vec2i extent, i32 
             .hits = p.create_buffer<tracer::hit_record>(slots, usage),
             .shadow_rays = p.create_buffer<tracer::shadow_ray>(2 * slots, usage),
             .tallies = p.create_buffer<tracer::pixel_tally>(slots, usage),
+            .channel_mask = channel_mask,
+            // a buffer of one where no channel is asked for, since the binding must be filled
+            .channel_sums
+            = p.create_buffer<tg::vec4f>(channel_mask == 0 ? 1 : slots * (cc::popcount(channel_mask) + 1), usage),
             .queue_a = p.create_buffer<u32>(slots, usage),
             .queue_b = p.create_buffer<u32>(slots, usage),
             .queue_hits = p.create_buffer<u32>(slots, usage),
@@ -61,9 +65,9 @@ isize wavefront_state::size_in_bytes() const
 {
     return path_rays.size_in_bytes() + path_states.size_in_bytes() + path_media.size_in_bytes()
          + path_lights.size_in_bytes() + hits.size_in_bytes() + shadow_rays.size_in_bytes() + tallies.size_in_bytes()
-         + queue_a.size_in_bytes() + queue_b.size_in_bytes() + queue_hits.size_in_bytes() + queue_sorted.size_in_bytes()
-         + queue_shadow.size_in_bytes() + queue_finished.size_in_bytes() + counters.size_in_bytes()
-         + shade_offsets.size_in_bytes() + args.size_in_bytes();
+         + channel_sums.size_in_bytes() + queue_a.size_in_bytes() + queue_b.size_in_bytes() + queue_hits.size_in_bytes()
+         + queue_sorted.size_in_bytes() + queue_shadow.size_in_bytes() + queue_finished.size_in_bytes()
+         + counters.size_in_bytes() + shade_offsets.size_in_bytes() + args.size_in_bytes();
 }
 
 namespace impl
@@ -138,6 +142,7 @@ shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
         .hits = paths.hits.as_readwrite_buffer(),
         .shadow_rays = paths.shadow_rays.as_readwrite_buffer(),
         .tallies = paths.tallies.as_readwrite_buffer(),
+        .channel_sums = paths.channel_sums.as_readwrite_buffer(),
         .queue_a = paths.queue_a.as_readwrite_buffer(),
         .queue_b = paths.queue_b.as_readwrite_buffer(),
         .queue_hits = paths.queue_hits.as_readwrite_buffer(),

@@ -1,0 +1,93 @@
+// 64-bit values as the GPU runs them: longs where a device has shader_int64, and doubles where it has shader_f64.
+// WGSL has neither and MSL no double, so WebGPU runs none of this and Metal the longs alone.
+
+require shader_int64
+require shader_f64
+require shader_int64_atomics
+
+// In a constant block a long takes 8 bytes, and a ulong2 starts on the next 16-byte row.
+binding long_sums:
+    seed: long
+    mask: ulong2
+    deltas: buffer[long2]
+    totals: mut buffer[ulong2]
+
+// Every step leaves 32 bits behind: a product past 2^32, a shift into the high word and back, a quotient of 64-bit
+// values, and a sum that wraps.
+@compute(64) fun sum_longs(@thread_id id: int3){long_sums}:
+    let d = long_sums.deltas[id.x]
+    let product = d.x * 3'000'000'000 + long_sums.seed
+    let shifted = ((product as ulong) << 20) >> 4
+    let quotient = product / (d.y | 1)
+    long_sums.totals[id.x] = ulong2((shifted ^ long_sums.mask.x) + long_sums.mask.y, (quotient - d.y) as ulong)
+
+binding double_sums:
+    scale: double
+    values: buffer[double2]
+    results: mut buffer[double2]
+
+// A float keeps 24 bits, so 2^-40 beside a small integer is lost to it, and a double keeps it through every step.
+@compute(64) fun sum_doubles(@thread_id id: int3){double_sums}:
+    let v = double_sums.values[id.x]
+    let fine = v.x + 1.0f64 / 1099511627776.0f64
+    double_sums.results[id.x] = double2(fine * double_sums.scale - v.x * double_sums.scale, min(v.y, -v.x) / 4.0f64)
+
+binding long_atomics:
+    totals: mut buffer[atomic[ulong]]
+    lows: mut buffer[atomic[long]]
+
+// Every invocation of a group adds a multiple of 2^33 to the group's element, which no low word holds, and keeps the
+// most negative of its id times -2^40.
+@compute(64) fun tally_longs(@thread_id id: int3, @local_thread_index local: int, @workgroup_id group: int3){long_atomics}:
+    long_atomics.totals[group.x].add(((local as uint as ulong) + 1u64) << 33)
+    long_atomics.lows[group.x].min(-(id.x as long) << 40)
+
+// 64-bit values cross from the vertex to the pixel stage flat (CHK-454), as their words on dx12 and metal (EMIT-196).
+// The pixel stage stores a long's two words, a double's bit past a float's, and a ulong2's high and low parts.
+// A double3 and a ulong4 take two locations each (CHK-454), so `tag` after them lands only if every location lines up.
+binding crossed:
+    words: mut buffer[uint]
+
+struct long_varyings:
+    @position position: hpos4
+    @interpolate(.flat) key: long
+    @interpolate(.flat) ratio: double
+    @interpolate(.flat) pair: ulong2
+    @interpolate(.flat) wide: double3
+    @interpolate(.flat) quad: ulong4
+    @interpolate(.flat) tag: uint
+
+@pixel struct long_target:
+    color: float4
+
+@vertex fun long_vs(@vertex_index v: int) -> long_varyings:
+    let x = ((v & 1) as float) * 4.0 - 1.0
+    let y = ((v >> 1) as float) * 4.0 - 1.0
+    return {
+        position = hpos4(x, y, 0.0, 1.0),
+        key = (0x12345678i64 << 32) | 0x9abcdefi64,
+        ratio = 1.0f64 + 1.0f64 / 1099511627776.0f64,
+        pair = ulong2(5u64 << 40, 3u64),
+        wide = double3(2.0f64, 3.0f64, 1.0f64 + 3.0f64 / 1099511627776.0f64),
+        quad = ulong4(1u64, 2u64 << 36, 3u64, (7u64 << 44) | 11u64),
+        tag = 0x5eedu,
+    }
+
+@pixel fun long_ps(p: long_varyings){crossed} -> long_target:
+    crossed.words[0] = ((p.key & 0xffffffffi64) as ulong) as uint
+    crossed.words[1] = ((p.key >> 32) as ulong) as uint
+    crossed.words[2] = (((p.ratio - 1.0f64) * 1099511627776.0f64) as long as ulong) as uint
+    crossed.words[3] = ((p.pair.x >> 40) + p.pair.y) as uint
+    let tail = (((p.wide.z - 1.0f64) * 1099511627776.0f64) as long as ulong) as uint
+    crossed.words[4] = tail + (((p.wide.x + p.wide.y) as float) as uint)
+    crossed.words[5] = ((p.quad.y >> 36) + p.quad.x + p.quad.z) as uint
+    crossed.words[6] = (p.quad.w >> 44) as uint
+    crossed.words[7] = (p.quad.w & 0xffffffffu64) as uint
+    crossed.words[8] = p.tag
+    return {color = float4(1.0, 0.0, 0.0, 1.0)}
+
+pipeline long_crossing:
+    vertex = long_vs
+    pixel = long_ps
+    cull = .none
+    format = .rgba8_unorm

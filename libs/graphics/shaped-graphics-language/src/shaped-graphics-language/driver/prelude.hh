@@ -23,7 +23,7 @@ struct sgl::parsed_prelude_file
 
 namespace sgl
 {
-/// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, then `raytracing.sgl`.
+/// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, `raytracing.sgl`, then `tessellation.sgl`.
 ///
 /// `builtins.sgl` is `builtins::default_registry().prelude_text()`: generated in memory, so the library never opens the committed file.
 /// The committed `prelude/builtins.sgl` is byte-identical, which is why a diagnostic's line and column are right in it.
@@ -37,14 +37,23 @@ namespace sgl
 /// Immutable after the first call, so every thread reads the same files.
 [[nodiscard]] cc::span<parsed_prelude_file const> parsed_prelude();
 
+/// The library files SGL ships, which every compile's library holds behind the caller's: module `accel` (CHK-522).
+/// Embedded like the prelude, so `use accel` needs no module directory; the views live for the life of the process.
+[[nodiscard]] cc::span<library_file const> shipped_library();
+
+/// The position in `shipped_library()` of the file `path` is, -1 when it is none of them, told as `prelude_file_of` tells.
+/// A source that is one of them stands in for it, so the library leaves the shipped copy out.
+[[nodiscard]] i32 shipped_library_file_of(cc::string_view path);
+
 /// `parsed_prelude()` checked against `builtins::default_registry()`, once per process, which every compile behind it continues.
 /// Null where the prelude reports anything, and a compile then checks the prelude with its program to report it.
 /// Immutable after the first call, like `parsed_prelude()`.
 [[nodiscard]] check::checked_prelude const* checked_prelude();
 
 /// The position in `prelude_files()` of the file `path` is, -1 when it is none of them.
-/// Only the library's own prelude directory counts, as the build saw it: a user's `shaders/prelude/core.sgl` is -1.
-/// So `path` must be absolute, a path or a `file://` uri; either separator matches, and on Windows any case.
+/// Only a file in the library's own `shaped-graphics-language/prelude/` directory counts: a user's `shaders/prelude/core.sgl` is -1.
+/// That directory is told by its place in a checkout, since a binary carries no path of the tree it was built from.
+/// `path` is a path or a `file://` uri; either separator matches, and on Windows any case.
 /// A driver checks such a source as that file of the prelude, in place of the library's copy.
 /// Behind the prelude it would declare everything a second time, and each name would then hide its own twin.
 [[nodiscard]] i32 prelude_file_of(cc::string_view path);
@@ -61,6 +70,8 @@ namespace sgl::impl
 [[nodiscard]] cc::string_view embedded_core_prelude();
 /// `prelude/raytracing.sgl`: the types and the functions of a trace, and the software traversal webgpu runs.
 [[nodiscard]] cc::string_view embedded_raytracing_prelude();
-/// The absolute path of the source tree's `prelude/` directory, with `/` separators.
-[[nodiscard]] cc::string_view prelude_directory();
+/// `prelude/tessellation.sgl`: the fixed-function tessellator, for the tessellation polyfill (CHK-527).
+[[nodiscard]] cc::string_view embedded_tessellation_prelude();
+/// `prelude/accel.sgl`: module `accel`, the records of a GPU-written acceleration structure build.
+[[nodiscard]] cc::string_view embedded_accel_module();
 } // namespace sgl::impl

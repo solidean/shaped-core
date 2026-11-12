@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
@@ -80,6 +81,8 @@ namespace sgl::check
     return u16(1u << u8(s));
 }
 inline constexpr u16 k_every_stage = 0xFFFF;
+/// The largest factor D3D's tessellator and every native one take, which `max_factor` states at most (CHK-304).
+inline constexpr i32 k_max_tessellation_factor = 64;
 } // namespace sgl::check
 
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
@@ -126,6 +129,12 @@ enum class sgl::check::stage : sgl::u8
     tessellation_control,
     /// A `@tessellation_evaluation` fun: it takes a patch, its factors and a point of the domain, and returns a vertex (CHK-306).
     tessellation_evaluation,
+    /// A `@task(x, y, z)` fun: a workgroup launches mesh workgroups with `dispatch_mesh`, handing them one payload
+    /// (CHK-484).
+    task,
+    /// A `@mesh(x, y, z, vertices = N, triangles = M)` fun: a workgroup writes up to N vertices and M triangles for the
+    /// rasterizer through its output (CHK-480), in the vertex stage's place.
+    mesh,
     /// The ray-tracing stages (CHK-326): where a dispatch of rays starts, one invocation per launch index.
     raygen,
     /// What a ray that hit nothing runs, with its ray type's payload.
@@ -159,6 +168,10 @@ namespace sgl::check
         return "tessellation_control";
     case stage::tessellation_evaluation:
         return "tessellation_evaluation";
+    case stage::task:
+        return "task";
+    case stage::mesh:
+        return "mesh";
     case stage::raygen:
         return "raygen";
     case stage::miss:
@@ -218,6 +231,8 @@ enum class sgl::check::stage_input : sgl::u8
     /// How many invocations the subgroup holds, and this one's index in it (CHK-271).
     subgroup_size,
     subgroup_invocation_id,
+    /// Which view of a draw of several this invocation renders, from 0: the pipeline's `view_count` says how many.
+    view_index,
 };
 
 /// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.
@@ -243,6 +258,14 @@ namespace sgl::check
 [[nodiscard]] cc::span<stage_input_info const> stage_inputs();
 /// The one of `input`; `input` must not be `none`.
 [[nodiscard]] stage_input_info const& info_of(stage_input input);
+/// Whether `input` says where an invocation stands in its workgroup or its subgroup, which a bare @compute, whose size
+/// the compile chooses, never reads (CHK-520).
+[[nodiscard]] constexpr bool reads_group(stage_input input)
+{
+    return input == stage_input::local_thread_id || input == stage_input::local_thread_index
+        || input == stage_input::workgroup_id || input == stage_input::subgroup_size
+        || input == stage_input::subgroup_invocation_id;
+}
 } // namespace sgl::check
 
 /// One canonical type: equal types have equal ids, so type equality is id equality.
@@ -259,6 +282,12 @@ struct sgl::check::type_info
     bool is_opaque = false;
     /// A struct whose body is a `const if` chain, which a compile may spell in its target's text (CHK-432).
     bool is_text_type = false;
+    /// `@target_layout`: a struct whose fields stand in each target's own order, as one of `target_type_branches` says
+    /// (CHK-522); the check judges it by its first branch's fields, and a compile writes its branch's struct instead.
+    bool has_target_layout = false;
+    /// The struct with a target layout this one is a branch of, whose fields it holds in that branch's order; `none` for
+    /// every other type.
+    type_id layout_of = type_id::none;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
     /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
@@ -269,6 +298,8 @@ struct sgl::check::type_info
     cc::string swizzle_alias;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
+    /// A mesh output's per-primitive struct, `mesh_output[V, P]`'s `P` (CHK-488); `none` for every other type.
+    type_id primitive = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
     i32 count = 0;
     /// The value parameter an array's length or an image's format is, `T[n]` or `image_2d[f]`, which an instance
@@ -407,6 +438,11 @@ struct sgl::check::member_info
     /// `@sampler(name)` on a texture that names a file-scope sampler rather than a member (CHK-279); none otherwise.
     /// At most one of it and `default_sampler` is set.
     symbol_id default_file_sampler = symbol_id::none;
+    /// `@bits(n)` in a branch of a `@target_layout` struct: the field takes the next `n` bits of a 32-bit word (CHK-526);
+    /// 0 for a field of its own.
+    i32 layout_bits = 0;
+    /// `@absent` in such a branch: the target's record has no such field, and a construction drops it (CHK-526).
+    bool is_absent = false;
 
     bool operator==(member_info const&) const = default;
 };
@@ -438,9 +474,8 @@ enum class sgl::check::symbol_kind : sgl::u8
     /// A file-scope `sampler`: a static sampler of the pipeline layout of every entry point that uses it (CHK-314).
     /// `info` is its position in `checked_module::samplers`, and `type` the sampler type its settings make.
     sampler,
-    /// A named declaration this phase has no meaning for yet: `type`.
-    /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
-    unsupported,
+    /// A `type` alias, whose `type` is the type its value names once it is compiled (CHK-14).
+    alias,
 };
 
 /// Where the demand-driven pass is with one symbol.
@@ -475,7 +510,7 @@ struct sgl::check::symbol
 {
     i32 file = 0;
     ast::decl_id declaration = ast::decl_id::none;
-    symbol_kind kind = symbol_kind::unsupported;
+    symbol_kind kind = symbol_kind::structure;
     symbol_state state = symbol_state::untouched;
     cc::string name;
     /// The registry record a `@builtin fun` stands for; `none` for a struct and for a declaration of the program's own.
@@ -484,7 +519,7 @@ struct sgl::check::symbol
     builtin_type_id intrinsic_type = builtin_type_id::none;
     /// The operator of an `@operator` function, which lookup finds through this spelling and never through `name`.
     cc::string operator_spelling;
-    /// A struct's type, a const's, and a file-scope sampler's.
+    /// A struct's type, a const's, a file-scope sampler's, and the type an alias names.
     type_id type = type_id::none;
     /// A position in `checked_module::functions`, `bindings`, `pipelines`, `constants` or `samplers`, by `kind`; -1
     /// before it is compiled.
@@ -601,7 +636,9 @@ struct sgl::check::function_info
     /// `@vertex`, `@pixel` or `@compute` makes the function an entry point.
     stage entry_stage = stage::none;
     /// The grid a `@compute` entry point is dispatched in, from `@compute(x, y, z)`; 1 for an axis nobody wrote.
-    i32 workgroup[3] = {1, 1, 1};
+    cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
+    /// A bare `@compute`, whose size the compile chooses from the body's indexing (CHK-520); `workgroup` is then 64.
+    bool is_auto_workgroup = false;
     /// The subgroup size a `@compute` entry point asks for by `@preferred_subgroup_size(n)`; 0 where it asks none.
     i32 preferred_subgroup_size = 0;
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
@@ -619,11 +656,24 @@ struct sgl::check::function_info
     /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
     /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
     type_id pixel_targets = type_id::none;
-    /// `@geometry(max_vertices = N)`'s `N`; 0 for every other stage.
+    /// `@geometry(max_vertices = N)`'s `N`, and `@mesh`'s `vertices`; 0 for every other stage.
     i32 max_vertices = 0;
+    /// `@mesh`'s `triangles`; 0 for every other stage.
+    i32 max_primitives = 0;
+    /// `@mesh(…, lines = M)`: the mesh stage writes lines, of two vertices each, rather than triangles (CHK-480).
+    bool is_line_mesh = false;
+    /// `@task(…, meshes = N)`'s `N`: the mesh workgroups one task workgroup launches at most; 0 where it states none,
+    /// and for every other stage (CHK-484).
+    i32 max_meshes = 0;
+    /// A task entry point's: the struct its `dispatch_mesh` hands the mesh stage (CHK-485); `none` before its body
+    /// is checked, and for every other function.
+    type_id mesh_payload = type_id::none;
     /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
     tessellation_partitioning partitioning = tessellation_partitioning::integer;
     bool is_clockwise = true;
+    /// `@tessellation_control(…, max_factor = N)`'s `N`, `k_max_tessellation_factor` where it states none, and for
+    /// every other stage (CHK-304).
+    i32 max_factor = k_max_tessellation_factor;
     /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
     u16 stages = k_every_stage;
     /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-263).
@@ -724,6 +774,10 @@ struct sgl::check::pipeline_info
     symbol_id geometry = symbol_id::none;
     symbol_id tessellation_control = symbol_id::none;
     symbol_id tessellation_evaluation = symbol_id::none;
+    /// In the vertex stage's place, which is then `none` (CHK-483).
+    symbol_id mesh = symbol_id::none;
+    /// The task stage before `mesh`, or `none` (CHK-487).
+    symbol_id task = symbol_id::none;
     /// The binding layout: the longest binding list of its stages with `@inline` left out; a range of `binding_lists`.
     ast::range_of<symbol_id> layout;
     /// The one `@inline` binding its stages list, or `none`.
@@ -780,6 +834,8 @@ enum class sgl::check::target_kind : sgl::u8
     receiver,
     /// On a `member`: an array's `length`, a constant (CHK-288).
     array_length,
+    /// On a `member`: a buffer's or a `bytes`' `length`, which the bound memory decides (CHK-460).
+    buffer_length,
     /// On a `member`: a swizzle of the struct `symbol`, whose fields `index` packs (`swizzle::unpacked`, CHK-385).
     swizzle,
     /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).
@@ -808,7 +864,7 @@ struct sgl::check::target
 /// A `count` of one is a field; zero is no swizzle at all.
 struct sgl::check::swizzle
 {
-    i8 fields[4] = {};
+    cc::fixed_array<i8, 4> fields = {};
     i8 count = 0;
 
     [[nodiscard]] constexpr bool has_repeats() const

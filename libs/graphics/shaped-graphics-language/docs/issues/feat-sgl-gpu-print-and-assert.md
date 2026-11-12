@@ -53,6 +53,13 @@ The readme lists "assertions, logging, per expression traces" among what SGL off
 4. slib and the build: the site table translated onto `sg::compiled_shader`, `SC_SHADER_DIAGNOSTICS`, and GPU tests.
 
 Landed by 2026-11-03: stages 1 to 4 on dx12, vulkan and webgpu, with sr's end-to-end test on each.
-Left: metal (Julius), whose SGL edge asks for no records until its backend binds `[[buffer(30)]]`.
+Metal landed 2026-11-09: its backend binds the window at `[[buffer(30)]]` for compute and raster pipelines, and its SGL edge asks for records.
+sr's end-to-end tests and sg's vertex-stage test run there.
+A guard measured against a buffer's length runs on metal too since 2026-11-09, over the lengths sg passes in (EMIT-195).
+vulkan's vertex, geometry and tessellation stages write their records on a device with `vertex_pipeline_stores`, which sg enables wherever the device has it (2026-11-05).
 A vertex and a tessellation evaluation stage end a failed assert at a NaN position, and a geometry stage returns (2026-11-03).
 A tessellation control stage ends one at zero edge factors, an any hit at `ignore`, and an intersection with no report.
+Since 2026-11-07 legalize writes every print as statements over a reserved binding, on all four targets (LEGAL-70), and no writer holds print logic.
+[reserved-bindings.md](../reserved-bindings.md) is the contract with sg.
+So the buffer is an array of atomic words on every target, each word written with an atomic store, where it was a raw buffer with plain stores: a dev-only cost, and the same bytes for sg.
+`sgl describe` no longer refuses a package's `print`.

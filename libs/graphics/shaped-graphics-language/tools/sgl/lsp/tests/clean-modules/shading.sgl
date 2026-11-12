@@ -1,0 +1,6 @@
+// A module that checks, which the documents of a test share one checked layer of.
+module shading
+
+use noise
+
+fun lit(x: float) -> float => noise.grain(x) * 2.0

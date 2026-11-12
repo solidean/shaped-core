@@ -93,8 +93,9 @@ struct mesh_stages
 
 [[nodiscard]] cc::shared_async<mesh_stages> compile_mesh(mtl::metal_context& ctx)
 {
-    co_return mesh_stages{.vertex = co_await mtl::test::sgl_shader(ctx, draws::tinted_vs),
-                          .fragment = co_await mtl::test::sgl_shader(ctx, draws::tinted_ps)};
+    auto vertex = co_await mtl::test::sgl_shader(ctx, draws::tinted_vs);
+    auto fragment = co_await mtl::test::sgl_shader(ctx, draws::tinted_ps);
+    co_return mesh_stages{.vertex = cc::move(vertex), .fragment = cc::move(fragment)};
 }
 
 [[nodiscard]] cc::result<mtl::metal_raster_pipeline_handle> make_mesh_pipeline(mtl::metal_context_handle const& ctx,
@@ -316,11 +317,9 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
     // records into the compute encoder and the draw into a render encoder opened after it.
     // What is meant to order them is the publish each encoder ends with and the queue wait the next one opens with.
     //
-    // **It covers the path rather than the barrier**, and the difference is worth stating: removing the publish leaves
-    // this passing on an M4, because a four-thread dispatch finishes well before the pass it precedes.
-    // So read a failure here as the dispatch-to-draw path being broken, not as the ordering being unprotected — what
-    // would catch that needs a dispatch long enough to lose the race, which is a slow test rather than a sharp one.
-    // issue: question-sg-metal-encoder-barrier-unproven
+    // **It is sharp for the ordering, not only the path**: the kernel spins before it writes, so a draw that starts
+    // early reads the buffer unwritten.
+    // On an M4 it fails with neither half of the pair in place, and passes with either one alone.
     auto const emit = co_await mtl::test::sgl_shader(*ctx, kernels::emit_quad_main);
 
     auto group_layout = ctx->create_metal_binding_group_layout(emit.bindings, {}, sg::lifetime_scope::persistent);

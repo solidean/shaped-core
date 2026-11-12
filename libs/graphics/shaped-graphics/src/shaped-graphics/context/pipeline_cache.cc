@@ -28,7 +28,7 @@ namespace
 /// Bumped when what goes into a persistent pipeline entry changes shape.
 /// The adapter and driver live in the key itself; this is only ever about OUR encoding.
 /// That includes what a backend derives from a layout: a root signature that grew a parameter makes every blob stale.
-constexpr auto k_pipeline_blob_version = bcache::version(2);
+constexpr auto k_pipeline_blob_version = bcache::version(3);
 
 /// The namespace fragment naming a backend, so two backends' blobs can never answer each other's lookups.
 /// backend_kind is explicitly not a closed set, so an unnamed one shares the "unknown" partition rather than silently
@@ -148,6 +148,8 @@ void add_shader(cc::byte_stream_builder& b, compiled_shader const& s)
     // On vulkan no text states it, so two acquires of one SPIR-V at two sizes differ here alone.
     b.add_bool(s.preferred_subgroup_size.has_value());
     b.add_pod(i32(s.preferred_subgroup_size.value_or(0)));
+    // and its pipeline reads the grid, from a layout the plain one is not
+    b.add_bool(s.is_dispatched_by_threads);
 }
 
 void add_optional_shader(cc::byte_stream_builder& b, cc::optional<compiled_shader> const& s)
@@ -330,6 +332,44 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
     add_optional_shader(b, desc.tessellation_control_shader);
     add_optional_shader(b, desc.tessellation_evaluation_shader);
     add_optional_shader(b, desc.geometry_shader);
+    add_optional_shader(b, desc.task_shader);
+    add_optional_shader(b, desc.mesh_shader);
+    b.add_bool(desc.mesh_polyfill.has_value());
+    if (desc.mesh_polyfill.has_value())
+    {
+        auto const& p = desc.mesh_polyfill.value();
+        add_shader(b, p.compute_shader);
+        b.add_pod(p.corners);
+        b.add_pod(p.primitives_per_group);
+        b.add_pod(p.words_per_group);
+        b.add_pod(p.input_corners);
+        add_optional_shader(b, p.task_shader);
+        b.add_bool(p.task_shader.has_value());
+        add_optional_shader(b, p.launched_shader);
+        b.add_bool(p.launched_shader.has_value());
+        if (p.task_shader.has_value() || p.launched_shader.has_value())
+            add_shader(b, p.scan_shader);
+        b.add_pod(p.record_words);
+        b.add_pod(p.task_meshes);
+        b.add_pod(p.launch_budget);
+    }
+    b.add_bool(desc.tessellation_polyfill.has_value());
+    if (desc.tessellation_polyfill.has_value())
+    {
+        auto const& p = desc.tessellation_polyfill.value();
+        add_shader(b, p.control_shader);
+        add_shader(b, p.count_shader);
+        add_shader(b, p.scan_shader);
+        add_shader(b, p.generate_shader);
+        add_shader(b, p.evaluation_shader);
+        b.add_pod(p.domain);
+        b.add_pod(p.control_points);
+        b.add_pod(p.patch_words);
+        b.add_pod(p.vertex_words);
+        b.add_pod(p.partitioning);
+        b.add_pod(p.output);
+        b.add_pod(p.max_factor);
+    }
 
     b.add_pod(u64(desc.vertex_input.slots.size()));
     for (auto const& s : desc.vertex_input.slots)
@@ -450,23 +490,26 @@ pipeline_layout_handle pipeline_cache::acquire_pipeline_layout(context& ctx, pip
 async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc)
 {
     auto const key = this->compute_compute_pipeline_key(desc);
-    return _compute_cache.acquire(key,
-                                  [&]() -> async_compute_pipeline
-                                  {
-                                      // The build runs later, possibly on a worker, so it owns the shader copy and layout handle rather than
-                                      // the description's reference.
-                                      auto node = build_compute_pipeline(&ctx, compiled_shader(desc.shader),
-                                                                         desc.layout, this->resolve_blob_cache(),
-                                                                         this->persistent_key(ctx, key, "pso"));
+    return _compute_cache.acquire(
+        key,
+        [&]() -> async_compute_pipeline
+        {
+            // The build runs later, possibly on a worker, so it owns the shader copy and layout handle rather than
+            // the description's reference.
+            // WebGPU has no blob to store, and the store's path builds synchronously, which only its
+            // async creation avoids: that one also settles after the shader's messages land.
+            auto* const store = ctx.backend() == backend_kind::webgpu ? nullptr : this->resolve_blob_cache();
+            auto node = build_compute_pipeline(&ctx, compiled_shader(desc.shader), desc.layout, store,
+                                               this->persistent_key(ctx, key, "pso"));
 
-                                      // Every segment on the device's home where it has one: the build and the seeded create both touch it.
-                                      if (auto* const home = ctx.device_home())
-                                          (void)node->try_home_cold(*home);
+            // Every segment on the device's home where it has one: the build and the seeded create both touch it.
+            if (auto* const home = ctx.device_home())
+                (void)node->try_home_cold(*home);
 
-                                      // A coroutine is cold; this tier has always handed back a scheduled node.
-                                      // Tracked on the context because nobody has to await it: the build references `ctx`.
-                                      return ctx.backlog.start(cc::move(node));
-                                  });
+            // A coroutine is cold; this tier has always handed back a scheduled node.
+            // Tracked on the context because nobody has to await it: the build references `ctx`.
+            return ctx.backlog.start(cc::move(node));
+        });
 }
 
 async_raster_pipeline pipeline_cache::acquire_raster_pipeline(context& ctx, raster_pipeline_description const& desc)

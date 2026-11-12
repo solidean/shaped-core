@@ -188,6 +188,13 @@ private:
     void raster_set_blend_constants(tg::vec4f constants) override;
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(draw_config const& config) override;
+    // metal builds no mesh-shaded pipeline yet, so none is ever bound to draw
+    void raster_draw_mesh_tasks(int x, int y, int z) override;
+    void raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                         sg::impl::geometry_polyfill_draw const& draw) override;
+    void raster_draw_tessellation_polyfilled(sg::impl::tessellation_polyfill_state const& polyfill,
+                                             sg::impl::geometry_polyfill_draw const& draw) override;
     void raster_draw_indexed(draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
@@ -240,6 +247,13 @@ private:
     /// a draw and a dispatch share.
     /// It does not flush: the op does, once, after adding whatever else it reads.
     void declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint);
+
+    /// Binds the recording epoch's debug window at its slot, for a compute or raster pipeline about to run.
+    /// Every op that runs with it bound declares it, as a bound group's members are declared.
+    void bind_debug_window(sg::impl::pipeline_footprint const& footprint);
+
+    /// Binds sg's pool and the bound groups' roots where the bound layout traces in software, for the op about to run.
+    void bind_software_trace();
 
     /// Forget which group each slot binds, at the start and end of a rendering scope and of the recording.
     /// The groups stay retained by `_bound_keep_alive`; only the slots are cleared, and that ends no array declaration.
@@ -453,6 +467,8 @@ private:
     /// The vertex buffer bound at each input slot, in slot order and with a null for a slot nothing bound.
     /// Held so a draw can declare `vertex_read` on them — the address itself lives in the argument table.
     cc::small_vector<sg::raw_buffer_handle, sg::max_vertex_buffers> _bound_vertex_buffers;
+    /// Each bound vertex buffer's address, its view's offset folded in, which a polyfilled geometry stage reads.
+    cc::small_vector<u64, sg::max_vertex_buffers> _bound_vertex_addresses;
 
     /// The bound index buffer, and what `drawIndexedPrimitives` needs of it.
     ///
@@ -478,6 +494,8 @@ private:
     /// The layout of whichever pipeline was bound last, and what every group bound after it is checked against.
     /// One member for all three kinds: a bind replaces it, which is the same rule the encoders follow.
     metal_pipeline_layout const* _bound_layout = nullptr;
+    /// The window `bind_debug_window` bound, until a ray-tracing pipeline replaces what is bound.
+    raw_buffer_handle _bound_debug_window;
 
     /// The ray-tracing pipeline a dispatch_rays must have had its table built for.
     /// Nothing is bound to an encoder at bind time: which compute state runs is decided by the raygen the dispatch

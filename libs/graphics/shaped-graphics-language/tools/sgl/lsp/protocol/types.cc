@@ -61,6 +61,31 @@ bool lsp::read(json::ref in, code_action_params& out)
     return json::read(in["textDocument"]["uri"], out.uri) && read(in["range"], out.range);
 }
 
+bool lsp::read(json::ref in, text_document_position_params& out)
+{
+    return json::read(in["textDocument"]["uri"], out.uri) && read(in["position"], out.position);
+}
+
+bool lsp::read(json::ref in, reference_params& out)
+{
+    // `context` is required by the specification; a client that leaves it out asks for the declaration too
+    if (auto const include = in["context"]["includeDeclaration"];
+        include.is_valid() && !json::read(include, out.include_declaration))
+        return false;
+    return json::read(in["textDocument"]["uri"], out.uri) && read(in["position"], out.position);
+}
+
+bool lsp::read(json::ref in, rename_params& out)
+{
+    return json::read(in["textDocument"]["uri"], out.uri) && read(in["position"], out.position)
+        && json::read(in["newName"], out.new_name);
+}
+
+bool lsp::read(json::ref in, workspace_symbol_params& out)
+{
+    return json::read(in["query"], out.query);
+}
+
 void lsp::write_fields(json::writer& w, position const& v)
 {
     w.write("line", v.line);
@@ -161,4 +186,91 @@ void lsp::write_fields(json::writer& w, log_message_params const& v)
 {
     w.write("type", i32(v.type));
     json::put(w, "message", v.message);
+}
+
+void lsp::write_fields(json::writer& w, hover const& v)
+{
+    w.begin_object("contents");
+    json::put(w, "kind", cc::string_view("markdown"));
+    json::put(w, "value", v.markdown);
+    w.end_object();
+    json::put(w, "range", v.range);
+}
+
+void lsp::write_fields(json::writer& w, completion_item const& v)
+{
+    json::put(w, "label", v.label);
+    w.write("kind", i32(v.kind));
+    if (!v.detail.empty())
+        json::put(w, "detail", v.detail);
+}
+
+void lsp::write_fields(json::writer& w, signature_information const& v)
+{
+    json::put(w, "label", v.label);
+    if (!v.documentation.empty())
+    {
+        w.begin_object("documentation");
+        json::put(w, "kind", cc::string_view("markdown"));
+        json::put(w, "value", v.documentation);
+        w.end_object();
+    }
+    w.begin_array("parameters");
+    for (auto const& p : v.parameters)
+    {
+        w.begin_object();
+        json::put(w, "label", p);
+        w.end_object();
+    }
+    w.end_array();
+}
+
+void lsp::write_fields(json::writer& w, signature_help const& v)
+{
+    json::put(w, "signatures", v.signatures);
+    w.write("activeSignature", v.active_signature);
+    w.write("activeParameter", v.active_parameter);
+}
+
+void lsp::write_fields(json::writer& w, workspace_edit const& v)
+{
+    w.begin_object("changes");
+    for (auto const& d : v.changes)
+        json::put(w, d.uri, d.edits);
+    w.end_object();
+}
+
+void lsp::write_fields(json::writer& w, prepare_rename_result const& v)
+{
+    json::put(w, "range", v.range);
+    json::put(w, "placeholder", v.placeholder);
+}
+
+void lsp::write_fields(json::writer& w, document_symbol const& v)
+{
+    json::put(w, "name", v.name);
+    if (!v.detail.empty())
+        json::put(w, "detail", v.detail);
+    w.write("kind", i32(v.kind));
+    json::put(w, "range", v.range);
+    json::put(w, "selectionRange", v.selection_range);
+    if (!v.children.empty())
+        json::put(w, "children", v.children);
+}
+
+void lsp::write_fields(json::writer& w, folding_range const& v)
+{
+    w.write("startLine", v.start_line);
+    w.write("endLine", v.end_line);
+    if (v.is_comment)
+        json::put(w, "kind", cc::string_view("comment"));
+}
+
+void lsp::write_fields(json::writer& w, symbol_information const& v)
+{
+    json::put(w, "name", v.name);
+    w.write("kind", i32(v.kind));
+    json::put(w, "location", v.location);
+    if (!v.container_name.empty())
+        json::put(w, "containerName", v.container_name);
 }

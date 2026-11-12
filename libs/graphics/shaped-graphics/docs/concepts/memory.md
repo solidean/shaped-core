@@ -57,6 +57,7 @@ The axes are independent, but in practice:
 A monotonic head hands out placement offsets and **resets to 0 whenever the epoch changes**, so successive epochs alias the same storage — which is not only safe but desired.
 It is safe because a single direct queue executes each epoch's GPU work before the next's.
 Epoch N's transient memory is therefore finished before epoch N+1 resets to 0 and touches it: the epoch boundary is the barrier.
+On D3D12 the queue orders that by itself; on Vulkan, whose submission order carries no memory dependency, the first list submitted in each epoch begins with a barrier from every stage to every stage.
 It is desired because a one-epoch-sized heap serves any pipelining depth, which is smaller and kinder to caches than a ring sized for every in-flight frame.
 A request larger than the budget falls back to a dedicated (committed) allocation.
 The buffer budget defaults to 128 MiB, set with `ctx.transient.set_budget`, and the texture budget to 256 MiB, set with `ctx.transient.set_texture_budget`.
@@ -75,6 +76,7 @@ Metal has no layouts and no such barrier: its first write defines the contents, 
 **Keep the epochs in flight bounded**, as a swapchain does: with dozens queued, every new frame's textures overlap memory the queued ones still use.
 The NVIDIA driver then stalls when a placed render target is bound, for up to 2 s in a benchmark that queued 48 frames unthrottled.
 Throttled to 2 in flight, the same frames recorded in 5 ms where dedicated textures had taken 15.
+On an M4, `sg transient - per-frame render targets` took 31.8 ms for ten frames of ten 1920x1080 targets from the heap, 87 ms with every one dedicated, and 33 ms with the targets kept.
 A texture falls back to a dedicated allocation where it cannot be placed:
 - **The backend places no textures**: webgpu and dx12 below resource heap tier 2.
 - **The heap cannot hold this one**: a multisampled texture on dx12, which needs a 4 MiB placement alignment, or a Vulkan image whose memory types exclude the heap's.

@@ -4,10 +4,10 @@
 # An example is built by every normal and CI build and run by nobody automatically; `dev.py example <match>`
 # runs exactly one. docs/guides/examples.md is the concept, nexus/test.hh the EXAMPLE macro.
 #
-#   sc_add_example(<target> SOURCES <file>... [MAIN <file>] [LINK <lib>...] [PCH <tier>...])
+#   sc_add_example(<target> SOURCES <file>... [MAIN <file>] [LINK <lib>...])
 #       One binary from one or more sources. Without MAIN, a main.cc calling nx::run is generated.
 #
-#   sc_add_single_file_examples(<prefix> FILES <file>... [LINK <lib>...] [PCH <tier>...])
+#   sc_add_single_file_examples(<prefix> FILES <file>... [LINK <lib>...])
 #       One binary per listed file, each with its own generated main, named `<prefix>-<stem>-example`.
 #       This is what lets one CMakeLists define a dozen single-file examples with no subdirectory clutter.
 #
@@ -36,7 +36,7 @@ function(sc_add_example target)
         return()
     endif()
 
-    cmake_parse_arguments(PARSE_ARGV 1 EX "" "MAIN" "SOURCES;LINK;PCH")
+    cmake_parse_arguments(PARSE_ARGV 1 EX "" "MAIN" "SOURCES;LINK")
 
     if(NOT EX_SOURCES)
         message(FATAL_ERROR "sc_add_example(${target}): SOURCES is required")
@@ -66,10 +66,6 @@ function(sc_add_example target)
     target_link_libraries(${target} PRIVATE nexus ${EX_LINK})
     sc_nexus_binary(${target} KINDS examples)
 
-    if(EX_PCH)
-        sc_target_pch(${target} ${EX_PCH})
-    endif()
-
     # Stage the shared libraries an example links, so it starts when run from its own build directory.
     # A test binary that needs this does it by hand; an example is always launched directly, so the helper owes it.
     # Examples share output directories, which is why this goes through sc_stage_runtime_dlls — see RuntimeDlls.cmake.
@@ -81,7 +77,7 @@ function(sc_add_single_file_examples prefix)
         return()
     endif()
 
-    cmake_parse_arguments(PARSE_ARGV 1 EX "" "" "FILES;LINK;PCH")
+    cmake_parse_arguments(PARSE_ARGV 1 EX "" "" "FILES;LINK")
 
     if(NOT EX_FILES)
         message(FATAL_ERROR "sc_add_single_file_examples(${prefix}): FILES is required")
@@ -95,7 +91,6 @@ function(sc_add_single_file_examples prefix)
         sc_add_example("${prefix}-${_stem}-example"
             SOURCES "${_file}"
             LINK ${EX_LINK}
-            PCH ${EX_PCH}
         )
     endforeach()
 endfunction()

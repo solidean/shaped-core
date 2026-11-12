@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_binding_group.hh>
@@ -17,12 +18,18 @@
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/barrier/access_inference.hh> // shader_access_of
+#include <shaped-graphics/binding/reserved_bindings.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
 
 namespace sg::backend::metal
 {
 namespace
 {
+/// Every stage of a render pipeline, the object and mesh stages included: a stage left out reads no binding at all.
+constexpr auto all_render_stages
+    = MTL::RenderStageVertex | MTL::RenderStageFragment | MTL::RenderStageObject | MTL::RenderStageMesh;
+
 [[nodiscard]] MTL::LoadAction load_action_of(sg::target_op op)
 {
     switch (op)
@@ -176,9 +183,11 @@ void metal_command_list::end_encoder()
     // **The producer half of the queue barrier pair, per encoder rather than per list.**
     // An encoder-scoped barrier cannot reach across an encoder boundary, so what orders a dispatch here against a draw
     // in the render encoder that follows is this publish plus that encoder's own `barrierAfterQueueStages` wait.
-    // Without it the pass opens waiting on queue work nothing published, and the draw reads what the dispatch wrote
-    // before it was written.
-    _encoder->barrierAfterStages(k_compute_encoder_stages, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
+    // On an M4 either half alone orders it, and `sg metal - a draw reads the vertex buffer a dispatch in the same list
+    // wrote` fails once both are gone.
+    // **It holds back every later stage, not the compute ones**: a publish to compute stages alone leaves the vertex
+    // stage that reads the buffer free to start, which that test caught on the M4 with the wait removed.
+    _encoder->barrierAfterStages(k_compute_encoder_stages, MTL::StageAll, MTL4::VisibilityOptionDevice);
 
     _encoder->endEncoding();
     _encoder->release();
@@ -361,6 +370,9 @@ void metal_command_list::flush_barriers()
     MTL::Stages before = 0;
     auto visibility = MTL4::VisibilityOptions(MTL4::VisibilityOptionNone);
     auto any = false;
+    // the resources whose hazard this op settles, counted as dx12 and vulkan count one barrier each
+    auto buffers_ordered = isize(0);
+    auto textures_ordered = isize(0);
 
     for (auto const& buffer : _pending_buffers)
     {
@@ -372,6 +384,7 @@ void metal_command_list::flush_barriers()
             continue;
 
         any = true;
+        ++buffers_ordered;
         after |= translated.after_stages;
         before |= translated.before_stages;
         visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
@@ -387,6 +400,7 @@ void metal_command_list::flush_barriers()
             continue;
 
         any = true;
+        ++textures_ordered;
         after |= translated.after_stages;
         before |= translated.before_stages;
         visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
@@ -424,6 +438,8 @@ void metal_command_list::flush_barriers()
     ++_barriers_emitted;
     _stats.add(sg::stat::global_barriers);
     _stats.add(sg::stat::barrier_calls);
+    _stats.add(sg::stat::buffer_barriers, buffers_ordered);
+    _stats.add(sg::stat::texture_barriers, textures_ordered);
 
     if (_render_encoder == nullptr)
     {
@@ -772,6 +788,7 @@ void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
+    bind_debug_window(mtl_pipeline.footprint());
 
     auto* const encoder = compute_encoder();
     encoder->setComputePipelineState(mtl_pipeline.state());
@@ -838,10 +855,17 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
     declare_array_accesses(&_bound_compute->footprint(), _bound_compute, sg::pipeline_stage_flag::compute,
                            _compute_arrays);
     flush_barriers();
+    bind_software_trace();
 
     auto const size = _bound_compute->workgroup_size();
-    compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
-                                            MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    auto const group = MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z));
+    // a pipeline dispatched by threads alone runs exactly the grid's threads, which its last workgroups are cut to
+    if (_bound_compute->is_dispatched_by_threads())
+        compute_encoder()->dispatchThreads(
+            MTL::Size(NS::UInteger(_dispatch_grid[0]), NS::UInteger(_dispatch_grid[1]), NS::UInteger(_dispatch_grid[2])),
+            group);
+    else
+        compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)), group);
 }
 
 void metal_command_list::compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes)
@@ -856,6 +880,7 @@ void metal_command_list::compute_dispatch_indirect(raw_buffer_handle const& args
     declare_array_accesses(&_bound_compute->footprint(), _bound_compute, sg::pipeline_stage_flag::compute,
                            _compute_arrays);
     flush_barriers();
+    bind_software_trace();
 
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*args);
     auto const size = _bound_compute->workgroup_size();
@@ -1017,7 +1042,10 @@ void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<ver
 
         // The stride is pipeline state on Metal, baked into the vertex descriptor, so a view carrying a different one
         // is a mismatch nothing below would report — the fetch simply reads the pipeline's stride.
-        if (_bound_raster != nullptr)
+        // A polyfilled geometry stage or tessellation reads the buffers in a compute pass instead, by a stride its
+        // shader holds.
+        if (_bound_raster != nullptr && _bound_raster->mesh_polyfill() == nullptr
+            && _bound_raster->tessellation_polyfill() == nullptr)
         {
             auto const strides = _bound_raster->vertex_strides();
             CC_ASSERT(slot < strides.size(), "the bound raster pipeline declares no vertex input slot here");
@@ -1030,8 +1058,12 @@ void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<ver
                                      NS::UInteger(k_vertex_buffer_base_index + slot));
 
         while (_bound_vertex_buffers.size() <= slot)
+        {
             _bound_vertex_buffers.push_back(nullptr);
+            _bound_vertex_addresses.push_back(0);
+        }
         _bound_vertex_buffers[slot] = view.buffer;
+        _bound_vertex_addresses[slot] = mtl_buffer.gpu_address() + u64(view.offset_in_bytes);
     }
 }
 
@@ -1153,8 +1185,56 @@ void metal_command_list::raster_draw_indexed_indirect(raw_buffer_handle const& a
     }
 }
 
+void metal_command_list::bind_debug_window(sg::impl::pipeline_footprint const& footprint)
+{
+    if (!sg::impl::debug_windows::k_enabled)
+        return;
+    _bound_debug_window = _metal_context.debug_windows().window_for_recording(!footprint.debug_stages().is_empty());
+    auto const& window = static_cast<metal_buffer const&>(*_bound_debug_window);
+    argument_table()->setAddress(window.gpu_address(), NS::UInteger(k_debug_window_buffer_index));
+}
+
+void metal_command_list::bind_software_trace()
+{
+    if (_bound_layout == nullptr || !_bound_layout->traces_in_software())
+        return;
+    u32 roots[sg::impl::software_trace_roots] = {};
+    auto const bases = _bound_layout->acceleration_bases();
+    for (auto g = isize(0); g < bases.size() && g < isize(sg::max_binding_groups); ++g)
+        if (_bound_groups[g] != nullptr)
+            for (auto k = isize(0); k < _bound_groups[g]->acceleration_roots().size(); ++k)
+            {
+                auto const at = bases[g] + k;
+                CC_ASSERT(at < sg::impl::software_trace_roots, "a pipeline traces at most 16 acceleration members in "
+                                                               "software");
+                roots[at] = _bound_groups[g]->acceleration_roots()[k];
+            }
+
+    // the pool is host-written at record time and never moves, so its address is all a dispatch needs of it
+    argument_table()->setAddress(_metal_context.metal_pool().storage().gpu_address,
+                                 NS::UInteger(k_acceleration_pool_buffer_index));
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(roots)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed, "the software walk's roots could "
+                                                                                     "not be staged");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), roots, sizeof(roots));
+    argument_table()->setAddress(staging.buffer->gpuAddress() + u64(staging.offset),
+                                 NS::UInteger(k_acceleration_roots_buffer_index));
+}
+
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
 {
+    // every op declares it, so none starts while the window is still being reset, and appends never wait on each other
+    if (_bound_debug_window != nullptr)
+    {
+        auto const writing = footprint != nullptr ? footprint->debug_stages() : pipeline_stage_flags{};
+        declare_buffer(_bound_debug_window, writing.is_empty() ? stages : writing, sg::access_flag::shader_append);
+    }
+
     // **Each binding is declared with what the code does to it**, which is what makes a read after a read free and
     // an untouched binding cost nothing.
     // Without a footprint that is its view class, as if every writable view were written.
@@ -1210,6 +1290,7 @@ void metal_command_list::declare_raster_draw(bool indexed)
         declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::vertex, sg::access_flag::index_read);
 
     flush_barriers();
+    bind_software_trace();
 }
 
 void metal_command_list::raster_begin_rendering(rendering_info const& info)
@@ -1313,8 +1394,9 @@ void metal_command_list::open_render_encoder(bool force_load)
     auto const layers = !info.color_targets.empty() ? info.color_targets[0].view.range().array_range
                       : info.depth_stencil_target.has_value() ? info.depth_stencil_target.value().view.range().array_range
                                                               : cc::start_end{.start = 0, .end = 1};
-    if (layers.end - layers.start > 1)
-        descriptor->setRenderTargetArrayLength(NS::UInteger(layers.end - layers.start));
+    if (layers.end - layers.start > 1 || info.view_count > 1)
+        descriptor->setRenderTargetArrayLength(
+            NS::UInteger(cc::max(isize(layers.end - layers.start), isize(info.view_count))));
     // **Retained, because it outlives the pool this function opened.**
     // `renderCommandEncoder` hands back an autoreleased object, and the scope above drains when this returns — so an
     // unretained encoder is deallocated the moment `begin_rendering` exits, and `end_rendering` then messages freed
@@ -1328,6 +1410,16 @@ void metal_command_list::open_render_encoder(bool force_load)
     descriptor->release();
     CC_ASSERT(_render_encoder != nullptr, "metal refused a render command encoder");
     _draws_in_render_encoder = 0;
+
+    // Several views per draw: amplification `i` renders into layer `i` of every target, which the mapping adds to
+    // the layer the vertex function writes, none, so that a stage need not write it.
+    if (info.view_count > 1)
+    {
+        auto mappings = cc::vector<MTL::VertexAmplificationViewMapping>();
+        for (auto view = 0; view < info.view_count; ++view)
+            mappings.push_back({.viewportArrayIndexOffset = 0, .renderTargetArrayIndexOffset = u32(view)});
+        _render_encoder->setVertexAmplificationCount(NS::UInteger(info.view_count), mappings.data());
+    }
 
     // Every encoder is ordered against the queue on open, the same as the compute one.
     _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
@@ -1402,7 +1494,7 @@ void metal_command_list::resume_render_encoder()
         _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
         _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
 
-        _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+        _render_encoder->setArgumentTable(argument_table(), all_render_stages);
     }
 
     if (_scope_stencil_reference.has_value())
@@ -1430,6 +1522,7 @@ void metal_command_list::raster_end_rendering()
     _render_suspended = false;
     _bound_raster = nullptr;
     _bound_vertex_buffers.clear();
+    _bound_vertex_addresses.clear();
     _bound_index_buffer = nullptr;
     _index_address = 0;
     _index_size_in_bytes = 0;
@@ -1458,6 +1551,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
+    bind_debug_window(mtl_pipeline.footprint());
 
     // A suspended scope's resume replays all of the below from `_bound_raster`.
     if (_render_encoder == nullptr)
@@ -1476,7 +1570,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
     _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
 
-    _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+    _render_encoder->setArgumentTable(argument_table(), all_render_stages);
 }
 
 void metal_command_list::raster_bind_group(int group_index, binding_group const& group)
@@ -1534,6 +1628,295 @@ void metal_command_list::raster_draw(draw_config const& config)
     ++_draws_in_render_encoder;
 }
 
+void metal_command_list::raster_draw_mesh_tasks(int x, int y, int z)
+{
+    CC_ASSERT(in_rendering_scope(), "a mesh draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr && _bound_raster->is_mesh(), "a mesh draw needs a bound mesh pipeline");
+    if (x == 0 || y == 0 || z == 0)
+        return;
+
+    declare_raster_draw(false);
+    resume_render_encoder();
+    // the workgroups of the first stage: the object stage's where it has one, the mesh stage's otherwise
+    _render_encoder->drawMeshThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
+                                          _bound_raster->object_threads(), _bound_raster->mesh_threads());
+    ++_draws_in_render_encoder;
+}
+
+void metal_command_list::raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(in_rendering_scope(), "an indirect mesh draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr && _bound_raster->is_mesh(), "a mesh draw needs a bound mesh pipeline");
+    static_assert(sizeof(sg::dispatch_args) == sizeof(MTL::DispatchThreadgroupsIndirectArguments));
+
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw(false);
+    resume_render_encoder();
+
+    // MTL4 draws one record per call, each a grid of workgroups as a dispatch's is
+    auto const& mtl_buffer = static_cast<metal_buffer const&>(*args);
+    auto const stride = u64(sizeof(sg::dispatch_args));
+    for (auto i = isize(0); i < count; ++i)
+    {
+        _render_encoder->drawMeshThreadgroups(
+            MTL::GPUAddress(mtl_buffer.gpu_address() + u64(offset_in_bytes) + u64(i) * stride),
+            _bound_raster->object_threads(), _bound_raster->mesh_threads());
+        ++_draws_in_render_encoder;
+    }
+}
+
+void metal_command_list::raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                                         sg::impl::geometry_polyfill_draw const& draw)
+{
+    CC_ASSERT(in_rendering_scope(), "a draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr, "a draw needs a bound raster pipeline");
+    CC_ASSERT(!draw.is_indexed || _bound_index_buffer != nullptr, "an indexed draw needs a bound index buffer");
+    auto const* const compute = dynamic_cast<metal_compute_pipeline const*>(polyfill.compute.get());
+    CC_ASSERT(compute != nullptr, "a geometry polyfill's compute half is not a metal compute_pipeline");
+    constexpr auto streams = cc::span<sg::reserved_binding_address const>(sg::reserved_geometry_vertices).size();
+    CC_ASSERTF(_bound_vertex_buffers.size() <= streams,
+               "a polyfilled geometry stage reads at most {} vertex buffers, and {} are bound", streams,
+               _bound_vertex_buffers.size());
+
+    // One thread a primitive of an instance, each owning its slots of a buffer of the draw's own.
+    auto const threads = u64(draw.primitives) * u64(draw.instances);
+    auto const scratch = _metal_context.transient.create_raw_buffer(isize(threads * u64(polyfill.words_per_group) * 4),
+                                                                    sg::buffer_usage::readwrite_buffer);
+    auto const& mtl_scratch = static_cast<metal_buffer const&>(*scratch);
+
+    // What the compute half reads of the draw: the buffers' offsets are folded into the addresses bound below.
+    u32 const values[12] = {draw.first,
+                            draw.primitives,
+                            draw.is_indexed ? (_index_format == sg::index_format::uint16 ? 1u : 2u) : 0u,
+                            u32(draw.vertex_offset),
+                            draw.first_instance,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0};
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(values)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed,
+                                             "a polyfilled geometry stage's draw could not be staged: the metal device "
+                                             "refused a one-off staging buffer");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), values, sizeof(values));
+
+    // The compute half runs outside the pass, which Metal has no dispatch inside of: the draw splits the scope.
+    suspend_render_encoder("a polyfilled geometry stage", split_remedy::none);
+    place_inline_constants();
+    declare_bound_groups(sg::pipeline_stage_flag::compute, &compute->footprint());
+    for (auto const& vertex_buffer : _bound_vertex_buffers)
+        if (vertex_buffer != nullptr)
+            declare_buffer(vertex_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    if (draw.is_indexed)
+        declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(scratch, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    bind_debug_window(compute->footprint());
+
+    // Metal's validation wants every buffer the kernel declares bound, read or not: a slot the draw has no buffer for
+    // takes the draw's own values, which the kernel never reads there.
+    auto* const table = argument_table();
+    auto const draw_address = staging.buffer->gpuAddress() + u64(staging.offset);
+    table->setAddress(mtl_scratch.gpu_address(), NS::UInteger(sg::reserved_mesh_output.metal_buffer));
+    table->setAddress(draw_address, NS::UInteger(sg::reserved_geometry_draw.metal_buffer));
+    table->setAddress(draw.is_indexed ? _index_address : draw_address,
+                      NS::UInteger(sg::reserved_geometry_indices.metal_buffer));
+    for (auto i = isize(0); i < isize(streams); ++i)
+    {
+        auto const address = i < _bound_vertex_addresses.size() ? _bound_vertex_addresses[i] : u64(0);
+        table->setAddress(address != 0 ? address : draw_address,
+                          NS::UInteger(sg::reserved_geometry_vertices[i].metal_buffer));
+    }
+
+    auto* const encoder = compute_encoder();
+    encoder->setComputePipelineState(compute->state());
+    encoder->setArgumentTable(table);
+    auto const size = compute->workgroup_size();
+    encoder->dispatchThreads(MTL::Size(NS::UInteger(threads), 1, 1),
+                             MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    // the encoder's pipeline is the polyfill's now, which the next dispatch of the bound compute pipeline sets again
+    if (_bound_compute != nullptr)
+        encoder->setComputePipelineState(_bound_compute->state());
+
+    // The vertex half draws every corner of every slot, in order, under the raster state as it was.
+    table->setAddress(mtl_scratch.gpu_address(), NS::UInteger(sg::reserved_mesh_input.metal_buffer));
+    declare_buffer(scratch, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    bind_debug_window(_bound_raster->footprint());
+    declare_raster_draw(false);
+    resume_render_encoder();
+    auto const corners = u64(polyfill.primitives_per_group) * u64(polyfill.corners);
+    _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()), NS::UInteger(0),
+                                    NS::UInteger(threads * corners), NS::UInteger(1), NS::UInteger(0));
+    ++_draws_in_render_encoder;
+}
+
+void metal_command_list::raster_draw_tessellation_polyfilled(sg::impl::tessellation_polyfill_state const& polyfill,
+                                                             sg::impl::geometry_polyfill_draw const& draw)
+{
+    CC_ASSERT(in_rendering_scope(), "a draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr, "a draw needs a bound raster pipeline");
+    CC_ASSERT(!draw.is_indexed || _bound_index_buffer != nullptr, "an indexed draw needs a bound index buffer");
+    auto const pass = [](sg::compute_pipeline_handle const& handle)
+    {
+        auto const* const p = dynamic_cast<metal_compute_pipeline const*>(handle.get());
+        CC_ASSERT(p != nullptr, "a tessellation polyfill's pass is not a metal compute_pipeline");
+        return p;
+    };
+    auto const* const control = pass(polyfill.control);
+    auto const* const count = pass(polyfill.count);
+    auto const* const scan = pass(polyfill.scan);
+    auto const* const generate = pass(polyfill.generate);
+    auto const* const evaluation = pass(polyfill.evaluation);
+    constexpr auto streams = cc::span<sg::reserved_binding_address const>(sg::reserved_geometry_vertices).size();
+    CC_ASSERTF(_bound_vertex_buffers.size() <= streams,
+               "polyfilled tessellation reads at most {} vertex buffers, and {} are bound", streams,
+               _bound_vertex_buffers.size());
+
+    // A patch of every instance owns its words of each buffer of the draw's own, sized for the largest factor.
+    auto const patches = u64(draw.primitives) * u64(draw.instances);
+    auto const points = patches * u64(polyfill.max_points());
+    auto const make
+        = [&](u64 words, auto usage) { return _metal_context.transient.create_raw_buffer(isize(words * 4), usage); };
+    auto const rw = sg::buffer_usage::readwrite_buffer;
+    auto const controls = make(patches * u64(polyfill.patch_words), rw);
+    auto const records = make(patches * 8, rw);
+    auto const point_words = make(points * 3, rw);
+    auto const indices = make(patches * u64(polyfill.max_indices()), rw);
+    auto const args = make(16, rw | sg::buffer_usage::indirect_command_buffer);
+    auto const vertices = make(points * u64(polyfill.vertex_words), rw);
+    auto const address
+        = [](sg::raw_buffer_handle const& b) { return static_cast<metal_buffer const&>(*b).gpu_address(); };
+
+    // What the passes read of the draw: the geometry polyfill's three rows, then the tessellation's two.
+    u32 const values[20] = {draw.first,
+                            draw.primitives,
+                            draw.is_indexed ? (_index_format == sg::index_format::uint16 ? 1u : 2u) : 0u,
+                            u32(draw.vertex_offset),
+                            draw.first_instance,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            draw.primitives,
+                            draw.instances,
+                            u32(polyfill.partitioning),
+                            u32(polyfill.output),
+                            u32(polyfill.domain),
+                            u32(polyfill.control_points),
+                            u32(polyfill.patch_words),
+                            cc::bit_cast<u32>(polyfill.max_factor)};
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(values)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed,
+                                             "a polyfilled tessellation's draw could not be staged: the metal device "
+                                             "refused a one-off staging buffer");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), values, sizeof(values));
+
+    // The passes run outside the pass, which Metal has no dispatch inside of: the draw splits the scope.
+    suspend_render_encoder("polyfilled tessellation", split_remedy::none);
+    place_inline_constants();
+    declare_bound_groups(sg::pipeline_stage_flag::compute, &control->footprint());
+    for (auto const& vertex_buffer : _bound_vertex_buffers)
+        if (vertex_buffer != nullptr)
+            declare_buffer(vertex_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    if (draw.is_indexed)
+        declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    for (auto const* const written : {&controls, &records})
+        declare_buffer(*written, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    bind_debug_window(control->footprint());
+
+    // Metal's validation wants every buffer a kernel declares bound, read or not: a slot the draw has no buffer for
+    // takes the draw's own values, which no pass reads there.
+    auto* const table = argument_table();
+    auto const draw_address = staging.buffer->gpuAddress() + u64(staging.offset);
+    table->setAddress(address(vertices), NS::UInteger(sg::reserved_mesh_output.metal_buffer));
+    table->setAddress(draw_address, NS::UInteger(sg::reserved_geometry_draw.metal_buffer));
+    table->setAddress(draw.is_indexed ? _index_address : draw_address,
+                      NS::UInteger(sg::reserved_geometry_indices.metal_buffer));
+    for (auto i = isize(0); i < isize(streams); ++i)
+    {
+        auto const a = i < _bound_vertex_addresses.size() ? _bound_vertex_addresses[i] : u64(0);
+        table->setAddress(a != 0 ? a : draw_address, NS::UInteger(sg::reserved_geometry_vertices[i].metal_buffer));
+    }
+    table->setAddress(draw_address + 12 * 4, NS::UInteger(sg::reserved_tessellation_draw.metal_buffer));
+    table->setAddress(address(records), NS::UInteger(sg::reserved_tessellation_patches.metal_buffer));
+    table->setAddress(address(controls), NS::UInteger(sg::reserved_tessellation_controls.metal_buffer));
+    table->setAddress(address(point_words), NS::UInteger(sg::reserved_tessellation_points.metal_buffer));
+    table->setAddress(address(indices), NS::UInteger(sg::reserved_tessellation_indices.metal_buffer));
+    table->setAddress(address(args), NS::UInteger(sg::reserved_tessellation_args.metal_buffer));
+
+    auto* const encoder = compute_encoder();
+    encoder->setArgumentTable(table);
+    // each pass takes the debug window as its own footprint asks, since any of them may print or assert
+    auto const run = [&](metal_compute_pipeline const* p, u64 threads)
+    {
+        bind_debug_window(p->footprint());
+        auto const size = p->workgroup_size();
+        encoder->setComputePipelineState(p->state());
+        encoder->dispatchThreads(MTL::Size(NS::UInteger(threads), 1, 1),
+                                 MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    };
+    // each pass reads what the one before it wrote
+    run(control, patches);
+    declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    run(count, patches);
+    declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    declare_buffer(args, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    run(scan, 1);
+    declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(point_words, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    declare_buffer(indices, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    run(generate, patches);
+    // the evaluation pass is as many workgroups as the scan counted, the arguments it wrote after the draw's
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_buffer(point_words, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(controls, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(vertices, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    {
+        bind_debug_window(evaluation->footprint());
+        auto const size = evaluation->workgroup_size();
+        encoder->setComputePipelineState(evaluation->state());
+        encoder->dispatchThreadgroups(MTL::GPUAddress(address(args) + 5 * 4),
+                                      MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+    }
+    // the encoder's pipeline is the polyfill's now, which the next dispatch of the bound compute pipeline sets again
+    if (_bound_compute != nullptr)
+        encoder->setComputePipelineState(_bound_compute->state());
+
+    // The vertex half draws the points by the tessellator's indices, under the raster state as it was.
+    table->setAddress(address(vertices), NS::UInteger(sg::reserved_mesh_input.metal_buffer));
+    declare_buffer(vertices, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    declare_buffer(indices, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    bind_debug_window(_bound_raster->footprint());
+    declare_raster_draw(false);
+    resume_render_encoder();
+    _render_encoder->drawIndexedPrimitives(
+        primitive_type_of(_bound_raster->topology()), MTL::IndexTypeUInt32, MTL::GPUAddress(address(indices)),
+        NS::UInteger(patches * u64(polyfill.max_indices()) * 4), MTL::GPUAddress(address(args)));
+    ++_draws_in_render_encoder;
+}
+
 void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pipeline)
 {
     // Nothing is bound to an encoder here: which compute pipeline state runs is decided by the raygen shader the
@@ -1543,6 +1926,8 @@ void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pip
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get());
+    // the raygen takes the debug window and hands it every stage it calls (EMIT-183)
+    bind_debug_window(_bound_raytracing->footprint());
 }
 
 void metal_command_list::raytracing_bind_group(int group_index, binding_group const& group)
@@ -1643,9 +2028,9 @@ sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
                                  >= _leased_counter_heaps[_active_timestamp_lease]->slot_count;
     if (needs_fresh)
     {
-        auto lease = queries.acquire_heap();
+        auto lease = queries.acquire_lease();
         if (lease == nullptr)
-            return {}; // the device refused a heap mid-recording; the caller sees an invalid query, as when unsupported
+            return {}; // the device refused a heap, which it reported; the caller sees an invalid query, as when unsupported
         _active_timestamp_lease = int(_leased_counter_heaps.size());
         _leased_counter_heaps.push_back(cc::move(lease));
     }
@@ -1657,7 +2042,7 @@ sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
     // That is also what makes the value meaningful: it is written once everything recorded before it has completed,
     // which is what makes the difference between two of them the duration of the work between.
     end_encoder();
-    _buffer->writeTimestampIntoHeap(lease.heap, NS::UInteger(slot));
+    _buffer->writeTimestampIntoHeap(lease.heap, NS::UInteger(lease.first_slot + slot));
 
     return sg::gpu_timestamp(std::shared_ptr<sg::data_future<u64> const>(lease.shared_future), isize(slot),
                              queries.timestamp_tick_to_seconds());
@@ -1665,10 +2050,10 @@ sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
 
 void metal_command_list::finalize_queries_before_close()
 {
-    // Heaps are leased on demand, so every leased heap holds at least one recorded timestamp.
+    // Ranges are leased on demand, so every leased range holds at least one recorded timestamp.
     for (auto& lease : _leased_counter_heaps)
     {
-        CC_ASSERT(lease->next_slot > 0, "leased a counter heap and recorded nothing into it");
+        CC_ASSERT(lease->next_slot > 0, "leased a counter heap range and recorded nothing into it");
         auto const size_in_bytes = isize(lease->next_slot) * isize(sizeof(u64));
 
         auto const staging = _metal_context.download_ring().reserve(size_in_bytes);
@@ -1684,7 +2069,7 @@ void metal_command_list::finalize_queries_before_close()
         // address rather than a bound resource, so the ring's own buffer is as good a destination as any.
         // No fences: the resolve is ordered by the command buffer it sits in, like every other call here.
         _buffer->resolveCounterHeap(
-            lease->heap, NS::Range(0, NS::UInteger(lease->next_slot)),
+            lease->heap, NS::Range(NS::UInteger(lease->first_slot), NS::UInteger(lease->next_slot)),
             MTL4::BufferRange(staging.buffer->gpuAddress() + u64(staging.offset), u64(size_in_bytes)), nullptr, nullptr);
 
         auto destination = cc::pinned_data<byte>::create_uninitialized(size_in_bytes);
@@ -1705,11 +2090,11 @@ void metal_command_list::finalize_queries_before_close()
             sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion)));
     }
 
-    // Back through the epoch rather than straight away: the resolve just recorded still names each heap, right up
+    // Back through the epoch rather than straight away: the resolve just recorded still names each range, right up
     // until this epoch's work has finished.
     for (auto& lease : _leased_counter_heaps)
         _metal_context.epochs().defer([system = &_metal_context.queries(), held = cc::move(lease)]() mutable
-                                      { system->release_heap(cc::move(held)); });
+                                      { system->release_lease(cc::move(held)); });
     _leased_counter_heaps.clear();
     _active_timestamp_lease = -1;
 }
@@ -1718,7 +2103,7 @@ void metal_command_list::release_queries_on_drop()
 {
     // Straight back rather than through the epoch: nothing was committed, so no pending command names them.
     for (auto& lease : _leased_counter_heaps)
-        _metal_context.queries().release_heap(cc::move(lease));
+        _metal_context.queries().release_lease(cc::move(lease));
     _leased_counter_heaps.clear();
     _active_timestamp_lease = -1;
 }

@@ -1,14 +1,16 @@
 ---
 created: 2026-11-05
-priority: next
+priority: normal
 tags: [xr, android, dev.py]
 parent: epic-xr
+claimed-by: Claude (for Philip)
+claimed-at: 2026-11-06T13:21Z
 ---
 
 # A gradle-free Android APK, deployed and launched by `dev.py`
 
 The NDK presets build, but nothing packages an APK, so nothing runs on a Quest.
-Phase 1 of `epic-xr`, and useful beyond XR: any Android example or app needs it.
+`epic-xr` reaches the Quest over Link first; this is what runs it standalone, and it is useful beyond XR: any Android example or app needs it.
 
 ## Wanted
 
@@ -20,5 +22,8 @@ Phase 1 of `epic-xr`, and useful beyond XR: any Android example or app needs it.
 ## Known
 
 - Decided against gradle: it would be the repo's first JVM toolchain.
+- `dev.py install android-sdk` provides `aapt2`, `zipalign`, `apksigner` and `adb` with no Java.
+- `apksigner` itself is a Java tool, so signing needs either a JRE or a signer of our own.
 - SDL3 on Android brings its own Java activity, which competes for the entry point; an XR app needs no window.
 - A test binary still runs as a plain executable under `adb shell`, with no APK.
+- `session::availability_of` never reports `needs_permission` or `denied` until this exists: Android's `USE_SCENE` grant is what feeds them.

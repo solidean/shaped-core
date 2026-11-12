@@ -176,6 +176,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     feature_not_declared,
     /// A `require` in a body that nothing needed; a warning.
     unused_require,
+    pixel_stage_ignores_view,
     /// A generic function nothing instantiates, so only its names were checked; a warning.
     generic_not_instantiated,
     /// A function reached from an entry point of a stage its `@stages` leaves out, `sample` in a compute shader.
@@ -242,6 +243,9 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// A float compared with itself in code an entry point compiles at `@float(.fast)`, a NaN test it may fold (CHK-436);
     /// a warning.
     nan_test_at_fast,
+    /// A stated workgroup size that leaves lanes of a wave idle, that no webgpu device runs, or that is shaped against
+    /// the body's indexing (CHK-521); a warning.
+    workgroup_wastes_lanes,
 };
 
 namespace sgl

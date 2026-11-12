@@ -1,5 +1,6 @@
 #include "emit-test-support.hh"
 
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
 
 using namespace sgl_test;
@@ -260,7 +261,8 @@ TEST("sgl emit - a group's plain member is a field of the constant buffer the gr
     // EMIT-89: MSL's group is an argument buffer, whose block is a pointer at slot 0, bound to a local of the block's name.
     auto const msl = emit_source(source, 0, target::msl);
     CHECK(sgl::emit::dump_errors(msl) == "");
-    CHECK(msl.text.contains("struct scene_arguments\n{\n    constant scene_data* scene [[id(0)]];\n};\n"));
+    CHECK(msl.text.contains("struct scene_arguments\n{\n    constant scene_data* scene [[id(0)]];\n    uint "
+                            "sgl_lengths [[id(1)]][1];\n};\n"));
     CHECK(msl.text.contains("constant scene_arguments& scene_group [[buffer(0)]]"));
     CHECK(msl.text.contains("    constant auto& scene = *scene_group.scene;\n"));
     CHECK(msl.text.contains("scene.tint"));
@@ -481,11 +483,56 @@ TEST("sgl emit - a mutable array that starts filled is the one array the loop fi
                                         "    arr[id.x % 8] = 1.0\n"
                                         "    work.dst[id.x] = arr[3]\n");
     auto const hlsl = text_of(source, target::hlsl_dx12);
-    CHECK(hlsl.contains("    float arr[8];\n    for (int i = 0; i < 8; ++i)\n    {\n        arr[i] = 0.0;\n    }\n"));
+    // EMIT-231: a small fill is a store per element at a constant index
+    CHECK(hlsl.contains("    float arr[8];\n    arr[0] = 0.0;\n    arr[1] = 0.0;\n"));
+    CHECK(hlsl.contains("    arr[7] = 0.0;\n"));
+    CHECK(!hlsl.contains("for ("));
     CHECK(!hlsl.contains("filled"));
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("    var arr: array<f32, 8>;\n"));
     CHECK(!wgsl.contains("filled"));
+}
+
+TEST("sgl emit - a fill past 64 elements in all is a loop per level, and a smaller one is not (EMIT-231)")
+{
+    auto const text = [](cc::string_view declaration)
+    {
+        return text_of(cc::format("binding work:\n"
+                                  "    dst: mut buffer[float]\n"
+                                  "\n"
+                                  "@compute(64) fun main(@thread_id id: int3){{work}}:\n"
+                                  "    let mut arr = {}\n"
+                                  "    arr[id.x % 4][id.y % 4] = 1.0\n"
+                                  "    work.dst[id.x] = arr[1][2]\n",
+                                  declaration),
+                       target::hlsl_vulkan);
+    };
+    auto const small = text("float[8, 8].filled(0.0)");
+    CHECK(small.contains("    arr[7][7] = 0.0;\n"));
+    CHECK(!small.contains("for ("));
+    auto const large = text("float[8, 9].filled(0.0)");
+    CHECK(large.contains("for (int i = 0; i < 8; ++i)"));
+    CHECK(large.contains("for (int i_1 = 0; i_1 < 9; ++i_1)"));
+}
+
+TEST("sgl emit - only a let array of constants is static const, never a var or one built of values (EMIT-230)")
+{
+    auto const source = cc::string_view("binding work:\n"
+                                        "    dst: mut buffer[float]\n"
+                                        "\n"
+                                        "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                        "    let k = [float2(1.0, 2.0), float2(3.0, 4.0)]\n"
+                                        "    let mut m = [1.0, 2.0]\n"
+                                        "    m[id.x % 2] = 5.0\n"
+                                        "    let f = id.y as float\n"
+                                        "    let v = [f, 1.0]\n"
+                                        "    work.dst[id.x] = k[id.x % 2].y + m[id.y % 2] + v[id.z % 2]\n");
+    auto const hlsl = text_of(source, target::hlsl_vulkan);
+    CHECK(hlsl.contains("static const float2 k[2] = {float2(1.0, 2.0), float2(3.0, 4.0)};\n"));
+    CHECK(!hlsl.contains("static const float m"));
+    CHECK(!hlsl.contains("static const float v"));
+    auto const msl = text_of(source, target::msl);
+    CHECK(!msl.contains("static const"));
 }
 
 TEST("sgl emit - a vertex member whose name ends in a digit gets a semantic that does not")
@@ -589,7 +636,7 @@ TEST("sgl emit - emit is total: a module with errors and a position out of range
                                                                  "    }\n"));
     CHECK(sgl::emit::dump_errors(sgl::emit::emit(broken.module, 0, target::wgsl)) == "module-has-errors 1 errors\n");
 
-    auto const cube = check_sources(read_prelude(), read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"));
+    auto const cube = check_sources(read_prelude(), read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl"));
     CHECK(sgl::emit::dump_errors(sgl::emit::emit(cube.module, 2, target::wgsl)) == "unknown-entry-point 2 of 2\n");
     CHECK(sgl::emit::dump_errors(sgl::emit::emit(cube.module, -1, target::hlsl_dx12)) == "unknown-entry-point -1 of 2\n");
 }

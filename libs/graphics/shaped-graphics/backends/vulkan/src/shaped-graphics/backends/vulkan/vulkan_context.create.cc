@@ -11,6 +11,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_forward_waits.hh>
+#include <shaped-graphics/context/gpu_selector.hh>
 
 
 namespace sg::backend::vulkan
@@ -139,6 +140,10 @@ bool find_graphics_queue_family(VkPhysicalDevice dev, u32& out_index)
 /// Where the family cannot give two, both directions share one and that stall is the cost; where there is no
 /// transfer family at all, they share the graphics queue and async transfer is asynchronous only in the CPU sense.
 /// Reporting which case applies is what keeps a surprise-free timing story: see vulkan_context::has_dedicated_transfer_queue.
+///
+/// **A family must copy any texel region**, a minImageTransferGranularity of 1×1×1, since an upload names arbitrary rows.
+/// AMD's DMA family reports 16×16×8; a copy below it is invalid usage, and an async texture upload hung behind one.
+/// A graphics or compute family always reports 1×1×1, so excluding a coarser one still leaves a family to take.
 u32 find_transfer_queue_family(VkPhysicalDevice dev, u32 graphics_family, u32& out_queue_count)
 {
     uint32_t count = 0;
@@ -149,7 +154,9 @@ u32 find_transfer_queue_family(VkPhysicalDevice dev, u32 graphics_family, u32& o
     auto const can_transfer = [&](uint32_t i)
     {
         // A graphics or compute family transfers implicitly, whether or not it sets the bit.
-        return (families[i].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) != 0;
+        auto const g = families[i].minImageTransferGranularity;
+        return (families[i].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) != 0
+            && g.width == 1 && g.height == 1 && g.depth == 1;
     };
 
     for (uint32_t i = 0; i < count; ++i)
@@ -216,9 +223,12 @@ struct selected_physical_device
     u32 queue_family;
 };
 
-// Highest-ranked physical device that exposes a graphics queue, or nullopt if none qualifies (no
-// devices at all, or none with a graphics queue).
-cc::optional<selected_physical_device> pick_physical_device(VkInstance instance, bool prefer_software)
+// Highest-ranked physical device that exposes a graphics queue and that `selector` asks for (sg::gpu_selector_matches),
+// or nullopt if none qualifies.
+// A CPU device ignores the selector, since it is the software fallback rather than a GPU anyone names.
+cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
+                                                            bool prefer_software,
+                                                            cc::string_view selector)
 {
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
@@ -235,6 +245,9 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
 
         VkPhysicalDeviceProperties props = {};
         vkGetPhysicalDeviceProperties(device, &props);
+        if (props.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU
+            && !sg::gpu_selector_matches(selector, props.vendorID, cc::string_view(props.deviceName)))
+            continue;
         int const rank = device_type_rank(props.deviceType, prefer_software);
         if (rank > best_rank)
         {
@@ -243,6 +256,62 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
         }
     }
     return best;
+}
+
+// Every physical device's name, for an error that says what a selector could have matched.
+cc::string physical_device_names(VkInstance instance)
+{
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
+    auto devices = cc::vector<VkPhysicalDevice>::create_uninitialized(device_count);
+    vkEnumeratePhysicalDevices(instance, &device_count, devices.data());
+    auto names = cc::string();
+    for (auto device : devices)
+    {
+        VkPhysicalDeviceProperties props = {};
+        vkGetPhysicalDeviceProperties(device, &props);
+        names += names.empty() ? "" : ", ";
+        names += cc::string_view(props.deviceName);
+    }
+    return names.empty() ? cc::string("none") : names;
+}
+
+// The device a caller chose, with its graphics family, or nullopt where it chose none or one with no graphics queue.
+cc::optional<selected_physical_device> chosen_physical_device(VkPhysicalDevice device)
+{
+    u32 family = 0;
+    if (device == VK_NULL_HANDLE || !find_graphics_queue_family(device, family))
+        return {};
+    return selected_physical_device{.device = device, .queue_family = family};
+}
+
+void log_adapter(sg::adapter_info const& info)
+{
+    CC_LOG_INFO("vulkan context on '{}', driver {}", info.name, info.driver_version);
+}
+
+// Appends each name of `extra` that `enabled` does not hold yet, terminated in place so `enabled` can point into it.
+// `extra` must not change while `enabled` is in use.
+// Returns the first name `available` refuses, or an empty view where every one was appended.
+template <class Available>
+cc::string_view append_extra_extensions(cc::vector<char const*>& enabled,
+                                        cc::vector<cc::string>& extra,
+                                        Available&& available)
+{
+    for (auto& name : extra)
+    {
+        auto const* const terminated = name.c_str_materialize();
+        auto already_enabled = false;
+        for (auto const* e : enabled)
+            if (cc::string_view(e) == cc::string_view(terminated))
+                already_enabled = true;
+        if (already_enabled)
+            continue;
+        if (!available(terminated))
+            return name;
+        enabled.push_back(terminated);
+    }
+    return {};
 }
 
 /// What vulkan says about the physical device that was picked.
@@ -260,6 +329,17 @@ sg::adapter_info describe_adapter(VkPhysicalDevice device)
     info.device_id = u32(props.deviceID);
     info.driver_version = cc::format("{}", props.driverVersion);
     info.is_software = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+
+    auto ids = VkPhysicalDeviceIDProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+    auto props2 = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &ids};
+    vkGetPhysicalDeviceProperties2(device, &props2);
+    if (ids.deviceLUIDValid == VK_TRUE)
+    {
+        static_assert(VK_LUID_SIZE == sizeof(u64));
+        auto luid = u64(0);
+        cc::memcpy(&luid, ids.deviceLUID, sizeof(luid));
+        info.luid = luid;
+    }
 
     // Vulkan reports heaps rather than a board size, so the card's memory is the sum of the DEVICE_LOCAL ones.
     // On an integrated GPU every heap is host memory and the sum is 0, which is the honest answer there.
@@ -287,7 +367,7 @@ void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT messe
 // The Vulkan version sg requires of a device, and the floor every feature below is core in.
 // Hardcoded rather than probed per capability: a branch taken on nobody's machine is a path nobody exercises,
 // so a device under the floor is refused at creation with one legible error instead of degrading silently.
-constexpr u32 k_required_api_version = VK_API_VERSION_1_3;
+constexpr u32 k_required_api_version = required_api_version;
 
 // Descriptor buffers back the whole bind path: a binding group is a range of plain memory a shader reads through a
 // bound address, which is what lets a staging group snapshot by copying bytes rather than re-writing every descriptor.
@@ -402,6 +482,14 @@ struct optional_shader_features
 {
     VkBool32 shader_float16 = VK_FALSE;
     VkBool32 shader_int16 = VK_FALSE;
+    VkBool32 shader_int64 = VK_FALSE;
+    VkBool32 shader_float64 = VK_FALSE;
+    /// sg::feature::shader_int64_atomics, a buffer's.
+    VkBool32 buffer_int64_atomics = VK_FALSE;
+    /// sg::feature::shader_shared_int64_atomics, workgroup memory's.
+    VkBool32 shared_int64_atomics = VK_FALSE;
+    /// sg::feature::unbounded_binding_arrays: a group decides its last binding's count.
+    VkBool32 variable_descriptor_count = VK_FALSE;
     VkBool32 storage_buffer_16bit = VK_FALSE;
     VkBool32 uniform_and_storage_buffer_16bit = VK_FALSE;
     /// An HLSL push constant may hold a 16-bit member, which needs this bit; SGL refuses one in an `@inline` binding.
@@ -411,6 +499,8 @@ struct optional_shader_features
     VkBool32 subgroup_size_control = VK_FALSE;
     /// SPIR-V's `Layer` written by a vertex shader, which DXC declares as `ShaderLayer`.
     VkBool32 shader_output_layer = VK_FALSE;
+    /// One draw rendering several views through a rendering's view mask, and SPIR-V's `ViewIndex` that reads which.
+    VkBool32 multiview = VK_FALSE;
     /// DXC writes a compute stage's quad operations in a derivative group, linear along one axis or of 2x2 threads.
     /// Both are VK_KHR_compute_shader_derivatives', which creation enables wherever the device has it.
     bool has_compute_derivatives = false;
@@ -434,6 +524,11 @@ struct optional_shader_features
     }
     [[nodiscard]] bool has_f16() const { return shader_float16 == VK_TRUE && has_16bit_support(); }
     [[nodiscard]] bool has_int16() const { return shader_int16 == VK_TRUE && has_16bit_support(); }
+    [[nodiscard]] bool has_int64_atomics() const { return shader_int64 == VK_TRUE && buffer_int64_atomics == VK_TRUE; }
+    [[nodiscard]] bool has_shared_int64_atomics() const
+    {
+        return has_int64_atomics() && shared_int64_atomics == VK_TRUE;
+    }
 };
 
 optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
@@ -470,12 +565,18 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
     return {
         .shader_float16 = vk12.shaderFloat16,
         .shader_int16 = features.features.shaderInt16,
+        .shader_int64 = features.features.shaderInt64,
+        .shader_float64 = features.features.shaderFloat64,
+        .buffer_int64_atomics = vk12.shaderBufferInt64Atomics,
+        .shared_int64_atomics = vk12.shaderSharedInt64Atomics,
+        .variable_descriptor_count = vk12.descriptorBindingVariableDescriptorCount,
         .storage_buffer_16bit = vk11.storageBuffer16BitAccess,
         .uniform_and_storage_buffer_16bit = vk11.uniformAndStorageBuffer16BitAccess,
         .storage_push_constant_16bit = vk11.storagePushConstant16,
         .subgroup_extended_types = vk12.shaderSubgroupExtendedTypes,
         .subgroup_size_control = vk13.subgroupSizeControl,
         .shader_output_layer = vk12.shaderOutputLayer,
+        .multiview = vk11.multiview,
         .has_compute_derivatives = has_compute_derivatives,
         .compute_derivative_group_linear = linear,
         .compute_derivative_group_quads = has_compute_derivatives ? derivatives.computeDerivativeGroupQuads : VK_FALSE,
@@ -579,6 +680,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     enable_platform_surface(sg::window_platform::wayland, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 #endif
 
+    // Copies, since a name is handed to Vulkan as a terminated string and the config is const; they must outlive device creation.
+    auto extra_instance_extensions = config.extra_instance_extensions;
+    auto extra_device_extensions = config.extra_device_extensions;
+    if (auto const added = append_extra_extensions(extensions, extra_instance_extensions,
+                                                   [](char const* name) { return instance_extension_available(name); });
+        !added.empty())
+        return cc::error(cc::format("the Vulkan loader does not offer the requested instance extension {}", added));
+
     auto const dbg_info = make_debug_messenger_info();
 
     // Chained ahead of the messenger rather than instead of it, so sync-validation findings arrive through the same
@@ -608,7 +717,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     };
 
     VkInstance instance = VK_NULL_HANDLE;
-    if (VkResult r = vkCreateInstance(&instance_info, nullptr, &instance); r != VK_SUCCESS)
+    if (config.create_instance)
+    {
+        if (VkResult r = config.create_instance(instance_info, instance); r != VK_SUCCESS)
+            return vulkan_error(r, "vulkan_config::create_instance failed");
+        if (instance == VK_NULL_HANDLE)
+            return cc::error("vulkan_config::create_instance reported success and created no instance");
+    }
+    else if (VkResult r = vkCreateInstance(&instance_info, nullptr, &instance); r != VK_SUCCESS)
         return vulkan_error(r, "vkCreateInstance failed");
 
     // The standalone messenger is created after the context below, so it can carry it as user data and a caller can
@@ -616,13 +732,23 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // Instance create/destroy messages are already covered by dbg_info on the instance's pNext.
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
 
-    // Physical device selection: rank every device that exposes a graphics queue, keep the best.
-    auto const picked = pick_physical_device(instance, config.prefer_software_device);
+    // Physical device selection: rank every device that exposes a graphics queue, keep the best — or take the one the caller chose.
+    auto const selector = config.choose_physical_device ? cc::string() : sg::gpu_selector_from_environment();
+    auto const picked = config.choose_physical_device
+                          ? chosen_physical_device(config.choose_physical_device(instance))
+                          : pick_physical_device(instance, config.prefer_software_device, selector);
     if (!picked.has_value())
     {
+        auto message = config.choose_physical_device ? cc::string("vulkan_config::choose_physical_device chose no "
+                                                                  "device, or one without a graphics "
+                                                                  "queue")
+                     : selector.empty()
+                         ? cc::string("no Vulkan device with a graphics queue found")
+                         : cc::format("SC_GPU='{}' matches no Vulkan device with a graphics queue; the devices are: {}",
+                                      selector, physical_device_names(instance));
         destroy_debug_messenger(instance, messenger);
         vkDestroyInstance(instance, nullptr);
-        return cc::error("no Vulkan device with a graphics queue found");
+        return cc::error(cc::move(message));
     }
     auto const best_device = picked.value().device;
     auto const best_family = picked.value().queue_family;
@@ -696,6 +822,38 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (micromap_supported)
         device_extensions.push_back(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
 
+    // A partitioned tlas, updated in place: optional above ray tracing too, and enabled wherever the device grants it.
+    char const* const partitioned_names[] = {VK_NV_PARTITIONED_ACCELERATION_STRUCTURE_EXTENSION_NAME};
+    auto partitioned_supported = false;
+    if (raytracing_supported && device_extensions_available(best_device, partitioned_names))
+    {
+        auto partitioned_query = VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PARTITIONED_ACCELERATION_STRUCTURE_FEATURES_NV,
+        };
+        auto features = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                                  .pNext = &partitioned_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        partitioned_supported = partitioned_query.partitionedAccelerationStructure == VK_TRUE;
+    }
+    if (partitioned_supported)
+        device_extensions.push_back(VK_NV_PARTITIONED_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+
+    // Clustered geometry: optional above ray tracing too, and enabled wherever the device grants it.
+    char const* const cluster_names[] = {VK_NV_CLUSTER_ACCELERATION_STRUCTURE_EXTENSION_NAME};
+    auto clusters_supported = false;
+    if (raytracing_supported && device_extensions_available(best_device, cluster_names))
+    {
+        auto cluster_query = VkPhysicalDeviceClusterAccelerationStructureFeaturesNV{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_ACCELERATION_STRUCTURE_FEATURES_NV,
+        };
+        auto features
+            = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &cluster_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        clusters_supported = cluster_query.clusterAccelerationStructure == VK_TRUE;
+    }
+    if (clusters_supported)
+        device_extensions.push_back(VK_NV_CLUSTER_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+
     // A native float add, which SGL's `atomic[float].add` uses where it is granted in a buffer and in workgroup memory
     // alike, and writes as a compare-exchange loop otherwise.
     char const* const float_atomic_names[] = {VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME};
@@ -717,6 +875,66 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (float_atomic_add_supported)
         device_extensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+    // The mesh and task stages, which sg's feature grants together.
+    char const* const mesh_names[] = {VK_EXT_MESH_SHADER_EXTENSION_NAME};
+    auto mesh_shader_supported = false;
+    if (device_extensions_available(best_device, mesh_names))
+    {
+        auto mesh_query = VkPhysicalDeviceMeshShaderFeaturesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+        };
+        auto features
+            = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &mesh_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        mesh_shader_supported = mesh_query.meshShader == VK_TRUE && mesh_query.taskShader == VK_TRUE;
+    }
+    if (mesh_shader_supported)
+        device_extensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+
+    // What the driver reports of each pipeline it compiles, only where the config asks, since capturing costs.
+    char const* const statistics_names[] = {VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME};
+    auto statistics_supported = false;
+    if ((config.capture_driver_statistics || config.capture_driver_representations)
+        && device_extensions_available(best_device, statistics_names))
+    {
+        auto statistics_query = VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+        };
+        auto features = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                                  .pNext = &statistics_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        statistics_supported = statistics_query.pipelineExecutableInfo == VK_TRUE;
+    }
+    if (statistics_supported)
+        device_extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+
+    // Shader execution reordering, which SGL writes as SPIR-V instructions of its own, since DXC lowers none of HLSL's.
+    // Only a reordering device counts: one whose hint is `none` regroups nothing, and SGL's hit objects are no use there.
+    auto reorder_supported = false;
+#ifdef VK_EXT_ray_tracing_invocation_reorder
+    char const* const reorder_names[] = {VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME};
+    if (raytracing_supported && device_extensions_available(best_device, reorder_names))
+    {
+        auto reorder_query = VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT,
+        };
+        auto features
+            = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &reorder_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        auto reorder_props = VkPhysicalDeviceRayTracingInvocationReorderPropertiesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_EXT,
+        };
+        auto props = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                 .pNext = &reorder_props};
+        vkGetPhysicalDeviceProperties2(best_device, &props);
+        reorder_supported = reorder_query.rayTracingInvocationReorder == VK_TRUE
+                         && reorder_props.rayTracingInvocationReorderReorderingHint
+                                == VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT;
+    }
+    if (reorder_supported)
+        device_extensions.push_back(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+#endif
+
     auto const shader_features = query_optional_shader_features(best_device);
     if (shader_features.has_compute_derivatives)
         device_extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
@@ -728,6 +946,15 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     bool const maintenance5_supported = device_extensions_available(best_device, maintenance5_names);
     if (maintenance5_supported)
         device_extensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+
+    if (auto const added = append_extra_extensions(device_extensions, extra_device_extensions,
+                                                   [&](char const* name)
+                                                   {
+                                                       char const* const names[] = {name};
+                                                       return device_extensions_available(best_device, names);
+                                                   });
+        !added.empty())
+        return cc::error(cc::format("the chosen Vulkan device does not offer the requested device extension {}", added));
 
     // Logical device with a single graphics queue.
     // Every feature is enabled up front, whether or not the milestone using it has landed: a feature costs nothing
@@ -798,6 +1025,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto vk12_features = VkPhysicalDeviceVulkan12Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &vk13_features,
+        .shaderBufferInt64Atomics = shader_features.buffer_int64_atomics,
+        .shaderSharedInt64Atomics = shader_features.shared_int64_atomics,
         .shaderFloat16 = shader_features.shader_float16,
         .shaderUniformBufferArrayNonUniformIndexing = shader_features.uniform_buffer_array_non_uniform_indexing,
         .shaderSampledImageArrayNonUniformIndexing = shader_features.sampled_image_array_non_uniform_indexing,
@@ -805,6 +1034,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .shaderStorageImageArrayNonUniformIndexing = shader_features.storage_image_array_non_uniform_indexing,
         .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
         .descriptorBindingPartiallyBound = VK_TRUE,
+        .descriptorBindingVariableDescriptorCount = shader_features.variable_descriptor_count,
         .runtimeDescriptorArray = VK_TRUE,
         .scalarBlockLayout = VK_TRUE,
         .shaderSubgroupExtendedTypes = shader_features.subgroup_extended_types,
@@ -849,6 +1079,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .storageBuffer16BitAccess = shader_features.storage_buffer_16bit,
         .uniformAndStorageBuffer16BitAccess = shader_features.uniform_and_storage_buffer_16bit,
         .storagePushConstant16 = shader_features.storage_push_constant_16bit,
+        .multiview = shader_features.multiview,
         .shaderDrawParameters = VK_TRUE,
     };
 
@@ -862,6 +1093,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // So are the geometry and tessellation stages, per-sample shading and wireframe fill, which sg::feature reports the same way:
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
+    // `drawIndirectFirstInstance` too, without which an indirect record's `first_instance` must be 0.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{
@@ -871,11 +1103,15 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .geometryShader = supported.geometryShader,
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,
+                     .drawIndirectFirstInstance = supported.drawIndirectFirstInstance,
                      .fillModeNonSolid = supported.fillModeNonSolid,
                      .samplerAnisotropy = supported.samplerAnisotropy,
                      .textureCompressionBC = supported.textureCompressionBC,
+                     .vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats,
+                     .shaderFloat64 = shader_features.shader_float64,
+                     .shaderInt64 = shader_features.shader_int64,
                      .shaderInt16 = shader_features.shader_int16},
     };
 
@@ -900,10 +1136,52 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .shaderSharedFloat32AtomicAdd = VK_TRUE,
     };
 
+    auto* const after_mesh
+        = float_atomic_add_supported ? static_cast<void*>(&float_atomic_features) : float_atomic_features.pNext;
+    auto mesh_features = VkPhysicalDeviceMeshShaderFeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+        .pNext = after_mesh,
+        .taskShader = VK_TRUE,
+        .meshShader = VK_TRUE,
+    };
+
+    void* const after_reorder = mesh_shader_supported ? static_cast<void*>(&mesh_features) : after_mesh;
+#ifdef VK_EXT_ray_tracing_invocation_reorder
+    auto reorder_features = VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT,
+        .pNext = after_reorder,
+        .rayTracingInvocationReorder = VK_TRUE,
+    };
+    void const* const chain = reorder_supported ? static_cast<void const*>(&reorder_features) : after_reorder;
+#else
+    void const* const chain = after_reorder;
+#endif
+
+    auto statistics_features = VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+        .pNext = const_cast<void*>(chain),
+        .pipelineExecutableInfo = VK_TRUE,
+    };
+    void const* const with_statistics = statistics_supported ? static_cast<void const*>(&statistics_features) : chain;
+
+    auto partitioned_features = VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PARTITIONED_ACCELERATION_STRUCTURE_FEATURES_NV,
+        .pNext = const_cast<void*>(with_statistics),
+        .partitionedAccelerationStructure = VK_TRUE,
+    };
+    void const* const with_partitioned
+        = partitioned_supported ? static_cast<void const*>(&partitioned_features) : with_statistics;
+
+    auto cluster_features = VkPhysicalDeviceClusterAccelerationStructureFeaturesNV{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_ACCELERATION_STRUCTURE_FEATURES_NV,
+        .pNext = const_cast<void*>(with_partitioned),
+        .clusterAccelerationStructure = VK_TRUE,
+    };
+    void const* const with_clusters = clusters_supported ? static_cast<void const*>(&cluster_features) : with_partitioned;
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext
-        = float_atomic_add_supported ? static_cast<void const*>(&float_atomic_features) : float_atomic_features.pNext,
+        .pNext = with_clusters,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),
@@ -913,10 +1191,15 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto const created = [&]
     {
         backend::vulkan::device_driver_barrier const barrier; // see vulkan_forward_waits.hh
+        if (config.create_device)
+            return config.create_device(best_device, device_info, device);
         return vkCreateDevice(best_device, &device_info, nullptr, &device);
     }();
     if (created != VK_SUCCESS)
-        return vulkan_error(created, "vkCreateDevice failed");
+        return vulkan_error(created,
+                            config.create_device ? "vulkan_config::create_device failed" : "vkCreateDevice failed");
+    if (device == VK_NULL_HANDLE)
+        return cc::error("vulkan_config::create_device reported success and created no device");
 
     VkQueue queue = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, best_family, 0, &queue);
@@ -973,6 +1256,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->set_device_properties(device_props.properties);
 
     ctx->set_adapter_info(describe_adapter(best_device));
+    log_adapter(ctx->metrics.adapter());
 
     // Ray tracing is supported only if its entry points are actually there too, which is the same all-or-nothing rule
     // the descriptor-buffer loader applies — except that here a false answer is a legitimate device rather than a
@@ -993,11 +1277,51 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         vkGetPhysicalDeviceProperties2(best_device, &props);
         ctx->_opacity_micromap = micromap_props;
     }
+    if (raytracing_supported && partitioned_supported && ctx->_raytracing_functions.load_partitioned(device))
+        ctx->_partitioned_tlas = true;
+    if (raytracing_supported && clusters_supported && ctx->_raytracing_functions.load_clusters(device))
+    {
+        auto cluster_props = VkPhysicalDeviceClusterAccelerationStructurePropertiesNV{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_ACCELERATION_STRUCTURE_PROPERTIES_NV,
+        };
+        auto props = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                 .pNext = &cluster_props};
+        vkGetPhysicalDeviceProperties2(best_device, &props);
+        ctx->_clusters = cluster_props;
+    }
     ctx->_shader_f16 = shader_features.has_f16();
     ctx->_shader_int16 = shader_features.has_int16();
+    ctx->_shader_int64 = shader_features.shader_int64 == VK_TRUE;
+    ctx->_shader_f64 = shader_features.shader_float64 == VK_TRUE;
+    ctx->_shader_int64_atomics = shader_features.has_int64_atomics();
+    ctx->_shader_shared_int64_atomics = shader_features.has_shared_int64_atomics();
+    ctx->_unbounded_binding_arrays = shader_features.variable_descriptor_count == VK_TRUE;
     ctx->_subgroups = shader_features.subgroups;
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
+    ctx->_view_instancing = shader_features.multiview == VK_TRUE;
+    ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
+    ctx->_shader_execution_reordering = raytracing_supported && reorder_supported;
+    if (statistics_supported)
+    {
+        ctx->_get_pipeline_executable_properties = PFN_vkGetPipelineExecutablePropertiesKHR(
+            vkGetDeviceProcAddr(device, "vkGetPipelineExecutablePropertiesKHR"));
+        ctx->_get_pipeline_executable_statistics = PFN_vkGetPipelineExecutableStatisticsKHR(
+            vkGetDeviceProcAddr(device, "vkGetPipelineExecutableStatisticsKHR"));
+        if (config.capture_driver_representations)
+            ctx->_get_pipeline_executable_representations = PFN_vkGetPipelineExecutableInternalRepresentationsKHR(
+                vkGetDeviceProcAddr(device, "vkGetPipelineExecutableInternalRepresentationsKHR"));
+        if (ctx->_get_pipeline_executable_properties == nullptr)
+        {
+            ctx->_get_pipeline_executable_statistics = nullptr;
+            ctx->_get_pipeline_executable_representations = nullptr;
+        }
+    }
+    if (mesh_shader_supported)
+        ctx->_cmd_draw_mesh_tasks = PFN_vkCmdDrawMeshTasksEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));
+    ctx->_cmd_draw_mesh_tasks_indirect
+        = PFN_vkCmdDrawMeshTasksIndirectEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksIndirectEXT"));
+    ctx->_mesh_shader = ctx->_cmd_draw_mesh_tasks != nullptr;
     if (shader_features.subgroup_size_control == VK_TRUE)
         ctx->_subgroup_size_control = {
             .min_size = shader_features.vk13_properties.minSubgroupSize,
@@ -1025,6 +1349,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // The staging ring is part of a usable context rather than something acquired lazily: without it cmd.upload has
     // nowhere to write, so a context that cannot allocate one is not worth handing back.
     ctx->_execution = config.execution;
+    ctx->_native_spirv = config.native_spirv;
+    ctx->_native_line_tables = config.native_line_tables;
     if (auto ring = ctx->_upload_inline.initialize(*ctx, config.upload_ring_bytes); ring.has_error())
         return cc::error(cc::move(ring).error());
     if (auto ring = ctx->_download_inline.initialize(*ctx, config.download_ring_bytes); ring.has_error())

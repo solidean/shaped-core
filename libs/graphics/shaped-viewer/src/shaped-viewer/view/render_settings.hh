@@ -132,6 +132,28 @@ enum class sv::environment_estimate : sv::u8
     exact,
 };
 
+/// A quantity a wavefront layer averages at its pixels' primary hits beside its image: a bit of `render_settings::channels`.
+///
+/// Each is one float4 a pixel, the mean over the pixel's samples since the restart; a sample whose primary ray escaped adds 0.
+/// The values are `channel_*` of shaders/sgl/tracer_wavefront.sgl, which writes them.
+enum class sv::render_channel : sv::u32
+{
+    /// The hit's world position, and 1 in .w, so .w is how much of the pixel a surface covers.
+    position = 1,
+    /// The hit's depth along the camera's forward axis, in .x.
+    view_depth = 2,
+    /// The surface's normal, turned toward the ray.
+    geometric_normal = 4,
+    /// The normal its material shades with, its normal map applied.
+    shading_normal = 8,
+    /// The material's base color.
+    base_color = 16,
+    /// The material's specular roughness, base metalness and micro-occlusion, and its opacity in .w.
+    material = 32,
+    /// The hit instance's index in .x, and a number in [0, 1) of it in .y, the same for every hit on it.
+    instance = 64,
+};
+
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
 ///
 /// How the layer is drawn, traced or rasterized, and the controls of each; a field says which mode reads it.
@@ -247,6 +269,16 @@ struct sv::render_settings
     /// This is what one frame costs, not what the image converges to — a view left alone accumulates without limit,
     /// so this trades how fast a moving camera settles against how smooth it stays while it moves.
     i32 samples_per_pixel = 4;
+
+    /// How many jittered samples per pixel a still image of a traced layer is expected to average; 0 for unknown.
+    /// That average already filters a pixel, so each primary ray reads its textures through a footprint narrowed by
+    /// 1/sqrt of it, held at an eighth, as pbrt-v4 scales its ray differentials; 0 and 1 read a whole pixel's.
+    /// A capture that accumulates a known count sets it, and its image comes out as sharp as its samples allow.
+    u32 expected_samples_per_pixel = 0;
+
+    /// The channels a wavefront layer averages at its pixels' primary hits beside its image: `sv::render_channel` values OR'd, 0 for none.
+    /// `sv::render_settled` hands them back with the image; no other mode writes them.
+    u32 channels = 0;
 
     /// Path length: the primary hit plus this many bounces.
     /// Up to eight refractions through smooth glass spend none, so a hollow glass vessel still leaves the path its bounces for what lies behind.

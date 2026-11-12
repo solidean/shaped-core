@@ -4,6 +4,7 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/types.hh>
 
@@ -12,7 +13,7 @@ using namespace sg;
 namespace
 {
 /// The header a window starts with, in words: where the next record goes, how many words it holds, and how many records it had no room for.
-constexpr isize k_header_words = 3;
+constexpr isize k_header_words = debug_header_words;
 
 [[nodiscard]] cc::string text_of_float(f32 f)
 {

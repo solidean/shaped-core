@@ -34,6 +34,14 @@ constexpr scalar_family k_short_family
     = {"short", "int16_t", "i16", "", value_kind::scalar_short, true, false, 2, check::feature::shader_int16};
 constexpr scalar_family k_ushort_family
     = {"ushort", "uint16_t", "u16", "", value_kind::scalar_ushort, true, false, 2, check::feature::shader_int16};
+// CHK-450 and CHK-451: no 64-bit value crosses a stage edge either, and WGSL has none at all, so its spellings are
+// placeholders no text ever holds (EMIT-109).
+constexpr scalar_family k_long_family
+    = {"long", "int64_t", "i64", "", value_kind::scalar_long, true, true, 8, check::feature::shader_int64};
+constexpr scalar_family k_ulong_family
+    = {"ulong", "uint64_t", "u64", "", value_kind::scalar_ulong, true, true, 8, check::feature::shader_int64};
+constexpr scalar_family k_double_family
+    = {"double", "double", "f64", "", value_kind::scalar_double, true, true, 8, check::feature::shader_f64};
 
 /// A vector of `width` scalars of `family` with the fields `x y [z [w]]`, which every target spells as its own vector.
 /// Its swizzles are the target's own too (EMIT-142).
@@ -207,13 +215,17 @@ void sgl::builtins::register_types(registry& r)
         .declaration = "struct affine3",
         .doc = "/// An affine map of space: a linear part and a translation, as three rows of four.\n"
                "/// It translates a `pos3` and leaves a `vec3` untranslated, so the type decides the w.\n"
-               "/// A value of function bodies alone, which no GPU memory holds yet.",
+               "/// In GPU memory its three rows stand back to back, 48 bytes, as an instance's transform does.",
         .hlsl = "float3x4",
         .wgsl = "mat3x4f",
         .msl = "float3x4",
+        // CHK-518: three rows of 16, wherever it stands; HLSL declares it `row_major`, and the others hold rows as columns
+        .hlsl_layout = {.size = 48, .alignment = 16},
+        .wgsl_layout = {.size = 48, .alignment = 16},
+        .msl_layout = {.size = 48, .alignment = 16},
         .leaf_kind = value_kind::scalar_float,
         .leaf_count = 12,
-        .local_only_reason = "its layout in GPU memory is not decided yet",
+        .local_only_reason = "no stage edge carries one yet",
     });
 
     r.add(type_record{
@@ -249,6 +261,15 @@ void sgl::builtins::register_types(registry& r)
     add_vectors(r, k_short_family, vectors);
     r.add(scalar_of(k_ushort_family, "/// 16 bits, unsigned; its arithmetic wraps."));
     add_vectors(r, k_ushort_family, vectors);
+
+    r.add_comment("// the 64-bit families (CHK-450), each needing a feature of the device (CHK-451); no value of one\n"
+                  "// crosses a stage edge (CHK-383)");
+    r.add(scalar_of(k_long_family, "/// 64 bits, signed; its arithmetic wraps."));
+    add_vectors(r, k_long_family, vectors);
+    r.add(scalar_of(k_ulong_family, "/// 64 bits, unsigned; its arithmetic wraps."));
+    add_vectors(r, k_ulong_family, vectors);
+    r.add(scalar_of(k_double_family, "/// A 64-bit float; every operation rounds to it, to nearest and ties to even."));
+    add_vectors(r, k_double_family, vectors);
 
     r.add_comment("// a vector of one value, beside the constructor of its fields (CHK-360)");
     evaluator const fills[] = {nullptr, nullptr, fill<2>, fill<3>, fill<4>};

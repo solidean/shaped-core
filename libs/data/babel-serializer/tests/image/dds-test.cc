@@ -8,6 +8,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/thorough.hh>
 
@@ -625,7 +626,7 @@ cc::optional<cc::vector<byte>> read_file(cc::string_view path)
 TEST("dds - real Bistro textures decode, when present")
 {
     // Where extern/bistro/fetch-bistro.py installs them, beside the FBX files the fbx tests read.
-    auto const dir = cc::string_view(BABEL_TEST_BISTRO_DIR "/Textures");
+    auto const dir = nx::source_path(BABEL_TEST_BISTRO_DIR "/Textures");
 
     // The small files cover every encoding Bistro uses; the 2048 x 2048 ones run under --thorough only.
     struct sample

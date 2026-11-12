@@ -27,7 +27,7 @@ TEST("sg - a consumer's shader package registers")
     CHECK(sg::test::shaders::double_values.compute.main->entry_point() == "main");
     // One definition per entry point rather than per file, which is why fragment_hazard.hlsl counts three.
     CHECK(sg::test::shaders::package().definitions.size()
-          == 6); // double_values, fragment_hazard x3 (fragment-write-hazard-test), pattern_fill, ping_pong
+          == 9); // double_values, fragment_hazard x3 (fragment-write-hazard-test), pattern_fill, mesh x4 (mesh-test)
 }
 
 ASYNC_INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired with",
@@ -42,7 +42,8 @@ ASYNC_INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is ac
 
     // Pass the context, get back what *it* accepts — the negotiation this whole seam exists for.
     // Which compiler ran is never named here; that it ran the right one is what the format assertion says.
-    auto const& compiled = co_await sg::test::shaders::double_values.compute.main->acquire(*ctx);
+    auto const compiled_async = sg::test::shaders::double_values.compute.main->acquire(*ctx);
+    auto const& compiled = co_await compiled_async;
 
     CHECK(ctx->accepts_shader_format(compiled.format));
     CHECK(compiled.stage == sg::shader_stage::compute);

@@ -1,15 +1,12 @@
 #include "dialect.hh"
+#include "payload_access.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 namespace
 {
-/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
-/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
-constexpr auto k_inline_constants_space = 9;
-/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
-constexpr auto k_bound_samplers_space = 10;
 /// The descriptor set sg keeps for itself on vulkan, `sg::reserved_binding_group`, whose binding 0 no static sampler takes.
 constexpr auto k_reserved_set = 3;
 /// `ray_flags.force_omm_2_state`, the one ray flag a query must not carry on vulkan without micromaps stated for it.
@@ -26,6 +23,39 @@ constexpr cc::string_view k_texture_names[]
        "Texture2DMSArray", "Texture3D",      "TextureCube", "TextureCubeArray"};
 constexpr cc::string_view k_image_names[]
     = {"RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray", "", "", "RWTexture3D", "", ""};
+
+/// Whether the entry point calls the builtin `name`, which a helper its text declares stands for.
+[[nodiscard]] bool calls_builtin(plan const& p, cc::string_view name)
+{
+    for (auto const& x : p.e.exprs)
+        if (auto const* const c = x.node.try_as<flat_call>(); c != nullptr && is_valid(c->intrinsic))
+            if (auto const* const record = p.m.builtin_function(c->intrinsic); record != nullptr && record->name == name)
+                return true;
+    return false;
+}
+
+/// EMIT-260: a hit's cluster, which DXC reaches through inline SPIR-V on vulkan and Shader Model 6.10 has on dx12.
+/// Generic over both of a query's parameters, since one that sees micromaps states its second (EMIT-184).
+constexpr cc::string_view k_query_cluster_vulkan
+    = "template <uint sgl_flags, uint sgl_query_flags>\n"
+      "[[vk::ext_extension(\"SPV_NV_cluster_acceleration_structure\")]]\n"
+      "[[vk::ext_capability(5437)]] // RayTracingClusterAccelerationStructureNV\n"
+      "[[vk::ext_instruction(5345)]] // OpRayQueryGetIntersectionClusterIdNV\n"
+      "int sgl_ray_query_cluster_id([[vk::ext_reference]] RayQuery<sgl_flags, sgl_query_flags> q, uint is_committed);"
+      "\n\n";
+constexpr cc::string_view k_query_cluster_dx12
+    = "template <uint sgl_flags, uint sgl_query_flags>\n"
+      "int sgl_ray_query_cluster_id(RayQuery<sgl_flags, sgl_query_flags> q, uint is_committed)\n"
+      "{\n"
+      "    return int(is_committed != 0u ? q.CommittedClusterID() : q.CandidateClusterID());\n"
+      "}\n\n";
+constexpr cc::string_view k_hit_cluster_vulkan
+    = "[[vk::ext_extension(\"SPV_NV_cluster_acceleration_structure\")]]\n"
+      "[[vk::ext_capability(5437)]] // RayTracingClusterAccelerationStructureNV\n"
+      "[[vk::ext_builtin_input(5436)]] // ClusterIDNV\n"
+      "static const uint sgl_cluster_id_input;\n"
+      "int sgl_hit_cluster_id()\n{\n    return int(sgl_cluster_id_input);\n}\n\n";
+constexpr cc::string_view k_hit_cluster_dx12 = "int sgl_hit_cluster_id()\n{\n    return int(ClusterID());\n}\n\n";
 
 /// Both HLSL targets: one language, and two ways of saying where a thing lives.
 class hlsl_dialect final : public dialect
@@ -49,44 +79,85 @@ public:
         return !_is_vulkan || !flags.has_value() || (flags.value() & k_ray_flag_force_omm_2_state) != 0;
     }
 
-    // vulkan writes no storage from a vertex, geometry or tessellation stage without vertexPipelineStoresAndAtomics,
-    // which sg does not ask a device for
-    bool writes_debug_in(check::stage s) const override
+    // GetDimensions writes through out parameters, so each buffer's length is a helper reading it
+    cc::string buffer_length(cc::string_view name, bool) const override { return cc::format("sgl_length_{}()", name); }
+    cc::string buffer_length_helper(cc::string_view name, bool is_bytes) const override
     {
-        return !_is_vulkan
-            || (s != check::stage::vertex && s != check::stage::geometry && s != check::stage::tessellation_control
-                && s != check::stage::tessellation_evaluation);
+        if (is_bytes)
+            return cc::format("uint sgl_length_{0}()\n{{\n    uint n;\n    {0}.GetDimensions(n);\n    return n;\n}}\n",
+                              name);
+        return cc::format("uint sgl_length_{0}()\n{{\n    uint n, stride;\n    {0}.GetDimensions(n, stride);\n    "
+                          "return n;\n}}\n",
+                          name);
     }
-    void write_debug_buffer(cc::string& out) const override
+    // a helper per mark: inside it, the parameter has lost the mark NonUniformResourceIndex must see
+    cc::string buffer_length_at(cc::string_view name, cc::string_view index, bool is_nonuniform) const override
     {
+        return cc::format("sgl_length_{}{}({})", is_nonuniform ? "nonuniform_" : "", name, index);
+    }
+    cc::string buffer_length_at_helper(cc::string_view name,
+                                       bool is_nonuniform,
+                                       bool is_bytes,
+                                       i32 count,
+                                       bool may_waterfall) const override
+    {
+        // TEMPORARY(debt-sgl-vulkan-element-length-asked-at-uniform-indices): AMD's vulkan driver answers
+        // OpArrayLength of a non-uniform element with the first lane's element, so each length is asked at a uniform index.
+        auto const dimensions = [&](cc::string_view element, cc::string_view into)
+        {
+            return is_bytes ? cc::format("{}.GetDimensions({});", element, into)
+                            : cc::format("{}.GetDimensions({}, stride);", element, into);
+        };
+        if (_is_vulkan && is_nonuniform && count > 0 && count <= 16)
+        {
+            auto text = cc::format("uint sgl_length_nonuniform_{}(uint i)\n{{\n    uint n, k, stride;\n    {}\n", name,
+                                   dimensions(cc::format("{}[0]", name), "n"));
+            for (auto e = 1; e < count; ++e)
+                text.appendf("    {}\n    n = i == {}u ? k : n;\n", dimensions(cc::format("{}[{}]", name, e), "k"), e);
+            text += "    return n;\n}\n";
+            return text;
+        }
+        if (_is_vulkan && is_nonuniform && count == 0 && may_waterfall)
+            return cc::format("uint sgl_length_nonuniform_{}(uint i)\n{{\n    uint n = 0u, stride;\n    for (;;)\n    "
+                              "{{\n        const uint first = WaveReadLaneFirst(i);\n        {}\n        if (first == "
+                              "i)\n"
+                              "            break;\n    }}\n    return n;\n}}\n",
+                              name, dimensions(cc::format("{}[first]", name), "n"));
+        auto const element
+            = is_nonuniform ? cc::format("{}[NonUniformResourceIndex(i)]", name) : cc::format("{}[i]", name);
+        auto const prefix = is_nonuniform ? "nonuniform_" : "";
+        if (is_bytes)
+            return cc::format("uint sgl_length_{}{}(uint i)\n{{\n    uint n;\n    {}.GetDimensions(n);\n    return "
+                              "n;\n}}\n",
+                              prefix, name, element);
+        return cc::format("uint sgl_length_{}{}(uint i)\n{{\n    uint n, stride;\n    {}.GetDimensions(n, stride);\n "
+                          "   return n;\n}}\n",
+                          prefix, name, element);
+    }
+    /// EMIT-135: an emulated trace reads sg's pool and the dispatch's roots, as WGSL's does.
+    void write_acceleration_pool(cc::string& out) const override
+    {
+        auto const which = u8(_is_vulkan ? emit::target::hlsl_vulkan : emit::target::hlsl_dx12);
+        auto const& pool = check::reserved_binding_named("sg_acceleration_pool")->targets[which];
+        auto const& roots = check::reserved_binding_named("sg_acceleration_roots")->targets[which];
         if (_is_vulkan)
-            out += "[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;\n\n";
+            out.appendf("[[vk::binding({}, {})]] StructuredBuffer<uint4> sg_acceleration_pool;\n"
+                        "[[vk::binding({}, {})]] cbuffer sg_acceleration_roots_block\n",
+                        pool.slot, pool.group, roots.slot, roots.group);
         else
-            out += "RWByteAddressBuffer sg_debug : register(u0, space11);\n\n";
+            out.appendf("StructuredBuffer<uint4> sg_acceleration_pool : register(t{}, space{});\n"
+                        "cbuffer sg_acceleration_roots_block : register(b{}, space{})\n",
+                        pool.slot, pool.group, roots.slot, roots.group);
+        out += "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
     }
-    cc::string debug_reserve(cc::string_view at, isize count) const override
+    /// Vulkan traces a structure by its address, as SGL's own SPIR-V does, so a partitioned tlas traces through DXC too.
+    cc::string acceleration_by_address(plan const& p, i32 resource) const override
     {
-        return cc::format("sg_debug.InterlockedAdd(0, {}, {});", count, at);
-    }
-    cc::string debug_declare(cc::string_view at) const override { return cc::format("uint {};", at); }
-    cc::string debug_fits(cc::string_view at, isize count) const override
-    {
-        return cc::format("{} + {} <= sg_debug.Load(4)", at, count);
-    }
-    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
-    {
-        return cc::format("sg_debug.Store(12 + ({} + {}) * 4, {});", at, i, word);
-    }
-    cc::string debug_drop() const override { return "sg_debug.InterlockedAdd(8, 1);"; }
-    cc::string debug_word(cc::string_view value, cc::string_view family) const override
-    {
-        if (family == "uint")
-            return cc::string(value);
-        if (family == "bool")
-            return cc::format("({} ? 1u : 0u)", value);
-        if (family == "half")
-            return cc::format("asuint(float({}))", value);
-        return cc::format("asuint({})", value);
+        auto const position = acceleration_address_position(p, resource);
+        if (!_is_vulkan || position >= check::k_acceleration_address_capacity)
+            return {};
+        return cc::format("sg_acceleration_from_address(sg_acceleration_addresses[{}].{})", position / 2,
+                          position % 2 == 0 ? "xy" : "zw");
     }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 
@@ -98,7 +169,7 @@ public:
     void write_local(cc::string& out, local_declaration const& local) const override
     {
         if (local.value.empty() && local.is_zeroed)
-            out.appendf("{} {} = ({})0;", local.type, local.name, local.type);
+            out.appendf("{} {}{} = ({}{})0;", local.type, local.name, local.dimensions, local.type, local.dimensions);
         else if (local.value.empty())
             out.appendf("{} {}{};", local.type, local.name, local.dimensions);
         else
@@ -113,63 +184,6 @@ public:
         out.appendf("groupshared {} {}{};\n", type_text(p, *this, w.type), w.name, array_dimensions(p, w.type));
     }
 
-    /// SPIR-V has no semantics, so vulkan takes the location as an attribute and keeps the semantic HLSL's grammar asks for.
-    cc::string semantic_of(planned_struct const& s, planned_member const& member, plan const& p) const
-    {
-        if (member.is_position)
-            return "SV_Position";
-        if (member.is_layer)
-            return "SV_RenderTargetArrayIndex";
-        switch (s.role)
-        {
-        case struct_role::vertex_input:
-        {
-            // EMIT-174: a piece is its member's semantic at its own index, `FRAME0`, which is how dx12 reads one
-            auto const at = member.whole >= 0 ? member.whole : &member - s.members.data();
-            auto const semantics = vertex_semantics(p.m, p.m.at(s.type));
-            for (auto i = isize(0); i < s.member_of.size(); ++i)
-                if (s.member_of[i] == at)
-                    return member.piece_index >= 0 ? cc::format("{}{}", semantics[i], member.piece_index) : semantics[i];
-            return "";
-        }
-        case struct_role::stage_link:
-            return cc::format("SGL{}", member.location);
-        case struct_role::patch_constants:
-            // EMIT-123: the factors are the tessellator's, and any other member reaches the evaluation stage as a link
-            if (member.factor == check::tessellation_factor::edge)
-                return "SV_TessFactor";
-            if (member.factor == check::tessellation_factor::inside)
-                return "SV_InsideTessFactor";
-            return cc::format("SGL{}", member.location);
-        case struct_role::render_targets:
-            // EMIT-130: the depth and the sample mask are outputs of their own
-            switch (member.output)
-            {
-            case check::pixel_output::depth:
-                return "SV_Depth";
-            case check::pixel_output::depth_greater_equal:
-                return "SV_DepthGreaterEqual";
-            case check::pixel_output::depth_less_equal:
-                return "SV_DepthLessEqual";
-            case check::pixel_output::sample_mask:
-                return "SV_Coverage";
-            case check::pixel_output::color:
-                break;
-            }
-            return cc::format("SV_Target{}", member.location);
-        case struct_role::plain:
-            break;
-        }
-        return "";
-    }
-
-    /// Which shaders read and write one payload field: the caller, then closesthit, miss and anyhit.
-    struct payload_access
-    {
-        bool reads[4] = {};
-        bool writes[4] = {};
-    };
-
     /// `: read(…) : write(…)` for `a`; a field nobody reads or writes is still the caller's, since HLSL qualifies each.
     static cc::string access_text(payload_access const& a)
     {
@@ -183,147 +197,6 @@ public:
             return text.empty() ? cc::string("caller") : text;
         };
         return cc::format(" : read({}) : write({})", list(a.reads), list(a.writes));
-    }
-
-    /// EMIT-137: field `name` of payload `type`, as every entry point of the module touches it.
-    /// A stage is its payload parameter's reader and writer, and a caller whatever local of the type it traces with.
-    /// A partial write reads the field too, since what it leaves must arrive intact; and a whole-struct access is one
-    /// of every field.
-    /// Every shader of one SGL file then states the same qualifiers, which is what one pipeline's shaders must agree on.
-    static payload_access payload_access_of(plan const& p, check::type_id type, cc::string_view name)
-    {
-        auto result = payload_access();
-        // Every shader of a pipeline must state the same qualifiers, and a host's hit group is compiled apart from the
-        // pipeline it joins: so a type only closed pipelines of this module trace is inferred, and any other is widest.
-        auto is_traced = false;
-        auto is_open = false;
-        for (auto const& pipeline : p.m.pipelines)
-        {
-            if (pipeline.kind != check::pipeline_kind::raytracing)
-                continue;
-            auto is_its = false;
-            for (auto const& ray : p.m.at(p.m.at(p.m.at(pipeline.ray_set).type).members))
-                is_its = is_its || ray.type == type;
-            is_traced = is_traced || is_its;
-            is_open = is_open || (is_its && pipeline.has_host_hit_groups);
-        }
-        if (!is_traced || is_open)
-        {
-            for (auto i = 0; i < 4; ++i)
-                result.reads[i] = result.writes[i] = true;
-            return result;
-        }
-        auto field = isize(-1);
-        auto const members = p.m.at(p.m.at(type).members);
-        for (auto i = isize(0); i < members.size(); ++i)
-            if (members[i].name == name)
-                field = i;
-        for (auto const& e : p.m.entry_points)
-        {
-            auto const stage_slot = e.entry_stage == stage::closest_hit ? 1
-                                  : e.entry_stage == stage::miss        ? 2
-                                  : e.entry_stage == stage::any_hit     ? 3
-                                                                        : -1;
-            auto is_caller = false;
-            for (auto const& r : e.traced_rays)
-                is_caller = is_caller || p.m.at(p.m.at(p.m.at(r.set).type).members)[r.ray].type == type;
-            auto const slot_of = [&](check::local_id local) -> int
-            {
-                if (stage_slot >= 0 && e.input == type && local == check::local_id(0))
-                    return stage_slot;
-                if (is_caller && e.at(local).type == type)
-                    return 0;
-                return -1;
-            };
-            // what stands as the object of a member, a place, or a trace's payload is no whole-struct read
-            auto is_object = cc::vector<bool>::create_filled(e.exprs.size(), false);
-            auto is_place = cc::vector<bool>::create_filled(e.exprs.size(), false);
-            for (auto const& x : e.exprs)
-            {
-                if (auto const* const m = x.node.try_as<check::flat_member>(); m != nullptr && check::is_valid(m->object))
-                    is_object[index_of(m->object)] = true;
-                auto const* const c = x.node.try_as<check::flat_call>();
-                auto const* const record = c == nullptr ? nullptr : p.m.builtin_function(c->intrinsic);
-                if (record == nullptr || !record->takes_element || e.at(c->arguments).empty())
-                    continue;
-                auto const handed = e.at(c->arguments).back();
-                is_place[index_of(handed)] = true;
-                // a payload handed on to a nested trace or a callable comes back written, whatever the stage itself
-                // does with it: what the nested shaders wrote must survive this stage's exit
-                if (auto const* const ref = e.at(handed).node.try_as<check::flat_local_ref>();
-                    ref != nullptr && slot_of(ref->local) >= 0)
-                    result.reads[slot_of(ref->local)] = result.writes[slot_of(ref->local)] = true;
-            }
-            for (auto const& st : e.stmts)
-            {
-                // a local's value where it is declared is a write of every field
-                if (auto const* const l = st.node.try_as<check::flat_let>(); l != nullptr && slot_of(l->local) >= 0)
-                    result.writes[slot_of(l->local)] = true;
-                if (auto const* const v = st.node.try_as<check::flat_var>();
-                    v != nullptr && check::is_valid(v->value) && slot_of(v->local) >= 0)
-                    result.writes[slot_of(v->local)] = true;
-                auto const* const a = st.node.try_as<check::flat_assign>();
-                if (a == nullptr || !check::is_valid(a->place))
-                    continue;
-                // down the member chain to the field right below the local
-                auto at = a->place;
-                auto top = flat_expr_id::none;
-                auto depth = 0;
-                while (auto const* const m = e.at(at).node.try_as<check::flat_member>())
-                {
-                    is_place[index_of(at)] = true;
-                    top = at;
-                    at = m->object;
-                    ++depth;
-                }
-                auto const* const ref = e.at(at).node.try_as<check::flat_local_ref>();
-                if (ref == nullptr)
-                    continue;
-                is_place[index_of(at)] = true;
-                auto const slot = slot_of(ref->local);
-                if (slot < 0)
-                    continue;
-                if (!check::is_valid(top))
-                    result.writes[slot] = true;
-                else if (e.at(top).node.as<check::flat_member>().member == field)
-                {
-                    result.writes[slot] = true;
-                    result.reads[slot] = result.reads[slot] || depth > 1;
-                }
-            }
-            for (auto i = isize(0); i < e.exprs.size(); ++i)
-            {
-                auto const& x = e.exprs[i];
-                if (auto const* const m = x.node.try_as<check::flat_member>(); m != nullptr && !is_place[i])
-                    if (auto const* const ref = e.at(m->object).node.try_as<check::flat_local_ref>();
-                        ref != nullptr && m->member == field && slot_of(ref->local) >= 0)
-                        result.reads[slot_of(ref->local)] = true;
-                if (auto const* const ref = x.node.try_as<check::flat_local_ref>();
-                    ref != nullptr && !is_object[i] && !is_place[i] && slot_of(ref->local) >= 0)
-                    result.reads[slot_of(ref->local)] = true;
-            }
-        }
-        // a stage that writes a field reads it too: a write it makes only on some paths keeps what came in on the others
-        for (auto i = 1; i < 4; ++i)
-        {
-            result.reads[i] = result.reads[i] || result.writes[i];
-            // what a stage writes the caller reads, since it alone consumes the trace; and what a stage reads the caller
-            // writes, so it arrives defined
-            result.reads[0] = result.reads[0] || result.writes[i];
-            result.writes[0] = result.writes[0] || result.reads[i];
-        }
-        return result;
-    }
-
-    /// Whether `type` is a ray payload of the entry point: the one it is handed, or one it traces with.
-    [[nodiscard]] static bool is_payload(plan const& p, check::type_id type)
-    {
-        if (p.e.entry_stage >= stage::raygen && p.e.entry_stage != stage::callable && type == p.e.input)
-            return true;
-        for (auto const& r : p.e.traced_rays)
-            if (p.m.at(p.m.at(p.m.at(r.set).type).members)[r.ray].type == type)
-                return true;
-        return false;
     }
 
     /// Whether the entry point is a pixel stage writing `@depth(.greater_equal)` or `@depth(.less_equal)`.
@@ -359,13 +232,24 @@ public:
         // EMIT-175: a mat2 in a constant block is its two columns in one row, which no HLSL matrix there is
         auto const in_constants = owner == nullptr || owner->is_constants;
         auto const is_vector_mat2 = in_memory && in_constants && is_mat2(p.m, member.type);
-        auto const type = is_widened              ? cc::string("float4x3")
-                        : is_vector_mat2          ? cc::string("float4")
+        auto const type = is_widened && !mat3_cell_field(p, member.type).empty() ? cc::string("sgl_mat3_cell")
+                        : is_widened                                             ? cc::string("float4x3")
+                        : is_vector_mat2                                         ? cc::string("float4")
                         : !widened_vector.empty() ? widened_vector
                                                   : cc::string(type_text(p, *this, member.type));
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
         if (type == "float4x4" || type == "float4x3" || type == "float3x3")
             out += "column_major ";
+        // CHK-518: an affine3 is its rows, which HLSL's `float3x4` holds as rows
+        if (in_memory && type == "float3x4")
+            out += "row_major ";
+        // EMIT-209: a per-triangle value is flat, and the pixel stage's SPIR-V input says it comes per primitive
+        if (owner != nullptr && owner->role == struct_role::primitive_link && p.e.entry_stage == stage::pixel)
+        {
+            if (_is_vulkan)
+                out += "[[vk::ext_decorate(5271)]] ";
+            out += "nointerpolation ";
+        }
         // EMIT-129: a stage link's interpolation, as HLSL's qualifiers spell it
         if (owner != nullptr && owner->role == struct_role::stage_link)
         {
@@ -382,7 +266,7 @@ public:
         }
         out.appendf("{} {}{}", type, member.name, array_dimensions(p, member.type));
         if (owner != nullptr)
-            if (auto const semantic = semantic_of(*owner, member, p); !semantic.empty())
+            if (auto const semantic = semantic_of(p, *owner, member); !semantic.empty())
                 out.appendf(" : {}", semantic);
         // EMIT-137: a payload's field states which shaders read and write it, as every shader of the module does
         if (owner != nullptr && is_payload(p, owner->type))
@@ -440,6 +324,9 @@ public:
                           : record->leaf_kind == check::value_kind::scalar_half   ? "half4"
                           : record->leaf_kind == check::value_kind::scalar_short  ? "short4"
                           : record->leaf_kind == check::value_kind::scalar_ushort ? "ushort4"
+                          : record->leaf_kind == check::value_kind::scalar_long   ? "long4"
+                          : record->leaf_kind == check::value_kind::scalar_ulong  ? "ulong4"
+                          : record->leaf_kind == check::value_kind::scalar_double ? "double4"
                                                                                   : "float4";
         return cc::string(builtin_spelling(p, family));
     }
@@ -456,6 +343,25 @@ public:
             if (r.element_form.has_value())
                 for (auto const& leaf : r.element_form.value().leaves)
                     result = result || leaf.is_widened;
+        return result;
+    }
+
+    /// Whether any member in memory holds a multi-dimensional array of mat3, which holds its matrices in cells.
+    [[nodiscard]] static bool holds_mat3_cells(plan const& p)
+    {
+        auto const holds = [&](planned_member const& member)
+        { return member.offset >= 0 && !mat3_cell_field(p, member.type).empty(); };
+        auto result = false;
+        for (auto const& s : p.structs)
+            if (s.memory_size > 0 && !s.is_packed)
+                for (auto const& member : s.members)
+                    result = result || holds(member);
+        if (p.constants.has_value())
+            for (auto const& member : p.constants.value().members)
+                result = result || holds(member);
+        for (auto const& block : p.group_blocks)
+            for (auto const& member : block.members)
+                result = result || holds(member);
         return result;
     }
 
@@ -478,8 +384,12 @@ public:
                 out.appendf("[[vk::offset({})]] ", f.offset);
             auto const is_matrix
                 = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3" || f.type == "float2x2";
-            out.appendf("{}{} {}{};\n", is_matrix ? "column_major " : "", f.type, f.name,
-                        f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
+            if (is_matrix)
+                out += "column_major ";
+            // CHK-518: an affine3 is its rows
+            if (f.type == "float3x4")
+                out += "row_major ";
+            out.appendf("{} {}{};\n", f.type, f.name, f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
         }
         out += "};\n\n";
     }
@@ -520,7 +430,10 @@ public:
         auto const& t = p.m.at(b.type);
         auto const format = t.kind == type_kind::image ? k_image_formats[t.format].spirv : cc::string_view();
         // a binding array takes `count` consecutive registers from its first
-        auto const name = b.count > 1 ? cc::format("{}[{}]", b.name, b.count) : cc::string(b.name);
+        // EMIT-210: an unbounded array is `name[]`, whose range the pipeline layout leaves open
+        auto const name = b.count == 0 ? cc::format("{}[]", b.name)
+                        : b.count > 1  ? cc::format("{}[{}]", b.name, b.count)
+                                       : cc::string(b.name);
         // EMIT-150: DXC writes it as SPIR-V's `Coherent` for vulkan
         auto const resource = b.element_form.has_value()
                                 ? cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", b.element_form.value().name)
@@ -610,6 +523,8 @@ public:
         if (holds_widened_mat3(p))
             out += "float4x3 sgl_widen_mat3(float3x3 m)\n{\n    return float4x3(m[0], m[1], m[2], float3(0.0, 0.0, "
                    "0.0));\n}\n\n";
+        if (holds_mat3_cells(p))
+            out += "struct sgl_mat3_cell\n{\n    column_major float4x3 m;\n};\n\n";
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
@@ -623,6 +538,22 @@ public:
             write_workgroup(out, w, p);
         if (!p.workgroup.empty())
             out += "\n";
+
+        // every acceleration member's address, and the conversion DXC has no builtin for but takes as inline SPIR-V
+        if (_is_vulkan && holds_acceleration_member(p))
+        {
+            auto const& at
+                = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(emit::target::hlsl_vulkan)];
+            out.appendf("[[vk::binding({}, {})]] cbuffer sg_acceleration_addresses_block\n{{\n"
+                        "    uint4 sg_acceleration_addresses[{}];\n}};\n\n",
+                        at.slot, at.group, check::k_acceleration_address_capacity / 2);
+            out += "[[vk::ext_instruction(4447)]] // OpConvertUToAccelerationStructureKHR\n"
+                   "RaytracingAccelerationStructure sg_acceleration_from_address(uint2 address);\n\n";
+        }
+        if (calls_builtin(p, "ray_query_candidate_cluster_id") || calls_builtin(p, "ray_query_committed_cluster_id"))
+            out += _is_vulkan ? k_query_cluster_vulkan : k_query_cluster_dx12;
+        if (calls_builtin(p, "hit_cluster_id"))
+            out += _is_vulkan ? k_hit_cluster_vulkan : k_hit_cluster_dx12;
 
         if (!p.constants.has_value())
             return;
@@ -685,10 +616,31 @@ public:
                     parameters.push_back(cc::format("const OutputPatch<{}, {}> {}", element, t.count, name));
                 continue;
             }
+            // EMIT-205: a mesh stage's output is its two arrays, named after the parameter its calls write through
+            if (t.kind == type_kind::stream && t.count == 0)
+            {
+                auto const& mesh = p.m.functions[p.m.at(p.e.function).info];
+                parameters.push_back(cc::format("out vertices {} {}_vertices[{}]", type_text(p, *this, t.element), name,
+                                                mesh.max_vertices));
+                if (mesh.is_line_mesh)
+                    parameters.push_back(cc::format("out indices uint2 {}_lines[{}]", name, mesh.max_primitives));
+                else
+                    parameters.push_back(cc::format("out indices uint3 {}_triangles[{}]", name, mesh.max_primitives));
+                if (check::is_valid(t.primitive))
+                    parameters.push_back(cc::format("out primitives {} {}_primitives[{}]",
+                                                    type_text(p, *this, t.primitive), name, mesh.max_primitives));
+                continue;
+            }
             if (t.kind == type_kind::stream)
             {
                 auto const stream = t.count == 1 ? "PointStream" : t.count == 2 ? "LineStream" : "TriangleStream";
                 parameters.push_back(cc::format("inout {}<{}> {}", stream, type_text(p, *this, t.element), name));
+                continue;
+            }
+            // EMIT-208: a mesh stage's one struct parameter is the payload its task stage handed it
+            if (p.e.entry_stage == stage::mesh)
+            {
+                parameters.push_back(cc::format("in payload {} {}", type_text(p, *this, local.type), name));
                 continue;
             }
             factors = local.type;
@@ -699,7 +651,13 @@ public:
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
 
         auto const& info = p.m.functions[p.m.at(p.e.function).info];
-        if (p.e.entry_stage == stage::geometry)
+        if (p.e.entry_stage == stage::mesh)
+        {
+            out.appendf("[outputtopology(\"{}\")]\n", info.is_line_mesh ? "line" : "triangle");
+            out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
+            out.appendf("void {}({})\n{{\n", p.entry_name, list);
+        }
+        else if (p.e.entry_stage == stage::geometry)
         {
             out.appendf("[maxvertexcount({})]\n", info.max_vertices);
             out.appendf("void {}({})\n{{\n", p.entry_name, list);
@@ -739,6 +697,8 @@ public:
         out.appendf("[partitioning(\"{}\")]\n", partitionings[isize(info.partitioning)]);
         out.appendf("[outputtopology(\"{}\")]\n", topology);
         out.appendf("[outputcontrolpoints({})]\n", patch.count);
+        if (info.max_factor < check::k_max_tessellation_factor)
+            out.appendf("[maxtessfactor({}.0)]\n", info.max_factor);
         out.appendf("[patchconstantfunc(\"{}\")]\n", p.patch_function);
         out.appendf("{} {}(InputPatch<{}, {}> {}, uint {} : SV_OutputControlPointID)\n{{\n", point, p.entry_name, point,
                     patch.count, p.locals[0], p.point_index);
@@ -751,11 +711,30 @@ public:
         if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap) && flags_some_query_for_micromaps(p))
             out += "[[vk::ext_extension(\"SPV_EXT_opacity_micromap\")]]\n[[vk::ext_capability(5381)]]\n";
         if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control
-            || p.e.entry_stage == stage::tessellation_evaluation)
+            || p.e.entry_stage == stage::tessellation_evaluation || p.e.entry_stage == stage::mesh)
             return write_primitive_head(out, p);
         auto parameters = cc::vector<cc::string>();
         if (check::is_valid(p.e.input))
             parameters.push_back(cc::format("{} {}", type_text(p, *this, p.e.input), p.locals[0]));
+        // CHK-489: a pixel stage's second struct, what a mesh stage wrote per triangle
+        auto takes_per_triangle = false;
+        if (p.e.entry_stage == stage::pixel && check::is_valid(p.e.input))
+            for (auto i = isize(1); i < p.e.locals.size(); ++i)
+            {
+                auto const& local = p.e.locals[i];
+                auto is_input = false;
+                for (auto const& s : p.e.stage_inputs)
+                    is_input = is_input || index_of(s.local) == i;
+                if (local.kind == check::local_kind::parameter && !is_input
+                    && p.m.at(local.type).kind == type_kind::structure && local.type != p.e.input)
+                {
+                    parameters.push_back(cc::format("{} {}", type_text(p, *this, local.type), p.locals[i]));
+                    takes_per_triangle = true;
+                }
+            }
+        // EMIT-209: SPIR-V reads a per-primitive input only beside the mesh shading capability
+        if (_is_vulkan && takes_per_triangle)
+            out += "[[vk::ext_extension(\"SPV_EXT_mesh_shader\")]] [[vk::ext_capability(5283)]]\n";
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
@@ -802,7 +781,7 @@ public:
             return;
         }
 
-        if (p.e.entry_stage == stage::compute)
+        if (p.e.entry_stage == stage::compute || p.e.entry_stage == stage::task)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
             // EMIT-148: the range form, which every dx12 device runs, prefers the size where the device has it

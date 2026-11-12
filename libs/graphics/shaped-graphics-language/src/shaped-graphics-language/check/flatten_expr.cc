@@ -91,6 +91,8 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
                             flat_binding_member{.binding = where.symbol,
                                                 .member = where.index,
                                                 .is_workgroup = c.is_workgroup_binding(where.symbol)});
+        if (where.kind == target_kind::buffer_length)
+            return add_expr(type, id, flat_buffer_length{.buffer = flatten_expr(m->object)});
         // CHK-288: a constant, and an object with an effect still runs for it
         if (where.kind == target_kind::array_length)
         {
@@ -110,8 +112,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     {
         auto const arguments = ast().at(indexed->arguments);
         auto const object_type = tables().type_at(indexed->object);
-        // CHK-367: a texel read is the `load` the check pass resolved it as
-        if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::image)
+        // CHK-367, CHK-514: a texel read is the `load` the check pass resolved it as
+        if (is_valid(object_type)
+            && (c.out.at(object_type).kind == type_kind::image || c.out.at(object_type).kind == type_kind::texture))
             return tables().call_at(id) >= 0 && !c.out.at(object_type).is_atomic
                      ? flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)])
                      : fail();
@@ -245,6 +248,11 @@ auto sgl::check::impl::flattener::value_of(type_id type, ast::expr_id from, cc::
                 return add_expr(type, from, flat_int_literal{.value = leaf.widened().as_int(), .is_unsigned = true});
             case value_kind::boolean:
                 return add_expr(type, from, flat_bool_literal{.value = leaf.as_bool()});
+            case value_kind::scalar_long:
+            case value_kind::scalar_ulong:
+                return add_expr(type, from, flat_wide_literal{.bits = leaf.wide_bits()});
+            case value_kind::scalar_double:
+                return add_expr(type, from, flat_literal{.value = leaf.as_double()});
             default:
                 return fail();
             }
@@ -309,17 +317,24 @@ auto sgl::check::impl::flattener::flatten_number(ast::expr_id id, type_id type) 
     if (auto const suffixed = split_suffix(text); suffixed.has_value())
         text = suffixed.value().body;
     auto const is_half = type == c.prelude_type(builtins::k_half);
-    auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+    auto const is_float
+        = is_half || type == c.prelude_type(builtins::k_float) || type == c.prelude_type(builtins::k_double);
     // CHK-253: a half literal is the half nearest its value, which every target's text then spells exactly
     auto const literal = [&](f64 v)
     { return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v}); };
     if (classify_number(text) == number_class::plain_integer)
     {
+        if (auto const past_long = parse_literal_past_long(text);
+            past_long.has_value() && type == c.prelude_type(builtins::k_ulong))
+            return add_expr(type, id, flat_wide_literal{.bits = past_long.value()});
         auto const value = parse_literal_integer(text);
         if (!value.has_value())
             return fail();
         if (is_float)
             return literal(f64(value.value()));
+        // CHK-450: a 64-bit literal keeps all of its bits, two's complement for either type
+        if (type == c.prelude_type(builtins::k_long) || type == c.prelude_type(builtins::k_ulong))
+            return add_expr(type, id, flat_wide_literal{.bits = u64(value.value())});
         // an unsigned literal keeps its bits in `value`
         auto const is_unsigned = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
         auto const v = value.value();
@@ -335,7 +350,10 @@ auto sgl::check::impl::flattener::flatten_number(ast::expr_id id, type_id type) 
 auto sgl::check::impl::flattener::flatten_folded(ast::expr_id id, type_id type, number_literal const& n) -> flat_expr_id
 {
     auto const is_half = type == c.prelude_type(builtins::k_half);
-    auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+    auto const is_float
+        = is_half || type == c.prelude_type(builtins::k_float) || type == c.prelude_type(builtins::k_double);
+    if (n.is_integer && (type == c.prelude_type(builtins::k_long) || type == c.prelude_type(builtins::k_ulong)))
+        return add_expr(type, id, flat_wide_literal{.bits = u64(n.integer)});
     if (n.is_integer && !is_float)
     {
         auto const is_unsigned = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
@@ -393,22 +411,42 @@ auto sgl::check::impl::flattener::flatten_filled(ast::expr_id id, type_id type, 
     }
     auto const result = add_local(local_kind::var, "filled", type);
     body.push_back(make_stmt(where, flat_var{.local = result}));
-    // the statements that assign `filler` to every element of `place`, of type `t`, down to the filler's own type
-    auto const fill = [&](auto const& self, flat_expr_id place, type_id t) -> flat_stmt_id
+    // EMIT-231: a small array is filled one constant index at a time, so a target keeps it in registers
+    constexpr auto max_unrolled_fill = isize(64);
+    auto elements = isize(1);
+    for (auto t = type; t != value_type && elements <= max_unrolled_fill; t = c.out.at(t).element)
+        elements *= isize(c.out.at(t).count);
+    auto const is_unrolled = elements <= max_unrolled_fill;
+
+    // appends the statements that assign `filler` to every element of `place`, of type `t`, down to the filler's own type
+    auto const fill = [&](auto const& self, flat_expr_id place, type_id t, cc::vector<flat_stmt_id>& out) -> void
     {
         if (t == value_type)
-            return make_stmt(where, flat_assign{.place = place, .value = filler});
+        {
+            out.push_back(make_stmt(where, flat_assign{.place = place, .value = filler}));
+            return;
+        }
         auto const& info = c.out.at(t);
+        if (is_unrolled)
+        {
+            for (auto k = 0; k < info.count; ++k)
+            {
+                auto const at = add_expr(int_type(), id, flat_int_literal{.value = k});
+                self(self, add_expr(info.element, id, flat_element{.object = place, .index = at}), info.element, out);
+            }
+            return;
+        }
         auto const index = add_local(local_kind::index, "i", int_type());
         auto const element = add_expr(info.element, id, flat_element{.object = place, .index = local_ref(index, id)});
-        flat_stmt_id const store[] = {self(self, element, info.element)};
-        return make_stmt(where, flat_for{.label = add_label("fill"),
-                                         .index = index,
-                                         .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
-                                         .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
-                                         .body = add_list(store)});
+        auto store = cc::vector<flat_stmt_id>();
+        self(self, element, info.element, store);
+        out.push_back(make_stmt(where, flat_for{.label = add_label("fill"),
+                                                .index = index,
+                                                .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                                .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
+                                                .body = add_list(store)}));
     };
-    body.push_back(fill(fill, local_ref(result, id), type));
+    fill(fill, local_ref(result, id), type, body);
     body.push_back(make_stmt(where, flat_leave{.target = label, .value = local_ref(result, id)}));
     return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
 }
@@ -445,6 +483,13 @@ auto sgl::check::impl::flattener::flatten_call(ast::expr_id id, type_id type, ta
             && tables().type_at(arguments[0].value) == checked_module::void_type
             && tables().type_at(arguments[1].value) == checked_module::void_type)
             return flatten_void_equality(id, type, spelling == "==", arguments[0].value, arguments[1].value);
+        if ((spelling == "==" || spelling == "!=") && arguments.size() == 2 && where.kind != target_kind::overload
+            && c.out.at(concrete(tables().type_at(arguments[0].value))).kind == type_kind::array)
+        {
+            auto const lhs = flatten_expr(arguments[0].value);
+            auto const rhs = flatten_expr(arguments[1].value);
+            return flatten_array_equality(id, type, spelling == "==", lhs, rhs);
+        }
     }
 
     for (auto const& t : c.out.ray_traces)
@@ -518,10 +563,11 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         else
             (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
     }
-    // CHK-433: a raygen of a dx12 compile whose device reorders traces through a hit object; every other trace is the
-    // plain one, its hint unevaluated, since a hint changes nothing a shader computes
+    // CHK-433: a raygen of a dx12 or vulkan compile whose device reorders traces through a hit object; every other
+    // trace is the plain one, its hint unevaluated, since a hint changes nothing a shader computes
     auto const target = compiled_for();
-    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen && target.api == graphics_api::dx12
+    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen
+                       && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan)
                        && target.device_features.has(feature::shader_execution_reordering);
     auto hint = flat_expr_id::none;
     auto hint_bits = flat_expr_id::none;
@@ -583,6 +629,8 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         values.push_back(hint);
         values.push_back(hint_bits);
     }
+    // the ray's time, past the signature ahead of the payload, which stays last: MSL places what moves at it
+    values.push_back(field(4));
     values.push_back(payload);
     auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
     if (!entry.traced_rays.values().any([&](flat_traced_ray const& r) { return r == traced_ray; }))
@@ -1024,6 +1072,60 @@ auto sgl::check::impl::flattener::flatten_void_equality(ast::expr_id id,
         make_stmt(where, flat_eval{.value = left}),
         make_stmt(where, flat_eval{.value = right}),
         make_stmt(where, flat_leave{.target = label, .value = add_expr(type, id, flat_bool_literal{.value = is_equal})}),
+    };
+    return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
+}
+
+auto sgl::check::impl::flattener::flatten_array_equality(ast::expr_id id,
+                                                         type_id type,
+                                                         bool is_equal,
+                                                         flat_expr_id lhs,
+                                                         flat_expr_id rhs) -> flat_expr_id
+{
+    auto const label = add_label("array_equality");
+    auto const where = origin{.file = file(), .expr = id};
+    auto const array = entry.at(lhs).type;
+    auto const element = c.out.at(array).element;
+    auto const left = add_local(local_kind::temporary, "left", array);
+    auto const right = add_local(local_kind::temporary, "right", array);
+    auto const index = add_local(local_kind::index, "i", int_type());
+    auto const element_of = [&](local_id of)
+    { return add_expr(element, id, flat_element{.object = local_ref(of, id), .index = local_ref(index, id)}); };
+
+    auto is_same = flat_expr_id::none;
+    if (c.out.at(element).kind == type_kind::array)
+        is_same = flatten_array_equality(id, type, true, element_of(left), element_of(right));
+    else
+    {
+        // an enum compares as the `int` its cases are (EVAL-64)
+        auto const compared = c.out.is_plain_enum(element) ? int_type() : element;
+        type_id const both[] = {compared, compared};
+        auto const equals = c.find_operator(file(), "==", both);
+        if (!is_valid(equals))
+            return fail();
+        flat_expr_id const elements[] = {element_of(left), element_of(right)};
+        is_same = builtin_call(id, equals, elements);
+    }
+
+    auto const answer = [&](bool value)
+    {
+        return make_stmt(where,
+                         flat_leave{.target = label, .value = add_expr(type, id, flat_bool_literal{.value = value})});
+    };
+    flat_stmt_id const differs[] = {answer(!is_equal)};
+    flat_stmt_id const loop_body[] = {
+        make_stmt(where, flat_if{.condition = add_expr(type, id, flat_not{.operand = is_same}),
+                                 .then_body = add_list(differs)}),
+    };
+    flat_stmt_id const body[] = {
+        make_stmt(where, flat_let{.local = left, .value = lhs}),
+        make_stmt(where, flat_let{.local = right, .value = rhs}),
+        make_stmt(where, flat_for{.label = add_label("each_element"),
+                                  .index = index,
+                                  .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                  .end = add_expr(int_type(), id, flat_int_literal{.value = c.out.at(array).count}),
+                                  .body = add_list(loop_body)}),
+        answer(is_equal),
     };
     return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
 }

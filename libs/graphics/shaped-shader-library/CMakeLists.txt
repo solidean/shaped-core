@@ -16,6 +16,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/binding/binding_groups.cc
     src/shaped-shader-library/binding/wgsl_declarations.cc
     src/shaped-shader-library/compiler/wgsl_compiler.cc
+    src/shaped-shader-library/compiler/reserved_contract.cc
     src/shaped-shader-library/compiler/sgl_compiler.cc
     src/shaped-shader-library/compiler/available_compilers.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
@@ -29,6 +30,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
     src/shaped-shader-library/impl/sgl_emit_cache.cc
+    src/shaped-shader-library/impl/sgl_module_artifacts.cc
     src/shaped-shader-library/impl/shader_bundle.cc
 )
 
@@ -41,7 +43,9 @@ target_sources(shaped-shader-library
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
+    src/sgl_modules/accel.hh
     src/shaped-shader-library/fwd.hh
+    src/shaped-shader-library/gpu_affine3.hh
     src/shaped-shader-library/gpu_bool.hh
     src/shaped-shader-library/gpu_mat3.hh
     src/shaped-shader-library/gpu_padded.hh
@@ -69,6 +73,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/impl/pipeline_fields.hh
     src/shaped-shader-library/impl/sgl_library.hh
     src/shaped-shader-library/impl/sgl_emit_cache.hh
+    src/shaped-shader-library/impl/sgl_module_artifacts.hh
     src/shaped-shader-library/impl/shader_bundle.hh
 )
 
@@ -76,7 +81,9 @@ target_sources(shaped-shader-library
 # Private: it changes what a library reads at run time, never a type a consumer sees.
 target_compile_definitions(shaped-shader-library PRIVATE SLIB_FROZEN_SHADERS=$<BOOL:${SC_FROZEN_SHADERS}>)
 # SC_SHADER_UNDEFINED is the root CMakeLists' switch, as slib::sgl_undefined_guard's value; a consumer that never set it guards nothing
-if(SC_SHADER_UNDEFINED STREQUAL "REPORT")
+if(SC_SHADER_UNDEFINED STREQUAL "DEFINE")
+    target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=3)
+elseif(SC_SHADER_UNDEFINED STREQUAL "REPORT")
     target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=2)
 elseif(SC_SHADER_UNDEFINED STREQUAL "ABORT")
     target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=1)
@@ -127,8 +134,6 @@ sc_add_source_fingerprint(shaped-shader-library
     FUNCTION slib::impl::sgl_edge_fingerprint
     HEADER shaped-shader-library/impl/sgl_emit_cache.hh
     FILES ${_slib_fingerprinted})
-
-sc_target_pch(shaped-shader-library SG)
 
 target_compile_options(shaped-shader-library
     PUBLIC
@@ -194,6 +199,7 @@ if(SC_BUILD_TESTS)
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
         tests/sgl_emit_cache-test.cc
+        tests/sgl_module_artifacts-test.cc
         tests/sgl_options-test.cc
         tests/sgl_layout-test.cc
         tests/sgl_file_namespaces-test.cc
@@ -261,12 +267,22 @@ if(SC_BUILD_TESTS)
     target_sources(shaped-shader-library-test PRIVATE "${_slib_corpus_generated}")
     target_include_directories(shaped-shader-library-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
     # The pipeline test compares the committed impl/pipeline_fields.hh against what the SGL compiler generates now.
-    target_compile_definitions(shaped-shader-library-test PRIVATE SLIB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    sc_target_source_paths(shaped-shader-library-test PRIVATE SLIB_SOURCE_DIR .)
 
     # The pipeline test walks the SGL prelude, which slib itself links privately.
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library shaped-graphics-language blob-cache nexus)
-
-    sc_target_pch(shaped-shader-library-test SG NEXUS)
+    if(TARGET shaped-shader-compiler-dxc)
+        target_sources(shaped-shader-library-test PRIVATE
+            tests/sgl-native-compile-benchmark.cc
+            tests/sgl-double-maths-spirv-test.cc
+            tests/sgl-hit-object-spirv-test.cc
+            tests/sgl-native-dxil-test.cc
+            tests/sgl-native-line-table-test.cc
+            tests/sgl-real-shaders-test.cc
+            tests/sgl-signature-golden-test.cc
+        )
+        target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-compiler-dxc)
+    endif()
 
     # slib declares a package of its own: the codegen has to be exercised by something, and the library that
     # ships sc_add_shader_package is the honest place for it.
@@ -304,6 +320,7 @@ if(SC_BUILD_TESTS)
             double_values.sgl:compute:main
             listed.sgl:compute:spread
             scaled.sgl:*
+            blended.sgl:*
             tapped.sgl:*
             host_layout.sgl:*
             twin_a.sgl:*
@@ -311,6 +328,29 @@ if(SC_BUILD_TESTS)
             slib_test.sgl:*
     )
 
+    # And one in MSL, which only slib's metal compiler compiles.
+    if(APPLE)
+        sc_add_shader_package(
+            TARGET     shaped-shader-library-test
+            NAME       slib_test_msl_shaders
+            NAMESPACE  slib_test::msl_shaders
+            SOURCE_DIR tests/shaders-msl
+            LANGUAGE   msl
+            SHADERS
+                doubled.metal:compute:main_cs
+        )
+    endif()
+
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-shader-library-test)
+endif()
+
+# `pipeline-stats`, what the vulkan driver reports of an SGL entry point's pipeline on both SPIR-V routes.
+if(SC_BUILD_TOOLS AND TARGET shaped-graphics-vulkan AND SC_HAS_DXC_COMPILER)
+    add_executable(pipeline-stats tools/pipeline-stats/main.cc)
+    sc_nexus_binary(pipeline-stats KINDS tool)
+    target_link_libraries(pipeline-stats PRIVATE shaped-shader-library shaped-graphics-vulkan nexus)
+    if(WIN32)
+        sc_stage_runtime_dlls(pipeline-stats TAG pipeline-stats-dxc DLLS ${DXC_RUNTIME_DLLS})
+    endif()
 endif()

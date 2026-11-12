@@ -166,12 +166,13 @@ The fallback has to reach the `uint` bits of an `atomic[float]`, which no SGL sp
 **SER, second.**
 The first half is done: prelude `maybe_reorder(hint, bits)`, a text body under `has(.shader_execution_reordering)` with an empty fallback.
 sg reports the feature on dx12 where the Agility SDK's runtime gives Shader Model 6.9, and slib compiles an entry point that uses it at 6.9.
-A GPU test traces through a reordering raygen on dx12, really reordering, and through its fallback on vulkan.
+It reports it on vulkan where `VK_EXT_ray_tracing_invocation_reorder` reorders, and the vulkan branch is a builtin, since its instruction must be declared outside the body.
+GPU tests trace through a reordering raygen on dx12 and on vulkan, each really reordering, and through the fallback on a device without the feature.
 The second half is a compiler construct rather than a text type, since only the compiler knows a ray type's table indices.
-`trace(…, reorder = true)`, or `reorder = hint, reorder_bits = n`, traces into a hit object, regroups by it and invokes it on dx12 (CHK-433), and is the plain trace elsewhere.
+`trace(…, reorder = true)`, or `reorder = hint, reorder_bits = n`, traces into a hit object, regroups by it and invokes it on dx12 and vulkan (CHK-433), and is the plain trace elsewhere.
 A first-class `hit_object` lets a raygen read a hit before it runs its shaders (CHK-434).
 It is gated on the feature rather than specialized: no other target can trace without running them, so the program writes the plain `trace` beside it.
-Under `.vulkan` it needs SPIR-V instructions of its own, since no DXC lowers SER to SPIR-V; neither the pinned 1.9.2602 nor the Vulkan SDK's does.
+Under `.vulkan` it is SPIR-V instructions of its own, since no DXC lowers SER to SPIR-V; neither the pinned 1.9.2602 nor the Vulkan SDK's does (EMIT-225).
 
 **Opacity micromaps need no text body.**
 sg builds them on vulkan already, and a trace honors one with no change to the shader.
@@ -184,14 +185,14 @@ Discarding is done too: a type comparison, and the three-valued decision that le
 Text bodies in their first form are done too: the tagged string as a body, its placement, placeholders and `$result`, a `flat_call` with `text`, and the emitters writing it inline.
 So is their declared contract, `@pure`, `@barrier`, `@subgroup` and `@derivatives` on the `fun`, which the uniformity pass reads in place of the text (CHK-431).
 So are text types, a struct spelled per compile in the target's text or as its SGL fields (AST-160, CHK-432).
+So are a buffer as a parameter, which a text body names as it names a texture (CHK-366), and `#line` inside the text (EMIT-182).
 Left:
 
 * The check pass: SGL branches checked against the declared contract, so a fallback of a `@pure` function that writes memory is an error, and coverage.
 * The attributes' stages: `@derivatives` keeps a call to the pixel stage, and `@subgroup` to a device with subgroups, which `@stages` and `has` say by hand today.
 * Generics: questions of a type beyond its identity, such as whether it is a vector, and its scalar where it is a scalar itself.
-* The emitters: reserved names read from the text, and `#line` inside it.
+* The emitters: reserved names read from the text.
   The preamble is done (CHK-428), a file's per language; one per API, such as vulkan's alone among the HLSL targets, is open.
-* A buffer as a parameter, which SGL has for no function yet, so a text body reaches a buffer through an element or an atomic alone.
 * Text types beyond their first form (CHK-432): a condition on an option.
 * The interpreter: the features a test sets.
 * `sgl describe`: optional features.

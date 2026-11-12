@@ -71,13 +71,42 @@ struct sg::compiled_shader
     /// The resource bindings the code uses — a flat list; per-set grouping is derived by the consumer.
     cc::vector<binding> bindings;
 
-    /// Compute workgroup size, present only for a compute `stage`.
+    /// The workgroup size of a compute, mesh or task `stage`, which Metal states at the dispatch or the mesh draw.
     cc::optional<compute_dimensions> workgroup_size;
     /// The subgroup size a compute shader runs best at, which a backend asks the device for where it can and ignores
     /// where it cannot: a preference, never a requirement, so no pipeline is refused for it.
     /// The shader itself must be correct at any size.
     /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
     cc::optional<i32> preferred_subgroup_size;
+    /// A compute shader whose compiler chose `workgroup_size`, as a bare SGL `@compute` has it: sg dispatches it by
+    /// threads alone, writing the grid its threads past it return before, and refuses a dispatch by groups.
+    /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
+    bool is_dispatched_by_threads = false;
+    /// A polyfilled mesh stage's numbers, which both its halves carry alike: a primitive's corners, the primitives and
+    /// the 32-bit words of one workgroup's slots (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md); all 0 for every other shader.
+    /// SGL states them, and a compiler's cache holds the compiler's own result, so a cached shader never carries them.
+    i32 mesh_polyfill_corners = 0;
+    i32 mesh_polyfill_primitives = 0;
+    i32 mesh_polyfill_words = 0;
+    /// A polyfilled task stage's numbers, which its compute form and its mesh stage's compute half and scan carry
+    /// alike: the 32-bit words of one task workgroup's record, and the mesh workgroups one launches at most, 0 where
+    /// it states none; all 0 for every other shader.
+    /// SGL states them, as it does the mesh stage's.
+    i32 task_polyfill_record_words = 0;
+    i32 task_polyfill_meshes = 0;
+    /// A polyfilled tessellation's numbers, which its control stage's and its evaluation stage's halves carry alike
+    /// (SGL's CHK-527): the domain's edges (2 isolines, 3, 4), the patch's control points, the 32-bit words a patch
+    /// takes, the words a point takes, the partitioning (0 integer, 1 fractional even, 2 fractional odd), and D3D's
+    /// output topology (0 `triangle_cw`, 1 `triangle_ccw`, 2 lines), and the control stage's largest factor; all 0 for
+    /// every other shader.
+    /// The vertex half carries `tessellation_vertex_words` alone.
+    i32 tessellation_domain = 0;
+    i32 tessellation_control_points = 0;
+    i32 tessellation_patch_words = 0;
+    i32 tessellation_vertex_words = 0;
+    i32 tessellation_partitioning = 0;
+    i32 tessellation_output = 0;
+    i32 tessellation_max_factor = 0;
 
     compiler_info compiler;
 

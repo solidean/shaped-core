@@ -153,10 +153,34 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::shader_execution_reordering:
         // Metal reorders no ray-tracing work on request.
         return false;
+    case sg::feature::float_specials:
+        // every compile of this backend runs in safe math
+        return true;
+    case sg::feature::float_denormals:
+        // safe math flushes them, read and written: measured on an M4, pinned by the float-specials test
+        return false;
+    case sg::feature::view_instancing:
+        // vertex amplification, which SGL's `@view_index` reads as `[[amplification_id]]`
+        return _device != nullptr && _device->supportsVertexAmplificationCount(2);
+    case sg::feature::pixel_view_read_workaround:
+        return false;
+    case sg::feature::ray_tracing_motion_blur:
+        // motion acceleration structures, which a pipeline's trace takes natively
+        return true;
+    case sg::feature::partitioned_tlas:
+        // Metal 4 has no partitioned instance structure
+        return false;
+    case sg::feature::clustered_geometry:
+        // Metal 4 builds no acceleration structure from clusters
+        return false;
+    case sg::feature::vertex_pipeline_stores:
+        // a vertex function writes a device buffer on every Apple GPU
+        return true;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
     case sg::feature::first_instance:
+    case sg::feature::indirect_first_instance:
         // `[[base_instance]]` is on every Apple GPU this backend's Metal 4 floor admits.
         return true;
     case sg::feature::opacity_micromap:
@@ -169,6 +193,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
         return false;
+    case sg::feature::mesh_shader:
+        // object and mesh stages, which every Metal 4 device has
+        return true;
     case sg::feature::unaligned_block_compression:
         // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;
@@ -177,8 +204,20 @@ bool metal_context::supports(sg::feature f) const
         return _device != nullptr && _device->supportsBCTextureCompression();
     case sg::feature::shader_f16:
     case sg::feature::shader_int16:
+    case sg::feature::shader_int64:
     case sg::feature::subgroups:
-        // `half`, `short` and the SIMD-group and quad functions are on every Apple GPU, so nothing is probed.
+        // `half`, `short`, `long` and the SIMD-group and quad functions are on every Apple GPU, so nothing is probed.
+        return true;
+    case sg::feature::shader_f64:
+    case sg::feature::shader_int64_atomics:
+    case sg::feature::shader_shared_int64_atomics:
+        // MSL has no double, and its 64-bit atomics are a buffer's ulong min and max alone.
+        return false;
+    case sg::feature::shader_int64_min_max_atomics:
+        // MSL 3.1's atomic_ulong min and max, which Apple's feature set tables give from Apple8; run on an M4
+        return _device != nullptr && _device->supportsFamily(MTL::GPUFamilyApple8);
+    case sg::feature::unbounded_binding_arrays:
+        // one slot holding the address of a table each group sizes, since no argument buffer member is unsized
         return true;
     case sg::feature::image_atomics:
         // Inferred from the floor rather than probed: texture atomics need Apple7, below every Metal 4 device.
@@ -324,11 +363,23 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             if (has_downloads)
                 pending_counter->fetch_add(1, std::memory_order_acq_rel);
 
+            // What the list held, so a failure names the work it lost: the error alone says only that something did.
+            auto const& counted = sg::impl::recorded_stats(list).values;
+            auto const contents
+                = cc::format("submission {}: {} draws, {} dispatches, {} ray dispatches, {} blas and {} tlas builds",
+                             i64(claimed), counted[int(sg::stat::draws)], counted[int(sg::stat::dispatches)],
+                             counted[int(sg::stat::ray_dispatches)], counted[int(sg::stat::blas_builds)],
+                             counted[int(sg::stat::tlas_builds)]);
+
             auto* const options = MTL4::CommitOptions::alloc()->init();
             options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
               auto* const error = feedback->error();
+              // The GPU time tells the two MTL4 timeouts apart: a hang runs to the watchdog, a page fault ends early.
               if (error != nullptr)
-                  sink->report(device_error_kind_of(error), describe_error(error, "a metal command buffer failed"));
+                  sink->report(device_error_kind_of(error),
+                               cc::format("{}, after {:.3f} s on the GPU, {}",
+                                          describe_error(error, "a metal command buffer failed"),
+                                          feedback->GPUEndTime() - feedback->GPUStartTime(), contents));
 
               for (auto& download : *downloads)
               {
@@ -515,6 +566,8 @@ void metal_context::shutdown()
     // Close the final epoch and drain, so every deferred release runs while the device is still alive.
     advance_epoch();
     drain_at_shutdown();
+    // the final epoch's records are decoded while the download path still runs
+    release_debug_windows();
 
     // The waiter may be parked on both timelines, so it is joined before they go.
     if (_completion_waiter != nullptr)
@@ -550,6 +603,7 @@ void metal_context::shutdown()
     }
 
     // After the drain above, so nothing in flight still names these bytes.
+    _software_pool.shutdown();
     _upload_ring.shutdown();
     _download_ring.shutdown();
     _samplers.shutdown();
@@ -1054,8 +1108,9 @@ cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(bin
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                             int unbounded_capacity,
                                                                                              lifetime_scope scope)
 {
-    return create_metal_staging_binding_group(cc::move(layout), scope);
+    return create_metal_staging_binding_group(cc::move(layout), scope, unbounded_capacity);
 }
 } // namespace sg::backend::metal

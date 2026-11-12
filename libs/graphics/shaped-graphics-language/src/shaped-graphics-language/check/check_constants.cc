@@ -34,6 +34,20 @@ struct constant_pass
     void report(flat_expr_id id, diagnostic_kind kind, cc::string_view detail)
     {
         auto const& x = e.at(id);
+        // a prelude body is no program's to fix, so its constant is the program's call that reached it
+        if (c.is_prelude_file(x.from.file))
+            for (auto i = isize(x.inlined_through.count) - 1; i >= 0; --i)
+            {
+                auto const& site = e.call_sites[isize(x.inlined_through.first) + i];
+                if (c.is_prelude_file(site.file))
+                    continue;
+                auto const where = c.span_of(site.file, site.call);
+                for (auto const& d : c.out.diagnostics)
+                    if (d.what.kind == kind && d.file == site.file && d.what.where == where)
+                        return;
+                c.report(kind, site.file, where, cc::format("`{}` {}", c.text_of(site.file, where), detail));
+                return;
+            }
         auto const where
             = ast::is_valid(x.from.expr) ? c.span_of(x.from.file, x.from.expr) : c.span_of(x.from.file, x.from.stmt);
         // once, however many trees inline the function the expression stands in
@@ -136,14 +150,19 @@ struct constant_pass
                 return judged::sound;
             for (auto const& leaf : operand.result.leaves)
             {
-                if (record->judged_last == builtins::judged_operand::shift_count && leaf.bits > 31u)
+                // a 64-bit operand counts to 63 (CHK-452)
+                auto const width = is_64_bit(leaf.kind) ? 64u : 32u;
+                if (record->judged_last == builtins::judged_operand::shift_count && leaf.wide_bits() >= width)
                 {
                     report(id, diagnostic_kind::shift_out_of_range,
-                           cc::format("shifts by {}, which moves every bit out of 32; a constant count is 0 to 31",
-                                      leaf.kind == value_kind::scalar_int ? i64(leaf.as_int()) : i64(leaf.bits)));
+                           cc::format("shifts by {}, which moves every bit out of {}; a constant count is 0 to {}",
+                                      leaf.kind == value_kind::scalar_int    ? i64(leaf.as_int())
+                                      : leaf.kind == value_kind::scalar_long ? leaf.as_long()
+                                                                             : i64(leaf.wide_bits()),
+                                      width, width - 1));
                     return judged::reported;
                 }
-                if (record->judged_last == builtins::judged_operand::divisor && leaf.bits == 0)
+                if (record->judged_last == builtins::judged_operand::divisor && leaf.wide_bits() == 0)
                 {
                     report(id, diagnostic_kind::constant_without_value,
                            "divides an integer by a constant zero, which no target gives a value");

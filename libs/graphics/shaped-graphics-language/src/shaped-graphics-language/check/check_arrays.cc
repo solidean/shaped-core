@@ -51,7 +51,7 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     if (found == nullptr)
         return false;
     auto const kind = out.at(found->front()).kind;
-    return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
+    return kind == symbol_kind::structure || kind == symbol_kind::enumeration || kind == symbol_kind::alias;
 }
 
 i32 checker::case_index_of(type_id type, cc::string_view name) const
@@ -162,6 +162,8 @@ type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& no
         report(diagnostic_kind::type_mismatch, file, where, "an array of void holds nothing");
         return checked_module::error_type;
     }
+    if (refuse_held_layout(file, where, element, "an array"))
+        return checked_module::error_type;
 
     auto const arguments = ast.at(node.arguments);
     // CHK-286: `T[]` is a binding array whose length the host binds, which only a binding member may be
@@ -442,8 +444,10 @@ i32 checker::workgroup_size_of(type_id type) const
             return {.size = record->wgsl_layout.size, .alignment = record->wgsl_layout.alignment};
         }
         auto const& info = out.at(t);
-        // an atomic holds a `uint` or an `int` (CHK-296)
-        if (info.kind == type_kind::enumeration || info.kind == type_kind::atomic)
+        // an atomic is its integer's size, 4 or 8 bytes (CHK-296)
+        if (info.kind == type_kind::atomic)
+            return self(self, info.element);
+        if (info.kind == type_kind::enumeration)
             return {.size = 4, .alignment = 4};
         if (info.kind == type_kind::array)
         {
@@ -474,8 +478,10 @@ i32 checker::storage_size_of(type_id type) const
     auto const measure = [&](auto const& self, type_id t) -> measured
     {
         if (auto const* const record = out.builtin_type_of(t))
-            return {.size = record->hlsl_layout.size, .alignment = is_16_bit(record->leaf_kind) ? 2 : 4};
+            return {.size = record->hlsl_layout.size, .alignment = scalar_bytes_of(record->leaf_kind)};
         auto const& info = out.at(t);
+        if (info.kind == type_kind::atomic)
+            return self(self, info.element);
         if (info.kind != type_kind::structure)
             return {.size = 4, .alignment = 4};
         auto result = measured();
@@ -506,11 +512,13 @@ type_id checker::resolve_atomic(i32 file, ast::expr_id expr, ast::index const& n
                            ? resolve_type(file, arguments[0].value, scope)
                            : checked_module::error_type;
     auto const name = element == checked_module::error_type ? cc::string_view() : out.name_of(element);
-    // CHK-296: the widths and kinds every target has atomics of, and a float, which every target holds as a `uint`'s bits
-    if (name != builtins::k_uint && name != builtins::k_int && name != builtins::k_float)
+    // CHK-296: the widths and kinds every target has atomics of, a float, which every target holds as a `uint`'s bits,
+    // and the 64-bit integers, which need a feature
+    if (name != builtins::k_uint && name != builtins::k_int && name != builtins::k_float && name != builtins::k_long
+        && name != builtins::k_ulong)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
-               "an atomic holds a `uint`, an `int` or a `float`: `atomic[uint]`");
+               "an atomic holds a `uint`, an `int`, a `float`, a `ulong` or a `long`: `atomic[uint]`");
         return checked_module::error_type;
     }
     return resource_type({.kind = type_kind::atomic, .element = element});

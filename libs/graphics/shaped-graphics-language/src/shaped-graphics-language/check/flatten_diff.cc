@@ -316,6 +316,8 @@ struct differentiator
             n->buffer = clone(n->buffer);
             n->index = clone(n->index);
         }
+        else if (auto* const n = x.node.try_as<flat_buffer_length>())
+            n->buffer = clone(n->buffer);
         else if (auto* const n = x.node.try_as<flat_construct>())
         {
             auto arguments = copy_of(n->arguments);
@@ -387,9 +389,6 @@ struct differentiator
             types.push_back(type_of(a));
         }
         auto const callee = find(name, types);
-        if (!is_valid(callee) && is_operator(name))
-            if (auto const by_columns = matrix_operation(name, arguments); is_valid(by_columns))
-                return by_columns;
         if (!is_valid(callee))
         {
             auto spelled = cc::string();
@@ -398,43 +397,6 @@ struct differentiator
             return failed(cc::format("its derivative needs {}({}), which no builtin is", name, spelled));
         }
         return f.builtin_call(at, callee, arguments);
-    }
-    /// TEMPORARY(debt-sgl-matrix-arithmetic): `+`, `-` and a scale of a matrix, column by column; none where
-    /// `arguments` are no such operation.
-    flat_expr_id matrix_operation(cc::string_view name, cc::span<flat_expr_id const> arguments)
-    {
-        auto matrix = type_id::none;
-        for (auto const a : arguments)
-            if (is_matrix(type_of(a)))
-                matrix = type_of(a);
-        if (!is_valid(matrix) || name == "/")
-            return flat_expr_id::none;
-        for (auto const a : arguments)
-            if (type_of(a) != matrix && !(name == "*" && is_scalar(type_of(a))))
-                return flat_expr_id::none;
-        if (name == "*" && arguments.size() == 2 && type_of(arguments[0]) == type_of(arguments[1]))
-            return flat_expr_id::none;
-        auto shared = cc::vector<flat_expr_id>();
-        auto any_matrix = flat_expr_id::none;
-        for (auto const a : arguments)
-        {
-            shared.push_back(share(a));
-            if (is_matrix(type_of(a)))
-                any_matrix = shared.back();
-        }
-        auto const column_count
-            = leaf_count(matrix) / leaf_count(type_of(call("matrix_column", use(any_matrix), integer(0))));
-        auto parts = cc::vector<flat_expr_id>();
-        for (auto c = 0; c < column_count; ++c)
-        {
-            auto pieces = cc::vector<flat_expr_id>();
-            for (auto const s : shared)
-                pieces.push_back(is_matrix(type_of(s)) ? call("matrix_column", use(s), integer(c)) : use(s));
-            auto const column = share(name == "*" ? mul(pieces[0], pieces[1]) : call(name, pieces));
-            for (auto row = 0; row < leaf_count(type_of(column)); ++row)
-                parts.push_back(component(column, row));
-        }
-        return assemble(matrix, parts);
     }
 
     flat_expr_id call(cc::string_view name, flat_expr_id a)
@@ -1031,8 +993,7 @@ struct differentiator
     {
         auto const place_type = type_of(place_of(root(), steps));
         type_id const types[] = {place_type, type_of(g)};
-        // a matrix has no `+` of the prelude's yet, and `call` writes it by columns
-        if (is_valid(find("+", types)) || (is_matrix(place_type) && place_type == type_of(g)))
+        if (is_valid(find("+", types)))
         {
             auto const read = place_of(root(), steps);
             return emit(flat_assign{.place = place_of(root(), steps), .value = call("+", read, use(g))});
@@ -1203,27 +1164,29 @@ struct differentiator
                         restate(id, flat_if{.condition = n->condition, .then_body = then_body, .else_body = else_body});
                     }
                     // a call with a derivative written by hand runs forward as it is, loops and all
-                    else if (auto const* const n = s.node.try_as<flat_block>();
-                             n != nullptr && f.custom_calls.contains(i32(n->label)))
+                    else if (auto const* const custom = s.node.try_as<flat_block>();
+                             custom != nullptr && f.custom_calls.contains(i32(custom->label)))
                         f.block.push_back(id);
                     else if (auto const* const n = s.node.try_as<flat_block>())
                         restate(id,
                                 flat_block{.label = n->label, .body = f.add_list(hoist_declarations(copy_of(n->body)))});
-                    else if (auto const* const n = s.node.try_as<flat_for>();
-                             n != nullptr && constant_bounds(*n).has_value())
+                    else if (auto const* const loop = s.node.try_as<flat_for>();
+                             loop != nullptr && constant_bounds(*loop).has_value())
                     {
                         // a `continue` of this loop leaves the rest of its iteration: a block around the body
                         auto const iteration = f.add_label("iteration");
-                        auto const wrapped = f.make_stmt(
-                            where,
-                            flat_block{.label = iteration,
-                                       .body = f.add_list(continues_as_leaves(copy_of(n->body), n->label, iteration))});
+                        auto const wrapped
+                            = f.make_stmt(where, flat_block{.label = iteration,
+                                                            .body = f.add_list(continues_as_leaves(
+                                                                copy_of(loop->body), loop->label, iteration))});
                         ++loop_depth;
                         auto const body = f.add_list(hoist_declarations(cc::span<flat_stmt_id const>(&wrapped, 1)));
                         --loop_depth;
-                        restate(
-                            id,
-                            flat_for{.label = n->label, .index = n->index, .first = n->first, .end = n->end, .body = body});
+                        restate(id, flat_for{.label = loop->label,
+                                             .index = loop->index,
+                                             .first = loop->first,
+                                             .end = loop->end,
+                                             .body = body});
                     }
                     else if (s.node.is<flat_loop>() || s.node.is<flat_while>() || s.node.is<flat_for>())
                         failed("a loop whose bounds are no constants, which only a @backward can walk back");
@@ -1257,9 +1220,9 @@ struct differentiator
                         auto const else_body = inside(n->else_body);
                         restate(id, flat_if{.condition = n->condition, .then_body = then_body, .else_body = else_body});
                     }
-                    else if (auto const* const n = s.node.try_as<flat_block>();
-                             n != nullptr && !f.custom_calls.contains(i32(n->label)))
-                        restate(id, flat_block{.label = n->label, .body = inside(n->body)});
+                    else if (auto const* const block = s.node.try_as<flat_block>();
+                             block != nullptr && !f.custom_calls.contains(i32(block->label)))
+                        restate(id, flat_block{.label = block->label, .body = inside(block->body)});
                     else if (auto const* const n = s.node.try_as<flat_for>())
                         restate(id, flat_for{.label = n->label,
                                              .index = n->index,
@@ -1408,14 +1371,14 @@ struct differentiator
                 auto const else_body = f.add_list(straighten(copy_of(n->else_body)));
                 restate(id, flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
             }
-            else if (auto const* const n = s.node.try_as<flat_block>();
-                     n != nullptr && !f.custom_calls.contains(i32(n->label)))
+            else if (auto const* const block = s.node.try_as<flat_block>();
+                     block != nullptr && !f.custom_calls.contains(i32(block->label)))
             {
-                auto body = straighten(copy_of(n->body));
+                auto body = straighten(copy_of(block->body));
                 // a block in a loop runs again, and its leave of the last run must not guard this one
-                if (auto const* const flag = left_flag.get_ptr(i32(n->label)))
+                if (auto const* const flag = left_flag.get_ptr(i32(block->label)))
                     body.insert_at(0, f.make_stmt(where, flat_assign{.place = ref(*flag), .value = boolean(false)}));
-                restate(id, flat_block{.label = n->label, .body = f.add_list(body)});
+                restate(id, flat_block{.label = block->label, .body = f.add_list(body)});
             }
             else if (auto const* const n = s.node.try_as<flat_for>())
             {
@@ -1526,6 +1489,17 @@ struct differentiator
         auto result = flat_expr_id::none;
         for (auto i = 0; i < leaf_count(t); ++i)
             result = sum(result, add(f.field_type(t, i), flat_member{.object = use(g), .member = i}));
+        return result;
+    }
+
+    /// The sum of the products of two shared matrices' elements, column by column.
+    flat_expr_id inner_product(flat_expr_id a, flat_expr_id b)
+    {
+        auto const column_count = leaf_count(type_of(a)) / leaf_count(type_of(call("matrix_column", use(a), integer(0))));
+        auto result = flat_expr_id::none;
+        for (auto c = 0; c < column_count; ++c)
+            result = sum(result, call("dot", call("matrix_column", use(a), integer(c)),
+                                      call("matrix_column", use(b), integer(c))));
         return result;
     }
 
@@ -1681,6 +1655,10 @@ struct differentiator
             }
             else if (is_vector(ut) && k == 1 && is_matrix(wt))
                 gu = call("*", call("transpose", use(w)), use(g));
+            else if (is_matrix(ut) && is_scalar(wt))
+                gu = mul(use(g), use(w));
+            else if (is_scalar(ut) && is_matrix(wt))
+                gu = inner_product(g, w);
             else if (is_matrix(ut) && is_matrix(wt))
                 gu = k == 0 ? call("*", use(g), call("transpose", use(w))) : call("*", call("transpose", use(w)), use(g));
             else

@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::vulkan
@@ -16,15 +17,13 @@ namespace
 {
 /// The heap range one group of `layout` needs, or an error when the heap cannot supply it.
 /// An empty layout takes no space, which is legal and yields an empty range.
-cc::result<vulkan_descriptor_range> allocate_range(vulkan_context& ctx,
-                                                   vulkan_binding_group_layout const& layout,
-                                                   bool transient)
+cc::result<vulkan_descriptor_range> allocate_range(vulkan_context& ctx, isize size_in_bytes, bool transient)
 {
-    if (layout._size_in_bytes == 0)
+    if (size_in_bytes == 0)
         return vulkan_descriptor_range{};
 
-    auto range = transient ? ctx._descriptor_heap.allocate_transient(layout._size_in_bytes)
-                           : ctx._descriptor_heap.allocate_persistent(layout._size_in_bytes);
+    auto range = transient ? ctx._descriptor_heap.allocate_transient(size_in_bytes)
+                           : ctx._descriptor_heap.allocate_persistent(size_in_bytes);
 
     // Exhaustion is a recoverable runtime failure rather than a contract violation — a large bindless table is
     // exactly the case that hits it — so it is reported instead of asserted.
@@ -134,12 +133,18 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
 
     // Stored on the group before anything can fail, so the destructor frees a persistent range even when a later
     // validation error abandons creation partway.
+    // an unbounded binding, the layout's last, takes as many elements as its views; a layout holds one at most
+    auto unbounded_count = isize(0);
+    for (auto const& nv : views)
+        if (layout->bindings()[nv.slot].is_unbounded())
+            unbounded_count = nv.view->span().size();
+    group->unbounded_length = u32(unbounded_count);
     {
-        auto r = allocate_range(ctx, *layout, group->transient);
+        auto r = allocate_range(ctx, layout->group_size_in_bytes(unbounded_count), group->transient);
         CC_RETURN_IF_ERROR(r);
         group->range = cc::move(r.value());
     }
-    byte* const base = layout->_size_in_bytes == 0 ? nullptr : ctx._descriptor_heap.mapped_at(group->range);
+    byte* const base = group->range.is_empty() ? nullptr : ctx._descriptor_heap.mapped_at(group->range);
 
     auto const bindings = layout->bindings();
 
@@ -160,7 +165,8 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
         auto const& b = bindings[slot];
         bool const is_array = b.is_array();
         auto const element_views = nv.view->span();
-        if (element_views.size() != isize(b.count))
+        if (b.is_unbounded() ? element_views.empty() || element_views.size() > isize(layout->_unbounded_capacity)
+                             : element_views.size() != isize(b.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
                                         "exactly one per element; a vacant element is sg::vacant_view)",
                                         nv.name, b.count, element_views.size()));
@@ -195,6 +201,36 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
             if (sg::try_as_tlas_view(view) != nullptr && is_array)
                 return cc::error(
                     cc::format("binding_group: '{}' — acceleration-structure arrays are not supported yet", nv.name));
+            if (auto const* tv_as = sg::try_as_tlas_view(view); tv_as != nullptr)
+            {
+                auto const software
+                    = tv_as->tlas != nullptr ? sg::impl::software_region_of(*tv_as->tlas) : sg::impl::software_region{};
+                if (software.is_moving && !b.traced_in_software)
+                    return cc::error(cc::format("binding_group: '{}' binds a tlas that moves, which only the software "
+                                                "walk sees: the shader's package takes SOFTWARE_TRACE in "
+                                                "sc_add_shader_package",
+                                                nv.name));
+                {
+                    auto const position = sg::impl::acceleration_position(bindings, b.index);
+                    while (group->acceleration_addresses.size() <= position)
+                        group->acceleration_addresses.push_back(0);
+                    group->acceleration_addresses[position]
+                        = tv_as->tlas != nullptr ? trace_target_of(*tv_as->tlas).address : 0;
+                }
+                if (b.traced_in_software)
+                {
+                    if (tv_as->tlas != nullptr && software.pool == nullptr)
+                        return cc::error(cc::format("binding_group: '{}' is traced in software, so its tlas is built "
+                                                    "with accel_build_flag::software_trace",
+                                                    nv.name));
+                    auto const position = sg::impl::acceleration_position(bindings, b.index);
+                    while (group->acceleration_roots.size() <= position)
+                        group->acceleration_roots.push_back(0);
+                    group->acceleration_roots[position] = software.unit;
+                    if (tv_as->tlas != nullptr)
+                        group->software_tlases.push_back(tv_as->tlas);
+                }
+            }
 
             write_view_descriptor(ctx, ctx._image_views, b, view,
                                   base + layout->descriptor_offset_of(slot, int(element)));
@@ -231,8 +267,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
             {
                 // A trace reads the TLAS's storage buffer, so that is what is kept alive and declared accel_read at
                 // dispatch — the structure object itself is not a resource the barrier vocabulary knows.
-                auto const& tlas = static_cast<vulkan_tlas const&>(*tv_as->tlas);
-                group->referenced.push_back(tlas._vulkan_storage);
+                group->referenced.push_back(trace_target_of(*tv_as->tlas).storage);
                 group->hazard_views.push_back({group->referenced.back(), sg::view_class::acceleration_structure, slot});
             }
             else if (is_array)
@@ -245,7 +280,15 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
 
     // Match each provided dynamic sampler by name and write its descriptor.
     // A static sampler was already written above, so supplying one is an error rather than an override.
-    auto sampler_filled = cc::vector<char>::create_filled(bindings.size(), char(0));
+    // one flag per element of each binding, so a sampler array is filled element by element
+    auto sampler_first = cc::vector<isize>::create_filled(bindings.size(), isize(0));
+    auto sampler_elements = isize(0);
+    for (isize i = 0; i < bindings.size(); ++i)
+    {
+        sampler_first[i] = sampler_elements;
+        sampler_elements += sg::is_sampler(bindings[i].type) ? isize(bindings[i].count) : 0;
+    }
+    auto sampler_filled = cc::vector<char>::create_filled(sampler_elements, char(0));
     for (auto const& ns : samplers)
     {
         isize slot = -1;
@@ -261,14 +304,16 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
             return cc::error(cc::format("binding_group: sampler '{}' is static — it is fixed by the layout and must "
                                         "not be supplied per group",
                                         ns.name));
-        CC_ASSERT(sampler_filled[slot] == char(0), "binding_group: a sampler was provided more than once");
-        CC_ASSERT(bindings[slot].count == 1, "dynamic sampler arrays are not supported yet");
-        sampler_filled[slot] = char(1);
+        if (ns.element < 0 || ns.element >= int(bindings[slot].count))
+            return cc::error(cc::format("binding_group: sampler '{}' has no element {}", ns.name, ns.element));
+        auto& filled = sampler_filled[sampler_first[slot] + ns.element];
+        CC_ASSERT(filled == char(0), "binding_group: a sampler was provided more than once");
+        filled = char(1);
 
         VkSampler const sampler = ctx._samplers.acquire(ns.sampler);
         if (sampler == VK_NULL_HANDLE)
             return cc::error(cc::format("binding_group: could not create the sampler for '{}'", ns.name));
-        write_sampler_descriptor(ctx, sampler, base + layout->descriptor_offset_of(slot, 0));
+        write_sampler_descriptor(ctx, sampler, base + layout->descriptor_offset_of(slot, ns.element));
     }
 
     // Every binding must be provided — there is no default descriptor at this level.
@@ -277,8 +322,14 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
     {
         if (sg::is_sampler(bindings[i].type))
         {
-            if (layout->_slot_samplers[i] == VK_NULL_HANDLE && sampler_filled[i] == char(0))
-                return cc::error(cc::format("binding_group: sampler '{}' was not provided", bindings[i].name));
+            if (layout->_slot_samplers[i] == VK_NULL_HANDLE)
+                for (auto e = 0; e < int(bindings[i].count); ++e)
+                    if (sampler_filled[sampler_first[i] + e] == char(0))
+                        return cc::error(
+                            bindings[i].count == 1
+                                ? cc::format("binding_group: sampler '{}' was not provided", bindings[i].name)
+                                : cc::format("binding_group: element {} of sampler array '{}' was not provided", e,
+                                             bindings[i].name));
         }
         else if (view_filled[i] == char(0))
             return cc::error(cc::format("binding_group: binding '{}' was not provided", bindings[i].name));
@@ -295,18 +346,23 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     cc::vector<vulkan_texture_handle> referenced_textures,
     cc::vector<vulkan_hazard_view> hazard_views,
     cc::vector<vulkan_texture_hazard_view> texture_hazard_views,
-    cc::vector<vulkan_array_binding> array_bindings)
+    cc::vector<vulkan_array_binding> array_bindings,
+    u32 unbounded_length,
+    cc::vector<u64> acceleration_addresses)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
-    CC_ASSERT(image.size() == layout->_size_in_bytes, "the descriptor image must be one layout-sized set");
+    CC_ASSERT(image.size() <= layout->_size_in_bytes, "the descriptor image is one set, its unbounded binding cut "
+                                                      "short");
 
     auto group = std::make_shared<vulkan_binding_group>();
     group->_ctx = &ctx;
     group->layout = layout;
+    group->unbounded_length = unbounded_length;
+    group->acceleration_addresses = cc::move(acceleration_addresses);
     group->creation_epoch = ctx.current_epoch();
 
     {
-        auto r = allocate_range(ctx, *layout, /*transient =*/false);
+        auto r = allocate_range(ctx, image.size(), /*transient =*/false);
         CC_RETURN_IF_ERROR(r);
         group->range = cc::move(r.value());
     }

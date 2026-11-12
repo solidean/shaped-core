@@ -1,0 +1,7 @@
+// A package that states NATIVE_DXIL: SGL writes its DXIL, and an entry point it has no lowering for would not compile.
+
+binding filled:
+    values: mut buffer[int]
+
+@compute(64) fun fill(@thread_id id: int3){filled}:
+    filled.values[id.x] = id.x * 2 + 1

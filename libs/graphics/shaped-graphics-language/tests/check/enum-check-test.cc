@@ -40,10 +40,16 @@ TEST("sgl check - a written case value sets the count on from there, and a repea
     CHECK(reports_for("enum e:\n    a\n    a\n") == "duplicate-declaration user:[a] a\n");
 }
 
-TEST("sgl check - a case value is an int literal, and anything else is unsupported-yet")
+TEST("sgl check - a case value is an int computed before anything runs, as a const's is")
 {
-    CHECK(reports_for("enum e:\n    a = 1.5\n") == "unsupported-yet user:[1.5] a case value that is no int literal\n");
-    CHECK(reports_for("enum e:\n    a = b\n") == "unsupported-yet user:[b] a case value that is no int literal\n");
+    CHECK(reports_for("enum e:\n    a = 1.5\n") == "literal-not-representable user:[1.5] int does not hold 1.5 exactly\n");
+    CHECK(reports_for("enum e:\n    a = b\n") == "unknown-name user:[b] b\n");
+    CHECK(reports_for("const k = 4\nenum e:\n    a = k * 2\n    b = 1 << 4\n    c\n") == "");
+    // the enum is one type for every compile, so a case cannot follow an option
+    CHECK(reports_for("@option const n = 2\nenum e:\n    a = n\n")
+          == "unsupported-yet user:[n] a case value that reaches an option\n");
+    // a case is read through the enum it is a case of, which is still being declared
+    CHECK(reports_for("enum e:\n    a = 1\n    b = e.a as int\n") == "dependency-cycle user:[e] e -> e\n");
 
     // An implicit value follows the one before it, and the last int has none after it.
     CHECK(reports_for("enum e:\n    a = 2147483647\n    b\n")
@@ -80,11 +86,16 @@ TEST("sgl check - an enum compares with == and != and converts to nothing")
     auto const unequal = "enum k:\n    a\n    b\n\nfun other(x: k) -> bool => x != k.a\n";
     CHECK(reports_for(unequal) == "");
 
-    // Neither direction converts, and no other operator resolves (CHK-150).
+    // Neither direction converts on its own, and no other operator resolves (CHK-150).
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> int => x\n").contains("type-mismatch"));
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: int) -> k => x\n").contains("type-mismatch"));
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> bool => x < k.a\n").contains("no-matching-overload"));
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> k => x + k.a\n").contains("no-matching-overload"));
+
+    // `as int` is the one conversion, and it does not come back.
+    CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> int => x as int\n") == "");
+    CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> uint => x as uint\n").contains("no-matching-overload"));
+    CHECK(reports_for("enum k:\n    a\n\nfun n(x: int) -> k => x as k\n").contains("no-matching-overload"));
 
     // Two enums are two types, so one never compares with the other.
     CHECK(reports_for("enum a:\n    x\nenum b:\n    x\n\nfun n(p: a, q: b) -> bool => p == q\n")

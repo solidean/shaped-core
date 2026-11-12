@@ -67,6 +67,11 @@ enum class sv::residency : sv::u8
 
 namespace sv
 {
+/// The description a texture to adopt (`texture_data::adopt`) is created with on `ctx`: the full chain, and the usage
+/// a texture manager on `ctx` needs to fill and encode it, the same a texture of uploaded pixels gets.
+/// A producer writes its base level through `copy_dst`, or through `image` where the format allows one.
+[[nodiscard]] sg::texture_2d_description adoptable_texture(sg::context& ctx, sg::pixel_format format, i32 width, i32 height);
+
 /// How many triangles one block of an emitter's area CDF covers — `tracer.emitter_block_size` and shaders/emitter_cdf.sgl's `block_size`.
 inline constexpr u32 emitter_cdf_block_size = 256;
 
@@ -605,6 +610,9 @@ public:
     /// immediately while the pixels are still in flight.
     /// It is `pending` until `collect_settled` sees the transfers land, and a slot sampling it meanwhile reads a 1x1
     /// placeholder seeded from the material's own factor rather than an empty texture.
+    ///
+    /// An adopted texture is taken as it is, with nothing to stream; it settles at the next `collect_settled`, which
+    /// reports it as landed, so its follow-up work is queued as for any upload.
     [[nodiscard]] texture_id acquire(texture_data const& texture);
 
     /// Advances every texture whose pixels have landed, and reports the ids that just became sampleable.

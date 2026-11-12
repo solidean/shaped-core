@@ -11,6 +11,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <nexus/async-test.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -753,7 +754,7 @@ TEST("fbx - Bistro exterior reads when present")
     if (!nx::is_thorough())
         SKIP("thorough only: parses a 114 MB file");
 
-    auto adapter = cc::file_read_stream_adapter::open(BABEL_TEST_BISTRO_DIR "/BistroExterior.fbx");
+    auto adapter = cc::file_read_stream_adapter::open(nx::source_path(BABEL_TEST_BISTRO_DIR "/BistroExterior.fbx"));
     if (adapter.has_error())
         SKIP("Bistro is not fetched; uv run extern/bistro/fetch-bistro.py installs it");
 

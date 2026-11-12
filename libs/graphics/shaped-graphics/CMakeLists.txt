@@ -21,7 +21,9 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list/query.cc
     src/shaped-graphics/query/gpu_timestamp.cc
     src/shaped-graphics/raytracing/acceleration_structure.cc
+    src/shaped-graphics/raytracing/partitioned_tlas.cc
     src/shaped-graphics/raytracing/impl/hit_record_check.cc
+    src/shaped-graphics/raytracing/impl/software_trace.cc
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/barrier/footprint.cc
     src/shaped-graphics/barrier/array_declarations.cc
@@ -42,6 +44,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/bindless_array.cc
     src/shaped-graphics/context/pipeline_cache.cc
     src/shaped-graphics/context/cold_caches.cc
+    src/shaped-graphics/context/gpu_selector.cc
     src/shaped-graphics/present/swapchain.cc
     src/shaped-graphics/routine/reload_generation.cc
     src/shaped-graphics/routine/render_routine.cc
@@ -109,8 +112,10 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list/raytracing.hh
     src/shaped-graphics/command_list/query.hh
     src/shaped-graphics/query/gpu_timestamp.hh
+    src/shaped-graphics/query/driver_statistic.hh
     src/shaped-graphics/raytracing/acceleration_structure.hh
     src/shaped-graphics/raytracing/impl/hit_record_check.hh
+    src/shaped-graphics/raytracing/impl/software_trace.hh
     src/shaped-graphics/resource/raw_buffer.hh
     src/shaped-graphics/resource/buffer.hh
     src/shaped-graphics/resource/pixel_format.hh
@@ -183,11 +188,6 @@ endif()
 # Public: a backend binds the debug window by it, and slib asks SGL for records by it.
 target_compile_definitions(shaped-graphics PUBLIC SG_SHADER_DIAGNOSTICS=$<BOOL:${SC_SHADER_DIAGNOSTICS}>)
 
-sc_declare_pch_tier(SG EXTENDS TG HEADERS <shaped-graphics/all.hh>)
-
-# The most include-bound target in the repo at 90 %, and the one a PCH helps most: 0.26 of the no-PCH compile time.
-sc_target_pch(shaped-graphics SG)
-
 # Enable conforming preprocessor for MSVC
 target_compile_options(shaped-graphics
     PUBLIC
@@ -237,6 +237,12 @@ function(sg_warp_test_binary target)
         target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=1)
     else()
         target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=0)
+        # A WARP staged while one was pinned would still load in place of Windows' own, which SG_HAS_PINNED_WARP=0 denies.
+        # The define's flip relinks the binary, so this runs exactly when the pin went away.
+        if(WIN32)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${target}>/d3d10warp.dll" VERBATIM)
+        endif()
     endif()
 endfunction()
 
@@ -319,6 +325,7 @@ if(SC_BUILD_TESTS)
             tests/context/context-test.cc
             tests/context/metrics-test.cc
             tests/context/cold-caches-test.cc
+            tests/context/gpu-selector-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
             tests/texture/texture-feature-test.cc
@@ -348,10 +355,12 @@ if(SC_BUILD_TESTS)
             tests/present/present-test.cc
         )
         if(WIN32)
-            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc tests/backends/dx12-rtv-record-time-test.cc)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc tests/backends/dx12-agility-process.cc
+                                                        tests/backends/dx12-rtv-record-time-test.cc)
         endif()
         if(Vulkan_FOUND)
-            target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc
+                                                        tests/backends/vulkan-shared-atomics-test.cc)
         endif()
         if(APPLE AND TARGET metal-cpp)
             target_sources(shaped-graphics-test PRIVATE tests/backends/metal-entry.cc)
@@ -370,8 +379,6 @@ if(SC_BUILD_TESTS)
         ${_sg_backends}
         nexus
     )
-
-    sc_target_pch(shaped-graphics-test SG NEXUS) # 0.36
 
     # A shader package declared by a *consumer* of sg. shaped-graphics itself does not depend on the
     # shader library -- the arrow points slib -> sg -- but a target built on sg may declare its own
@@ -393,7 +400,10 @@ if(SC_BUILD_TESTS)
                 fragment_hazard.hlsl:fragment:ps_write
                 fragment_hazard.hlsl:fragment:ps_read
                 pattern_fill.hlsl:compute:main
-                ping_pong.hlsl:compute:main
+                mesh.hlsl:mesh:ms_main
+                mesh.hlsl:task:as_main
+                mesh.hlsl:mesh:ms_halves
+                mesh.hlsl:fragment:ps_main
         )
         # What tests/shaders/shader_fixtures.cc keys on: the SGL package is always there, this one is not.
         target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_HLSL_SHADERS=1)
@@ -401,8 +411,8 @@ if(SC_BUILD_TESTS)
         # The one tier-1 test that executes raster shaders, for the hazard only a running GPU shows.
         target_sources(shaped-graphics-test PRIVATE tests/command_list/fragment-write-hazard-test.cc)
 
-        # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
-        target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)
+        # The mesh and task stages from HLSL; tests/pipeline/sgl-mesh-test.cc draws SGL's on every backend.
+        target_sources(shaped-graphics-test PRIVATE tests/pipeline/mesh-test.cc)
 
         # The render-routine framework tests are backend-agnostic invocables like the rest of the tier-1
         # suite, so they need only the shader package this block already gated: the end-to-end test
@@ -430,11 +440,22 @@ if(SC_BUILD_TESTS)
             tests/barrier/sticky-array-test.cc
             tests/compute/compute-coherence-test.cc
             tests/compute/compute-float-specials-test.cc
+            tests/compute/compute-affine-memory-test.cc
+            tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-sixteen-bit-test.cc
+            tests/compute/compute-sixty-four-bit-test.cc
+            tests/compute/compute-double-maths-test.cc
+            tests/compute/compute-array-equality-test.cc
+            tests/compute/compute-native-dxil-test.cc
+            tests/compute/compute-native-spirv-test.cc
+            tests/compute/compute-matrix-arithmetic-test.cc
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
+            tests/raster/mixed-route-test.cc
+            tests/raster/mixed-route-query-test.cc
+            tests/pipeline/mixed-route-ray-test.cc
             tests/barrier/footprint-barrier-test.cc
             tests/pipeline/module-bindings-test.cc
             tests/pipeline/pipeline_harness.cc
@@ -449,7 +470,14 @@ if(SC_BUILD_TESTS)
             tests/pipeline/texture-shapes-test.cc
             tests/pipeline/stages-test.cc
             tests/pipeline/ray-query-test.cc
+            tests/pipeline/partitioned-tlas-test.cc
+            tests/pipeline/sgl-mesh-test.cc
+            tests/pipeline/mesh-polyfill-test.cc
+            tests/pipeline/mesh-polyfill-benchmark.cc
+            tests/pipeline/software-trace-test.cc
             tests/pipeline/raytracing-pipeline-test.cc
+            # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
+            tests/transient/transient-benchmark.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -460,15 +488,20 @@ if(SC_BUILD_TESTS)
             MODULE_DIRS tests/shaders/sgl/modules
             SHADERS
                 module:marking
+                module:marking.tints
                 module_marking.sgl:*
                 module_tinting.sgl:*
                 double_values.sgl:*
+                affine_memory.sgl:*
                 quads.sgl:*
                 textures.sgl:*
+                ping_pong.sgl:*
                 footprint.sgl:*
                 layout.sgl:*
                 sync.sgl:*
                 binding_arrays.sgl:*
+                unbounded_arrays.sgl:*
+                sampler_arrays.sgl:*
                 sticky_arrays.sgl:*
                 sticky_arrays_traced.sgl:*
                 bytes.sgl:*
@@ -477,6 +510,7 @@ if(SC_BUILD_TESTS)
                 vertex_input.sgl:*
                 dispatch.sgl:*
                 raytracing.sgl:*
+                ptlas_records.sgl:*
                 raytracing_pipeline.sgl:*
                 raytracing_scenes.sgl:*
                 raytracing_transforms.sgl:*
@@ -484,6 +518,7 @@ if(SC_BUILD_TESTS)
                 raytracing_open.sgl:*
                 raytracing_callables.sgl:*
                 pixel_semantics.sgl:*
+                view_unread.sgl:*
                 sampling.sgl:*
                 shapes.sgl:*
                 stages.sgl:*
@@ -491,9 +526,99 @@ if(SC_BUILD_TESTS)
                 coherence.sgl:*
                 float_specials.sgl:*
                 diagnostics.sgl:*
+                meshes.sgl:*
                 sixteen_bit.sgl:*
+                sixty_four_bit.sgl:*
+                sixty_four_bit_shared.sgl:*
+                sixty_four_bit_min_max.sgl:*
+                double_maths.sgl:*
+                array_equality.sgl:*
+                matrix_arithmetic.sgl:*
                 float_atomics.sgl:*
                 option_formats.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_native_spirv
+            NAMESPACE  sg::test::native_spirv
+            SOURCE_DIR tests/shaders/sgl_native
+            LANGUAGE   sgl
+            NATIVE_SPIRV
+            SHADERS
+                native_spirv.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_native_dxil
+            NAMESPACE  sg::test::native_dxil
+            SOURCE_DIR tests/shaders/sgl_native_dxil
+            LANGUAGE   sgl
+            NATIVE_DXIL
+            SHADERS
+                native_dxil.sgl:*
+        )
+        # The same stages three ways, which the mixed-route test links across routes.
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_mixed_text
+            NAMESPACE  sg::test::mixed_text
+            SOURCE_DIR tests/shaders/sgl_mixed
+            LANGUAGE   sgl
+            SHADERS
+                mixed_link.sgl:*
+                pixel_surface.sgl:*
+                primitive_stages.sgl:*
+                mesh_stages.sgl:*
+                diagnostic_routes.sgl:*
+                query_stages.sgl:*
+                ray_stages.sgl:*
+                double_routes.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_mixed_dxil
+            NAMESPACE  sg::test::mixed_dxil
+            SOURCE_DIR tests/shaders/sgl_mixed
+            LANGUAGE   sgl
+            NATIVE_DXIL
+            SHADERS
+                mixed_link.sgl:*
+                pixel_surface.sgl:*
+                primitive_stages.sgl:*
+                mesh_stages.sgl:*
+                diagnostic_routes.sgl:*
+                query_stages.sgl:*
+                ray_stages.sgl:*
+                double_routes.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_mixed_spirv
+            NAMESPACE  sg::test::mixed_spirv
+            SOURCE_DIR tests/shaders/sgl_mixed
+            LANGUAGE   sgl
+            NATIVE_SPIRV
+            SHADERS
+                mixed_link.sgl:*
+                pixel_surface.sgl:*
+                primitive_stages.sgl:*
+                mesh_stages.sgl:*
+                diagnostic_routes.sgl:*
+                query_stages.sgl:*
+                ray_stages.sgl:*
+                double_routes.sgl:*
+        )
+
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_software_trace
+            NAMESPACE  sg::test::software_trace
+            SOURCE_DIR tests/shaders/sgl_software
+            LANGUAGE   sgl
+            SOFTWARE_TRACE
+            SHADERS
+                software_trace.sgl:*
+                pipeline_motion.sgl:*
         )
     endif()
 

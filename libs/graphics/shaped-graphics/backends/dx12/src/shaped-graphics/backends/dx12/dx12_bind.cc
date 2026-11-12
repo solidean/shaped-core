@@ -47,7 +47,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_context::create_dx12_pipeline_layou
                                                                                   sg::lifetime_scope scope)
 {
     require_persistent(scope);
-    return dx12_pipeline_layout::create(_device.Get(), desc.groups, desc.static_samplers, desc.inline_constants);
+    return dx12_pipeline_layout::create(_device.Get(), desc.groups, desc.static_samplers, desc.inline_constants,
+                                        desc.dispatch_grid, desc.mesh_polyfill);
 }
 
 cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipeline(sg::compiled_shader const& shader,
@@ -105,11 +106,12 @@ cc::result<dx12_binding_group_handle> dx12_context::create_dx12_binding_group(dx
 
 cc::result<dx12_staging_binding_group_handle> dx12_context::create_dx12_staging_binding_group(
     dx12_binding_group_layout_handle layout,
+    int unbounded_capacity,
     sg::lifetime_scope scope)
 {
     CC_ASSERT(scope == sg::lifetime_scope::persistent, "a staging_binding_group is persistent — it exists to outlive "
                                                        "the epoch that built it");
-    return dx12_staging_binding_group::create(*this, cc::move(layout));
+    return dx12_staging_binding_group::create(*this, cc::move(layout), unbounded_capacity);
 }
 
 cc::result<dx12_descriptor_ref> dx12_context::create_dx12_render_target_view(sg::render_target_view const& view)
@@ -219,12 +221,13 @@ cc::result<sg::binding_group_handle> dx12_context::try_create_binding_group(sg::
 
 cc::result<sg::staging_binding_group_handle> dx12_context::try_create_staging_binding_group(
     sg::binding_group_layout_handle layout,
+    int unbounded_capacity,
     sg::lifetime_scope scope)
 {
     auto dx = std::dynamic_pointer_cast<dx12_binding_group_layout const>(cc::move(layout));
     CC_ASSERT(dx != nullptr, "binding_group_layout is not a dx12 binding_group_layout");
-    return note_device_loss_on_error(
-        cc::result<sg::staging_binding_group_handle>(create_dx12_staging_binding_group(cc::move(dx), scope)),
-        "create_staging_binding_group");
+    return note_device_loss_on_error(cc::result<sg::staging_binding_group_handle>(
+                                         create_dx12_staging_binding_group(cc::move(dx), unbounded_capacity, scope)),
+                                     "create_staging_binding_group");
 }
 } // namespace sg::backend::dx12

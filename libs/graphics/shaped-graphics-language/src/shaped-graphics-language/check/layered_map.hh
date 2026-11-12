@@ -44,6 +44,15 @@ public:
         return _own[key];
     }
 
+    /// The entries this layer wrote, each of which it took over from the lower part or added.
+    [[nodiscard]] map const& own_entries() const { return _own; }
+
+    /// Whether both are the one frozen map, neither with entries of its own: what a layer that added nothing shares.
+    [[nodiscard]] bool shares_all_with(layered_map const& other) const
+    {
+        return _own.size() == 0 && other._own.size() == 0 && _base == other._base;
+    }
+
     /// Makes every entry part of the shared lower layer, which the layer above starts from and never writes.
     void freeze()
     {

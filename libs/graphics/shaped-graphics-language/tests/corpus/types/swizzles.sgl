@@ -103,15 +103,72 @@ test:
     v.xy = float2(1.0, 2.0)
     true
 
-// a mut argument is not taken through a swizzle yet
+// a swizzle with distinct letters is a mut argument too: the body reads and writes exactly its lanes (CHK-352)
 fun double2(v: mut float2):
     v = v * float2(2.0, 2.0)
 
-@expect(error = "unsupported-yet")
 test:
     let mut v = float3(1.0, 2.0, 3.0)
+    double2(mut v.zx)
+    v.x == 2.0 and v.y == 2.0 and v.z == 6.0
+
+// a body that writes one lane, adds to the place and hands it on writes through every step to the caller's lanes
+fun nudge(v: mut float2):
+    v.y = 10.0
+    v += float2(1.0, 1.0)
+    double2(mut v)
+
+test:
+    let mut c = float4(1.0, 2.0, 3.0, 4.0)
+    nudge(mut c.wy)
+    c.x == 1.0 and c.y == 22.0 and c.z == 3.0 and c.w == 10.0
+
+// and a body that takes a swizzle of its own place hands on the lanes of the caller's lanes
+fun swap_halves(v: mut float4):
+    double2(mut v.yx)
+
+test:
+    let mut c = float4(1.0, 2.0, 3.0, 4.0)
+    swap_halves(mut c)
+    c.x == 2.0 and c.y == 4.0 and c.z == 3.0
+
+// the operand's indices are evaluated once, before the body reads or writes a lane
+test:
+    let mut vs = [float3(1.0, 2.0, 3.0), float3(4.0, 5.0, 6.0)]
+    let mut i = 0
+    double2(mut vs[next(mut i)].xz)
+    i == 1
+    vs[0].x == 2.0 and vs[0].y == 2.0 and vs[0].z == 6.0 and vs[1].x == 4.0
+
+// a field of a member's swizzle, and a member's swizzle, as places
+test:
+    let mut p = particle(float3(0.0, 0.0, 0.0), float3(1.0, 2.0, 3.0))
+    double2(mut p.velocity.yz)
+    p.velocity.y == 4.0 and p.velocity.z == 6.0
+
+// a repeated letter writes one field twice, so that swizzle is no mut argument either
+@expect(error = "not-assignable")
+test:
+    let mut v = float3(1.0, 2.0, 3.0)
+    double2(mut v.xx)
+    true
+
+// and a swizzle of a value that is no place is none
+@expect(error = "not-assignable")
+test:
+    let v = float3(1.0, 2.0, 3.0)
     double2(mut v.xy)
     true
+
+// a target writes the lanes back as its own assignment would
+binding swizzled:
+    data: mut buffer[float4]
+
+@compute(64) fun double_middle(@thread_id id: int3){swizzled}:
+    let mut v = swizzled.data[id.x]
+    double2(mut v.yz)
+    nudge(mut swizzled.data[id.x].xw)
+    swizzled.data[id.x] = v + swizzled.data[id.x]
 
 // a struct of the program has them too, by its own letters, and gives the plain vector as well
 @swizzle struct rgb:
@@ -181,3 +238,10 @@ test pos3(1.0, 2.0, 3.0).r == 1.0
     t: float
 
 test st(1.0, 2.0).vu == float2(2.0, 1.0)
+
+// a swizzle of a struct of the program is a new value, built of its fields, which no body could write through yet
+@expect(error = "unsupported-yet")
+test:
+    let mut c = sky()
+    double2(mut c.rg)
+    true

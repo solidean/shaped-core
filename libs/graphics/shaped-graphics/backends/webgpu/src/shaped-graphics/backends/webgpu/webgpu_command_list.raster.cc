@@ -123,6 +123,7 @@ void webgpu_command_list::open_render_pass(bool reopen)
     auto attachments = cc::fixed_vector<WGPURenderPassColorAttachment, sg::max_color_targets>();
     for (auto const& a : _color_attachments)
         attachments.push_back(a.attachment);
+    auto writes = WGPUPassTimestampWrites{};
     auto const desc = WGPURenderPassDescriptor{
         .nextInChain = nullptr,
         .label = to_wgpu("sg rendering scope"),
@@ -130,9 +131,9 @@ void webgpu_command_list::open_render_pass(bool reopen)
         .colorAttachments = attachments.empty() ? nullptr : attachments.data(),
         .depthStencilAttachment = _has_depth ? &_depth_attachment : nullptr,
         .occlusionQuerySet = nullptr,
-        .timestampWrites = nullptr,
+        .timestampWrites = pass_timestamp_writes(writes),
     };
-    _render_pass = wgpu_render_pass(wgpuCommandEncoderBeginRenderPass(encoder(), &desc));
+    _render_pass = wgpu_render_pass(wgpuCommandEncoderBeginRenderPass(_encoder.get(), &desc));
 
     auto const pass = render_pass();
     wgpuRenderPassEncoderSetViewport(pass, _viewport.x, _viewport.y, _viewport.width, _viewport.height,
@@ -193,7 +194,7 @@ void webgpu_command_list::apply_raster_state()
     {
         for (auto i = s.groups.size(); i < sg::reserved_binding_group; ++i)
             wgpuRenderPassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
-        u32 offsets[2] = {};
+        u32 offsets[3] = {};
         auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
         auto window = sg::raw_buffer_handle();
         if (sg::impl::debug_windows::k_enabled)

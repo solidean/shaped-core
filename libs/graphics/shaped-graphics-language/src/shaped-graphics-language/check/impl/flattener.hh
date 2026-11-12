@@ -31,6 +31,8 @@ struct stage_violation
     bool is_inlined_decision = false;
     /// The write is an assignment to a buffer's element, `call` its place; `callee` is then none.
     bool is_buffer_store = false;
+    /// The callee is a builtin only a test calls (CHK-512).
+    bool is_test_only = false;
 };
 
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
@@ -50,10 +52,11 @@ struct flattener
     stage inlined_decision = stage::none;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
-    /// A test's calls of a subgroup operation, which a run of one invocation has no subgroup for (CHK-379).
-    cc::vector<stage_violation> subgroup_calls;
     /// A compute entry point's calls of a quad operation, whose workgroup then forms its quads along one axis (CHK-380).
     cc::vector<stage_violation> quad_calls;
+    /// A compute entry point's calls of a barrier or a subgroup operation, which read its group: a bare `@compute`
+    /// reaches none (CHK-520), and one that reaches one has a size no warning judges (CHK-521).
+    cc::vector<stage_violation> group_calls;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
@@ -301,6 +304,19 @@ struct flattener
     template <class Node>
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
+        // A field or a swizzle of a swizzle reads the operand below it, so a place stays one assignable target.
+        // That is what a `mut` parameter bound to a swizzle meets, wherever its body names a field of it (CHK-352).
+        if constexpr (std::is_same_v<Node, flat_member>)
+            if (is_valid(node.object))
+                if (auto const* const inner = entry.at(node.object).node.template try_as<flat_member>();
+                    inner != nullptr && inner->is_swizzle())
+                {
+                    auto const outer
+                        = node.is_swizzle() ? node.letters : swizzle{.fields = {i8(node.member)}, .count = 1};
+                    auto const composed = outer.over(inner->letters);
+                    node = composed.count == 1 ? flat_member{.object = inner->object, .member = composed.fields[0]}
+                                               : flat_member{.object = inner->object, .letters = composed};
+                }
         type = concrete(type);
         note_value_use(type, from);
         // A builtin with an effect may give nothing, `store`, and its call is only ever an `eval`'s value.
@@ -453,6 +469,8 @@ struct flattener
 
     /// What an operator over number literals folded to, as the type it was checked as.
     flat_expr_id flatten_folded(ast::expr_id id, type_id type, number_literal const& n);
+    /// `lhs == rhs` of two arrays, or `!=` where not `is_equal`: a loop over the elements, each side evaluated once.
+    flat_expr_id flatten_array_equality(ast::expr_id id, type_id type, bool is_equal, flat_expr_id lhs, flat_expr_id rhs);
 
     /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
     flat_expr_id flatten_array_literal(ast::expr_id id, type_id type, ast::array const& literal);
@@ -748,6 +766,9 @@ struct flattener
     /// CHK-432: each text type the tree holds a value of, as this compile spells it, into `entry.text_types`.
     /// A field or a constructor of one that the compile spells in its target's text is reported.
     void judge_text_types();
+    /// CHK-522: every struct with a target layout the tree holds as the struct of the branch this compile takes, its
+    /// fields renumbered to that order; one no branch of holds on this compile is reported.
+    void place_target_layouts();
 
     void flatten_assign(origin from, ast::assign_stmt const& assign);
 

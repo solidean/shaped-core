@@ -10,6 +10,11 @@
 // Under `--capture` there is no window and no swapchain: the frame goes into a texture and is written out, which is
 // how the committed image is produced and how the example is verified on a machine with no display at all.
 //
+// **The shader edits live.**
+// Natively the package's source directory is watched, so saving cube.sgl redraws the cube with it.
+// On the web there is no source tree: the page holds the text, the in-page SGL compiler builds what it hands over, and
+// a broken edit leaves the last good pipeline drawing while its error is shown against the source.
+//
 // **Nothing here blocks**, which is what lets one source serve WebGPU too: a context that reports `never_block`
 // asserts on every wait, so each step is awaited instead — the frame loop included, where awaiting the epoch depth
 // is also what returns the browser its thread.
@@ -26,6 +31,8 @@
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/window.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
+#include <shaped-shader-library/filesystem/memory_filesystem.hh>
+#include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <typed-geometry/camera/camera.hh>
 #include <typed-geometry/linalg/cross.hh>
@@ -45,7 +52,56 @@
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+
+#include <clean-core/container/set.hh>
+
+#include <memory>
+#endif
+
 using namespace cc::primitive_defines;
+
+#ifdef __EMSCRIPTEN__
+namespace
+{
+/// The page's edits, mounted over the package's embedded copy.
+/// Global because the page reaches it through exported functions, and a page runs the example once.
+std::shared_ptr<slib::memory_filesystem> g_page_edits;
+/// Where the page writes an edit's text, and a terminator, before it commits it.
+cc::vector<char> g_page_edit_buffer;
+/// The mount the package's virtual paths start with, which an edit's path is taken relative to.
+cc::string g_package_prefix;
+} // namespace
+
+// The page's half of the loop, which web-shell.html defines; each does nothing on a page that defines none.
+// clang-format off
+EM_JS(void, sgl_cube_page_show_source, (char const* path, char const* text), {
+    if (Module.sglCubeShowSource) Module.sglCubeShowSource(UTF8ToString(path), UTF8ToString(text));
+});
+EM_JS(void, sgl_cube_page_report, (int reloads, char const* errors), {
+    if (Module.sglCubeReport) Module.sglCubeReport(reloads, UTF8ToString(errors));
+});
+EM_JS_DEPS(sgl_cube_page, "$UTF8ToString");
+// clang-format on
+
+/// A buffer of at least `bytes` bytes, which the page fills with an edit's text and its terminator.
+extern "C" EMSCRIPTEN_KEEPALIVE char* sgl_cube_edit_buffer(int bytes)
+{
+    g_page_edit_buffer.resize_to_filled(cc::max(isize(bytes), isize(1)), '\0');
+    return g_page_edit_buffer.data();
+}
+
+/// Writes the buffer's text as the source at the package's virtual path `path`; the next frame's poll builds it.
+extern "C" EMSCRIPTEN_KEEPALIVE void sgl_cube_edit_commit(char const* path)
+{
+    auto relative = cc::string_view(path);
+    if (relative.starts_with(g_package_prefix))
+        relative = relative.subview(g_package_prefix.size());
+    if (g_page_edits != nullptr)
+        g_page_edits->write(relative, cc::string_view(g_page_edit_buffer.data()));
+}
+#endif
 
 namespace
 {
@@ -207,6 +263,15 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
     auto lib = slib::shader_library();
     slib::add_available_compilers(lib);
     lib.add_package(shaders::package());
+#ifdef __EMSCRIPTEN__
+    // Unthreaded, so a frame's poll is the recompile: the in-page compiler is fast enough to run between two frames.
+    g_page_edits = std::make_shared<slib::memory_filesystem>();
+    g_package_prefix = cc::format("{}/", shaders::package().name);
+    lib.mount(shaders::package().name, g_page_edits);
+    lib.start_hot_reload({.unthreaded = true});
+#else
+    lib.start_hot_reload();
+#endif
 
     auto const building = build_pipeline(*ctx, color_format);
     co_await cc::async_settled(building);
@@ -217,7 +282,39 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
                                                       : cc::string("the pipeline build never ran"));
         co_return;
     }
-    auto const pipeline = pipeline_result->value();
+    auto pipeline = pipeline_result->value();
+
+    // What the pipeline was built from: the sum of its stages' generations, which a promoted reload moves.
+    // A stage's generation moves inside its acquire, so each frame acquires both, which is a lookup once built.
+    auto const generation_of_stages = [&]
+    {
+        auto sum = u64(0);
+        for (auto const& asset : lib.assets())
+        {
+            (void)asset->acquire(*ctx);
+            sum += asset->generation();
+        }
+        return sum;
+    };
+    auto built_generation = generation_of_stages();
+    auto reloads = 0;
+    auto reported_reloads = -1;
+    auto reported_errors = cc::string();
+
+#ifdef __EMSCRIPTEN__
+    // The page starts from the text the build embedded, so its editor shows what is drawing.
+    {
+        auto shown = cc::set<cc::string>();
+        for (auto const& asset : lib.assets())
+        {
+            if (!shown.insert(asset->virtual_path()))
+                continue;
+            auto path = cc::string(asset->virtual_path());
+            if (auto text = asset->read_source(); text.has_value())
+                sgl_cube_page_show_source(path.c_str_materialize(), text.value().c_str_materialize());
+        }
+    }
+#endif
 
     // Persistent, uploaded once: the mesh never changes, and this is what most real geometry looks like.
     auto const vertices = ctx->persistent.create_buffer_from_data(build_cube_mesh(), sg::buffer_usage::vertex_buffer);
@@ -312,6 +409,39 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
         // the whole timeout and then fail.
         if (!dragging && !capture.active)
             spin = spin + tg::angle_f::make_from_degree(dt * 22.0f);
+
+        // A changed source is built between two frames, and the pipeline swaps once it has; a broken one keeps the last.
+        lib.poll_hot_reload();
+        if (auto const generation = generation_of_stages(); generation != built_generation)
+        {
+            built_generation = generation;
+            auto const rebuilding = build_pipeline(*ctx, color_format);
+            co_await cc::async_settled(rebuilding);
+            auto const* const rebuilt = rebuilding->try_value();
+            if (rebuilt != nullptr && rebuilt->has_value())
+            {
+                pipeline = rebuilt->value();
+                ++reloads;
+            }
+            else if (rebuilt != nullptr)
+                cc::eprintln("{}", rebuilt->error().to_string());
+        }
+
+        // Why the newest edit is not drawing, if it is not: each stage's own reason, each said once.
+        auto errors = cc::string();
+        for (auto const& asset : lib.assets())
+            if (auto const error = asset->last_error(); error.has_value() && !errors.contains(error.value()))
+                errors.appendf("{}\n", error.value());
+        if (errors != reported_errors || reloads != reported_reloads)
+        {
+            if (errors != reported_errors && !errors.empty())
+                cc::eprintln("the edit does not build, so the cube keeps the last one that did:\n{}", errors);
+            reported_errors = errors;
+            reported_reloads = reloads;
+#ifdef __EMSCRIPTEN__
+            sgl_cube_page_report(reloads, errors.c_str_materialize());
+#endif
+        }
 
         // A back buffer normally, the capture texture when there is no display — everything below is written
         // against a render target and cannot tell which it got.

@@ -10,7 +10,7 @@ add_subdirectory(extern/shaped-core EXCLUDE_FROM_ALL)
 ```
 
 - **Add it before defining any target of your own.**
-  Its options, PCH tiers and helper functions (`sc_nexus_binary`, `sc_target_pch`, `sc_add_example`, …) exist from then on.
+  Its options and helper functions (`sc_nexus_binary`, `sc_add_example`, …) exist from then on.
 - `EXCLUDE_FROM_ALL` keeps `all` to what your targets link; every library is still configured.
 - `SC_BUILD_TESTS`, `SC_BUILD_TOOLS` and `SC_BUILD_EXAMPLES` default to OFF here.
   Set `SC_BUILD_TOOLS` ON before the call to build shaped-linter into your tree for `dev.py lint shaped`.
@@ -19,7 +19,7 @@ add_subdirectory(extern/shaped-core EXCLUDE_FROM_ALL)
   Some of them are ABI, so a target that uses shaped-core headers must link clean-core, directly or not — never only include its headers.
   [tools/cmake/BuildConfig.cmake](../../tools/cmake/BuildConfig.cmake) is the mechanism.
 - **The end-of-configure registries run at the end of your top-level CMakeLists**, not of shaped-core's.
-  The nexus binary manifest, the PCH tiers, shader packages and the wasm test pages therefore see your targets too, and you call none of the finalizers yourself.
+  The nexus binary manifest, shader packages and the wasm test pages therefore see your targets too, and you call none of the finalizers yourself.
   Register your test binaries with `sc_nexus_binary` and `dev.py test` finds them.
 
 ## dev.py
@@ -33,6 +33,9 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
   The driver's own files — the pinned clang-format, the emsdk pin — are found in the submodule without any configuration.
 - **Its own `check`**, since the gate registry is project policy.
   The `Check` type, the runner and the individual gates' machinery are all reusable.
+  A gate build passes `server=ctx.build_server(gate=True)`, so the gate follows shaped-core's when the optional build server is turned on for it.
+- Optionally a **`BuildServer`** in that Policy: where an optional local build server's client is installed, how to install it, and whether the project opts in by default.
+  [Building and testing](building-and-testing.md#an-optional-build-server) is what it changes.
 - Its own `CMakePresets.json`: the diag-launcher paths in ours are `${sourceDir}`-relative, so a consumer points them into the submodule.
 
 ## Keeping the submodules current

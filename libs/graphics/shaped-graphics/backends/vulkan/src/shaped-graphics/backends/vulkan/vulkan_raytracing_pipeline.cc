@@ -181,8 +181,14 @@ cc::result<vulkan_raytracing_pipeline_handle> vulkan_raytracing_pipeline::create
                "max_recursion_depth {} exceeds the device's limit of {}", desc.max_recursion_depth,
                rt_props.maxRayRecursionDepth);
 
+    // A pipeline meets a cluster only if it says so, which it does wherever the device has them (the plan's D7).
+    auto const clusters = VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV{
+        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV,
+        .allowClusterAccelerationStructure = VK_TRUE,
+    };
     auto const info = VkRayTracingPipelineCreateInfoKHR{
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+        .pNext = ctx.is_clustered_geometry_supported() ? &clusters : nullptr,
         // A pipeline traces a micromap only if it says so, unlike a ray query, which always does.
         .flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT
                | (ctx.is_opacity_micromap_supported()

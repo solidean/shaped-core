@@ -1,0 +1,69 @@
+// a test states the texels of what it binds, so `sgl test` needs no driver for a texture (EVAL-127, EVAL-128)
+
+binding scene:
+    ramp: texture_2d[float]
+    grid: texture_2d[float4]
+    pyramid: texture_2d[float]
+    sky: texture_cube[float]
+    canvas: mut image_2d[.r32_float]
+    smp: sampler
+    sampler nearest:
+        filter = .nearest
+        address = .clamp_edge
+    sampler linear:
+        filter = .linear
+        address = .clamp_edge
+
+fun brightness(uv: float2){scene} -> float => scene.ramp.sample(uv, scene.linear, level = 0.0)
+
+// a texture grows to the smallest that holds every texel stated so far, every other texel zero
+test {scene}:
+    scene.ramp.test_texel(int2(0, 0), 0.0)
+    scene.ramp.test_texel(int2(3, 0), 30.0)
+    scene.ramp.size() == int2(4, 1)
+    scene.ramp.load(int2(1, 0)) == 0.0
+    scene.ramp.test_texel(int2(1, 0), 10.0)
+    scene.ramp.test_texel(int2(2, 0), 20.0)
+    // halfway between texels 1 and 2
+    brightness(float2(0.5, 0.5)) == 15.0
+
+// a loop states a whole texture
+test {scene}:
+    for y in 0 ..< 2:
+        for x in 0 ..< 2:
+            scene.grid.test_texel(int2(x, y), float4(x as float, y as float, 0.0, 1.0))
+    scene.grid.load(int2(1, 1)) == float4(1.0, 1.0, 0.0, 1.0)
+    scene.grid.sample(float2(0.5, 0.5), scene.linear, level = 0.0) == float4(0.5, 0.5, 0.0, 1.0)
+
+// a texel of a level grows level 0 to hold it, as each level halves the one before
+test {scene}:
+    scene.pyramid.test_texel(int2(0, 0), 8.0, 1)
+    scene.pyramid.level_count() == 2
+    scene.pyramid.size() == int2(2, 2)
+    scene.pyramid.sample(float2(0.5, 0.5), scene.linear, level = 1.0) == 8.0
+
+// a cube's face is named, its layers six faces each
+test {scene}:
+    scene.sky.test_texel(int2(0, 0), 4.0, face = 4)
+    scene.sky.sample(float3(0.1, 0.2, 1.0), scene.nearest, level = 0.0) == 4.0
+    scene.sky.sample(float3(1.0, 0.2, 0.1), scene.nearest, level = 0.0) == 0.0
+
+// an image takes its texels as a texture does, and a store writes inside what was stated
+test {scene}:
+    scene.canvas.test_texel(int2(1, 1), 0.0)
+    scene.canvas.store(int2(0, 1), 7.5)
+    scene.canvas.load(int2(0, 1)) == 7.5
+
+
+// a dynamic sampler takes the state of a sampler whose state the source sets
+test {scene}:
+    scene.ramp.test_texel(int2(0, 0), 0.0)
+    scene.ramp.test_texel(int2(1, 0), 10.0)
+    scene.ramp.sample(float2(0.5, 0.5), scene.smp, level = 0.0) == 5.0
+    scene.smp.test_state(scene.nearest)
+    scene.ramp.sample(float2(0.5, 0.5), scene.smp, level = 0.0) == 10.0
+
+// only a test states what its run binds, and no target writes it (CHK-512)
+@expect(error = "stage-not-allowed")
+@compute(1) fun stated_in_a_shader(){scene}:
+    scene.ramp.test_texel(int2(0, 0), 1.0)

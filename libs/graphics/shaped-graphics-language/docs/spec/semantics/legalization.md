@@ -27,23 +27,65 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
 * **LEGAL-63** (V0) Asked to, legalization drops every `print` with its values too, which is how a text is written without diagnostics.
 * **LEGAL-64** (V0) Asked to, it lowers each `assert` instead: its body, then `if not condition`, a print of its message and the end of the invocation.
+* **LEGAL-70** Asked to, the last step writes each `print` of the finished core tree as statements over the reserved binding `sg_debug`, for every target ([the contract](../../reserved-bindings.md)).
+  Each value is bound once, ahead of the reservation, and the site table is built here, so what folding removed has no site and no route can differ.
+  Left unasked, a print stays a statement, which only the interpreter runs.
   A compute, a geometry or a ray-tracing stage that returns nothing returns, and a pixel stage discards.
   A vertex and a tessellation evaluation stage return their result at a NaN position, which culls every primitive the vertex is part of.
   A tessellation control stage returns its edge factors at 0, which culls the patch.
   An any hit returns `ignore`, and an intersection a report whose `is_hit` is false.
   An `assert` before the last barrier, derivative or subgroup operation sets LEGAL-65's flag instead, and its invocation ends where a guard's does.
   The tree then prints nothing; it is the one way it may behave otherwise than its input, and only when the caller asked.
-* **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort` or `report`.
+* **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort`, `report` or `define` (LEGAL-68).
   That is an integer `/` or `%` whose divisor is no literal that cannot fail (EVAL-84), and an array index that is no literal (EVAL-90).
+  A binding array's own index is one, whatever element it names, a mark staying on the index: by its `N`, or where it is unbounded by CHK-491's length.
   The guard is a block in the operation's place that binds the operands, tests them, and only then runs the operation, so every later rule keeps its order and its short circuits.
   A failed test ends the invocation as an `assert` of LEGAL-64 does, and `report` first prints the operation and its operands as that `assert`'s message.
   Where a barrier, a derivative or a subgroup operation may still follow, every invocation must reach it, so the end waits:
   the guard sets a flag and replaces the failing operand with one that cannot fail, a divisor of 1 or an index of 0.
-  The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is not masked.
+  The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is skipped (LEGAL-67).
   Until then, a loop that holds none of those operations is left at the top of each iteration once the flag is set, so a safe operand never keeps it running long.
   A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
-  A buffer element, `bytes` (EVAL-97), workgroup memory (EVAL-92) and the builtins of EVAL-87 are not guarded yet.
+  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, a scalar beside a vector read as every lane of it.
+  So is a matrix's `row` or `column` whose index is outside the matrix.
+  So is workgroup memory read before any invocation stored it (EVAL-92), by LEGAL-69.
   Wherever the input has a value, the tree behaves as the input does; where it has none, the tree ends the invocation instead.
+* **LEGAL-66** (G1) Where the target reads a buffer's length (EMIT-195), those profiles also guard a buffer index and a `bytes` access, by the length of CHK-460.
+  A buffer index outside `0 ..< values.length` ends the invocation as an array index does (EVAL-90).
+  So does a `bytes` load or store whose offset is no multiple of 4, or whose last word reaches past the bound memory (EVAL-97).
+  The memory itself is never bound to a local, so only the offset and a stored value are, in their order.
+  An element of a binding array names its memory for the length and again for the access, so its index is pinned in front of both, and evaluated once.
+  An access through one is a block of its own: a read gives the element, a store evaluates its place and then its value, and an atomic its place and then its operands.
+  MSL reads no length, so a metal text guards neither.
+* **LEGAL-67** (G1) Once a guard may set that flag, every write up to the flag's test is skipped where it is set, so a safe operand's result reaches no memory.
+  A write is a store to a buffer element or to workgroup memory, and a call with an effect, an atomic or an image store, that stands as a statement.
+  A barrier, a derivative and a subgroup operation are never skipped, since every invocation must reach them.
+  An atomic whose result a `let` binds runs only where the flag is clear, and the `let` is 0 where it is set.
+* **LEGAL-68** (G1) The profile `define` runs each guard of LEGAL-65 and LEGAL-66 without ending anything: a failed test replaces the operand by its safe value, and the operation runs on it.
+  A divisor of 1, so `x / 0` is `x`, `x % 0` is 0 and `INT_MIN / -1` is `INT_MIN`, which are WGSL's values; an index or an offset of 0.
+  A maths builtin of EVAL-87 runs on the operands its deferred guard gives: `pow` on a base of 1, `asin` and `acos` on 0, `atan2` on an `x` of 1.
+  `smoothstep` runs on the edges 0 and 1, and `clamp` on a `high` of `low`.
+  It prints nothing and needs no flag, since no invocation ends, and the tree has a value wherever the input has one.
+  Memory too short for the access has no index or offset that is safe, so the access does not run.
+  A read and a `bytes` load are zero of their type, a store is dropped, and an atomic gives zero and changes nothing.
+  Its operands still run, in their order, as WGSL's bounded access evaluates them.
+* **LEGAL-69** (G1) Those profiles shadow a compute, task or mesh stage's workgroup memory with a bit per scalar, set where one is stored and tested where one is read (EVAL-92).
+  A scalar is a leaf of a member's type, counted in the order the members are listed: a `float3` is three, an atomic one, whatever its width.
+  A store and an atomic set the bits of the scalars they reach once they ran; every read, an atomic's but a store's included, tests them first.
+  A uniform load tests them after its barrier, which is what makes another invocation's store visible to it.
+  A failed test ends the invocation as a guard does, and `report` names the place with its indices: ``workgroup memory `tile.values[2]` is read before any invocation stored it``.
+  A swizzle tests each field it reads, and each index of the place is pinned once, so the test and the access read the same element.
+  A read that races a store, with no barrier between, may or may not be reported.
+  The shadow takes a word per 32 scalars beside the memory it shadows, in CHK-294's 16384 bytes.
+  Where it would not fit no read is tested, and the compile warns `workgroup-unshadowed`, naming the bytes it left out.
+  The profile `define` shadows nothing and zeroes workgroup memory before the body instead, WGSL's value (LEGAL-71).
+* **LEGAL-71** The last step writes the shadow and its prologue as statements of the finished core tree, so no route knows of either.
+  A read of the shadow is an atomic `load` of its word, and a mark an atomic `bit_or`, each on a place no source can name, which the target declares `sgl_written` (EMIT-229).
+  Which bits a range of scalars takes is arithmetic in the tree, a whole word its own case, since no target shifts by 32.
+  Ahead of the body, each invocation stores 0 to the words its index in the workgroup strides to.
+  Under `define` it zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0, and an atomic by its store.
+  A `workgroup_barrier` follows either, so no mark lands before a clear and no read before the zero.
+  A target whose workgroup memory starts at zero, as WebGPU's does, gets no prologue.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

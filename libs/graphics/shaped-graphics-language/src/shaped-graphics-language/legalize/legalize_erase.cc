@@ -26,7 +26,7 @@ struct invocation_ender
             into.push_back(out.discard());
         else if (stage == check::stage::compute || stage == check::stage::raygen || stage == check::stage::miss
                  || stage == check::stage::closest_hit || stage == check::stage::callable
-                 || stage == check::stage::geometry)
+                 || stage == check::stage::geometry || stage == check::stage::mesh || stage == check::stage::task)
             into.push_back(out.return_(flat_expr_id::none));
         else if (stage == check::stage::vertex || stage == check::stage::tessellation_evaluation)
         {
@@ -151,6 +151,8 @@ struct void_eraser
     bool erases_void = true;
     /// LEGAL-63: V0 drops the prints too.
     bool erases_prints = false;
+    /// Set in the last pass, which writes each print over `sg_debug` (LEGAL-70).
+    legalize_options const* expanding = nullptr;
     /// LEGAL-64: V0 lowers each assert instead of dropping it.
     bool lowers_asserts = false;
 
@@ -177,7 +179,8 @@ struct void_eraser
             for (auto const v : out.e.at(site.message_values))
                 values.push_back(expr(v, 0));
         auto failed = cc::vector<flat_stmt_id>();
-        failed.push_back(out.print(message, values));
+        if (!erases_prints)
+            failed.push_back(out.print(message, values));
         end_invocation(out, failed);
         into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
     }
@@ -244,6 +247,8 @@ struct void_eraser
             element->buffer = expr(element->buffer, depth + 1);
             element->index = expr(element->index, depth + 1);
         }
+        else if (auto* const length = copy.node.try_as<flat_buffer_length>())
+            length->buffer = expr(length->buffer, depth + 1);
         else if (auto* const array_element = copy.node.try_as<flat_element>())
         {
             array_element->object = expr(array_element->object, depth + 1);
@@ -344,6 +349,11 @@ struct void_eraser
             }
             if (copy.node.is<flat_check>() || (erases_prints && copy.node.is<flat_print>()))
                 continue;
+            if (auto* const n = copy.node.try_as<flat_print>(); n != nullptr && expanding != nullptr)
+            {
+                expand_print(out, copy, *n, *expanding, result);
+                continue;
+            }
             if (erases_void && erase_void_statement(copy, result))
                 continue;
 
@@ -404,6 +414,11 @@ struct void_eraser
 void sgl::check::impl::end_invocation(flat_builder& out, stmt_list& into)
 {
     invocation_ender{.out = out}.end(into);
+}
+
+stmt_list sgl::check::impl::expand_prints(flat_builder& out, stmt_list const& body, legalize_options const& options)
+{
+    return void_eraser{.out = out, .erases_void = false, .expanding = &options}.erase(body, 0);
 }
 
 stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts)

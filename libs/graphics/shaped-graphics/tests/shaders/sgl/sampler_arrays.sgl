@@ -1,0 +1,12 @@
+// An array of samplers: each thread reads one texture at one coordinate through the sampler its index picks.
+
+require binding_arrays
+
+binding through:
+    source: texture_2d[float4]
+    samplers: sampler[3]
+    values: mut buffer[float]
+
+@compute(64) fun sample_each(@thread_id id: int3){through}:
+    let at = float2(1.1, 0.5)
+    through.values[id.x] = through.source.sample(at, through.samplers[nonuniform (id.x % 3)], level = 0.0).x

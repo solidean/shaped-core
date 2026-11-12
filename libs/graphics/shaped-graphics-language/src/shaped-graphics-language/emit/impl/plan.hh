@@ -15,6 +15,11 @@ namespace sgl::emit::impl
 /// How many groups an entry point may list besides its `@inline` binding, `sg::max_binding_groups`.
 /// sgl does not link sg, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 inline constexpr auto k_max_groups = 3;
+/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
+/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
+inline constexpr auto k_inline_constants_space = 9;
+/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
+inline constexpr auto k_bound_samplers_space = 10;
 
 /// How many file-scope sampler indices a stage may reach.
 /// Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` both hold 16.
@@ -34,6 +39,8 @@ enum class struct_role : u8
     render_targets,
     /// What a tessellation control stage returns and the evaluation stage takes: its factors, and data per patch.
     patch_constants,
+    /// What a mesh stage writes per triangle and the pixel stage takes beside its stage link, flat (CHK-488).
+    primitive_link,
 };
 
 struct planned_member
@@ -64,6 +71,8 @@ struct planned_member
     /// consecutive locations from `location` (EMIT-174); 0 for any other member.
     i32 pieces = 0;
     check::type_id piece = check::type_id::none;
+    /// The locations each piece takes: two for a 64-bit three- or four-vector the target carries as itself (CHK-454).
+    i32 piece_locations = 1;
     /// In `declared_members`: where the member stands in its struct's `members`, and which of its pieces this is, or -1.
     isize whole = -1;
     i32 piece_index = -1;
@@ -145,6 +154,8 @@ struct planned_constants
     /// The block as its target has to declare it to reach SGL's offsets, named `block_name`; absent where it declares
     /// the members as they are.
     cc::optional<memory_form> form;
+    /// A reserved binding's block, at the reserved table's address, which reaches no host list and no layout.
+    bool is_reserved = false;
 };
 
 /// A resource member of a binding — a buffer, a texture, an image or a sampler — rather than a field of a block.
@@ -167,6 +178,8 @@ struct planned_resource
     bool is_mut = false;
     /// `@coherent`: HLSL declares it `globallycoherent`, and MSL `coherent(device)` (EMIT-150).
     bool is_coherent = false;
+    /// An entry of `k_reserved_bindings`: sg binds it, so the host never hears of it, and it stands at its fixed address.
+    bool is_reserved = false;
     i32 group = 0;
     /// The first of the `count` consecutive slots it takes: a binding array takes one per element (CHK-299).
     i32 slot = 0;
@@ -224,11 +237,14 @@ struct plan
     check::checked_module const& m;
     check::flat_entry_point const& e;
     target which;
-    /// EMIT-183: the text writes a print into sg's debug buffer, which it declares.
-    bool writes_debug = false;
     /// Every `atomic[float]` is the target's own float atomic, rather than a `uint`'s bits: the device adds floats in one
     /// instruction, and the target can say so (vulkan, metal).
     bool native_float_atomics = false;
+    /// The text writes prints and asserts into sg's debug window (EMIT-183), which a metal raygen hands every stage it
+    /// calls through its context, whether it prints itself or not.
+    bool diagnostics = false;
+    /// MSL: the package takes `SOFTWARE_TRACE`, so a structure that moves may be bound, and a native trace takes motion tags.
+    bool sees_motion = false;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;
@@ -283,6 +299,13 @@ struct plan
 [[nodiscard]] i32 workgroup_of(plan const& p, check::symbol_id binding, i32 member);
 /// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
 [[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
+
+/// Where vulkan's `sg_acceleration_addresses` holds the address of resource `index`, an acceleration member: its rank
+/// among the plan's, group by group and each group's by slot, which is how sg numbers them.
+[[nodiscard]] u32 acceleration_address_position(plan const& p, i32 index);
+
+/// Whether the plan holds an acceleration member a trace reaches by address, which then declares the address block.
+[[nodiscard]] bool holds_acceleration_member(plan const& p);
 
 /// The position in `samplers` of the file-scope sampler `symbol`, or -1 where the entry point reaches none of it.
 [[nodiscard]] i32 sampler_of(plan const& p, check::symbol_id symbol);
@@ -373,20 +396,37 @@ struct block_placement
 /// element or column, named `<member>_<i>` at consecutive locations.
 [[nodiscard]] cc::vector<planned_member> declared_members(planned_struct const& s);
 
+/// The semantic HLSL declares member `member` of `s` under, which is what a DXIL signature names it by on both routes;
+/// empty for a member of a struct that crosses no edge.
+/// SPIR-V has no semantics: vulkan takes the location as an attribute, and keeps this because HLSL's grammar asks for it.
+[[nodiscard]] cc::string semantic_of(plan const& p, planned_struct const& s, planned_member const& member);
+
 /// EMIT-174: whether `element` names one piece of an array held as pieces, by a literal index.
 /// `p.accesses` must hold the element's object already.
 [[nodiscard]] bool is_piece(plan const& p, check::flat_element const& element);
+
+/// EMIT-196: whether a 64-bit value of `type` crosses a link as its 32-bit words, low word first, where the target
+/// carries no 64-bit value between stages (`hlsl-dx12`, MSL).
+[[nodiscard]] bool is_word_split(plan const& p, check::type_id type);
+/// EMIT-196: the pieces a value of `type` crosses as where it is word split: one, or two for a three- or four-vector.
+[[nodiscard]] i32 word_pieces(plan const& p, check::type_id type);
+/// CHK-454: whether `type` is a 64-bit three- or four-vector, which takes two locations.
+[[nodiscard]] bool is_wide_64_bit(plan const& p, check::type_id type);
 
 /// EMIT-173: fills `p.accesses` from the target, its blocks and its structs in memory, and from where each expression
 /// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.
 void plan_memory_accesses(plan& p);
 
+/// What reaches a matrix from an element of `type`, a multi-dimensional array of mat3 in HLSL's memory: `.m` of its
+/// `sgl_mat3_cell` (EMIT-168); empty for any other type.
+[[nodiscard]] cc::string_view mat3_cell_field(plan const& p, check::type_id type);
 /// Whether member `member` of `object_type` is a mat3 its target holds as a `float4x3`, where the struct is in memory.
 [[nodiscard]] bool holds_widened_mat3(plan const& p, check::type_id object_type, isize member);
 /// Whether member `member` of `object_type` is an array of 3-vectors its target holds as 4-vectors (EMIT-169).
 [[nodiscard]] bool holds_widened_array(plan const& p, check::type_id object_type, isize member);
 
-/// The prelude's 4-vector of the scalar of `element`, `float4` for a `float2`, which holds one element per row.
+/// The prelude's vector of one 16-byte row of the scalar of `element`, `float4` for a `float2` and `long2` for a
+/// `long`, which holds one element per row.
 [[nodiscard]] cc::string_view row_vector_of(plan const& p, check::type_id element);
 
 /// `members` must belong to a binding that passed `validate_binding`.

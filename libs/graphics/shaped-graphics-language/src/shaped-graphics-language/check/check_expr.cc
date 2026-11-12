@@ -216,13 +216,13 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     if (object == error_type)
         return error_type;
     auto const kind = out.at(object).kind;
-    if (kind == type_kind::image)
+    if (kind == type_kind::image || kind == type_kind::texture)
         return check_texel(scope, id, node, object);
     if (auto const lane = lane_type_of(object); is_valid(lane))
         return check_lane(scope, node, object, lane);
     if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer, an image, an array or a vector");
+        unsupported(file, where, "a subscript on anything but a buffer, an image, a texture, an array or a vector");
         return error_type;
     }
 
@@ -282,8 +282,9 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
         auto is_handed = false;
         for (auto const h : handed)
             is_handed = is_handed || h == id;
+        // CHK-366: a buffer is subscripted, or handed to a call as a texture is
         auto const is_buffer = out.at(result).kind == type_kind::buffer;
-        if (is_buffer ? id != subscripted : !is_handed)
+        if (!is_handed && !(is_buffer && id == subscripted))
         {
             unsupported(
                 file, where,
@@ -335,6 +336,18 @@ type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index 
     arguments.leading_dots.insert_at(0, {});
 
     auto const& info = out.at(image);
+    // CHK-514: a texture's texel reads as its `load`, and nothing stores one
+    if (info.kind == type_kind::texture)
+    {
+        if (id == assigned)
+        {
+            report(diagnostic_kind::not_assignable, file, span_of(file, id),
+                   "a texture is only read, and an image is what a shader stores into");
+            return error_type;
+        }
+        return resolve_overload(scope, id, ast::expr_id::none, candidates_of(file, "load", image), arguments, "load",
+                                call_spelling::dot_call);
+    }
     auto const texel = type_of_builtin(texel_name_of(info.format), file, span_of(file, id));
     if (texel == error_type)
         return error_type;
@@ -571,6 +584,14 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
             note_program_call(scope, candidate, where);
         return to;
     }
+    // CHK-150: an enum's `as int` takes the enum as the int it is held as, as its `==` does
+    if (out.is_plain_enum(from) && to == prelude_type(builtins::k_int))
+        if (auto const* const found = prelude_names.get_ptr("enum_as_int");
+            found != nullptr && demand((*found)[0], file, where) == symbol_state::checked)
+        {
+            set_target(file, id, {.kind = target_kind::overload, .symbol = (*found)[0]});
+            return to;
+        }
     report(diagnostic_kind::no_matching_overload, file, where,
            cc::format("{} as {}: no conversion", out.name_of(from), out.name_of(to)));
     return error_type;
@@ -671,12 +692,13 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
     {
         // CHK-61: held in 64 bits, and refused only where it keeps a default type that does not hold it
         auto const value = parse_literal_integer(text);
-        if (!value.has_value())
+        auto const is_past_long = parse_literal_past_long(text).has_value();
+        if (!value.has_value() && !is_past_long)
         {
             unsupported(file, where, "an integer literal beyond 64 bits");
             return error_type;
         }
-        if (value.value() < -2147483647 - 1 || value.value() > 2147483647)
+        if (is_past_long || value.value() < -2147483647 - 1 || value.value() > 2147483647)
             wide_literals.push_back({.file = file, .expr = id, .function = scope.function, .instance = current_instance});
         return type_of_builtin(builtins::k_int, file, where);
     }
@@ -707,12 +729,13 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
 {
     // CHK-357: the suffix names the type, and the literal converts to no other
     auto const s = split_suffix(text).value();
-    if (s.width != 32 && s.width != 16)
+    if (s.width != 32 && s.width != 16 && s.width != 64)
     {
         unsupported(file, where, cc::format("a literal of {} bits, which no type of the prelude is", s.width));
         return error_type;
     }
     auto const is_narrow = s.width == 16;
+    auto const is_wide = s.width == 64;
     auto const is_float_body = classify_number(s.body) == number_class::plain_float;
     if (is_float_body && s.letter != 'f')
     {
@@ -721,9 +744,15 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         return error_type;
     }
 
-    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half : builtins::k_float)
-                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort : builtins::k_uint)
-                                      : (is_narrow ? builtins::k_short : builtins::k_int);
+    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half
+                                         : is_wide ? builtins::k_double
+                                                   : builtins::k_float)
+                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort
+                                         : is_wide ? builtins::k_ulong
+                                                   : builtins::k_uint)
+                                      : (is_narrow ? builtins::k_short
+                                         : is_wide ? builtins::k_long
+                                                   : builtins::k_int);
     auto const type = type_of_builtin(name, file, where);
     if (type == error_type)
         return error_type;
@@ -746,12 +775,16 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         return type;
     }
     auto const value = parse_literal_integer(s.body);
-    if (!value.has_value())
+    auto const past_long = parse_literal_past_long(s.body);
+    if (!value.has_value() && !past_long.has_value())
     {
         unsupported(file, where, "an integer literal beyond 64 bits");
         return error_type;
     }
-    if (!holds({.is_number = true, .is_integer = true, .integer = value.value()}, type))
+    auto const number = past_long.has_value()
+                          ? number_literal{.is_number = true, .is_integer = true, .is_past_long = true}
+                          : number_literal{.is_number = true, .is_integer = true, .integer = value.value()};
+    if (!holds(number, type))
     {
         report(diagnostic_kind::literal_not_representable, file, where, cc::format("{} does not hold {}", name, text));
         return error_type;
@@ -780,13 +813,15 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
             return error_type;
         }
         // CHK-366: a resource parameter stands where its binding member would, which is as a call's argument
-        if (local->type != error_type && is_resource(out.at(local->type).kind)
-            && out.at(local->type).kind != type_kind::buffer)
+        if (local->type != error_type && is_resource(out.at(local->type).kind))
         {
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;
-            if (!is_handed)
+            // a buffer and bytes are subscripted, or their length read, as a member's are
+            auto const kind = out.at(local->type).kind;
+            auto const is_read = (kind == type_kind::buffer || kind == type_kind::bytes) && id == subscripted;
+            if (!is_handed && !is_read)
             {
                 unsupported(file, where,
                             cc::format("{} as a value; hand it to a call, as in `t.load(xy)`", out.name_of(local->type)));
@@ -844,6 +879,7 @@ type_id checker::check_symbol_value(function_scope& scope,
     {
     case symbol_kind::structure:
     case symbol_kind::enumeration:
+    case symbol_kind::alias:
         unsupported(file, where, "a type as a value");
         break;
     case symbol_kind::function:
@@ -872,11 +908,6 @@ type_id checker::check_symbol_value(function_scope& scope,
         auto is_handed = false;
         for (auto const h : handed)
             is_handed = is_handed || h == id;
-        if (scope.is_test)
-        {
-            unsupported(file, where, "a file-scope sampler in a test, which samples no texture");
-            break;
-        }
         if (!is_valid(scope.function) || !is_handed)
         {
             unsupported(file, where, "a sampler as a value; hand it to a builtin, as in `t.sample(uv, smp)`");
@@ -884,8 +915,6 @@ type_id checker::check_symbol_value(function_scope& scope,
         }
         return out.at(symbol).type;
     }
-    case symbol_kind::unsupported:
-        break;
     }
     return error_type;
 }
@@ -958,9 +987,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             }
             set_target(file, id, {.kind = target_kind::binding_member, .symbol = binding, .index = i32(index)});
             auto const type = out.at(out.bindings[out.at(binding).info].members)[index].type;
-            if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted)
+            // CHK-366: a buffer is subscripted, or handed to a call as a texture is
+            auto is_buffer_handed = false;
+            for (auto const h : handed)
+                is_buffer_handed = is_buffer_handed || h == id;
+            if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted && !is_buffer_handed)
             {
-                unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
+                unsupported(file, span_of(file, id),
+                            "a buffer as a value; read an element of it, as in `values[i]`, or hand it to a call");
                 return error_type;
             }
             if (!judge_atomic_use(file, id, type))
@@ -977,8 +1011,10 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;
+            // CHK-460: a `bytes` whose length is read is named as a subscripted buffer is
+            auto const is_measured = out.at(type).kind == type_kind::bytes && id == subscripted;
             if (type != error_type && is_resource(out.at(type).kind) && out.at(type).kind != type_kind::buffer
-                && !is_handed)
+                && !is_handed && !is_measured)
             {
                 unsupported(file, span_of(file, id),
                             cc::format("{} as a value; call a builtin on it, as in `t.load(xy)`", out.name_of(type)));
@@ -988,11 +1024,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
 
         // `light_kind.point`: an enum is no value either (CHK-148), so its name never reaches `check_expr`
-        if (out.at(found->front()).kind == symbol_kind::enumeration)
+        // an alias of an enum names its cases as the enum's own name does (CHK-14)
+        auto const enumeration = out.at(found->front()).kind == symbol_kind::alias
+                                   ? declared_type_of(found->front(), file, span_of(file, member.object))
+                                   : found->front();
+        if (is_valid(enumeration) && out.at(enumeration).kind == symbol_kind::enumeration)
         {
-            auto const enumeration = found->front();
             auto const object_where = span_of(file, member.object);
-            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = enumeration});
+            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = found->front()});
             if (demand(enumeration, file, object_where) != symbol_state::checked)
                 return error_type;
 
@@ -1014,13 +1053,32 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
     }
 
+    // CHK-460: `values.length` names a buffer without reading an element of it, as a subscript does
+    auto const outer = subscripted;
+    if (name == "length")
+        subscripted = member.object;
     auto const object = check_expr(scope, member.object);
+    subscripted = outer;
     if (object == error_type || member.name.empty())
         return error_type;
 
     // CHK-288: an array's length is a constant of its type, and it has no other member
     if (out.at(object).kind == type_kind::array)
     {
+        // CHK-491: an unbounded array's length is the views a group binds, which sg writes per dispatch or draw
+        if (name == "length" && out.at(object).count == 0)
+        {
+            auto const where = tables_of(file).target_at(member.object);
+            if (where.kind != target_kind::binding_member)
+            {
+                unsupported(file, span_of(file, id),
+                            "the length of an unbounded binding array named otherwise than "
+                            "as its binding's member");
+                return error_type;
+            }
+            set_target(file, id, {.kind = target_kind::buffer_length});
+            return type_of_builtin(builtins::k_int, file, span_of(file, id));
+        }
         if (name != "length")
         {
             report(diagnostic_kind::unknown_member, file, member.name,
@@ -1029,6 +1087,13 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
         set_target(file, id, {.kind = target_kind::array_length, .index = out.at(object).count});
         return type_of_builtin(builtins::k_int, file, span_of(file, id));
+    }
+
+    // CHK-460: a buffer's length is the bound memory's
+    if ((out.at(object).kind == type_kind::buffer || out.at(object).kind == type_kind::bytes) && name == "length")
+    {
+        set_target(file, id, {.kind = target_kind::buffer_length});
+        return type_of_builtin(builtins::k_uint, file, span_of(file, id));
     }
 
     // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise

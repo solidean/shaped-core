@@ -149,6 +149,39 @@ enum class sr::mouse_button : sr::u8
     x2, ///< the second extra button, usually "forward"
 };
 
+/// A gamepad button by position, so `south` is A on an Xbox pad and cross on a PlayStation one.
+/// The extra paddles and touchpads some pads have are not modelled and produce no event.
+enum class sr::gamepad_button : sr::u8
+{
+    south,
+    east,
+    west,
+    north,
+    back,
+    guide,
+    start,
+    left_stick,
+    right_stick,
+    left_shoulder,
+    right_shoulder,
+    dpad_up,
+    dpad_down,
+    dpad_left,
+    dpad_right,
+};
+
+/// A gamepad axis.
+/// Sticks read -1 to 1 with up and right positive, and triggers 0 to 1.
+enum class sr::gamepad_axis : sr::u8
+{
+    left_x,
+    left_y,
+    right_x,
+    right_y,
+    left_trigger,
+    right_trigger,
+};
+
 /// Modifier keys held when an event was produced, as a bit set.
 /// Each covers both instances — shift is set for either shift key.
 enum class sr::key_modifiers : sr::u8
@@ -162,6 +195,12 @@ enum class sr::key_modifiers : sr::u8
 
 namespace sr
 {
+
+/// The bit `gamepad_state::held_buttons` sets for `b`.
+[[nodiscard]] constexpr u32 gamepad_button_bit(gamepad_button b)
+{
+    return 1u << u8(b);
+}
 
 /// The bit `mouse_move_event::held_buttons` sets for `b`.
 [[nodiscard]] constexpr u8 mouse_button_bit(mouse_button b)
@@ -295,6 +334,51 @@ struct sr::file_drop_event
     tg::pos2f cursor_pos;
 };
 
+/// A gamepad appearing or going away, which every pad already plugged in also reports on the first poll.
+/// `window_system::gamepads()` holds it from this event on.
+struct sr::gamepad_connection_event
+{
+    /// Which pad, stable while it stays connected and never reused within a run.
+    u32 gamepad = 0;
+    cc::string name;
+    bool is_connected = false;
+};
+
+/// A gamepad button going down or coming up.
+/// Gamepads have no focus of their own: nothing arrives while no window of this application has it.
+struct sr::gamepad_button_event
+{
+    u32 gamepad = 0;
+    sr::gamepad_button button = gamepad_button::south;
+    bool is_down = false;
+};
+
+/// A gamepad axis moving, with no dead zone applied: a stick at rest may report small values forever.
+/// A game loop usually reads `window_system::gamepads()` instead, since a held stick sends no event.
+struct sr::gamepad_axis_event
+{
+    u32 gamepad = 0;
+    sr::gamepad_axis axis = gamepad_axis::left_x;
+    float value = 0.0f;
+};
+
+/// One connected gamepad as of the last poll_events, from the same events input_event carries.
+struct sr::gamepad_state
+{
+    u32 gamepad = 0;
+    cc::string name;
+    /// The buttons held, one `gamepad_button_bit` each.
+    u32 held_buttons = 0;
+    /// Up and right positive, -1 to 1, with no dead zone applied.
+    tg::vec2f left_stick;
+    tg::vec2f right_stick;
+    /// 0 to 1.
+    float left_trigger = 0.0f;
+    float right_trigger = 0.0f;
+
+    [[nodiscard]] bool is_held(gamepad_button b) const { return (held_buttons & gamepad_button_bit(b)) != 0; }
+};
+
 /// One thing the user did.
 ///
 /// Obtained from window_system::events(), oldest first, across every window in the order the OS reported them.
@@ -310,7 +394,7 @@ struct sr::file_drop_event
 ///             [](auto const&) {});
 struct sr::input_event
 {
-    /// The window the event went to, or null when none had focus.
+    /// The window the event went to, or null when none had focus, as for every gamepad event, which belongs to no window.
     /// Never dangles within one frame: a window destroyed mid-frame drops its events from this span.
     sr::window* window = nullptr;
 
@@ -318,13 +402,22 @@ struct sr::input_event
     /// Divide by it, not by window::pixel_density, to get logical units — the window's own changes mid-poll when it moves to another display.
     float pixel_density = 1.0f;
 
-    /// What happened, as one of the six event payloads.
+    /// What happened, as one of the nine event payloads.
     ///
     /// Visiting it is the way to consume an event: each handler receives its payload named and typed, with no probe first.
     /// Handlers are combined into one overload set, so a trailing `[](auto const&) {}` absorbs the kinds a handler does not care about
-    /// — spell all six instead, and a seventh event kind becomes a compile error here rather than silence.
+    /// — spell all nine instead, and a tenth event kind becomes a compile error here rather than silence.
     /// The `is_*` / `as_*` accessors below are for what a visit cannot express: a predicate, or a loop body that must `continue`.
-    cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event, file_drop_event> payload;
+    cc::variant<key_event,
+                text_event,
+                mouse_move_event,
+                mouse_button_event,
+                mouse_wheel_event,
+                file_drop_event,
+                gamepad_connection_event,
+                gamepad_button_event,
+                gamepad_axis_event>
+        payload;
 
     /// Which kind the payload holds.
     /// For a predicate — code that then wants the payload is usually a visit instead.
@@ -334,6 +427,9 @@ struct sr::input_event
     [[nodiscard]] bool is_mouse_button() const { return payload.is<mouse_button_event>(); }
     [[nodiscard]] bool is_mouse_wheel() const { return payload.is<mouse_wheel_event>(); }
     [[nodiscard]] bool is_file_drop() const { return payload.is<file_drop_event>(); }
+    [[nodiscard]] bool is_gamepad_connection() const { return payload.is<gamepad_connection_event>(); }
+    [[nodiscard]] bool is_gamepad_button() const { return payload.is<gamepad_button_event>(); }
+    [[nodiscard]] bool is_gamepad_axis() const { return payload.is<gamepad_axis_event>(); }
 
     /// The payload as one specific kind, which the event must hold.
     /// Ask the matching is_* first unless the kind is already known.
@@ -343,4 +439,10 @@ struct sr::input_event
     [[nodiscard]] mouse_button_event const& as_mouse_button() const { return payload.as<mouse_button_event>(); }
     [[nodiscard]] mouse_wheel_event const& as_mouse_wheel() const { return payload.as<mouse_wheel_event>(); }
     [[nodiscard]] file_drop_event const& as_file_drop() const { return payload.as<file_drop_event>(); }
+    [[nodiscard]] gamepad_connection_event const& as_gamepad_connection() const
+    {
+        return payload.as<gamepad_connection_event>();
+    }
+    [[nodiscard]] gamepad_button_event const& as_gamepad_button() const { return payload.as<gamepad_button_event>(); }
+    [[nodiscard]] gamepad_axis_event const& as_gamepad_axis() const { return payload.as<gamepad_axis_event>(); }
 };

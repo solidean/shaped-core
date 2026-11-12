@@ -44,7 +44,7 @@ struct varyings:
 @pixel fun edge_ps(p: varyings, @subgroup_size size: int) -> target:
     let across = p.uv.x - quad_swap_x(p.uv.x)
     let votes = subgroup_ballot(across > 0.0)
-    return { color = float4(across, count_bits(votes.x) as float, size as float, 1.0) }
+    return {color = float4(across, count_bits(votes.x) as float, size as float, 1.0)}
 
 // a test is one invocation, whose uniform load reads what it stored
 test:
@@ -75,16 +75,14 @@ test:
     let x = 1u
     workgroup_uniform_load(x) == 1u
 
-// a run is one invocation, which has no subgroup to exchange values in (CHK-379)
-@expect(error = "unsupported-yet")
-test subgroup_add(1.0) == 1.0
+// a test runs as one lane per invocation of a subgroup, so a sum over it counts them (EVAL-140)
+test subgroup_add(1.0) == test_lane_count() as float
 
 fun widest(b: bool) -> float:
     if b => return subgroup_max(2.0)
     return 1.0
 
-// reached through a helper, it is the test's own call that is refused
-@expect(error = "unsupported-yet")
+// reached through a helper as well
 test widest(true) == 2.0
 
 // many invocations adding to one slot: where the subgroup agrees on the slot, its sum is added once

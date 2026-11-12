@@ -102,11 +102,6 @@ void checker::check_message(function_scope& scope, ast::expr_id message, bool ta
             unsupported(file, span_of(file, message), "an assert message that is no quoted literal");
         return;
     }
-    if (text_of(file, span_of(file, message)).contains('\n'))
-    {
-        unsupported(file, span_of(file, message), "a multi-line message");
-        return;
-    }
     // a message is no value, so it takes no type of its own: strings are not first class
     for (auto const part : ast.at(literal->interpolations))
     {
@@ -266,7 +261,12 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     if (ast::is_valid(let.type))
     {
         type = resolve_value_type(file, let.type, &scope);
-        if (ast::is_valid(let.value))
+        // CHK-341: the prelude's `undefined()` has the type written of the `let mut` it stands in
+        auto const* const call = ast::is_valid(let.value) ? ast.at(let.value).node.try_as<ast::call>() : nullptr;
+        if (call != nullptr && let.is_mut && is_prelude_file(file) && is_named(file, call->callee, "undefined")
+            && ast.at(call->arguments).empty())
+            set_target(file, let.value, {.kind = target_kind::undefined_value});
+        else if (ast::is_valid(let.value))
             (void)check_expected(scope, let.value, type);
     }
     else if (ast::is_valid(let.value))
@@ -366,7 +366,20 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
     }
     if (operand != expr)
     {
-        if (!what.empty())
+        // a mut argument is the caller's place, named again wherever the body names it, as an assignment's target is;
+        // a payload and a callable's parameter are a value handed to the trace whole
+        // a struct of the program reads its swizzle as a new value, which no body could write through
+        auto const operand_type = tables_of(file).type_at(operand);
+        if (what == "a mut argument" && operand_type != type_id::none && out.at(operand_type).kind != type_kind::error
+            && out.builtin_type_of(operand_type) == nullptr)
+        {
+            if (quiet_why != nullptr)
+                *quiet_why = "a swizzle of a struct of the program as a mut argument is not supported yet";
+            else
+                unsupported(file, span_of(file, expr), "a swizzle of a struct of the program as a mut argument");
+            return false;
+        }
+        if (!what.empty() && what != "a mut argument")
         {
             if (quiet_why != nullptr)
                 *quiet_why = cc::format("a swizzle as {} is not supported yet", what);
@@ -736,31 +749,31 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
 
 // ---- recursion ------------------------------------------------------------------------------------------------------
 
-void checker::find_recursion(isize first)
+void checker::find_recursion(isize first, isize first_note, isize first_call)
 {
-    // 0 is unvisited, 1 is on the path, 2 is done; one entry per function, as `notes`
+    // 0 is unvisited, 1 is on the path, 2 is done; one entry per function of this layer, from note `first_note`
     // A lower layer's function is done: it calls only its own layer's, whose loops were found when it was checked.
-    auto state = cc::vector<u8>::create_filled(notes.size(), 0);
-    for (auto i = isize(0); i < first; ++i)
-        if (auto const& s = out.symbols[i]; s.kind == symbol_kind::function && s.info >= 0)
-            state[s.info] = 2;
+    auto state = cc::vector<u8>::create_filled(notes.size() - first_note, 0);
+    auto const state_of = [&](isize info) -> u8& { return state[info - first_note]; };
+    auto const is_lower = [&](isize info) { return info < first_note; };
     auto path = cc::vector<symbol_id>();
 
     // Each function's calls, so a visit walks its own edges rather than every edge of the module.
-    auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size());
-    for (auto i = isize(0); i < calls.size(); ++i)
-        if (auto const info = out.at(calls[i].caller).info; info >= 0 && state[info] == 0)
-            calls_of[info].push_back(i);
+    auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size() - first_note);
+    for (auto i = first_call; i < calls.size(); ++i)
+        if (auto const info = out.at(calls[i].caller).info; info >= 0 && !is_lower(info))
+            calls_of[info - first_note].push_back(i);
 
     auto const visit = [&](auto&& self, symbol_id f) -> void
     {
-        state[out.at(f).info] = 1;
+        state_of(out.at(f).info) = 1;
         path.push_back(f);
-        for (auto const i : calls_of[out.at(f).info])
+        for (auto const i : calls_of[out.at(f).info - first_note])
         {
             // by value: a report does not touch `calls`, and a copy keeps this loop honest if one ever does
             auto const edge = calls[i];
-            auto const seen = state[out.at(edge.callee).info];
+            auto const callee = out.at(edge.callee).info;
+            auto const seen = is_lower(callee) ? u8(2) : state_of(callee);
             if (seen == 0)
                 self(self, edge.callee);
             if (seen != 1)
@@ -781,13 +794,13 @@ void checker::find_recursion(isize first)
             report(diagnostic_kind::recursive_call, edge.file, edge.where, cc::move(loop));
         }
         path.remove_back();
-        state[out.at(f).info] = 2;
+        state_of(out.at(f).info) = 2;
     };
 
     for (auto i = first; i < out.symbols.size(); ++i)
     {
         auto const& s = out.symbols[i];
-        if (s.kind == symbol_kind::function && s.info >= 0 && state[s.info] == 0)
+        if (s.kind == symbol_kind::function && s.info >= 0 && !is_lower(s.info) && state_of(s.info) == 0)
             visit(visit, symbol_id(i));
     }
 }

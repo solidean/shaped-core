@@ -7,7 +7,7 @@
 #include <nexus/async-test.hh>
 #include <nexus/bench/run_async.hh>
 #include <nexus/test.hh>
-#include <sg_test_shaders.hh>
+#include <sg_test_sgl_shaders.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
@@ -77,8 +77,8 @@ cc::shared_async<cc::unit> render_frames(sg::context_handle ctx,
             auto const& from = targets[pass];
             auto const& to = targets[(pass + 1) % targets_per_frame];
             auto const group = ctx->transient.create_binding_group(
-                layout, {{.name = "gSource", .view = from.as_texture_view()},
-                         {.name = "gTarget", .view = to.as_image_view<sg::pixel_format::rgba16_float>()}});
+                layout, {{.name = "ping_pong.source", .view = from.as_texture_view()},
+                         {.name = "ping_pong.target", .view = to.as_image_view<sg::pixel_format::rgba16_float>()}});
             cmd->compute.bind_group(0, *group);
             cmd->compute.dispatch_threads(width, height);
         }
@@ -116,7 +116,8 @@ ASYNC_BENCHMARK("sg transient - per-frame render targets")
             continue; // no device for this backend on this machine
         auto const ctx = created.value();
 
-        auto const& compiled = co_await sg::test::shaders::ping_pong.compute.main->acquire(*ctx);
+        auto const compiled_async = sg::test::sgl_shaders::ping_pong::main->acquire(*ctx);
+        auto const& compiled = co_await compiled_async;
 
         auto const layout = ctx->cached.acquire_binding_group_layout(compiled.bindings);
         auto const pipeline = co_await ctx->cached.acquire_compute_pipeline(

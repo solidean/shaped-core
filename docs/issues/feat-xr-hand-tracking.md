@@ -3,7 +3,6 @@ created: 2026-11-05
 priority: normal
 tags: [xr, input]
 parent: epic-xr
-blocked-by: [feat-xr-controller-actions]
 ---
 
 # Hand tracking: joint poses, pinch and aim

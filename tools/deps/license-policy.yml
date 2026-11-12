@@ -110,6 +110,20 @@ exceptions:
       The data section lets the software send usage data to Microsoft, with only partial opt-out.
       The headers are MIT, LICENSE-CODE.txt, and carry none of this.
 
+  - identifier: LicenseRef-Microsoft-DirectX-Preview
+    why: >-
+      Microsoft Software License Terms for Microsoft DirectX as the pre-release D3D12 Agility SDK carries them, in
+      extern/agility-preview, the runtime with DXR's clustered geometry and partitioned TLAS.
+      Proprietary, narrower than the retail terms, and accepted on 2026-11-11 by the maintainer for development machines only.
+      Section 4e forbids sharing, publishing or distributing it, with no distributable-code carve-out at all, so nothing
+      we ship may contain it, stage it or require it.
+      The time-sensitive section ends the agreement 30 days after a commercial release first becomes available, or when
+      Microsoft terminates it, so the pin is retired as soon as a retail Agility SDK carries the features.
+      extern/agility-preview is `install: on-request`, fetch-agility.py refuses it without --accept-license, and only a
+      build configured with SC_AGILITY_PREVIEW reads it, in a build directory of its own.
+      The data section matches the retail terms', with only partial opt-out.
+      The headers are MIT, LICENSE-CODE.txt, and carry none of this.
+
 # Licenses we will not take, listed so a refusal comes with a reason rather than a silent absence.
 denied:
   - identifier: GPL-2.0-only

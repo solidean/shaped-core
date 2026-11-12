@@ -23,7 +23,7 @@ namespace
 {
 [[nodiscard]] bool can_sample()
 {
-    return cc::stack_capture_from_context_available() && CC_HAS_THREADS;
+    return cc::rec::sampling_available();
 }
 
 CC_DONT_INLINE void burn_until_sampled_in_scope(u64 samples)

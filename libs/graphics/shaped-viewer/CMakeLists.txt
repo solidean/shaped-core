@@ -40,6 +40,7 @@ add_library(shaped-viewer
     src/shaped-viewer/refs.cc
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/capture.cc
+    src/shaped-viewer/settled.cc
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/impl/wavefront_pacing.cc
     src/shaped-viewer/impl/web_page.cc
@@ -187,8 +188,6 @@ elseif(EMSCRIPTEN AND TARGET shaped-graphics-webgpu)
     target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_WEBGPU=1)
 endif()
 
-sc_target_pch(shaped-viewer SG)
-
 target_compile_options(shaped-viewer
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -249,7 +248,6 @@ if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-d
     )
     sc_nexus_binary(shaped-view KINDS tool)
     target_link_libraries(shaped-view PRIVATE shaped-viewer nexus)
-    sc_target_pch(shaped-view SG NEXUS)
 
     # A windowed program: opened from Explorer, a console subsystem binary would bring a console window up beside it.
     set_target_properties(shaped-view PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -319,14 +317,13 @@ if(SC_BUILD_TESTS)
     target_include_directories(shaped-viewer-test PRIVATE "${BABEL_TEST_DIR}")
 
     # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the import test that reads the real scene when present.
-    cmake_path(SET _sv_test_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/bistro/.install")
-    target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR="${_sv_test_bistro_dir}")
+    sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR ../../../extern/bistro/.install)
 
     # Where the glTF Research Scenes land (extern/gltf-research-scenes/fetch-research-scenes.py), for the tests that draw one when present.
-    cmake_path(SET _sv_test_research_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/gltf-research-scenes/.install")
-    target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_RESEARCH_SCENES_DIR="${_sv_test_research_dir}")
+    sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_RESEARCH_SCENES_DIR ../../../extern/gltf-research-scenes/.install)
 
-    sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
+    # The pbr shade kernel the generator writes, committed for native-parity.py's size gate; a test keeps it current.
+    sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_DATA_DIR tests/data)
 
     # The GPU tests run once per backend this build has: an entry driver per backend invokes every
     # `INVOCABLE_TEST(..., (sg::context_handle const&))` in the binary against one context of it.
@@ -357,12 +354,14 @@ if(SC_BUILD_TESTS)
             tests/cutout-trace-test.cc
             tests/guide-ray-test.cc
             tests/emitter-trace-test.cc
+            tests/deterministic-seed-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc
             tests/hybrid-test.cc
             tests/studio-test.cc
             tests/auto-exposure-test.cc
+            tests/bloom-view-test.cc
             tests/mode-switch-test.cc
             tests/restart-energy-test.cc
             tests/mode-agreement-test.cc
@@ -423,6 +422,7 @@ if(SC_BUILD_TESTS)
             tests/raster-without-raytracing-test.cc
             tests/raster-bound-test.cc
             tests/wavefront-benchmark.cc
+            tests/native-route-benchmark.cc
             tests/raster-benchmark.cc
             tests/hybrid-benchmark.cc
             tests/viewer-window-manual-test.cc
@@ -438,7 +438,7 @@ if(SC_BUILD_TESTS)
         endif()
 
         # Where the on-request Sponza fetch installs, which the raster and hybrid benchmarks draw when it is there.
-        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
+        sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR ../../../extern/sponza/.install)
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.

@@ -11,7 +11,9 @@ using namespace cc::primitive_defines;
 
 /// Every test of `source` run with `bindings`, each result that is no pass as its diagnostic, in the form `reports_of` writes.
 /// The check pass reports nothing first, and a test that expects diagnostics is judged by them and left out.
-inline cc::string driven_failures_of(cc::string_view source, sgl::check::driver_bindings const& bindings)
+inline cc::string driven_failures_of(cc::string_view source,
+                                     sgl::check::driver_bindings const& bindings,
+                                     sgl::check::run_limits const& limits = {})
 {
     auto checked = check_sources(read_prelude(), source);
     REQUIRE(reports_of(checked) == "");
@@ -20,7 +22,8 @@ inline cc::string driven_failures_of(cc::string_view source, sgl::check::driver_
         files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
 
     auto shown = cc::vector<sgl::check::located_diagnostic>();
-    auto const results = sgl::test::run_tests(checked.module, files, {.file = checked.user_file(), .bindings = bindings});
+    auto const results = sgl::test::run_tests(checked.module, files,
+                                              {.file = checked.user_file(), .limits = limits, .bindings = bindings});
     REQUIRE(!results.empty());
     for (auto const& r : results)
         if (!r.is_passed())

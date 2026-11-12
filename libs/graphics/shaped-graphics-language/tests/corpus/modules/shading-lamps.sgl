@@ -1,0 +1,8 @@
+// A module of the corpus library whose name is dotted: `shading.lamps` is one name, and no module of `shading` holds it.
+// A `use` of it binds `lamps`, the last part.
+module shading.lamps
+
+fun glow(x: float) -> float => x * 3.0
+
+// a module sees its own names unqualified, its dotted name being no prefix of them
+test glow(1.0) == 3.0

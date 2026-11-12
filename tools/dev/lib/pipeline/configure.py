@@ -48,6 +48,7 @@ def _ensure_prereqs(root: Path, preset: Preset, emsdk_path: str | None = None) -
     prereqs.ensure_dxc(root, preset.name)
     prereqs.ensure_zydis(root, preset.name)
     prereqs.ensure_sdl3(root, preset.name)
+    prereqs.ensure_openxr(root, preset.name)
     prereqs.ensure_node_webgpu(root, preset.name, emsdk_path)
     prereqs.ensure_sqlite(root, preset.name)
     prereqs.ensure_oidn_weights(root, preset.name)
@@ -64,6 +65,8 @@ def _configure_one(
     defines = toolset.compiler_defines(preset, root)
     if preset.example_backend is not None:
         defines = {**defines, "SC_EXAMPLE_BACKEND": preset.example_backend}
+    if preset.agility_preview:
+        defines = {**defines, "SC_AGILITY_PREVIEW": "ON"}
     if preset.is_cross_compiling:
         # Imported here: host_tools configures the host preset through this module.
         from .host_tools import ensure_host_sgl

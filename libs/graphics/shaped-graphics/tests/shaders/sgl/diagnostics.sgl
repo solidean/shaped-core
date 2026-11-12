@@ -4,7 +4,30 @@
 binding checked:
     values: mut buffer[int]
 
-@compute(4) fun double_checked(@thread_id id: int3){checked}:
+@compute fun double_checked(@thread_id id: int3){checked}:
     let v = checked.values[id.x]
     assert v >= 0, "a negative input $v"
     checked.values[id.x] = v * 2
+
+// A vertex stage's assert, which vulkan writes only on a device with vertex_pipeline_stores (EMIT-183).
+// Vertex 2 fails it, so its record is the one error a draw logs, and its NaN position culls the triangle.
+struct marked:
+    @position position: hpos4
+
+@pixel struct marked_target:
+    color: float4
+
+@vertex fun marking_vs(@vertex_index v: int) -> marked:
+    assert v < 2, "vertex $v of the triangle"
+    let x = ((v & 1) as float) * 4.0 - 1.0
+    let y = ((v >> 1) as float) * 4.0 - 1.0
+    return {position = hpos4(x, y, 0.0, 1.0)}
+
+@pixel fun marking_ps(p: marked) -> marked_target:
+    return {color = float4(1.0, 0.0, 0.0, 1.0)}
+
+pipeline vertex_asserted:
+    vertex = marking_vs
+    pixel = marking_ps
+    cull = .none
+    format = .rgba8_unorm

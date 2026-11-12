@@ -3,7 +3,7 @@
 *Incubator: not normative.*
 
 **Specified since 2026-11-05**: the attribute and an entry point's level (CHK-435), the lint (CHK-436), what each target keeps (EMIT-185) and the licenses (EVAL-6).
-What stays here is vulkan's execution modes, a WebGPU opt-in on the context, levels finer than the entry point, and the open questions below.
+What stays here is metal's denormals, levels finer than the entry point, and the open questions below.
 
 ## The idea
 

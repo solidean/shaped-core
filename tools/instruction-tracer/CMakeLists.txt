@@ -61,9 +61,6 @@ target_compile_options(instruction-tracer-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:
 # A tool depending on nexus is the intended direction — it is the binary harness, not only a test framework.
 target_link_libraries(instruction-tracer-core PUBLIC clean-core PRIVATE dbghelp zydis nexus babel-data)
 
-sc_target_pch(instruction-tracer-core CC) # 0.59
-
-# No PCH on the single-TU targets below: a ~1 s PCH build and ~15 MB of disk to save ~0.4 s on one object is a loss.
 add_executable(instruction-tracer src/instruction-tracer/main.cc)
 target_link_libraries(instruction-tracer PRIVATE instruction-tracer-core)
 
@@ -92,6 +89,4 @@ if(SC_BUILD_TESTS)
     sc_nexus_binary(instruction-tracer-test KINDS tests)
 
     target_link_libraries(instruction-tracer-test PRIVATE instruction-tracer-core nexus)
-
-    sc_target_pch(instruction-tracer-test CC NEXUS)
 endif()

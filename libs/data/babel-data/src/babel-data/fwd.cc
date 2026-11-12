@@ -22,3 +22,8 @@ namespace babel::markdown
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.markdown");
 } // namespace babel::markdown
+
+namespace babel::spirv
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.spirv");
+} // namespace babel::spirv

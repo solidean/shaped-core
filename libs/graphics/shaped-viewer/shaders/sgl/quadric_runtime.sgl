@@ -208,4 +208,4 @@ fun intersect(prim: primitive, origin: float3, dir: float3, t_min: float, t_max:
 /// The triangle fields are zeroed rather than faked: resolution refuses to source an attribute at a frequency this geometry does not number.
 /// So nothing generated for a quadric ever reads them.
 fun make_context(inst: scene.instance, primitive: uint) -> material.shading_context:
-    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, uint3(0, 0, 0), float3(1.0, 0.0, 0.0))
+    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, uint3(0, 0, 0), float3(1.0, 0.0, 0.0), material.no_footprint, material.no_footprint, float2(0.0, 0.0))

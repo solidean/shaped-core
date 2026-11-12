@@ -94,8 +94,8 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         mo.write("slot", m.slot);
         if (m.kind == sgl::described_member_kind::buffer)
             mo.write("stride", m.stride);
-        // a binding array's length, which is 1 for any other resource
-        if (m.count > 1)
+        // a binding array's length, 0 where unbounded (CHK-490), and 1 for any other resource
+        if (m.count != 1)
             mo.write("count", m.count);
         mo.write("host_name", cc::string_view(m.host_name));
         // The sg enum values a binding of this kind states, each written only where it applies.
@@ -298,6 +298,8 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     o.write("geometry", cc::string_view(p.geometry));
     o.write("tessellation_control", cc::string_view(p.tessellation_control));
     o.write("tessellation_evaluation", cc::string_view(p.tessellation_evaluation));
+    o.write("mesh", cc::string_view(p.mesh));
+    o.write("task", cc::string_view(p.task));
     {
         auto list = o.write_array("layout", babel::json::layout::compact);
         for (auto const& name : p.layout)
@@ -383,6 +385,12 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
                 o.write("name", cc::string_view(option.name));
                 o.write("type", cc::string_view(option.type));
                 o.write("value", cc::string_view(option.value));
+                if (!option.follows.empty())
+                {
+                    auto follows = o.write_array("follows", babel::json::layout::compact);
+                    for (auto const& name : option.follows)
+                        follows.write(cc::string_view(name));
+                }
             }
         }
         {

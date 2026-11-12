@@ -18,7 +18,15 @@ namespace sgl::check::impl
 /// would leave behind.
 /// The real fix is iterative walks over an explicit work stack for `interpret`'s `eval` and the legalizer's expression
 /// walks, with a cycle caught by an on-path bit rather than by depth; the limit could then be far higher.
-constexpr int k_max_depth = 40;
+/// 44 is 40 levels of a program (CHK-268) and the 4 a guard adds, about 352 KiB of that worker's stack at 8 KiB a level.
+constexpr int k_max_depth = 44;
+
+/// How many levels a guard of a robustness profile nests its operands deeper (LEGAL-65).
+constexpr int k_guard_depth_reserve = 4;
+
+/// How deep a program's tree may nest (CHK-268): the walks' limit, less what a guard adds, so every site a profile
+/// guards stands where every walk still reaches it.
+constexpr int k_max_program_depth = k_max_depth - k_guard_depth_reserve;
 
 [[nodiscard]] inline bool is_known(flat_entry_point const& e, flat_expr_id id)
 {
@@ -61,6 +69,10 @@ void for_each_operand(flat_entry_point const& e, flat_expr const& x, Fn&& fn)
         fn(element->buffer);
         fn(element->index);
     }
+    else if (auto const* const length = x.node.try_as<flat_buffer_length>())
+        fn(length->buffer);
+    else if (auto const* const written = x.node.try_as<flat_written_word>())
+        fn(written->word);
     else if (auto const* const element = x.node.try_as<flat_element>())
     {
         fn(element->object);
@@ -189,7 +201,8 @@ void for_each_body_of(flat_entry_point const& e, flat_stmt const& s, Fn&& fn)
     }
 }
 
-/// Finds the first node of a flat tree that stands deeper than `k_max_depth`, counted the way every later walk counts.
+/// Finds the first node of a flat tree that stands deeper than `k_max_program_depth`, counted the way every later walk
+/// counts.
 /// It descends at most one level past the limit, so it is safe on any tree the flattener wrote.
 struct depth_probe
 {
@@ -201,7 +214,7 @@ struct depth_probe
         if (found.has_value() || !is_known(e, id))
             return;
         auto const& x = e.at(id);
-        if (depth > k_max_depth)
+        if (depth > k_max_program_depth)
         {
             found = x.from;
             return;
@@ -220,7 +233,7 @@ struct depth_probe
             if (found.has_value() || !is_known(e, id))
                 continue;
             auto const& s = e.at(id);
-            if (depth > k_max_depth)
+            if (depth > k_max_program_depth)
             {
                 found = s.from;
                 return;

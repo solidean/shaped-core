@@ -218,6 +218,7 @@ A submodule's integration branch is its own `.issues.toml`'s, else the `branch =
 A bare id resolves in the issue's own repository first.
 `--with-submodules` reaches every checked-out submodule, `--top-only` none.
 Claiming a submodule's issue pushes to the submodule's remote.
+A file ref may point into a submodule too, and a claim checks it inside the submodule, at the commit the superproject records.
 
 ## The CLI
 

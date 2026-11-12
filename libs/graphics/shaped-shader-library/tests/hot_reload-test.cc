@@ -225,6 +225,48 @@ TEST("slib - a broken edit keeps the last good shader and reports why", exclusiv
     }
 }
 
+TEST("slib - a memory filesystem mounted over a package's embedded files is how a page edits them",
+     exclusive("slib-shader-library"))
+{
+    // A page has no source tree, so a package answers from its embedded copy until the page writes the file itself.
+    static slib::embedded_file const embedded[] = {{.path = "invert.hlsl", .text = "v1"}};
+    slib::shader_library lib;
+    test_package pkg;
+    lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
+    auto package = pkg.package();
+    package.embedded_files = embedded;
+    lib.add_package(package);
+    auto const edits = std::make_shared<slib::memory_filesystem>();
+    lib.mount(package.name, edits);
+    lib.start_hot_reload({.unthreaded = true});
+
+    auto const source = [&]
+    {
+        auto const shader = pkg.invert->acquire(sg::shader_format::dxil);
+        REQUIRE(shader->has_value());
+        return cc::string(fake_compiler::source_of(*shader->try_value()));
+    };
+    CHECK(source() == "v1");
+    lib.poll_hot_reload();
+    CHECK(pkg.invert->read_source() == cc::optional<cc::string>(cc::string("v1")));
+
+    // The first write shadows the embedded copy, which is a change like any other.
+    edits->write("invert.hlsl", "v2");
+    lib.poll_hot_reload();
+    CHECK(source() == "v2");
+
+    edits->write("invert.hlsl", slib_test::k_broken_source);
+    lib.poll_hot_reload();
+    CHECK(source() == "v2");
+    CHECK(pkg.invert->last_error().has_value());
+
+    // Taking the edit away again lands on the embedded copy.
+    edits->remove("invert.hlsl");
+    lib.poll_hot_reload();
+    CHECK(source() == "v1");
+    CHECK(!pkg.invert->last_error().has_value());
+}
+
 TEST("slib - deleting a shader's source keeps the last good shader", exclusive("slib-shader-library"))
 {
     reload_fixture f;

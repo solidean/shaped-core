@@ -27,6 +27,10 @@ struct sv::wavefront_state
     sg::buffer<shaders::tracer::hit_record> hits;
     sg::buffer<shaders::tracer::shadow_ray> shadow_rays;
     sg::buffer<shaders::tracer::pixel_tally> tallies;
+
+    /// The channels this state sums, `render_settings::channels`, and their sums: a slot's count, then a float4 a channel.
+    u32 channel_mask = 0;
+    sg::buffer<tg::vec4f> channel_sums;
     sg::buffer<u32> queue_a;
     sg::buffer<u32> queue_b;
     sg::buffer<u32> queue_hits;
@@ -42,7 +46,11 @@ struct sv::wavefront_state
     u32 generation = 0;
 
     /// A state for `extent`, every path dead and every tally empty: the first trace through it has to restart.
-    [[nodiscard]] static wavefront_state create(sg::context& ctx, tg::vec2i extent, i32 max_permutations);
+    /// `channel_mask` sizes the channel sums, one float4 a channel a slot.
+    [[nodiscard]] static wavefront_state create(sg::context& ctx,
+                                                tg::vec2i extent,
+                                                i32 max_permutations,
+                                                u32 channel_mask = 0);
 
     /// What every buffer of the state occupies together.
     [[nodiscard]] isize size_in_bytes() const;

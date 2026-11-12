@@ -1,0 +1,108 @@
+// Bloom: a share of the light above a knee scatters through a wide kernel, and each pixel gives up what it scatters.
+// Paired with sr::bloom_routine; libs/graphics/shaped-rendering/docs/bloom.md is the definition this approximates.
+//
+// `first_cs` takes the light that scatters down to half size, `down_cs` halves it again per level, `up_cs` adds each level's weighted light on the way back, and `finish_cs` writes the image.
+// Past the first pass only the routine's own images are read, in a filterable format, so each tap is bilinear and the sampler mirrors at the edges, which keeps the light in frame.
+
+const target_format: pixel_format = .rgba16_float
+
+@inline binding bloom_constants:
+    // the light a pixel starts to scatter at, on the image's own scale; 0 scatters all of it
+    knee: float
+    // up: this level's weight; finish: the share of light that scatters
+    weight: float
+    // up and finish: what the image coming up is scaled by
+    carry: float
+
+binding bloom_first_io:
+    @unfilterable
+    source: texture_2d[float4]
+    target: out image_2d[target_format]
+
+binding bloom_chain_io:
+    source: texture_2d[float4]
+    sampler mirrored:
+        filter = .linear
+        address = .mirror_repeat
+    // up: the level being added to what came up
+    level: texture_2d[float4]
+    target: out image_2d[target_format]
+
+binding bloom_finish_io:
+    @unfilterable
+    source: texture_2d[float4]
+    spread: texture_2d[float4]
+    sampler mirrored:
+        filter = .linear
+        address = .mirror_repeat
+    target: out image_2d[target_format]
+
+fun luminance(c: float3) -> float:
+    return 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z
+
+/// The light of `c` that scatters: all of it above a soft knee half as wide as `knee` to each side, none below, its hue kept.
+fun scattered(c: float3, knee: float) -> float3:
+    if knee <= 0.0 => return c
+    let l = luminance(c)
+    let width = 0.5 * knee
+    if l <= knee - width => return float3(0.0, 0.0, 0.0)
+    if l >= knee + width => return c * ((l - knee) / l)
+    let x = l - knee + width
+    return c * (x * x / (4.0 * width) / l)
+
+const first_weights = float4(1.0, 3.0, 3.0, 1.0)
+
+@compute(8, 8) fun first_cs(@thread_id id: int3){bloom_first_io, bloom_constants}:
+    let size = bloom_first_io.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    // a level is half the source, so a target texel sits over the middle of four source texels, in [1 3 3 1] / 8 per axis
+    let last = bloom_first_io.source.size() - int2(1, 1)
+    let mut sum = float3(0.0, 0.0, 0.0)
+    for j in 0 ..< 4:
+        for i in 0 ..< 4:
+            let p = clamp(id.xy * 2 + int2(i - 1, j - 1), int2(0, 0), last)
+            sum += scattered(bloom_first_io.source.load(p).xyz, bloom_constants.knee) * (first_weights[i] * first_weights[j])
+    bloom_first_io.target[id.xy] = float4(..(sum / 64.0), 1.0) as texel[target_format]
+
+@compute(8, 8) fun down_cs(@thread_id id: int3){bloom_chain_io}:
+    let size = bloom_chain_io.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let uv = (float2(id.xy) + float2(0.5, 0.5)) / float2(size)
+    let reach = 0.5 / float2(size)
+    let mut sum = float3(0.0, 0.0, 0.0)
+    for j in 0 ..< 2:
+        for i in 0 ..< 2:
+            let at = uv + reach * float2((i * 2 - 1) as float, (j * 2 - 1) as float)
+            sum += bloom_chain_io.source.sample(at, bloom_chain_io.mirrored, level = 0.0).xyz
+    bloom_chain_io.target[id.xy] = float4(..(sum * 0.25), 1.0) as texel[target_format]
+
+/// A 3x3 tent over the texels of `t`, read at `uv`.
+fun tent(t: texture_2d[float4], s: sampler, uv: float2) -> float3:
+    let reach = float2(1.0, 1.0) / float2(t.size())
+    let mut sum = float3(0.0, 0.0, 0.0)
+    for j in 0 ..< 3:
+        for i in 0 ..< 3:
+            let g = ((2 - abs(i - 1)) * (2 - abs(j - 1))) as float
+            sum += t.sample(uv + reach * float2((i - 1) as float, (j - 1) as float), s, level = 0.0).xyz * g
+    return sum / 16.0
+
+@compute(8, 8) fun up_cs(@thread_id id: int3){bloom_chain_io, bloom_constants}:
+    let size = bloom_chain_io.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let uv = (float2(id.xy) + float2(0.5, 0.5)) / float2(size)
+    let carried = tent(bloom_chain_io.source, bloom_chain_io.mirrored, uv) * bloom_constants.carry
+    let own = bloom_chain_io.level.load(id.xy).xyz * bloom_constants.weight
+    bloom_chain_io.target[id.xy] = float4(..(carried + own), 1.0) as texel[target_format]
+
+@compute(8, 8) fun finish_cs(@thread_id id: int3){bloom_finish_io, bloom_constants}:
+    let size = bloom_finish_io.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let uv = (float2(id.xy) + float2(0.5, 0.5)) / float2(size)
+    let c = bloom_finish_io.source.load(id.xy)
+    let away = scattered(c.xyz, bloom_constants.knee)
+    let spread = tent(bloom_finish_io.spread, bloom_finish_io.mirrored, uv) * bloom_constants.carry
+    bloom_finish_io.target[id.xy] = float4(..(c.xyz + (spread - away) * bloom_constants.weight), c.w) as texel[target_format]

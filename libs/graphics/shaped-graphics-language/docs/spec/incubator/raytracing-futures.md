@@ -22,14 +22,16 @@ The host's groups are what it cannot see, so a pipeline with `.host` would stay 
 It is the same move [stage-polyfills.md](stage-polyfills.md) makes for the geometry and tessellation stages.
 
 **Shader execution reordering.**
-DXR 1.2's `MaybeReorderThread` and its hit objects let a closest hit run on a thread sorted by what it hit.
-It would be a builtin behind a feature, and a hit object is a type the vocabulary would gain.
+Done on dx12 and vulkan: `maybe_reorder`, a reordering `trace` and a first-class `hit_object` (CHK-433, CHK-434, EMIT-225).
+Metal and WebGPU have no reordering to write.
 
 **Opacity micromaps and displacement micromaps.**
 They are properties of a BLAS, which sg builds, so most of their cost lands in sg; SGL would gain little beyond a ray flag and a hit's micro-triangle fields.
 
 **Motion blur.**
-A ray carries a time, and a BLAS or an instance its motion; `ray` would gain a `time`, and the targets that have it would take it.
+Done in the emulated trace: a ray carries a `time`, and a moving instance and moving vertices stand where it puts them (EVAL-130, EVAL-132).
+Left: a native trace where a device has motion, the emulated walk on dx12 and vulkan, and keyframes beyond two.
+Metal's intersector takes a time with motion acceleration structures, and vulkan's `VK_NV_ray_tracing_motion_blur` a pipeline's `traceRayMotionNV`.
 
 **Ray queries in the vertex stage.**
 Nothing refuses an inline trace in a vertex stage, and the text every target writes looks right; no GPU test has run one yet.

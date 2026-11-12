@@ -109,53 +109,6 @@ def split_command(entry: dict) -> list[str]:
     return tokenize_windows(cmd) if os.name == "nt" else shlex.split(cmd)
 
 
-# The MSVC-frontend PCH flags, in the joined form CMake emits (`/Yu<hxx>`, `/Fp<pch>`, `/FI<hxx>`).
-# The `/`-prefixed spelling is matched case-insensitively; the `-`-prefixed one is not, because `-fi` also opens
-# `-finline-functions` and a dozen other real flags.
-_PCH_SLASH = ("/yu", "/fp", "/fi")
-_PCH_DASH = ("-Yu", "-Fp", "-FI")
-
-
-def strip_pch_flags(argv: list[str]) -> list[str]:
-    """`argv` without the flags that force a precompiled header onto the translation unit.
-
-    Anything that re-runs a compile command out of the database must strip these, and for two different reasons.
-    A tool that only reads the TU — clang-tidy — would otherwise need the target's `.pch` to exist, which it does not on a configured-but-unbuilt tree.
-    A tool that *measures* — `compile-time` — would otherwise time a header whose whole transitive closure is already deserialized, and report ~0.03 s for everything without erroring.
-    That second one is the dangerous half: it produces a plausible number rather than a failure.
-
-    Covers the MSVC frontend's joined `/Yu` / `/Fp` / `/FI` and the GCC-frontend `-include-pch` / `-include` pairs, each with the `-Xclang` that introduces it.
-    A `-include` naming something other than CMake's generated `cmake_pch.hxx` is left alone, since that is a deliberate flag rather than PCH wiring.
-    """
-    n = len(argv)
-    drop: set[int] = set()
-
-    for i, tok in enumerate(argv):
-        if tok.lower().startswith(_PCH_SLASH) or tok.startswith(_PCH_DASH):
-            drop.add(i)
-        elif tok == "-include-pch":
-            drop.add(i)
-            j = i + 1
-            while j < n and argv[j] == "-Xclang":
-                drop.add(j)
-                j += 1
-            if j < n:
-                drop.add(j)
-        elif tok == "-include":
-            j = i + 1
-            while j < n and argv[j] == "-Xclang":
-                j += 1
-            if j < n and Path(argv[j]).name.startswith("cmake_pch"):
-                drop.update(range(i, j + 1))
-
-    # Backwards, so a `-Xclang` whose only purpose was to introduce a dropped token goes with it even in a chain.
-    for i in range(n - 1, -1, -1):
-        if argv[i] == "-Xclang" and (i + 1) in drop:
-            drop.add(i)
-
-    return [tok for i, tok in enumerate(argv) if i not in drop]
-
-
 def suggest_files(entries: list[dict], file: Path, limit: int = 10) -> list[str]:
     """Files in the database that look related to `file`, by same name then same stem, for a 'did you mean' hint when find_entry comes up empty."""
     name = _norm(Path(str(file)).name)

@@ -25,6 +25,8 @@ enum class sgl::check::feature : sgl::u8
     sample_rate_shading,
     geometry_shader,
     tessellation_shader,
+    /// The mesh stage (CHK-480), which WebGPU has on no device.
+    mesh_shader,
     /// `half` and its vectors (CHK-382).
     shader_f16,
     /// `short`, `ushort` and their vectors (CHK-382), which WebGPU has on no device.
@@ -44,42 +46,83 @@ enum class sgl::check::feature : sgl::u8
     /// A float added atomically in one instruction, which vulkan and metal write where the device has it.
     /// `atomic[float]` runs on every device without it, so it is what `has` asks rather than what a `require` needs.
     float_atomic_add,
-    /// A ray-generation stage reorders its invocations by a hint, which only dx12 on Shader Model 6.9 writes.
+    /// A ray-generation stage reorders its invocations by a hint, which dx12 on Shader Model 6.9 and vulkan write.
     /// `maybe_reorder` does nothing without it, so it is what `has` asks rather than what a `require` needs.
     shader_execution_reordering,
     /// A ray query that sees the opacity micromaps its BLASes hold, which only Shader Model 6.9 writes.
     /// No program names it: an HLSL compile for a device that has micromaps states it for every ray query (EMIT-184).
     opacity_micromap,
+    /// 32-bit floats that keep NaNs, infinities and signed zeros, which vulkan asks of the device (EMIT-185).
+    /// No program names it: a vulkan text needs it for an entry point at `@float(.specials)` or above.
+    float_specials,
+    /// 32-bit floats that keep denormals, which vulkan asks of the device for an entry point at `@float(.ieee)`.
+    float_denormals,
+    /// `@view_index` (CHK-437): one draw renders several views, which WebGPU has on no device.
+    view_instancing,
+    /// No program names it: `keep_view` asks for it with `has`, on a device whose driver needs the pixel stage to read the view.
+    pixel_view_read_workaround,
+    /// A vertex, geometry or tessellation stage writes a storage buffer, which vulkan asks of the device (EMIT-183).
+    /// No program names it: a vulkan text writes a `print` from those stages where the device has it, and drops one elsewhere.
+    vertex_pipeline_stores,
+    /// `long`, `ulong` and their vectors (CHK-451), which WebGPU has on no device.
+    shader_int64,
+    /// `double` and its vectors (CHK-451), which WebGPU and Metal have on no device.
+    shader_f64,
+    /// `atomic[long]` and `atomic[ulong]` in a buffer (CHK-296), which WebGPU and Metal have on no device.
+    shader_int64_atomics,
+    /// A binding array `T[]` whose length the host binds (CHK-490), which WebGPU and Metal have on no device yet.
+    unbounded_binding_arrays,
+    /// `atomic[long]` and `atomic[ulong]` in workgroup memory (CHK-510), which both APIs make optional.
+    shader_shared_int64_atomics,
+    /// `atomic[ulong]` in a buffer, its `min` and `max` alone (CHK-511); `shader_int64_atomics` grants it too.
+    /// It is all of Metal's 64-bit atomics, on the GPUs that have any.
+    shader_int64_min_max_atomics,
+    /// A hit's cluster, which `cluster_id` reads where the device builds a BLAS from clusters, and is -1 elsewhere.
+    /// No program names it: the prelude asks it with `has`, so a device without it needs no capability of it.
+    clustered_geometry,
 };
 
-CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
+CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
 
 namespace sgl::check
 {
 using feature_set = cc::flags<feature>;
 
 inline constexpr cc::string_view k_feature_names[] = {
-    "binding_arrays",              //
-    "extended_image_formats",      //
-    "readwrite_image_formats",     //
-    "multisampled_array_textures", //
-    "ray_query",                   //
-    "raytracing_pipeline",         //
-    "primitive_index",             //
-    "sample_rate_shading",         //
-    "geometry_shader",             //
-    "tessellation_shader",         //
-    "shader_f16",                  //
-    "shader_int16",                //
-    "subgroups",                   //
-    "device_coherence",            //
-    "image_atomics",               //
-    "first_instance",              //
-    "helper_lane_query",           //
-    "vertex_layer_output",         //
-    "float_atomic_add",            //
-    "shader_execution_reordering", //
-    "opacity_micromap",            //
+    "binding_arrays",               //
+    "extended_image_formats",       //
+    "readwrite_image_formats",      //
+    "multisampled_array_textures",  //
+    "ray_query",                    //
+    "raytracing_pipeline",          //
+    "primitive_index",              //
+    "sample_rate_shading",          //
+    "geometry_shader",              //
+    "tessellation_shader",          //
+    "mesh_shader",                  //
+    "shader_f16",                   //
+    "shader_int16",                 //
+    "subgroups",                    //
+    "device_coherence",             //
+    "image_atomics",                //
+    "first_instance",               //
+    "helper_lane_query",            //
+    "vertex_layer_output",          //
+    "float_atomic_add",             //
+    "shader_execution_reordering",  //
+    "opacity_micromap",             //
+    "float_specials",               //
+    "float_denormals",              //
+    "view_instancing",              //
+    "pixel_view_read_workaround",   //
+    "vertex_pipeline_stores",       //
+    "shader_int64",                 //
+    "shader_f64",                   //
+    "shader_int64_atomics",         //
+    "unbounded_binding_arrays",     //
+    "shader_shared_int64_atomics",  //
+    "shader_int64_min_max_atomics", //
+    "clustered_geometry",           //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

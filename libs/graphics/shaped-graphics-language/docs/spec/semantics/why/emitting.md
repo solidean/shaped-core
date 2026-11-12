@@ -189,6 +189,12 @@ A `column_major float4x3` is exactly the natural layout in both: three columns o
 Its upper-left 3x3 is the matrix, which is what HLSL's cast to `float3x3` reads, and a constructor from the matrix's three rows and a zero row writes it.
 So the matrix stays a field of its struct, and the cost is a cast at each read and a call at each write.
 
+## EMIT-171
+
+DXC decorates a struct member's matrix with its stride and its majorness through one array at most.
+A `float4x3 turns[2][2]` reaches SPIR-V with neither, so vulkan reads its last column as zero, while DXIL needs no decoration and is right.
+A matrix in a struct of its own is a member again, at any depth, and the struct adds no byte, so both targets hold one form.
+
 ## EMIT-116
 
 Reordering members is how a compiler packs a struct tighter, and it is planned: a `{float; float4; float}` block takes three rows where `{float4; float; float}` takes two.
@@ -265,11 +271,19 @@ So the trace is SGL source the prelude holds twice, a native and an emulated for
 The emulated form reads one pool per context rather than a binding per structure, since a traversal walks from a TLAS into BLASes nothing else binds.
 The acceleration member keeps its slot and takes no binding, so every other member's slot is what it is on the other targets, and one layout serves all four.
 
+HLSL takes the emulated form only by request, because a device's hardware must not decide how fast a shipped trace runs.
+A choice made per device would make the same build slow on some machines with nothing in its source saying so.
+
 ## EMIT-137
 
 DXR's payload qualifiers are a promise the driver optimizes by: a field nobody writes after the caller need not travel back.
 Every shader of one pipeline must state the same qualifiers, so they are inferred from the whole module rather than per entry point.
 A host's hit group is compiled apart and cannot see the module, so a payload it may meet states the widest access, which DXC reads as a missed optimization and not an error.
+
+The validator and state object creation both accept a native module that states no access, and it once left the annotations out.
+NVIDIA's driver does not: two pipelines of one device that disagree on a payload's access lose the second one's payload writes.
+sg's text and native routes run on one device, so the native writer states what DXC states.
+[nvidia-reorder-payload-qualifiers-across-pipelines](../../../../../../../docs/bugs-external/nvidia-reorder-payload-qualifiers-across-pipelines/readme.md) has the reproduction.
 
 ## EMIT-138
 
@@ -283,6 +297,9 @@ Metal has no shader table: a kernel intersects with its own intersector and call
 One table holds the miss and closest-hit functions of every ray type, so they share one signature, and the payload travels as words each function reads as its own type.
 DXR finds a closest hit's record from the instance's hit-group offset, which Metal's intersection result does not carry, so sg binds each instance's offset beside the tables.
 A procedural group's intersection and its any hit are one function on metal, since Metal runs no any hit after a box's intersection, which is why CHK-345 fuses them.
+The motion tags double a static scene's traversal on an M4, nearly all of it `instance_motion`'s, so only a compile that may be bound a structure that moves takes them.
+That is a package with `SOFTWARE_TRACE`: sg refuses a moving structure to every other, so a trace without the tags never meets one.
+One macro rather than a flag per site keeps every function of a pipeline alike, since each is compiled apart and must link.
 
 ## EMIT-142
 
@@ -357,3 +374,26 @@ A compute stage has no helpers, so it takes the strong one on WebGPU as everywhe
 The refusal is a feature, `helper_lane_query`, rather than a rule of the WGSL emitter, so it holds on every target, as EMIT-13 asks.
 A pixel stage without the `require` is refused on the dev box at its line, and one with it is refused on WebGPU by name.
 Once WebGPU can tell a helper, sg reports the feature there and nothing else changes.
+
+## EMIT-219
+
+The bodies hold on dx12 because D3D states its double arithmetic exactly.
+The D3D11.3 functional spec's "64-bit (Double Precision) Floating Point" says "double-precision instructions match IEEE 754R behavior requirements".
+Its one exception is the reciprocal, "permitted 1.0 ULP tolerance and the exact result if representable", which the bodies never take.
+Its instruction list names `dfma` "double precision fused multiply-add", and the section says double instructions honor a subnormal rather than read it as zero.
+So each addition, multiplication and `fma` the bodies take is correctly rounded, and the residual `sqrt` corrects by is exact, which is what bounds it to an ULP.
+The rounding bodies clear bits, which needs no arithmetic to be exact at all.
+
+## EMIT-256
+
+vulkan gives the bodies nothing to stand on.
+The Vulkan spec's "Precision and Operation of SPIR-V Instructions" says "The precision of double-precision instructions is at least that of single precision".
+That covers the `OpFAdd`, `OpFMul` and `Fma` the bodies are made of.
+Its table states `fma()` as "Inherited from OpFMul followed by OpFAdd", so a vulkan `fma` need not round once, and the residual `sqrt` corrects by may itself be wrong.
+So on vulkan the bodies would be slower and no better bounded than the driver's own instructions, and their correction is not even sound there.
+The same table states `round`, `roundEven`, `trunc`, `floor`, `ceil` and `fract` as "Correctly rounded", `inversesqrt()` as 2 ULP, and `sqrt()` as "Inherited from 1.0 / inversesqrt()".
+
+The choice is by API rather than by route, since that is where the instructions differ.
+`target_api` already tells the two apart, and both vulkan routes end as SPIR-V, so writing the same instructions from each keeps them computing alike.
+DXC hands a double to its own `floor` or `sqrt` as a float even for SPIR-V, an `OpFConvert` on either side of the float instruction.
+Its inline SPIR-V, `[[vk::ext_instruction(8, "GLSL.std.450")]]`, takes the double as it is, which is the device of EMIT-225.

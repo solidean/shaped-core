@@ -1,5 +1,6 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/ast/dump.hh>
@@ -14,7 +15,7 @@ namespace
 cc::string read_sample(cc::string_view name)
 {
     auto const is_prelude = name == "builtins.sgl" || name == "core.sgl";
-    auto const directory = is_prelude ? cc::string_view(SGL_PRELUDE_DIR) : cc::string_view(SGL_SAMPLES_DIR);
+    auto const directory = is_prelude ? nx::source_path(SGL_PRELUDE_DIR) : nx::source_path(SGL_SAMPLES_DIR);
     auto adapter = cc::file_read_stream_adapter::open(cc::string(directory) + "/" + name);
     REQUIRE(adapter.has_value());
     auto stream = adapter.value().stream();

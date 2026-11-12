@@ -120,6 +120,11 @@ public:
                              });
     }
 
+    /// Records that the image is in its resting layout already, so no initial transition is owed: an image someone
+    /// else created and already moved there, such as an XR runtime's.
+    /// Only before any list has touched it.
+    void mark_in_resting_layout() { _needs_initial_transition = false; }
+
     /// Claims the one-time UNDEFINED -> resting transition, or reports that someone else already has.
     /// Exactly one caller ever wins, however many command lists and transfer jobs race for it.
     [[nodiscard]] bool claim_initial_transition()

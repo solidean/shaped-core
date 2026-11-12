@@ -31,6 +31,12 @@ What a target lacks is the exception: WGSL's emulated ray tracing pays for being
 
 `uv run dev.py benchmark "sr - SGL against the HLSL it was ported from"` measures it on dx12, with sr's shaders against the hand-written HLSL they were ported from.
 On an RTX 5070 Ti in October 2026 SGL took 0.99x to 1.00x the HLSL's GPU time for à-trous, 0.99x for the network's convolution, and 1.02x for SVGF's filter.
+On an Intel Arc B580 in November 2026 it took 0.99x to 1.00x of it on dx12, and 0.97x to 0.99x on vulkan, where both go through DXC's SPIR-V backend.
+`uv run dev.py benchmark "sr - SGL against the same kernels written in MSL, on metal"` measures the same kernels against MSL ports of that HLSL.
+On an Apple M4 in November 2026 SGL's minima were 0.99x to 1.05x the MSL's for à-trous, 0.97x to 1.12x for SVGF's filter, and 1.00x to 1.02x for the convolution.
+`uv run dev.py benchmark "written in WGSL" --preset emscripten-webgpu-relwithdebinfo` measures WebGPU, against the same kernels written by hand in WGSL.
+On the same Arc it took 1.00x for à-trous and SVGF's filter under node's Dawn and deno's wgpu alike, and 0.81x and 0.52x for the convolution.
+The convolution is faster because SGL unrolls the loops the HLSL marks `[unroll]`, which WGSL cannot ask for.
 
 ## Where to look
 
@@ -100,6 +106,20 @@ Open [examples/sample.sgl](tools/vscode-extension/examples/sample.sgl) to check:
 The extensions directory differs for other builds: `.vscode-insiders`, `.vscode-oss`, `.cursor`, and `.vscode-server` when working over Remote / WSL.
 To uninstall, delete the link and reload.
 
+### The formatter
+
+`sgl format FILE…` writes SGL's spacing into each file in place; `--check` changes nothing and exits 2 where a file would change.
+`dev.py check` holds every tracked `.sgl` file to it through the `sgl-format` gate, which `--fix` formats.
+It is the spacing within a line: one space where tokens stand apart, a space after a comma and a colon, around an arrow and around a binary operator, none inside brackets or before a comma or a colon.
+So a type is `name: type` everywhere, `let x: T = …` included.
+The trailing comments of consecutive lines line up one space past the longest code, unless that moves a comment more than 16 columns, which starts a new run.
+Code is indented four spaces a level of the line tree, a tab in the indentation included.
+The lines a comment or a multi-line string owns move with it, so the comment keeps its layout and the string its value.
+Line breaks, comment text and strings are content, and stay as written.
+A syntax error leaves its block and the block's siblings as written, with a warning naming the error, and the rest of the file is formatted; at the top level, its declaration stays.
+An operator without its spaces, `a+b`, and a tab in the indentation are no such errors: each has one reading, which the formatter fixes.
+Its output always parses to the tree its input did, which it checks; a line whose formatting would not is left as written and named, as a bug of the formatter.
+
 ### The language server
 
 The extension starts the server when the first `.sgl` file opens, and its log is the **SGL Language Server** output channel.
@@ -108,6 +128,13 @@ What the server provides:
 * diagnostics, pushed as you type;
 * semantic tokens, which colour what the grammar cannot tell apart;
 * inlay hints showing inferred types: ` : float` after a `let` that writes none, and `-> float` before the `=>` of a function that writes none;
+* hover: a name's declaration as SGL writes it, `fun mix(a: float, b: float, t: float) -> float`, with its `///` comment, and the rest of its overload set;
+* go to definition, into the prelude too, whose files open as read-only `sgl-prelude:` documents;
+* completion: after a `.` what the object has, anywhere else the locals in scope, the declarations and the keywords;
+* signature help while a call's arguments are written, every overload listed and the argument under the cursor marked, a named one by its name;
+* find all references and rename, across the document and its modules; a name the prelude declares is not renamed;
+* formatting, by the rules of `sgl format` above;
+* an outline of the document's declarations, folding by indentation and comment runs, and workspace symbols across the open documents and the module directories;
 * test results: a failing `check` is a diagnostic, and every check site gets a gutter mark.
 
 Accepting a hint writes it into the source, except on a property of a type body, which takes no `-> type`.
@@ -156,6 +183,14 @@ A manual test after a change, with the extension installed by `uv run dev.py ins
 5. Rebuild with `uv run dev.py build -t sgl`: the "A newer sgl was built." prompt appears, and **Restart** brings the new server up.
    The output channel's `using …` line names the default preset's build directory.
 6. With the marks of step 3 showing, add a line above a check: its mark moves down with it, and stays on that line once it dims.
+7. Hover a call of `mix`: its signature and its doc comment show.
+   **Go to Definition** on it opens `builtins.sgl` from the prelude at its declaration.
+8. In a function taking a struct `l`, type `l.`: the completion list offers its fields and methods.
+9. Type `mix(` and a first argument and a comma: signature help shows `mix`'s overloads with the second parameter marked.
+10. **Rename Symbol** on a local: every use changes; on `mix` it is refused.
+    **Find All References** on a function lists its declaration and its calls.
+11. Write `a+b` and **Format Document**: it becomes `a + b`.
+12. The **Outline** view lists the file's declarations, a struct's fields under it; **Go to Symbol in Workspace** finds a function by a few of its letters.
 
 ### Working on the grammar
 

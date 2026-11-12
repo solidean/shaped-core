@@ -122,4 +122,10 @@ void write_sampler_descriptor(vulkan_context& ctx, VkSampler sampler, byte* dst)
 
 /// The device's descriptor size for a binding's type, which is what a set layout reserves per element.
 [[nodiscard]] isize descriptor_size_of(vulkan_context const& ctx, sg::binding_type type);
+
+/// Writes the descriptor that references nothing, for a view binding of `type`, into `dst`: a vacant element.
+/// **Its bytes are the driver's, not zeros.**
+/// The nullDescriptor feature defines what vkGetDescriptorEXT returns for no resource, and not that all-zero bytes are it.
+/// NVIDIA and RADV happen to answer zeros; Intel's Arc does not, and reads a zeroed descriptor as a real one, losing the device.
+void write_null_descriptor(vulkan_context& ctx, sg::binding_type type, byte* dst);
 } // namespace sg::backend::vulkan

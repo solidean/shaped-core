@@ -300,7 +300,8 @@ void sgl::builtins::register_scalar_math(registry& r)
     };
     for (auto const type : {cc::string_view("float"), cc::string_view("half")})
         for (auto const& c : comparisons)
-            add_infix(r, c.op, cc::format("{}{}", c.name, suffix_of(type)), type, type, "bool", c.of_float);
+            add_operator(r, c.op, cc::format("{}{}", c.name, suffix_of(type)), type, type, "bool", c.of_float,
+                         c.op == "!=" ? float_not_equal() : infix(c.op));
     for (auto const type : {cc::string_view("int"), cc::string_view("short")})
         for (auto const& c : comparisons)
             add_infix(r, c.op, cc::format("{}{}", c.name, suffix_of(type)), type, type, "bool", c.of_int);

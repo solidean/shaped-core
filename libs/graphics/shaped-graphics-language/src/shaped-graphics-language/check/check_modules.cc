@@ -10,23 +10,37 @@ namespace
 /// One `use` line as written, before any module is known.
 struct use_line
 {
-    /// Empty where the path is dotted.
+    /// The module's whole name, its dots included.
     cc::string module;
-    /// The name it binds: the alias, or the module's own name.
+    /// The name it binds: the alias, or the last part of the module's name.
     cc::string name;
     source_span where;
-    bool is_dotted = false;
 };
 
 /// What one file's `module` and `use` lines say.
 struct file_lines
 {
-    /// The module its `module` line names; empty without one, and where the line names a dotted path.
+    /// The module its `module` line names; empty without one.
     cc::string module;
-    /// Where a dotted `module` line stands; empty for every other file.
-    source_span dotted_module;
     cc::vector<use_line> uses;
 };
+
+/// The module name a path of `module` or `use` writes, `a.b.c` as one name; empty for any other expression, which the
+/// AST pass reported.
+cc::string path_of(module_file const& f, ast::expr_id e)
+{
+    auto const& node = f.ast.at(e).node;
+    if (auto const* const n = node.try_as<ast::name>())
+        return cc::string(f.file.text_of(n->where));
+    if (auto const* const m = node.try_as<ast::member>())
+    {
+        auto head = ast::is_valid(m->object) ? path_of(f, m->object) : cc::string();
+        if (head.empty())
+            return {};
+        return cc::format("{}.{}", head, f.file.text_of(m->name));
+    }
+    return {};
+}
 
 file_lines read_lines(module_file const& f)
 {
@@ -39,22 +53,21 @@ file_lines read_lines(module_file const& f)
         if (auto const* const m = d.node.try_as<ast::module_decl>())
         {
             // a `module` line that lost its path was reported by the AST pass
-            if (!ast::is_valid(m->path))
-                continue;
-            if (auto const* const n = ast.at(m->path).node.try_as<ast::name>())
-                result.module = f.file.text_of(n->where);
-            else
-                result.dotted_module = where;
+            if (ast::is_valid(m->path))
+                result.module = path_of(f, m->path);
         }
         else if (auto const* const u = d.node.try_as<ast::use_decl>())
         {
             if (!ast::is_valid(u->path))
                 continue;
-            auto const* const n = ast.at(u->path).node.try_as<ast::name>();
-            auto line = use_line{.where = where, .is_dotted = n == nullptr};
-            if (n != nullptr)
-                line.module = f.file.text_of(n->where);
-            line.name = !u->alias.empty() ? cc::string(f.file.text_of(u->alias)) : line.module;
+            auto line = use_line{.module = path_of(f, u->path), .where = where};
+            if (line.module.empty())
+                continue;
+            // CHK-347: `use a.b` binds `b`, the last part of the module's name
+            auto const dot = line.module.rfind('.');
+            line.name = !u->alias.empty() ? cc::string(f.file.text_of(u->alias))
+                      : dot >= 0          ? cc::string(cc::string_view(line.module).subview(dot + 1))
+                                          : line.module;
             result.uses.push_back(cc::move(line));
         }
     }
@@ -80,6 +93,14 @@ struct pending_diagnostic
     cc::string detail;
 };
 } // namespace
+
+cc::string impl::module_name_of(module_file const& f)
+{
+    for (auto const id : f.ast.at(f.ast.declarations))
+        if (auto const* const m = f.ast.at(id).node.try_as<ast::module_decl>(); m != nullptr && ast::is_valid(m->path))
+            return path_of(f, m->path);
+    return {};
+}
 
 module_plan impl::plan_modules(cc::span<module_file const> library, module_file program)
 {
@@ -115,11 +136,6 @@ module_plan impl::plan_modules(cc::span<module_file const> library, module_file 
     };
 
     // The program's own module is module 0, and a program whose `module` line names one of the library joins it.
-    if (!program_lines.dotted_module.empty())
-        pending.push_back({.kind = diagnostic_kind::unsupported_yet,
-                           .file = -1,
-                           .where = program_lines.dotted_module,
-                           .detail = "a dotted module name"});
     add_module(program_lines.module);
 
     auto library_uses = cc::map<i32, cc::vector<module_use>>();
@@ -129,14 +145,6 @@ module_plan impl::plan_modules(cc::span<module_file const> library, module_file 
         auto& uses = file < 0 ? program_uses : library_uses[file];
         for (auto const& u : l.uses)
         {
-            if (u.is_dotted)
-            {
-                pending.push_back({.kind = diagnostic_kind::unsupported_yet,
-                                   .file = file,
-                                   .where = u.where,
-                                   .detail = "a dotted module path"});
-                continue;
-            }
             // CHK-347: a module's own names are seen unqualified already
             if (!modules[module].empty() && u.module == modules[module])
             {

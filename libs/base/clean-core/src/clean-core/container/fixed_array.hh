@@ -21,6 +21,9 @@ struct cc::fixed_array
 public:
     T _data[N];
 
+    /// Element-wise, so an aggregate holding one compares with a defaulted `==`.
+    [[nodiscard]] constexpr bool operator==(fixed_array const&) const = default;
+
     // element access
 public:
     /// Returns a reference to the element at index i.
@@ -103,6 +106,8 @@ public:
 template <class T>
 struct cc::fixed_array<T, 0>
 {
+    [[nodiscard]] constexpr bool operator==(fixed_array const&) const = default;
+
     // element access
 public:
     /// operator[] not callable on empty array.

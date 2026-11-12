@@ -59,8 +59,6 @@ target_include_directories(shaped-graphics-webgpu
 
 target_link_libraries(shaped-graphics-webgpu PUBLIC shaped-graphics)
 
-sc_target_pch(shaped-graphics-webgpu SG)
-
 # Backend-specific test binary: compute, raster, inline constants, samplers, texture copies and presentation, over hand-written WGSL.
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-webgpu-test

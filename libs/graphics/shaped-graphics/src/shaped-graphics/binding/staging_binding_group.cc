@@ -7,8 +7,10 @@ namespace sg
 {
 staging_binding_group::~staging_binding_group() = default;
 
-staging_binding_group::staging_binding_group(binding_group_layout_handle layout, cc::vector<int> descriptor_offsets)
-  : _layout(cc::move(layout))
+staging_binding_group::staging_binding_group(binding_group_layout_handle layout,
+                                             cc::vector<int> descriptor_offsets,
+                                             int unbounded_capacity)
+  : _layout(cc::move(layout)), _unbounded_capacity(unbounded_capacity)
 {
     CC_ASSERT(_layout != nullptr, "staging_binding_group requires a binding_group_layout");
 
@@ -57,7 +59,7 @@ bool staging_binding_group::is_array(binding_slot slot) const
 
 int staging_binding_group::array_size(binding_slot slot) const
 {
-    return int(info_of(slot).declared->count);
+    return element_count(*info_of(slot).declared);
 }
 
 void staging_binding_group::touch(binding_slot slot)
@@ -148,9 +150,22 @@ void staging_binding_group::set_sampler(binding_slot slot, sampler const& smp)
     CC_ASSERT(is_sampler(info.declared->type), "staging_binding_group: that binding is not a sampler");
     CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that sampler is static — it lives in the root "
                                           "signature, not in the group");
-    CC_ASSERT(info.declared->count == 1, "dynamic sampler arrays are not supported yet");
+    CC_ASSERT(info.declared->count == 1, "staging_binding_group: that sampler is an array — use set_sampler_element");
 
     write_sampler_descriptor(info.first_descriptor, smp);
+    _dirty = true;
+    touch(slot);
+}
+
+void staging_binding_group::set_sampler_element(binding_slot slot, int element, sampler const& smp)
+{
+    auto const& info = info_of(slot);
+    CC_ASSERT(is_sampler(info.declared->type), "staging_binding_group: that binding is not a sampler");
+    CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that sampler is static — it lives in the root "
+                                          "signature, not in the group");
+    CC_ASSERT(element >= 0 && element < int(info.declared->count), "staging_binding_group: no such sampler element");
+
+    write_sampler_descriptor(info.first_descriptor + element, smp);
     _dirty = true;
     touch(slot);
 }
@@ -212,7 +227,7 @@ void staging_binding_group::record_use(binding_slot slot, int first_element, cc:
             _slot_tlases.resize_to_defaulted(index + 1);
         auto& elements = _slot_tlases[index];
         if (elements.empty())
-            elements.resize_to_defaulted(isize(b.count));
+            elements.resize_to_defaulted(isize(element_count(b)));
         for (auto i = isize(0); i < views.size(); ++i)
         {
             auto const* const tlas = try_as_tlas_view(views[i]);
@@ -237,7 +252,7 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
     auto const& b = *info.declared;
     CC_ASSERT(!is_sampler(b.type), "staging_binding_group: that binding is a sampler — it takes no view");
     CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that binding has no view descriptor");
-    CC_ASSERT(first_element >= 0 && first_element + views.size() <= isize(b.count),
+    CC_ASSERT(first_element >= 0 && first_element + views.size() <= isize(element_count(b)),
               "staging_binding_group: the run does not fit inside the binding's element count");
     if (views.empty())
         return;
@@ -281,7 +296,7 @@ void staging_binding_group::clear_run(binding_slot slot, int first_element, int 
     auto const& b = *info.declared;
     CC_ASSERT(!is_sampler(b.type), "staging_binding_group: that binding is a sampler — it takes no view");
     CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that binding has no view descriptor");
-    CC_ASSERT(count >= 0 && first_element >= 0 && first_element + count <= int(b.count),
+    CC_ASSERT(count >= 0 && first_element >= 0 && first_element + count <= element_count(b),
               "staging_binding_group: the run does not fit inside the binding's element count");
     if (count == 0)
         return;

@@ -64,23 +64,24 @@ binding thin_io:
     // Where the raster sampled the pixel, which is off its center on a frame drawn for an upscaler.
     let pixel = float2((id.x as float) + 0.5, (id.y as float) + 0.5) + hybrid.jitter_of(f)
     let ray = scene.camera_ray_offset(cam, pixel, hybrid.pass.size)
+    let origin = scene.camera_origin(cam, pixel, hybrid.pass.size)
     let t = thin_io.depth.load(px) / dot(ray, normalize(cam.forward))
 
     let normals = thin_io.normals.load(px)
     let shading_n = raster.oct_decode(float2(normals.x, normals.y))
     let n = raster.oct_decode(float2(normals.z, normals.w))
-    // The point is rounded as `cam.position + ray * t` is, to a scale of the camera's distance from the origin plus the ray's length.
+    // The point is rounded as `origin + ray * t` is, to a scale of the camera's distance from the origin plus the ray's length.
     // `pt.offset_ray` sizes its offset from the point's own coordinates, as an interpolated point is rounded, which is far less on a floor near y = 0.
     // So the point is lifted off the surface by that rounding first, or a row of it starts under the floor and its bounce rays hit the floor.
     // The face's own reach, which the G-buffer holds in emission's alpha, adds the rounding a ray leaving it meets on its far corners.
-    let reach = max(abs(cam.position.x), max(abs(cam.position.y), abs(cam.position.z))) + length(ray) * t + emission.w
+    let reach = max(abs(origin.x), max(abs(origin.y), abs(origin.z))) + length(ray) * t + emission.w
     let lift = reach * (1.0 / 1048576.0)
-    let surface_p = cam.position + ray * t
+    let surface_p = origin + ray * t
     // Reflections and light samples leave on the viewer's side; a refraction leaves through the surface, which `bounce_from` lifts toward itself.
     let p = surface_p + n * lift
     let surface = raster.thin_surface(thin_io.base.load(px), thin_io.specular.load(px), thin_io.extra.load(px))
     let shading = openpbr.make_frame(shading_n)
-    let v = normalize(cam.position - p)
+    let v = normalize(scene.camera_eye_of(cam, p) - p)
     // The normals were turned toward the viewer, so the viewer is outside.
     let b = openpbr.bsdf_prepare(surface, false, 3u)
     let wo_local = openpbr.to_local(shading, v)

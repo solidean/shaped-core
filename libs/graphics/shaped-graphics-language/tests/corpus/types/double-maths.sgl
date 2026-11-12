@@ -1,0 +1,97 @@
+// the maths of a double (CHK-458): rounding, roots, the geometry of its vectors and the tests of its bits
+
+require shader_f64
+
+// rounding is exact, a zero keeping its sign, and `round` takes a tie to the even neighbour (EVAL-108)
+test:
+    floor(2.5f64) == 2.0f64 and floor(-2.5f64) == -3.0f64 and ceil(-2.5f64) == -2.0f64
+    trunc(-2.75f64) == -2.0f64 and fract(-0.25f64) == 0.75f64
+    round(2.5f64) == 2.0f64 and round(3.5f64) == 4.0f64 and round(-2.5f64) == -2.0f64 and round(2.5000001f64) == 3.0f64
+    // 2^52 + 1 is a double and no float, and every double from 2^52 on is an integer
+    floor(4503599627370497.0f64) == 4503599627370497.0f64
+    floor(4503599627370495.5f64) == 4503599627370495.0f64
+    // a value a float would round to an integer keeps its fraction
+    fract(16777216.25f64) == 0.25f64
+    1.0f64 / round(-0.25f64) < 0.0f64 and 1.0f64 / ceil(-0.5f64) < 0.0f64
+
+// sqrt is the double nearest the root, and a vector's functions take it per component
+test:
+    sqrt(2.0f64) == 1.4142135623730951f64
+    sqrt(1.0e300f64) == 1.0e150f64
+    sqrt(2.0e-320f64) * sqrt(2.0e-320f64) < 4.0e-320f64
+    inverse_sqrt(4.0f64) == 0.5f64
+    sqrt(double2(9.0f64, 0.25f64)) == double2(3.0f64, 0.5f64)
+    floor(double3(1.5f64, -1.5f64, 0.0f64)) == double3(1.0f64, -2.0f64, 0.0f64)
+
+// a NaN and an infinity are read from the bits, and sqrt passes them on
+test:
+    let zero = 0.0f64
+    let nan = zero / zero
+    let inf = 1.0f64 / zero
+    is_nan(nan) and is_inf(-inf)
+    not is_nan(inf)
+    not is_inf(1.0e308f64)
+    sqrt(inf) == inf and is_nan(sqrt(-1.0f64)) and is_nan(sqrt(nan))
+    inverse_sqrt(inf) == 0.0f64 and inverse_sqrt(zero) == inf
+    is_nan(double2(nan, 1.0f64)) == bool2(true, false)
+
+// the geometry of the vectors, and what mix, step and smoothstep make of a double
+test:
+    let v = double3(3.0f64, 4.0f64, 12.0f64)
+    dot(v, v) == 169.0f64 and length(v) == 13.0f64
+    distance(double2(1.0f64, 1.0f64), double2(4.0f64, 5.0f64)) == 5.0f64
+    normalize(double2(0.0f64, 2.0f64)) == double2(0.0f64, 1.0f64)
+    cross(double3(1.0f64, 0.0f64, 0.0f64), double3(0.0f64, 1.0f64, 0.0f64)) == double3(0.0f64, 0.0f64, 1.0f64)
+    mix(1.0f64, 3.0f64, 0.25f64) == 1.5f64
+    mix(double2(0.0f64, 10.0f64), double2(1.0f64, 20.0f64), double2(0.5f64, 1.0f64)) == double2(0.5f64, 20.0f64)
+    step(0.5f64, 0.5f64) == 1.0f64 and smoothstep(0.0f64, 1.0f64, 0.5f64) == 0.5f64
+    sign(-0.0f64) == 0.0f64 and sign(double2(-3.0f64, 2.0f64)) == double2(-1.0f64, 1.0f64)
+    saturate(1.5f64) == 1.0f64 and clamp(-1.0f64, 0.0f64, 1.0f64) == 0.0f64
+
+// a double's `fma` rounds once, however wide the product (EVAL-146)
+test:
+    // (1 + 2^-27)^2 is 1 + 2^-26 + 2^-54, half an ULP past 1 + 2^-26, which the product alone rounds away
+    let a = 1.0000000074505806f64
+    let b = 1.0000000149011612f64
+    a * a - b == 0.0f64
+    fma(a, a, -b) == 0.000000000000000055511151231257827f64
+    // a product past the largest double is no infinity where the sum comes back in range
+    fma(1.0e308f64, 2.0f64, -1.0e308f64) == 1.0e308f64
+    // 1.5 of the smallest subnormal is a tie, which goes to the even one, two of it
+    fma(1.5f64, 5.0e-324f64, 0.0f64) == 1.0e-323f64
+    fma(double2(1.0f64, 2.0f64), double2(3.0f64, 4.0f64), double2(5.0f64, 6.0f64)) == double2(8.0f64, 14.0f64)
+    1.0f64 / fma(-0.0f64, 1.0f64, -0.0f64) < 0.0f64
+
+// a double's bits are two words, the low first, and come back from them unchanged (CHK-517)
+test:
+    let one = 1.0f64
+    one.bits == uint2(0u, 0x3ff00000u) and (-0.0f64).bits == uint2(0u, 0x80000000u)
+    double.from_bits(uint2(0u, 0x40000000u)) == 2.0f64
+    // the smallest subnormal is the lowest bit of the low word
+    double.from_bits(uint2(1u, 0u)) == 5.0e-324f64
+    double.from_bits((0.1f64).bits) == 0.1f64
+    // a NaN keeps every bit of its payload
+    double.from_bits(uint2(0x1234u, 0x7ff80000u)).bits == uint2(0x1234u, 0x7ff80000u)
+
+// smoothstep whose edges are not in order has no value, as of a float (EVAL-87)
+@expect(error = "constant-without-value")
+test smoothstep(1.0f64, 0.0f64, 0.5f64) == 0.5f64
+
+// no target computes a transcendental of a double, so none takes one: the float's is a conversion away
+@expect(error = "no-matching-overload")
+test sin(0.5f64) > 0.0f64
+
+test sin(0.5f64 as float) > 0.0
+
+// an entry point that calls them is written for dx12 and vulkan
+binding numbers:
+    values: mut buffer[double4]
+
+@compute(64) fun rounded(@thread_id id: int3){numbers}:
+    let v = numbers.values[id.x]
+    numbers.values[id.x] = double4(sqrt(v.x), floor(v.y), round(v.z), length(v.xy)) + normalize(v)
+
+@compute(64) fun reworded(@thread_id id: int3){numbers}:
+    let v = numbers.values[id.x]
+    let words = v.x.bits
+    numbers.values[id.x] = double4(double.from_bits(uint2(words.x, words.y ^ 0x80000000u)), fma(v.y, v.z, v.w), v.z, v.w)

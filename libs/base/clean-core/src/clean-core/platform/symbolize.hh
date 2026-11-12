@@ -10,7 +10,9 @@
 //
 // Capture is deliberately cheap and blind: it writes return addresses and never asks who they belong to, because
 // asking costs orders of magnitude more than the event it would hang off.
-// This is where the asking happens — at analysis time, off the hot path, and never from a crash handler.
+// This is where the asking happens — at analysis time, off the hot path.
+// The one exception is a POSIX crash report, which names its frames here as a best effort: it allocates, and a report
+// without names is worse than one that might not finish.
 //
 // **A symbolizer resolves against a set of modules, and which set is the choice.**
 // The default is this process's own, which is right for a program exporting its own trace.

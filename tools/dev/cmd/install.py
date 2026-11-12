@@ -10,6 +10,10 @@ It is the version and SHA-256 `tools/sde.version` pins, unpacked in ~/tools/sde.
 All three are folders rather than links, so `--uninstall` names them and leaves deleting them to the user.
 shaped-view, the standalone model viewer, is a frozen copy in ~/tools/shaped-view plus the file associations that open it — install_shaped_view.py.
 That folder is wholly the install's, so `--uninstall` removes it along with the associations.
+vulkan-sdk, LunarG's SDK at the version `tools/vulkan-sdk.version` pins, is a folder in ~/tools/vulkan-sdk that every dev.py run points VULKAN_SDK at — install_vulkan_sdk.py.
+android-sdk, the NDK and SDK tools `tools/android-sdk.version` pins, is a folder in ~/tools/android-sdk that every dev.py run points ANDROID_NDK_ROOT at.
+It asks for `--accept-license` — install_android_sdk.py.
+monado, the simulated headset at the commit `tools/monado.version` pins, is built in ~/tools/monado, and `dev.py test` selects it — install_monado.py.
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ from tools.dev.lib.core.layout import DRIVER_ROOT
 from tools.dev.lib.toolchain import jsruntime as jsr
 
 from . import args as a
-from . import install_shaped_view
+from . import install_android_sdk, install_monado, install_shaped_view, install_vulkan_sdk
 from .context import Context
 
 NAME = "install"
@@ -116,6 +120,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--no-build", action="store_true", help="Install what is already built, and build nothing first")
     p.add_argument("--archive", metavar="FILE",
                    help="sde only: the kit downloaded from Intel's page, after accepting its license there")
+    p.add_argument("--accept-license", action="store_true", help="android-sdk only: accept Google's Android SDK license")
     a.emsdk(p)
     return p
 
@@ -185,6 +190,9 @@ def _list(ctx: Context) -> None:
     _list_emsdk(ctx)
     _list_deno()
     _list_sde(ctx)
+    install_vulkan_sdk.list_state()
+    install_monado.list_state()
+    install_android_sdk.list_state()
     install_shaped_view.list_state()
     print(console.dim(f"\n  uv run dev.py {NAME} <name> [--editor <e>] [--emsdk-path <dir>] [--archive <file>] [--uninstall]"))
 
@@ -427,6 +435,15 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         return
     if args.name == install_shaped_view.NAME:
         install_shaped_view.run(args, ctx)
+        return
+    if args.name == install_vulkan_sdk.NAME:
+        install_vulkan_sdk.run(args, ctx)
+        return
+    if args.name == install_monado.NAME:
+        install_monado.run(args, ctx)
+        return
+    if args.name == install_android_sdk.NAME:
+        install_android_sdk.run(args, ctx)
         return
     item = next((i for i in _INSTALLABLES if i.name == args.name), None)
     if item is None:

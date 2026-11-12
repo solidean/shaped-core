@@ -491,6 +491,8 @@ cc::shared_async<cc::vector<tg::vec4f>> image_of(sg::context* ctx, sv::gpu_resou
 /// Measured at most 3.5e-6 on an RTX 5070 Laptop and 7.5e-6 on an RTX 3080 Ti Laptop; a value that diverged differs by
 /// orders of magnitude more, so the bound has room for another GPU's rounding and still catches that.
 constexpr float k_across_api_tolerance = 1e-4f;
+/// Two routes on one API differ only where an optimizer reassociated, so they are held to what two APIs are.
+constexpr float k_native_route_tolerance = k_across_api_tolerance;
 
 /// The smallest value a difference is measured relative to.
 constexpr float k_relative_floor = 1e-3f;
@@ -619,5 +621,49 @@ ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to roundi
                                 own.size(), d.max_abs, d.max_relative));
     }
     CHECK(!ctx.value()->is_device_lost());
+}
+
+namespace
+{
+/// Traces every case on `native`, whose shaders are SGL's own binary, and holds each image to `reference`'s through DXC.
+cc::shared_async<cc::unit> held_to_dxc(sg::context_handle native, sg::context_handle reference, cc::string_view api)
+{
+    auto resources = sv::gpu_resource_manager::create(*native);
+    auto reference_resources = sv::gpu_resource_manager::create(*reference);
+    for (auto const c : cases_to_trace())
+    {
+        auto const own = co_await image_of(native.get(), &resources, c);
+        auto const mean = checked_mean(own, cc::format("{} through SGL's {}", name_of(c), api));
+        CHECK(mean > 0.05f).context(cc::format("{} on {}: the scene is lit; mean {}", name_of(c), api, mean));
+        auto const held = co_await image_of(reference.get(), &reference_resources, c);
+        REQUIRE(held.size() == own.size());
+        auto const d = difference_of(held, own);
+        CC_LOG_INFO("native route trace, {} on {}: max abs diff {}, max relative diff {}, {} of {} pixels differ",
+                    name_of(c), api, d.max_abs, d.max_relative, d.differing_pixels, own.size());
+        CHECK(d.max_relative <= k_native_route_tolerance)
+            .context(cc::format("{} on {}: {} of {} pixels differ, by up to {} ({} relative)", name_of(c), api,
+                                d.differing_pixels, own.size(), d.max_abs, d.max_relative));
+    }
+    CHECK(!native->is_device_lost());
+    co_return;
+}
+} // namespace
+
+// The path tracer and every material's hit group through SGL's own DXIL and SPIR-V, each held to DXC's image on its API.
+ASYNC_TEST("sv - the path tracer through SGL's binary traces what DXC's traces, on dx12 and on vulkan")
+{
+    if (nx::is_smoke())
+        SKIP("a smoke run: the default preset holds the routes to each other");
+    auto dx12_reference = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    auto dx12_native = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (dx12_reference.has_value() && dx12_native.has_value() && !cannot_trace(*dx12_native.value()).has_value())
+        co_await held_to_dxc(dx12_native.value(), dx12_reference.value(), "DXIL");
+
+    auto vulkan_reference = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = false});
+    auto vulkan_native = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = true});
+    if (vulkan_reference.has_value() && vulkan_native.has_value() && !cannot_trace(*vulkan_native.value()).has_value())
+        co_await held_to_dxc(vulkan_native.value(), vulkan_reference.value(), "SPIR-V");
 }
 #endif

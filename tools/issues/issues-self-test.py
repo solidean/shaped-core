@@ -448,6 +448,29 @@ def test_submodules_are_their_own_repositories(base: Path):
     assert cli(a, "--top-only", "list")[1].count("bug-deep") == 0
 
 
+def test_claim_resolves_a_file_ref_into_a_submodule(base: Path):
+    a, _ = setup(base)
+    git(base, "init", "-q", "-b", "main", "lib")
+    lib = base / "lib"
+    git(lib, "config", "user.name", "L")
+    git(lib, "config", "user.email", "l@example.com")
+    write(lib / "src/deep.cc", "deep\n")
+    git(lib, "add", "-A")
+    git(lib, "commit", "-q", "-m", "lib")
+    git(a, "submodule", "add", "-q", "-b", "main", str(lib), "extern/lib")
+    git(a, "commit", "-q", "-m", "the submodule")
+    git(a, "push", "-q", "origin", "main")
+
+    # the parent's tree holds only the submodule's commit, so the file is looked up inside it, at that commit
+    assert cli(a, "new", "feat", "deep", "--ref", "file:extern/lib/src/deep.cc")[0] == 0
+    code, _, err = cli(a, "claim", "feat-deep")
+    assert code == 0, err
+
+    assert cli(a, "new", "feat", "missing", "--ref", "file:extern/lib/src/absent.cc")[0] == 0
+    code, _, err = cli(a, "claim", "feat-missing")
+    assert code == 2 and "refs file extern/lib/src/absent.cc, which does not exist" in err, err
+
+
 # ---------------------------------------------------------------------------
 
 def main() -> int:

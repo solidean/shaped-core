@@ -176,6 +176,11 @@ public:
     cc::vector<dx12_binding_group const*> _bound_raster_groups;
     sg::impl::pipeline_footprint const* _bound_raster_footprint = nullptr;
     void const* _bound_raster_footprint_owner = nullptr;
+    /// The bound raster pipeline's state object, which a polyfilled mesh draw sets again after its compute half, since
+    /// D3D12 has one pipeline-state slot for both.
+    ID3D12PipelineState* _bound_raster_pso = nullptr;
+    /// The raster inline constants as last set, which a polyfilled mesh draw's compute half is handed too.
+    cc::vector<u32> _raster_inline_constants;
 
     // The live array declarations of the raster bind point, met at every draw by _bound_raster_groups; ended with the scope.
     sg::impl::array_declaration_book _raster_arrays;
@@ -273,8 +278,15 @@ protected:
     void raster_set_blend_constants(tg::vec4f constants) override;
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
+    void raster_draw_mesh_tasks(int x, int y, int z) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
+    void raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                              sg::raw_buffer_handle const& args,
+                                              isize offset_in_bytes,
+                                              isize count) override;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;
@@ -287,6 +299,22 @@ protected:
                                                               int hit_record_stride) override;
     [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
                                                         sg::accel_build_flags flags) override;
+    void raytracing_update_partitioned_tlas(sg::partitioned_tlas const& ptlas,
+                                            sg::ptlas_operations const& ops,
+                                            bool is_first,
+                                            cc::vector<sg::blas_handle>&& released) override;
+    [[nodiscard]] sg::cluster_set_handle raytracing_build_clusters(cc::span<sg::cluster_triangles const> clusters,
+                                                                   sg::accel_build_flags flags) override;
+    void raytracing_build_clusters_indirect(sg::cluster_pool const& pool,
+                                            sg::cluster_indirect_build const& build) override;
+    [[nodiscard]] cc::vector<sg::blas_handle> raytracing_build_cluster_blas(sg::cluster_set_handle const& clusters,
+                                                                            cc::span<sg::cluster_range const> ranges,
+                                                                            sg::accel_build_flags flags,
+                                                                            int hit_record_stride) override;
+    void raytracing_update_partitioned_tlas_indirect(sg::partitioned_tlas const& ptlas,
+                                                     sg::ptlas_indirect_operations const& ops,
+                                                     bool is_first,
+                                                     cc::vector<sg::blas_table_handle>&& released) override;
 
     // Ray-tracing dispatch, reached through cmd.raytracing.
     // Bodies in dx12_command_list.cc, next to the compute equivalents — ray tracing binds through the compute root signature.
@@ -323,6 +351,13 @@ private:
                                                sg::access_flags access,
                                                bool from_array_application = false);
 
+    /// One polyfilled mesh draw, of the grid `x, y, z`, or of the record of `dispatch_args` at `offset_in_bytes` of
+    /// `args` where it is non-null.
+    void draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                              cc::fixed_array<int, 3> grid,
+                              dx12_buffer_handle const& args,
+                              isize offset_in_bytes);
+
     // Shared BLAS build for both geometry families.
     // Prebuild-query the translated geometry descs, allocate the persistent result + transient scratch, barrier + record the build, and wrap it in a dx12_blas.
     // `input_buffers` are the geometry's build-input buffers, tracked accel_read to order any prior upload.
@@ -357,6 +392,10 @@ private:
                                 sg::impl::array_declaration_book& book);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
+    /// Sets the software walk's pool and roots, for a layout that carries them, right before an op runs.
+    void bind_software_trace(dx12_pipeline_layout const& layout,
+                             cc::span<dx12_binding_group const* const> groups,
+                             bool is_graphics);
     void declare_group_accesses(cc::span<dx12_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
                                 sg::pipeline_stage_flags op_stages);

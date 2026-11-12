@@ -46,7 +46,8 @@
 //      genuinely stuck thread.
 //   4. **Addresses are absolute.** Resolving them offline needs the module bases, which the recording carries.
 //   5. **Untried under ThreadSanitizer**, which has opinions about a handler touching shared state.
-//   6. **macOS is not implemented.** It has no `/proc`, no `SIGRTMIN`, and would need `task_threads()`.
+//   6. **macOS walks from outside instead**: `task_threads()` lists the threads, and each is suspended, read and resumed
+//      in turn, as Windows does, with its frames named only once every thread runs again.
 
 namespace cc::impl
 {

@@ -1,0 +1,139 @@
+// The mesh and task stages, each built three ways, which the mixed-route test links across routes.
+// The links walk the packing rules, what a triangle writes reads in the pixel stage after them, and the payload walks DXC's layout of it.
+require mesh_shader
+
+struct mesh_link:
+    @position position: hpos4
+    near: float3
+    // shares `near`'s row
+    tail: float
+    @interpolate(.linear) screen: float2
+    @interpolate(.flat) id: int
+    // crosses as its columns
+    frame: mat2
+
+// Packed on its own from row 0 in a mesh stage, and after the link in a pixel stage.
+struct mesh_face:
+    tint: float3
+    @interpolate(.flat) index: int
+    weight: float2
+
+@pixel struct colors:
+    first: float4
+    second: float4
+
+@pixel fun plain_ps(l: mesh_link) -> colors:
+    return {
+        first = float4(l.near.x, l.near.y, l.near.z, l.tail)
+        second = float4((l.frame * float2(l.screen.x, 1.0)).x, (l.frame * float2(1.0, l.screen.y)).y, l.id as float, 1.0)
+    }
+
+@pixel fun faced_ps(l: mesh_link, f: mesh_face) -> colors:
+    return {
+        first = float4(l.near.x + f.tint.x, l.near.y + f.tint.y, l.near.z + f.tint.z, l.tail + (l.id as float) + (l.frame * l.screen).x)
+        second = float4(f.weight.x, f.weight.y, f.index as float, 1.0)
+    }
+
+fun corner(x: float, y: float, id: int) -> mesh_link:
+    return {
+        position = hpos4(x, y, 0.5, 1.0)
+        near = float3(x, y, x * y)
+        tail = x - y
+        screen = float2(x * 0.5, y * 0.25)
+        id = id
+        frame = mat2(float2(1.0, x), float2(y, 2.0))
+    }
+
+// A quad over most of the target, written by the invocation each corner falls to, of a dynamic index.
+@mesh(4, vertices = 4, triangles = 2)
+fun quad_ms(@local_thread_index k: int, output: mut mesh_output[mesh_link]):
+    output.set_counts(4u, 2u)
+    let x = if (k & 1) == (k >> 1) => -0.75 else 0.75
+    let y = if k < 2 => -0.75 else 0.75
+    output.vertex(k as uint, corner(x, y, 5 + k))
+    if k == 0:
+        output.triangle(0u, uint3(0u, 1u, 2u))
+        output.triangle(1u, uint3(0u, 2u, 3u))
+
+// Two triangles that each state their own values.
+@mesh(1, vertices = 4, triangles = 2)
+fun faces_ms(output: mut mesh_output[mesh_link, mesh_face]):
+    output.set_counts(4u, 2u)
+    output.vertex(0u, corner(-1.0, -1.0, 1))
+    output.vertex(1u, corner(1.0, -1.0, 2))
+    output.vertex(2u, corner(1.0, 1.0, 3))
+    output.vertex(3u, corner(-1.0, 1.0, 4))
+    for i in 0 ..< 2:
+        let n = i as uint
+        output.triangle(n, uint3(0u, n + 1u, n + 2u))
+        output.primitive(n, {
+            tint = float3(0.25 * ((i + 1) as float), 0.5, 0.75)
+            index = 40 + i
+            weight = float2((i as float) + 0.5, 3.0)
+        })
+
+// Two lines, across and along the target.
+@mesh(1, vertices = 4, lines = 2)
+fun lines_ms(output: mut mesh_output[mesh_link]):
+    output.set_counts(4u, 2u)
+    output.vertex(0u, corner(-1.0, 0.125, 1))
+    output.vertex(1u, corner(1.0, 0.125, 2))
+    output.vertex(2u, corner(0.375, -1.0, 3))
+    output.vertex(3u, corner(0.375, 1.0, 4))
+    output.line(0u, uint2(0u, 1u))
+    output.line(1u, uint2(2u, 3u))
+
+// `shift` follows a float with no gap, and `steps` is read at an index only the workgroup knows.
+struct handed:
+    blue: float
+    shift: float2
+    steps: float[4]
+    id: int
+    corner: float3
+    low: uint
+
+@task(1) fun split_ts(@workgroup_id group: int3):
+    let first = (group.x + 1) as float
+    let h: handed = {
+        blue = 0.5
+        shift = float2(0.25, first)
+        steps = [-1.0, 0.0, 1.0, 2.0]
+        id = 9
+        corner = float3(1.0, 2.0, 3.0)
+        low = (group.x != 0) as uint
+    }
+    dispatch_mesh(2u, 1u, 1u, h)
+
+@mesh(1, vertices = 4, triangles = 2)
+fun split_ms(@workgroup_id group: int3, h: handed, output: mut mesh_output[mesh_link]):
+    output.set_counts(4u, 2u)
+    let left = h.steps[group.x]
+    let right = h.steps[group.x + 1]
+    let bottom = if h.low != 0u => -1.0 else -0.5
+    for k in 0 ..< 4:
+        let x = if (k & 1) == (k >> 1) => left else right
+        let y = if k < 2 => bottom else 1.0
+        let mut c = corner(x, y, h.id + group.x)
+        c.tail = h.blue + h.shift.x * h.shift.y + h.corner.z
+        output.vertex(k as uint, c)
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(0u, 2u, 3u))
+
+// A mesh stage with memory of its own, whose invocations each read the payload.
+@workgroup binding shared_row:
+    picked: float[4]
+
+@task(1) fun many_ts():
+    let h: handed = {blue = 0.75, shift = float2(1.0, 2.0), steps = [-1.0, -0.5, 0.5, 1.0], id = 2, corner = float3(0.0), low = 1u}
+    dispatch_mesh(1u, 1u, 1u, h)
+
+@mesh(4, vertices = 4, triangles = 2)
+fun many_ms(@local_thread_index k: int, h: handed, output: mut mesh_output[mesh_link]){shared_row}:
+    output.set_counts(4u, 2u)
+    shared_row.picked[k] = h.steps[k]
+    let x = if (k & 1) == (k >> 1) => h.steps[0] else h.steps[3]
+    let y = if k < 2 => h.steps[1] else h.steps[2]
+    output.vertex(k as uint, corner(x, y, h.id + k))
+    if k == 0:
+        output.triangle(0u, uint3(0u, 1u, 2u))
+        output.triangle(1u, uint3(0u, 2u, 3u))

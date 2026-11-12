@@ -38,6 +38,15 @@ static_assert(!std::is_constructible_v<cc::write_stream, cc::read_write_stream&>
 static_assert(!std::is_copy_constructible_v<cc::read_stream>);
 static_assert(std::is_move_constructible_v<cc::read_stream>);
 
+// The slots a stream lacks take no space, under the MSVC ABI too.
+// Every stream holds {curr, end, flush, context}, plus first_write when it writes and the write end when it does both.
+static_assert(sizeof(cc::read_stream) == 4 * sizeof(void*));
+static_assert(sizeof(cc::write_stream) == 5 * sizeof(void*));
+static_assert(sizeof(cc::read_write_stream) == 6 * sizeof(void*));
+static_assert(sizeof(cc::seekable_read_stream) == 4 * sizeof(void*));
+static_assert(sizeof(cc::seekable_write_stream) == 5 * sizeof(void*));
+static_assert(sizeof(cc::seekable_read_write_stream) == 6 * sizeof(void*));
+
 TEST("stream - adapter converts directly to a narrower stream")
 {
     byte data[4] = {b(1), b(2), b(3), b(4)};

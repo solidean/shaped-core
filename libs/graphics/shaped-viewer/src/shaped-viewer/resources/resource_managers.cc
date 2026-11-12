@@ -835,6 +835,35 @@ void texture_manager::replace_with_compressed(texture_id id, sg::texture_2d comp
         record->summary.value().exact = false;
 }
 
+sg::texture_2d_description adoptable_texture(sg::context& ctx, sg::pixel_format format, i32 width, i32 height)
+{
+    CC_ASSERT(width > 0 && height > 0, "a texture needs a positive extent");
+
+    // Which routine can fill the levels an upload did not supply is a property of the FORMAT, and the usage it needs
+    // is fixed at creation — so the choice is made here rather than where the generation is recorded.
+    // An sRGB format carries no typed UAV and a compressed one is neither writable nor renderable, which leaves the
+    // compressed case with no path at all; it allocates only the levels its file supplied.
+    // An image format outside the portable set is writable only where the device grants extended image formats.
+    auto const compute_mips = sg::supports_typed_uav(format)
+                           && (sg::is_portable_image_format(format) || ctx.supports(sg::feature::extended_image_formats));
+    auto const raster_mips = !compute_mips && sg::is_render_target_format(format);
+
+    // The full chain is allocated up front even when only the base level is supplied, so generating the rest
+    // later fills this texture in place rather than replacing it.
+    // A format neither routine can fill has room for the levels it is given only, which is 1 here.
+    auto usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
+    if (compute_mips)
+        usage = usage | sg::texture_usage::image;
+    else if (raster_mips)
+        usage = usage | sg::texture_usage::render_target;
+
+    return {.format = format,
+            .width = width,
+            .height = height,
+            .mip_levels = compute_mips || raster_mips ? impl::mip_count_of(width, height) : 1,
+            .usage = usage};
+}
+
 texture_id texture_manager::acquire(texture_data const& texture)
 {
     if (auto const resident = find_by_hash(texture.hash); resident.has_value())
@@ -843,33 +872,49 @@ texture_id texture_manager::acquire(texture_data const& texture)
     CC_ASSERT(texture.width > 0 && texture.height > 0, "a texture needs a positive extent");
     CC_ASSERT(texture.mip_count >= 1, "a texture carries at least its base level");
 
-    // Which routine can fill the levels an upload did not supply is a property of the FORMAT, and the usage it needs
-    // is fixed at creation — so the choice is made here rather than where the generation is recorded.
-    // An sRGB format carries no typed UAV and a compressed one is neither writable nor renderable, which leaves the
-    // compressed case with no path at all; it allocates only the levels its file supplied.
-    // An image format outside the portable set is writable only where the device grants extended image formats.
-    auto const compute_mips
-        = sg::supports_typed_uav(texture.format)
-       && (sg::is_portable_image_format(texture.format) || _ctx.supports(sg::feature::extended_image_formats));
-    auto const raster_mips = !compute_mips && sg::is_render_target_format(texture.format);
+    // The budget is charged for the whole allocated chain rather than the levels supplied so far.
+    // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
+    // completed texture would sit in the budget at three quarters of what it costs.
+    auto const chain_bytes_of = [&](i32 levels)
+    {
+        auto bytes = isize(0);
+        for (auto mip = i32(0); mip < levels; ++mip)
+            bytes += impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
+        return bytes;
+    };
 
-    // The full chain is allocated up front even when only the base level is supplied, so generating the rest
-    // later fills this texture in place rather than replacing it.
-    auto const total_mips
-        = compute_mips || raster_mips ? impl::mip_count_of(texture.width, texture.height) : texture.mip_count;
+    auto const description = adoptable_texture(_ctx, texture.format, texture.width, texture.height);
+
+    if (texture.gpu.has_value())
+    {
+        auto const& gpu = texture.gpu.value();
+        CC_ASSERT(gpu.raw()->format() == texture.format && gpu.width() == texture.width && gpu.height() == texture.height,
+                  "an adopted texture has the shape its data names");
+        CC_ASSERT(gpu.mip_levels() == description.mip_levels && gpu.raw()->usage().has_all(description.usage),
+                  "an adopted texture is created from adoptable_texture's description");
+
+        // Nothing streams: an empty transfer list is settled and delivered, so the next `collect_settled` reports it
+        // as landed, and its follow-up work is queued as an upload's is.
+        auto const id = insert(texture.hash,
+                               {.texture = gpu,
+                                .state = residency::pending,
+                                .uploaded_mips = texture.mip_count,
+                                .total_mips = description.mip_levels,
+                                .summary = texture.summary},
+                               chain_bytes_of(description.mip_levels));
+        _settling[id] = {};
+        return id;
+    }
+
+    // A format with no mip routine keeps the levels it was given, whatever their number.
+    auto const total_mips = description.mip_levels > 1 ? description.mip_levels : texture.mip_count;
     CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
-
-    auto usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
-    if (compute_mips)
-        usage = usage | sg::texture_usage::image;
-    else if (raster_mips)
-        usage = usage | sg::texture_usage::render_target;
 
     auto gpu = _ctx.persistent.create_texture_2d({.format = texture.format,
                                                   .width = texture.width,
                                                   .height = texture.height,
                                                   .mip_levels = total_mips,
-                                                  .usage = usage});
+                                                  .usage = description.usage});
 
     // Every supplied level as its own transfer, each keeping a pin into the caller's pixels — so the payload outlives
     // this call without the manager holding a copy of it.
@@ -890,12 +935,7 @@ texture_id texture_manager::acquire(texture_data const& texture)
     // Every texture is, since which ones a material reads as an emission is not known here; the scan is capped and cheap.
     auto const summary = summarize_texture(texture);
 
-    // The budget is charged for the whole allocated chain rather than the levels supplied so far.
-    // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
-    // completed texture would sit in the budget at three quarters of what it costs.
-    auto chain_bytes = isize(0);
-    for (auto mip = i32(0); mip < total_mips; ++mip)
-        chain_bytes += impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
+    auto const chain_bytes = chain_bytes_of(total_mips);
 
     auto const id = insert(texture.hash,
                            {.texture = cc::move(gpu),

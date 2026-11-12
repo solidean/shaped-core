@@ -1,5 +1,6 @@
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/impl/flattener.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -81,16 +82,11 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         feature_uses.push_back(
             {.file = file(), .call = call, .features = record->features, .within = cc::move(within), .granted = granted});
     }
-    // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
+    // CHK-298, CHK-379: a test's run is as many lanes as its subgroup operations and derivatives need (EVAL-140)
     if (is_test)
     {
-        auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
-        if (record != nullptr && record->uses_derivatives)
-            stage_violations.push_back({.file = file(), .call = call, .callee = callee});
         auto const chain = entry.at(current()->chain);
         auto const written = chain.empty() ? call_site{.file = file(), .call = call} : chain[0];
-        if (record != nullptr && record->is_subgroup_operation)
-            subgroup_calls.push_back({.file = file(), .call = call, .callee = callee, .written = written});
         auto const ray_stages = stage_bit(stage::raygen) | stage_bit(stage::miss) | stage_bit(stage::closest_hit)
                               | stage_bit(stage::any_hit) | stage_bit(stage::intersection) | stage_bit(stage::callable);
         if (auto const& s = c.out.at(callee); s.info >= 0 && (c.out.functions[s.info].stages & ~ray_stages) == 0)
@@ -100,8 +96,17 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
     if (entry.entry_stage == stage::none)
         return;
     auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+    // CHK-512: what only a test states, no target writes
+    if (record != nullptr && record->is_test_only)
+    {
+        stage_violations.push_back({.file = file(), .call = call, .callee = callee, .is_test_only = true});
+        return;
+    }
     if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
         quad_calls.push_back({.file = file(), .call = call, .callee = callee});
+    if (record != nullptr && entry.entry_stage == stage::compute
+        && (record->is_barrier || record->is_uniform_load || record->is_subgroup_operation || record->is_quad_operation))
+        group_calls.push_back({.file = file(), .call = call, .callee = callee});
     // CHK-404: a decision runs as often as the traversal asks it, whichever stage's loop asks
     if (auto const decision = decision_stage();
         decision != stage::none && record != nullptr
@@ -268,8 +273,8 @@ auto sgl::check::impl::flattener::is_substitutable(flat_expr_id id) const -> boo
     if (!is_valid(id))
         return false;
     auto const& x = entry.at(id);
-    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>()
-        || x.node.is<flat_enum_value>())
+    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_wide_literal>()
+        || x.node.is<flat_bool_literal>() || x.node.is<flat_enum_value>())
         return true;
     auto const* const ref = x.node.try_as<flat_local_ref>();
     return ref != nullptr && !entry.at(ref->local).is_mut;
@@ -296,8 +301,8 @@ auto sgl::check::impl::flattener::is_literal_construction(flat_expr_id id) const
     for (auto const a : entry.at(made->arguments))
     {
         auto const& x = entry.at(a).node;
-        auto const is_literal
-            = x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_bool_literal>() || x.is<flat_enum_value>();
+        auto const is_literal = x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_wide_literal>()
+                             || x.is<flat_bool_literal>() || x.is<flat_enum_value>();
         if (!is_literal && !is_literal_construction(a))
             return false;
     }
@@ -312,6 +317,8 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
     if (auto const* const l = x.node.try_as<flat_literal>())
         return add_expr(x.type, from, *l);
     if (auto const* const l = x.node.try_as<flat_int_literal>())
+        return add_expr(x.type, from, *l);
+    if (auto const* const l = x.node.try_as<flat_wide_literal>())
         return add_expr(x.type, from, *l);
     if (auto const* const l = x.node.try_as<flat_bool_literal>())
         return add_expr(x.type, from, *l);
@@ -335,6 +342,8 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
         auto const object = again(member->object, from);
         return add_expr(x.type, from, flat_member{.object = object, .member = index, .letters = letters});
     }
+    if (auto const* const length = x.node.try_as<flat_buffer_length>())
+        return add_expr(x.type, from, flat_buffer_length{.buffer = again(length->buffer, from)});
     if (auto const* const element = x.node.try_as<flat_buffer_element>())
     {
         auto const buffer = again(element->buffer, from);
@@ -616,6 +625,76 @@ void sgl::check::impl::flattener::flatten_swizzle_assign(origin from, ast::assig
 
 namespace
 {
+/// CHK-520: the axes of its thread id a tree reads, counted to the highest.
+/// 0 for none, 1 for `id.x` alone, 2 where it reads `id.y`, and 3 where it reads `id.z` or hands the vector on whole.
+i32 thread_id_axes(flat_entry_point const& e)
+{
+    auto id = local_id::none;
+    for (auto const& input : e.stage_inputs)
+        if (input.input == stage_input::thread_id)
+            id = input.local;
+    if (!is_valid(id))
+        return 0;
+    auto const names_id = [&](flat_expr_id x)
+    {
+        auto const* const ref = is_valid(x) ? e.at(x).node.try_as<flat_local_ref>() : nullptr;
+        return ref != nullptr && ref->local == id;
+    };
+    auto is_read_by_axis = cc::vector<u8>::create_filled(e.exprs.size(), 0);
+    auto axes = 0;
+    for (auto const& x : e.exprs)
+    {
+        auto const* const member = x.node.try_as<flat_member>();
+        if (member == nullptr || !names_id(member->object))
+            continue;
+        is_read_by_axis[index_of(member->object)] = 1;
+        auto const highest = [&]
+        {
+            if (!member->is_swizzle())
+                return i32(member->member);
+            auto result = 0;
+            for (auto k = 0; k < member->letters.count; ++k)
+                result = cc::max(result, i32(member->letters.fields[k]));
+            return result;
+        }();
+        axes = cc::max(axes, highest + 1);
+    }
+    for (auto i = isize(0); i < e.exprs.size(); ++i)
+        if (names_id(flat_expr_id(i)) && is_read_by_axis[i] == 0)
+            return 3;
+    return axes;
+}
+
+/// CHK-521: why a stated workgroup size wastes what a bare @compute would not, which would choose `chosen`; none where
+/// it wastes nothing, and never for one thread, a serial kernel's size.
+cc::optional<cc::string> stated_workgroup_waste(cc::fixed_array<i32, 3> const& size,
+                                                cc::fixed_array<i32, 3> const& chosen,
+                                                i32 axes)
+{
+    auto const total = size[0] * size[1] * size[2];
+    auto const stated
+        = cc::format("@compute({}, {}, {}) runs {} threads to a workgroup", size[0], size[1], size[2], total);
+    auto const instead = chosen[1] == 1 ? cc::format("{}", chosen[0])
+                       : chosen[2] == 1 ? cc::format("{}, {}", chosen[0], chosen[1])
+                                        : cc::format("{}, {}, {}", chosen[0], chosen[1], chosen[2]);
+    auto const bare = cc::format("a bare @compute would choose ({}) here", instead);
+    if (total == 1)
+        return {};
+    if (total < 32)
+        return cc::format("{}, less than a wave of any GPU, which idles the rest of it; {}", stated, bare);
+    if (total % 32 != 0)
+        return cc::format("{}, which leaves a partial wave in every workgroup; {}", stated, bare);
+    if (total > 256 || size[0] > 256 || size[1] > 256 || size[2] > 64)
+        return cc::format("{}, which no webgpu device runs: it has 256 threads, at most (256, 256, 64) along the axes; "
+                          "{}",
+                          stated, bare);
+    if (axes == 1 && (size[1] > 1 || size[2] > 1))
+        return cc::format("{} along more than one axis, and the body reads the thread id's x alone, so on a grid of "
+                          "one row every row of a workgroup but the first runs past it; {}",
+                          stated, bare);
+    return {};
+}
+
 /// CHK-436: a float compared with itself, `x != x` or `x == x`, which a fast-math compiler folds.
 /// `is_nan` and `is_inf` test the bits on every target, which no such compiler can fold, so they are no such test.
 bool is_special_value_test(flat_entry_point const& e, flat_call const& call)
@@ -648,8 +727,20 @@ located_diagnostic& report_unroll(checker& c, flattener::unroll_report const& u)
 }
 } // namespace
 
+cc::shared_ptr<cc::set<cc::string>> checker::names_up_to(isize count) const
+{
+    auto names = cc::make_shared<cc::set<cc::string>>();
+    for (auto i = isize(0); i < count; ++i)
+        if (!out.symbols[i].name.empty() && !takes_no_emitted_name(out.symbols[i]))
+            (void)names->insert(out.symbols[i].name);
+    return names;
+}
+
 checker::taken_names checker::module_names()
 {
+    // a link's names below are made where they are first needed (`seal_layer`)
+    if (module_names_below == nullptr && module_names_below_count > 0)
+        module_names_below = names_up_to(module_names_below_count);
     if (own_module_names == nullptr || module_names_for != out.symbols.size())
     {
         auto names = cc::make_shared<cc::set<cc::string>>();
@@ -710,9 +801,6 @@ void checker::flatten_test(i32 index)
     // a pipeline's trace or callable runs against tables a test has none of
     for (auto const& v : f.ray_stage_calls)
         report_reached(v, ", which only the ray-tracing stages run");
-    // CHK-379
-    for (auto const& v : f.subgroup_calls)
-        report_reached(v, ": a run is one invocation, and has no subgroup");
 
     // what a test reaches is of every compile, even where an entry point's tree judged it first
     for (auto const& u : f.unroll_reports)
@@ -727,6 +815,7 @@ void checker::flatten_test(i32 index)
             f.entry.body = f.root_body();
             judge_constants(f.entry);
             judge_assignments(f.entry);
+            (void)judge_uniformity(f.entry);
         }
         return;
     }
@@ -736,20 +825,18 @@ void checker::flatten_test(i32 index)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect")
             .entry_points.clear();
-    for (auto const& v : f.stage_violations)
-        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-               cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
-                          out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where,
                     f.failure_detail.empty() ? cc::string("a test whose body reaches a construct the flat tree cannot "
                                                           "hold yet")
                                              : f.failure_detail);
-    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
+    if (f.is_failed || !f.ray_stage_calls.empty())
         return;
     f.entry.body = f.root_body();
     judge_constants(f.entry);
     judge_assignments(f.entry);
+    // CHK-377, CHK-282: its lanes reach each subgroup operation and derivative together, as an entry point's do
+    (void)judge_uniformity(f.entry);
     out.tests.own(index).unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
@@ -834,7 +921,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
 
     auto const parameters = out.at(info.parameters);
     // A compute entry point hands nothing back, so `nothing` is its result and not a hole.
-    auto const wants_result = info.entry_stage != stage::compute;
+    auto const wants_result = info.entry_stage != stage::compute && info.entry_stage != stage::task;
     auto is_parameter_sound = true;
     for (auto const& parameter : parameters)
         is_parameter_sound = is_parameter_sound && is_sound(parameter.type);
@@ -853,10 +940,15 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];
+    f.entry.is_auto_workgroup = info.is_auto_workgroup;
     f.entry.preferred_subgroup_size = info.preferred_subgroup_size;
     f.entry.features = info.features;
+    // CHK-527: a reserved binding an internal entry point of the prelude lists keeps its reserved place
     for (auto const binding : out.at(info.bindings))
-        f.entry.bindings.push_back(binding);
+        if (is_internal(id) && reserved_binding_named(out.at(binding).name) != nullptr)
+            f.entry.reserved.push_back(binding);
+        else
+            f.entry.bindings.push_back(binding);
 
     // Every module-level name is taken, so no local can hide a type, a binding or a builtin an emitter writes.
     auto const taken = module_names();
@@ -983,6 +1075,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
     f.judge_text_types();
+    f.place_target_layouts();
 
     // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
     // CHK-402: what is judged of this entry point's inlined body is its own, which a compile of a sibling leaves out.
@@ -1078,6 +1171,14 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     for (auto const& v : f.stage_violations)
     {
         auto const where = span_of(v.file, v.call);
+        if (v.is_test_only)
+        {
+            report_of_entry(diagnostic_kind::stage_not_allowed, v.file, where,
+                            cc::format("a {} entry point reaches this, and only a test calls {}, which states what "
+                                       "its run binds or which lane it runs in",
+                                       check::stage_name(info.entry_stage), out.at(v.callee).name));
+            continue;
+        }
         if (v.decision == stage::none)
         {
             report_of_entry(diagnostic_kind::stage_not_allowed, v.file, where,
@@ -1128,6 +1229,13 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                    "{}, "
                                    "{})",
                                    out.at(q.callee).name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
+    // CHK-520: what a bare @compute reaches reads nothing of the group whose size the compile chooses
+    for (auto const& g :
+         info.is_auto_workgroup ? cc::span<stage_violation const>(f.group_calls) : cc::span<stage_violation const>())
+        report_of_entry(diagnostic_kind::invalid_entry_point, g.file, span_of(g.file, g.call),
+                        cc::format("{} reads the workgroup it runs in, and {} is a bare @compute, which chooses its "
+                                   "own workgroup size; it states one, `@compute(64)`",
+                                   out.at(g.callee).name, s.name));
     auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
     for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
         report_of_entry(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
@@ -1160,10 +1268,73 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                                      check::stage_name(info.entry_stage), s.name)});
         }
     }
-    if (f.is_failed || !f.stage_violations.empty() || reaches_discard
-        || (info.stages & stage_bit(info.entry_stage)) == 0 || (!is_linear && !f.quad_calls.empty()))
+    if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0
+        || (!is_linear && !f.quad_calls.empty()) || (info.is_auto_workgroup && !f.group_calls.empty()))
         return;
     f.entry.body = f.root_body();
+
+    // CHK-520: a bare @compute's size follows the axes of its thread id the body reads, each a multiple of 64
+    if (info.entry_stage == stage::compute)
+    {
+        auto const axes = thread_id_axes(f.entry);
+        auto const chosen = axes >= 3 ? cc::fixed_array<i32, 3>{4, 4, 4}
+                          : axes == 2 ? cc::fixed_array<i32, 3>{8, 8, 1}
+                                      : cc::fixed_array<i32, 3>{64, 1, 1};
+        // CHK-521: a stated size a bare @compute could have chosen is habit rather than the algorithm's, and is judged
+        auto is_group_read = !f.group_calls.empty();
+        for (auto const binding : out.at(info.bindings))
+            is_group_read = is_group_read || out.bindings[out.at(binding).info].is_workgroup;
+        for (auto const& parameter : parameters)
+            is_group_read = is_group_read || check::reads_group(parameter.input);
+        if (info.is_auto_workgroup)
+            f.entry.workgroup = chosen;
+        else if (auto detail = stated_workgroup_waste(info.workgroup, chosen, axes); detail.has_value() && !is_group_read)
+            report_of_entry(diagnostic_kind::workgroup_wastes_lanes, s.file,
+                            find_attribute(s.file, ast_of(s.file).at(s.declaration).attributes, "compute")->name,
+                            cc::move(detail.value()));
+    }
+
+    // CHK-485: a task stage launches its mesh workgroups once, as the last thing its body does
+    if (info.entry_stage == stage::task)
+    {
+        auto const is_dispatch = [&](flat_expr_id id)
+        {
+            auto const* const call = is_valid(id) ? f.entry.at(id).node.try_as<flat_call>() : nullptr;
+            auto const* const record
+                = call != nullptr && is_valid(call->intrinsic) ? out.builtin_function(call->intrinsic) : nullptr;
+            return record != nullptr && record->name == "dispatch_mesh";
+        };
+        auto dispatches = 0;
+        for (auto i = isize(0); i < f.entry.exprs.size(); ++i)
+            dispatches += is_dispatch(flat_expr_id(i)) ? 1 : 0;
+        // the last statement's value, through the blocks a call is flattened into, down to what each leaves with
+        auto ends_in_dispatch = false;
+        auto top = f.entry.at(f.entry.body);
+        for (auto depth = 0; depth < 8 && !top.empty() && !ends_in_dispatch; ++depth)
+        {
+            auto const& last = f.entry.at(top[top.size() - 1]).node;
+            auto value = flat_expr_id::none;
+            if (auto const* const eval = last.try_as<flat_eval>())
+                value = eval->value;
+            else if (auto const* const leave = last.try_as<flat_leave>())
+                value = leave->value;
+            if (!is_valid(value))
+                break;
+            ends_in_dispatch = is_dispatch(value);
+            auto const* const block = f.entry.at(value).node.try_as<flat_block>();
+            if (block == nullptr)
+                break;
+            top = f.entry.at(block->body);
+        }
+        if (dispatches != 1 || !ends_in_dispatch)
+        {
+            report(diagnostic_kind::invalid_entry_point, s.file,
+                   ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                   cc::format("{} is a task stage, which calls dispatch_mesh once, as the last statement of its body",
+                              s.name));
+            return;
+        }
+    }
 
     // Every later walk stops descending at the limit and leaves a hole where it stopped, so a tree past it must never
     // reach them: the hole would surface as a missing id rather than as the limit (CHK-268).
@@ -1174,7 +1345,15 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         auto const& at = probe.found.value();
         auto const where = ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt);
         report(diagnostic_kind::nesting_too_deep, at.file, where,
-               cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_depth));
+               cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_program_depth));
+        return;
+    }
+    // CHK-516: here, with every call inlined, so a copy reached through a generic or a return is judged too
+    if (auto const misuse = find_hit_object_misuse(f.entry); misuse.has_value())
+    {
+        auto const& at = misuse.value().where;
+        unsupported(at.file, ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt),
+                    misuse.value().detail);
         return;
     }
     judge_constants(f.entry);
@@ -1187,7 +1366,11 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         legalized.value().options = f.entry.options;
         f.entry.legalized = cc::make_shared<flat_entry_point const>(cc::move(legalized.value()));
     }
-    out.entry_points.push_back(cc::move(f.entry));
+    // CHK-527: the prelude's own entry points are no program's, and only a polyfill compiles them, by name
+    if (is_internal(id))
+        out.internal_entry_points.push_back(cc::move(f.entry));
+    else
+        out.entry_points.push_back(cc::move(f.entry));
 }
 
 void checker::flatten_metal_traversals()
@@ -1195,7 +1378,8 @@ void checker::flatten_metal_traversals()
     auto is_any = false;
     for (auto const& p : out.pipelines)
     {
-        if (p.kind != pipeline_kind::hit_group && p.kind != pipeline_kind::raytracing)
+        if ((p.kind != pipeline_kind::hit_group && p.kind != pipeline_kind::raytracing)
+            || !out.is_reached_file(out.at(p.symbol).file))
             continue;
         is_any = true;
         if (p.kind != pipeline_kind::hit_group || !p.is_procedural || out.at(p.symbol).file != i32(out.files.size()) - 1)
@@ -1210,13 +1394,15 @@ void checker::flatten_metal_traversals()
             flatten_entry_point(p.intersection, &request);
         }
     }
+    if (!is_any)
+        return;
     // CHK-345: a record without a closest hit calls this one on metal, where a table slot holds a function or crashes
     // it stands for no function of the source, so it is owned by a ray-tracing function of the program
     auto owner = symbol_id::none;
     for (auto const& fn : out.functions)
         if (fn.entry_stage >= stage::raygen && out.at(fn.symbol).file == i32(out.files.size()) - 1)
             owner = fn.symbol;
-    if (!is_any || !is_valid(owner))
+    if (!is_valid(owner))
         return;
     auto f = flattener{.c = *this};
     f.entry.entry_stage = stage::closest_hit;

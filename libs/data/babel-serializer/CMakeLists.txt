@@ -116,9 +116,6 @@ target_compile_options(babel-serializer
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# CC_ALL rather than CC_STD, and measured: babel's readers work against cc::read_stream, not the heavy STL headers.
-sc_target_pch(babel-serializer CC_ALL) # 0.54
-
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(babel-serializer-test
@@ -156,11 +153,8 @@ if(SC_BUILD_TESTS)
         nexus
     )
 
-    sc_target_pch(babel-serializer-test CC_ALL NEXUS) # inherits the library's measured tier
-
     # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the fbx test that reads the real scene when present.
-    cmake_path(SET _babel_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/bistro/.install")
-    target_compile_definitions(babel-serializer-test PRIVATE BABEL_TEST_BISTRO_DIR="${_babel_bistro_dir}")
+    sc_target_source_paths(babel-serializer-test PRIVATE BABEL_TEST_BISTRO_DIR ../../../extern/bistro/.install)
 
     # tests/font/font_builder.hh crafts fonts byte by byte; another library's tests include it from this root.
     set(BABEL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests" CACHE INTERNAL "babel-serializer's test-helper include root")

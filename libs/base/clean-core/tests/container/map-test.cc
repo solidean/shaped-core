@@ -1,5 +1,6 @@
 #include <clean-core/common/hash.hh>
 #include <clean-core/container/map.hh>
+#include <clean-core/memory/allocation.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
@@ -44,7 +45,19 @@ struct const_hash
         return 0;
     }
 };
+
+// the map's members without the hasher and the comparator
+struct map_members_without_functors
+{
+    cc::allocation<void*> buckets;
+    isize size;
+    void* node_resource;
+};
 } // namespace
+
+// An empty hasher and comparator take no space, under the MSVC ABI too.
+static_assert(sizeof(cc::map<int, int>) == sizeof(map_members_without_functors));
+static_assert(sizeof(cc::map<int, int, const_hash>) == sizeof(map_members_without_functors));
 
 TEST("map - basic get / contains / operator[]")
 {

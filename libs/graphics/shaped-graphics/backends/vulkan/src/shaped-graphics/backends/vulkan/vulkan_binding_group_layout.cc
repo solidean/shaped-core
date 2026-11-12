@@ -65,7 +65,34 @@ VkDescriptorType to_vk_descriptor_type(sg::binding_type t)
     add(sg::shader_stage::miss, VK_SHADER_STAGE_MISS_BIT_KHR);
     add(sg::shader_stage::intersection, VK_SHADER_STAGE_INTERSECTION_BIT_KHR);
     add(sg::shader_stage::callable, VK_SHADER_STAGE_CALLABLE_BIT_KHR);
+    add(sg::shader_stage::task, VK_SHADER_STAGE_TASK_BIT_EXT);
+    add(sg::shader_stage::mesh, VK_SHADER_STAGE_MESH_BIT_EXT);
     return flags;
+}
+} // namespace
+
+namespace
+{
+/// The most elements an unbounded binding of `type` holds: the device's per-stage limit for its kind, capped so a
+/// layout's capacity stays a size a descriptor heap's offsets can carry.
+u32 unbounded_capacity_of(vulkan_context const& ctx, sg::binding_type type)
+{
+    auto const& limits = ctx.device_properties().limits;
+    auto limit = limits.maxPerStageDescriptorSampledImages;
+    switch (type)
+    {
+    case sg::binding_type::image:
+        limit = limits.maxPerStageDescriptorStorageImages;
+        break;
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
+        limit = limits.maxPerStageDescriptorStorageBuffers;
+        break;
+    default:
+        break;
+    }
+    constexpr auto k_most = u32(1) << 16;
+    return limit < k_most ? limit : k_most;
 }
 } // namespace
 
@@ -83,7 +110,6 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
     for (isize i = 0; i < bindings.size(); ++i)
     {
         auto const& b = bindings[i];
-        CC_ASSERT(b.count >= 1, "unbounded / zero-count bindings are not supported yet");
         if (!sg::is_sampler(b.type))
             continue;
 
@@ -112,21 +138,37 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
                                             "space cannot tell two of them apart",
                                             bindings[i].name, bindings[j].name, bindings[i].index));
 
+    // An unbounded binding, which the context placed last, is the layout's capacity: each group takes what it binds.
+    auto unbounded_capacity = u32(0);
     auto vk_bindings = cc::vector<VkDescriptorSetLayoutBinding>::create_uninitialized(bindings.size());
+    auto vk_flags = cc::vector<VkDescriptorBindingFlags>::create_filled(bindings.size(), VkDescriptorBindingFlags(0));
     for (isize i = 0; i < bindings.size(); ++i)
     {
         auto const& b = bindings[i];
+        auto count = b.count;
+        if (b.is_unbounded())
+        {
+            count = unbounded_capacity_of(ctx, b.type);
+            unbounded_capacity = count;
+            vk_flags[i] = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+        }
         vk_bindings[i] = VkDescriptorSetLayoutBinding{
             .binding = b.index,
             .descriptorType = to_vk_descriptor_type(b.type),
-            .descriptorCount = b.count,
+            .descriptorCount = count,
             .stageFlags = to_vk_stage_flags(b.visibility),
             .pImmutableSamplers = nullptr,
         };
     }
+    auto const flags_info = VkDescriptorSetLayoutBindingFlagsCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+        .bindingCount = u32(vk_flags.size()),
+        .pBindingFlags = vk_flags.data(),
+    };
 
     auto const info = VkDescriptorSetLayoutCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = unbounded_capacity > 0 ? &flags_info : nullptr,
         // A layout used with descriptor buffers has to say so at creation; it cannot also be allocated from a pool.
         .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT,
         .bindingCount = u32(vk_bindings.size()),
@@ -149,18 +191,38 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
         ctx._descriptor_functions.get_binding_offset(ctx._device, layout, bindings[i].index, &offset);
         binding_offsets[i] = isize(offset);
     }
+    // AMD's driver sizes a variable-count binding at no elements where the spec says its whole capacity
+    // (docs/bugs-external/amd-vulkan-variable-count-layout-size-omits-binding).
+    if (unbounded_capacity > 0)
+    {
+        auto const last = bindings.size() - 1;
+        auto const full
+            = binding_offsets[last] + isize(unbounded_capacity) * descriptor_size_of(ctx, bindings[last].type);
+        if (isize(layout_size) < full)
+            layout_size = VkDeviceSize(full);
+    }
 
     auto owned = cc::vector<sg::binding>::create_copy_of(bindings);
     auto owned_samplers = cc::vector<sg::named_sampler>::create_copy_of(static_samplers);
     return vulkan_binding_group_layout_handle(std::make_shared<vulkan_binding_group_layout>(
         ctx, hash, cc::move(owned), cc::move(owned_samplers), layout, cc::move(slot_samplers), isize(layout_size),
-        cc::move(binding_offsets)));
+        cc::move(binding_offsets), unbounded_capacity));
+}
+
+isize vulkan_binding_group_layout::group_size_in_bytes(isize unbounded_count) const
+{
+    if (_unbounded_capacity == 0)
+        return _size_in_bytes;
+    // the device's layout size assumes the whole capacity; the last binding is where a group's own count ends it
+    auto const last = bindings().size() - 1;
+    return _binding_offsets[last] + unbounded_count * descriptor_size_of(_ctx, bindings()[last].type);
 }
 
 isize vulkan_binding_group_layout::descriptor_offset_of(isize slot, int element) const
 {
     auto const& b = bindings()[slot];
-    CC_ASSERT(element >= 0 && element < int(b.count), "element is outside the binding's count");
+    CC_ASSERT(element >= 0 && element < int(b.is_unbounded() ? _unbounded_capacity : b.count), "element is outside the "
+                                                                                               "binding's count");
     return _binding_offsets[slot] + isize(element) * descriptor_size_of(_ctx, b.type);
 }
 

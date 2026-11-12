@@ -1,5 +1,7 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
@@ -23,6 +25,127 @@ D3D12_DEPTH_STENCILOP_DESC to_stencil_face(sg::stencil_face const& f)
     d.StencilFunc = to_d3d12_comparison(f.compare);
     return d;
 }
+
+/// One subobject of a pipeline-state stream, aligned the way D3D12 walks a stream: a type tag, then its value.
+template <D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type, class T>
+struct alignas(void*) stream_subobject
+{
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type = Type;
+    T value = {};
+};
+
+/// A graphics pipeline as a stream, which is the only way to state view instancing: the classic description has no
+/// field for it.
+struct view_instanced_stream
+{
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, ID3D12RootSignature*> root_signature;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, D3D12_SHADER_BYTECODE> vs;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, D3D12_SHADER_BYTECODE> ps;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, D3D12_SHADER_BYTECODE> ds;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, D3D12_SHADER_BYTECODE> hs;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, D3D12_SHADER_BYTECODE> gs;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, D3D12_BLEND_DESC> blend;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, UINT> sample_mask;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, D3D12_RASTERIZER_DESC> rasterizer;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, D3D12_DEPTH_STENCIL_DESC> depth_stencil;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT, D3D12_INPUT_LAYOUT_DESC> input_layout;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, D3D12_PRIMITIVE_TOPOLOGY_TYPE> topology;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY> rtv_formats;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, DXGI_FORMAT> dsv_format;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, DXGI_SAMPLE_DESC> sample_desc;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO, D3D12_CACHED_PIPELINE_STATE> cached;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING, D3D12_VIEW_INSTANCING_DESC> view_instancing;
+};
+
+/// Creates `pso` with `locations.size()` views, view `i` rendering into render-target array slice `i`.
+HRESULT create_view_instanced(ID3D12Device* device,
+                              D3D12_GRAPHICS_PIPELINE_STATE_DESC const& pso,
+                              cc::span<D3D12_VIEW_INSTANCE_LOCATION const> locations,
+                              ComPtr<ID3D12PipelineState>& out)
+{
+    ComPtr<ID3D12Device2> device2;
+    if (HRESULT hr = device->QueryInterface(IID_PPV_ARGS(&device2)); FAILED(hr))
+        return hr;
+
+    auto stream = view_instanced_stream();
+    stream.root_signature.value = pso.pRootSignature;
+    stream.vs.value = pso.VS;
+    stream.ps.value = pso.PS;
+    stream.ds.value = pso.DS;
+    stream.hs.value = pso.HS;
+    stream.gs.value = pso.GS;
+    stream.blend.value = pso.BlendState;
+    stream.sample_mask.value = pso.SampleMask;
+    stream.rasterizer.value = pso.RasterizerState;
+    stream.depth_stencil.value = pso.DepthStencilState;
+    stream.input_layout.value = pso.InputLayout;
+    stream.topology.value = pso.PrimitiveTopologyType;
+    stream.rtv_formats.value.NumRenderTargets = pso.NumRenderTargets;
+    for (auto i = 0; i < 8; ++i)
+        stream.rtv_formats.value.RTFormats[i] = pso.RTVFormats[i];
+    stream.dsv_format.value = pso.DSVFormat;
+    stream.sample_desc.value = pso.SampleDesc;
+    stream.cached.value = pso.CachedPSO;
+    stream.view_instancing.value = D3D12_VIEW_INSTANCING_DESC{
+        .ViewInstanceCount = UINT(locations.size()),
+        .pViewInstanceLocations = locations.data(),
+        .Flags = D3D12_VIEW_INSTANCING_FLAG_NONE,
+    };
+
+    auto const stream_desc
+        = D3D12_PIPELINE_STATE_STREAM_DESC{.SizeInBytes = sizeof(stream), .pPipelineStateSubobjectStream = &stream};
+    return device2->CreatePipelineState(&stream_desc, IID_PPV_ARGS(&out));
+}
+
+/// A mesh-shaded pipeline as a stream, the only way to state one: an optional amplification and a mesh stage stand
+/// where the vertex stage and the input assembler would.
+struct mesh_stream
+{
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, ID3D12RootSignature*> root_signature;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS, D3D12_SHADER_BYTECODE> as;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS, D3D12_SHADER_BYTECODE> ms;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, D3D12_SHADER_BYTECODE> ps;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, D3D12_BLEND_DESC> blend;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, UINT> sample_mask;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, D3D12_RASTERIZER_DESC> rasterizer;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, D3D12_DEPTH_STENCIL_DESC> depth_stencil;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY> rtv_formats;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, DXGI_FORMAT> dsv_format;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, DXGI_SAMPLE_DESC> sample_desc;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CACHED_PSO, D3D12_CACHED_PIPELINE_STATE> cached;
+};
+
+/// Creates `pso`'s fixed-function state with `desc`'s task and mesh stages in place of its vertex stage.
+HRESULT create_mesh_shaded(ID3D12Device* device,
+                           D3D12_GRAPHICS_PIPELINE_STATE_DESC const& pso,
+                           sg::raster_pipeline_description const& desc,
+                           ComPtr<ID3D12PipelineState>& out)
+{
+    ComPtr<ID3D12Device2> device2;
+    if (HRESULT hr = device->QueryInterface(IID_PPV_ARGS(&device2)); FAILED(hr))
+        return hr;
+
+    auto stream = mesh_stream();
+    stream.root_signature.value = pso.pRootSignature;
+    if (desc.task_shader.has_value())
+        stream.as.value = {desc.task_shader.value().bytecode.data(), SIZE_T(desc.task_shader.value().bytecode.size())};
+    stream.ms.value = {desc.mesh_shader.value().bytecode.data(), SIZE_T(desc.mesh_shader.value().bytecode.size())};
+    stream.ps.value = pso.PS;
+    stream.blend.value = pso.BlendState;
+    stream.sample_mask.value = pso.SampleMask;
+    stream.rasterizer.value = pso.RasterizerState;
+    stream.depth_stencil.value = pso.DepthStencilState;
+    stream.rtv_formats.value.NumRenderTargets = pso.NumRenderTargets;
+    for (auto i = 0; i < 8; ++i)
+        stream.rtv_formats.value.RTFormats[i] = pso.RTVFormats[i];
+    stream.dsv_format.value = pso.DSVFormat;
+    stream.sample_desc.value = pso.SampleDesc;
+    stream.cached.value = pso.CachedPSO;
+
+    auto const stream_desc
+        = D3D12_PIPELINE_STATE_STREAM_DESC{.SizeInBytes = sizeof(stream), .pPipelineStateSubobjectStream = &stream};
+    return device2->CreatePipelineState(&stream_desc, IID_PPV_ARGS(&out));
+}
 } // namespace
 
 cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Device* device,
@@ -30,9 +153,22 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
                                                                      sg::raster_pipeline_description const& desc)
 {
     CC_ASSERT(layout != nullptr, "raster pipeline requires a pipeline_layout");
-    CC_ASSERT(desc.vertex_shader.stage == sg::shader_stage::vertex, "raster pipeline requires a vertex shader");
-    CC_ASSERT(desc.vertex_shader.format == sg::shader_format::dxil, "the dx12 backend requires DXIL bytecode");
-    CC_ASSERT(!desc.vertex_shader.bytecode.empty(), "vertex shader has no bytecode");
+    auto const is_mesh_shaded = desc.mesh_shader.has_value();
+    if (is_mesh_shaded)
+    {
+        CC_ASSERT(desc.mesh_shader.value().stage == sg::shader_stage::mesh, "mesh_shader must be a mesh stage");
+        CC_ASSERT(desc.mesh_shader.value().format == sg::shader_format::dxil, "the dx12 backend requires DXIL "
+                                                                              "bytecode");
+        CC_ASSERT(!desc.task_shader.has_value() || desc.task_shader.value().stage == sg::shader_stage::task,
+                  "task_shader must be a task stage");
+        CC_ASSERT(desc.view_count == 1, "a mesh-shaded pipeline renders one view on dx12 so far");
+    }
+    else
+    {
+        CC_ASSERT(desc.vertex_shader.stage == sg::shader_stage::vertex, "raster pipeline requires a vertex shader");
+        CC_ASSERT(desc.vertex_shader.format == sg::shader_format::dxil, "the dx12 backend requires DXIL bytecode");
+        CC_ASSERT(!desc.vertex_shader.bytecode.empty(), "vertex shader has no bytecode");
+    }
     if (desc.fragment_shader.has_value())
     {
         CC_ASSERT(desc.fragment_shader.value().stage == sg::shader_stage::fragment, "fragment_shader must be a "
@@ -200,7 +336,24 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
         pso.CachedPSO.CachedBlobSizeInBytes = SIZE_T(cached.size());
     }
 
-    HRESULT hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&pipeline->pipeline_state));
+    // view `i` into array slice `i` of every target, through viewport 0
+    CC_ASSERTF(desc.view_count >= 1 && desc.view_count <= D3D12_MAX_VIEW_INSTANCE_COUNT,
+               "dx12 renders 1 to {} views, not {}", D3D12_MAX_VIEW_INSTANCE_COUNT, desc.view_count);
+    D3D12_VIEW_INSTANCE_LOCATION locations[D3D12_MAX_VIEW_INSTANCE_COUNT] = {};
+    for (auto i = 0; i < desc.view_count; ++i)
+        locations[i] = {.ViewportArrayIndex = 0, .RenderTargetArrayIndex = UINT(i)};
+    auto const create = [&]
+    {
+        if (is_mesh_shaded)
+            return create_mesh_shaded(device, pso, desc, pipeline->pipeline_state);
+        if (desc.view_count > 1)
+            return create_view_instanced(device, pso,
+                                         cc::span<D3D12_VIEW_INSTANCE_LOCATION const>(locations, desc.view_count),
+                                         pipeline->pipeline_state);
+        return device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&pipeline->pipeline_state));
+    };
+
+    HRESULT hr = create();
     pipeline->_used_cached_pipeline = SUCCEEDED(hr) && !cached.empty();
 
     // A stale/mismatched blob fails with E_INVALIDARG; the cached PSO is a best-effort accelerator, so
@@ -211,7 +364,7 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     if (FAILED(hr) && !cached.empty())
     {
         pso.CachedPSO = {};
-        hr = device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&pipeline->pipeline_state));
+        hr = create();
     }
 
     if (FAILED(hr))

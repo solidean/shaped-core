@@ -32,6 +32,13 @@ struct auto_exposure_state
 
     /// The partials of the meter last started, which a later frame polls; invalid once read.
     sg::data_future<tg::vec2f> pending;
+
+    /// How many meters have started and landed, in order, one in flight at a time.
+    u32 meters_started = 0;
+    u32 meters_landed = 0;
+
+    /// The meter `is_auto_exposure_read` waits for; 0 while nothing waits, which a restart returns it to.
+    u32 meter_awaited = 0;
 };
 
 /// One temporal resource a view keeps across frames, and how far whatever writes it has run.
@@ -140,12 +147,9 @@ struct temporal_slot
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
 
-    /// How many runs of this accumulation slot's mean drew samples before a different image restarted it, which keeps each run's random sequence apart.
-    /// A run ended only because its last frame traced through something still loading is not counted, so the run after it repeats its sequence.
-    u32 restarts = 0;
-
-    /// Whether a full-size frame traced through the sequence `restarts` picks, so the next restart for a different image moves on from it.
-    bool drew_since_restart = false;
+    /// What the mean's random sequence is drawn from: the image hashed over inputs that are equal on any machine.
+    /// So a run repeats its sequence whatever restarted it, and a capture is one image whatever its restarts were.
+    u64 seed_key = 0;
 
     /// How many frames of this slot traced through a stand-in or an emitter still loading, each of which restarts the mean behind it.
     /// Nothing decides by it: it is how a test tells a mean that waited on a compile from one that did not.
@@ -305,4 +309,8 @@ void restart_accumulation(view_state& state);
 /// was already as converged as it gets.
 /// False for a view with no traced layer at all, since nothing there has converged.
 [[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> samples);
+
+/// Whether a meter that started after the first call has landed on every automatic layer of `state`.
+/// Called once the image holds still, that says the exposure is a reading of the finished image.
+[[nodiscard]] bool is_auto_exposure_read(view_state& state);
 } // namespace sv::impl

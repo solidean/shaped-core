@@ -64,13 +64,24 @@ TEST("sgl float - each target keeps what it can, and refuses more by name")
     CHECK(compiled("loose", target::wgsl).has_value());
     CHECK(compiled("loose", target::hlsl_vulkan).has_value());
 
-    for (auto const t : {target::wgsl, target::hlsl_vulkan})
-    {
-        auto const refused = compiled("both", t);
-        REQUIRE(refused.has_error());
-        CHECK(refused.error().contains("float-guarantee-not-kept")).dump("error", refused.error());
-        CHECK(refused.error().contains("'ordered'")).dump("error", refused.error());
-    }
+    auto const refused = compiled("both", target::wgsl);
+    REQUIRE(refused.has_error());
+    CHECK(refused.error().contains("float-guarantee-not-kept")).dump("error", refused.error());
+    CHECK(refused.error().contains("'ordered'")).dump("error", refused.error());
+
+    // vulkan keeps every level through execution modes the device must have, so the entry point needs their features
+    auto const precise = compiled("both", target::hlsl_vulkan);
+    REQUIRE(precise.has_value()).dump("error", precise.has_error() ? precise.error() : cc::string());
+    CHECK(precise.value().features.has(sgl::check::feature::float_specials));
+    CHECK(!precise.value().features.has(sgl::check::feature::float_denormals));
+    auto const ieee = compiled("exact", target::hlsl_vulkan);
+    REQUIRE(ieee.has_value());
+    CHECK(ieee.value().features.has(sgl::check::feature::float_specials));
+    CHECK(ieee.value().features.has(sgl::check::feature::float_denormals));
+    CHECK(!compiled("loose", target::hlsl_vulkan).value().features.has(sgl::check::feature::float_specials));
+    // dx12 keeps them on every device, so it needs no feature
+    CHECK(!compiled("exact", target::hlsl_dx12).value().features.has(sgl::check::feature::float_specials));
+
     // metal's safe math is not known to keep denormals
     auto const metal = compiled("exact", target::msl);
     REQUIRE(metal.has_error());
@@ -86,7 +97,7 @@ TEST("sgl float - a host may weaken a guarantee on WebGPU alone, which compiles 
     CHECK(weakened.value().warnings[0].contains("float-guarantee-weakened"));
 
     // the other targets take no weakening: what a shader needs is refused rather than dropped there
-    CHECK(compiled("both", target::hlsl_vulkan, true).has_error());
+    CHECK(compiled("exact", target::msl, true).has_error());
 }
 
 TEST("sgl float - @float takes one of its four levels")

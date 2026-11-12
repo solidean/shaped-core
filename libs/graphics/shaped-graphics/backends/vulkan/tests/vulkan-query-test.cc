@@ -56,8 +56,9 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a timestamp pair measures real work", (vulkan:
     // Positive, and not absurd: a plain copy of this size cannot take a second, and a backend reporting the same
     // tick twice — or an unreset slot — fails the lower bound.
     auto const elapsed = s1.value() - s0.value();
-    CHECK(elapsed > 0.0);
-    CHECK(elapsed < 1.0);
+    auto const ticks = cc::format("ticks {} -> {}", t0.try_get_ticks().value(), t1.try_get_ticks().value());
+    CHECK(elapsed > 0.0).context(ticks);
+    CHECK(elapsed < 1.0).context(ticks);
 }
 
 ASYNC_INVOCABLE_TEST("sg vulkan - a timestamp records inside a rendering scope",

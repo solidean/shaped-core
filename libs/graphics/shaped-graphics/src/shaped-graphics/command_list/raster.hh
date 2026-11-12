@@ -73,6 +73,10 @@ struct sg::rendering_info
     cc::optional<sg::viewport> viewport;
     cc::optional<tg::aabb2i> scissor; ///< pixel rect; unset => full target extent
 
+    /// The views each draw renders, view `i` into layer `i` of every target, as its pipeline's `view_count` says.
+    /// More than 1 needs every target's view to span exactly that many layers of an array.
+    int view_count = 1;
+
     /// The name of the target set these color targets are, as a generated SGL render target states it; empty for none.
     /// Binding a pipeline built for another set is refused.
     /// The command list copies the name, so it need not outlive the call.
@@ -101,6 +105,7 @@ struct sg::draw_indexed_config
 /// D3D12's `D3D12_DRAW_INDEXED_ARGUMENTS`, vulkan's `VkDrawIndexedIndirectCommand`, Metal's and WebGPU's, field for field.
 /// A shader that writes them declares a struct of five 4-byte members in this order; a buffer of it re-types with `reinterpret_as`.
 /// `first_instance` is where `@instance_index` starts, which is how one draw of many learns which it is.
+/// A value other than 0 needs `sg::feature::indirect_first_instance`.
 struct sg::draw_indexed_args
 {
     u32 index_count = 0;
@@ -207,6 +212,10 @@ public:
     void draw(draw_config const& config = {});
     /// Records an indexed draw of the active pipeline (an index buffer must be bound).
     void draw_indexed(draw_indexed_config const& config = {});
+    /// Records a draw of the bound mesh-shaded pipeline: `x * y * z` workgroups of its task stage, or of its mesh stage
+    /// where it has none, each of which writes its own vertices and primitives.
+    /// Only a pipeline with a mesh stage draws this way, and it draws no other way.
+    void draw_mesh_tasks(int x, int y = 1, int z = 1);
     /// Records `count` indexed draws of the active pipeline, whose parameters the GPU reads from `args[first, first + count)` when they run.
     ///
     /// This is how a pass that only the GPU decides — culling — chooses what draws, with no readback: a draw it rejects holds an `instance_count` of 0, which draws nothing.
@@ -214,6 +223,11 @@ public:
     /// `args` needs `buffer_usage::indirect_command_buffer`, and a shader writing it needs `readwrite_buffer` too; it must not be bound writable to the same draw.
     /// An index buffer must be bound, and a 16-bit one needs every `first_index` even, which nothing can check on the CPU.
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
+    /// Records `count` mesh draws of the bound mesh-shaded pipeline, each the workgroup counts the GPU reads from
+    /// `args[first, first + count)` when it runs: a culling pass decides how many meshlets draw, with no readback.
+    /// A record of a zero count draws nothing; `args` needs `buffer_usage::indirect_command_buffer`, as for
+    /// `draw_indexed_indirect`.
+    void draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first = 0, isize count = 1);
 
 private:
     friend class command_list_raster_scope;
@@ -274,7 +288,9 @@ public:
     }
     void draw(draw_config const& config = {});
     void draw_indexed(draw_indexed_config const& config = {});
+    void draw_mesh_tasks(int x, int y = 1, int z = 1);
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
+    void draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raster_manual_scope(command_list_raster_manual_scope const&) = delete;
@@ -342,7 +358,9 @@ public:
     }
     void draw(draw_config const& config = {});
     void draw_indexed(draw_indexed_config const& config = {});
+    void draw_mesh_tasks(int x, int y = 1, int z = 1);
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
+    void draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raster_scope(command_list_raster_scope const&) = delete;

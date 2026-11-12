@@ -230,6 +230,11 @@ if(_sc_host_side_deps AND SC_USE_VENDORED_SDL3 AND EXISTS "${CMAKE_CURRENT_SOURC
     add_subdirectory(sdl3)
 endif()
 
+# The OpenXR loader, prebuilt for Windows; it defines `openxr_loader` where it was fetched.
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/openxr/.install/pin.txt")
+    add_subdirectory(openxr)
+endif()
+
 if(_sc_host_side_deps AND SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
     add_subdirectory(sqlite)
 endif()
@@ -266,6 +271,18 @@ if(WIN32 AND SC_USE_VENDORED_WARP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/warp/.
     add_subdirectory(warp)
 endif()
 
-if(WIN32 AND SC_USE_VENDORED_AGILITY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/agility/.install/pin.txt")
+# SC_AGILITY_PREVIEW swaps the runtime for extern/agility-preview's pin, read through the same wrapper.
+# It is required there, since a retail build under that name would test nothing the switch is for.
+set(_sc_agility_install "${CMAKE_CURRENT_SOURCE_DIR}/agility/.install")
+if(WIN32 AND SC_AGILITY_PREVIEW)
+    set(_sc_agility_install "${CMAKE_CURRENT_SOURCE_DIR}/agility-preview/.install")
+    if(NOT SC_USE_VENDORED_AGILITY OR NOT EXISTS "${_sc_agility_install}/pin.txt")
+        message(FATAL_ERROR "SC_AGILITY_PREVIEW is ON, but no preview Agility SDK was fetched: "
+                            "run `uv run extern/agility/fetch-agility.py --preview --accept-license` after reading its terms")
+    endif()
+endif()
+
+if(WIN32 AND SC_USE_VENDORED_AGILITY AND EXISTS "${_sc_agility_install}/pin.txt")
+    set(AGILITY_INSTALL "${_sc_agility_install}")
     add_subdirectory(agility)
 endif()

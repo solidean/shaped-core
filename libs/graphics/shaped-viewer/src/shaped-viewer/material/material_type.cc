@@ -192,6 +192,9 @@ material_type material_type::create(material_type_description description)
     b.add_string(description.thin_walled_attribute);
     b.add_string(description.tangent_frame_attribute);
     b.add_bool(description.display_only);
+    b.add_string(description.height_attribute);
+    b.add_string(description.height_top_attribute);
+    b.add_string(description.height_bottom_attribute);
     b.add_pod(i64(description.signature.size()));
     for (auto const& d : description.signature)
     {
@@ -218,6 +221,9 @@ material_type material_type::create(material_type_description description)
                               .thin_walled_attribute = cc::move(description.thin_walled_attribute),
                               .tangent_frame_attribute = cc::move(description.tangent_frame_attribute),
                               .display_only = description.display_only,
+                              .height_attribute = cc::move(description.height_attribute),
+                              .height_top_attribute = cc::move(description.height_top_attribute),
+                              .height_bottom_attribute = cc::move(description.height_bottom_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)

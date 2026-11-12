@@ -190,6 +190,8 @@ struct sgl::described_entry_point
     check::stage stage = check::stage::none;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// A bare @compute's: the compile chose `workgroup`, so the host dispatches it by threads alone (CHK-520).
+    bool is_dispatched_by_threads = false;
     /// The subgroup size a compute entry point prefers (CHK-371); 0 where it prefers none.
     i32 preferred_subgroup_size = 0;
     /// The strictest `@float` it reaches (CHK-435), and the function that stated it, by name; empty at `fast`.
@@ -238,6 +240,9 @@ struct sgl::described_pipeline
     cc::string geometry;
     cc::string tessellation_control;
     cc::string tessellation_evaluation;
+    /// The mesh stage, in the vertex stage's place, which is then empty (CHK-483).
+    cc::string mesh;
+    cc::string task;
     /// The binding layout, in group order, and its one `@inline` binding or empty.
     cc::vector<cc::string> layout;
     cc::string inline_constants;
@@ -348,9 +353,12 @@ struct sgl::described_option
     cc::string name;
     /// `bool`, `int`, or the name of its enum, `pixel_format` for an image's format.
     cc::string type;
-    /// What this describe compiled it as, spelled as a compile's value is: `8`, `-3`, `true`, `.rgba16_float`.
+    /// What this describe compiled it as, spelled as a compile's value is: `8`, `-3`, `0.5`, `true`, `.rgba16_float`.
     /// Its written default, unless the request gave it another.
     cc::string value;
+    /// The options its default is computed from, by the name a compile sets each by (CHK-519).
+    /// A compile that gives it no value computes it from theirs, so a host leaves it unset to have it follow them.
+    cc::vector<cc::string> follows;
 };
 
 struct sgl::module_description

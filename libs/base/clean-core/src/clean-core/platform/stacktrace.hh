@@ -5,8 +5,10 @@
 // cc::stacktrace mirrors std::stacktrace where the C++23 <stacktrace> header is available, and degrades to an empty stub where it is not.
 // WASI libc++ currently ships no <stacktrace>, yet code that captures a trace — the default assert handler, cc::any_error payloads — must still compile and link there.
 //
-// Emscripten ships no <stacktrace> either but is NOT the stub: it gets a backend of its own below, and that backend
-// is cc::capture_stack plus cc::symbolizer — the same two halves this type is everywhere else.
+// Emscripten and Apple's libc++ ship no <stacktrace> either but are NOT the stub: they get a backend of their own below,
+// cc::capture_stack plus cc::symbolizer — the same two halves this type is everywhere else.
+// On Apple a name comes from dladdr, which knows functions and modules but not files or lines; `atos` resolves those
+// offline from the `module+offset` every frame carries.
 // A wasm frame does carry an address, a byte offset into the module file, so there is nothing special
 // about the platform at this level; what differs is only where a name comes from.
 // Names come from the wasm name section, which the wasm presets keep with --profiling-funcs; without it the frames
@@ -32,7 +34,7 @@
 #endif
 #endif
 
-#if defined(__EMSCRIPTEN__) && CC_HAS_STACKTRACE
+#if (defined(__EMSCRIPTEN__) || defined(__APPLE__)) && CC_HAS_STACKTRACE
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -48,7 +50,7 @@ struct stacktrace;
 [[nodiscard]] cc::string to_string(cc::stacktrace const& trace);
 } // namespace cc
 
-/// One frame of an Emscripten trace: the address it was captured at, and what that resolved to.
+/// One frame of a trace this backend captured: the address it was captured at, and what that resolved to.
 ///
 /// Rendered at capture time rather than lazily, because on wasm a name is only knowable while the frame text the
 /// capture parsed still exists — see remember_wasm_symbol in platform/impl/wasm_frames.hh.
@@ -56,23 +58,24 @@ struct stacktrace;
 struct cc::stacktrace_entry
 {
     stacktrace_entry() = default;
-    stacktrace_entry(cc::u32 address, cc::string text) : _text(cc::move(text)), _address(address) {}
+    stacktrace_entry(cc::u64 address, cc::string text) : _text(cc::move(text)), _address(address) {}
 
     [[nodiscard]] cc::string const& description() const { return _text; }
 
-    /// The byte offset into the module file, which is what an offline resolver takes.
-    /// A JS frame instead carries its line, tagged with cc::impl::wasm_js_frame_bit.
-    [[nodiscard]] cc::u32 address() const { return _address; }
+    /// On wasm the byte offset into the module file, which is what an offline resolver takes; a JS frame instead
+    /// carries its line, tagged with cc::impl::wasm_js_frame_bit.
+    /// On Apple the return address in this process.
+    [[nodiscard]] cc::u64 address() const { return _address; }
 
     /// By address, since that is the frame's identity; the text is a rendering of it.
     [[nodiscard]] bool operator==(stacktrace_entry const& rhs) const { return _address == rhs._address; }
 
 private:
     cc::string _text;
-    cc::u32 _address = 0;
+    cc::u64 _address = 0;
 };
 
-/// A snapshot of the wasm call stack, captured through emscripten_get_callstack.
+/// A snapshot of the call stack, captured through cc::capture_stack: emscripten_get_callstack on wasm, the frame chain on Apple.
 /// Allocates, exactly as std::stacktrace does, so it belongs at analysis time rather than in a crash handler --
 /// cc::capture_stack is the allocation-free one, and on wasm it has nothing to symbolize against.
 struct cc::stacktrace

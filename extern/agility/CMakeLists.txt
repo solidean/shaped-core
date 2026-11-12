@@ -6,10 +6,13 @@ cmake_minimum_required(VERSION 3.28)
 # configure; dependency.yml says why.
 # Nothing links a library of it: the dx12 backend compiles against its headers and loads its D3D12Core.dll at run time,
 # through ID3D12SDKConfiguration1::CreateDeviceFactory, from the directory this publishes.
-set(AGILITY_INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/.install)
+# AGILITY_INSTALL is the parent's choice: this directory's retail install, or extern/agility-preview's under SC_AGILITY_PREVIEW.
+if(NOT AGILITY_INSTALL)
+    set(AGILITY_INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/.install)
+endif()
 
 if(NOT EXISTS "${AGILITY_INSTALL}/bin/D3D12Core.dll" OR NOT EXISTS "${AGILITY_INSTALL}/include/d3d12.h")
-    message(STATUS "agility: the install holds no runtime or headers — re-run `uv run extern/agility/fetch-agility.py --accept-license --force`; dx12 keeps the system runtime.")
+    message(STATUS "agility: ${AGILITY_INSTALL} holds no runtime or headers — re-run its fetch with `--accept-license --force`; dx12 keeps the system runtime.")
     return()
 endif()
 

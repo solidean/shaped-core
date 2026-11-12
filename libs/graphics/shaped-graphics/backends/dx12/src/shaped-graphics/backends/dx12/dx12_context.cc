@@ -29,6 +29,7 @@ void dx12_context::shutdown()
         // the final epoch's records are decoded while the download path still runs
         release_debug_windows();
     }
+    _software_pool.shutdown();
 
     // Drain + join the download actor and release the ring buffers while the submission fence is still
     // alive (the actor may block on it). The GPU is idle by now, so pending copies complete promptly.

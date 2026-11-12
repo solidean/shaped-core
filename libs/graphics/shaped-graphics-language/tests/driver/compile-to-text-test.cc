@@ -1,6 +1,7 @@
 #include "../emit/emit-test-support.hh"
 
 #include <clean-core/string/format.hh>
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/source/format_diagnostic.hh>
@@ -12,7 +13,7 @@ namespace
 {
 cc::string cube_source()
 {
-    return read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl");
+    return read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl");
 }
 
 cc::string error_of(sgl::text_request const& request)
@@ -47,17 +48,19 @@ cc::string sum_source(int terms)
 TEST("sgl driver - the prelude is the generated builtins and the hand-written files, and each matches its file")
 {
     auto const files = sgl::prelude_files();
-    REQUIRE(files.size() == 3);
+    REQUIRE(files.size() == 4);
     CHECK(files[0].name == "builtins.sgl");
     CHECK(files[1].name == "core.sgl");
     CHECK(files[2].name == "raytracing.sgl");
+    CHECK(files[3].name == "tessellation.sgl");
 
     // The committed builtins.sgl is what the registry generates, byte for byte: `uv run dev.py check sgl-prelude --fix` rewrites it.
     // That is also what makes a diagnostic's line and column right in the committed file, which the compiler never opens.
-    CHECK(files[0].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/builtins.sgl"));
+    CHECK(files[0].source == read_text(nx::source_path(SGL_PRELUDE_DIR) + "/builtins.sgl"));
     // core.sgl is embedded when CMake configures, and editing it re-runs the configure.
-    CHECK(files[1].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/core.sgl"));
-    CHECK(files[2].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/raytracing.sgl"));
+    CHECK(files[1].source == read_text(nx::source_path(SGL_PRELUDE_DIR) + "/core.sgl"));
+    CHECK(files[2].source == read_text(nx::source_path(SGL_PRELUDE_DIR) + "/raytracing.sgl"));
+    CHECK(files[3].source == read_text(nx::source_path(SGL_PRELUDE_DIR) + "/tessellation.sgl"));
 }
 
 TEST("sgl driver - a line and a column are 1-based, and end of file is a place")

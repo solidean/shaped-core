@@ -9,18 +9,6 @@ So is the flaky test that used to time out about once in 35 runs: two lost wakeu
 that advanced a manual clock past a deadline nobody had computed yet.
 So is the `doctor` line, in [network.py](../../tools/dev/lib/toolchain/network.py).
 
-## A precompiled-header tier
-
-Not yet: the library is too small to measure one honestly.
-
-When there is enough, declare it next to the targets that use it —
-`sc_declare_pch_tier(CNET EXTENDS CC_STD HEADERS <clean-net/all.hh>)` — and **pick it with
-`uv run dev.py compile-time pch`, never by eye**.
-A bigger tier is not automatically better, and choosing by eye is how a bigger one gets chosen than the numbers
-support.
-
-`src/clean-net/all.hh` already exists as the umbrella such a tier would name.
-
 ---
 
 ## A real defect elsewhere: `DATA:` in the glTF reader

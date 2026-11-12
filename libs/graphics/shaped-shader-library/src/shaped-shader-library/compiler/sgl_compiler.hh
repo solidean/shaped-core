@@ -22,6 +22,8 @@ enum class slib::sgl_undefined_guard : slib::u8
     /// The operation and its operands are logged as a failed `assert` is, and the invocation ends as for `abort`.
     /// It needs `diagnostics` to log, and is `abort` without it.
     report,
+    /// The operation runs on a substitute operand that has a value, and the invocation goes on, as in WGSL.
+    define,
 };
 
 /// Where an SGL edge keeps SGL's front end, beside the in-memory tier every SGL edge in the process shares.
@@ -37,6 +39,11 @@ struct slib::sgl_compiler_options
     /// Off, the text holds neither.
     bool diagnostics = false;
     sgl_undefined_guard guards_undefined = sgl_undefined_guard::none;
+    /// Keeps each SGL module's checked layer in `persistent_cache` too, so a later process loads its modules rather
+    /// than checking them; off by default, since a process that checks its modules once pays little for it.
+    /// The library fetches them ahead of its compiles (`shader_library::prefetch_modules`) and a compile never waits:
+    /// one that comes first checks its modules.
+    bool keeps_module_artifacts = false;
 };
 
 namespace slib
@@ -62,4 +69,8 @@ namespace slib
 /// It needs no toolchain of its own, so it exists wherever `inner` does.
 [[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
                                                                    sgl_compiler_options const& options = {});
+
+/// The edge `sgl -> spirv` with no compiler behind it: SGL writes the module itself, and an entry point it has no
+/// lowering for yet fails to compile.
+[[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_spirv_compiler(sgl_compiler_options const& options = {});
 } // namespace slib

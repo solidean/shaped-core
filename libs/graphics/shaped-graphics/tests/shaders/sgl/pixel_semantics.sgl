@@ -194,3 +194,71 @@ pipeline layered_tags:
     pixel = layered_ps
     cull = .none
     format = .rgba32_float
+
+struct viewed:
+    @position position: hpos4
+    @interpolate(.flat) tag: int
+
+// One draw renders both views, each into its own layer, and both stages read which view they run for (CHK-437).
+@vertex fun viewed_vs(v: tagged_corner, @view_index view: int) -> viewed:
+    require view_instancing
+    return {
+        position = hpos4(v.position.x, v.position.y, v.depth, 1.0)
+        tag = v.tag + 10 * view
+    }
+
+@pixel fun viewed_ps(p: viewed, @view_index view: int) -> float4:
+    require view_instancing
+    return float4(p.tag as float, view as float, 0.0, 1.0)
+
+// The position depends on the view, as a per-eye matrix makes it: view 0 lands left of centre, view 1 right of it.
+@vertex fun moved_vs(v: tagged_corner, @view_index view: int) -> viewed:
+    require view_instancing
+    let shift = if view == 0 => -0.5 else 0.5
+    return {
+        position = hpos4(v.position.x * 0.5 + shift, v.position.y, v.depth, 1.0)
+        tag = v.tag
+    }
+
+pipeline moved_views:
+    vertex = moved_vs
+    pixel = viewed_ps
+    cull = .none
+    format = .rgba32_float
+    view_count = 2
+
+// The same with no vertex input at all, as a shape drawn from its vertex index is: a strip over the whole target.
+@vertex fun moved_index_vs(@vertex_index vertex: int, @view_index view: int) -> viewed:
+    require view_instancing
+    let x = if (vertex & 1) != 0 => 1.0 else -1.0
+    let y = if (vertex & 2) != 0 => 1.0 else -1.0
+    let shift = if view == 0 => -0.5 else 0.5
+    return {
+        position = hpos4(x * 0.5 + shift, y, 0.5, 1.0)
+        tag = 7
+    }
+
+pipeline moved_index_views:
+    vertex = moved_index_vs
+    pixel = viewed_ps
+    cull = .none
+    topology = .triangle_strip
+    format = .rgba32_float
+    view_count = 2
+
+pipeline moved_views_depth:
+    vertex = moved_vs
+    pixel = viewed_ps
+    cull = .none
+    format = .rgba32_float
+    depth_test = true
+    depth_write = true
+    depth_stencil_format = .depth32_float
+    view_count = 2
+
+pipeline viewed_tags:
+    vertex = viewed_vs
+    pixel = viewed_ps
+    cull = .none
+    format = .rgba32_float
+    view_count = 2

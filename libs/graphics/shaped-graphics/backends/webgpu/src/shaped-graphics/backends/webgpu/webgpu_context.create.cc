@@ -14,10 +14,10 @@ namespace
 {
 /// The optional features a context asks for wherever the adapter offers them.
 constexpr WGPUFeatureName k_optional_features[] = {
-    WGPUFeatureName_TimestampQuery,    WGPUFeatureName_TextureCompressionBC, WGPUFeatureName_Depth32FloatStencil8,
-    WGPUFeatureName_DepthClipControl,  WGPUFeatureName_TextureFormatsTier1,  WGPUFeatureName_TextureFormatsTier2,
-    WGPUFeatureName_Float32Filterable, WGPUFeatureName_BGRA8UnormStorage,    WGPUFeatureName_ShaderF16,
-    WGPUFeatureName_Subgroups,
+    WGPUFeatureName_TimestampQuery,    WGPUFeatureName_TextureCompressionBC,  WGPUFeatureName_Depth32FloatStencil8,
+    WGPUFeatureName_DepthClipControl,  WGPUFeatureName_TextureFormatsTier1,   WGPUFeatureName_TextureFormatsTier2,
+    WGPUFeatureName_Float32Filterable, WGPUFeatureName_BGRA8UnormStorage,     WGPUFeatureName_ShaderF16,
+    WGPUFeatureName_Subgroups,         WGPUFeatureName_IndirectFirstInstance,
 };
 
 void on_uncaptured_error(WGPUDevice const*, WGPUErrorType type, WGPUStringView message, void* userdata1, void*)
@@ -90,7 +90,8 @@ void finish_creation(webgpu_context& ctx)
                                = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage),
                                .shader_f16 = has(WGPUFeatureName_ShaderF16),
                                .subgroups = has(WGPUFeatureName_Subgroups),
-                               .texture_compression_bc = has(WGPUFeatureName_TextureCompressionBC)});
+                               .texture_compression_bc = has(WGPUFeatureName_TextureCompressionBC),
+                               .indirect_first_instance = has(WGPUFeatureName_IndirectFirstInstance)});
     ctx.debug_windows().create();
 }
 

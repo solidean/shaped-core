@@ -44,12 +44,14 @@ sv::view_id                      // stable identity across frames; view_id::from
 sv::view_index                   // enum class : u32 — a view's slot in `viewer_definition::views` THIS frame; not an identity, so never persist one
 sv::display_name_of("angle##0")  // -> "angle"; the id up to its first ##, and what a view's display name defaults to
 sv::push_id_seed(seed, "name") / (seed, i64 n)  // fold a scope into a seed; what frame::push_id does, for a caller minting ids by hand
-sv::camera                       // { pos3d position; quat_d orientation; perspective_projection projection; } — double-precision pose + projection
+sv::camera                       // { pos3d position; quat_d orientation; camera_projection projection; } — double-precision pose + projection
 sv::camera::looking_at(eye, target, up=+y)     // -> camera at eye aimed at target (static factory); default projection
 sv::camera::orbiting(target, distance, azimuth, elevation)  // -> camera orbiting target, looking inward (azimuth around +y, elevation off the horizon)
 sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at target (static); cam.look_at(target, up=+y) sets it from position
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
-sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
+sv::camera_projection            // { kind; angle_d vertical_fov; f64 view_height; f64 aspect_ratio; f64 near_plane; f64 far_plane; }
+                                 //   kind = projection_kind::perspective (a pinhole, vertical_fov) or ::orthographic (view_height meters high,
+                                 //   raster depth linear up to far_plane); traced, raster and hybrid alike
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; sr::display_transform display; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
@@ -245,13 +247,16 @@ sv::attribute_interpolation      // linear | rotation — a property of the DECL
 sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant binding; trailing bool makes it final
 sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
 
-sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `pbr` and `unlit`
+sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `openpbr_relief`, `pbr` and `unlit`
                                  //   thread-safe: the process-wide one is shared by every viewer and every parallel test
 lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
 lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
 lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> material const&
-sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
+sv::builtin_material::openpbr / openpbr_relief / pbr / unlit  // the names the builtins register under
+                                                     // openpbr_relief: a tileable material; its `occlusion` is its relief's, which the tracer applies per direction
+                                                     //   horizon_lo / horizon_hi: the sines of its relief's horizon in 8 tangent directions, 45 degrees apart from +t;
+                                                     //   where bound they shadow light, environment and bounces below it, in place of the occlusion
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
                                  //   emission declared by openpbr (emission_color, emission_luminance) and pbr (emissive); unlit's reaches the camera alone
@@ -411,7 +416,12 @@ Gotchas:
 - **A texture samples through a fixed palette**, never through per-permutation samplers.
   Module `tracer`'s `binding bindless` declares one static sampler per magnification filter and address mode of each axis.
   It sits beside the tables because every pipeline that samples a material lists that group, and sg allows no fourth.
-  A hit samples level 0, where only the magnification filter applies, so the minification and mip filters are dropped; `sgl_palette_sampler` says what else is.
+  The palette keeps a sampler's magnification filter for all three, minification and between levels included; `sgl_palette_sampler` says what else it drops.
+- **A hit samples through its ray cone's footprint** (`material.texture_gradients`): an ellipse on the face, as two axes in barycentrics (`shading_context::footprint_a`, `footprint_b`).
+  Each texture maps them through its own uv edges to `grad_x` and `grad_y`, and the linear palette samplers filter 16:1 anisotropically.
+- **`render_settings::expected_samples_per_pixel`** narrows a primary's footprint by 1/sqrt of it, held at an eighth, as pbrt-v4 does.
+  An image that averages many jittered samples is filtered by them already.
+  The cone starts a pixel's angle wide (`frame_constants::pixel_spread`) and widens at each bounce by the lobe it left along; emission and opacity stay at level 0.
 
 ## Mesh authoring — geometry + what a material reads
 
@@ -842,6 +852,8 @@ m.table_capacity(table)                     // -> u32 — capacity_of(table), as
 
 // textures + the follow-up work their policy asks for
 sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
+sv::adoptable_texture(ctx, format, w, h) -> texture_2d_description  // full chain + the usage the manager's mips and encode need
+sv::texture_data::adopt(texture_2d, key, written_mips=1, summary={})  // a texture already on the GPU, no pixels; `key` is the caller's content hash
 m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, queues the rest
 m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; residency state; i32 uploaded_mips, total_mips; optional<value_summary> summary; }
 sv::value_summary                                   // { vec4f mean, min, max; bool exact; } — per channel, read on the CPU at acquire; min/max bound every value only where exact
@@ -962,7 +974,8 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   `reconstruct_guides::jitter` stays zero at full size for a traced layer: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
   A full-size hybrid frame shifts its whole raster by one Halton (2, 3) offset per sample of the mean, and declares it, since a raster samples only where the projection puts the centers.
   The per-frame offset a temporal upscaler reconstructs from is the other kind: a frame traced at the upscaler's extent takes one, and passes it as `.jitter` beside `.previous_jitter`.
-- **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
+- **The temporal history restarts on a scene change, never on camera or object motion** — its signal is the trace hash without the camera and without where geometry sits.
+  An instance's transform and a frame mesh's content restart the mean, not the history, so a deforming body keeps the static scene's history.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
   One that cannot run presents the raw mean and logs once.
@@ -1005,7 +1018,7 @@ store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_
 store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
 store.accumulated_frames(id) -> u32           // one named slot's frame counter, defaulting to accumulation(0) — the layer, not the view
-store.history_of(id) -> {restarts, loading_frames}  // the slot's restart count, which picks its seed, and frames traced while loading
+store.history_of(id) -> {seed_key, loading_frames}  // the key its random sequence is drawn from, equal on any machine for one image, and frames traced while loading
                                               //   read it once after a render: logging every frame changes the timing a flake hangs on
 store.min_accumulated_samples(id) -> u32      // the fewest samples per pixel across every traced layer; sv::impl::min_accumulated_samples is the rule
 store.is_accumulation_converged(id, samples = {}) -> bool  // every traced layer holds `samples`, or stopped at sv::accumulation_sample_cap
@@ -1059,6 +1072,11 @@ sv::interactive_async([ctx,] "id", cfg)  // -> sv::async_frames owning its viewe
                                  //     clears the shell's loading overlay; under node: headless, 300 frames, as a smoke run
                                  //   the frame is good until the next next(); a loop left by break finishes its viewer in the background
                                  //     on a context that never blocks (sv::background_work covers it), in the destructor elsewhere
+sv::render_settled([ctx,] "id", {.size, .samples, .timeout_seconds}, [&](sv::frame& f) { ... })
+                                 // -> cc::result<sv::settled_image>: the loop inside one call, the capture handed back as rgba bytes
+                                 //   the same body draws the same image here and in a window; .settled is false where time ran out
+                                 //   .channels: what the first wavefront layer averaged at its primary hits, render_settings::channels =
+                                 //   u32(sv::render_channel::position) | ... (position+coverage, view_depth, normals, base_color, material, instance)
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
                                  //   yields sv::frame_scope: a frame whose destructor presents, so the loop body needs no present call

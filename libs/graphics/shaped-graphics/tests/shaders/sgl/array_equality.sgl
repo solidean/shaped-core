@@ -1,0 +1,42 @@
+// `==` and `!=` of arrays as the GPU runs them (CHK-513), a loop of the target's own over the elements.
+
+binding array_equality:
+    values: buffer[int]
+    results: mut buffer[int]
+
+@compute(1) fun compare_arrays(){array_equality}:
+    let a = [array_equality.values[0], array_equality.values[1]]
+    let b = [array_equality.values[2], array_equality.values[3]]
+    let grid: int[2, 2] = [a, b]
+    let swapped: int[2, 2] = [b, a]
+    let mut answers = 0
+    if a == [array_equality.values[0], array_equality.values[1]] => answers = answers | 1
+    if a != b => answers = answers | 2
+    if grid == [a, b] => answers = answers | 4
+    if grid != swapped => answers = answers | 8
+    if a == b => answers = answers | 16
+    array_equality.results[0] = answers
+
+// An array of mat3 two dimensions deep, read and written whole, by the row and by the element (EMIT-168, EMIT-171).
+struct nested:
+    turns: mat3[2, 2]
+    tag: float
+
+binding nest:
+    items: mut buffer[nested]
+    picked: mut buffer[float4]
+
+@compute(1) fun nest_matrices(){nest}:
+    let whole = nest.items[0]
+    let last = float3(0.0, 0.0, 1.0)
+    let a = whole.turns[1][1] * last
+    let b = nest.items[0].turns[1][0] * last
+    nest.picked[0] = float4(a.x, a.y, a.z, whole.tag)
+    nest.picked[1] = float4(b.x, b.y, b.z, 0.0)
+    let mut changed = whole
+    changed.turns[0][1] = whole.turns[1][1]
+    nest.items[1] = changed
+    let row = nest.items[0].turns[1]
+    let mut moved = whole
+    moved.turns[0] = row
+    nest.items[2] = moved

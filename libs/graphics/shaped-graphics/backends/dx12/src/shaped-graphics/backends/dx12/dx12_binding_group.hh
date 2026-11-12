@@ -112,6 +112,13 @@ public:
     dx12_descriptor_alloc table; // the group's CBV/SRV/UAV range (its start feeds table_start; count for freeing)
     D3D12_GPU_DESCRIPTOR_HANDLE sampler_table_start = {};
     dx12_descriptor_alloc sampler_table; // the group's SAMPLER range (empty if the layout has no dynamic samplers)
+    /// Each acceleration member's root in the software pool, by binding index; 0, the empty TLAS, for a null one.
+    /// Filled only by a binding traced in software, and `software_tlases` keeps their regions alive.
+    cc::vector<u32> acceleration_roots;
+    cc::vector<sg::tlas_handle> software_tlases;
+    /// The length of the layout's unbounded binding array, the views it binds; 0 where it holds none.
+    u32 unbounded_length = 0;
+
     cc::vector<dx12_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives
     cc::vector<dx12_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives
     cc::vector<dx12_hazard_view> hazard_views;           // (buffer + view class) — declared for hazards at dispatch

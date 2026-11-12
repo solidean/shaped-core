@@ -1,0 +1,50 @@
+// sgl-cube's cube for a headset: one draw renders both eyes, eye i into layer i of the frame's images.
+
+// each eye's cube-to-clip matrix, which the host composes from the frame's views
+@inline binding constants:
+    left_eye: mat4
+    right_eye: mat4
+
+@vertex struct cube_vertex:
+    position: pos3
+    normal: vec3
+    color: float3
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    normal: vec3
+    color: float3
+
+@vertex fun main_vs(v: cube_vertex, @view_index view: int){constants} -> pixel_input:
+    require view_instancing
+    let to_clip = if view == 0 => constants.left_eye else constants.right_eye
+    return {
+        position = to_clip * v.position
+        normal = v.normal
+        color = v.color
+    }
+
+// a key light and a fill light over an ambient floor, as sgl-cube shades
+fun shade(color: float3, normal: vec3) -> float3:
+    let n = normalize normal
+    let key = 0.8 * saturate dot(n, normalize vec3(0.45, 0.8, -0.4))
+    let fill = 0.25 * saturate dot(n, normalize vec3(-0.7, 0.15, 0.6))
+    return color * min(0.25 + key + fill, 1.0)
+
+// opaque, so where the room shows through only the cube covers it
+@pixel fun main_ps(p: pixel_input, @view_index view: int) -> target:
+    require view_instancing
+    return {color = float4(..(shade(p.color, p.normal) * keep_view(view)), 1.0)}
+
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .back
+    depth_test = true
+    depth_write = true
+    depth_stencil_format = .depth32_float
+    format = .host
+    view_count = 2

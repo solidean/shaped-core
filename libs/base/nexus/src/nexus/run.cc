@@ -34,11 +34,14 @@
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
 #include <nexus/tests/export/pgo_json.hh>
+#include <nexus/tests/export/runner_report.hh>
 #include <nexus/tests/export/timings_json.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
 #include <unordered_set> // std::unordered_set: keyed on declaration addresses, where cc::set's hashing requirements do not apply
+
+using namespace cc::primitive_defines;
 
 namespace
 {
@@ -190,6 +193,8 @@ struct run_reporting
     nx::bench::load_sample benchmark_load_before;
     bool benchmark_pinned = false;
     cc::unique_ptr<cc::process_cpu_sampler> cpu_sampler;
+    /// Where an external runner asked for the runner report (NX_EXTERNAL_RUNNER_REPORT); empty when it did not.
+    cc::string runner_report_file;
 };
 
 /// Writes every report a run asked for and returns the process's exit code.
@@ -204,6 +209,12 @@ int report_run(nx::test_schedule_config const& config,
     auto const& benchmark_load_before = reporting.benchmark_load_before;
     auto const benchmark_pinned = reporting.benchmark_pinned;
     auto& cpu_sampler = *reporting.cpu_sampler;
+
+    // First, so recording stops before any report below writes a file: those are the run's outputs, not its tests'.
+    auto const runner_report
+        = reporting.runner_report_file.empty()
+            ? cc::string()
+            : nx::end_runner_report(execution, config.shuffle ? cc::optional<u64>(config.seed) : cc::nullopt);
 
     // Measured only where something reports it: the process query counts the machine's threads on Windows, which
     // costs as much as an `sgl emit` compile itself, for an app or a command that prints no resources
@@ -233,6 +244,15 @@ int report_run(nx::test_schedule_config const& config,
                             config.shuffle ? cc::optional<decltype(config.seed)>(config.seed) : cc::nullopt));
         if (!written.has_value())
             cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
+                         written.error().to_string());
+    }
+
+    // Additive as well: what each test read and wrote, for the runner that asked.
+    if (!reporting.runner_report_file.empty())
+    {
+        auto const written = write_report_file(reporting.runner_report_file, runner_report);
+        if (!written.has_value())
+            cc::eprintln("Error: could not write the runner report: {}: {}", reporting.runner_report_file,
                          written.error().to_string());
     }
 
@@ -520,6 +540,8 @@ int nx::run(int argc, char** argv)
         config.allow_cross_bucket_naming = false;
         config.filters = {route.entry->name};
         config.test_args = route.entry_args;
+        if (route.jobs > 0)
+            config.jobs = route.jobs;
     }
 
     // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks,
@@ -669,6 +691,20 @@ int nx::run(int argc, char** argv)
         cc::rec::install_crash_dump({.path = nx::impl::run_dump_path()});
     }
 
+    // File access is recorded from here on only when a runner asks, and only for a test run: an app or a command has no tests to attribute to.
+    auto runner_report_file = cc::string();
+    if (!is_entry_run)
+        if (auto const asked = cc::environment_variable(nx::runner_report_variable); asked.has_value())
+        {
+            runner_report_file = asked.value();
+            auto const hz = cc::environment_variable(nx::runner_report_sampling_variable);
+            // Counters are per process, so a test's covered functions are exact only while it runs alone.
+            auto const covers = cc::environment_variable(nx::runner_report_coverage_variable);
+            auto const coverage = covers.has_value() && covers.value() == "1" && nx::build_counts_coverage();
+            config.one_at_a_time |= coverage;
+            nx::begin_runner_report(hz.has_value() ? cc::from_string<f64>(hz.value()).value_or(0.0) : 0.0, coverage);
+        }
+
     // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.
     auto reporting = run_reporting{.registry = &registry,
                                    .is_entry_run = is_entry_run,
@@ -676,7 +712,8 @@ int nx::run(int argc, char** argv)
                                    .has_benchmarks = framing.describes_host,
                                    .benchmark_load_before = benchmark_load_before,
                                    .benchmark_pinned = benchmark_pinned,
-                                   .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};
+                                   .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>(),
+                                   .runner_report_file = cc::move(runner_report_file)};
 
     // Not under a debugger either, where a test paused at a breakpoint is not a hung one.
     auto const watchdog_secs = framing.is_watched && !cc::impl::is_debugger_connected() ? config.watchdog_secs : 0.0;

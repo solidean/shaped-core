@@ -43,6 +43,8 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     # a float's atomic holds its bits, so the host writes and reads the float itself
     "atomic[float]": ("float", 4, None),
     "bool32": ("slib::gpu_bool", 4, None),
+    # three rows of four, as an instance's transform is (CHK-518)
+    "affine3": ("slib::gpu_affine3", 48, None),
     # the 16-bit families: typed-geometry's IEEE binary16, and clean-core's 16-bit integers
     "half": ("tg::f16", 2, None),
     "half2": ("tg::vec<2, tg::f16>", 4, None),
@@ -56,17 +58,36 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "ushort2": ("tg::vec<2, cc::u16>", 4, None),
     "ushort3": ("tg::vec<3, cc::u16>", 6, None),
     "ushort4": ("tg::vec<4, cc::u16>", 8, None),
+    # the 64-bit families, which no WGSL text holds
+    "long": ("cc::i64", 8, None),
+    "long2": ("tg::vec<2, cc::i64>", 16, None),
+    "long3": ("tg::vec<3, cc::i64>", 24, None),
+    "long4": ("tg::vec<4, cc::i64>", 32, None),
+    "ulong": ("cc::u64", 8, None),
+    "ulong2": ("tg::vec<2, cc::u64>", 16, None),
+    "ulong3": ("tg::vec<3, cc::u64>", 24, None),
+    "ulong4": ("tg::vec<4, cc::u64>", 32, None),
+    "double": ("double", 8, None),
+    "double2": ("tg::vec<2, double>", 16, None),
+    "double3": ("tg::vec<3, double>", 24, None),
+    "double4": ("tg::vec<4, double>", 32, None),
+    "atomic[long]": ("cc::i64", 8, None),
+    "atomic[ulong]": ("cc::u64", 8, None),
 }
 
 # The 16-bit types the generated code names, and the vectors among them.
 HALF_TYPES = {"half", "half2", "half3", "half4"}
 SIXTEEN_BIT_VECTORS = {"half2", "half3", "half4", "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"}
+WIDE_INTEGERS = {"long", "ulong", "atomic[long]", "atomic[ulong]"}
+WIDE_VECTORS = {f"{family}{width}" for family in ("long", "ulong", "double") for width in (2, 3, 4)}
 
 
 # An option as the host sets it: its C++ type, and its default as `describe` spells it, written as a C++ value.
 OPTION_TYPES = {
     "bool": ("bool", lambda value: value),
     "int": ("int", lambda value: value),
+    "uint": ("cc::u32", lambda value: f"{value}u"),
+    "float": ("float", lambda value: f"{value}f"),
     "pixel_format": ("sg::pixel_format", lambda value: f"sg::pixel_format::{value.lstrip('.')}"),
 }
 
@@ -85,18 +106,29 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
         if o["type"] not in OPTION_TYPES:
             continue
         if "." in o["name"]:
-            module, name = o["name"].split(".", 1)
+            module, name = split_module_name(o["name"])
             modules.setdefault(module, []).append((name, o))
         else:
             own.append((o["name"], o))
-    clash = sorted({name for name, _ in own} & set(modules))
+    clash = sorted({name for name, _ in own} & {m.split(".", 1)[0] for m in modules})
     if clash:
         raise HostCodeError(
             f"shader package '{package}': '{path}' has an option '{clash[0]}', and the options of module "
             f"'{clash[0]}' nest under that name in its options struct; rename the option")
+    for module, fields in modules.items():
+        for name, _ in fields:
+            if f"{module}.{name}" in modules:
+                raise HostCodeError(
+                    f"shader package '{package}': '{path}' reaches option '{name}' of module '{module}', and module "
+                    f"'{module}.{name}' nests its options under that name; rename the option")
 
     def field(name: str, option: dict, indent: str, of: str) -> str:
         cpp, spell = OPTION_TYPES[option["type"]]
+        follows = option.get("follows", [])
+        if follows:
+            # CHK-519: left unset, the compile computes it from the options its default names
+            return (f"{indent}cc::optional<{cpp}> {name} = {{}}; ///< `@option const {name}`{of}, "
+                    f"which follows {', '.join(follows)} unless set\n")
         return f"{indent}{cpp} {name} = {spell(option['value'])}; ///< `@option const {name}`{of}\n"
 
     out = [f"/// The options of {path}, each at the default its source writes. Generated; do not edit.\n"]
@@ -104,18 +136,44 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
     out.append(f"struct {struct_name}\n{{\n")
     for name, option in own:
         out.append(field(name, option, "    ", ""))
+    # a dotted module's options nest by the parts of its name, so a field is reached as the compile names it
+    tree: dict = {}
     for module, fields in modules.items():
-        out.append(f"    /// The options of module `{module}`, which a compile sets as `{module}.<name>`.\n")
-        out.append("    struct\n    {\n")
-        for name, option in fields:
-            out.append(field(name, option, "        ", f" of module `{module}`"))
-        out.append(f"    }} {module};\n")
+        node = tree
+        for part in module.split("."):
+            node = node.setdefault(part, {})
+        node[None] = (module, fields)
+
+    def nested(node: dict, prefix: str, indent: str) -> None:
+        for part, child in node.items():
+            if part is None:
+                continue
+            leaf = child.get(None)
+            if leaf is not None:
+                out.append(f"{indent}/// The options of module `{leaf[0]}`, which a compile sets as `{leaf[0]}.<name>`.\n")
+            else:
+                out.append(f"{indent}/// The options of the modules named `{prefix}{part}.<module>`.\n")
+            out.append(f"{indent}struct\n{indent}{{\n")
+            if leaf is not None:
+                for name, option in leaf[1]:
+                    out.append(field(name, option, indent + "    ", f" of module `{leaf[0]}`"))
+            nested(child, f"{prefix}{part}.", indent + "    ")
+            out.append(f"{indent}}} {part};\n")
+
+    nested(tree, "", "    ")
     out.append("\n")
     out.append("    /// The values as an acquire takes them, each by the name the compile sets it by.\n")
     out.append("    [[nodiscard]] cc::vector<slib::shader_option> values() const\n    {\n")
-    names = [name for name, _ in own] + [f"{m}.{name}" for m, fields in modules.items() for name, _ in fields]
-    listed = ", ".join(f'slib::option_of("{name}", {name})' for name in names)
-    out.append(f"        return {{{listed}}};\n    }}\n")
+    named = [(name, o) for name, o in own] + [(f"{m}.{name}", o) for m, fields in modules.items() for name, o in fields]
+    listed = ", ".join(f'slib::option_of("{name}", {name})' for name, o in named if not o.get("follows"))
+    following = [name for name, o in named if o.get("follows")]
+    if not following:
+        out.append(f"        return {{{listed}}};\n    }}\n")
+    else:
+        out.append(f"        auto values = cc::vector<slib::shader_option>{{{listed}}};\n")
+        for name in following:
+            out.append(f'        if ({name}.has_value())\n            values.push_back(slib::option_of("{name}", {name}.value()));\n')
+        out.append("        return values;\n    }\n")
     out.append("};\n")
     return "".join(out)
 
@@ -210,13 +268,29 @@ def cpp_name(sgl_name: str, namespace: str = "") -> str:
     where one is given.
     """
     if "." in sgl_name:
-        module, name = sgl_name.split(".", 1)
-        return f"::{MODULES_NAMESPACE}::{module}::{name}"
+        module, name = split_module_name(sgl_name)
+        return f"::{MODULES_NAMESPACE}::{module_cpp(module)}::{name}"
     return f"{namespace}::{sgl_name}" if namespace else sgl_name
 
 
+def split_module_name(sgl_name: str) -> tuple[str, str]:
+    """`m.x` as module `m` and its name `x`; a module's name may be dotted, `a.b.x`, and a declaration's never is."""
+    module, name = sgl_name.rsplit(".", 1)
+    return module, name
+
+
+def module_cpp(module: str) -> str:
+    """A module's name as the C++ namespace under `sgl_modules` it generates into: `a.b` is `a::b`."""
+    return module.replace(".", "::")
+
+
+def module_path(module: str) -> str:
+    """A module's name as the path of its header under `sgl_modules/`: `a.b` is `a/b`."""
+    return module.replace(".", "/")
+
+
 def module_header(module: str) -> str:
-    return f"<{MODULES_NAMESPACE}/{module}.hh>"
+    return f"<{MODULES_NAMESPACE}/{module_path(module)}.hh>"
 
 
 def modules_used(entries: SglEntries) -> list[str]:
@@ -226,7 +300,7 @@ def modules_used(entries: SglEntries) -> list[str]:
         names += p["layout"] + [p["inline"], p["vertex_input"], p["target_set"]]
     for _, p in entries.raytracing_pipelines:
         names += p["layout"] + [p["inline"]]
-    modules = [n.split(".", 1)[0] for n in names if n and "." in n]
+    modules = [split_module_name(n)[0] for n in names if n and "." in n]
     modules += [m for m, _ in entries.foreign_structs.values()]
     return sorted(set(modules) - ({entries.module} if entries.module else set()))
 
@@ -359,8 +433,8 @@ def includes(entries: SglEntries) -> list[str]:
     # A file's options struct: its values as an acquire takes them, and a format's enumerators for a default.
     # A wrapper's reached names are a span of string views.
     if entries.option_structs:
-        out += ["<clean-core/container/vector.hh>", "<shaped-shader-library/compiler/shader_compiler.hh>",
-                "<shaped-graphics/resource/pixel_format.hh>"]
+        out += ["<clean-core/container/vector.hh>", "<clean-core/error/optional.hh>",
+                "<shaped-shader-library/compiler/shader_compiler.hh>", "<shaped-graphics/resource/pixel_format.hh>"]
     if entries.option_structs or entries.described_entry_points or entries.pipelines or entries.raytracing_pipelines:
         out += ["<clean-core/container/span.hh>", "<clean-core/string/string_view.hh>"]
     # A layout built per set of values, from a group whose formats name options.
@@ -383,6 +457,9 @@ def includes(entries: SglEntries) -> list[str]:
         out += ["<clean-core/container/fixed_array.hh>", "<clean-core/fwd.hh>"]
     if any(m.get("count", 1) > 1 for _, b in entries.bindings for m in b["members"]):
         out += ["<clean-core/container/fixed_array.hh>"]
+    # an unbounded binding array (CHK-490) is as many views as the host binds
+    if any(m.get("count", 1) == 0 for _, b in entries.bindings for m in b["members"]):
+        out += ["<clean-core/container/vector.hh>"]
 
     # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
@@ -393,11 +470,12 @@ def includes(entries: SglEntries) -> list[str]:
     if arrays:
         out.append("<clean-core/container/fixed_array.hh>")
     types |= {element for element, _ in arrays}
-    if types & {"int", "uint", "atomic[int]", "atomic[uint]", "short", "ushort"}:
+    if types & ({"int", "uint", "atomic[int]", "atomic[uint]", "short", "ushort"} | WIDE_INTEGERS):
         out.append("<clean-core/fwd.hh>")
     if types & HALF_TYPES:
         out.append("<typed-geometry/scalar/half_float.hh>")
-    if types & ({"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"} | SIXTEEN_BIT_VECTORS):
+    plain_vectors = {"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"}
+    if types & (plain_vectors | SIXTEEN_BIT_VECTORS | WIDE_VECTORS):
         out.append("<typed-geometry/linalg/vec.hh>")
     if any(m["kind"] == "sampler" for _, b in entries.bindings for m in b["members"]):
         out.append("<shaped-graphics/binding/sampler.hh>")
@@ -409,6 +487,8 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")
+    if "affine3" in types:
+        out.append("<shaped-shader-library/gpu_affine3.hh>")
     if any(padded_element(m) for _, b in entries.bindings for m in b["members"]) or any("[" in t for t in types):
         out.append("<shaped-shader-library/gpu_padded.hh>")
     return list(dict.fromkeys(out))
@@ -482,7 +562,9 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         where = f"'{file.path}' `binding {name}` member '{member['name']}'"
         # a binding array is one field holding a view per element
         count = member.get("count", 1)
-        array = (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1 else (lambda view: view)
+        array = ((lambda view: f"cc::vector<{view}>") if count == 0
+                 else (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1
+                 else (lambda view: view))
         if member["kind"] == "constant":
             cpp = sized_host_type(package, memory, where, member["type"], member["size"])
             out.append(f"    {cpp} {member['name']}; ///< `{member['type']}`, "
@@ -507,7 +589,7 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.
             if "static_sampler" not in member:
-                out.append(f"    sg::sampler {member['name']}; ///< `{member['type']}`, which the group binds\n")
+                out.append(f"    {array('sg::sampler')} {member['name']}; ///< `{member['type']}`, which the group binds\n")
             continue
         if member["kind"] == "bytes":
             access = "readwrite" if member["access"] == "read_write" else "readonly"
@@ -564,7 +646,7 @@ def emit_array_bindings(where: str, members: list[tuple[str, str, str, int]]) ->
     A group without a binding array gets no struct, so no member can collide with a name it never emits.
     """
     arrays = [(member, name, ARRAY_FAMILIES[kind]) for member, name, kind, count in members
-              if count > 1 and kind in ARRAY_FAMILIES]
+              if count != 1 and kind in ARRAY_FAMILIES]
     if not arrays:
         return ""
     if any(member == "arrays" for member, _, _, _ in members):
@@ -635,6 +717,18 @@ def bound_samplers(where: str, samplers: list[dict], names: list[str], indent: s
     return "".join(out)
 
 
+def mark_software_trace(entries: SglEntries) -> None:
+    """A package's SOFTWARE_TRACE, on each acceleration member of its bindings, on its ray-tracing pipelines, and in the modules it exports."""
+    for _, binding in entries.bindings:
+        for member in binding["members"]:
+            if member["kind"] == "acceleration_structure":
+                member["software_trace"] = True
+    for _, pipeline in entries.raytracing_pipelines:
+        pipeline["software_trace"] = True
+    for unit in entries.modules.values():
+        mark_software_trace(unit)
+
+
 def binding_entry(member: dict) -> str:
     """The sg::binding a resource member is, its fields in sg::binding's declaration order."""
     # a binding array takes `count` consecutive slots from its own
@@ -651,7 +745,8 @@ def binding_entry(member: dict) -> str:
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
                        f".sample_type = sg::texture_sample_type::{member['sample_type']}}}")
     if kind == "acceleration_structure":
-        return head + ".type = sg::binding_type::acceleration_structure}"
+        software = ", .traced_in_software = true" if member.get("software_trace") else ""
+        return head + f".type = sg::binding_type::acceleration_structure{software}}}"
     if kind == "image":
         return head + (f".type = sg::binding_type::image, .access = sg::access_mode::{member['access']}, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
@@ -709,7 +804,7 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     position = {m["name"]: i + (1 if has_block(binding) else 0) for i, m in enumerate(resources)}
     for member in views:
         slot = position[member["name"]]
-        if member.get("count", 1) > 1:
+        if member.get("count", 1) != 1:
             # one view per element, in element order
             out.append("    {\n")
             out.append("        auto elements = cc::vector<sg::raw_view>();\n")
@@ -720,7 +815,13 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
             continue
         out.append(f"    views.push_back({{.slot = sg::binding_slot({slot}), .view = {member['name']}}});\n")
     for member in dynamic:
-        out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = {member["name"]}}});\n')
+        if member.get("count", 1) != 1:
+            # one per element, which names its element; `this->`, since a member may be called `samplers` too
+            out.append(f"    for (auto i = 0; i < int(this->{member['name']}.size()); ++i)\n")
+            out.append(f'        samplers.push_back({{.name = "{member["host_name"]}", .sampler = this->{member["name"]}[i], '
+                       f".element = i}});\n")
+            continue
+        out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = this->{member["name"]}}});\n')
     out.append("}\n")
 
     if has_block(binding):
@@ -903,7 +1004,7 @@ def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
     for file, struct in entries.render_targets:
         space = file_namespace(namespace, entries, file.path)
         # a module's target set is named after its module, which the runtime names a module's shader by too
-        identity = f"{MODULES_NAMESPACE}::{entries.module}" if entries.module else space
+        identity = f"{MODULES_NAMESPACE}::{module_cpp(entries.module)}" if entries.module else space
         out.append(emit_render_target(package, space, file, struct, identity))
     return "".join(out)
 
@@ -1309,7 +1410,7 @@ def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
 
 
 # A pipeline's stages in the order a vertex passes through them, each a field of `describe`'s pipeline.
-PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", "geometry", "pixel")
+PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", "geometry", "task", "mesh", "pixel")
 
 
 def pipeline_includes(entries: SglEntries) -> list[str]:
@@ -1333,7 +1434,7 @@ def emit_pipelines(namespace: str, entries: SglEntries, package: str = "") -> st
         options_type = options_type_of(namespace, entries, file.path)
         out.append(f"namespace {space}\n{{\n")
         out.append(reached_options(package, f"`pipeline {p['name']}` of {file.path}", type_name, options, file.options))
-        named = [p[s] for s in PIPELINE_STAGES if p[s]]
+        named = [p[s] for s in PIPELINE_STAGES if p.get(s)]
         stages = ", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 else named[0]
         writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
         out.append(f"/// `pipeline {p['name']}` of {file.path}: {stages}{writes}. Generated; do not edit.\n")
@@ -1465,8 +1566,8 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> st
         out.append(f'        .file = "{file.path}",\n')
         out.append(f'        .name = "{p["name"]}",\n')
         # in pipeline_definition's field order, which a designated initializer has to follow
-        for s in ("vertex", "pixel", "geometry", "tessellation_control", "tessellation_evaluation"):
-            if p[s]:
+        for s in ("vertex", "pixel", "geometry", "tessellation_control", "tessellation_evaluation", "mesh", "task"):
+            if p.get(s):
                 out.append(f"        .{s} = {handle(p[s])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
         if p["vertex_input"]:
@@ -1634,6 +1735,8 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
             out.append(f"        .hit_groups = k_{key}_groups,\n")
         if p["host_hit_groups"]:
             out.append("        .has_host_hit_groups = true,\n")
+        if p.get("software_trace"):
+            out.append("        .software_trace = true,\n")
         if p["callables"]:
             out.append(f"        .callables = k_{key}_callables,\n")
         if p["host_callables"]:

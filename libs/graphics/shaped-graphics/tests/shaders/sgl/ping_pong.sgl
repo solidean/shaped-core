@@ -1,0 +1,9 @@
+// The transient benchmark's pass: read one render target and write the next, so a frame's chain touches every target.
+
+binding ping_pong:
+    source: texture_2d[float4]
+    target: out image_2d[.rgba16_float]
+
+@compute(8, 8) fun main(@thread_id id: int3){ping_pong}:
+    let at = int2(id.x, id.y)
+    ping_pong.target.store(at, ping_pong.source.load(at) * 0.5 + float4(0.25))

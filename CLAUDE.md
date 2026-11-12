@@ -11,7 +11,7 @@ A library's entry below is a few lines, written for whoever *uses* the library; 
 **shaped-core** is a collection of foundational C++ libraries by Shaped Code, powering SOLIDEAN, internal tools, customer projects, and research.
 
 * C++23, CMake (>= 3.28), presets per platform/compiler (MSVC / Clang / GCC across Windows / Linux / macOS / Android).
-* [dev.py](dev.py) is the unified build & test driver, run via `uv` (Python 3.10+) — see the `building-and-testing` skill.
+* [dev.py](dev.py) is the unified build & test driver, run via `uv` (Python 3.12+) — see the `building-and-testing` skill.
 * The library set is **growing** — the list below is current, not exhaustive.
 
 ---
@@ -71,6 +71,8 @@ One-liner per library:
   Depends on clean-core.
   [docs/design.md](libs/base/clean-simd/docs/design.md) has the decisions; early stage.
 * **`libs/data/babel-data`** — the externals-free base of babel: a base64 codec, a JSON reader and writer, and a block-level markdown reader (`data/`).
+  Also the shader binaries (`shader/`), read as stored: `babel::spirv`, the `babel::dxil` container, and LLVM bitcode in two layers.
+  `babel::llvm` is the version-free bitstream, and `babel::llvm37` the LLVM 3.7 module DXIL froze; a later LLVM is a reader of its own beside it.
   Namespace `babel`.
   Depends on clean-core and nothing else, which is the library's whole contract.
   It also declares `namespace babel` itself — the vocabulary aliases and the fallback recording domain — so `fwd.hh` layers rather than forks.
@@ -125,6 +127,8 @@ One-liner per library:
   dx12 and vulkan cover the whole surface; webgpu covers it but the ray-tracing pipeline, on wasm over emdawnwebgpu, and never blocks.
   **Ray tracing is two features**, `sg::feature::ray_query` and `raytracing_pipeline`; webgpu has ray queries alone, as a software polyfill `ctx.implementation_of` reports `emulated`.
   dx12 runs on the D3D12 Agility SDK where it was fetched, and on the system runtime otherwise; `SG_HAS_AGILITY` (1/0) says which.
+  On an Intel GPU it defaults to the system runtime, since Intel's driver recompiles every shader of an Agility process; `SC_DX12_RUNTIME=agility` overrides.
+  `SC_DX12_RUNTIME=system` keeps a process off it; every test process on an Intel GPU stays off it, since Intel's driver there compiles every shader anew.
   Fetching it is a choice nothing makes for you: `uv run extern/agility/fetch-agility.py --accept-license`.
   **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
   opengl and webgl are intended tiers with no backend yet.
@@ -165,6 +169,13 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
   sr also hosts the **denoise members**, the vendor ones included: `SR_HAS_DLSS` (1/0) says whether NVIDIA's SDK was fetched.
   **That fetch is on request and nothing performs it for you** — `uv run extern/dlss/fetch-dlss.py` — because its license is NVIDIA's rather than one a build accepts on anyone's behalf.
+* **`libs/graphics/shaped-xr`** — sg rendering in a headset through OpenXR: `sxr::system`, `sxr::session` and its frames, Quest 3 over Quest Link first.
+  The runtime dictates the GPU, so `system::create_context` makes the sg context to its spec, on vulkan or dx12.
+  A frame is one image of a layer an eye, color and depth, so view instancing draws both eyes in one pass; passthrough is the runtime's own layer.
+  **Views are in tg's frame**: OpenXR's right-handed space is converted at the session's edge, and no public header names an OpenXR type.
+  Namespace `sxr`.
+  Depends on shaped-rendering, plus the fetched OpenXR loader and an sg backend where the build has them.
+  [docs/design.md](libs/graphics/shaped-xr/docs/design.md) has the decisions; `uv run dev.py example xr-cube --window` puts the cube in the headset.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
   [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan, webgpu and metal, from that one source.
@@ -182,6 +193,11 @@ One-liner per library:
   Namespace `sgl`.
   Depends on clean-core alone, which must stay so: an editor links it to parse.
   Early stage.
+* **`libs/graphics/shader-analysis`** — what a shader binary costs, read off the binary: operations by kind, register pressure, critical paths, and a diff of two modules.
+  Namespace `shan`.
+  Depends on clean-core + babel-data, whose readers parse the formats as stored; shan says what they mean.
+  **Its metrics compare two modules of one entry point, SGL's own against DXC's above all; they model no GPU.**
+  SPIR-V and DXIL alike; `uv run dev.py run shan -- diff native.dxil dxc.dxil` is the command line.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`.
   Depends on shaped-rendering, plus babel-serializer for the asset importer, and clean-net on the web, where `load_async` fetches.
@@ -231,6 +247,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
   When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
   See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
+* **Absolute paths are never baked into binaries** ([Build Configurations](docs/coding-guidelines.md#build-configurations)).
+  A source-tree directory goes through `sc_target_source_paths` and `nx::source_path`, and `check`'s `abspaths` gate holds the line.
 * **Work goes straight to `main`** (see Git workflow).
 * **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
@@ -296,12 +314,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * **`--preset` is a per-subcommand flag — it goes *after* the subcommand**: `uv run dev.py test --preset release-clang`.
 * `uv run dev.py list-presets` / `list-targets` show what's available.
 * `relwithdebinfo-*` has `CC_ASSERT` **on**; `release-*` has it **off**. If you touch assertion-gated code, build a `release-*` preset too.
-* **Per-target precompiled headers** are on by default ([tools/cmake/PrecompiledHeaders.cmake](tools/cmake/PrecompiledHeaders.cmake)).
-  Each library declares the tiers it owns with `sc_declare_pch_tier` in its own CMakeLists, and targets apply them with `sc_target_pch`.
-  A tier's header list belongs next to the headers it names, never centrally.
-  A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
-  [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
-  The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check --all-presets`' debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
+* **No precompiled headers**: incremental rebuilds after header edits matter more than the cold-build gain ([build-times](docs/notes/build-times.md#precompiled-headers-removed)).
+  Every TU includes what it uses.
 * `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
   `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
   `sgl-cube` is the same cube from one SGL source, on every backend.
@@ -327,27 +341,32 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
   See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
 * `SC_SOURCE_SITES` (default `FULL`; `OPAQUE`, `OFF`) is what a `cc::source_location` keeps → clean-core's `CC_SOURCE_SITES`: strings, the site's code address only, or nothing.
-  `OPAQUE` is for shipping: no source file or function in the binary, every site resolvable through the build's debug info; the `singlethreaded-*` presets build at it.
+  `OPAQUE` is no source file or function in the binary, every site resolvable through the build's debug info.
+  **The clang development presets build at `OPAQUE`**, so moving lines changes only debug info; `release-*` and the `singlethreaded-*` presets keep `FULL`.
+  `dev.py test` resolves a failed run's `module+0xoffset` sites to `file:line (function)` and the source line.
   Whole-build, since it changes `cc::source_location`'s layout; see [docs/platforms.md](docs/platforms.md#source-sites-sc_source_sites).
+* `SC_AGILITY_PREVIEW` (default OFF) builds dx12 against the pre-release Agility SDK, for clustered geometry and partitioned TLAS → `SG_HAS_AGILITY_PREVIEW`.
+  **Development only**, since its terms forbid shipping it.
+  `--agility-preview` gives it a build directory of its own; see [docs/platforms.md](docs/platforms.md#preview-agility-sdk-sc_agility_preview).
 * `SC_FROZEN_SHADERS` (default OFF) is the shipping mode for shaders: no shader file read, no hot reload, and recorded bytecode embedded where an executable asks with `sc_embed_shader_bundle`.
   A miss still compiles from the embedded sources, so DXC still ships; the `frozen-clang` preset sets it.
   See [frozen-shaders](libs/graphics/shaped-shader-library/docs/frozen-shaders.md).
 * `SC_SHADER_DIAGNOSTICS` (default: on unless `SC_FROZEN_SHADERS`) is whether a shader's `print` and `assert` reach the log → `SG_SHADER_DIAGNOSTICS`.
   SGL writes them as records into a debug window sg binds, reads back after the epoch and logs, so a failed GPU assert fails a test.
   See [docs/platforms.md](docs/platforms.md#shader-diagnostics-sc_shader_diagnostics).
-* `SC_SHADER_UNDEFINED` (default `NONE`; `ABORT`, `REPORT`) is SGL's robustness profile: what an integer division by zero or an array index past the array does.
-  `REPORT` logs it as a failed shader assert at the `.sgl` line and ends that invocation, `ABORT` only ends it.
+* `SC_SHADER_UNDEFINED` (default `NONE`; `ABORT`, `REPORT`, `DEFINE`) is SGL's robustness profile: what an integer division by zero or an index past an array or a buffer does.
+  `REPORT` logs it as a failed shader assert at the `.sgl` line and ends that invocation, `ABORT` only ends it, and `DEFINE` gives it WGSL's value and goes on.
   See [docs/platforms.md](docs/platforms.md#operations-with-no-value-sc_shader_undefined).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
-  Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so CI and `check --all-presets` exercise it.
+  Off in every preset, since the checks sit in predicate hot loops: a build dir configured with it ON runs them, now and then, and neither `check` nor CI does.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
-* `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the `debug-nopch` presets turn it on.
+* `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the clang `debug-*` presets turn it on.
   See [docs/platforms.md](docs/platforms.md#exhaustive-simd-tests-sc_simd_exhaustive_tests).
 * `SC_CHECK_GEOMETRY_SPECIAL_CASES` (default OFF) logs each special case a typed-geometry query assumes away — collinear lines, a ray in a triangle's plane → `TG_CHECK_SPECIAL_CASES`.
-  The `debug-nopch` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
+  The clang `debug-*` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
   See [docs/platforms.md](docs/platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases).
 * `SC_ASYNC_AMBIENT_TRACE` (default OFF) lets nexus name who still holds a test's context when it reports leftover async work → `CC_ASYNC_AMBIENT_TRACE`.
-  Off, nothing is paid; on, every context release pays a load and a compare; the `debug-nopch` presets turn it on.
+  Off, nothing is paid; on, every context release pays a load and a compare; off in every preset, like `SC_CHECK_WIDE_ARITH`.
   See [docs/platforms.md](docs/platforms.md#who-holds-a-tests-context-sc_async_ambient_trace).
 
 ---
@@ -397,6 +416,8 @@ What binds you while writing:
 
 * **Never reflow prose into a justified block.
   A new point starts a new line.**
+* **American English**: `color`, not `colour`; `meters`, not `metres`; `center`, `gray`, `behavior`, `neighbor`, `-ize`.
+  Identifiers and prose alike, in new code; existing names change only with an API decision.
 * This binds **all prose we write**, whatever the language it sits in: `///` and `//` comments, `#` comments in CMake and Python, docstrings, commit messages and PR descriptions.
   And **every `.md` file in the repo** — docs, readmes, cheat sheets, this file, skill files.
   Build files are not exempt either.
@@ -534,7 +555,6 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
 | Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
-| Find what a target's precompiled header is worth | `uv run dev.py compile-time pch "<glob>"` ([precompiled-headers](docs/guides/precompiled-headers.md)) |
 | See a function's codegen         | `uv run dev.py assembly search/show` ([disassembly](docs/guides/disassembly.md)) |
 | Resolve a wasm stack after the fact | `uv run dev.py symbolize --obj <sidecar> report.txt` ([platforms](docs/platforms.md#wasm-debug-sidecars-sc_wasm_debug_sidecars)) |
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
@@ -561,7 +581,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | Update a consumer's submodules   | `uv run dev.py submodules sync [--tip \| --bump]` — to the recorded commits (or the branch heads), fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
 | Clone an opt-in companion repo   | `uv run dev.py companions init shader-rosetta` (`list` shows them, `sync` fast-forwards; [building-and-testing](docs/guides/building-and-testing.md#companion-repositories-companions)) |
-| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install shaped-view` the model viewer a double-click opens) |
+| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install vulkan-sdk` the pinned Vulkan SDK every dev.py run then builds against, `install android-sdk --accept-license` the pinned NDK and SDK tools, `install monado` the simulated headset `dev.py test` then runs shaped-xr's session tests on, `install shaped-view` the model viewer a double-click opens) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

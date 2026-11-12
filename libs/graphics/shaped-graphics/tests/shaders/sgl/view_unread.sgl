@@ -1,0 +1,29 @@
+// A pipeline of two views whose pixel stage ignores the view, on purpose: it is what CHK-515 warns of.
+// In a file of its own, because a file's warnings reach every entry point compiled from it.
+
+@vertex struct tagged_corner:
+    position: float2
+    tag: int
+    depth: float
+
+struct viewed:
+    @position position: hpos4
+    @interpolate(.flat) tag: int
+
+@vertex fun moved_vs(v: tagged_corner, @view_index view: int) -> viewed:
+    require view_instancing
+    let shift = if view == 0 => -0.5 else 0.5
+    return {
+        position = hpos4(v.position.x * 0.5 + shift, v.position.y, v.depth, 1.0)
+        tag = v.tag
+    }
+
+@pixel fun plain_tag_ps(p: viewed) -> float4:
+    return float4(p.tag as float, 0.0, 0.0, 1.0)
+
+pipeline moved_vertex_stage_only:
+    vertex = moved_vs
+    pixel = plain_tag_ps
+    cull = .none
+    format = .rgba32_float
+    view_count = 2

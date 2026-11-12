@@ -1,0 +1,96 @@
+// What a pixel stage reaches, each entry point built by the same three packages as the link.
+// A draw through each route has to read alike, value by value, whichever route each stage came from.
+
+require sample_rate_shading, primitive_index
+
+struct surface_link:
+    @position position: hpos4
+    near: float2
+    @interpolate(.perspective, .centroid) middle: float2
+    @interpolate(.perspective, .sample) exact: float2
+    @interpolate(.linear, .sample) screen: float
+    @interpolate(.flat) tag: int
+
+@pixel struct surface_colors:
+    first: float4
+    second: float4
+
+@vertex fun surface_vs(@vertex_index v: int, @instance_index i: int) -> surface_link:
+    let x = ((v & 1) as float) * 4.0 - 1.0
+    let y = ((v >> 1) as float) * 4.0 - 1.0
+    let w = 1.0 + (v as float) * 0.5
+    return {
+        position = hpos4(x * w, y * w, 0.5, w)
+        near = float2(x, y)
+        middle = float2(y, x)
+        exact = float2(x * y, x)
+        screen = x * 0.5
+        tag = 7 + i
+    }
+
+// Every member of the link together, so no stage leaves an output of the vertex stage unread.
+fun link_sum(l: surface_link) -> float => l.near.x + l.near.y + l.middle.x + l.middle.y + l.exact.x + l.exact.y + l.screen + (l.tag as float)
+
+// Column 0 discards and goes on as a helper, so the derivatives of column 1 still see it.
+// x² at pixel centres steps by 2 between columns 0 and 1 and by 6 between 2 and 3, so `first.x` reads 2 only through one.
+@pixel fun discarding_ps(l: surface_link) -> surface_colors:
+    let x = l.position.x
+    let y = l.position.y
+    if x < 1.0 => discard
+    let after = x * x
+    return {
+        first = float4(ddx(after), ddy(y * y), fwidth(after + y), link_sum(l))
+        second = float4(ddx(l.near.x), ddx(l.near.y), ddy(l.near.x), ddy(l.near.y))
+    }
+
+// Every input a stage hands over, past the link.
+@pixel fun inputs_ps(l: surface_link, @is_front_facing front: bool, @primitive_id primitive: int, @sample_index sample: int, @sample_mask covered: uint) -> surface_colors:
+    let facing = if front => 1.0 else 2.0
+    return {
+        first = float4(l.near.x, l.near.y, l.middle.x, l.middle.y)
+        second = float4(link_sum(l), facing, (primitive + sample) as float, covered as float)
+    }
+
+@pixel struct depth_colors:
+    first: float4
+    second: float4
+    @depth depth: float
+
+// The depth test against what clears the target decides which pixels stay, so a depth the two routes write apart shows.
+@pixel fun depth_ps(l: surface_link) -> depth_colors:
+    return {
+        first = float4(l.near.x, l.near.y, link_sum(l), 1.0)
+        second = float4(1.0, 0.0, 0.0, 1.0)
+        depth = l.position.x * 0.125
+    }
+
+binding surface_textures:
+    albedo: texture_2d[float4]
+    shadow: texture_2d_depth
+    smooth: sampler
+    compared: comparison_sampler
+
+// The sampling family, which only a pixel stage takes its levels from.
+@pixel fun sampled_ps(l: surface_link){surface_textures} -> surface_colors:
+    let uv = l.position.xy * 0.125
+    let plain = surface_textures.albedo.sample(uv, surface_textures.smooth)
+    let biased = surface_textures.albedo.sample(uv, surface_textures.smooth, bias = 1.0)
+    let graded = surface_textures.albedo.sample(uv, surface_textures.smooth, grad_x = float2(0.25, 0.0), grad_y = float2(0.0, 0.25))
+    let gathered = surface_textures.albedo.gather(uv, surface_textures.smooth, component = texel_component.y)
+    let compare = surface_textures.shadow.sample_compare(uv, surface_textures.compared, reference = 0.25)
+    let flat = surface_textures.shadow.sample_compare(uv, surface_textures.compared, reference = 0.75, level = 0.0)
+    let around = surface_textures.shadow.gather_compare(uv, surface_textures.compared, reference = 0.25)
+    return {
+        first = float4(plain.x + link_sum(l), biased.y, graded.z, gathered.w)
+        second = float4(compare, flat, around.x, plain.w)
+    }
+
+// An offset moves a sample or a gather by whole texels, and only a constant may state one (CHK-280).
+@pixel fun offset_ps(l: surface_link){surface_textures} -> surface_colors:
+    let uv = l.position.xy * 0.125
+    let moved = surface_textures.albedo.sample(uv, surface_textures.smooth, offset = int2(1, -1))
+    let around = surface_textures.albedo.gather(uv, surface_textures.smooth, component = texel_component.x, offset = int2(-1, 0))
+    return {
+        first = float4(moved.x + link_sum(l), moved.y, moved.z, around.x)
+        second = float4(around.y, around.z, around.w, moved.w)
+    }

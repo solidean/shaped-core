@@ -119,6 +119,10 @@ public:
     /// Returns the dynamic sampler at `slot` to the default sampler state.
     void unset_sampler(binding_slot slot);
 
+    /// Supplies element `element` of the dynamic sampler array at `slot`, which must be within its count.
+    /// Each element starts at the default sampler state, so an array counts as set once any element was.
+    void set_sampler_element(binding_slot slot, int element, sampler const& smp);
+
     // --- the same, by name --------------------------------------------------------------------------
     // Whole-binding wiring, where resolving the name every call is not the cost that matters.
     // Each asserts the layout has a binding of that name.
@@ -143,7 +147,16 @@ protected:
     /// binding's first descriptor in its heap — the view heap, or the sampler heap for a sampler binding.
     /// `-1` marks a binding the backend keeps no descriptor for, which is a static sampler.
     /// Every descriptor must already hold its binding's empty value by the time this returns.
-    staging_binding_group(binding_group_layout_handle layout, cc::vector<int> descriptor_offsets);
+    /// `unbounded_capacity` is the element count of the layout's unbounded binding, 0 where it has none.
+    staging_binding_group(binding_group_layout_handle layout,
+                          cc::vector<int> descriptor_offsets,
+                          int unbounded_capacity = 0);
+
+    /// How many elements binding `b` holds in this group: its count, or the group's capacity where it is unbounded.
+    [[nodiscard]] int element_count(binding const& b) const
+    {
+        return b.is_unbounded() ? _unbounded_capacity : int(b.count);
+    }
 
     /// Writes `views` into the view heap at [`first_descriptor`, `first_descriptor` + views.size()), replacing whatever was there — including its resource references.
     /// One call per contiguous run, so filling a range costs one dispatch rather than one per element.
@@ -200,6 +213,7 @@ private:
     cc::vector<slot_info> _slots;           // indexed by binding_slot; parallel to _layout->bindings()
 
     int _untouched = 0; // settable bindings not yet set; snapshot() asserts this is zero
+    int _unbounded_capacity = 0;
 
     binding_group_handle _snapshot;
     bool _dirty = true;

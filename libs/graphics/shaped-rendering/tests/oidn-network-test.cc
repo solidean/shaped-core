@@ -333,6 +333,7 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
 
         auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         auto const got = co_await readback.data();
@@ -686,6 +687,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
         auto const whole_read = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(whole_output.raw()));
         auto const tiled_read = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(tiled_output.raw()));
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         auto const a = co_await whole_read.data();

@@ -27,6 +27,9 @@ struct sv::material_type_description
     cc::string thin_walled_attribute = {};
     cc::string tangent_frame_attribute = {};
     bool display_only = false;
+    cc::string height_attribute = {};
+    cc::string height_top_attribute = {};
+    cc::string height_bottom_attribute = {};
 };
 
 /// A family of materials: what a shader needs per pixel, and the code that turns it into a shaded surface.
@@ -117,6 +120,14 @@ struct sv::material_type
     /// A secondary hit then reads its base color and specular weight as 0, so the hybrid's bounce is absorbed there as a tracer's is,
     /// rather than lit as the mid-gray a type naming no base color is otherwise read as.
     bool display_only = false;
+
+    /// Which declared float attribute is a relief's height in meters, positive out of the face, or empty for none.
+    /// Bound to a texture, a hit marches it along its ray (parallax occlusion mapping) and every texture is read where the ray met it.
+    /// The face's geometry stands at `height_top_attribute` and the relief is carved down to `height_bottom_attribute`;
+    /// a top not above the bottom marches nothing.
+    cc::string height_attribute;
+    cc::string height_top_attribute;
+    cc::string height_bottom_attribute;
 
     cc::hash128 hash;
 

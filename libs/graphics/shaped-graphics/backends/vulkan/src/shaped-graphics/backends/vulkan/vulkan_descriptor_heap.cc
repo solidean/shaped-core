@@ -32,8 +32,9 @@ cc::result<cc::unit> vulkan_descriptor_heap::initialize(vulkan_context& ctx,
         .size = VkDeviceSize(capacity_in_bytes),
         // Both descriptor-buffer usages, because one heap serves resource and sampler descriptors alike — Vulkan puts
         // them in the same set layout, unlike D3D12's separate heaps.
+        // A software trace's roots sit beside the descriptors that name them, so it is a uniform buffer too.
         .usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
-               | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+               | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
     if (VkResult const r = vkCreateBuffer(ctx._device, &info, nullptr, &_buffer); r != VK_SUCCESS)

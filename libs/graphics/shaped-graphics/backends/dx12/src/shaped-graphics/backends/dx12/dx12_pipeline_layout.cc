@@ -4,20 +4,25 @@
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/binding.hh> // sg::is_sampler
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 namespace sg::backend::dx12
 {
 cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Device* device,
                                                                      cc::span<sg::binding_group_layout_handle const> groups,
                                                                      cc::span<sg::bound_sampler const> static_samplers,
-                                                                     cc::optional<sg::binding> const& inline_constants)
+                                                                     cc::optional<sg::binding> const& inline_constants,
+                                                                     bool dispatch_grid,
+                                                                     sg::mesh_polyfill_slots mesh_polyfill)
 {
     if (int(groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
     auto pl = std::make_shared<dx12_pipeline_layout>(
-        sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants), groups, inline_constants);
+        sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants, dispatch_grid, mesh_polyfill), groups,
+        inline_constants, dispatch_grid, static_samplers, mesh_polyfill);
 
     // One descriptor-table root parameter per group table, appended in group order (resource table then
     // sampler table).
@@ -107,9 +112,79 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         D3D12_ROOT_PARAMETER param = {};
         param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
         param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        param.Descriptor.ShaderRegister = 0;
-        param.Descriptor.RegisterSpace = 11;
+        param.Descriptor.ShaderRegister = UINT(sg::reserved_debug_window.dx12_register);
+        param.Descriptor.RegisterSpace = UINT(sg::reserved_debug_window.dx12_space);
         pl->debug_root_param = int(params.size());
+        params.push_back(param);
+    }
+
+    // The software walk's pool and roots, in the space EMIT-135 declares them in, where a group's binding asks for them.
+    auto traces_in_software = false;
+    auto acceleration_members = isize(0);
+    for (auto const& g : groups)
+    {
+        pl->acceleration_bases.push_back(acceleration_members);
+        acceleration_members += sg::impl::acceleration_count(g->bindings());
+        traces_in_software = traces_in_software || sg::impl::traces_in_software(g->bindings());
+    }
+    if (traces_in_software)
+    {
+        D3D12_ROOT_PARAMETER pool = {};
+        pool.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+        pool.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        pool.Descriptor.ShaderRegister = UINT(sg::reserved_acceleration_pool.dx12_register);
+        pool.Descriptor.RegisterSpace = UINT(sg::reserved_acceleration_pool.dx12_space);
+        pl->software_pool_root_param = int(params.size());
+        params.push_back(pool);
+
+        D3D12_ROOT_PARAMETER roots = {};
+        roots.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        roots.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        roots.Constants.Num32BitValues = UINT(sg::impl::software_trace_roots);
+        roots.Constants.ShaderRegister = UINT(sg::reserved_acceleration_roots.dx12_register);
+        roots.Constants.RegisterSpace = UINT(sg::reserved_acceleration_roots.dx12_space);
+        pl->software_roots_root_param = int(params.size());
+        params.push_back(roots);
+    }
+
+    // The unbounded arrays' lengths, in the order of the groups that hold one, which sg writes from the bound groups.
+    auto lengths = isize(0);
+    for (auto const& g : groups)
+        pl->length_bases.push_back(sg::impl::has_unbounded_array(g->bindings()) ? lengths++ : isize(-1));
+    CC_ASSERT(lengths <= sg::impl::array_lengths_capacity, "a pipeline binds at most 16 unbounded binding arrays");
+    if (lengths > 0)
+    {
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Constants.Num32BitValues = UINT(sg::impl::array_lengths_capacity);
+        param.Constants.ShaderRegister = UINT(sg::reserved_array_lengths.dx12_register);
+        param.Constants.RegisterSpace = UINT(sg::reserved_array_lengths.dx12_space);
+        pl->array_lengths_root_param = int(params.size());
+        params.push_back(param);
+    }
+
+    if (dispatch_grid)
+    {
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Constants.Num32BitValues = 4;
+        param.Constants.ShaderRegister = UINT(sg::reserved_dispatch_grid.dx12_register);
+        param.Constants.RegisterSpace = UINT(sg::reserved_dispatch_grid.dx12_space);
+        pl->dispatch_grid_root_param = int(params.size());
+        params.push_back(param);
+    }
+
+    // a polyfill's slots and records, each written by one half and read by another, all by address
+    for (auto const& slot : sg::impl::polyfill_slots_of(mesh_polyfill))
+    {
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = slot.is_writable ? D3D12_ROOT_PARAMETER_TYPE_UAV : D3D12_ROOT_PARAMETER_TYPE_SRV;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Descriptor.ShaderRegister = UINT(slot.address->dx12_register);
+        param.Descriptor.RegisterSpace = UINT(slot.address->dx12_space);
+        (slot.is_task ? pl->task_slots_root_param : pl->mesh_slots_root_param) = int(params.size());
         params.push_back(param);
     }
 

@@ -32,7 +32,8 @@ public:
     metal_staging_binding_group(metal_context& ctx,
                                 sg::binding_group_layout_handle layout,
                                 cc::vector<int> descriptor_offsets,
-                                isize slot_count);
+                                isize slot_count,
+                                int unbounded_capacity = 0);
 
 private:
     void write_view_descriptors(int first_descriptor, sg::binding const& b, cc::span<sg::raw_view const> views) override;
@@ -46,6 +47,8 @@ private:
     /// A zero slot IS the null descriptor — a shader reading through it reads zeroes, which is what sg promises a
     /// vacant element does.
     cc::vector<u64> _slots;
+    /// Each slot's byte length, parallel to `_slots`: a buffer view's, zero for anything else (EMIT-195).
+    cc::vector<u32> _lengths;
 
     /// Set when the device refused a sampler state, which `mint` turns into an error.
     bool _sampler_refused = false;

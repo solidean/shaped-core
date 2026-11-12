@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <imgui/imgui.h>
 #include <nexus/async-test.hh>
+#include <nexus/source_root.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -361,7 +362,8 @@ ASYNC_EXAMPLE("shaped-viewer/research-studio")
             // Fetched relative to the page, which the dev server serves the installed scenes beside as `scenes/`.
             assets[scene_index] = loader.load_async(cc::format("scenes/{}", entry.file));
 #else
-            assets[scene_index] = loader.load_async(cc::format("{}/{}", SV_RESEARCH_SCENES_DIR, entry.file));
+            assets[scene_index]
+                = loader.load_async(cc::format("{}/{}", nx::source_path(SV_RESEARCH_SCENES_DIR), entry.file));
 #endif
         auto& asset = assets[scene_index].value();
 

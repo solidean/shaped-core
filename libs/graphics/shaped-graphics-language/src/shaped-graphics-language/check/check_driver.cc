@@ -6,6 +6,7 @@
 #include <clean-core/string/from_string.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/impl/relocate.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -15,6 +16,9 @@ using namespace sgl::check::impl;
 
 void checker::run(resume_point from)
 {
+    run_from_files = from.files;
+    bodies_read_from = bodies_read.size();
+    run_start = sizes_of(*this);
     if (from.files == 0)
     {
         out.types.push_back({.kind = type_kind::error});
@@ -23,7 +27,12 @@ void checker::run(resume_point from)
     // A checked layer leaves the scope of its empty program behind, which this check's own module replaces.
     // A layer of modules keeps theirs, since their files are declared already and are not declared again.
     if (from.files > prelude_count)
+    {
         module_scopes[0] = {};
+        // a layer of the chain adds modules behind the ones it continues
+        while (module_scopes.size() < modules.size())
+            module_scopes.push_back({});
+    }
     else
     {
         module_scopes = {};
@@ -59,6 +68,12 @@ void checker::run(resume_point from)
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_defaults(symbol_id(i));
+    // what a later link of a chain may name of this one, before a body adds anything
+    if (records_interface)
+    {
+        interface_end = sizes_of(*this);
+        interface_digest = interface_hash(*this, run_start, interface_end);
+    }
 
     // A call needs a signature only, so each body is checked once, after every signature is known.
     // That is what lets a function call one declared below it.
@@ -69,7 +84,7 @@ void checker::run(resume_point from)
 
     // A test in a body that was never checked, a function whose signature failed or a test inside a test, is found
     // nowhere else, and a test is run or fails: it is never left out (CHK-224).
-    add_unregistered_tests();
+    add_unregistered_tests(from.files, from.tests);
 
     // Last, since a test in a function body is found while that body is checked (CHK-224).
     for (auto i = from.tests; i < out.tests.size(); ++i)
@@ -77,15 +92,18 @@ void checker::run(resume_point from)
     warn_uninstantiated_generics(from.symbols);
 
     judge_wide_literals(from.wide_literals);
-    find_recursion(from.symbols);
+    find_recursion(from.symbols, from.notes, from.calls);
 
     // Every binding and body is checked by now, so what each entry point needs and declares is known.
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             judge_entry_features(symbol_id(i));
+    // CHK-487: what a task stage hands on is known once its body is, and its pipeline's mesh stage takes exactly it
+    judge_mesh_payloads();
 
     index_builtin_symbols(from.symbols);
-    instantiate_generics();
+    instantiate_generics(from.call_records, from.types);
+    prepare_target_layouts();
     // CHK-350: the entry points are the program's; a module the program uses is a library, whose own are not built
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked
@@ -94,6 +112,7 @@ void checker::run(resume_point from)
     flatten_metal_traversals();
     for (auto i = from.tests; i < out.tests.size(); ++i)
         flatten_test(i32(i));
+    place_layout_bindings(from.symbols);
     // after flattening, which finds what a body's calls need (CHK-322)
     report_unused_requires();
     judge_footprint_pins();
@@ -282,6 +301,12 @@ void checker::attach_extensions(isize first)
         }
         auto const owner = found->front();
         auto const owner_kind = out.at(owner).kind;
+        // an alias names its type only once it is compiled, and type scopes are made before anything is
+        if (owner_kind == symbol_kind::alias)
+        {
+            unsupported(file, extended, "an extension through a type alias; extend the type it names");
+            continue;
+        }
         if (owner_kind != symbol_kind::structure && owner_kind != symbol_kind::enumeration)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, extended,
@@ -451,12 +476,13 @@ void checker::judge_redeclarations(isize first)
             alike.push_back(i);
         }
     };
-    for (auto const& [name, ids] : prelude_names)
+    // a set a lower layer holds unchanged has no symbol of this layer, so only this layer's own entries can hold one
+    for (auto const& [name, ids] : prelude_names.own_entries())
         judge(ids);
     for (auto const& scope : module_scopes)
         for (auto const& [name, ids] : scope)
             judge(ids);
-    for (auto const& [owner, scope] : type_scopes)
+    for (auto const& [owner, scope] : type_scopes.own_entries())
         for (auto const& [name, ids] : scope)
             judge(ids);
 }
@@ -604,16 +630,6 @@ void checker::declare(i32 file, ast::decl_id decl)
     auto const& d = ast_of(file).at(decl);
     auto const named = [&](symbol_kind kind, source_span name)
     { return symbol{.file = file, .declaration = decl, .kind = kind, .name = text_of(file, name)}; };
-    auto const unsupported_symbol = [&](source_span name, cc::string_view construct)
-    {
-        unsupported(file, span_of(file, decl), construct);
-        if (name.empty())
-            return;
-        auto s = named(symbol_kind::unsupported, name);
-        s.state = symbol_state::failed;
-        add_symbol(cc::move(s), name);
-    };
-
     d.node.visit(
         [&](ast::fun_decl const& f)
         {
@@ -694,7 +710,11 @@ void checker::declare(i32 file, ast::decl_id decl)
             }
             add_member_tests(file, e.members, cc::format("enum {}", text_of(file, e.name)));
         },
-        [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
+        [&](ast::type_decl const& t)
+        {
+            if (!t.name.empty())
+                add_symbol(named(symbol_kind::alias, t.name), t.name);
+        },
         [&](ast::const_decl const& c)
         {
             if (!c.name.empty())
@@ -796,8 +816,8 @@ void checker::compile(symbol_id id)
     case symbol_kind::test:
         // A test's signature is made where it is found, and its body is checked with the others.
         break;
-    case symbol_kind::unsupported:
-        out.symbols.own(index_of(id)).state = symbol_state::failed;
+    case symbol_kind::alias:
+        compile_alias(id);
         break;
     }
 

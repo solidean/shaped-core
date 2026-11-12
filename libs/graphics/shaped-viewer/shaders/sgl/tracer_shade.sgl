@@ -36,6 +36,48 @@ struct light_sample:
     /// 1 where the ray has to be tested; 0 where the sample contributes nothing, or comes from a light that casts no shadow
     tested: uint
 
+/// How open direction `w` is above the shading normal `n` where a material's relief leaves `ao` of the hemisphere open:
+/// clamp(|n.w| + 2 ao^2 - 1, 0, 1) (Chan, "Material Advances in Call of Duty: WWII", 2018), and exactly 1 wherever ao is.
+/// Grazing directions close first, so a crevice loses its grazing light and its grazing reflections alike.
+fun micro_visibility(ao: float, n: float3, w: float3) -> float:
+    if ao >= 1.0 => return 1.0
+    return clamp(abs(dot(n, w)) + 2.0 * ao * ao - 1.0, 0.0, 1.0)
+
+/// How open direction `w` is past a material's own relief, whose horizon is `lo` and `hi` in frame `f`'s tangent plane:
+/// the horizon interpolated at `w`'s azimuth, and `w` open where it rises above it, closed a sine of 0.05 below it.
+/// A self-shadowing a height field casts on itself, which a light sample cannot trace, since the relief is no geometry.
+fun horizon_visibility(lo: float4, hi: float4, f: openpbr.frame, w: float3) -> float:
+    let z = dot(w, f.n)
+    if z <= 0.0 => return 1.0
+    let phi = atan2(dot(w, f.b), dot(w, f.t))
+    let u = (if phi < 0.0 => phi + 6.2831853 else phi) / 0.78539816
+    let k = (floor(u) as int) % 8
+    let t = u - floor(u)
+    let h = mix(horizon_sine(lo, hi, k), horizon_sine(lo, hi, (k + 1) % 8), t)
+    return saturate((z - h) / 0.05 + 1.0)
+
+/// Direction `k` of a horizon's 8, 0 to 3 from `lo` and 4 to 7 from `hi`.
+fun horizon_sine(lo: float4, hi: float4, k: int) -> float:
+    if k == 0 => return lo.x
+    if k == 1 => return lo.y
+    if k == 2 => return lo.z
+    if k == 3 => return lo.w
+    if k == 4 => return hi.x
+    if k == 5 => return hi.y
+    if k == 6 => return hi.z
+    return hi.w
+
+/// How open direction `w` is past a material's own relief: by its horizon where it has one, else by its micro-occlusion.
+/// Never both: the horizon is the occlusion's own information per direction, and the two together would count it twice.
+fun relief_visibility(surface: openpbr.surface, f: openpbr.frame, w: float3) -> float:
+    if any(surface.horizon_lo > float4(0.0)) or any(surface.horizon_hi > float4(0.0)):
+        return horizon_visibility(surface.horizon_lo, surface.horizon_hi, f, w)
+    return micro_visibility(surface.micro_occlusion, f.n, w)
+
+/// Whether a surface's relief closes any direction, so a surface with none skips it.
+fun has_relief(surface: openpbr.surface) -> bool:
+    return surface.micro_occlusion < 1.0 or any(surface.horizon_lo > float4(0.0)) or any(surface.horizon_hi > float4(0.0))
+
 /// The sample that contributes nothing and tests nothing.
 fun no_light_sample() -> light_sample:
     return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u)
@@ -681,6 +723,17 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
         env = sample_environment(v, b, f, wo_local, p, n, false, mut rng, mut variate)
         variate += environment_specular_variate(v, b, f, wo_local, mut rng)
 
+    // A material's own relief closes grazing directions and the ones below its horizon to every strategy alike,
+    // light samples and the continuation, so multiple importance sampling weighs one visibility.
+    let relief = has_relief(surface)
+    if relief:
+        let light_open = relief_visibility(surface, f, light.direction)
+        light.diffuse *= light_open
+        light.specular *= light_open
+        let env_open = relief_visibility(surface, f, env.direction)
+        env.diffuse *= env_open
+        env.specular *= env_open
+
     // The continuation, importance-sampled from the closure the material just described.
     let u1 = pt.rand(mut rng)
     let u2 = pt.rand(mut rng)
@@ -702,6 +755,8 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     if s.valid:
         // The cosine is the one at the SURFACE, so a refracted direction contributes its own magnitude rather than a negative weight.
         let mut weight = s.value * (abs(s.direction.z) / s.pdf)
+        if relief and s.direction.z > 0.0:
+            weight *= relief_visibility(surface, f, continuation)
 
         // Collapsing onto one wavelength keeps one channel of three, so what survives is scaled back up by three.
         if collapsing:
@@ -752,6 +807,75 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
 fun instance_position(inst: scene.instance, vertex: uint){bindless} -> float3:
     let buffer = inst.vertices as int
     return material.position_of(inst, bindless.buffers[nonuniform buffer], vertex)
+
+/// `ctx` with the level its textures sample at: the ray cone `width` meters wide at the ray's origin, widening by `spread`
+/// per meter, met `t` meters along the unit `dir` on a triangle whose world edges from its first corner cross to `edges`.
+/// A cone of no width and no spread leaves `ctx` at the base level, as does a degenerate triangle.
+fun with_cone(ctx: material.shading_context, e1: float3, e2: float3, dir: float3, t: float, width: float, spread: float) -> material.shading_context:
+    if width <= 0.0 and spread <= 0.0 => return ctx
+    let normal = cross(e1, e2)
+    let area = length(normal)
+    if area <= 0.0 => return ctx
+    let n = normal / area
+    let footprint = max(width + spread * t, 1e-9)
+
+    // On the face the footprint is an ellipse: across the ray as wide as the cone, and along the ray's trace on the face
+    // stretched by one over the cosine; past about 87 degrees the stretch is held, as a sampler's anisotropy is.
+    let facing = max(abs(dot(n, dir)), 0.05)
+    let mut across = cross(n, dir)
+    if dot(across, across) < 1e-12:
+        across = e1
+    across = normalize(across)
+    let along = cross(across, n)
+    let mut coned = ctx
+    coned.footprint_a = barycentric_offset(e1, e2, across * footprint)
+    coned.footprint_b = barycentric_offset(e1, e2, along * (footprint / facing))
+    return coned
+
+/// The offset `d` on a triangle's plane in its barycentrics: the (s, t) with e1 s + e2 t = d, for edges `e1` and `e2`
+/// from its first corner, through their Gram matrix; a degenerate triangle gives none.
+fun barycentric_offset(e1: float3, e2: float3, d: float3) -> float2:
+    let g11 = dot(e1, e1)
+    let g12 = dot(e1, e2)
+    let g22 = dot(e2, e2)
+    let det = g11 * g22 - g12 * g12
+    if det <= 0.0 => return float2(0.0, 0.0)
+    let r1 = dot(e1, d)
+    let r2 = dot(e2, d)
+    return float2(g22 * r1 - g12 * r2, g11 * r2 - g12 * r1) / det
+
+/// The angle a ray cone widens by where a path leaves a surface along `lobe`, of perceptual `roughness`.
+/// A smooth reflection keeps its spread, a rough one widens about by its lobe's width, alpha twice over, and a diffuse one by a radian.
+/// A surface's curvature is left out, so the reflection in a curved mirror samples finer textures than it could.
+fun bounce_spread(lobe: uint, roughness: float) -> float:
+    if openpbr.bsdf_lobe_is_specular(lobe) => return 2.0 * roughness * roughness
+    return 1.0
+
+/// What a triangle hit's ray and face are in the world: the ray's unit direction and the meters it went, and the face's
+/// edges from its first corner, which a ray cone and a relief's parallax both read.
+struct hit_geometry:
+    dir: float3
+    t: float
+    e1: float3
+    e2: float3
+
+/// The geometry of a closest hit, its edges through the hit's own transform, as its tangent frame goes.
+fun hit_geometry_of(h: triangle_hit, ctx: material.shading_context){traced, bindless} -> hit_geometry:
+    let inst = scene.instance(..traced.instances[h.instance_id])
+    let v0 = instance_position(inst, ctx.corner.x)
+    let a = instance_position(inst, ctx.corner.y) - v0
+    let b = instance_position(inst, ctx.corner.z) - v0
+    let e1 = h.to_world(vec3(a.x, a.y, a.z))
+    let e2 = h.to_world(vec3(b.x, b.y, b.z))
+    let d = float3(h.ray.direction.x, h.ray.direction.y, h.ray.direction.z)
+    let len = length(d)
+    return hit_geometry(d / len, h.t * len, float3(e1.x, e1.y, e1.z), float3(e2.x, e2.y, e2.z))
+
+/// The shading context of a closest hit, its cone the one `p` brought.
+fun cone_context(h: triangle_hit, p: surface_payload){traced, bindless} -> material.shading_context:
+    let ctx = triangle_context(h)
+    let g = hit_geometry_of(h, ctx)
+    return with_cone(ctx, g.e1, g.e2, g.dir, g.t, p.cone_width, p.cone_spread)
 
 /// The shading context of a triangle hit, which is all a material needs to know about where it is.
 fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_context:

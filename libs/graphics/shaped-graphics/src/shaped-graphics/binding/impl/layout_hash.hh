@@ -30,7 +30,9 @@ namespace sg::impl
 /// All three change the root signature, so all three are part of it.
 [[nodiscard]] cc::hash128 pipeline_layout_hash(cc::span<binding_group_layout_handle const> groups,
                                                cc::span<bound_sampler const> static_samplers,
-                                               cc::optional<binding> const& inline_constants);
+                                               cc::optional<binding> const& inline_constants,
+                                               bool dispatch_grid = false,
+                                               mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none);
 
 [[nodiscard]] cc::hash128 pipeline_layout_hash(pipeline_layout_description const& desc);
 } // namespace sg::impl

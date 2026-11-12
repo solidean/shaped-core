@@ -28,14 +28,16 @@ class sg::backend::vulkan::vulkan_staging_binding_group final : public sg::stagi
 {
 public:
     [[nodiscard]] static cc::result<vulkan_staging_binding_group_handle> create(vulkan_context& ctx,
-                                                                                vulkan_binding_group_layout_handle layout);
+                                                                                vulkan_binding_group_layout_handle layout,
+                                                                                int unbounded_capacity);
 
     /// `descriptor_offsets` is the base's slot map — see staging_binding_group's constructor.
     /// Only `create` builds one correctly; it is not a public entry point.
     vulkan_staging_binding_group(vulkan_context& ctx,
                                  vulkan_binding_group_layout_handle layout,
                                  cc::vector<int> descriptor_offsets,
-                                 cc::vector<isize> byte_offsets);
+                                 cc::vector<isize> byte_offsets,
+                                 int unbounded_capacity);
     ~vulkan_staging_binding_group() override;
 
 protected:
@@ -53,6 +55,8 @@ private:
         vulkan_texture_handle texture;
         sg::subresource_range range;
         sg::view_class bound_as = sg::view_class::readonly;
+        /// An acceleration member's device address, which a minted group hands its trace; 0 otherwise.
+        u64 address = 0;
     };
 
     /// Fills every descriptor with its binding's empty value, which the base requires before it hands the group out.

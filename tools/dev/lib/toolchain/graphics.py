@@ -89,7 +89,7 @@ def _vulkan_headers_check(cxx: str | None) -> tuple[str, bool | None, str]:
     if reachable:
         where = f"VULKAN_SDK={sdk}" if dirs else "the compiler's default include path"
         return (label, True, f"vulkan/vulkan.h via {where}")
-    hint = "install the Vulkan SDK (https://vulkan.lunarg.com) and set VULKAN_SDK"
+    hint = "run: uv run dev.py install vulkan-sdk"
     if sdk:
         hint = f"VULKAN_SDK={sdk} has no include/vulkan/vulkan.h — {hint}"
     return (label, None, f"vulkan/vulkan.h not found, so the vulkan backend is skipped at configure; {hint}")

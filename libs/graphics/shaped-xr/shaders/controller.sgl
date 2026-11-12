@@ -1,0 +1,32 @@
+// A plain box per view, placed by the host: what sxr::controller_routine draws a controller and its aim ray with.
+// No vertex input: fourteen indices walk a triangle strip around the unit box.
+
+// the box-to-clip matrix per eye, and its color
+@inline binding constants:
+    left_eye: mat4
+    right_eye: mat4
+    color: float4
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    shade: float
+
+// one bit per strip index says which side of each axis that corner sits on
+fun corner(vertex: int, mask: int) -> float:
+    return if ((mask >> vertex) & 1) != 0 => 0.5 else -0.5
+
+@vertex fun main_vs(@vertex_index vertex: int, @view_index view: int){constants} -> pixel_input:
+    require view_instancing
+    let to_clip = if view == 0 => constants.left_eye else constants.right_eye
+    let z = corner(vertex, 12771)
+    return {
+        position = to_clip * pos3(corner(vertex, 10362), corner(vertex, 687), z)
+        shade = 0.75 + z * 0.5
+    }
+
+@pixel fun main_ps(p: pixel_input, @view_index view: int){constants} -> target:
+    require view_instancing
+    return {color = float4(..(constants.color.xyz * p.shade * keep_view(view)), constants.color.w)}

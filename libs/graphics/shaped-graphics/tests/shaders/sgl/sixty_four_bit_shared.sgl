@@ -1,0 +1,26 @@
+// 64-bit atomics in workgroup memory, where a device has shader_shared_int64_atomics (CHK-510).
+// A file of its own, since its require would ask every entry point of sixty_four_bit.sgl for a feature many GPUs lack.
+
+require shader_int64, shader_int64_atomics, shader_shared_int64_atomics
+
+binding shared_results:
+    totals: mut buffer[ulong]
+    lows: mut buffer[long]
+
+@workgroup binding shared_local:
+    total: atomic[ulong]
+    lowest: atomic[long]
+
+// Each of a workgroup's 64 threads adds 2^33 plus its index and offers -(2^40) minus its index as the minimum, so
+// both results need all 64 bits.
+@compute(64) fun shared_sums(@local_thread_index local: int, @workgroup_id group: int3){shared_results, shared_local}:
+    if local == 0:
+        shared_local.total.store(0u64)
+        shared_local.lowest.store(0i64)
+    workgroup_barrier()
+    shared_local.total.add((1u64 << 33) + ((local as uint) as ulong))
+    shared_local.lowest.min(-(1i64 << 40) - (local as long))
+    workgroup_barrier()
+    if local == 0:
+        shared_results.totals[group.x] = shared_local.total.load()
+        shared_results.lows[group.x] = shared_local.lowest.load()

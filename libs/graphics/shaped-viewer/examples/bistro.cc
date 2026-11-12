@@ -1,5 +1,6 @@
 #include <clean-core/record/log.hh>          // CC_LOG_ERROR, CC_LOG_INFO
 #include <clean-core/streams/file_stream.hh> // cc::file_read_stream_adapter
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/all.hh>
 
@@ -81,9 +82,10 @@ constexpr float glass_color_depth = 0.01f;
     return name.starts_with(base) && (name.size() == base.size() || name[base.size()] == '.');
 }
 
-[[nodiscard]] cc::string_view file_of(scene_kind kind)
+[[nodiscard]] cc::string file_of(scene_kind kind)
 {
-    return kind == scene_kind::exterior ? SV_BISTRO_DIR "/BistroExterior.fbx" : SV_BISTRO_DIR "/BistroInterior_Wine.fbx";
+    return nx::source_path(kind == scene_kind::exterior ? SV_BISTRO_DIR "/BistroExterior.fbx"
+                                                        : SV_BISTRO_DIR "/BistroInterior_Wine.fbx");
 }
 
 /// The meshes as placed: the file's own, with glass made transmissive and the interior's lamps brightened.

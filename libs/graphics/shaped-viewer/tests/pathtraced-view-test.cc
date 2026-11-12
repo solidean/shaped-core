@@ -1,10 +1,12 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/container/tuple.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <typed-geometry/scalar/half_float.hh>
 
 using namespace cc::primitive_defines;
@@ -604,6 +606,8 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
         {
             auto fc = sv::default_frame_constants();
             fc.camera = sv::camera_record_of(scene.camera);
+            // A pixel's footprint, as a view sets it, so a hit's textures pick the level its ray cone covers.
+            sv::set_pixel_footprint(fc, scene.size);
             lights.describe_in(fc);
             fc.samples_per_pixel = scene.samples_per_pixel;
             fc.max_bounces = scene.max_bounces;
@@ -1281,6 +1285,639 @@ ASYNC_INVOCABLE_TEST("sv - a light visible to the camera is seen at its radiance
     auto const size = scene.value().size;
     CHECK(mean_brightness(images[0], size, 2) < 0.01f);
     CHECK(tg::abs(mean_brightness(images[1], size, 2) - luminance) < 0.01f * luminance);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+namespace
+{
+/// `a` x `b` as a vector, which a tangent frame is built from.
+[[nodiscard]] tg::vec3f cross_of(tg::vec3f a, tg::vec3f b)
+{
+    return tg::vec3f(a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);
+}
+
+/// A tangent frame as the `tangent_frame` attribute carries it: tangent, bitangent and normal as the quaternion's x, y and z.
+[[nodiscard]] tg::quat_f frame_quat(tg::vec3f t, tg::vec3f n)
+{
+    auto const b = cross_of(n, t);
+    return tg::quat_f::make_from_basis(t, b, n).normalized();
+}
+
+/// The floor, a matte gray, with `frame` and `handedness` at every corner and uvs across it.
+[[nodiscard]] sv::mesh framed_floor(tg::quat_f frame, f32 handedness)
+{
+    auto const gray = sv_test::pbr_material{.base_color = tg::vec3f(0.5f, 0.5f, 0.5f), .roughness = 1.0f};
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          gray);
+    auto mesh = sv_test::as_mesh("normal-mapped floor", floor.positions, floor.materials);
+
+    auto const count = floor.positions.size();
+    auto uvs = cc::vector<tg::vec2f>();
+    for (auto const& p : floor.positions)
+        uvs.push_back(tg::vec2f(p[0], p[2]));
+    mesh.attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    mesh.attributes.push_back(sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                                         cc::vector<tg::quat_f>::create_filled(count, frame)));
+    mesh.attributes.push_back(sv::mesh_attribute::create("tangent_handedness", sv::attribute_frequency::per_vertex,
+                                                         cc::vector<f32>::create_filled(count, handedness)));
+    return mesh;
+}
+} // namespace
+
+// A normal map against its own definition: a tangent-space normal read from a texture means the shading normal
+// `t * x + b * y + n * z` of the corner's frame, b mirrored where the handedness is negative.
+// So a flat floor with a constant normal map must shade as the same floor does whose frame is turned onto that normal and
+// which samples no map.
+// Four tilts, one toward each tangent direction, under a light that tells all four apart, catch a swapped or a negated
+// axis and a wrong strength; a frame turned a quarter about its normal, a mirrored one, and both encodings a normal map
+// arrives in, signed or unsigned with its transform, catch what only those reach.
+ASYNC_INVOCABLE_TEST("sv - a normal map shades as the tangent frame turned onto its normal does",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    struct frame_case
+    {
+        cc::string_view name;
+        tg::vec3f tangent;
+        f32 handedness;
+    };
+    auto const up = tg::vec3f(0, 1, 0);
+    auto const frames = cc::vector<frame_case>{
+        {.name = "tangent along +x", .tangent = tg::vec3f(1, 0, 0), .handedness = 1.0f},
+        {.name = "tangent along -z, a quarter turn", .tangent = tg::vec3f(0, 0, -1), .handedness = 1.0f},
+        {.name = "mirrored", .tangent = tg::vec3f(1, 0, 0), .handedness = -1.0f},
+    };
+
+    // From above, off every axis, so a tilt toward each of the four tangent directions is lit differently.
+    auto const light = sv::light::directional(tg::normalize(tg::vec3f(0.7f, -1.0f, 0.35f))).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+
+    auto const tilt = tg::angle_f::make_from_degree(40.0f);
+    for (auto const& f : frames)
+        for (auto const is_signed : {true, false})
+        {
+            auto shades = cc::vector<f32>();
+            for (auto const azimuth_degrees : {0.0f, 90.0f, 180.0f, 270.0f})
+            {
+                auto const azimuth = tg::angle_f::make_from_degree(azimuth_degrees);
+                auto const wanted
+                    = tg::vec3f(tg::sin(tilt) * tg::cos(azimuth), tg::sin(tilt) * tg::sin(azimuth), tg::cos(tilt));
+
+                // Encoded as a normal map stores it, and decoded as the sampler returns it, so the reference has the
+                // quantized normal rather than the exact one.
+                auto pixels = cc::vector<byte>();
+                auto decoded = tg::vec3f();
+                for (auto c = 0; c < 3; ++c)
+                {
+                    if (is_signed)
+                    {
+                        auto const q = i32(tg::round(wanted[c] * 127.0f));
+                        pixels.push_back(byte(u8(i8(q))));
+                        decoded[c] = f32(q) / 127.0f;
+                    }
+                    else
+                    {
+                        auto const q = i32(tg::round((wanted[c] * 0.5f + 0.5f) * 255.0f));
+                        pixels.push_back(byte(u8(q)));
+                        decoded[c] = f32(q) / 255.0f * 2.0f - 1.0f;
+                    }
+                }
+                pixels.push_back(byte(is_signed ? 127 : 255));
+                auto texels = cc::vector<byte>();
+                for (auto i = 0; i < 4 * 4; ++i)
+                    texels.push_back_range(pixels);
+                decoded = tg::normalize(decoded);
+
+                auto mapped = framed_floor(frame_quat(f.tangent, up), f.handedness);
+                mapped.textures.push_back(
+                    {.name = "normal",
+                     .source
+                     = {.texture = sv::texture_data::create(
+                            cc::move(texels), is_signed ? sg::pixel_format::rgba8_snorm : sg::pixel_format::rgba8_unorm,
+                            4, 4),
+                        .transform = is_signed ? sv::sample_transform{} : sv::sample_transform::of_signed_normal()}});
+
+                // The same normal in world space, and a frame turned onto it, with no map to sample.
+                auto const bitangent = cross_of(up, f.tangent) * f.handedness;
+                auto const world = tg::normalize(f.tangent * decoded[0] + bitangent * decoded[1] + up * decoded[2]);
+                auto const level = tg::normalize(f.tangent - world * tg::dot(f.tangent, world));
+                auto const reference = framed_floor(frame_quat(level, world), 1.0f);
+
+                auto shade = cc::fixed_array<f32, 2>{};
+                auto const meshes = cc::fixed_array<sv::mesh const*, 2>{&mapped, &reference};
+                for (auto k = 0; k < 2; ++k)
+                {
+                    auto scene = make_light_scene(resources, *meshes[k], cam);
+                    REQUIRE(scene.has_value());
+                    auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+                    auto const& images = co_await traced;
+                    REQUIRE(images.size() == 1);
+                    shade[k] = mean_brightness(images[0], scene.value().size);
+                }
+                auto const shade_mapped = shade[0];
+                auto const shade_reference = shade[1];
+                CHECK(tg::abs(shade_mapped - shade_reference) <= 0.02f * shade_reference)
+                    .dump("frame", f.name)
+                    .dump("signed", is_signed)
+                    .dump("azimuth", azimuth_degrees)
+                    .dump("mapped", shade_mapped)
+                    .dump("reference", shade_reference);
+                shades.push_back(shade_reference);
+            }
+
+            // The light tells the four tilts apart, or the comparison above could not catch a swapped axis.
+            auto lo = shades[0];
+            auto hi = shades[0];
+            for (auto const s : shades)
+            {
+                lo = cc::min(lo, s);
+                hi = cc::max(hi, s);
+            }
+            CHECK(hi - lo > 0.2f * hi).dump("frame", f.name).dump("darkest", lo).dump("brightest", hi);
+            for (auto i = isize(0); i < shades.size(); ++i)
+                for (auto j = i + 1; j < shades.size(); ++j)
+                    CHECK(tg::abs(shades[i] - shades[j]) > 0.03f * hi).dump("frame", f.name).dump("i", i).dump("j", j);
+        }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+namespace
+{
+/// A floor `k` uv units to the meter, sampling a 64 by 64 base color whose level L holds 2^-L, or `flat` at every level.
+[[nodiscard]] sv::mesh mipped_floor(f32 k, bool halving, f32 flat = 1.0f)
+{
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-50, 0, -50), tg::pos3f(-50, 0, 50), tg::pos3f(50, 0, 50),
+                          tg::pos3f(50, 0, -50), sv_test::pbr_material{});
+    auto uvs = cc::vector<tg::vec2f>();
+    for (auto const& p : floor.positions)
+        uvs.push_back(tg::vec2f(p[0] * k, p[2] * k));
+    auto attributes = cc::vector<sv::mesh_attribute>();
+    attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    auto mesh = sv::mesh{.name = "mipped floor",
+                         .geometry = sv::triangle_geometry::create_from_positions(floor.positions),
+                         .attributes = cc::move(attributes),
+                         .material = sv::default_material(sv_test::shared_material_library())};
+
+    auto pixels = cc::vector<byte>();
+    auto const levels = sv::impl::mip_count_of(64, 64);
+    for (auto level = 0; level < levels; ++level)
+    {
+        auto const value = byte(u8(tg::round(255.0f * (halving ? 1.0f / f32(1 << level) : flat))));
+        auto const e = sv::impl::mip_extent(64, level);
+        for (auto i = 0; i < e * e; ++i)
+            pixels.push_back_range(cc::fixed_array<byte, 4>{value, value, value, byte(255)});
+    }
+    auto const repeat
+        = sg::sampler{.address_u = sg::sampler_address_mode::repeat, .address_v = sg::sampler_address_mode::repeat};
+    mesh.textures.push_back(
+        {.name = "base_color",
+         .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 64, 64, levels),
+                    .sampler = repeat}});
+    return mesh;
+}
+
+/// The level a sample of a chain whose level L holds 2^-L reads, from what it read: linear between two levels, 2^-n (1 - f / 2) at n + f.
+[[nodiscard]] f32 level_of(f32 ratio)
+{
+    auto const n = tg::floor(-(tg::log(ratio) / tg::log(2.0f)));
+    auto const f = 2.0f * (1.0f - ratio * tg::pow(2.0f, n));
+    return n + f;
+}
+} // namespace
+
+// A ray cone picks a texture's level from its footprint: the pixel's angle times the distance, over the cosine it meets
+// the face at, against the texels the triangle spans per meter (Akenine-Moller et al. 2019).
+// A floor whose levels each hold half the one above shows the level a pixel read, against the same floor at 1 throughout,
+// so the light cancels: the camera's level is the one the cone predicts, and four times as far is two levels coarser.
+ASYNC_INVOCABLE_TEST("sv - a ray cone samples the texture level its footprint covers", (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    // 2 uv units a meter, of 64 texels each: 128 texels a meter
+    auto const k = 2.0f;
+    auto measured = cc::vector<f32>();
+    for (auto const height : {3.0, 12.0})
+    {
+        auto cam = sv::camera::looking_at(tg::pos3d(0, height, -0.01), tg::pos3d(0, 0, 0));
+        cam.projection.aspect_ratio = 1.0;
+
+        // halving, white and black at every level: what the albedo does not scale, the specular, falls out of the ratio
+        auto shade = cc::fixed_array<f32, 3>{};
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto scene = make_light_scene(resources, mipped_floor(k, i == 0, i == 1 ? 1.0f : 0.0f), cam);
+            REQUIRE(scene.has_value());
+            auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+            auto const& images = co_await traced;
+            REQUIRE(images.size() == 1);
+            shade[i] = mean_brightness(images[0], scene.value().size, 2);
+        }
+        REQUIRE(shade[1] > shade[2]);
+        auto const level = level_of((shade[0] - shade[2]) / (shade[1] - shade[2]));
+
+        // the footprint at the image's center, straight down: the pixel's angle times the height, at 128 texels a meter
+        auto const record = sv::camera_record_of(cam);
+        auto const spread = 2.0f * record.up_scaled.length() / 48.0f;
+        auto const wanted = tg::log(spread * f32(height) * k * 64.0f) / tg::log(2.0f);
+        CHECK(tg::abs(level - wanted) < 0.35f).dump("height", height).dump("level", level).dump("wanted", wanted);
+        measured.push_back(level);
+    }
+    CHECK(tg::abs(measured[1] - measured[0] - 2.0f) < 0.2f).dump("near", measured[0]).dump("far", measured[1]);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// An orthographic camera's rays run parallel, so its cone starts a pixel wide and never widens.
+// The halving floor seen straight down through it reads one level at 3 m above it as at 12: the level its pixel's width predicts,
+// where a pinhole's reads two levels coarser four times as far.
+ASYNC_INVOCABLE_TEST("sv - an orthographic ray cone samples the level of its pixel's width, at any distance",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    // 2 uv units a meter, of 64 texels each: 128 texels a meter; the image 4 m high over 48 pixels
+    auto const k = 2.0f;
+    auto const view_height = 4.0;
+    auto measured = cc::vector<f32>();
+    for (auto const height : {3.0, 12.0})
+    {
+        auto cam = sv::camera::looking_at(tg::pos3d(0, height, -0.01), tg::pos3d(0, 0, 0));
+        cam.projection.aspect_ratio = 1.0;
+        cam.projection.kind = sv::projection_kind::orthographic;
+        cam.projection.view_height = view_height;
+
+        auto shade = cc::fixed_array<f32, 3>{};
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto scene = make_light_scene(resources, mipped_floor(k, i == 0, i == 1 ? 1.0f : 0.0f), cam);
+            REQUIRE(scene.has_value());
+            auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+            auto const& images = co_await traced;
+            REQUIRE(images.size() == 1);
+            shade[i] = mean_brightness(images[0], scene.value().size, 2);
+        }
+        REQUIRE(shade[1] > shade[2]);
+        measured.push_back(level_of((shade[0] - shade[2]) / (shade[1] - shade[2])));
+    }
+
+    auto const wanted = tg::log(f32(view_height) / 48.0f * k * 64.0f) / tg::log(2.0f);
+    CHECK(tg::abs(measured[0] - wanted) < 0.35f).dump("near", measured[0]).dump("wanted", wanted);
+    CHECK(tg::abs(measured[1] - wanted) < 0.35f).dump("far", measured[1]).dump("wanted", wanted);
+    CHECK(tg::abs(measured[1] - measured[0]) < 0.1f).dump("near", measured[0]).dump("far", measured[1]);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A grazing view stretches a cone's footprint along the floor by one over the cosine, and an anisotropic sampler reads
+// that ellipse at the level of its short axis, the cone's own width, with more taps along the long one.
+// The same halving floor seen 70 degrees off its normal reads the level the width predicts, where an isotropic footprint
+// would read log2(1 / cos 70), about 1.55 levels, coarser.
+ASYNC_INVOCABLE_TEST("sv - a grazing ray cone samples at its footprint's short axis, filtering anisotropically",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    // 3 m from the floor's center, 70 degrees off its normal
+    auto const k = 2.0f;
+    auto const distance = 3.0;
+    auto const tilt = tg::angle_d::make_from_degree(70.0);
+    auto cam
+        = sv::camera::looking_at(tg::pos3d(0, distance * tg::cos(tilt), -distance * tg::sin(tilt)), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+
+    auto shade = cc::fixed_array<f32, 3>{};
+    for (auto i = 0; i < 3; ++i)
+    {
+        auto scene = make_light_scene(resources, mipped_floor(k, i == 0, i == 1 ? 1.0f : 0.0f), cam);
+        REQUIRE(scene.has_value());
+        auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+        auto const& images = co_await traced;
+        REQUIRE(images.size() == 1);
+        shade[i] = mean_brightness(images[0], scene.value().size, 2);
+    }
+    REQUIRE(shade[1] > shade[2]);
+    auto const level = level_of((shade[0] - shade[2]) / (shade[1] - shade[2]));
+
+    // the short axis at the image's center: the pixel's angle times the distance, at 128 texels a meter
+    // a GPU's anisotropic level selection is an approximation of its own, so the bound is wider than the isotropic test's
+    auto const record = sv::camera_record_of(cam);
+    auto const spread = 2.0f * record.up_scaled.length() / 48.0f;
+    auto const wanted = tg::log(spread * f32(distance) * k * 64.0f) / tg::log(2.0f);
+    CHECK(tg::abs(level - wanted) < 0.5f).dump("level", level).dump("wanted", wanted);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+namespace
+{
+/// A floor of `type`, a diffuse gray with no specular, its occlusion `ao`.
+[[nodiscard]] sv::mesh occluded_floor(cc::string_view type, f32 ao)
+{
+    auto& lib = sv_test::shared_material_library();
+    auto const material
+        = lib.acquire(sv::material::create(cc::format("{} floor at {}", type, ao), lib.acquire_type(type).value(),
+                                           {sv::material_attribute_binding::of("base_color", tg::vec3f(0.5f, 0.5f, 0.5f)),
+                                            sv::material_attribute_binding::of("specular_weight", 0.0f),
+                                            sv::material_attribute_binding::of("occlusion", ao)}));
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          sv_test::pbr_material{});
+    return {.name = "occluded floor",
+            .geometry = sv::triangle_geometry::create_from_positions(floor.positions),
+            .material = material};
+}
+} // namespace
+
+// A tileable material's occlusion is its own relief's, which no trace can find, so the relief type applies it itself:
+// light from direction l reaches a texel by clamp(|n.l| + 2 ao^2 - 1, 0, 1), the micro-shadowing of Chan 2018.
+// A floor lit only by a light 60 degrees off its normal shows exactly that against the same floor fully open,
+// and at an occlusion of 1 the relief type is the plain OpenPBR one, which ignores occlusion as an imported asset needs.
+ASYNC_INVOCABLE_TEST("sv - a relief material's occlusion closes grazing light, by the micro-shadowing of its ao",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    // 60 degrees off the floor's normal, so |n.l| is a half
+    auto const light
+        = sv::light::directional(tg::normalize(tg::vec3f(tg::sqrt(3.0f), -1.0f, 0.0f))).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+
+    auto const shade = [&](cc::string_view type, f32 ao) -> cc::shared_async<f32>
+    {
+        auto scene = make_light_scene(resources, occluded_floor(type, ao), cam);
+        if (!scene.has_value())
+            co_return -1.0f;
+        auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+        auto const& images = co_await traced;
+        co_return images.size() == 1 ? mean_brightness(images[0], scene.value().size, 4) : -1.0f;
+    };
+
+    auto values = cc::vector<f32>();
+    for (auto const& [type, ao] : {cc::pair<cc::string_view, f32>{sv::builtin_material::openpbr, 0.6f},
+                                   {sv::builtin_material::openpbr_relief, 1.0f},
+                                   {sv::builtin_material::openpbr_relief, 0.8f},
+                                   {sv::builtin_material::openpbr_relief, 0.6f}})
+    {
+        auto const traced = shade(type, ao);
+        auto const v = co_await traced;
+        REQUIRE(v > 0.0f);
+        values.push_back(v);
+    }
+
+    // the plain type ignores occlusion, and the relief type fully open is the same surface
+    CHECK(tg::abs(values[1] - values[0]) < 0.01f * values[0]).dump("openpbr", values[0]).dump("relief", values[1]);
+    // 0.5 + 2 * 0.64 - 1 and 0.5 + 2 * 0.36 - 1
+    CHECK(tg::abs(values[2] / values[1] - 0.78f) < 0.02f).dump("ratio", values[2] / values[1]);
+    CHECK(tg::abs(values[3] / values[1] - 0.22f) < 0.02f).dump("ratio", values[3] / values[1]);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+namespace
+{
+/// A floor at height `y`, uv `k` per meter of x and z, striped in u, of the relief type: its height texture holds
+/// `height` everywhere in the band from `top` down to `bottom`.
+[[nodiscard]] sv::mesh relief_floor(f32 y, f32 k, f32 height, f32 top, f32 bottom)
+{
+    auto& lib = sv_test::shared_material_library();
+    auto const material
+        = lib.acquire(sv::material::create(cc::format("relief floor {} {} {}", height, top, bottom),
+                                           lib.acquire_type(sv::builtin_material::openpbr_relief).value(),
+                                           {sv::material_attribute_binding::of("specular_weight", 0.0f),
+                                            sv::material_attribute_binding::of("height_top", top),
+                                            sv::material_attribute_binding::of("height_bottom", bottom)}));
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-8, y, -8), tg::pos3f(-8, y, 8), tg::pos3f(8, y, 8), tg::pos3f(8, y, -8),
+                          sv_test::pbr_material{});
+    auto uvs = cc::vector<tg::vec2f>();
+    for (auto const& p : floor.positions)
+        uvs.push_back(tg::vec2f(p[0] * k, p[2] * k));
+    auto attributes = cc::vector<sv::mesh_attribute>();
+    attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    auto mesh = sv::mesh{.name = "relief floor",
+                         .geometry = sv::triangle_geometry::create_from_positions(floor.positions),
+                         .attributes = cc::move(attributes),
+                         .material = material};
+
+    auto const repeat
+        = sg::sampler{.address_u = sg::sampler_address_mode::repeat, .address_v = sg::sampler_address_mode::repeat};
+    // eight stripes across a repeat, black and white
+    auto stripes = cc::vector<byte>();
+    for (auto row = 0; row < 8; ++row)
+        for (auto col = 0; col < 8; ++col)
+        {
+            auto const v = col % 2 == 0 ? byte(230) : byte(25);
+            stripes.push_back_range(cc::fixed_array<byte, 4>{v, v, v, byte(255)});
+        }
+    mesh.textures.push_back(
+        {.name = "base_color",
+         .source = {.texture = sv::texture_data::create(cc::move(stripes), sg::pixel_format::rgba8_unorm, 8, 8),
+                    .sampler = repeat}});
+    auto heights = cc::vector<f32>::create_filled(4 * 4, height);
+    mesh.textures.push_back({.name = "height",
+                             .source = {.texture = sv::texture_data::create(cc::span<f32 const>(heights).as_bytes(),
+                                                                            sg::pixel_format::r32_float, 4, 4),
+                                        .sampler = repeat}});
+    return mesh;
+}
+
+/// The root mean square of two images' difference in brightness.
+[[nodiscard]] f32 rms_between(cc::vector<tg::vec4f> const& a, cc::vector<tg::vec4f> const& b)
+{
+    auto sum = 0.0;
+    for (auto i = isize(0); i < a.size(); ++i)
+    {
+        auto const d = (a[i][0] + a[i][1] + a[i][2] - b[i][0] - b[i][1] - b[i][2]) / 3.0f;
+        sum += f64(d) * f64(d);
+    }
+    return f32(tg::sqrt(sum / f64(a.size())));
+}
+} // namespace
+
+namespace
+{
+/// A relief floor whose horizon is `lo` and `hi` everywhere, its tangent along +x and its bitangent along -z, so a
+/// horizon's direction 0 faces +x; a diffuse gray with no specular.
+[[nodiscard]] sv::mesh horizon_floor(tg::vec4f lo, tg::vec4f hi)
+{
+    auto& lib = sv_test::shared_material_library();
+    auto const material = lib.acquire(sv::material::create(
+        cc::format("horizon floor {} {} {} {}", lo[0], lo[1], hi[0], hi[1]),
+        lib.acquire_type(sv::builtin_material::openpbr_relief).value(),
+        {sv::material_attribute_binding::of("base_color", tg::vec3f(0.5f, 0.5f, 0.5f)),
+         sv::material_attribute_binding::of("specular_weight", 0.0f),
+         sv::material_attribute_binding::of("horizon_lo", lo), sv::material_attribute_binding::of("horizon_hi", hi)}));
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          sv_test::pbr_material{});
+    auto const frame
+        = tg::quat_f::make_from_basis(tg::vec3f(1, 0, 0), tg::vec3f(0, 0, -1), tg::vec3f(0, 1, 0)).normalized();
+    return {.name = "horizon floor",
+            .geometry = sv::triangle_geometry::create_from_positions(floor.positions),
+            .attributes
+            = {sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                          cc::vector<tg::quat_f>::create_filled(floor.positions.size(), frame))},
+            .material = material};
+}
+} // namespace
+
+// A relief's horizon shadows it as the relief would itself: light from below the horizon in its direction is closed,
+// and light above it, or from a direction whose horizon is open, is not.
+// A floor whose horizon rises to 45 degrees toward +x and nowhere else: a light from +x at 30 degrees is shadowed,
+// one from +x at 60 degrees and one from -x at 30 degrees are not, each against the same floor wholly open.
+ASYNC_INVOCABLE_TEST("sv - a relief's horizon shadows the light below it, in its own direction alone",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+    auto const blocked = tg::vec4f(tg::sin(tg::angle_f::make_from_degree(45.0f)), 0, 0, 0);
+    auto const open = tg::vec4f(0, 0, 0, 0);
+
+    auto const shade = [&](tg::vec4f lo, f32 from_x, f32 elevation_degrees) -> cc::shared_async<f32>
+    {
+        auto const e = tg::angle_f::make_from_degree(elevation_degrees);
+        // the light travels toward the floor from the side `from_x` names
+        auto const light
+            = sv::light::directional(tg::vec3f(-from_x * tg::cos(e), -tg::sin(e), 0.0f)).lux(2).casts_shadows(false);
+        auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+        auto scene = make_light_scene(resources, horizon_floor(lo, open), cam);
+        if (!scene.has_value())
+            co_return -1.0f;
+        auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+        auto const& images = co_await traced;
+        co_return images.size() == 1 ? mean_brightness(images[0], scene.value().size, 4) : -1.0f;
+    };
+
+    for (auto const [from_x, elevation, wanted, what] :
+         {cc::tuple<f32, f32, f32, cc::string_view>{1.0f, 30.0f, 0.0f, "from +x below the horizon"},
+          {1.0f, 60.0f, 1.0f, "from +x above it"},
+          {-1.0f, 30.0f, 1.0f, "from -x, where it is open"}})
+    {
+        auto const relief_traced = shade(blocked, from_x, elevation);
+        auto const relief = co_await relief_traced;
+        auto const plain_traced = shade(open, from_x, elevation);
+        auto const plain = co_await plain_traced;
+        REQUIRE(relief >= 0.0f);
+        REQUIRE(plain > 0.0f);
+        CHECK(tg::abs(relief / plain - wanted) < 0.02f).dump("light", what).dump("ratio", relief / plain);
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// Parallax occlusion mapping against geometry: a relief whose height is one flat plane 0.2 m below its face must look
+// exactly as a face 0.2 m lower does, its stripes moved by the ray's own slant (Tatarchuk 2006).
+// The same relief with no band to march, top at the bottom, stays where its face is, which is what the comparison is against.
+ASYNC_INVOCABLE_TEST("sv - a relief's parallax shows a sunken plane where real geometry would be",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const light = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2).casts_shadows(false);
+    auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    // 45 degrees down onto the floor, so a sunken plane shows its stripes moved by its depth
+    auto cam = sv::camera::looking_at(tg::pos3d(0.3, 2.5, -2.5), tg::pos3d(0.3, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+
+    auto const k = 1.5f;
+    auto const meshes = cc::fixed_array<sv::mesh, 3>{
+        relief_floor(0.0f, k, -0.2f, 0.0f, -0.4f), // the relief, a plane 0.2 m down
+        relief_floor(-0.2f, k, 0.0f, 0.0f, 0.0f),  // real geometry 0.2 m down, nothing to march
+        relief_floor(0.0f, k, -0.2f, 0.0f, 0.0f),  // the relief's face itself, its band empty
+    };
+    auto images = cc::vector<cc::vector<tg::vec4f>>();
+    for (auto const& mesh : meshes)
+    {
+        auto scene = make_light_scene(resources, mesh, cam);
+        REQUIRE(scene.has_value());
+        scene.value().size = 64;
+        auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+        auto const& out = co_await traced;
+        REQUIRE(out.size() == 1);
+        images.push_back(out[0]);
+    }
+
+    auto const parallax_error = rms_between(images[0], images[1]);
+    auto const unmoved_error = rms_between(images[2], images[1]);
+    CHECK(unmoved_error > 0.05f).dump("unmoved", unmoved_error);
+    CHECK(parallax_error < 0.15f * unmoved_error).dump("parallax", parallax_error).dump("unmoved", unmoved_error);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

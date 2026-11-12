@@ -21,7 +21,7 @@ namespace
 {
 /// The layout revision `encode_preprocessed` writes; bump it with any change to what it writes.
 /// sg's codec version rides in the persistent key beside it, since a stated shader and its bindings are written in that codec.
-constexpr u32 k_codec_version = 3;
+constexpr u32 k_codec_version = 10;
 
 /// How many results the in-memory tier holds before it starts over; each is a few dozen kilobytes of text.
 constexpr isize k_memory_capacity = 512;
@@ -172,6 +172,7 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
     auto out = cc::vector<byte>();
     put_u32(out, k_codec_version);
     put_string(out, source.source);
+    put_bytes(out, source.bytecode);
     put_string(out, source.entry_point);
 
     put_u64(out, u64(source.used_modules.size()));
@@ -185,6 +186,7 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
     put_u64(out, u64(source.dxc_args.size()));
     for (auto const& a : source.dxc_args)
         put_string(out, a);
+    put_string(out, source.native_gap);
 
     put_u64(out, u64(source.layouts.size()));
     for (auto const& l : source.layouts)
@@ -212,6 +214,16 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
         put_string(out, s.target_set);
         put_u32(out, s.required_features.has_value() ? 1 : 0);
         put_u64(out, u64(s.required_features.has_value() ? s.required_features.value().bits : 0));
+        put_u32(out, s.is_dispatched_by_threads ? 1 : 0);
+        put_u32(out, u32(s.mesh_polyfill_corners));
+        put_u32(out, u32(s.mesh_polyfill_primitives));
+        put_u32(out, u32(s.mesh_polyfill_words));
+        put_u32(out, u32(s.task_polyfill_record_words));
+        put_u32(out, u32(s.task_polyfill_meshes));
+        for (auto const v : {s.tessellation_domain, s.tessellation_control_points, s.tessellation_patch_words,
+                             s.tessellation_vertex_words, s.tessellation_partitioning, s.tessellation_output,
+                             s.tessellation_max_factor})
+            put_u32(out, u32(v));
     }
     return out;
 }
@@ -224,6 +236,7 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
 
     auto result = preprocessed_source();
     result.source = r.get_string();
+    result.bytecode = cc::vector<byte>::create_copy_of(r.get_bytes());
     result.entry_point = r.get_string();
 
     // Every entry is at least its length prefixes, which bounds a count before anything is reserved for it.
@@ -238,6 +251,7 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
     auto const arg_count = r.get_count(8);
     for (auto i = isize(0); r.ok && i < arg_count; ++i)
         result.dxc_args.push_back(r.get_string());
+    result.native_gap = r.get_string();
 
     auto const layout_count = r.get_count(24);
     for (auto i = isize(0); r.ok && i < layout_count; ++i)
@@ -269,7 +283,16 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
         auto target_set = r.get_string();
         auto const has_features = r.get_u32();
         auto const features = r.get_u64();
-        if (!r.ok || !stated.has_value() || has_subgroup > 1 || has_features > 1)
+        auto const by_threads = r.get_u32();
+        auto const mesh_corners = i32(r.get_u32());
+        auto const mesh_primitives = i32(r.get_u32());
+        auto const mesh_words = i32(r.get_u32());
+        auto const task_record_words = i32(r.get_u32());
+        auto const task_meshes = i32(r.get_u32());
+        i32 tessellation[7] = {};
+        for (auto& v : tessellation)
+            v = i32(r.get_u32());
+        if (!r.ok || !stated.has_value() || has_subgroup > 1 || has_features > 1 || by_threads > 1)
             return {};
         auto& s = stated.value();
         if (has_subgroup == 1)
@@ -277,6 +300,19 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
         s.target_set = cc::move(target_set);
         if (has_features == 1)
             s.required_features = sg::feature_set::create_from_bits(sg::feature_set::storage_type(features));
+        s.is_dispatched_by_threads = by_threads == 1;
+        s.mesh_polyfill_corners = mesh_corners;
+        s.mesh_polyfill_primitives = mesh_primitives;
+        s.mesh_polyfill_words = mesh_words;
+        s.task_polyfill_record_words = task_record_words;
+        s.task_polyfill_meshes = task_meshes;
+        s.tessellation_domain = tessellation[0];
+        s.tessellation_control_points = tessellation[1];
+        s.tessellation_patch_words = tessellation[2];
+        s.tessellation_vertex_words = tessellation[3];
+        s.tessellation_partitioning = tessellation[4];
+        s.tessellation_output = tessellation[5];
+        s.tessellation_max_factor = tessellation[6];
         result.stated = cc::move(s);
     }
 

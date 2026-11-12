@@ -231,6 +231,12 @@ private:
     /// application embedding the viewer cannot have its loop ended out from under it.
     void install_capture(sr::capture_request req);
 
+    /// Installs a capture whose finished image lands in `landing` instead of a file; the viewer must be headless.
+    ///
+    /// **Only `sv::render_settled` calls this**, and `landing` outlives the viewer.
+    /// The request's `output_path` is unused, since nothing is written.
+    void install_settled(sr::capture_request req, sv::impl::settled_landing* landing);
+
     /// Runs `body` when `name` is the capture being taken, and notes the name either way for the listing mode.
     ///
     /// Called from `frame::register_capture`, so the callback runs exactly where it was declared in the frame body —
@@ -316,4 +322,8 @@ private:
     friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config);
     friend frame_range interactive(cc::string_view id, viewer_config config, sr::capture_request capture);
     friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config, sr::capture_request capture);
+    friend cc::result<settled_image> render_settled(sg::context& ctx,
+                                                    cc::string_view id,
+                                                    settled_options const& options,
+                                                    cc::function_ref<void(frame&)> author);
 };

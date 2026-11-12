@@ -110,6 +110,19 @@ void smoothstep(leaves in, result& out)
     }
 }
 
+/// EVAL-146: `a * b + c` rounded once, to a float or straight to a half, never to a float on the way.
+template <bool IsHalf>
+void fma(leaves in, result& out)
+{
+    auto const width = in.size() / 3;
+    for (auto i = isize(0); i < width; ++i)
+    {
+        auto const odd
+            = fma_to_odd(f64(in[i].as_float()), f64(in[width + i].as_float()), f64(in[2 * width + i].as_float()));
+        out.push_back(IsHalf ? scalar::of_half(odd) : scalar::of(f32(odd)));
+    }
+}
+
 /// A single invocation has no neighbours to difference against, so the interpreter's derivative is 0.
 void no_derivative(leaves in, result& out)
 {
@@ -710,6 +723,10 @@ void sgl::builtins::register_math(registry& r)
             "/// 0 where `x` is below `edge`, and 1 from it on.");
         add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep, {},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
+        // EMIT-254: HLSL's `fma` takes a double alone, and `mad` is its float's, which DXIL leaves free to fuse
+        add(r, cc::format("@pure fun fma(a: {0}, b: {0}, c: {0}) -> {0}", t),
+            t.starts_with("half") ? evaluator(fma<true>) : evaluator(fma<false>), {.hlsl = "mad"}, nullptr, false,
+            "/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).");
     }
 
     r.add_comment("// whether a float or a half is a NaN or an infinity, per component; read from its bits on every\n"

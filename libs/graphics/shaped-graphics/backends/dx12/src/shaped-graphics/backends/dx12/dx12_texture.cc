@@ -2,6 +2,7 @@
 // The type is otherwise header-only (ctor + fields).
 
 #include <clean-core/common/profiling.hh>
+#include <clean-core/string/format.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
@@ -165,6 +166,34 @@ cc::result<dx12_texture_handle> dx12_context::create_dx12_texture(sg::texture_de
         _transient_expiring_textures.lock([&](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
                                           { v.push_back(texture); });
 
+    return dx12_texture_handle(cc::move(texture));
+}
+
+cc::result<dx12_texture_handle> dx12_context::wrap_dx12_texture(ID3D12Resource* resource,
+                                                                sg::texture_description const& desc)
+{
+    CC_ASSERT(resource != nullptr, "wrap_dx12_texture: resource is null");
+    desc.assert_valid();
+
+    auto const want = texture_resource_desc(desc);
+    auto const have = resource->GetDesc();
+    if (have.Dimension != want.Dimension || have.Width != want.Width || have.Height != want.Height
+        || have.DepthOrArraySize != want.DepthOrArraySize || have.MipLevels != want.MipLevels
+        || have.SampleDesc.Count != want.SampleDesc.Count)
+        return cc::error(cc::format("wrap_dx12_texture: the resource is {}x{}x{} with {} mips and {} samples, the "
+                                    "description {}x{}x{} with {} mips and {} samples",
+                                    have.Width, have.Height, have.DepthOrArraySize, have.MipLevels,
+                                    have.SampleDesc.Count, want.Width, want.Height, want.DepthOrArraySize,
+                                    want.MipLevels, want.SampleDesc.Count));
+    for (auto const flag : {D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
+                            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS})
+        if ((want.Flags & flag) != 0 && (have.Flags & flag) == 0)
+            return cc::error(cc::format("wrap_dx12_texture: the description's usage needs resource flag 0x{:x}, "
+                                        "which the resource was not created with",
+                                        u32(flag)));
+
+    // Tracked from COMMON, exactly as a texture sg created itself.
+    auto texture = std::make_shared<dx12_texture>(*this, current_epoch(), desc, ComPtr<ID3D12Resource>(resource));
     return dx12_texture_handle(cc::move(texture));
 }
 } // namespace sg::backend::dx12

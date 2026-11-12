@@ -20,8 +20,12 @@ use display
     wipe: float4
     /// the wipe's seam band
     separator_color: float4
-    /// view only: x the exposure scale, y the `display.curve_*` the sample is mapped through, z 1 where the source is opaque
+    /// view only: x the exposure scale, y the `display.curve_*` the sample is mapped through, z above 0 applies the grade, w above 0 dithers
     display: float4
+    /// view only: the grade's temperature, tint and vignette
+    grade_balance: float4
+    /// view only: the grade's contrast and saturation, and z 1 where the source is opaque
+    grade_tone: float4
 
 /// The sampler is dynamic rather than static: a draw picks nearest or linear, so its state is the caller's.
 binding layout_sources:
@@ -54,15 +58,20 @@ struct layout_varyings:
 
 // A border band: one flat color over the viewport.
 @pixel fun border_ps(v: layout_varyings){layout_constants} -> layout_target:
-    return { color = layout_constants.tint }
+    return {color = layout_constants.tint}
 
 // One view across its rect, through its display transform.
 // An opaque source's alpha is no coverage: a scene layer's image carries its samples' second moment there, which à-trous reads.
 @pixel fun view_ps(v: layout_varyings){layout_sources, layout_constants} -> layout_target:
     let sampled = layout_sources.source_0.sample(v.uv0, layout_sources.source_sampler, level = 0.0)
-    let sample = if layout_constants.display.z > 0.5 => float4(..sampled.xyz, 1.0) else sampled
-    let shown = display.transform_premultiplied(sample, layout_constants.display.x, layout_constants.display.y as uint)
-    return { color = shown * layout_constants.tint }
+    let sample = if layout_constants.grade_tone.z > 0.5 => float4(..sampled.xyz, 1.0) else sampled
+    let graded = layout_constants.display.z > 0.0
+    let shown = if graded => display.transform_graded(sample, layout_constants.display.x, layout_constants.display.y as uint, layout_constants.grade_balance.xyz, layout_constants.grade_tone.xy, v.local) else display.transform_premultiplied(sample, layout_constants.display.x, layout_constants.display.y as uint)
+    if layout_constants.display.w > 0.0:
+        let d = display.dither_at(v.position.xy)
+        let dithered = float4(saturate(shown.x + d), saturate(shown.y + d), saturate(shown.z + d), shown.w)
+        return {color = dithered * layout_constants.tint}
+    return {color = shown * layout_constants.tint}
 
 // Two views split along an axis, with an optional separator band on the split itself.
 @pixel fun wipe_ps(v: layout_varyings){layout_sources, layout_constants} -> layout_target:
@@ -77,4 +86,4 @@ struct layout_varyings:
     let half_width = wipe.z
     if half_width > 0.0 and abs(along - split) < half_width:
         c = layout_constants.separator_color
-    return { color = c * layout_constants.tint }
+    return {color = c * layout_constants.tint}

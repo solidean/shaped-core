@@ -131,6 +131,24 @@ def ensure_sdl3(root: Path, preset_name: str = "") -> None:
     )
 
 
+def ensure_openxr(root: Path, preset_name: str = "") -> None:
+    """Download the prebuilt OpenXR loader into extern/openxr/.install when it is missing or at the wrong pin.
+
+    A failure leaves the xr examples unbuilt.
+    """
+    _ensure(
+        root,
+        preset_name,
+        name="openxr",
+        directory="openxr",
+        script_name="fetch-openxr.py",
+        skip_env="SC_SKIP_OPENXR",
+        windows_only=True,
+        doing="downloading the pinned OpenXR loader for the xr examples",
+        dependent="the xr examples",
+    )
+
+
 def ensure_sqlite(root: Path, preset_name: str = "") -> None:
     """Download the SQLite amalgamation into extern/sqlite/.install when it is missing or at the wrong pin.
 

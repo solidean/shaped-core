@@ -3,9 +3,13 @@
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/binding/staging_binding_group.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/raytracing/blas_table.hh>
+#include <shaped-graphics/raytracing/clusters.hh>
+#include <shaped-graphics/raytracing/partitioned_tlas.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
 namespace sg
@@ -89,6 +93,83 @@ cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(
     return _ctx.try_create_memory_heap(size_in_bytes, contents);
 }
 
+partitioned_tlas_handle context_persistent_scope::create_partitioned_tlas(partitioned_tlas_description const& desc)
+{
+    CC_ASSERT(_ctx.supports(feature::partitioned_tlas), "create_partitioned_tlas: this context has no "
+                                                        "sg::feature::partitioned_tlas");
+    CC_ASSERT(desc.instance_capacity > 0, "create_partitioned_tlas: instance_capacity must be > 0");
+    CC_ASSERT(desc.partition_count >= 0 && desc.max_global_instances >= 0, "create_partitioned_tlas: partition_count "
+                                                                           "and max_global_instances must be >= 0");
+    CC_ASSERT(desc.partition_count == 0 || desc.max_instances_per_partition > 0, "create_partitioned_tlas: a partition "
+                                                                                 "holds at least one instance");
+    CC_ASSERT(desc.partition_count > 0 || desc.max_global_instances > 0, "create_partitioned_tlas: no partition can "
+                                                                         "hold an instance");
+    CC_ASSERT(desc.flags.without(accel_build_flag::fast_trace | accel_build_flag::fast_build).is_empty(),
+              "create_partitioned_tlas: only fast_trace or fast_build apply");
+    CC_ASSERT(!desc.flags.has_all(accel_build_flag::fast_trace | accel_build_flag::fast_build),
+              "create_partitioned_tlas: fast_trace and fast_build are mutually exclusive");
+    auto r = _ctx.try_create_partitioned_tlas(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw allocation_exception("partitioned tlas allocation failed", 0, r.error());
+}
+
+blas_table_handle context_persistent_scope::create_blas_table(cc::span<blas_handle const> blases)
+{
+    CC_ASSERT(_ctx.supports(feature::partitioned_tlas), "create_blas_table: this context has no "
+                                                        "sg::feature::partitioned_tlas");
+    CC_ASSERT(!blases.empty(), "create_blas_table: a table lists at least one blas");
+    auto addresses = cc::vector<gpu_blas_ref>();
+    for (auto const& blas : blases)
+    {
+        CC_ASSERT(blas != nullptr && !blas->is_expired(), "create_blas_table: a blas is null or expired");
+        addresses.push_back({.address = _ctx.blas_address_of(*blas)});
+    }
+    auto buffer = create_buffer_from_data(cc::span<gpu_blas_ref const>(addresses), buffer_usage::readonly_buffer);
+    return std::make_shared<blas_table const>(cc::vector<blas_handle>::create_copy_of(blases), cc::move(buffer));
+}
+
+buffer_table_handle context_persistent_scope::create_buffer_table(cc::span<raw_buffer_handle const> buffers)
+{
+    CC_ASSERT(_ctx.supports(feature::clustered_geometry), "create_buffer_table: this context has no "
+                                                          "sg::feature::clustered_geometry");
+    CC_ASSERT(!buffers.empty(), "create_buffer_table: a table lists at least one buffer");
+    auto addresses = cc::vector<gpu_buffer_ref>();
+    for (auto const& b : buffers)
+    {
+        CC_ASSERT(b != nullptr && !b->is_expired(), "create_buffer_table: a buffer is null or expired");
+        CC_ASSERT(b->usage().has(buffer_usage::accel_structure_build_input),
+                  "create_buffer_table: a buffer needs buffer_usage::accel_structure_build_input");
+        addresses.push_back({.address = _ctx.buffer_address_of(*b)});
+    }
+    auto buffer = create_buffer_from_data(cc::span<gpu_buffer_ref const>(addresses), buffer_usage::readonly_buffer);
+    return std::make_shared<buffer_table const>(cc::vector<raw_buffer_handle>::create_copy_of(buffers), cc::move(buffer));
+}
+
+cluster_pool_handle context_persistent_scope::create_cluster_pool(cluster_pool_description const& desc)
+{
+    CC_ASSERT(_ctx.supports(feature::clustered_geometry), "create_cluster_pool: this context has no "
+                                                          "sg::feature::clustered_geometry");
+    CC_ASSERT(desc.max_clusters > 0 && desc.max_total_triangles > 0 && desc.max_total_vertices > 0,
+              "create_cluster_pool: a pool holds at least one cluster, triangle and vertex");
+    CC_ASSERT(desc.max_triangles_per_cluster >= 1 && desc.max_triangles_per_cluster <= max_cluster_triangles
+                  && desc.max_vertices_per_cluster >= 1 && desc.max_vertices_per_cluster <= max_cluster_vertices,
+              "create_cluster_pool: a cluster holds 1 to 256 triangles and vertices");
+    CC_ASSERT(desc.max_geometry_index >= 0 && desc.max_geometry_index < (1 << 24),
+              "create_cluster_pool: max_geometry_index must fit in 24 bits");
+    CC_ASSERT(desc.flags.without(accel_build_flag::fast_trace | accel_build_flag::fast_build).is_empty()
+                  && !desc.flags.has_all(accel_build_flag::fast_trace | accel_build_flag::fast_build),
+              "create_cluster_pool: fast_trace or fast_build, and nothing else");
+    auto r = _ctx.try_create_cluster_pool(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw allocation_exception("cluster pool allocation failed", 0, r.error());
+}
+
 // bind path
 // binding_group_layout / pipeline_layout / compute_pipeline creation lives on ctx.uncached (see uncached.cc) — those are schemas / PSOs, not lifetime-scoped resources.
 // binding_group is a real per-scope descriptor allocation.
@@ -158,9 +239,10 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
     return group;
 }
 
-staging_binding_group_handle context_persistent_scope::create_staging_binding_group(binding_group_layout_handle layout)
+staging_binding_group_handle context_persistent_scope::create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                    int unbounded_capacity)
 {
-    auto r = try_create_staging_binding_group(cc::move(layout));
+    auto r = try_create_staging_binding_group(cc::move(layout), unbounded_capacity);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -169,9 +251,24 @@ staging_binding_group_handle context_persistent_scope::create_staging_binding_gr
 }
 
 cc::result<staging_binding_group_handle> context_persistent_scope::try_create_staging_binding_group(
-    binding_group_layout_handle layout)
+    binding_group_layout_handle layout,
+    int unbounded_capacity)
 {
-    auto created = _ctx.try_create_staging_binding_group(cc::move(layout), lifetime_scope::persistent);
+    if (unbounded_capacity < 0)
+        return cc::error(cc::format("staging_binding_group: an unbounded capacity of {} elements", unbounded_capacity));
+    auto unbounded = cc::string_view();
+    if (layout != nullptr)
+        for (auto const& b : layout->bindings())
+            if (b.is_unbounded())
+                unbounded = b.name;
+    if (!unbounded.empty() && unbounded_capacity == 0)
+        return cc::error(cc::format("staging_binding_group: '{}' is an unbounded array, and the group needs a capacity "
+                                    "for it",
+                                    unbounded));
+    if (unbounded.empty() && unbounded_capacity != 0)
+        return cc::error("staging_binding_group: a capacity for a layout without an unbounded array");
+    auto created
+        = _ctx.try_create_staging_binding_group(cc::move(layout), unbounded_capacity, lifetime_scope::persistent);
     if (created.has_value())
     {
         created.value()->_float32_filtering = _ctx.supports(feature::float32_filtering);

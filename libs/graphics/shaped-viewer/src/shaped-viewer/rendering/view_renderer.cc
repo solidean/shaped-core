@@ -220,6 +220,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                                   out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
             out.frame_contents.push_back({});
+            out.contents.push_back(pending ? cc::hash128() : resources.quadrics.hash_of(item.quadrics));
             out.own_indices.push_back({});
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
@@ -254,6 +255,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                                   out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
             out.frame_contents.push_back(item.frame_geometry.hash);
+            out.contents.push_back(item.frame_geometry.hash);
             out.own_indices.push_back(m.draw_indices);
             out.triangle_counts.push_back(u32(m.triangle_count));
             out.primitive_counts.push_back(0);
@@ -316,6 +318,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                               out.hit_groups[permutation]->secondary);
         out.parameter_blocks.push_back(item.instance);
         out.frame_contents.push_back({});
+        out.contents.push_back(is_pending ? cc::hash128() : resources.meshes.hash_of(item.mesh));
         out.own_indices.push_back({});
         out.triangle_counts.push_back(triangle_count);
         out.primitive_counts.push_back(0);
@@ -641,11 +644,15 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     auto cam = v.camera;
     cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
     fc.camera = camera_record_of(cam);
-    fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(resolution[1] > 0 ? resolution[1] : 1);
+    set_pixel_footprint(fc, resolution[1]);
 
     lights.describe_in(fc);
 
     fc.samples_per_pixel = l.settings.samples_per_pixel;
+    // the primary cone narrows where the image averages many samples, which filter the pixel already (pbrt-v4's rule)
+    auto const expected = l.settings.expected_samples_per_pixel;
+    fc.primary_scale = expected > 1 ? cc::max(0.125f, 1.0f / tg::sqrt(f32(expected))) : 1.0f;
+    fc.channel_mask = l.settings.channels;
     // A hybrid layer lights its own count of bounces, which its shaders read from the same field.
     fc.max_bounces
         = l.settings.mode == render_mode::hybrid ? cc::clamp(l.settings.hybrid_bounces, 1, 2) : l.settings.max_bounces;
@@ -674,13 +681,26 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
 /// drawn through the same eye, so the mean it converges to is the image this frame is asking for and no other.
 /// Moving the eye therefore restarts it, and that is the trade — no reprojection to salvage the old samples, and in
 /// exchange no smearing, no per-pixel rejection heuristic, and an uncapped mean that converges to ground truth.
+///
+/// `scope` picks what restarts: the mean's `image`, or a temporal denoiser's `history`.
+/// A history reprojects across motion and rejects per pixel what it cannot follow, so what moves or deforms is left out of it:
+/// every instance's transform, and of a frame mesh everything but its permutation — geometry, attributes, parameter block.
+/// A frame mesh is new content every frame by design, a simulation's body with its normals, and a history exists to follow that.
+/// What the scene is stays in it: how many instances and which shaders, a managed mesh's record, the lights, the background.
+enum class trace_hash_scope : u8
+{
+    image,
+    history,
+};
+
 [[nodiscard]] u64 trace_hash(shaders::tracer::frame_constants fc,
                              background_gpu const& bg,
                              pt_light_table const& lights,
                              traced_decals const& decals,
                              resolved_view const& r,
                              tg::vec2i resolution,
-                             u64 shader_generation)
+                             u64 shader_generation,
+                             trace_hash_scope scope = trace_hash_scope::image)
 {
     // The two fields that legitimately differ every frame; hashing either would restart the estimator forever.
     fc.rng_seed = 0;
@@ -706,6 +726,13 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     {
         auto const& inst = r.instances[i];
         auto const content = r.frame_contents[i];
+        if (scope == trace_hash_scope::history)
+        {
+            h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset));
+            if (content == cc::hash128())
+                h = cc::combine_hash(h, cc::make_hash(inst.blas.get())); // a managed mesh's BLAS is its geometry's identity
+            continue;
+        }
         h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<float const>(inst.transform, 12).as_bytes()));
         if (content == cc::hash128())
             h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
@@ -725,16 +752,27 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     {
         auto anonymized = r.records[i];
         anonymized.param_buffer = 0;
-        if (r.frame_contents[i] != cc::hash128())
+        auto const frame_row = r.frame_contents[i] != cc::hash128();
+        if (frame_row && scope == trace_hash_scope::history)
+            continue; // its permutation, hashed with the instances above, is all of it a history keeps
+        if (frame_row)
         {
             anonymized.vertices = 0;
             anonymized.indices = 0;
         }
+        // the record carries the instance's transform too, which a history leaves out as it does the TLAS instance's
+        if (scope == trace_hash_scope::history)
+        {
+            anonymized.to_world_x = {};
+            anonymized.to_world_y = {};
+            anonymized.to_world_z = {};
+        }
         h = cc::combine_hash(
             h, cc::make_hash_of_bytes(cc::span<shaders::tracer::instance_record const>(&anonymized, 1).as_bytes()));
     }
-    for (auto const block : r.parameter_blocks)
-        h = cc::combine_hash(h, cc::make_hash(u32(block)));
+    for (auto i = isize(0); i < r.parameter_blocks.size(); ++i)
+        if (scope == trace_hash_scope::image || r.frame_contents[i] == cc::hash128())
+            h = cc::combine_hash(h, cc::make_hash(u32(r.parameter_blocks[i])));
 
     // Which shader reads those records is not in them, and a different permutation is a different image.
     for (auto const& key : r.permutations)
@@ -742,15 +780,43 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     return h;
 }
 
-/// The random seed of the frame `slot` traces next.
+/// The key a traced image's random sequence is drawn from: the image, hashed over inputs that are equal on any machine.
 ///
-/// Each restart draws a sequence of its own, so moving frames, every one a restart, do not all draw one.
-/// The restart and the frame within its run are mixed rather than spaced apart, since a run counts frames up to
-/// `frame_count_cap`, far past what a u32 could hold between two runs.
+/// So a capture is one image however often it restarted on the way: cold compiles and drains restart it on their own clock.
+/// Where `trace_hash` reads a BLAS address or a bindless index, this reads the content behind it, or nothing.
+/// A material's parameters and the decals are left out, since their keys name ids a process mints.
+/// An edit to them alone keeps the sequence: the mean still restarts on `trace_hash`, and draws the same samples of a different image.
+/// Moving frames are each a different camera, so they still draw sequences apart.
+[[nodiscard]] u64 seed_key_of(shaders::tracer::frame_constants const& fc,
+                              background_gpu const& bg,
+                              pt_light_table const& lights,
+                              resolved_view const& r,
+                              tg::vec2i resolution)
+{
+    auto h = cc::make_hash_of_bytes(cc::span<shaders::tracer::camera_record const>(&fc.camera, 1).as_bytes());
+    h = cc::combine_hash(h, cc::make_hash(fc.max_bounces, fc.samples_per_pixel, resolution[0], resolution[1]));
+    // The channel mask is not here: the image does not depend on it, and a new mask reallocates the wavefront state,
+    // which restarts the accumulation by itself.
+    h = cc::combine_hash(h, cc::make_hash(cc::bit_cast<u32>(fc.primary_scale)));
+    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<background_gpu const>(&bg, 1).as_bytes()));
+    h = cc::combine_hash(
+        h, cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(lights.records).as_bytes()));
+    for (auto i = isize(0); i < r.instances.size(); ++i)
+    {
+        auto const& inst = r.instances[i];
+        auto const shader = r.permutations[inst.hit_group_offset / 2];
+        h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<float const>(inst.transform, 12).as_bytes()));
+        h = cc::combine_hash(h, cc::make_hash(r.contents[i].low, r.contents[i].high, shader.low, shader.high));
+    }
+    return h;
+}
+
+/// The random seed of the frame `slot` traces next: its image's `seed_key_of`, mixed with the frame within the run.
+/// Mixed rather than spaced apart, since a run counts frames up to `frame_count_cap`, far past what a u32 could hold between two keys.
 /// Never 0, which the tracer reads as no seed.
 [[nodiscard]] u32 seed_of(impl::temporal_slot const& slot)
 {
-    auto const seed = u32(cc::make_hash(slot.restarts, slot.accum_frame));
+    auto const seed = u32(cc::make_hash(slot.seed_key, slot.accum_frame));
     return seed != 0 ? seed : 1;
 }
 
@@ -772,21 +838,6 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
 [[nodiscard]] tg::vec2f still_jitter(u32 index)
 {
     return tg::vec2f(halton(index + 1, 2) - 0.5f, halton(index + 1, 3) - 0.5f);
-}
-
-/// Restarts `slot`'s mean for an image whose hash is now `hash`, moving on to the next random sequence where the last one drew samples.
-/// Not where it drew none, as after frames that declined to trace, nor where only the last frame traced through
-/// something still loading and `hash` is unchanged.
-/// A compile lasting seconds restarts thousands of times, and counting each would leave the image a converged mean lands on to the compile's timing.
-/// Called before `reset_hash` takes `hash`.
-void restart_for_image(impl::temporal_slot& slot, u64 hash)
-{
-    if (slot.drew_since_restart && slot.reset_hash != cc::combine_hash(hash, u64(1)))
-    {
-        ++slot.restarts;
-        slot.drew_since_restart = false;
-    }
-    impl::restart_accumulation(slot);
 }
 
 /// Bytes a texture of `size` in `format` costs, for the cache's budget.
@@ -890,7 +941,6 @@ constexpr u32 frame_count_cap = u32(1) << 30;
 /// the next frame restarts the mean, so until then it is no sample of the image asked for, however many it traced.
 void count_traced_frame(impl::temporal_slot& slot, render_settings const& settings, bool incomplete)
 {
-    slot.drew_since_restart = true;
     slot.accum_frame = next_frame_count(slot);
     if (settings.mode == render_mode::megakernel)
         slot.samples = slot.accum_frame * megakernel_samples_per_frame(settings);
@@ -1019,10 +1069,11 @@ void mark_denoised(impl::temporal_slot& slot, shaders::tracer::camera_record con
     auto const extent = tg::vec2i(d.output.width(), d.output.height());
     auto const permutations = i32(d.hit_groups.size());
     auto& held = scaled ? slot.scaled_paths : slot.paths;
-    if (!held.has_value() || held.value().extent != extent || held.value().max_permutations < permutations)
+    if (!held.has_value() || held.value().extent != extent || held.value().max_permutations < permutations
+        || held.value().channel_mask != settings.channels)
     {
         // Twice today's permutations, so a material appearing does not reallocate every slot of the view.
-        held = wavefront_state::create(cmd.context(), extent, cc::max(16, 2 * permutations));
+        held = wavefront_state::create(cmd.context(), extent, cc::max(16, 2 * permutations), settings.channels);
         // A new state holds no paths, so its mean starts over whatever the hash says.
         impl::restart_accumulation(slot);
     }
@@ -1176,6 +1227,7 @@ struct raster_batch
         .light_count = u32(scene.lights->records.size()),
         .decal_count = u32(scene.decals->decals.size()),
         .pixel_spread = fc.pixel_spread,
+        .pixel_width = fc.pixel_width,
         .size = tg::vec2f(f32(resolution[0]), f32(resolution[1])),
         .jitter = tg::vec2f(0, 0),
     };
@@ -1903,12 +1955,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
                            cc::make_hash(u32(mode), u32(l.settings.hybrid_lighting), slot->stand_in_hash));
 
-    // The same, with the camera left out: what a temporal denoiser's history restarts on.
+    // What a temporal denoiser's history restarts on: the camera left out, and where the geometry sits (trace_hash_scope).
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
     auto scene_fc = fc;
     scene_fc.camera = {};
-    auto const scene_hash
-        = trace_hash(scene_fc, bg_unturned, lights, decals, resolved, tr.resolution, self->_shader_generation);
+    auto const scene_hash = trace_hash(scene_fc, bg_unturned, lights, decals, resolved, tr.resolution,
+                                       self->_shader_generation, trace_hash_scope::history);
 
     // A cut teleports the camera, so nothing from the last frame reprojects: the temporal history describes another
     // part of the scene, and the motion guide would reproject into a camera nothing connects it to.
@@ -1963,8 +2015,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The tracer publishes its own hash as this slot's reset rule: it covers the bytes actually uploaded, so it
     // cannot drift away from what the shader reads the way a hand-declared one could.
     if (slot->reset_hash != hash)
-        restart_for_image(*slot, hash);
+        impl::restart_accumulation(*slot);
     slot->reset_hash = hash;
+    slot->seed_key = seed_key_of(fc, bg, lights, resolved, tr.resolution);
 
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
@@ -2097,8 +2150,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     if (has_temporal)
     {
-        // The temporal member's history restarts on a different SCENE, never on camera motion: carrying history across
-        // camera motion is what it exists for, while the mean restarts on every move.
+        // The temporal member's history restarts on a different SCENE, never on camera or object motion: carrying history
+        // across motion is what it exists for, while the mean restarts on every move.
         if (ds.frame->reset_hash != scene_hash)
         {
             ds.frame->denoise.reset();
@@ -2155,7 +2208,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         jitter = sr::reconstruct_jitter(ctx, upscale_settings, tr.resolution, slot->scaled_frame, traceable_guides());
         fc.fixed_jitter = 1;
         fc.jitter = jitter + tg::vec2f(0.5f, 0.5f);
-        fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(input_extent[1]);
+        set_pixel_footprint(fc, input_extent[1]);
+        // an upscaled frame is one sample a pixel, averaged with no others, so its primaries read a whole pixel
+        fc.primary_scale = 1.0f;
         // A moving frame's mean restarts every time, so the accumulation's seed would draw one sequence on all of them.
         fc.rng_seed = slot->scaled_frame + 1;
         fc.guide_frame = 0;
@@ -2172,9 +2227,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto previous_jitter = slot->last_jitter;
     if (!scaled && mode == render_mode::hybrid)
     {
-        // Counted across restarts: a move restarts the mean every frame, and the temporal member reconstructs
+        // Offset by the image's seed key: a move restarts the mean every frame, and the temporal member reconstructs
         // sub-pixel detail only from an offset that changes from frame to frame.
-        jitter = still_jitter(slot->restarts + slot->accum_frame);
+        jitter = still_jitter(u32(slot->seed_key & 0xffffu) + slot->accum_frame);
         fc.fixed_jitter = 1;
         fc.jitter = jitter + tg::vec2f(0.5f, 0.5f);
         slot->last_jitter = jitter;
@@ -2770,8 +2825,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // A fresh target holds no history, and a different image must not be averaged into the old one.
     if (acc.resized || slot.reset_hash != hash)
-        restart_for_image(slot, hash);
+        impl::restart_accumulation(slot);
     slot.reset_hash = hash;
+    slot.seed_key = seed_key_of(fc, bg, lights, resolved, v.resolution);
 
     if (mode == render_mode::hybrid)
     {

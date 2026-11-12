@@ -3,6 +3,7 @@
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_view
 #include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/resource/buffer.hh>
@@ -211,4 +212,49 @@ INVOCABLE_TEST("sg - scalar binding rejects a vacant element", (sg::context_hand
 
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)),
                     sg::binding_group_exception);
+}
+
+INVOCABLE_TEST("sg - an unbounded array binding is its layout's last, and each group sizes it by its views",
+               (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto unbounded = texture_array_binding(0);
+    unbounded.index = 1;
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+    {
+        CHECK(ctx->uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&unbounded, 1))
+                  .error()
+                  .message()
+                  .contains("unbounded_binding_arrays"));
+        SKIP("this backend has no unbounded binding arrays");
+    }
+
+    // an unbounded binding before another one is refused, since only a layout's last binding may be one
+    auto const plain = sg::binding{.name = "Plain",
+                                   .space = 0,
+                                   .index = 2,
+                                   .type = sg::binding_type::texture,
+                                   .texture_dimension = sg::texture_view_dimension::tex_2d};
+    sg::binding const misplaced[] = {unbounded, plain};
+    CHECK(ctx->uncached.try_create_binding_group_layout(misplaced).error().message().contains("only the last binding"));
+
+    auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&unbounded, 1));
+    for (auto const count : {1, 3, 40})
+    {
+        auto elements = cc::vector<sg::raw_view>();
+        for (auto i = 0; i < count; ++i)
+            elements.push_back(sg::vacant_view{});
+        auto const texture = make_texture(ctx);
+        elements[count - 1] = texture.as_texture_view();
+        auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
+        CHECK(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)) != nullptr);
+    }
+    // a staging group holds the capacity it is given, and needs one
+    CHECK_THROWS_AS(ctx->persistent.create_staging_binding_group(layout), sg::binding_group_exception);
+    auto const staging = ctx->persistent.create_staging_binding_group(layout, 8);
+    auto const slot = staging->slot_of("Textures");
+    CHECK(staging->is_array(slot));
+    CHECK(staging->array_size(slot) == 8);
+    staging->unset_array(slot);
+    CHECK(staging->snapshot() != nullptr);
 }

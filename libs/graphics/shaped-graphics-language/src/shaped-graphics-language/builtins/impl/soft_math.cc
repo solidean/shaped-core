@@ -1,6 +1,7 @@
 #include "soft_math.hh"
 
 #include <clean-core/math/bit.hh>
+#include <clean-core/math/wide_arith.hh>
 
 using namespace sgl;
 using namespace sgl::builtins;
@@ -152,6 +153,61 @@ f64 impl::soft_sqrt(f64 x)
     for (auto i = 0; i < 8; ++i)
         guess = 0.5 * (guess + x / guess);
     return guess;
+}
+
+f64 impl::correctly_rounded_sqrt(f64 x)
+{
+    if (is_nan(x) || x < 0.0)
+        return quiet_nan();
+    if (x == 0.0 || !is_finite(x))
+        return x;
+
+    // x = m * 2^e with m an integer of 53 bits and e even, a subnormal's mantissa shifted up to the same width
+    auto const bits = cc::bit_cast<u64>(x);
+    auto m = bits & ((u64(1) << 52) - 1);
+    auto e = int((bits >> 52) & 0x7ff);
+    if (e == 0)
+    {
+        while ((m >> 52) == 0)
+        {
+            m <<= 1;
+            --e;
+        }
+        ++e;
+    }
+    else
+        m |= u64(1) << 52;
+    e -= 1075;
+    if ((e & 1) != 0)
+    {
+        m <<= 1;
+        --e;
+    }
+
+    // the root of m * 2^56, a bit pair of it at a time, so the 55-bit result has two bits past the 53 it keeps
+    auto root = u64(0);
+    auto remainder = u64(0);
+    for (auto pair = 54; pair >= 0; --pair)
+    {
+        auto const low_bit = 2 * pair - 56;
+        auto const bits_here = low_bit >= 0 ? (m >> low_bit) & 3u : u64(0);
+        remainder = (remainder << 2) | bits_here;
+        auto const trial = (root << 2) | 1u;
+        root <<= 1;
+        if (remainder >= trial)
+        {
+            remainder -= trial;
+            root |= 1u;
+        }
+    }
+
+    // to nearest, ties to even, though a root of a double is never a tie
+    auto const kept = root >> 2;
+    auto const guard = (root >> 1) & 1u;
+    auto const sticky = (root & 1u) != 0 || remainder != 0;
+    auto const rounded = kept + ((guard != 0 && (sticky || (kept & 1u) != 0)) ? 1u : 0u);
+    // the root is rounded * 2^(e / 2 - 28 + 2), and rounded has 53 bits, or 54 where rounding carried
+    return scaled(f64(rounded), e / 2 - 26);
 }
 
 f64 impl::soft_exp(f64 x)
@@ -313,4 +369,196 @@ f32 impl::float_of_half_bits(u32 h)
         return sign != 0 ? -magnitude : magnitude;
     }
     return cc::bit_cast<f32>(sign | ((exponent - 15 + 127) << 23) | (mantissa << 13));
+}
+
+namespace
+{
+/// The value of a finite f64 as `mantissa * 2^exponent`, the mantissa an integer below 2^53.
+struct decoded
+{
+    bool negative = false;
+    u64 mantissa = 0;
+    int exponent = 0;
+};
+
+decoded decode(f64 x)
+{
+    auto const bits = cc::bit_cast<u64>(x);
+    auto const field = int((bits >> 52) & 0x7ff);
+    auto const fraction = bits & ((u64(1) << 52) - 1);
+    if (field == 0)
+        return {.negative = (bits >> 63) != 0, .mantissa = fraction, .exponent = -1074};
+    return {.negative = (bits >> 63) != 0, .mantissa = fraction | (u64(1) << 52), .exponent = field - 1075};
+}
+
+int leading_zeroes(cc::u128 v)
+{
+    return v.hi != 0 ? cc::count_leading_zeroes(v.hi) : 64 + cc::count_leading_zeroes(v.lo);
+}
+
+cc::u128 shifted_left(cc::u128 v, int n)
+{
+    if (n == 0)
+        return v;
+    if (n >= 64)
+        return {.lo = 0, .hi = v.lo << (n - 64)};
+    return {.lo = v.lo << n, .hi = (v.hi << n) | (v.lo >> (64 - n))};
+}
+
+/// `v >> n`, with every bit shifted out folded into the lowest one kept, so a later rounding still sees it.
+cc::u128 shifted_right_sticky(cc::u128 v, int n)
+{
+    if (n == 0)
+        return v;
+    if (n >= 128)
+        return {.lo = (v.lo | v.hi) != 0 ? 1u : 0u, .hi = 0};
+    auto lost = u64(0);
+    auto kept = cc::u128();
+    if (n >= 64)
+    {
+        lost = v.lo | (n > 64 ? v.hi << (128 - n) : 0);
+        kept = {.lo = n > 64 ? v.hi >> (n - 64) : v.hi, .hi = 0};
+    }
+    else
+    {
+        lost = v.lo << (64 - n);
+        kept = {.lo = (v.lo >> n) | (v.hi << (64 - n)), .hi = v.hi >> n};
+    }
+    if (lost != 0)
+        kept.lo |= 1;
+    return kept;
+}
+
+bool less(cc::u128 a, cc::u128 b)
+{
+    return a.hi != b.hi ? a.hi < b.hi : a.lo < b.lo;
+}
+cc::u128 plus(cc::u128 a, cc::u128 b)
+{
+    auto const low = cc::add_with_carry(a.lo, b.lo);
+    return {.lo = low.value, .hi = a.hi + b.hi + low.carry};
+}
+cc::u128 minus(cc::u128 a, cc::u128 b)
+{
+    auto const low = cc::sub_with_borrow(a.lo, b.lo);
+    return {.lo = low.value, .hi = a.hi - b.hi - low.borrow};
+}
+
+bool bit_of(cc::u128 v, int i)
+{
+    return ((i >= 64 ? v.hi >> (i - 64) : v.lo >> i) & 1) != 0;
+}
+/// Whether any of the bits below `i` is set.
+bool any_below(cc::u128 v, int i)
+{
+    if (i <= 0)
+        return false;
+    if (i >= 128)
+        return (v.lo | v.hi) != 0;
+    if (i >= 64)
+        return v.lo != 0 || (i > 64 && (v.hi << (128 - i)) != 0);
+    return (v.lo << (64 - i)) != 0;
+}
+
+/// `r * 2^e`, `r` nonzero, rounded once to the nearest f64, ties to even, with the sign given.
+/// The bit an alignment folded what it shifted out into lies below the guard bit, so it reads as sticky.
+f64 rounded(bool negative, cc::u128 r, int e)
+{
+    auto const top = 127 - leading_zeroes(r);
+    // keep 53 bits, or fewer where the result is subnormal and its exponent is pinned at -1074
+    auto shift = top - 52;
+    if (e + shift < -1074)
+        shift = -1074 - e;
+    auto mantissa = u64(0);
+    if (shift <= 0)
+        mantissa = shifted_left(r, -shift).lo;
+    else if (shift <= 128)
+    {
+        if (shift < 64)
+            mantissa = (r.lo >> shift) | (r.hi << (64 - shift));
+        else if (shift < 128)
+            mantissa = r.hi >> (shift - 64);
+        auto const guard = bit_of(r, shift - 1);
+        if (guard && (any_below(r, shift - 1) || (mantissa & 1) != 0))
+            ++mantissa;
+    }
+    auto exponent = e + shift;
+    if (mantissa == (u64(1) << 53))
+    {
+        mantissa >>= 1;
+        ++exponent;
+    }
+    auto bits = u64(negative ? 1 : 0) << 63;
+    if (mantissa >= (u64(1) << 52))
+    {
+        auto const biased = exponent + 1075;
+        if (biased >= 2047)
+            return negative ? -infinity() : infinity();
+        bits |= (u64(biased) << 52) | (mantissa & ((u64(1) << 52) - 1));
+    }
+    else
+        bits |= mantissa;
+    return cc::bit_cast<f64>(bits);
+}
+} // namespace
+
+f64 impl::soft_fma(f64 a, f64 b, f64 c)
+{
+    // a product of a NaN or an infinity is exactly what it is, and a finite one plus an infinity is that infinity
+    if (!is_finite(a) || !is_finite(b))
+        return a * b + c;
+    if (!is_finite(c))
+        return c;
+    // an exact zero product: the sum is IEEE's own, signs of zero and all
+    if (a == 0.0 || b == 0.0)
+        return a * b + c;
+
+    auto const x = decode(a);
+    auto const y = decode(b);
+    auto const z = decode(c);
+    auto const product_negative = x.negative != y.negative;
+    // both terms as 128-bit integers whose top bit is bit 125, leaving room for the carry of a sum
+    auto p = cc::umul128(x.mantissa, y.mantissa);
+    auto pe = x.exponent + y.exponent;
+    auto const p_shift = leading_zeroes(p) - 2;
+    p = shifted_left(p, p_shift);
+    pe -= p_shift;
+    if (z.mantissa == 0)
+        return rounded(product_negative, p, pe);
+    auto q = cc::u128{.lo = z.mantissa, .hi = 0};
+    auto qe = z.exponent;
+    auto const q_shift = leading_zeroes(q) - 2;
+    q = shifted_left(q, q_shift);
+    qe -= q_shift;
+    auto e = pe;
+    if (pe >= qe)
+        q = shifted_right_sticky(q, pe - qe);
+    else
+    {
+        p = shifted_right_sticky(p, qe - pe);
+        e = qe;
+    }
+    if (product_negative == z.negative)
+        return rounded(product_negative, plus(p, q), e);
+    if (p.hi == q.hi && p.lo == q.lo)
+        return 0.0; // an exact cancellation is +0 when rounding to nearest
+    return less(q, p) ? rounded(product_negative, minus(p, q), e) : rounded(z.negative, minus(q, p), e);
+}
+
+f64 impl::fma_to_odd(f64 a, f64 b, f64 c)
+{
+    auto const product = a * b;
+    auto const sum = product + c;
+    if (!is_finite(sum) || !is_finite(product) || !is_finite(c))
+        return sum;
+    // the error of the sum, exactly (Knuth's TwoSum), so `sum + error` is `a * b + c`
+    auto const b_virtual = sum - product;
+    auto const error = (product - (sum - b_virtual)) + (c - b_virtual);
+    if (error == 0.0 || sum == 0.0)
+        return sum;
+    // round to odd: of the two f64 either side of the exact value, the one whose last bit is set
+    auto bits = cc::bit_cast<u64>(sum);
+    if ((bits & 1) == 0)
+        bits = (error > 0.0) == (sum > 0.0) ? bits + 1 : bits - 1;
+    return cc::bit_cast<f64>(bits);
 }

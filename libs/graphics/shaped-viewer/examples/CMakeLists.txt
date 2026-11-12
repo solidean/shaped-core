@@ -79,15 +79,14 @@ sc_add_single_file_examples(shaped-viewer
     FILES
     ${_sv_example_sources}
     LINK shaped-viewer
-    PCH SG NEXUS
 )
 
 # Sponza is fetched on request (extern/sponza/fetch-sponza.py), and the example says so when it is missing.
-target_compile_definitions(shaped-viewer-hybrid-sponza-example PRIVATE SV_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
+sc_target_source_paths(shaped-viewer-hybrid-sponza-example PRIVATE SV_SPONZA_DIR ../../../../extern/sponza/.install)
 
 # The research scenes are fetched on request (extern/gltf-research-scenes/fetch-research-scenes.py), and the example says so when one is missing.
-target_compile_definitions(shaped-viewer-research-studio-example
-    PRIVATE SV_RESEARCH_SCENES_DIR="${CMAKE_SOURCE_DIR}/extern/gltf-research-scenes/.install")
+sc_target_source_paths(shaped-viewer-research-studio-example
+    PRIVATE SV_RESEARCH_SCENES_DIR ../../../../extern/gltf-research-scenes/.install)
 
 # NGX loads Ray Reconstruction from a DLL beside the executable, so without it staged `automatic` falls back to a lesser denoiser.
 if(SC_DLSS_RUNTIME)
@@ -98,5 +97,4 @@ endif()
 
 # Bistro is fetched on request into extern/bistro/.install, so the example names where it lands rather than what it
 # contains, and reports a missing scene at run time: a fetch after the build then needs no reconfigure.
-cmake_path(SET _sv_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../extern/bistro/.install")
-target_compile_definitions(shaped-viewer-bistro-example PRIVATE SV_BISTRO_DIR="${_sv_bistro_dir}")
+sc_target_source_paths(shaped-viewer-bistro-example PRIVATE SV_BISTRO_DIR ../../../../extern/bistro/.install)

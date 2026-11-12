@@ -175,7 +175,11 @@ bool is_below(scalar a, scalar b)
         return a.as_float() < b.as_float();
     if (a.kind == check::value_kind::scalar_int)
         return a.as_int() < b.as_int();
-    return a.bits < b.bits;
+    if (a.kind == check::value_kind::scalar_double)
+        return a.as_double() < b.as_double();
+    if (a.kind == check::value_kind::scalar_long)
+        return a.as_long() < b.as_long();
+    return a.wide_bits() < b.wide_bits();
 }
 
 void min_ints(leaves in, result& out)
@@ -240,7 +244,9 @@ constexpr cc::string_view k_clamp[] = {"clamp"};
 /// Equal as the targets compare: a float as a float, so a NaN is unequal to itself and -0.0 equals 0.0.
 bool is_same(scalar a, scalar b)
 {
-    return a.kind == check::value_kind::scalar_float ? a.as_float() == b.as_float() : a.bits == b.bits;
+    if (a.kind == check::value_kind::scalar_double)
+        return a.as_double() == b.as_double();
+    return a.kind == check::value_kind::scalar_float ? a.as_float() == b.as_float() : a.wide_bits() == b.wide_bits();
 }
 
 /// `op(a, b)` per component, which gives a bool vector.
@@ -347,7 +353,7 @@ constexpr cc::string_view k_select[] = {"select"};
 /// The scalar of a prelude vector or scalar by its name: `half` of `half3`, and `float` of `vec3`, `pos3` and `hpos4`.
 cc::string_view element_of(cc::string_view type)
 {
-    for (auto const family : {"half", "ushort", "short", "uint", "int", "bool"})
+    for (auto const family : {"half", "ushort", "short", "uint", "int", "bool", "ulong", "long", "double"})
         if (type.starts_with(family))
             return family;
     return "float";
@@ -539,9 +545,11 @@ void sgl::builtins::register_vector_math(registry& r)
 
     r.add_comment("// a prefix `+` of every number and vector is the value itself, as every target writes it "
                   "(CHK-410)");
-    for (auto const type : {"float",  "half",   "int",    "uint",    "short",   "ushort",  "float2", "float3", "float4",
-                            "half2",  "half3",  "half4",  "int2",    "int3",    "int4",    "uint2",  "uint3",  "uint4",
-                            "short2", "short3", "short4", "ushort2", "ushort3", "ushort4", "vec3"})
+    for (auto const type :
+         {"float",  "half",    "int",     "uint",    "short",   "ushort",  "float2", "float3", "float4", "half2",
+          "half3",  "half4",   "int2",    "int3",    "int4",    "uint2",   "uint3",  "uint4",  "short2", "short3",
+          "short4", "ushort2", "ushort3", "ushort4", "vec3",    "long",    "long2",  "long3",  "long4",  "ulong",
+          "ulong2", "ulong3",  "ulong4",  "double",  "double2", "double3", "double4"})
         r.add(function_record{
             .signature = cc::format("@pure @operator(\"+\") fun {}(x: {}) -> {}", named("identity", type), type, type),
             .evaluate = identity,
@@ -553,7 +561,8 @@ void sgl::builtins::register_vector_math(registry& r)
                   "// which `equal` and `not_equal` are per component (CHK-363)");
     cc::string_view const ordered[]
         = {"float2", "float3", "float4", "int2",   "int3",   "int4",   "uint2",   "uint3",   "uint4",
-           "half2",  "half3",  "half4",  "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"};
+           "half2",  "half3",  "half4",  "short2", "short3", "short4", "ushort2", "ushort3", "ushort4",
+           "long2",  "long3",  "long4",  "ulong2", "ulong3", "ulong4", "double2", "double3", "double4"};
     for (auto const type : ordered)
     {
         auto const bools = cc::format("bool{}", type.back());
@@ -563,9 +572,10 @@ void sgl::builtins::register_vector_math(registry& r)
         add_infix(r, ">=", named("greater_equal", type), type, type, bools, greater_equal_each);
     }
     cc::string_view const compared[]
-        = {"float2", "float3", "float4", "int2",   "int3",   "int4",    "uint2",   "uint3",
-           "uint4",  "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half2",
-           "half3",  "half4",  "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"};
+        = {"float2", "float3", "float4", "int2",    "int3",    "int4",    "uint2", "uint3", "uint4",
+           "bool2",  "bool3",  "bool4",  "vec3",    "pos3",    "hpos4",   "half2", "half3", "half4",
+           "short2", "short3", "short4", "ushort2", "ushort3", "ushort4", "long2", "long3", "long4",
+           "ulong2", "ulong3", "ulong4", "double2", "double3", "double4"};
     for (auto const type : compared)
     {
         auto const bools = cc::format("bool{}", type.back());
@@ -575,14 +585,19 @@ void sgl::builtins::register_vector_math(registry& r)
                       .hlsl_names = k_all,
                       .wgsl_names = k_all,
                       .msl_names = k_all});
+        // EMIT-186: a float lane's `!=` is true for a NaN, which HLSL has to spell `!(a == b)`
+        auto const has_float_lanes = type.starts_with("float") || type.starts_with("half") || type.starts_with("double")
+                                  || type == "vec3" || type == "pos3" || type == "hpos4";
         add_operator(r, "!=", named("differs", type), type, type, "bool", not_equal_whole,
-                     {.kind = spelling_kind::custom,
-                      .custom = write_whole<false>,
-                      .hlsl_names = k_any,
-                      .wgsl_names = k_any,
-                      .msl_names = k_any});
+                     has_float_lanes ? float_vectors_differ()
+                                     : spelling{.kind = spelling_kind::custom,
+                                                .custom = write_whole<false>,
+                                                .hlsl_names = k_any,
+                                                .wgsl_names = k_any,
+                                                .msl_names = k_any});
         add_function(r, "equal", {"a", type, "b", type}, bools, equal_each, infix("=="));
-        add_function(r, "not_equal", {"a", type, "b", type}, bools, not_equal_each, infix("!="));
+        add_function(r, "not_equal", {"a", type, "b", type}, bools, not_equal_each,
+                     has_float_lanes ? float_not_equal() : infix("!="));
     }
 
     r.add_comment("// a bool vector read whole (CHK-364), and `select`, which evaluates all three of its arguments\n"

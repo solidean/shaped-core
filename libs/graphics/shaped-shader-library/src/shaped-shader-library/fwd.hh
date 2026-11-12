@@ -37,6 +37,8 @@ struct wgsl_declarations;
 struct gpu_bool;
 // a mat3 as GPU memory holds one, three 16-byte columns (gpu_mat3.hh)
 struct gpu_mat3;
+// an affine3 as GPU memory holds one, three 16-byte rows (gpu_affine3.hh)
+struct gpu_affine3;
 // a value and the padding GPU memory leaves after it (gpu_padded.hh)
 template <class T, int Size>
 struct gpu_padded;

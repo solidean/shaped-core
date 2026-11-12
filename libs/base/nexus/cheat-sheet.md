@@ -102,6 +102,37 @@ TEST("corpus soak", thorough_only,                  // `dev.py check` runs this 
 A flag, not a bucket: the test runs either way, and `manual` is not where a thorough test goes.
 [docs/test-runtime.md](docs/test-runtime.md) has the rules.
 
+## The source tree (`nx::source_root`)
+
+```cmake
+sc_target_source_paths(my-test PRIVATE MY_DATA_DIR tests/data)   # a string literal RELATIVE to the top-level source dir
+```
+
+```cpp
+#include <nexus/source_root.hh>
+nx::source_path(MY_DATA_DIR)             // cc::string, absolute: the directory joined onto the source root
+nx::source_path(MY_DATA_DIR "/a.obj")    //   a literal suffix concatenates as usual
+nx::source_root()                        // cc::string_view: SC_SOURCE_ROOT, else the CMakeCache.txt above the executable;
+                                         //   neither ends the process naming both. Resolved once, thread-safe
+```
+
+- **Never an absolute path in a definition**: `check`'s `abspaths` gate refuses one ([coding guidelines](../../../docs/coding-guidelines.md#build-configurations)).
+- `dev.py` sets `SC_SOURCE_ROOT` for every binary it runs; a binary started by hand finds its build's `CMakeCache.txt`, wherever that build directory is.
+- For tests, examples and tools: a shipped library never asks, and links no nexus.
+
+## File access (`cc::file_access`)
+
+```cpp
+#include <clean-core/platform/file_access.hh>
+cc::file_access::note_read(path);        // DECLARE a file read past clean-core (std::filesystem, fopen, a library's own IO)
+cc::file_access::note_write(path);       //   ...written, created or deleted
+cc::file_access::note_list(directory);   //   ...a directory listed (clean-core has no iteration, so always declared)
+```
+
+- **Touch files through clean-core**: its streams record every path they open when a runner asks (`NX_EXTERNAL_RUNNER_REPORT`).
+  Anything past them is not seen unless declared, and a runner caching on reads then misses the dependency ([docs/external-runner.md](docs/external-runner.md)).
+- Free while nothing records: one relaxed atomic load.
+
 ## Examples (`EXAMPLE`)
 
 A runnable demonstration of an API **in practice**, in the `example` bucket, run one at a time by `dev.py example`.
@@ -144,6 +175,7 @@ TEST("lint - a clean file exits 0", main_thread, exclusive())   // run_command r
 
 ```bash
 tool lint a.cc          # an app or command named first runs with the rest of the line
+tool -j8 lint a.cc      # a --jobs before the name sizes its run's pool; after the name it is the command's own
 tool --tests "lint -"   # --tests (or --examples, --benchmarks, --manual, --apps, --commands, --list-tests-json,
                         #   --list-hw-counters, --reporter) hands the line to nexus; an exact test name does too
 tool a.cc --fix         # otherwise the default_entry takes the WHOLE line — nexus parses none of it
@@ -362,6 +394,7 @@ TEST("sg backend - vulkan")
   `s.define_alias(name, {alias_fragment{driver, section_path}, ...})` binds a name to driver+scope, so `dev.py test "<test-name>"` runs it, one scoped run per fragment.
   `s.invocables_with<Args...>()` / `find_test(name)` help build them.
   Aliases never double-run: a full sweep ignores them, and a fragment whose driver is already name-selected is dropped.
+- **A disabled invocable is parked**: its driver skips it unless it is named exactly, or disabled tests run too.
 - **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` that no driver invoked fails the run.
   One an alias can reach is exempt, so a deliberately `disabled` driver parks its invocables (runnable by name) rather than orphaning them.
 - Args are boxed by (decayed) value, so prefer cheap-to-copy / handle types.
@@ -380,10 +413,12 @@ ASYNC_TEST("sg dx12 backend")                        // only an ASYNC body can a
     auto const r = co_await nx::async_invoke_tests_in_sequence("dx12", ctx);  // one child at a time, match order
     co_await nx::async_invoke_tests_in_parallel("dx12", {.max_concurrent = 4}, ctx);   // fan-out; serial under -j1
     co_await nx::async_invoke_tests_in_sequence("webgpu", {.inherit_home = true}, ctx); // children on the DRIVER's home
-    // ^ nx::invocation_options {max_concurrent, inherit_home}. inherit_home is OFF by default and for a thread-BOUND
+    // ^ nx::invocation_options {max_concurrent, inherit_home, after_each}. inherit_home is OFF by default and for a thread-BOUND
     //   subject only (a webgpu device): it homes each child BODY where the driver is homed, and nothing else — the
     //   child's helper coroutines go to compute as any homed body's do. The driver must be homed — main_thread does it.
     //   A child's own main_thread still wins.
+    //   after_each: a cc::unique_function<cc::shared_async<cc::unit>()> a SEQUENCE awaits after every child; ignored in parallel.
+    //   For a subject the children share, e.g. a GPU context sweeping the epochs a test left in flight.
 }
 ```
 
@@ -423,6 +458,9 @@ uv run dev.py test                       # build + run the whole suite
 //   See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
 //   still just a filter, so the disabled and bucket gates hold — only an exact test NAME opens those.
+// --shard K/N (or `dev.py test --shard K/N`) : run only shard K of N, 0-based. A test's shard is a hash of its name,
+//   the same on every run. A driver an alias names (a backend's context) runs in every shard and shards its children
+//   instead, so the shards partition the leaves — what bisecting a flake across a suite takes.
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,
 //   filter_matches, eligible) plus an "aliases" array, the resolved config (filters, filter_mode, selected_bucket,
 //   allow_cross_bucket_naming, run_disabled_tests) and eligible_count / eligible_alias_count, under the rest of
@@ -606,6 +644,8 @@ NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or ea
   Run an assert-enabled preset (debug / relwithdebinfo) to actually exercise them.
 - **The `_AS` exception checks match subclasses too**: a `std::runtime_error` satisfies `..._THROWS_AS(expr, std::exception)`.
 - **`SKIP` inside a `SECTION` skips that section alone**: the sections after it still run, and the test is reported skipped only when nothing in it ran but skips.
+- **Below `SC_SOURCE_SITES=FULL` (the clang development presets) a failure names its site `binary+0xoffset`**, and `dev.py test` resolves it to `file:line` and the source line.
+  A test's own site is its body's entry there; its file is kept, so selecting by file works, but the listings' line is 0.
 - **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` above, not Catch2 generators.
 - **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, and type-parametrized (templated) tests.
   Use `.context()` / `.note()` / `.dump()` for messages, and `BENCHMARK` + `nx::bench` for benchmarks.

@@ -46,7 +46,7 @@ Configured per platform via presets.
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
 | Linux    | `g++` / `gcc`       | `relwithdebinfo-linux-gcc`, the only GCC preset. GCC **13+** for `std::stacktrace`. |
 | macOS    | Homebrew `llvm@22`  | Expects `/opt/homebrew/opt/llvm@22/bin/clang++` (arm64). The formula is versioned so a Homebrew bump cannot move the toolchain under us. Targets macOS 26.0; see [below](#macos-deployment-target-and-sdk). |
-| Android  | NDK (r27+)          | `android-ndk-arm64-*` presets; NDK located via `$ANDROID_NDK_ROOT`. |
+| Android  | NDK (r29)           | `android-ndk-arm64-*` presets; `uv run dev.py install android-sdk`, or `$ANDROID_NDK_ROOT`. |
 | WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
 
 See [platforms.md](platforms.md) for the full tier matrix — which platforms are actively tested, which are supported, and which are planned.
@@ -57,15 +57,14 @@ See [platforms.md](platforms.md) for the full tier matrix — which platforms ar
 26 is the floor the Metal backend already states, since `sg::create_metal_context` refuses anything older; see its [readme](../libs/graphics/shaped-graphics/backends/metal/readme.md).
 Without the pin, Homebrew clang derives its target from the SDK, and picks the SDK for the *running* OS through a per-version config file (`etc/clang/arm64-apple-darwin<N>.cfg`).
 That never appears on the command line, so an OS update changed what every TU was compiled for while ninja saw nothing to rebuild.
-Precompiled headers built before the update were then refused as built for another target, and stayed refused.
-With the pin, a change to the target is a change to the command line, and that rebuilds the PCHs with everything else.
+With the pin, a change to the target is a change to the command line, and that rebuilds everything.
 
 **The SDK is resolved at configure time, not pinned in the presets.**
 Pinning one would need an SDK every machine has, and Xcode 27 ships only the 27 SDK while the Command Line Tools 27 still carry the 26 one.
 So [MacosSdk.cmake](../tools/cmake/MacosSdk.cmake) asks the compiler which SDK it would use and puts that `-isysroot` on every compile and link line.
 That is the config file's newest Command Line Tools SDK, `MacOSX<N>.sdk` for the running OS.
-The SDK then moves only when the build directory is reconfigured, and a reconfigure that moves it rebuilds everything, PCHs included.
-Without it the config file's `-isysroot` stays off the command line, and a PCH built against the old SDK is accepted silently by TUs compiled against the new one.
+The SDK then moves only when the build directory is reconfigured, and a reconfigure that moves it rebuilds everything.
+Without it the config file's `-isysroot` stays off the command line, and objects built against the old SDK are linked silently with TUs compiled against the new one.
 `dev.py doctor` warns when a build directory's SDK is no longer the one the compiler would pick.
 To build against another SDK, configure with `-DCMAKE_OSX_SYSROOT=<path>`, which the module leaves alone.
 
@@ -192,7 +191,7 @@ That is what makes it worth writing down: a checkout missing all of it configure
 
 | Need | For | Absent |
 |------|-----|--------|
-| **Vulkan headers** (`vulkan/vulkan.h`, via `$VULKAN_SDK` or a distro package) | building the vulkan backend at all — `find_package(Vulkan)` gates it | the backend is skipped at configure, and on non-Windows that leaves sg with no backend |
+| **Vulkan headers** (`vulkan/vulkan.h`: `uv run dev.py install vulkan-sdk`, an SDK `$VULKAN_SDK` names, or a distro package) | building the vulkan backend at all — `find_package(Vulkan)` gates it | the backend is skipped at configure, and on non-Windows that leaves sg with no backend |
 | **Vulkan loader + an ICD** | creating a device at run time | `create_vulkan_context` fails with no graphics device |
 | **X11 / XCB / wayland development headers** (Linux) | a *windowed* swapchain, and SDL3 configuring at all | `sr::window_system::try_create` fails and a swapchain reports the platform unsupported; headless present and `--capture` are unaffected |
 | **DXC** (`uv run extern/dxc/download-dxc.py`, run by dev.py) | `ssc::dxc`, so a shader package's HLSL becomes DXIL or SPIR-V | every `slib` `acquire` fails, and the examples that draw are gated out of the build |
@@ -239,6 +238,47 @@ uv run dev.py install sde --archive <file>   # into ~/tools/sde, checked against
 
 Then `~/tools/sde/sde64 -snb -- <program>` (`sde.exe` on Windows) runs a program as a Sandy Bridge, with AVX but no AVX2, and `-help` lists the CPUs.
 There are kits for Windows and Linux x86-64 only.
+
+### Vulkan SDK
+
+LunarG's SDK is what the vulkan backend builds against, and its validation layer is what the vulkan tests run under.
+
+```bash
+uv run dev.py install vulkan-sdk   # into ~/tools/vulkan-sdk/<version>, checked against the SHA-256 tools/vulkan-sdk.version pins
+```
+
+**Every dev.py run then points `VULKAN_SDK` at it**, so no environment variable is yours to set.
+On Linux it also adds the SDK's layers to `VK_ADD_LAYER_PATH`, since an unpacked tarball registers none; the Windows installer registers its own.
+
+### Android SDK
+
+The NDK the Android presets build with, plus what packages and deploys an APK: platform-tools, build-tools and one platform.
+
+```bash
+uv run dev.py install android-sdk --accept-license   # into ~/tools/android-sdk, checked against the SHA-1 tools/android-sdk.version pins
+```
+
+**The flag is yours to pass**, after reading [Google's license](https://developer.android.com/studio/terms); nothing passes it for you.
+**Every dev.py run then points `ANDROID_NDK_ROOT` at it**, unless that is set already.
+It needs no Java, since it fetches the archives directly rather than through sdkmanager.
+`apksigner`, one of those build-tools, does need a Java runtime, which `feat-android-apk` has yet to settle.
+
+### Monado
+
+Monado is an OpenXR runtime with a simulated headset, which shaped-xr's session tests run on so that they need no hardware.
+Without it they skip.
+
+```bash
+uv run dev.py install monado   # builds the commit tools/monado.version pins into ~/tools/monado; Windows only so far
+```
+
+It builds from source with its dependencies through vcpkg, and needs the Vulkan SDK and MSVC.
+**`dev.py test` then selects it by itself, and nothing else does**: [testing.md](../libs/graphics/shaped-xr/docs/testing.md) says why.
+A `VULKAN_SDK` already set wins: an SDK you chose is never replaced by the pinned one.
+On Windows the SDK is LunarG's installer, run unattended.
+Its core component needs admin rights even when installing into your home, so `dev.py` starts it again elevated and Windows asks you to confirm once.
+On Linux it is LunarG's tarball, unpacked, which needs no admin rights.
+There are kits for Windows and Linux x86-64 only; macOS builds the metal backend and needs none.
 
 ## What `dev.py doctor` validates
 

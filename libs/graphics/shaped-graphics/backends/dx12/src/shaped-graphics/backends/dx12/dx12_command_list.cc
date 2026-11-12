@@ -17,6 +17,7 @@
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/barrier/access_inference.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::dx12
@@ -79,6 +80,51 @@ void fold_stream_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
     fold_group_wait(waits, wait);
 }
 } // namespace
+
+void dx12_command_list::bind_software_trace(dx12_pipeline_layout const& layout,
+                                            cc::span<dx12_binding_group const* const> groups,
+                                            bool is_graphics)
+{
+    // each unbounded binding array's length, from the group bound at its slot
+    if (layout.array_lengths_root_param >= 0)
+    {
+        u32 lengths[sg::impl::array_lengths_capacity] = {};
+        for (isize g = 0; g < groups.size() && g < layout.length_bases.size(); ++g)
+            if (groups[g] != nullptr && layout.length_bases[g] >= 0)
+                lengths[layout.length_bases[g]] = groups[g]->unbounded_length;
+        if (is_graphics)
+            _list->SetGraphicsRoot32BitConstants(UINT(layout.array_lengths_root_param),
+                                                 UINT(sg::impl::array_lengths_capacity), lengths, 0);
+        else
+            _list->SetComputeRoot32BitConstants(UINT(layout.array_lengths_root_param),
+                                                UINT(sg::impl::array_lengths_capacity), lengths, 0);
+    }
+    if (layout.software_pool_root_param < 0)
+        return;
+    u32 roots[sg::impl::software_trace_roots] = {};
+    for (isize g = 0; g < groups.size(); ++g)
+        if (groups[g] != nullptr)
+            for (isize k = 0; k < groups[g]->acceleration_roots.size(); ++k)
+            {
+                auto const at = layout.acceleration_bases[g] + k;
+                CC_ASSERT(at < sg::impl::software_trace_roots, "a pipeline traces at most 16 acceleration members in "
+                                                               "software");
+                roots[at] = groups[g]->acceleration_roots[k];
+            }
+    auto const address = _ctx._software_pool.storage().gpu_address;
+    if (is_graphics)
+    {
+        _list->SetGraphicsRootShaderResourceView(UINT(layout.software_pool_root_param), address);
+        _list->SetGraphicsRoot32BitConstants(UINT(layout.software_roots_root_param),
+                                             UINT(sg::impl::software_trace_roots), roots, 0);
+    }
+    else
+    {
+        _list->SetComputeRootShaderResourceView(UINT(layout.software_pool_root_param), address);
+        _list->SetComputeRoot32BitConstants(UINT(layout.software_roots_root_param),
+                                            UINT(sg::impl::software_trace_roots), roots, 0);
+    }
+}
 
 void dx12_command_list::bind_debug_window(dx12_pipeline_layout const& layout,
                                           sg::impl::pipeline_footprint const& footprint,
@@ -379,6 +425,13 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     // Declare each bound group's shader accesses before the dispatch: the tracker emits any intra-list
     // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
+    // the threads dispatch_threads asked for, which a pipeline dispatched by threads alone returns past
+    if (_bound_pipeline_layout->dispatch_grid_root_param >= 0)
+    {
+        u32 const grid[4] = {u32(_dispatch_grid[0]), u32(_dispatch_grid[1]), u32(_dispatch_grid[2]), 0};
+        _list->SetComputeRoot32BitConstants(UINT(_bound_pipeline_layout->dispatch_grid_root_param), 4, grid, 0);
+    }
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
@@ -400,6 +453,7 @@ void dx12_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const& a
 
     // The arguments are read by the command processor, a stage of their own, before the dispatch runs at all.
     track_buffer_access(buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
     declare_array_accesses(_bound_groups, _bound_footprint, _bound_footprint_owner, sg::pipeline_stage_flag::compute,
                            _compute_arrays);
@@ -466,6 +520,7 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
 
     // Declare each bound group's accesses at the raytracing stage (a bound TLAS surfaces as accel_read), same
     // rhythm as compute_dispatch.
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::raytracing);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
@@ -910,11 +965,6 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             return t;
         });
 
-    // The Signal above may have observed device removal, marked rather than thrown inside the lock.
-    // Surface it now that the lock is released; the context is dead, so the post-submit bookkeeping is moot.
-    if (is_device_lost())
-        throw sg::device_lost_exception(device_loss_reason());
-
     // Stamp every resource this list touched with the token, so a later async upload to it defers its copy behind this list — the reverse per-resource cross-queue sync.
     // Reuses the access tracker's touched sets.
     // Done after submit returns the token: the caller then issues the async upload, which reads this stamp, so the ordering holds.
@@ -947,6 +997,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     _command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
+
+    // The Signal above may have observed device removal, marked rather than thrown inside the lock.
+    // Surfaced only after the bookkeeping: this list was executed, and throwing over it would let its destructor
+    // auto-drop it, an assert inside an unwind, which terminates instead of reporting the loss.
+    if (is_device_lost())
+        throw sg::device_lost_exception(device_loss_reason());
     return token;
 }
 
@@ -989,14 +1045,17 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     // Never submitted, so the GPU never touched this allocator.
     // Close the list so it is poolable, then return both to the pool: the list for reuse, the allocator straight to the free pool.
     // It was never executed, so no epoch gates it; reset happens at reuse.
+    // A removed device fails the Close, and this runs from a destructor too, where an assert would terminate.
     HRESULT const closed = cmd._list->Close();
-    CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
+    if (FAILED(closed) && !note_device_removed_if_lost(closed, "command list Close"))
+        CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed");
     _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._list));
     _cmd_pool.return_free_allocator({cc::move(cmd._allocator), cmd._queue});
     if (cmd._pre_list)
     {
         HRESULT const pre_closed = cmd._pre_list->Close();
-        CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
+        if (FAILED(pre_closed) && !note_device_removed_if_lost(pre_closed, "command list Close (entry barriers)"))
+            CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed (entry barriers)");
         _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._pre_list));
         _cmd_pool.return_free_allocator({cc::move(cmd._pre_allocator), cmd._queue});
     }

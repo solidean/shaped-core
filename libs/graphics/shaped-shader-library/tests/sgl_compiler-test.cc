@@ -1163,6 +1163,15 @@ TEST("slib sgl compiler - an entry point's @float picks DXC's float flags for dx
     CHECK(ieee[1] == "-denorm");
     CHECK(ieee[2] == "preserve");
 
+    // vulkan takes the same flags, which DXC writes as SPIR-V's float execution modes and NoContraction
+    auto const vulkan = slib::create_sgl_compiler(
+        std::make_unique<slib_test::fake_compiler>(slib::shader_language::hlsl, sg::shader_format::spirv));
+    auto const vulkan_text = vulkan->preprocess(
+        {.source = source_at("@float(.precise) "), .entry_point = "cs", .stage = sg::shader_stage::compute}, resolve);
+    REQUIRE(vulkan_text.has_value());
+    REQUIRE(vulkan_text.value().dxc_args.size() == 1);
+    CHECK(vulkan_text.value().dxc_args[0] == "-Gis");
+
     auto const wgsl = slib::create_sgl_compiler(slib::create_wgsl_compiler());
     auto const refused = wgsl->preprocess(
         {.source = source_at("@float(.specials) "), .entry_point = "cs", .stage = sg::shader_stage::compute}, resolve);

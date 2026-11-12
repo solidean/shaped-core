@@ -64,7 +64,11 @@ expected_cell expected_at(int x, int y, bool is_cut)
 }
 
 /// Builds the scene, runs `pipeline` over the grid and checks every cell.
-cc::shared_async<cc::unit> trace_grid(sg::context_handle ctx, sg::compute_pipeline_handle pipeline, bool is_cut)
+/// `is_moving` lifts the square's vertices by 2 at time 1 and instance 1 by 2 more, for a pipeline tracing at time 0.5.
+cc::shared_async<cc::unit> trace_grid(sg::context_handle ctx,
+                                      sg::compute_pipeline_handle pipeline,
+                                      bool is_cut,
+                                      bool is_moving = false)
 {
     // a helper is an unhomed async: it moves to where the device lives before its first bound call
     if (auto* const home = ctx->device_home())
@@ -72,19 +76,26 @@ cc::shared_async<cc::unit> trace_grid(sg::context_handle ctx, sg::compute_pipeli
 
     // two triangles, non-indexed, three floats per vertex
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    float const end_vertices[] = {0, 0, 2, 4, 0, 2, 0, 4, 2, 4, 0, 2, 4, 4, 2, 0, 4, 2};
     auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const end_input
+        = ctx->persistent.create_buffer_from_data(end_vertices, sg::buffer_usage::accel_structure_build_input);
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
     auto const hits
         = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
     auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
 
     auto cmd = ctx->create_command_list();
-    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
+    if (is_moving)
+        triangles.later_poses.push_back({.vertices = end_input.raw()});
     auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1));
-    sg::tlas_instance const instances[] = {
+    sg::tlas_instance instances[] = {
         {.blas = blas, .instance_id = 10},
         {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20},
     };
+    if (is_moving)
+        instances[1].transform_at_end = cc::fixed_array<float, 12>{1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 4};
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
@@ -115,8 +126,10 @@ cc::shared_async<cc::unit> trace_grid(sg::context_handle ctx, sg::compute_pipeli
             CHECK(got_ids[at][1] == want.instance_id).context(where);
             CHECK(got_ids[at][2] == want.primitive).context(where);
             CHECK(got_ids[at][3] == want.instance_index).context(where);
+            // at time 0.5 the square has risen by 1, and instance 1 by 1 more
+            auto const lifted = !is_moving ? 0.0f : want.instance_index == 0 ? 1.0f : 2.0f;
             // hardware and the polyfill agree on t and the barycentrics within rounding, never bit for bit
-            CHECK(tg::abs(got_hits[at][0] - want.t) < 1e-4f).context(where);
+            CHECK(tg::abs(got_hits[at][0] - (want.t + lifted)) < 1e-4f).context(where);
             CHECK(tg::abs(got_hits[at][1] - want.u) < 1e-4f).context(where);
             CHECK(tg::abs(got_hits[at][2] - want.v) < 1e-4f).context(where);
         }
@@ -286,6 +299,19 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace forced opaque asks no any-hit decisio
         SKIP("this device has no ray queries");
     auto const pipeline = co_await shaders::raytracing::trace_cells_opaque.acquire_pipeline(*ctx);
     co_await trace_grid(ctx, pipeline, false);
+}
+
+ASYNC_INVOCABLE_TEST("sg - an inline trace meets moving vertices and a moving instance at its ray's time",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    // dx12 and vulkan see motion through an opted-in package alone: software-trace-test.cc
+    if (ctx->implementation_of(sg::feature::ray_query) != sg::feature_implementation::emulated)
+        SKIP("this package traces natively, which sees no motion");
+    auto const pipeline = co_await shaders::raytracing::trace_cells_midway.acquire_pipeline(*ctx);
+    co_await trace_grid(ctx, pipeline, false, true);
 }
 
 // The same square, with an opacity micromap: map 0 subdivides its triangle once and marks all four micro-triangles
