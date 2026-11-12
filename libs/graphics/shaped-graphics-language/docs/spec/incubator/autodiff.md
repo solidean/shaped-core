@@ -58,7 +58,8 @@ So a derivative written by hand is part of the first design, not an extension of
 
 ## The prototype
 
-A prototype is built: [flatten_diff.cc](../../../src/shaped-graphics-language/check/flatten_diff.cc), and its tests are [corpus/derivatives/](../../../tests/corpus/derivatives/).
+A prototype is built: [flatten_diff.cc](../../../src/shaped-graphics-language/check/flatten_diff.cc) and the files it names.
+Its tests are [corpus/derivatives/](../../../tests/corpus/derivatives/).
 They hold both modes to central differences, among them the whole gradient of one Gaussian splat's opacity at a pixel, whose backward kernel every target writes.
 
 * **The surface is two prelude names**, and a call that names a function resolves against an overload the check pass writes for it.

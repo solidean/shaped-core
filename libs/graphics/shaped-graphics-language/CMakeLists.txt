@@ -130,6 +130,10 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flatten_call.cc
     src/shaped-graphics-language/check/flatten_stmt.cc
     src/shaped-graphics-language/check/flatten_diff.cc
+    src/shaped-graphics-language/check/flatten_diff_lower.cc
+    src/shaped-graphics-language/check/flatten_diff_forward.cc
+    src/shaped-graphics-language/check/flatten_diff_straighten.cc
+    src/shaped-graphics-language/check/flatten_diff_backward.cc
     src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
