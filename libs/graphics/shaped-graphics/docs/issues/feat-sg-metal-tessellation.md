@@ -3,6 +3,8 @@ created: 2026-11-11
 parent: epic-sgl-every-stage-everywhere
 refs:
   - file: libs/graphics/shaped-graphics/docs/concepts/raster-pipeline.md
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-12T08:34Z
 ---
 
 # Tessellation on metal
