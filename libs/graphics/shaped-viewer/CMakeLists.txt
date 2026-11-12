@@ -42,6 +42,7 @@ add_library(shaped-viewer
     src/shaped-viewer/capture.cc
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/impl/wavefront_pacing.cc
+    src/shaped-viewer/impl/web_page.cc
     src/shaped-viewer/resources/resource_managers.cc
     src/shaped-viewer/resources/impl/range_allocator.cc
     src/shaped-viewer/resources/value_summary.cc
@@ -165,16 +166,25 @@ target_include_directories(shaped-viewer
 # A legal direction — data/ sits below graphics/ — and the first time sv links anything below shaped-rendering.
 target_link_libraries(shaped-viewer PUBLIC shaped-rendering babel-serializer)
 
+# On the web, `asset_loader::load_async` fetches over the page's `fetch` through clean-net, since a page has no files.
+if(EMSCRIPTEN)
+    target_link_libraries(shaped-viewer PRIVATE clean-net)
+endif()
+
 # sv brings its own context up when a caller sets no sv::acquire_context, so it needs one backend to fall back on.
 # PRIVATE: the fallback is an implementation detail, and a consumer that wants a different backend overrides the hook
 # rather than inheriting this one.
-# dx12 on Windows and metal on Apple platforms; anywhere else a caller supplies the context.
+# dx12 on Windows, metal on Apple platforms and webgpu on the web; anywhere else a caller supplies the context.
+# webgpu's device is requested rather than created, so only `acquire_viewer_context_async` reaches that default.
 if(WIN32 AND TARGET shaped-graphics-dx12)
     target_link_libraries(shaped-viewer PRIVATE shaped-graphics-dx12)
     target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_DX12=1)
 elseif(APPLE AND TARGET shaped-graphics-metal)
     target_link_libraries(shaped-viewer PRIVATE shaped-graphics-metal)
     target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_METAL=1)
+elseif(EMSCRIPTEN AND TARGET shaped-graphics-webgpu)
+    target_link_libraries(shaped-viewer PRIVATE shaped-graphics-webgpu)
+    target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_WEBGPU=1)
 endif()
 
 sc_target_pch(shaped-viewer SG)
@@ -190,6 +200,7 @@ target_compile_options(shaped-viewer
 # Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
 # Module `hybrid` is exported because the forward hybrid's pixel shader is generated too, and lists its inline constants.
 # Module `raster_bound` is exported because the bound raster mode's pixel shader is generated too, and lists its group 0.
+# Modules `raster_bound_shadows` and `raster_bound_shadow_maps` are exported so the host can bind their passes' groups.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
 # Must be declared here, in the CMakeLists that defines the target — the generated sources are added as
 # PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped. Deliberately not gated on a compiler:
@@ -206,10 +217,17 @@ sc_add_shader_package(
         module:raster
         module:hybrid
         module:raster_bound
+        module:raster_bound_shadows
+        module:raster_bound_shadow_maps
+        module:raster_bound_reflections
+        module:raster_bound_indirect
         tracer_pipeline.sgl:*
         wavefront.sgl:*
         raster_pass.sgl:*
         raster_bound_pass.sgl:*
+        raster_bound_shadow_pass.sgl:*
+        raster_bound_shadow_map_pass.sgl:*
+        raster_bound_indirect_pass.sgl:*
         raster_cull.sgl:*
         hybrid_pass.sgl:*
         layout.sgl:*

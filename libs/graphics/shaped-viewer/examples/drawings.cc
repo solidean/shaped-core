@@ -1,4 +1,4 @@
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -16,6 +16,7 @@ using namespace cc::primitive_defines;
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/drawings
+// On the web, build the emscripten-webgpu preset and open web/drawings.html, served over https or from localhost.
 
 namespace
 {
@@ -90,7 +91,7 @@ namespace
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/drawings")
+ASYNC_EXAMPLE("shaped-viewer/drawings")
 {
     auto const triangles = cube_triangles(2.0f);
     auto const cube = sv::mesh{.name = "cube", .geometry = sv::triangle_geometry::create_from_positions(triangles)};
@@ -100,9 +101,10 @@ EXAMPLE("shaped-viewer/drawings")
     auto const logo_id = set.add(logo());
     auto const legend_id = set.add(legend(logo()));
 
-    for (auto f : sv::interactive("shaped-viewer/drawings"))
+    auto frames = sv::interactive_async("shaped-viewer/drawings");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0, 0),
                             .distance = 6.0,
                             .azimuth = tg::angle_d::make_from_degree(35.0),

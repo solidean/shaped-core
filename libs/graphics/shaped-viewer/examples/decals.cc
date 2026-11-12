@@ -1,4 +1,4 @@
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -13,6 +13,7 @@ using namespace cc::primitive_defines;
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/decals
+// On the web, build the emscripten-webgpu preset and open web/decals.html, served over https or from localhost.
 
 namespace
 {
@@ -61,7 +62,7 @@ namespace
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/decals")
+ASYNC_EXAMPLE("shaped-viewer/decals")
 {
     auto const floor
         = sv::mesh{.name = "floor",
@@ -87,9 +88,10 @@ EXAMPLE("shaped-viewer/decals")
     auto const plate = badge();
     auto const rings = target();
 
-    for (auto f : sv::interactive("shaped-viewer/decals"))
+    auto frames = sv::interactive_async("shaped-viewer/decals");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0.6, 0),
                             .distance = 6.5,
                             .azimuth = tg::angle_d::make_from_degree(20.0),

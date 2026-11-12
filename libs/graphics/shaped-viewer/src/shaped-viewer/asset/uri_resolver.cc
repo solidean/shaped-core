@@ -70,6 +70,11 @@ cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri)
     return g_resolve_uri ? g_resolve_uri(uri) : impl::resolve_uri_from_filesystem(uri);
 }
 
+bool impl::resolve_uri_is_set()
+{
+    return bool(g_resolve_uri);
+}
+
 uri_resolver_provider filesystem_resolver(filesystem_resolver_options options)
 {
     return [max_bytes = options.max_file_bytes](cc::string_view uri)

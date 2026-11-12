@@ -1,6 +1,6 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
 #include <typed-geometry/linalg/quat.hh>
@@ -27,6 +27,7 @@ using namespace cc::primitive_defines;
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/openpbr-spheres
+// On the web, build the emscripten-webgpu preset and open web/openpbr-spheres.html, served over https or from localhost.
 
 namespace
 {
@@ -408,7 +409,7 @@ struct sweep_row
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/openpbr-spheres")
+ASYNC_EXAMPLE("shaped-viewer/openpbr-spheres")
 {
     // Built once, outside the loop: this is what pins the buffers and hashes their contents, so placing them every frame
     // uploads nothing after the first.
@@ -442,9 +443,10 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
                        {sv::material_attribute_binding::of("base_color", tg::vec3f(0.32f, 0.32f, 0.34f)),
                         sv::material_attribute_binding::of("specular_roughness", 0.55f)}))};
 
-    for (auto f : sv::interactive("shaped-viewer/openpbr-spheres"))
+    auto frames = sv::interactive_async("shaped-viewer/openpbr-spheres");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
 
         // Above and behind the grid, pitched down far enough that it reads as a GRID rather than as a corridor.
         //

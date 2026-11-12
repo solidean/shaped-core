@@ -9,6 +9,46 @@
 # SDL3 is deliberately NOT part of the gate. A capture run brings no window system up at all, so an example is
 # capturable wherever the tracing stack exists; without SDL3 only the interactive path is unavailable, and that one
 # already fails cleanly.
+#
+# On the web, only the examples that loop with sv::interactive_async and draw what raster_bound draws, each as a page
+# of its own: <build>/web/<stem>.html.
+set(_sv_web_example_stems hello-cube openpbr-spheres load-asset lights light-stage quadric-gallery quadric-arrows mesh-structure mesh-structure-dense tg-objects drawings decals research-studio)
+if(EMSCRIPTEN)
+    if(NOT SC_BUILD_EXAMPLES OR NOT TARGET shaped-graphics-webgpu)
+        return()
+    endif()
+    sc_resolve_example_backend(_sv_web_backend _sv_web_mode SUPPORTS webgpu)
+    if(_sv_web_mode STREQUAL "none")
+        return()
+    endif()
+    if(_sv_web_mode STREQUAL "stub")
+        foreach(_stem IN LISTS _sv_web_example_stems)
+            sc_add_example_backend_stub(shaped-viewer-${_stem}-example "${SC_EXAMPLE_BACKEND}" SUPPORTS webgpu)
+        endforeach()
+        return()
+    endif()
+
+    list(TRANSFORM _sv_web_example_stems APPEND ".cc" OUTPUT_VARIABLE _sv_web_example_sources)
+    sc_add_single_file_examples(shaped-viewer
+        FILES
+        ${_sv_web_example_sources}
+        LINK shaped-viewer
+    )
+    foreach(_stem IN LISTS _sv_web_example_stems)
+        sc_add_example_web_page(shaped-viewer-${_stem}-example
+            EXAMPLE shaped-viewer/${_stem}
+            OUTPUT ${_stem}
+            SHELL ${CMAKE_CURRENT_SOURCE_DIR}/../web/example-shell.html
+            LINK_OPTIONS
+                # The page embeds sv's SGL sources, whose `<` the HTML minifier reads as a tag.
+                "SHELL:-s MINIFY_HTML=0"
+                # And the UI font its text is drawn in.
+                ${SR_WEB_UI_FONT_LINK_OPTION}
+        )
+    endforeach()
+    return()
+endif()
+
 if(NOT ((WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12) OR (APPLE AND TARGET shaped-graphics-metal)))
     return()
 endif()

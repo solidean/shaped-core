@@ -2,7 +2,7 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <imgui/imgui.h>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -22,12 +22,14 @@ using namespace cc::primitive_defines;
 //   left-drag    orbit          middle-drag    pan          wheel    zoom
 //   the panel picks the scene, one of the six sheet views, and the renderer
 //
-// A capture takes its scene from SV_STUDIO_SCENE (an index), its renderer from SV_STUDIO_MODE (0 deferred, 1 forward, 2 traced)
+// A capture takes its scene from SV_STUDIO_SCENE (an index), its renderer from SV_STUDIO_MODE (0 deferred, 1 forward, 2 traced, 3 automatic)
 // its sheet view from SV_STUDIO_VIEW (0 front to 5 top, as the panel lists them), its still-image denoise from SV_STUDIO_STILL (an index into k_stills),
 // and the hybrid's bounces from SV_STUDIO_BOUNCES (1 or 2).
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/research-studio
+// On the web, build the emscripten-webgpu preset and open web/research-studio.html, served with the installed scenes
+// beside it as `scenes/`: the bound raster mode draws it there, without the renderer and denoiser choices.
 
 namespace
 {
@@ -199,7 +201,7 @@ constexpr int k_still_count = int(sizeof(k_stills) / sizeof(k_stills[0]));
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/research-studio")
+ASYNC_EXAMPLE("shaped-viewer/research-studio")
 {
     // The research scenes leave the volume off solid glass, so a closed glass mesh is read as the solid it is.
     auto const loader = sv::asset_loader({.closed_transmission_is_solid = true});
@@ -224,7 +226,8 @@ EXAMPLE("shaped-viewer/research-studio")
     auto scene_index = from_environment("SV_STUDIO_SCENE", 0, k_scene_count);
     auto view_index = from_environment("SV_STUDIO_VIEW", 0, 6);
     auto reframe = true;
-    auto mode = from_environment("SV_STUDIO_MODE", 0, 3);       // 0 hybrid deferred, 1 hybrid forward, 2 path traced
+    auto mode
+        = from_environment("SV_STUDIO_MODE", 0, 4); // 0 hybrid deferred, 1 hybrid forward, 2 path traced, 3 automatic
     auto bounces = from_environment("SV_STUDIO_BOUNCES", 0, 3); // render_settings::hybrid_bounces, 0 for its default
     if (bounces == 0)
         bounces = sv::render_settings{}.hybrid_bounces;
@@ -245,10 +248,16 @@ EXAMPLE("shaped-viewer/research-studio")
     auto const floor_exposure = sv::studio_exposure(sv::studio_dome(sv::studio_setup::floor));
     auto const ceiling_exposure = sv::studio_exposure(sv::studio_dome(sv::studio_setup::ceiling));
 
-    for (auto f : sv::interactive("shaped-viewer/research-studio"))
+    // A scene left behind gives its GPU resources back within a few frames: a browser's acceleration pool holds one
+    // large scene, not several.
+    auto const released = sv::manager_config{.budget = {.max_idle_epochs = 4}};
+    auto frames = sv::interactive_async(
+        "shaped-viewer/research-studio",
+        {.resources = {.meshes = released, .quadrics = released, .textures = released, .attributes = released}});
+    while (auto* f = co_await frames.next())
     {
         // The panel first: a scene picked there is the one this frame loads, frames and draws.
-        if (f.imgui())
+        if (f->imgui())
         {
             ImGui::Begin("studio");
             if (ImGui::BeginCombo("scene", k_scenes[scene_index].name))
@@ -271,9 +280,13 @@ EXAMPLE("shaped-viewer/research-studio")
                     reframe = true;
                 }
             }
+#ifndef __EMSCRIPTEN__
+            // A page has no ray-tracing pipeline, so it draws in the bound raster mode and none of these apply there.
             ImGui::RadioButton("hybrid, deferred", &mode, 0);
             ImGui::RadioButton("hybrid, forward", &mode, 1);
             ImGui::RadioButton("path traced", &mode, 2);
+            // What the device picks, `SV_AUTOMATIC_MODE` included: how the bound raster mode a page draws in is seen here.
+            ImGui::RadioButton("automatic", &mode, 3);
             if (mode != 2)
             {
                 ImGui::SliderInt("hybrid bounces", &bounces, 1, 2);
@@ -321,6 +334,7 @@ EXAMPLE("shaped-viewer/research-studio")
                 ImGui::SliderInt("temporal frames", &temporal_frames, 0, 256);
                 ImGui::SliderInt("fade frames", &fade_frames, 0, 64);
             }
+#endif
             ImGui::Checkbox("ceiling setup", &ceiling);
             ImGui::SliderFloat("exposure offset", &exposure_offset, -3.0f, 3.0f, "%.1f stops");
             restart = ImGui::Button("reset accumulation");
@@ -336,9 +350,19 @@ EXAMPLE("shaped-viewer/research-studio")
             ImGui::End();
         }
 
+        // Only the scene shown stays loaded, so its resources are the only ones in use.
+        for (auto i = 0; i < k_scene_count; ++i)
+            if (i != scene_index)
+                assets[i] = cc::nullopt;
+
         auto const& entry = k_scenes[scene_index];
         if (!assets[scene_index].has_value())
+#ifdef __EMSCRIPTEN__
+            // Fetched relative to the page, which the dev server serves the installed scenes beside as `scenes/`.
+            assets[scene_index] = loader.load_async(cc::format("scenes/{}", entry.file));
+#else
             assets[scene_index] = loader.load_async(cc::format("{}/{}", SV_RESEARCH_SCENES_DIR, entry.file));
+#endif
         auto& asset = assets[scene_index].value();
 
         if (asset.has_error())
@@ -352,7 +376,7 @@ EXAMPLE("shaped-viewer/research-studio")
         }
         if (!asset.poll())
         {
-            f.hold_capture("the scene is still loading");
+            f->hold_capture("the scene is still loading");
             continue;
         }
         if (!framed[scene_index])
@@ -362,7 +386,7 @@ EXAMPLE("shaped-viewer/research-studio")
             framed[scene_index] = true;
         }
 
-        auto view = f.window().view();
+        auto view = f->window().view();
         if (restart)
             view.restart_accumulation();
         samples = view.accumulated_samples();
@@ -401,7 +425,13 @@ EXAMPLE("shaped-viewer/research-studio")
                                        .scale = k_scales[scale]};
         auto const temporal = k_stills[still].temporal_forever ? u32(-1) : u32(temporal_frames);
         auto const scene_settings = sv::render_settings{
-            .mode = mode == 2 ? sv::render_mode::wavefront : sv::render_mode::hybrid,
+#ifdef __EMSCRIPTEN__
+            .mode = sv::render_mode::automatic,
+#else
+            .mode = mode == 3 ? sv::render_mode::automatic
+                  : mode == 2 ? sv::render_mode::wavefront
+                              : sv::render_mode::hybrid,
+#endif
             .hybrid_lighting = mode == 1 ? sv::hybrid_lighting::forward : sv::hybrid_lighting::deferred,
             .hybrid_bounces = bounces,
             .hybrid_moving_samples = moving_samples,

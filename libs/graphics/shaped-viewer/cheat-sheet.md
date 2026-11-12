@@ -644,6 +644,7 @@ loader.load(babel::gltf::data)   // an ALREADY-PARSED document — no re-read fo
 loader.load(babel::obj::data) / loader.load(babel::stl::data)
 loader.load(babel::fbx::data, name, base_uri)   // read it with {.triangulate = true}; base_uri is what texture file names join against
 loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
+                                 //   on the web, with no resolver installed: fetched over the page's fetch, relative to the page
 sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl | fbx
 
 sv::asset                        // a load in flight; move-only; dropping it mid-load WAITS for the worker to leave the loader
@@ -1039,14 +1040,25 @@ sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_functi
                                  //   sv::set_acquire_context([] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::warp}); }); pass {} to clear
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
+                                 //   the default is dx12 on Windows, metal on Apple, webgpu on the web, where only the async form reaches it
+sv::acquire_viewer_context_async()  // -> cc::shared_async<cc::result<sg::context_handle>>; the same, awaited: on the web the page's WebGPU device
 
-sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count, headless }
+sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count, headless, surface }
                                  //   title is optional: unset takes the id, up to its ## — so naming a viewer usually titles it too
                                  //   headless: no window system, no window, no swapchain, nothing presented — composites into an offscreen texture
+                                 //   surface: an sg::swapchain_description to present into without a window system — the page's canvas on the web;
+                                 //     its client_size or headless_extent is the first size, nothing polls input, request_close ends the loop
+                                 //     viewer.set_surface_size(size) asks a canvas for a new size from the next frame on
                                  //   SC_CAPTURE turns this on by itself and installs a capture, but only for an example its .capture.json declares
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
 sv::interactive([ctx,] "id", cfg, req)  // takes this sr::capture_request instead of the environment; req must be active with an output path
                                  //   how a test reaches req.clock_seconds, so a capture timeout is advanced rather than waited out
+sv::interactive_async([ctx,] "id", cfg)  // -> sv::async_frames owning its viewer: THE LOOP THAT RUNS IN A BROWSER, natively the same loop
+                                 //   auto frames = sv::interactive_async("id");  while (auto* f = co_await frames.next()) { ... }  // in an ASYNC_EXAMPLE
+                                 //   in a page: draws into #canvas, takes its input, follows its size, paces to the browser's frames,
+                                 //     clears the shell's loading overlay; under node: headless, 300 frames, as a smoke run
+                                 //   the frame is good until the next next(); a loop left by break finishes its viewer in the background
+                                 //     on a context that never blocks (sv::background_work covers it), in the destructor elsewhere
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
                                  //   yields sv::frame_scope: a frame whose destructor presents, so the loop body needs no present call
