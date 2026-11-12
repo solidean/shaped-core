@@ -367,6 +367,8 @@ It is opt-in and never required: without it, everything builds and tests exactly
 - **`ship` can prove instead of gating, when asked**: with the server opted in and `ship --proof` or the project's `BuildServer.ship_proof`,
   the server's `proof` replaces the gate's build and test steps: a green build of exactly this tree, every test green at least once,
   the tests without such a result run, then the ones most likely affected within a short budget; old tests' failures it only reports.
+  It judges the change being pushed: what its likely affected tests ran while it was made counts toward the budget,
+  and a red blocks only when the change turned it red; a flaky one, one red before it, or one nothing ties to it is listed to be filed as an issue.
   The static gates run as always, `--no-proof` runs the full gate, and so does any problem with the server; off by default.
 
 [build_server.py](../../tools/dev/lib/pipeline/build_server.py) has the client contract, and [its self-test](../../tools/dev/build-server-self-test.py) runs with `check`.

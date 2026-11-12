@@ -16,9 +16,11 @@ The client contract, which is all dev.py knows of a server:
   `cached`, `verified`, `exit_code`, `ms`, `stored_ms`, `seed`, and `log`, a file with the binary's whole console output;
 - each binary's JUnit report is `<binary>.results.xml` beside it, where dev.py keeps its own;
 - exit 0, or 1 when any binary failed, with that array is a finished test run, 130 a cancelled one, 10-13 as above;
-- `<client> proof <build-dir> --json [-j N]` builds the dir and proves its source state from the server's records: every test green at least once,
+- `<client> proof <build-dir> --json --delta [-j N]` builds the dir and proves its source state from the server's records: every test green at least once,
   the ones without such a result run, then the ones most likely affected within a short budget;
-  it prints one JSON object on stdout with `verdict` (`pass` or `fail`), `reasons`, `plan`, `ran` and `sideband`, progress on stderr;
+  `--delta` judges the change a push sends: runs of its affected tests since it began count toward the budget,
+  and a red blocks only when the change turned it red, the others listed in `filed` to be filed as issues;
+  it prints one JSON object on stdout with `verdict` (`pass` or `fail`), `reasons`, `plan`, `ran`, `sideband` and `filed`, progress on stderr;
 - exit 0 with that object is a proof that holds, 1 one that does not, 10-13 as above.
 
 What opts in, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1|0`, the project's `BuildServer.enabled`.
@@ -315,7 +317,7 @@ class Session:
         if not self._ensure(env, doing="proving"):
             return None
         assert self.command is not None
-        cmd = [*self.command, "proof", str(build_dir), "--json"]
+        cmd = [*self.command, "proof", str(build_dir), "--json", "--delta"]
         jobs = (env if env is not None else os.environ).get("CMAKE_BUILD_PARALLEL_LEVEL", "").strip()
         if jobs.isdigit() and int(jobs) > 0:
             cmd += ["-j", jobs]

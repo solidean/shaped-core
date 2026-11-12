@@ -11,7 +11,8 @@ the tests ran on this change already, and what came in was gated by whoever push
 A submodule's push is retried the same way, its own static gate re-run and its pointer bumped again, within the same rounds.
 
 The gate builds and tests through the build server when it is opted in, as `check` does; `--no-server` keeps every gate off it.
-With the build server opted in, `--proof` (or the project's `BuildServer.ship_proof`) replaces the gate's build and test steps with the server's proof:
+With the build server opted in, `--proof` (or the project's `BuildServer.ship_proof`) replaces the gate's build and test steps with the server's proof
+of the change being pushed; a red blocks only when the change turned it red, and the others are listed to be filed:
 a green build of exactly this tree and every test green at least once, the tests without such a result run, then the likeliest affected within a short budget.
 The static gates run as always; any problem with the server runs the full gate instead (lib/pipeline/build_server.py).
 """
@@ -200,6 +201,14 @@ def _prove(ctx: Context, server: build_server.Session) -> bool | None:
          f"{len(plan.get('over_budget') or [])} past the budget")
     for s in proof.report.get("sideband") or []:
         _say(f"sideband, not blocking: {s.get('config')} {s.get('mode')} {s.get('binary')}: {s.get('outcome')} {s.get('range')}")
+    # Reds the change did not cause, by the server's judgement: flaky, red before it, or unrelated by the evidence.
+    # The push goes on; each is the session's to file as an issue, after `issues known <test>`.
+    filed = proof.report.get("filed") or []
+    for f in filed:
+        dev.ui.write_line(console.yellow(
+            f"ship: not blocking, file an issue: {f.get('binary')}: {f.get('test')}: {f.get('outcome')} ({f.get('filed')})"))
+    if filed:
+        _say(f"{len(filed)} red test(s) above are not this change's; `uv run dev.py issues known <test>`, then file each that is not known")
     for reason in proof.reasons:
         dev.ui.write_line(console.red(f"ship: proof: {reason}"))
     return proof.passed

@@ -433,7 +433,7 @@ def _prove(f: Fixture, report: dict | None) -> bs.Proof | None:
 def test_a_proof_that_holds_passes_with_the_build_s_cap(f: Fixture) -> None:
     proof = _prove(f, _report("pass", must_run=2))
     assert proof is not None and proof.passed and proof.reasons == [], proof
-    assert f.calls() == ["ensure --quiet", f"proof {f.dir} --json -j 8"], f.calls()
+    assert f.calls() == ["ensure --quiet", f"proof {f.dir} --json --delta -j 8"], f.calls()
     assert not f.session.warnings
 
 
