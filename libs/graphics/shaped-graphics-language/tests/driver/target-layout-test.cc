@@ -120,7 +120,7 @@ constexpr cc::string_view k_clusters = "use accel\n"
                                        "    records.clusters[id.x] = c\n";
 } // namespace
 
-TEST("sgl target layout - @bits packs fields into words, and @absent drops one a target lacks (CHK-524)")
+TEST("sgl target layout - @bits packs fields into words, and @absent drops one a target lacks (CHK-526)")
 {
     auto const vulkan = compiled(k_clusters, target::hlsl_vulkan);
     auto const dx12 = compiled(k_clusters, target::hlsl_dx12);

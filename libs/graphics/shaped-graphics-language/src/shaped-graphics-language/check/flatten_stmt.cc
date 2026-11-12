@@ -1025,7 +1025,7 @@ void sgl::check::impl::flattener::place_target_layouts()
                 return to;
         return type;
     };
-    // CHK-524: where each field the check judged stands in the branch's record, by the branch that made it
+    // CHK-526: where each field the check judged stands in the branch's record, by the branch that made it
     auto const places_of = [&](type_id to) -> cc::span<layout_place const>
     {
         for (auto const& b : c.out.target_type_branches)
@@ -1120,7 +1120,7 @@ void sgl::check::impl::flattener::place_target_layouts()
                                  c.out.name_of(from), is_dropped_effect ? "drop" : "write in another order"));
             continue;
         }
-        // CHK-524: each member of the record from the arguments it holds, a packed word ORing its fields in place
+        // CHK-526: each member of the record from the arguments it holds, a packed word ORing its fields in place
         auto members = cc::vector<flat_expr_id>::create_filled(c.out.at(to).members.count, flat_expr_id::none);
         for (auto a = isize(0); a < arguments.size(); ++a)
         {

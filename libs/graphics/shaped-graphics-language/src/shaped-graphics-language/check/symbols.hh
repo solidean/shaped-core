@@ -436,10 +436,10 @@ struct sgl::check::member_info
     /// `@sampler(name)` on a texture that names a file-scope sampler rather than a member (CHK-279); none otherwise.
     /// At most one of it and `default_sampler` is set.
     symbol_id default_file_sampler = symbol_id::none;
-    /// `@bits(n)` in a branch of a `@target_layout` struct: the field takes the next `n` bits of a 32-bit word (CHK-524);
+    /// `@bits(n)` in a branch of a `@target_layout` struct: the field takes the next `n` bits of a 32-bit word (CHK-526);
     /// 0 for a field of its own.
     i32 layout_bits = 0;
-    /// `@absent` in such a branch: the target's record has no such field, and a construction drops it (CHK-524).
+    /// `@absent` in such a branch: the target's record has no such field, and a construction drops it (CHK-526).
     bool is_absent = false;
 
     bool operator==(member_info const&) const = default;

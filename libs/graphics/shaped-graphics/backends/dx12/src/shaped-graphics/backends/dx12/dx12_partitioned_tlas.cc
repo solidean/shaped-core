@@ -28,6 +28,13 @@ u64 dx12_context::blas_address_of(sg::blas const& blas) const
     return u64(dx->_dx12_storage->gpu_virtual_address());
 }
 
+u64 dx12_context::buffer_address_of(sg::raw_buffer const& buffer) const
+{
+    auto const* const dx = dynamic_cast<dx12_buffer const*>(&buffer);
+    CC_ASSERT(dx != nullptr, "buffer_address_of: a buffer is not a dx12 buffer");
+    return u64(dx->gpu_virtual_address());
+}
+
 #if SG_HAS_AGILITY_PREVIEW
 namespace
 {
@@ -254,7 +261,7 @@ void dx12_command_list::raytracing_update_partitioned_tlas_indirect(sg::partitio
 
     struct kind
     {
-        sg::ptlas_indirect_records const* records;
+        sg::indirect_records const* records;
         D3D12_RTAS_PARTITIONED_TLAS_OPERATION_TYPE type;
         isize stride;
     };
@@ -271,7 +278,7 @@ void dx12_command_list::raytracing_update_partitioned_tlas_indirect(sg::partitio
 
     // The operations with no count yet, each counted below by a copy of the count its shader wrote.
     auto operations = cc::vector<D3D12_RTAS_PARTITIONED_TLAS_OPERATION>();
-    auto counted = cc::vector<sg::ptlas_indirect_records const*>();
+    auto counted = cc::vector<sg::indirect_records const*>();
     auto read = cc::vector<dx12_buffer_handle>();
     for (auto const& k : kinds)
     {

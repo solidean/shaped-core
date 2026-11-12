@@ -372,6 +372,8 @@ protected:
                                             cc::vector<sg::blas_handle>&& released) override;
     [[nodiscard]] sg::cluster_set_handle raytracing_build_clusters(cc::span<sg::cluster_triangles const> clusters,
                                                                    sg::accel_build_flags flags) override;
+    void raytracing_build_clusters_indirect(sg::cluster_pool const& pool,
+                                            sg::cluster_indirect_build const& build) override;
     [[nodiscard]] cc::vector<sg::blas_handle> raytracing_build_cluster_blas(sg::cluster_set_handle const& clusters,
                                                                             cc::span<sg::cluster_range const> ranges,
                                                                             sg::accel_build_flags flags,

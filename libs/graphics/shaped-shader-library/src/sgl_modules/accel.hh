@@ -8,6 +8,8 @@
 namespace sgl_modules::accel
 {
 using blas_ref = sg::gpu_blas_ref;
+using buffer_ref = sg::gpu_buffer_ref;
+using clas_triangles = sg::gpu_clas_triangles;
 using ptlas_write = sg::gpu_ptlas_write;
 using ptlas_update = sg::gpu_ptlas_update;
 using ptlas_translation = sg::gpu_ptlas_translation;

@@ -1043,7 +1043,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_coherent = is_coherent,
             .padding = member_padding,
         });
-        // CHK-524: where a field stands in one target's record, which a struct with a target layout alone says
+        // CHK-526: where a field stands in one target's record, which a struct with a target layout alone says
         if (auto const* const bits = is_struct ? find_attribute(file, f.attributes, "bits") : nullptr)
         {
             auto const arguments = ast.at(bits->arguments);
@@ -1171,7 +1171,7 @@ void checker::compile_struct(symbol_id id)
     type_parameter_names.resize_down_to(type_parameter_names.size() - parameters.size());
     for (auto const& m : out.at(members))
         (void)refuse_held_layout(file, span_of(file, ast_of(file).at(m.field).type), m.type, "a struct field");
-    // CHK-524: a field's place in a target's record is a branch's of a struct with a target layout
+    // CHK-526: a field's place in a target's record is a branch's of a struct with a target layout
     if (find_attribute(file, d.attributes, "target_layout") == nullptr)
         for (auto const& m : out.at(members))
             if (m.layout_bits != 0 || m.is_absent)

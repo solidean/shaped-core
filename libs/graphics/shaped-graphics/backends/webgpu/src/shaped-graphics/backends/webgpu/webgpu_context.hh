@@ -198,6 +198,9 @@ public:
         case sg::feature::partitioned_tlas:
             // the polyfill's structures are rebuilt whole, with no partitions to update in place
             return false;
+        case sg::feature::clustered_geometry:
+            // the polyfill builds no structure from clusters
+            return false;
         case sg::feature::vertex_pipeline_stores:
             // a vertex stage binds no writable storage on any WebGPU device
             return false;

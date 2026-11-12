@@ -615,6 +615,10 @@ public:
     [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
         sg::partitioned_tlas_description const& desc) override;
     [[nodiscard]] u64 blas_address_of(sg::blas const& blas) const override;
+    [[nodiscard]] u64 buffer_address_of(sg::raw_buffer const& buffer) const override;
+    /// Sizes and allocates a cluster pool for `desc`'s capacities; its first build fills it.
+    [[nodiscard]] cc::result<sg::cluster_pool_handle> try_create_cluster_pool(
+        sg::cluster_pool_description const& desc) override;
 
     [[nodiscard]] cc::result<vulkan_swapchain_handle> create_vulkan_swapchain(sg::swapchain_description const& desc);
 

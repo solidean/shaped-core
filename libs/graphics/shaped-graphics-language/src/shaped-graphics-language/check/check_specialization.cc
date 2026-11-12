@@ -474,7 +474,7 @@ void checker::compile_layout_branches(symbol_id id,
                               why));
             continue;
         }
-        // CHK-524: the record as the target lays it out: a run of @bits fields shares one word, and an @absent one is
+        // CHK-526: the record as the target lays it out: a run of @bits fields shares one word, and an @absent one is
         // none; each field the check judged is then placed by name
         auto placed = cc::vector<member_info>();
         auto by_name = cc::vector<layout_place>();

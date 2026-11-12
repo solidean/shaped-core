@@ -966,7 +966,7 @@ cmd.raytracing.update(ptlas, {.writes, .updates, .clears, .translations})
 ctx.persistent.create_blas_table(span<blas_handle const>)
                                                    // -> blas_table_handle: holds them; table->view() binds as buffer[accel.blas_ref]
 cmd.raytracing.update_indirect(ptlas, {.writes, .updates, .translations, .tables})
-                                                   // records a shader wrote (SGL's `use accel`), each ptlas_indirect_records
+                                                   // records a shader wrote (SGL's `use accel`), each indirect_records
                                                    // {records, offset, max_count, count, count_offset}; sg copies each u32 count
                                                    // into the operation it writes. gpu_ptlas_write is opaque: only a shader fills one
 cmd.raytracing.build_clusters(span<cluster_triangles const>{vertices, vertex_count, indices, triangle_count, cluster_id,
@@ -975,6 +975,14 @@ cmd.raytracing.build_clusters(span<cluster_triangles const>{vertices, vertex_cou
                                                    //    needs sg::feature::clustered_geometry (vulkan's NV extension today)
 cmd.raytracing.build_cluster_blas(set, span<cluster_range const>{first, count}, flags, hit_record_stride=1)
                                                    // -> vector<blas_handle>, one per contiguous range, each holding the set
+ctx.persistent.create_cluster_pool({.max_clusters, .max_total_triangles, .max_total_vertices, .max_triangles_per_cluster,
+                                    .max_vertices_per_cluster, .max_geometry_index, .index_type, .flags})
+                                                   // -> cluster_pool_handle: a cluster_set rebuilt in place; generation()
+ctx.persistent.create_buffer_table(span<raw_buffer_handle const>)
+                                                   // -> buffer_table_handle: table->view() binds as buffer[accel.buffer_ref]
+cmd.raytracing.build_clusters_indirect(pool, {.clusters = indirect_records{...}, .tables})
+                                                   // accel.clas_triangles records a shader wrote; bumps the generation, so
+                                                   // a BLAS built before is_stale() and a tlas build asserts on it
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

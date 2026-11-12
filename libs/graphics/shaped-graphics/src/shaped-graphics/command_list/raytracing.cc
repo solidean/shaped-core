@@ -172,6 +172,8 @@ tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance con
        && _cmd.context().implementation_of(feature::ray_tracing_motion_blur) != feature_implementation::native;
     for (auto const& instance : instances)
     {
+        CC_ASSERT(instance.blas == nullptr || !instance.blas->is_stale(), "build_tlas: an instance's cluster BLAS is "
+                                                                          "stale: its pool was rebuilt since");
         CC_ASSERT(!instance.transform_at_end.has_value() || _cmd.context().supports(feature::ray_tracing_motion_blur),
                   "build_tlas: an instance moves, and this context has no sg::feature::ray_tracing_motion_blur");
         CC_ASSERT(!instance.transform_at_end.has_value() || !has_native_trace || pool != nullptr,
@@ -218,6 +220,12 @@ cluster_set_handle command_list::raytracing_build_clusters(cc::span<cluster_tria
     return nullptr;
 }
 
+void command_list::raytracing_build_clusters_indirect(cluster_pool const&, cluster_indirect_build const&)
+{
+    CC_ASSERT(false, "a backend that reports sg::feature::clustered_geometry overrides "
+                     "raytracing_build_clusters_indirect");
+}
+
 cc::vector<blas_handle> command_list::raytracing_build_cluster_blas(cluster_set_handle const&,
                                                                     cc::span<cluster_range const>,
                                                                     accel_build_flags,
@@ -230,7 +238,7 @@ cc::vector<blas_handle> command_list::raytracing_build_cluster_blas(cluster_set_
 namespace
 {
 /// Checks one kind of record against the buffers it names, which the build then reads.
-void validate_indirect_records(ptlas_indirect_records const& r, isize stride, char const* what)
+void validate_indirect_records(indirect_records const& r, isize stride, char const* what)
 {
     if (r.max_count == 0)
         return;
@@ -322,6 +330,24 @@ cluster_set_handle command_list_raytracing_scope::build_clusters(cc::span<cluste
     }
     _cmd._stats.add(stat::blas_builds);
     return _cmd.raytracing_build_clusters(clusters, flags);
+}
+
+void command_list_raytracing_scope::build_clusters_indirect(cluster_pool const& pool, cluster_indirect_build const& build)
+{
+    CC_ASSERT(_cmd.context().supports(feature::clustered_geometry), "build_clusters_indirect: this context has no "
+                                                                    "sg::feature::clustered_geometry");
+    CC_ASSERT(build.clusters.max_count >= 1 && build.clusters.max_count <= pool.cluster_count(),
+              "build_clusters_indirect: max_count must be 1 to the pool's capacity");
+    // the stride is the backend's, so the records are checked against the largest, which every buffer of them sizes for
+    validate_indirect_records(build.clusters, isize(sizeof(gpu_clas_triangles)), "the clusters");
+    CC_ASSERT(build.clusters.records->usage().has(buffer_usage::accel_structure_build_input)
+                  && build.clusters.count->usage().has(buffer_usage::accel_structure_build_input),
+              "build_clusters_indirect: the records and their count need buffer_usage::accel_structure_build_input");
+    for (auto const& table : build.tables)
+        CC_ASSERT(table != nullptr, "build_clusters_indirect: a table is null");
+    _cmd._stats.add(stat::blas_builds);
+    (void)impl::bump_generation(pool);
+    _cmd.raytracing_build_clusters_indirect(pool, build);
 }
 
 cc::vector<blas_handle> command_list_raytracing_scope::build_cluster_blas(cluster_set_handle const& clusters,

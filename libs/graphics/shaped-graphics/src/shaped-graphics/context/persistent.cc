@@ -8,6 +8,7 @@
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/raytracing/blas_table.hh>
+#include <shaped-graphics/raytracing/clusters.hh>
 #include <shaped-graphics/raytracing/partitioned_tlas.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
@@ -128,6 +129,45 @@ blas_table_handle context_persistent_scope::create_blas_table(cc::span<blas_hand
     }
     auto buffer = create_buffer_from_data(cc::span<gpu_blas_ref const>(addresses), buffer_usage::readonly_buffer);
     return std::make_shared<blas_table const>(cc::vector<blas_handle>::create_copy_of(blases), cc::move(buffer));
+}
+
+buffer_table_handle context_persistent_scope::create_buffer_table(cc::span<raw_buffer_handle const> buffers)
+{
+    CC_ASSERT(_ctx.supports(feature::clustered_geometry), "create_buffer_table: this context has no "
+                                                          "sg::feature::clustered_geometry");
+    CC_ASSERT(!buffers.empty(), "create_buffer_table: a table lists at least one buffer");
+    auto addresses = cc::vector<gpu_buffer_ref>();
+    for (auto const& b : buffers)
+    {
+        CC_ASSERT(b != nullptr && !b->is_expired(), "create_buffer_table: a buffer is null or expired");
+        CC_ASSERT(b->usage().has(buffer_usage::accel_structure_build_input),
+                  "create_buffer_table: a buffer needs buffer_usage::accel_structure_build_input");
+        addresses.push_back({.address = _ctx.buffer_address_of(*b)});
+    }
+    auto buffer = create_buffer_from_data(cc::span<gpu_buffer_ref const>(addresses), buffer_usage::readonly_buffer);
+    return std::make_shared<buffer_table const>(cc::vector<raw_buffer_handle>::create_copy_of(buffers), cc::move(buffer));
+}
+
+cluster_pool_handle context_persistent_scope::create_cluster_pool(cluster_pool_description const& desc)
+{
+    CC_ASSERT(_ctx.supports(feature::clustered_geometry), "create_cluster_pool: this context has no "
+                                                          "sg::feature::clustered_geometry");
+    CC_ASSERT(desc.max_clusters > 0 && desc.max_total_triangles > 0 && desc.max_total_vertices > 0,
+              "create_cluster_pool: a pool holds at least one cluster, triangle and vertex");
+    CC_ASSERT(desc.max_triangles_per_cluster >= 1 && desc.max_triangles_per_cluster <= max_cluster_triangles
+                  && desc.max_vertices_per_cluster >= 1 && desc.max_vertices_per_cluster <= max_cluster_vertices,
+              "create_cluster_pool: a cluster holds 1 to 256 triangles and vertices");
+    CC_ASSERT(desc.max_geometry_index >= 0 && desc.max_geometry_index < (1 << 24),
+              "create_cluster_pool: max_geometry_index must fit in 24 bits");
+    CC_ASSERT(desc.flags.without(accel_build_flag::fast_trace | accel_build_flag::fast_build).is_empty()
+                  && !desc.flags.has_all(accel_build_flag::fast_trace | accel_build_flag::fast_build),
+              "create_cluster_pool: fast_trace or fast_build, and nothing else");
+    auto r = _ctx.try_create_cluster_pool(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw allocation_exception("cluster pool allocation failed", 0, r.error());
 }
 
 // bind path

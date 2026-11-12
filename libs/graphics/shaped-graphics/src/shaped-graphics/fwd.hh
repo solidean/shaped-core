@@ -134,11 +134,17 @@ struct gpu_blas_ref;                 // value type — SGL's accel.blas_ref, a B
 struct gpu_ptlas_write;              // value type — SGL's accel.ptlas_write, opaque on the host
 struct gpu_ptlas_update;             // value type — SGL's accel.ptlas_update
 struct gpu_ptlas_translation;        // value type — SGL's accel.ptlas_translation
-struct ptlas_indirect_records;       // value type — one kind of record a compute pass wrote, and its count
+struct indirect_records;             // value type — one kind of record a compute pass wrote, and its count
 struct ptlas_indirect_operations;    // value type — one GPU-written update of a partitioned_tlas
 class cluster_set;                   // immutable clusters one build made (see raytracing/clusters.hh)
 struct cluster_triangles;            // value type — one cluster's indexed triangles
 struct cluster_range;                // value type — the clusters of a set one cluster BLAS lists
+class cluster_pool;                  // a cluster set rebuilt in place from GPU-written records
+struct cluster_pool_description;     // value type — the capacities a cluster_pool is created with
+struct cluster_indirect_build;       // value type — one GPU-written cluster build's records and tables
+class buffer_table;                  // buffers, held, and a buffer of their addresses (see raytracing/blas_table.hh)
+struct gpu_buffer_ref;               // value type — SGL's accel.buffer_ref, a buffer's address
+struct gpu_clas_triangles;           // value type — SGL's accel.clas_triangles, opaque on the host
 
 struct reserved_binding_address;
 } // namespace sg
@@ -531,6 +537,8 @@ using micromap_handle = std::shared_ptr<micromap const>; // shared-immutable: an
 using partitioned_tlas_handle = std::shared_ptr<partitioned_tlas const>; // a tlas updated in place by recorded operations
 using blas_table_handle = std::shared_ptr<blas_table const>;             // immutable — BLASes and their addresses
 using cluster_set_handle = std::shared_ptr<cluster_set const>;           // immutable — the clusters one build made
+using cluster_pool_handle = std::shared_ptr<cluster_pool const>;         // a cluster set rebuilt in place
+using buffer_table_handle = std::shared_ptr<buffer_table const>;         // immutable — buffers and their addresses
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

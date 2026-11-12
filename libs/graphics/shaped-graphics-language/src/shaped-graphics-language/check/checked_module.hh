@@ -211,7 +211,7 @@ struct sgl::check::target_condition
     constexpr bool operator==(target_condition const&) const = default;
 };
 
-/// Where one field of a struct with a target layout stands in a branch's record (CHK-524).
+/// Where one field of a struct with a target layout stands in a branch's record (CHK-526).
 struct sgl::check::layout_place
 {
     /// The member of the branch's struct that holds it; -1 for an `@absent` field, which none holds.
@@ -238,7 +238,7 @@ struct sgl::check::target_type_branch
     /// Of a struct with a target layout (CHK-522): the struct of this branch's fields in its order, which a compile taking
     /// it writes wherever the type stands.
     type_id layout = type_id::none;
-    /// Parallel to the fields the check judged: where each stands in `layout` (CHK-524).
+    /// Parallel to the fields the check judged: where each stands in `layout` (CHK-526).
     cc::vector<layout_place> places;
 
     [[nodiscard]] bool operator==(target_type_branch const& rhs) const

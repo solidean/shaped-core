@@ -180,6 +180,15 @@ public:
     /// Requires `sg::feature::partitioned_tlas`; throws sg::allocation_exception on allocation failure.
     [[nodiscard]] blas_table_handle create_blas_table(cc::span<blas_handle const> blases);
 
+    /// A table of `buffers` a shader copies addresses from into GPU-written cluster records, holding each of them.
+    /// Each must carry `buffer_usage::accel_structure_build_input`, and the list be non-empty.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] buffer_table_handle create_buffer_table(cc::span<raw_buffer_handle const> buffers);
+
+    /// An empty cluster pool for `desc`'s capacities, which `cmd.raytracing.build_clusters_indirect` fills in place.
+    /// Requires `sg::feature::clustered_geometry`; throws sg::allocation_exception on allocation failure.
+    [[nodiscard]] cluster_pool_handle create_cluster_pool(cluster_pool_description const& desc);
+
     // bind path
     // binding_group_layout / pipeline_layout / compute_pipeline creation is not here — those are schemas / PSOs, not lifetime-scoped GPU resources.
     // They live on the raw `ctx.uncached` scope; prefer `ctx.cached`.

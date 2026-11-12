@@ -17,7 +17,7 @@ struct buffer_ref:
 
 /// Builds one cluster: up to 256 triangles over up to 256 float3 vertices, by index.
 /// Built by name, `accel.clas_triangles(cluster_id = c, triangle_count = t, vertex_count = v, index_buffer = i,
-/// vertex_buffer = p)`, every other field having a default; a field is never read or written alone (CHK-524).
+/// vertex_buffer = p)`, every other field having a default; a field is never read or written alone (CHK-526).
 /// Vulkan packs its counts into bits and D3D12 gives them 16 each, so `@bits` places them, and `@absent` a field one
 /// API lacks: D3D12 states the index format per build, and Vulkan has no micromap base or geometry index buffer.
 @target_layout
@@ -70,6 +70,12 @@ struct clas_triangles:
         micromap_index_buffer: buffer_ref = no_buffer()
         @absent index_format: uint = 4u
         @absent micromap_index_format: uint = 0u
+
+/// The address `bytes` past this one: a cluster's part of a buffer the table lists whole.
+fun buffer_ref.offset(self, bytes: uint) -> buffer_ref:
+    let low = self.address.x + bytes
+    let carry = if low < self.address.x => 1u else 0u
+    return buffer_ref(uint2(low, self.address.y + carry))
 
 /// No buffer at all, for a record's address that names none.
 @internal
