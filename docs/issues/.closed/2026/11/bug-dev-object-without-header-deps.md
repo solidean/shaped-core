@@ -2,6 +2,8 @@
 created: 2026-11-12
 priority: next
 tags: [dev]
+closed: 2026-11-12
+resolution: fixed
 ---
 
 # An object ninja records no header dependencies for is never rebuilt, and links a stale layout
@@ -18,3 +20,13 @@ dev.py could refuse, or rebuild, an object whose deps entry is empty, at build t
 
 The same three objects had no dependencies in the `--agility-preview` build directory too, on 2026-11-12, with the same crash; deleting them fixed it there as well.
 So it is these files rather than one bad compile: two build directories lost exactly the same three entries.
+
+## Log
+
+### 2026-11-12: closed in the build server
+
+The two other objects are right to record none: each TU is #if'd out whole here, so it includes nothing.
+compute.cc's empty record was not found again, so how it lost its headers stays unknown.
+The optional build server no longer trusts a compile that reports no header at all: it reruns it every build, never stores or serves it,
+and hands ninja a stale deps entry for it, so `--no-server` reruns it too.
+Its own state file also drops a record line cut short mid-write, which could have loaded with fewer headers than its compile read.

@@ -433,7 +433,7 @@ def _prove(f: Fixture, report: dict | None) -> bs.Proof | None:
 def test_a_proof_that_holds_passes_with_the_build_s_cap(f: Fixture) -> None:
     proof = _prove(f, _report("pass", must_run=2))
     assert proof is not None and proof.passed and proof.reasons == [], proof
-    assert f.calls() == ["ensure --quiet", f"proof {f.dir} --json -j 8"], f.calls()
+    assert f.calls() == ["ensure --quiet", f"proof {f.dir} --json --delta -j 8"], f.calls()
     assert not f.session.warnings
 
 
@@ -541,6 +541,34 @@ def test_ship_s_gate_takes_the_proof_for_the_build_and_test_steps() -> None:
         ship._dev, ship._dirty, ship._prove = saved
 
 
+def test_a_red_run_at_the_change_s_base_decides_whether_it_blocks() -> None:
+    from tools.dev.cmd import ship
+    red = lambda t, judged, filed=None: {"binary": "b", "test": t, "outcome": "fail", "why": "must run",  # noqa: E731
+                                         "judged": judged, **({"filed": filed} if filed else {})}
+    ran = [red("tied", "tied"), red("untied", "untied", "nothing ties it"), red("flaky", "flaky", "flaky: green on a rerun"),
+           red("unknown", "unknown"), {"binary": "b", "test": "ok", "outcome": "pass", "why": "must run"}]
+    reasons = ["b: tied: fail (must run; tied)", "b: unknown: fail (must run; no evidence)", "the build is not green"]
+    proof = bs.Proof(passed=False, reasons=reasons, report={"ran": ran, "delta": {"base": "abc123"}})
+    asked: list[str] = []
+
+    def at_base(ctx, preset, base, reds):
+        asked.extend(r["test"] for r in reds)
+        return {("b", "tied"): True, ("b", "untied"): False, ("b", "unknown"): None}
+
+    saved = ship._red_at_base
+    ship._red_at_base = at_base
+    try:
+        passed, filed, blockers = ship._settle_at_base(types.SimpleNamespace(), None, proof)
+    finally:
+        ship._red_at_base = saved
+    assert asked == ["tied", "untied", "unknown"], "flaky is the server's to settle; the rest run at the base"
+    assert [f[1] for f in filed] == ["tied", "flaky"], filed
+    assert "red at the change's base" in filed[0][3]
+    assert any(b.startswith("b: untied: fail (green at the change's base") for b in blockers), blockers
+    assert any(b == "b: unknown: fail (must run)" for b in blockers), "no base result: the server's judgement"
+    assert "the build is not green" in blockers and not passed
+
+
 def main() -> int:
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     failures = 0
@@ -558,3 +586,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

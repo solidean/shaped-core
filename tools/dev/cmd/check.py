@@ -544,6 +544,15 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             print(console.red("No test binaries found (expected '*-test' executables)"), file=sys.stderr)
             return False
 
+        # A project may leave a test binary out of `all` (EXCLUDE_FROM_ALL); the gate still runs it, so it builds it by name.
+        unbuilt = [t.name for t in test_targets if t.artifact is None or not Path(t.artifact).exists()]
+        if unbuilt:
+            results = dev.build(presets, unbuilt, root=ctx.root, auto_configure=False, mirror=mirror, verbose=verbose,
+                                server=ctx.build_server(gate=True))
+            if not all(r.ok for r in results):
+                dev.report.print_build_failure(results, presets, ctx.root)
+                return False
+
         # Everything is built above, so a compile break anywhere still fails here; the selection is what RUNS.
         candidates = [t.name for t in test_targets]
         names = _select_test_binaries(ctx, presets[0], scope, candidates)
