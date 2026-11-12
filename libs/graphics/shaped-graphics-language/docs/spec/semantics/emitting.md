@@ -32,7 +32,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-109's, EMIT-122's and EMIT-261's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
@@ -204,6 +204,8 @@ const light_kind_sun: i32 = 2;
   The entry point then declares `SPV_EXT_mesh_shader` and its `MeshShadingEXT` capability, which DXC leaves out of a pixel stage.
 * **EMIT-206** MSL writes a mesh entry point as a `[[mesh]]` function of a `metal::mesh<V, F, N, M, topology>` output, F `void` where nothing is written per primitive.
   It writes a task entry point as an `[[object]]` function; WGSL refuses both by EMIT-109.
+* **EMIT-261** WGSL refuses a pixel entry point that takes a mesh stage's per-primitive struct (CHK-489) as `target-lacks-feature`, naming `mesh_shader`.
+  Only the pipeline of a polyfilled mesh stage hands it one there, and that pipeline's pixel stage is written in the form CHK-524 gives it, which takes no such struct.
   Metal counts the primitives alone, so `set_counts` is `set_primitive_count` of its second argument, and `triangle` and `line` set one index per corner.
   The object stage writes its payload and its grid of mesh workgroups from its first invocation, and a pixel stage's per-primitive struct arrives in one `[[stage_in]]` beside the link.
 * **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
@@ -898,7 +900,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
-| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206 |
+| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206, EMIT-261 |
 
 ## Open
 

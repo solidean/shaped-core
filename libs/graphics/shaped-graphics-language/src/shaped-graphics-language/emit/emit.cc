@@ -272,6 +272,15 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                          .symbol = e.function,
                                          .detail = cc::format("{} needs {}, which WebGPU does not have", e.name,
                                                               check::k_feature_names[i])});
+        // EMIT-261: only a polyfilled mesh stage feeds WebGPU's pixel stage, which takes its values in another form
+        if (e.entry_stage == check::stage::pixel && check::is_valid(check::mesh_corner_parts_of(m, e).primitive))
+            result.errors.push_back(
+                {.kind = error_kind::target_lacks_feature,
+                 .symbol = e.function,
+                 .detail = cc::format("{} takes what a mesh stage wrote per primitive, which needs mesh_shader, which "
+                                      "WebGPU does not have; the pixel stage of a polyfilled mesh pipeline is written "
+                                      "with `--mesh vertex` instead (CHK-524)",
+                                      e.name)});
 
         if (!result.errors.empty())
             return result;

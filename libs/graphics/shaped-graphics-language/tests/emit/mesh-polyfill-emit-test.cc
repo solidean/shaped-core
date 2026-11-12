@@ -123,6 +123,12 @@ TEST("sgl emit - a polyfilled mesh stage's values per primitive follow its verti
         CHECK(pixel.text.contains("sgl_mesh_corner")).dump("text", pixel.text);
         CHECK(!pixel.text.contains("5271")).dump("text", pixel.text);
     }
+
+    // EMIT-261: as itself, only a native mesh stage feeds it, which WebGPU has none of
+    auto const refused = sgl::emit::dump_errors(emit_source(program, 1, target::wgsl, {}));
+    CHECK(refused.contains("target-lacks-feature")).dump("errors", refused);
+    CHECK(refused.contains("--mesh vertex")).dump("errors", refused);
+    CHECK(sgl::emit::dump_errors(emit_source(program, 1, target::hlsl_vulkan, {})) == "");
 }
 
 TEST("sgl emit - a mesh stage the polyfill does not carry yet is refused by name, not guessed (CHK-524)")
