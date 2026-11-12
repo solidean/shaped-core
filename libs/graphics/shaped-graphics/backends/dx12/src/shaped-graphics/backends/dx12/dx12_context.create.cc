@@ -187,6 +187,13 @@ void log_adapter(sg::adapter_info const& info)
     CC_LOG_INFO("dx12 context on '{}', driver {}", info.name, info.driver_version);
 }
 
+void log_no_clusters_and_ptlas(HRESULT hr)
+{
+    CC_LOG_INFO("the preview runtime runs, but the driver reports no clustered geometry or partitioned TLAS "
+                "(OPTIONS_RAYTRACING2 hr=0x{:08X})",
+                u32(hr));
+}
+
 /// What DXGI says about the adapter that was picked.
 ///
 /// The driver version comes from CheckInterfaceSupport, which is the only place d3d12 exposes one at all.
@@ -643,10 +650,15 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // Only its headers name the query, and only its experimental features make the runtime answer it.
 #if SG_HAS_AGILITY_PREVIEW
     D3D12_FEATURE_DATA_D3D12_OPTIONS_RAYTRACING2 raytracing2 = {};
-    auto const clusters_and_ptlas = runs_raytracing_preview() && raytracing_tier >= D3D12_RAYTRACING_TIER_1_1
-                                 && SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS_RAYTRACING2,
-                                                                    &raytracing2, sizeof(raytracing2)))
-                                 && raytracing2.ClustersAndPTLASSupported;
+    auto clusters_and_ptlas = false;
+    if (runs_raytracing_preview() && raytracing_tier >= D3D12_RAYTRACING_TIER_1_1)
+    {
+        auto const hr = check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS_RAYTRACING2, &raytracing2,
+                                              sizeof(raytracing2));
+        clusters_and_ptlas = SUCCEEDED(hr) && raytracing2.ClustersAndPTLASSupported;
+        if (!clusters_and_ptlas)
+            log_no_clusters_and_ptlas(hr);
+    }
 #else
     auto const clusters_and_ptlas = false;
 #endif
