@@ -3,6 +3,8 @@ created: 2026-11-12
 tags: [raytracing]
 refs:
   - file: libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md
+closed: 2026-11-12
+resolution: fixed
 ---
 
 # A cluster pool rebuilt in place races a trace that still reads its clusters
