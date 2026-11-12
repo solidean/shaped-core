@@ -45,7 +45,7 @@ There the two images must be identical, equal depths and blending included, and 
 
 ## Still open
 
-- Where a task stage declares its maximum, and its spelling.
+
 - The primitive-order claim above is from memory of both specs, and is checked against their text before a test relies on it.
 
 ## Log
@@ -66,3 +66,10 @@ There the two images must be identical, equal depths and blending included, and 
   The vertex half returns one struct of both, and the pixel stage, compiled after it, takes that struct and makes its own two.
   So neither stage is marked per primitive, which vulkan's SPIR-V would otherwise refuse to link.
   `tinted` draws the native stage's image on webgpu (Dawn and wgpu), dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V.
+- **2026-11-12: the task stage.**
+  The maximum is spelled `@task(32, meshes = 64)`, after `@mesh`'s `vertices = N`; a host's budget per pipeline, 4096 by default, bounds a draw of one that states none.
+  A task workgroup's first invocation writes a record: its launch, its grid and its payload.
+  A scan of one invocation numbers what was launched, cut to the slots the draw holds, and writes the indirect arguments of the mesh pass and of the draw.
+  A launched mesh workgroup finds its task workgroup by a binary search over the records, so the order is the native one.
+  `launched` and `culled` (four task workgroups launching 0, 1, 2 and 0) draw the native stages' images on webgpu (Dawn and wgpu), dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V.
+  Still open of it: the `report` profile's log of a dropped launch, a parallel scan once measured, and WGSL's uniformity of a launched mesh stage's workgroup id.

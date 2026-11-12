@@ -75,6 +75,35 @@ struct sgl::check::mesh_polyfill_layout
     bool operator==(mesh_polyfill_layout const&) const = default;
 };
 
+/// The words of `sg_task_output` a polyfilled task stage's draw takes (CHK-524), behind a header of
+/// `k_first_record_word` words: the task workgroups, the mesh workgroups launched, the mesh pass's dispatch arguments
+/// and the draw's arguments.
+/// Task workgroup `t` owns `record_words()` words from `k_first_record_word + t * record_words()`: the mesh workgroups
+/// it launches, their grid's three sizes, the first of them among all launched, then its payload's words.
+struct sgl::check::task_polyfill_layout
+{
+    static constexpr i32 k_task_count_word = 0;
+    static constexpr i32 k_launched_word = 1;
+    /// Three words, `x, 1, 1`, which the mesh pass is dispatched indirectly by.
+    static constexpr i32 k_dispatch_word = 2;
+    /// Four words, `vertex_count, 1, 0, 0`, which the vertex half is drawn indirectly by.
+    static constexpr i32 k_draw_word = 5;
+    static constexpr i32 k_first_record_word = 9;
+    static constexpr i32 k_record_count = 0;
+    static constexpr i32 k_record_grid = 1;
+    static constexpr i32 k_record_first = 4;
+    static constexpr i32 k_record_payload = 5;
+
+    /// One word a scalar leaf of the payload, in field order.
+    i32 payload_words = 0;
+    /// `@task(…, meshes = N)`'s `N`, which a task workgroup's launch is cut to; 0 where it states none.
+    i32 max_meshes = 0;
+
+    [[nodiscard]] i32 record_words() const { return k_record_payload + payload_words; }
+
+    bool operator==(task_polyfill_layout const&) const = default;
+};
+
 /// What a polyfilled mesh stage hands its pixel stage per primitive: the vertex struct and the primitive struct of a
 /// mesh entry point's output, or a pixel entry point's stage struct and the second struct beside it (CHK-489).
 /// `primitive` is `none` where there is none.
@@ -133,10 +162,12 @@ namespace sgl::check
 /// dispatch_threads into `sg_dispatch_grid` (CHK-520); what dx12, vulkan and WebGPU read, and metal does not.
 [[nodiscard]] flat_entry_point with_dispatch_grid_guard(checked_module const& m, flat_entry_point const& e);
 
-/// The layout a mesh entry point `e` polyfills into, or the reason it has none yet: a task stage's payload, or a vertex
-/// or primitive member that is no scalar, vector or array of them (CHK-524).
+/// The layout a mesh entry point `e` polyfills into, or the reason it has none yet: a vertex, primitive or payload
+/// member that is no scalar, vector or array of them, or a payload where no polyfilled task stage launches `e`,
+/// `is_launched` (CHK-524).
 [[nodiscard]] cc::result<mesh_polyfill_layout, cc::string> mesh_polyfill_layout_of(checked_module const& m,
-                                                                                   flat_entry_point const& e);
+                                                                                   flat_entry_point const& e,
+                                                                                   bool is_launched = false);
 
 /// The vertex buffers a polyfilled geometry stage's vertex stage reads at most, `sg_geometry_vertices0` on (CHK-525).
 inline constexpr i32 k_geometry_polyfill_streams = 4;
@@ -165,8 +196,30 @@ inline constexpr i32 k_geometry_polyfill_workgroup = 64;
 
 /// A mesh entry point `e` as the compute entry point that writes its workgroup's slots of `sg_mesh_output` instead of
 /// handing them to the rasterizer; its grid is the one sg writes into `sg_dispatch_grid`.
+/// Where a polyfilled task stage launches it, `task` is that stage's layout: workgroup `g` of its indirect dispatch
+/// is the `g`-th launched, whose task workgroup, workgroup id and payload it reads from `sg_task_input`.
 /// `e` must have a layout.
-[[nodiscard]] flat_entry_point mesh_as_compute(checked_module const& m, flat_entry_point const& e);
+[[nodiscard]] flat_entry_point mesh_as_compute(checked_module const& m,
+                                               flat_entry_point const& e,
+                                               task_polyfill_layout const* task = nullptr);
+
+/// The layout a task entry point `t` polyfills into, or the reason it has none yet: a payload member that is no
+/// scalar, vector or array of them (CHK-524).
+[[nodiscard]] cc::result<task_polyfill_layout, cc::string> task_polyfill_layout_of(checked_module const& m,
+                                                                                   flat_entry_point const& t);
+
+/// A task entry point `t` as the compute entry point that writes its workgroup's record of `sg_task_output`, its
+/// first invocation's launch in place of `dispatch_mesh`; its grid is the one sg writes into `sg_dispatch_grid`.
+/// `t` must have a layout.
+[[nodiscard]] flat_entry_point task_as_compute(checked_module const& m, flat_entry_point const& t);
+
+/// The one-invocation compute entry point that runs between a polyfilled task stage and the mesh stage `e` it
+/// launches: each record's first launched workgroup, the count launched, cut to the threads sg wrote into
+/// `sg_dispatch_grid`, and from it the mesh pass's dispatch and the draw's arguments.
+/// It takes `e`'s header, since the draw's vertex count is `e`'s; `e` must have a layout.
+[[nodiscard]] flat_entry_point mesh_task_scan(checked_module const& m,
+                                              flat_entry_point const& e,
+                                              task_polyfill_layout const& task);
 
 /// The vertex entry point that draws what `mesh_as_compute` wrote, from `sg_mesh_input`, one invocation a corner of
 /// every primitive slot; the corners of a slot past its workgroup's count stand outside the clip volume.

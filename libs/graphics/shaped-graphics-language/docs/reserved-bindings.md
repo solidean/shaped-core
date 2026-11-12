@@ -32,6 +32,8 @@ A table edited on one side alone stops the build.
 | `sg_geometry_draw` | `t8, space11` | set 3, binding 25 | group 3, binding 25 | `[[buffer(22)]]` | a polyfilled geometry stage's compute half |
 | `sg_geometry_indices` | `t3, space11` | set 3, binding 26 | group 3, binding 26 | `[[buffer(23)]]` | the same |
 | `sg_geometry_vertices0` to `3` | `t4` to `t7, space11` | set 3, bindings 27 to 30 | group 3, bindings 27 to 30 | `[[buffer(24)]]` to `[[buffer(27)]]` | the same |
+| `sg_task_output` | `u9, space11`, a root UAV | set 3, binding 31 | group 3, binding 31 | none, metal draws every task stage | a polyfilled task stage's compute half and its scan |
+| `sg_task_input` | `t10, space11`, a root SRV | set 3, binding 32 | group 3, binding 32 | none | the compute half of a mesh stage a polyfilled task stage launches |
 
 On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and hands it every stage it calls through `sgl_context` (EMIT-183).
 
@@ -53,6 +55,7 @@ sg's vulkan layout holds it wherever the layout holds an acceleration member, si
 `sg_mesh_output` and `sg_mesh_input` are one buffer of words, which a polyfilled mesh stage's compute half writes and its vertex half reads back (CHK-524).
 The compute half also reads `sg_dispatch_grid`, the threads sg dispatched it in, to number its workgroups.
 [mesh-polyfill.md](../../shaped-graphics/docs/concepts/mesh-polyfill.md) is the protocol: the words, and how sg sizes and draws them.
+`sg_task_output` and `sg_task_input` are one more buffer of words, a polyfilled task stage's records, which the same page describes.
 
 A polyfilled geometry stage writes the same words, a primitive's in place of a workgroup's, and reads its draw from the `sg_geometry_*` entries (CHK-525).
 `sg_geometry_draw` is a buffer of three `uint4`s rather than a block, since metal has no reserved block, and the protocol page says what each lane holds.

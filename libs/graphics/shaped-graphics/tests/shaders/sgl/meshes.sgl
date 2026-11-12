@@ -72,6 +72,36 @@ pipeline launched:
     cull = .none
     format = .rgba8_unorm
 
+// Four task workgroups of a stated bound of two launches, launching 0, 1, 2 and 0 mesh workgroups, each drawing column
+// 2t + j of an 8 × 8 target: a task workgroup's columns past its launch stay clear, and each launch reads its own payload.
+struct column:
+    first: uint
+
+@task(1, meshes = 2) fun culling(@workgroup_id group: int3):
+    let t = group.x as uint
+    let launched = if t == 1u => 1u else if t == 2u => 2u else 0u
+    let handed: column = {first = 2u * t}
+    dispatch_mesh(launched, 1u, 1u, handed)
+
+@mesh(1, vertices = 4, triangles = 2)
+fun culled_column(@workgroup_id group: int3, handed: column, output: mut mesh_output[corner]):
+    output.set_counts(4u, 2u)
+    let left = ((handed.first + (group.x as uint)) as float) / 4.0 - 1.0
+    let color = float4((handed.first as float) / 8.0, group.x as float, 1.0, 1.0)
+    output.vertex(0u, {position = hpos4(left, -1.0, 0.0, 1.0), color = color})
+    output.vertex(1u, {position = hpos4(left + 0.25, -1.0, 0.0, 1.0), color = color})
+    output.vertex(2u, {position = hpos4(left + 0.25, 1.0, 0.0, 1.0), color = color})
+    output.vertex(3u, {position = hpos4(left, 1.0, 0.0, 1.0), color = color})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(0u, 2u, 3u))
+
+pipeline culled:
+    task = culling
+    mesh = culled_column
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
 // A quad of two triangles, each tinted by what the mesh stage wrote for it alone (CHK-488, CHK-489).
 struct face:
     tint: float4

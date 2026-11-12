@@ -18,6 +18,8 @@ constexpr auto k_max_geometry_scalars = 1024;
 // CHK-480: what D3D allows a mesh stage, and vulkan's VK_EXT_mesh_shader guarantees
 constexpr auto k_max_mesh_outputs = 256;
 constexpr auto k_max_mesh_workgroup = 128;
+/// What one task workgroup launches at most on dx12, `DispatchMesh`'s 2^22 workgroups.
+constexpr auto k_max_task_meshes = 1 << 22;
 
 /// The scalars a value of `type` is: what D3D and vulkan count of a geometry stage's output vertex.
 i32 scalars_of(checked_module const& m, type_id type)
@@ -96,6 +98,38 @@ checker::mesh_shape checker::mesh_of(i32 file, ast::attribute const& a)
         report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
                cc::format("a mesh workgroup holds at most {} invocations", k_max_mesh_workgroup));
         result.workgroup = {1, 1, 1};
+    }
+    return result;
+}
+
+checker::task_shape checker::task_of(i32 file, ast::attribute const& a)
+{
+    auto result = task_shape();
+    auto sizes = 0;
+    for (auto const& argument : ast_of(file).at(a.arguments))
+    {
+        auto const value = ast::is_valid(argument.value) && !argument.is_splat ? constant_count(file, argument.value)
+                                                                               : cc::optional<i32>();
+        auto const key = text_of(file, argument.name);
+        if (value.has_value() && value.value() >= 1 && key.empty() && sizes < 3 && result.meshes == 0)
+            result.workgroup[sizes++] = value.value();
+        else if (value.has_value() && value.value() >= 1 && value.value() <= k_max_task_meshes && key == "meshes"
+                 && result.meshes == 0 && sizes > 0)
+            result.meshes = value.value();
+        else
+        {
+            report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+                   cc::format("@task takes one to three workgroup sizes, then optionally how many mesh workgroups "
+                              "one launches at most, from 1 to {}: `@task(32, meshes = 64)`",
+                              k_max_task_meshes));
+            return {};
+        }
+    }
+    if (sizes == 0)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               "@task takes one to three workgroup sizes: `@task(32)`, `@task(32, meshes = 64)`");
+        return {};
     }
     return result;
 }

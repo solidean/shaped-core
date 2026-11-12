@@ -11,8 +11,8 @@ The decisions behind it are [feat-sgl-mesh-task-polyfill](../../../shaped-graphi
 
 ## Status
 
-SGL writes both halves, for a mesh stage with no task stage.
-sg draws them on webgpu, dx12 and vulkan; metal has every mesh stage natively and draws none.
+SGL writes both halves, and a task stage's two compute forms before them.
+sg draws them on webgpu, dx12 and vulkan; metal has every mesh and task stage natively and draws none.
 
 **Measured on an Arc B580** (2026-11-11, `tests/pipeline/mesh-polyfill-benchmark.cc`), a frame of 4096 workgroups of 98 triangles each:
 
@@ -78,6 +78,41 @@ On dx12 and vulkan each draw takes a transient buffer of its own, and the barrie
 dx12 dispatches inside the scope, which binds its targets without a render pass; vulkan suspends its rendering instance around the dispatch.
 Reopening the pass is a split that `render_pass_splits` counts and no warning reports, which batching every polyfilled draw of a scope into one compute pass ahead of it would remove later.
 
+## A task stage before it
+
+**A task stage is three compute forms ahead of the draw, and the draw becomes indirect**, since what the task workgroups launch is the GPU's to count.
+The order stays the native one, task workgroup by task workgroup and then by mesh workgroup within each, by a scan over what each launched rather than an append.
+
+A second buffer of words holds the task workgroups' records behind a header:
+
+| words | hold |
+|---|---|
+| 0 | the task workgroups of the draw |
+| 1 | the mesh workgroups launched, cut to the slots the draw holds |
+| 2 to 4 | the mesh pass's dispatch arguments, `launched, 1, 1` |
+| 5 to 8 | the draw's arguments, `launched * M * K, 1, 0, 0` |
+| then `record_words` a task workgroup | its launch's mesh workgroups, its grid's three sizes, the first of them among all launched, and its payload's words |
+
+A task workgroup's launch is cut to `@task(…, meshes = N)`'s `N` where the stage states one.
+The draw then holds slots for `N` mesh workgroups a task workgroup; where it states none, for `mesh_polyfill_description::task_budget`, 4096 unless the host sets it.
+Either is cut to the 65535 one dispatch dimension holds, and a launch past the slots is dropped.
+`record_words`, `N` and the budget are the shader's `task_layout` and the description's, which sg sizes the buffer by.
+
+`draw_mesh_tasks(x, y, z)` of such a pipeline then dispatches, in one pass:
+
+1. the task stage's compute form, in `x * y * z` workgroups numbered as the mesh stage's are, its first invocation writing its record in place of `dispatch_mesh`;
+2. the scan, one invocation, which writes each record's first launched, the count launched cut to the slots it reads from `sg_dispatch_grid.threads.x`, and both arguments;
+3. the mesh stage's compute half, indirectly by words 2 to 4; workgroup `g` finds the last record whose first is at most `g`, and reads its workgroup id within that grid and its payload there;
+4. then the vertex half, indirectly by words 5 to 8.
+
+| form | writes | reads |
+|---|---|---|
+| task stage's compute form | `sg_task_output` | the pipeline's groups, `sg_dispatch_grid` |
+| scan | `sg_task_output` | `sg_dispatch_grid` |
+| mesh stage's compute half | `sg_mesh_output` | the pipeline's groups, `sg_task_input` |
+
+The first two take a layout of `mesh_polyfill_slots::task`, the third one of `launched`.
+
 ## A geometry stage on the same words
 
 **A device without a geometry stage draws one the same way** (CHK-525): metal and webgpu, which have none.
@@ -115,5 +150,9 @@ dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage
 
 ## Not yet
 
-- A task stage, whose launch count the GPU chooses: a declared maximum per task workgroup, or a per-draw budget a host may override.
 - `draw_mesh_tasks_indirect`, whose vertex count the GPU then writes.
+- A launch dropped past the slots is silent; the decision is that the `report` profile logs it at the `.sgl` line.
+- The scan is one invocation, a loop over the task workgroups, which a parallel scan replaces once a benchmark of many task workgroups says it matters.
+- On webgpu a launched mesh stage's workgroup id and payload come from a storage read, so WGSL takes control flow on either for non-uniform.
+  A barrier under such a branch, which the native stage takes, fails WGSL's uniformity analysis there.
+- The task stage is drawn this way wherever the mesh stage is, `where_missing` by default, with no benchmark of its own yet.

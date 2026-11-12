@@ -140,6 +140,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_grid.cc
     src/shaped-graphics-language/legalize/legalize_geometry.cc
     src/shaped-graphics-language/legalize/legalize_mesh.cc
+    src/shaped-graphics-language/legalize/legalize_task.cc
     src/shaped-graphics-language/legalize/legalize_polyfill.cc
     src/shaped-graphics-language/legalize/legalize_lengths.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc

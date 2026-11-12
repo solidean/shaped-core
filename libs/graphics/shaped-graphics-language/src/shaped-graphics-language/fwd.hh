@@ -362,6 +362,7 @@ enum class undefined_guard : u8;
 struct legalize_options;
 struct mesh_polyfill_layout;
 struct mesh_corner_parts;
+struct task_polyfill_layout;
 
 enum class expectation_kind : u8;
 struct test_expectation;

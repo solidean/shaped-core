@@ -211,6 +211,27 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 3, .slot = 30, .stages = stage_bit(stage::compute)},
          {.group = -1, .slot = 27, .stages = stage_bit(stage::compute)},
      }},
+    // a polyfilled task stage's records, one a task workgroup behind a header, which its compute form and the scan after
+    // it write (CHK-524); metal draws every task stage natively
+    {.name = "sg_task_output",
+     .declaration = "@internal binding sg_task_output:\n    words: mut buffer[uint]\n",
+     .enabled_by = reserved_use::mesh_polyfill,
+     .targets = {
+         {.group = 11, .slot = 9, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 31, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 31, .stages = stage_bit(stage::compute)},
+         {},
+     }},
+    // the same records, which the mesh stage's compute form reads to find its task workgroup and its payload
+    {.name = "sg_task_input",
+     .declaration = "@internal binding sg_task_input:\n    words: buffer[uint]\n",
+     .enabled_by = reserved_use::mesh_polyfill,
+     .targets = {
+         {.group = 11, .slot = 10, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 32, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 32, .stages = stage_bit(stage::compute)},
+         {},
+     }},
 };
 
 /// The acceleration members `sg_acceleration_addresses` holds the address of; a trace of a later one is a native gap.

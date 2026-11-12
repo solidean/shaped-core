@@ -57,10 +57,8 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     auto const traces_by_address = acceleration_members > 0;
     CC_ASSERT(acceleration_members <= sg::impl::acceleration_address_capacity,
               "a vulkan pipeline binds at most 16 acceleration structures, whose addresses set 3 holds");
-    auto const has_mesh_slots = desc.mesh_polyfill != sg::mesh_polyfill_slots::none;
-    auto const mesh_binding
-        = u32(desc.mesh_polyfill == sg::mesh_polyfill_slots::output ? sg::reserved_mesh_output.vulkan_binding
-                                                                    : sg::reserved_mesh_input.vulkan_binding);
+    auto const polyfill_slots = sg::impl::polyfill_slots_of(desc.mesh_polyfill);
+    auto const has_mesh_slots = !polyfill_slots.empty();
     auto const has_regions = has_debug_window || traces_in_software || has_array_lengths || desc.dispatch_grid
                           || traces_by_address || has_mesh_slots;
     if (!desc.static_samplers.empty() || has_regions)
@@ -134,10 +132,10 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
             });
-        // a polyfilled mesh stage's slots, written by its compute half and read by its vertex half
-        if (has_mesh_slots)
+        // a polyfill's slots and records, each written by one half and read by another
+        for (auto const& slot : polyfill_slots)
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
-                .binding = mesh_binding,
+                .binding = u32(slot.address->vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
@@ -279,10 +277,12 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
                 ctx._device, reserved_set_layout, u32(sg::reserved_acceleration_addresses.vulkan_binding), &offset);
             result->_addresses_offset = isize(offset);
         }
-        if (has_mesh_slots)
+        for (auto const& slot : polyfill_slots)
         {
-            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout, mesh_binding, &offset);
-            result->_mesh_slots_offset = isize(offset);
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout,
+                                                         u32(slot.address->vulkan_binding), &offset);
+            (slot.is_task ? result->_task_slots_offset : result->_mesh_slots_offset) = isize(offset);
+            (slot.is_task ? result->_holds_task_slots : result->_holds_mesh_slots) = true;
         }
     }
     return vulkan_pipeline_layout_handle(cc::move(result));
@@ -355,7 +355,9 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
                                                  cc::span<u32 const> grid,
                                                  cc::span<u32 const> addresses,
                                                  VkDeviceAddress mesh_slots,
-                                                 isize mesh_slots_bytes) const
+                                                 isize mesh_slots_bytes,
+                                                 VkDeviceAddress task_slots,
+                                                 isize task_slots_bytes) const
 {
     // The set and the values it names, in one transient range of the heap, each a uniform buffer behind the set.
     // 256 is the largest minUniformBufferOffsetAlignment Vulkan allows.
@@ -412,10 +414,15 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
     }
     if (_traces_by_address)
         write_uniform(addresses, next, _addresses_offset);
-    if (mesh_polyfill() != sg::mesh_polyfill_slots::none)
+    if (_holds_mesh_slots)
     {
         CC_ASSERT(mesh_slots != 0, "a polyfilled mesh stage's set 3 names the draw's slot buffer");
         write_storage_descriptor(mesh_slots, mesh_slots_bytes, base + _mesh_slots_offset);
+    }
+    if (_holds_task_slots)
+    {
+        CC_ASSERT(task_slots != 0, "a polyfilled task stage's set 3 names the draw's record buffer");
+        write_storage_descriptor(task_slots, task_slots_bytes, base + _task_slots_offset);
     }
 
     u32 const buffer_index = 0;

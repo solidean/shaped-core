@@ -660,6 +660,9 @@ struct sgl::check::function_info
     i32 max_primitives = 0;
     /// `@mesh(…, lines = M)`: the mesh stage writes lines, of two vertices each, rather than triangles (CHK-480).
     bool is_line_mesh = false;
+    /// `@task(…, meshes = N)`'s `N`: the mesh workgroups one task workgroup launches at most; 0 where it states none,
+    /// and for every other stage (CHK-484).
+    i32 max_meshes = 0;
     /// A task entry point's: the struct its `dispatch_mesh` hands the mesh stage (CHK-485); `none` before its body
     /// is checked, and for every other function.
     type_id mesh_payload = type_id::none;

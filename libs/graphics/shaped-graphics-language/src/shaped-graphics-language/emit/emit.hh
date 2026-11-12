@@ -28,6 +28,9 @@ enum class sgl::emit::mesh_form : sgl::u8
     native,
     /// The compute entry point that writes its workgroups' slots of `sg_mesh_output`.
     compute,
+    /// Between a polyfilled task stage's compute entry point and a mesh stage's: the one that numbers the launched mesh
+    /// workgroups in order; written from the mesh entry point, since the draw's vertex count is its.
+    scan,
     /// The vertex entry point that draws those slots from `sg_mesh_input`.
     /// A pixel entry point is then its polyfilled pipeline's, which takes what the mesh stage wrote per primitive from
     /// the vertex half.
@@ -190,6 +193,8 @@ struct sgl::emit::emitted_text
     /// The slots a polyfilled mesh entry point's two halves agree on, which sg sizes its buffer and its draw by;
     /// empty for every other emit.
     cc::optional<check::mesh_polyfill_layout> mesh_layout;
+    /// The records a polyfilled task stage's forms agree on, which sg sizes their buffer by; empty for every other emit.
+    cc::optional<check::task_polyfill_layout> task_layout;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -202,7 +207,7 @@ struct sgl::emit::emitted_text
             && color_targets == rhs.color_targets && target_struct == rhs.target_struct
             && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
             && ast::impl::is_equal(debug_sites, rhs.debug_sites) && mesh_layout == rhs.mesh_layout
-            && ast::impl::is_equal(errors, rhs.errors);
+            && task_layout == rhs.task_layout && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

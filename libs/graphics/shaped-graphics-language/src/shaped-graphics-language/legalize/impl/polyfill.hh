@@ -125,6 +125,22 @@ ast::range_of<flat_stmt_id> rewritten(flat_builder& out, ast::range_of<flat_stmt
 /// The reserved binding `name`, listed in `out.e.reserved` once.
 [[nodiscard]] symbol_id listed(flat_builder& out, cc::string_view name);
 
+/// The local of stage input `input`, added as a parameter of `type` where the entry point reads none.
+[[nodiscard]] local_id stage_input_of(flat_builder& out, stage_input input, cc::string_view desired, type_id type);
+
+/// The workgroup `group` of a compute form dispatched in `workgroup`-sized groups, numbered `x + nx * (y + ny * z)`,
+/// the grid being the threads sg wrote into `sg_dispatch_grid`; what it binds goes into `into`.
+/// `count`, where given, is set to the workgroups of the grid.
+[[nodiscard]] flat_expr_id linear_workgroup(words& w,
+                                            local_id group,
+                                            cc::fixed_array<i32, 3> const& workgroup,
+                                            stmt_list& into,
+                                            flat_expr_id* count = nullptr);
+
+/// An entry point of stage `s` with no parameter, binding or result, which takes `e`'s header and origin; its
+/// locals stay, as temporaries, so a body built from `e`'s values reads them.
+[[nodiscard]] flat_builder fresh_entry(checked_module const& m, flat_entry_point const& e, stage s);
+
 /// The vertex entry point that draws a polyfill's slots back, one invocation a corner of every primitive slot, from
 /// `sg_mesh_input`; the corners of a slot past its workgroup's count stand outside the clip volume.
 /// `e` is the entry point the slots came from, whose header and origin it takes, and `vertex_type` the struct a slot holds.

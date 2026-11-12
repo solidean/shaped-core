@@ -153,33 +153,11 @@ flat_entry_point sgl::check::impl::slots_as_vertex_fetch(checked_module const& m
 {
     auto const result_type = is_valid(corner_type) ? corner_type : vertex_type;
 
-    auto out = flat_builder::extend(m, e);
-    for (auto& local : out.e.locals)
-        if (local.kind == local_kind::parameter)
-            local.kind = local_kind::temporary;
-    out.e.stage_inputs.clear();
-    out.e.bindings.clear();
-    out.e.reserved.clear();
-    out.e.traced_rays.clear();
-    out.e.debug_sites.clear();
-    out.e.options.clear();
-    out.e.legalized = nullptr;
-    out.e.input = type_id::none;
-    out.e.workgroup = {1, 1, 1};
-    out.e.is_auto_workgroup = false;
-    out.e.written_words = 0;
-    out.e.zeroes_workgroup = false;
-    out.e.unshadowed_bytes = 0;
-    out.e.workgroup_index = local_id::none;
-    out.e.entry_stage = stage::vertex;
+    auto out = fresh_entry(m, e, stage::vertex);
     out.e.result = result_type;
-    out.e.features = {};
     for (auto const& leaf : leaves_of(m, result_type).value())
         if (leaf.kind == leaf_kind::half_)
             out.e.features.set(feature::shader_f16);
-    if (e.body.count > 0)
-        out.from = e.at(e.at(e.body)[0]).from;
-    out.inlined_through = {};
 
     auto w = words{.out = out, .binding = listed(out, "sg_mesh_input")};
     auto const vertex_index = out.add_local(local_kind::parameter, "vertex_index", out.type_named(builtins::k_int));
@@ -254,4 +232,67 @@ flat_entry_point sgl::check::impl::slots_as_vertex_fetch(checked_module const& m
     }
     body.push_back(out.return_(out.local(result)));
     return compacted(m, out.e, body);
+}
+
+flat_builder sgl::check::impl::fresh_entry(checked_module const& m, flat_entry_point const& e, stage s)
+{
+    auto out = flat_builder::extend(m, e);
+    for (auto& local : out.e.locals)
+        if (local.kind == local_kind::parameter)
+            local.kind = local_kind::temporary;
+    out.e.stage_inputs.clear();
+    out.e.bindings.clear();
+    out.e.reserved.clear();
+    out.e.traced_rays.clear();
+    out.e.debug_sites.clear();
+    out.e.options.clear();
+    out.e.legalized = nullptr;
+    out.e.input = type_id::none;
+    out.e.result = checked_module::void_type;
+    out.e.workgroup = {1, 1, 1};
+    out.e.is_auto_workgroup = false;
+    out.e.written_words = 0;
+    out.e.zeroes_workgroup = false;
+    out.e.unshadowed_bytes = 0;
+    out.e.workgroup_index = local_id::none;
+    out.e.entry_stage = s;
+    out.e.features = {};
+    if (e.body.count > 0)
+        out.from = e.at(e.at(e.body)[0]).from;
+    out.inlined_through = {};
+    return out;
+}
+
+local_id sgl::check::impl::stage_input_of(flat_builder& out, stage_input input, cc::string_view desired, type_id type)
+{
+    for (auto const& s : out.e.stage_inputs)
+        if (s.input == input)
+            return s.local;
+    auto const local = out.add_local(local_kind::parameter, desired, type);
+    out.e.stage_inputs.push_back({.input = input, .local = local});
+    return local;
+}
+
+flat_expr_id sgl::check::impl::linear_workgroup(words& w,
+                                                local_id group,
+                                                cc::fixed_array<i32, 3> const& workgroup,
+                                                stmt_list& into,
+                                                flat_expr_id* count)
+{
+    auto& out = w.out;
+    auto const grid = listed(out, "sg_dispatch_grid");
+    auto const lane = [&](flat_expr_id v, i32 axis) { return out.member(v, axis); };
+    auto const id = [&](i32 axis) { return w.unary("convert_int_to_uint", lane(out.local(group), axis)); };
+    auto const axis_groups = [&](cc::string_view desired, i32 axis)
+    {
+        return w.bound(desired,
+                       w.binary("divide_uint", lane(out.binding_member(grid, 0), axis), w.word(u32(workgroup[axis]))),
+                       into);
+    };
+    auto const nx = axis_groups("polyfill_nx", 0);
+    auto const ny = axis_groups("polyfill_ny", 1);
+    if (count != nullptr)
+        *count = w.binary("multiply_uint", nx, w.binary("multiply_uint", ny, axis_groups("polyfill_nz", 2)));
+    return w.binary("add_uint", id(0),
+                    w.binary("multiply_uint", nx, w.binary("add_uint", id(1), w.binary("multiply_uint", ny, id(2)))));
 }

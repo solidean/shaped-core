@@ -901,6 +901,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   Its last parameter is `output: mut mesh_output[T]`; `output.set_counts(v, t)` in uniform control flow, then `output.vertex(i, v)` and `output.triangle(i, uint3)`.
   A `pipeline` names it as `mesh = f` in the vertex stage's place, and the host draws it with `draw_mesh_tasks`.
 - **`@task(x, y, z)` launches mesh workgroups** (CHK-484 to CHK-487): its body ends in `dispatch_mesh(x, y, z, payload)`, once, in uniform control flow.
+  `@task(32, meshes = 64)` states the most one workgroup launches, which a polyfilled draw holds slots for.
   The mesh stage takes `payload`'s struct as a parameter before its output, and the pipeline names both: `task = t`, `mesh = m`.
 - **`mesh_output[T, F]` writes `F` per triangle** with `output.primitive(i, f)` (CHK-488), and the pixel stage takes it as a second struct: `fun ps(c: T, f: F)` (CHK-489).
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.

@@ -343,6 +343,13 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
         b.add_pod(p.primitives_per_group);
         b.add_pod(p.words_per_group);
         b.add_pod(p.input_corners);
+        add_optional_shader(b, p.task_shader);
+        b.add_bool(p.task_shader.has_value());
+        if (p.task_shader.has_value())
+            add_shader(b, p.task_scan_shader);
+        b.add_pod(p.task_record_words);
+        b.add_pod(p.task_meshes);
+        b.add_pod(p.task_budget);
     }
 
     b.add_pod(u64(desc.vertex_input.slots.size()));

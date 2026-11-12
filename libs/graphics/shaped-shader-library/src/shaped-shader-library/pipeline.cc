@@ -376,10 +376,10 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                                        "and this device "
                                                                        "lacks sg::feature::tessellation_shader",
                                                                        d.file, d.name)));
-    // A mesh stage is drawn as its polyfill where the context asks for one, and only a mesh stage of no task stage so far.
+    // A mesh stage is drawn as its polyfill where the context asks for one, and its task stage with it.
     auto const polyfill_use = ctx->mesh_polyfill();
     auto const polyfills
-        = d.mesh != nullptr && d.task == nullptr
+        = d.mesh != nullptr
        && (polyfill_use == sg::polyfill_use::always
            || (polyfill_use == sg::polyfill_use::where_missing && !ctx->supports(sg::feature::mesh_shader)));
     if (d.mesh != nullptr && !polyfills && !ctx->supports(sg::feature::mesh_shader))
@@ -406,10 +406,14 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
     if (d.mesh != nullptr && polyfills)
     {
+        // the compute half and the scan read the task stage's records, so they name it
         auto const half = [&](cc::string_view form)
         {
             auto with_form = options;
             with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string(form)});
+            if (d.task != nullptr && form != "vertex")
+                with_form.push_back(
+                    {.name = cc::string(slib::k_polyfill_task_option), .value = cc::string((*d.task)->entry_point())});
             return (*d.mesh)->acquire(*ctx, with_form);
         };
         auto compute = co_await half("compute");
@@ -417,11 +421,22 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         desc.mesh_polyfill = sg::mesh_polyfill_description{.corners = compute.mesh_polyfill_corners,
                                                            .primitives_per_group = compute.mesh_polyfill_primitives,
                                                            .words_per_group = compute.mesh_polyfill_words};
+        if (d.task != nullptr)
+        {
+            auto with_form = options;
+            with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string("compute")});
+            auto task = co_await (*d.task)->acquire(*ctx, with_form);
+            auto& p = desc.mesh_polyfill.value();
+            p.task_record_words = task.task_polyfill_record_words;
+            p.task_meshes = task.task_polyfill_meshes;
+            p.task_scan_shader = co_await half("scan");
+            p.task_shader = cc::move(task);
+        }
         desc.mesh_polyfill.value().compute_shader = cc::move(compute);
     }
     else if (d.mesh != nullptr)
         desc.mesh_shader = co_await (*d.mesh)->acquire(*ctx, options);
-    if (d.task != nullptr)
+    if (d.task != nullptr && !polyfills)
         desc.task_shader = co_await (*d.task)->acquire(*ctx, options);
     // the pixel stage of a polyfilled mesh stage takes what it wrote per primitive from the vertex half (SGL's CHK-524)
     if (d.pixel != nullptr && polyfills)

@@ -2248,12 +2248,14 @@ void checker::compile_function(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     auto const* const compute = find_attribute(file, d.attributes, "compute");
     auto const mesh_limits = mesh != nullptr ? mesh_of(file, *mesh) : mesh_shape();
+    auto const task_limits = task != nullptr ? task_of(file, *task) : task_shape();
     // CHK-520: a bare `@compute` leaves its size to the compile, which flattening chooses from the body's indexing
     auto const is_auto_workgroup
         = compute != nullptr && task == nullptr && mesh == nullptr && ast_of(file).at(compute->arguments).empty();
     auto const workgroup = mesh != nullptr   ? mesh_limits.workgroup
+                         : task != nullptr   ? task_limits.workgroup
                          : is_auto_workgroup ? cc::fixed_array<i32, 3>{64, 1, 1}
-                                             : workgroup_of(file, task != nullptr ? task : compute);
+                                             : workgroup_of(file, compute);
     auto const preferred_subgroup_size = preferred_subgroup_size_of(
         file, find_attribute(file, d.attributes, "preferred_subgroup_size"), compute != nullptr);
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : mesh_limits.vertices;
@@ -2280,6 +2282,7 @@ void checker::compile_function(symbol_id id)
         .max_vertices = max_vertices,
         .max_primitives = mesh_limits.triangles,
         .is_line_mesh = mesh_limits.is_lines,
+        .max_meshes = task_limits.meshes,
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,
         .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),

@@ -146,6 +146,66 @@ ASYNC_INVOCABLE_TEST("sg - an SGL mesh stage draws its triangles in order, workg
             CHECK(pixels[0].rgba8(x, y) == tg::vec4i(255, 255, 255, 255)).context(cc::format("pixel ({}, {})", x, y));
 }
 
+ASYNC_INVOCABLE_TEST("sg - a polyfilled task stage launches its mesh workgroups, each handed the payload",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = unreachable(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const scope = polyfilling(*ctx);
+
+    // `launching` states no bound, so the draw holds the budget's slots
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::launched);
+    REQUIRE(pipeline->mesh_polyfill() != nullptr);
+    CHECK(pipeline->mesh_polyfill()->task != nullptr);
+    CHECK(pipeline->mesh_polyfill()->task_meshes == 0);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, mesh_target(),
+                                                         [&](sg::rendering_scope& s)
+                                                         {
+                                                             s.bind_pipeline(*pipeline);
+                                                             s.draw_mesh_tasks(1);
+                                                         });
+    // sgl-mesh-test.cc's image of the native stages: red by the mesh workgroup's index, blue from the payload
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const red = x < size / 2 ? 0 : 255;
+            CHECK(pixels[0].rgba8(x, y) == tg::vec4i(red, 0, 255, 255)).context(cc::format("pixel ({}, {})", x, y));
+        }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a polyfilled task workgroup that launches nothing draws nothing, and the rest keep their "
+                     "order",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = unreachable(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const scope = polyfilling(*ctx);
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::culled);
+    REQUIRE(pipeline->mesh_polyfill() != nullptr);
+    CHECK(pipeline->mesh_polyfill()->task_meshes == 2);
+    // twice, so the second draw's records follow the first's in a buffer the first left written
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, mesh_target(),
+                                                         [&](sg::rendering_scope& s)
+                                                         {
+                                                             s.bind_pipeline(*pipeline);
+                                                             s.draw_mesh_tasks(4);
+                                                             s.draw_mesh_tasks(4);
+                                                         });
+    // sgl-mesh-test.cc's image of the native stages: columns 2, 4 and 5 alone
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const expected = x == 2 ? tg::vec4i(64, 0, 255, 255)
+                                : x == 4 ? tg::vec4i(128, 0, 255, 255)
+                                : x == 5 ? tg::vec4i(128, 255, 255, 255)
+                                         : tg::vec4i(0, 0, 0, 0);
+            CHECK(pixels[0].rgba8(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
+        }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a polyfilled mesh stage hands its pixel stage what it wrote per triangle, flat on each "
                      "corner",
                      (sg::context_handle const& ctx))

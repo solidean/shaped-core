@@ -138,6 +138,28 @@ TEST("sgl check - a task stage and its mesh stage check as a pipeline (CHK-484 t
           == "");
 }
 
+TEST("sgl check - @task may state how many mesh workgroups one launches at most (CHK-484)")
+{
+    auto const source = [](cc::string_view attribute)
+    {
+        return cc::string(k_head) + "struct handed:\n    blue: float\n" + attribute
+             + " fun ts():\n    let h: handed = {blue = 1.0}\n    dispatch_mesh(2u, 1u, 1u, h)\n";
+    };
+    auto const checked = check_sources(read_prelude(), source("@task(32, meshes = 64)"));
+    CHECK(reports_of(checked) == "");
+    auto const& ts = symbol_named(checked.module, "ts");
+    CHECK(checked.module.functions[ts.info].max_meshes == 64);
+    CHECK(checked.module.functions[ts.info].workgroup[0] == 32);
+
+    auto const unstated = check_sources(read_prelude(), source("@task(32)"));
+    CHECK(unstated.module.functions[symbol_named(unstated.module, "ts").info].max_meshes == 0);
+
+    for (auto const attribute : {"@task(meshes = 4)", "@task(1, meshes = 0)", "@task(1, meshes = 4, meshes = 4)",
+                                 "@task(1, meshes = 4, 2)", "@task(1, lines = 4)", "@task(1, meshes = 4194305)"})
+        CHECK(reports_for(source(attribute)).contains("invalid-attribute-arguments"))
+            .dump("attribute", cc::string(attribute));
+}
+
 TEST("sgl check - a task stage dispatches once, as the last statement of its body (CHK-485)")
 {
     auto const head = cc::string_view("struct handed:\n    blue: float\n");

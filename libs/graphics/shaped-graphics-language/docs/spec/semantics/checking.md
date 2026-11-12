@@ -1418,6 +1418,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   The mesh stage says what primitives it writes, so the pipeline sets no `topology`, and one of `lines` rasterizes a line list.
   What the mesh stage writes is what the pixel stage takes, by CHK-183's rule, and the pipeline reads no vertex input.
 * **CHK-484** `@task(x, y, z)` makes an entry point of the task stage, which needs `mesh_shader`.
+  `@task(x, y, z, meshes = N)` also states how many mesh workgroups one task workgroup launches at most, from 1 to 2^22, which a polyfilled draw holds slots for (CHK-524).
   Its workgroup sizes are `@compute`'s, and it takes the compute stage's inputs and `@workgroup` bindings, and returns nothing.
 * **CHK-485** `dispatch_mesh(x, y, z, payload)` launches `x * y * z` mesh workgroups and hands each the struct `payload`; it is a task stage's alone.
   The three counts are `uint`, and `payload` is a struct of the program, or `wrong-kind-of-name`.
@@ -1434,8 +1435,11 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   Workgroup `g` owns fixed slots: its two counts, `M` primitives' indices, then `N` vertices of one word a scalar leaf, so the draw keeps the native primitive order.
   The vertex half draws one invocation a corner of every slot, and a slot past its workgroup's count stands outside the clip volume.
   What it writes per primitive follows the vertices in the same words, and rides flat on each corner of its primitive, so the pixel stage reads it at CHK-489's locations.
+  A task stage before it is a compute entry point whose first invocation writes its launch and payload into a record, and a scan that numbers what all of them launched.
+  The mesh stage's compute half then runs once a launched workgroup, in that number's order, reading its workgroup id and payload from its task workgroup's record.
+  A launch past `meshes = N`, or past what the draw holds slots for, is dropped.
   The words, the reserved buffers and how sg draws them are [the polyfill protocol](../../../../shaped-graphics/docs/concepts/mesh-polyfill.md).
-  A mesh entry point that takes a payload, or has a vertex or primitive member that is no scalar, vector or array of them, is `unsupported-yet` there.
+  A mesh entry point with a vertex, primitive or payload member that is no scalar, vector or array of them is `unsupported-yet` there, and so is one that takes a payload with no polyfilled task stage.
 * **CHK-525** Where a device has no geometry stage, a geometry entry point can be polyfilled the same way: its pipeline's vertex stage and itself as one compute entry point, then a draw.
   One thread a primitive of an instance assembles it from the draw's index and vertex buffers, runs the vertex stage on each corner, and runs the geometry stage on the result.
   What it appends goes into the primitive's fixed slots, the mesh polyfill's words, so the draw keeps the native order: primitive by primitive, then as appended.

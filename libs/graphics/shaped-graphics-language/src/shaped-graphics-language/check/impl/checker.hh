@@ -860,6 +860,14 @@ struct checker
     };
     /// A bad argument reports and leaves a shape of one vertex and one triangle.
     [[nodiscard]] mesh_shape mesh_of(i32 file, ast::attribute const& a);
+    /// `@task(x, y, z, meshes = N)`: its workgroup, and the mesh workgroups one of them launches at most, 0 where it
+    /// states none (CHK-484); a bad argument reports and leaves a workgroup of one and no bound.
+    struct task_shape
+    {
+        cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
+        i32 meshes = 0;
+    };
+    [[nodiscard]] task_shape task_of(i32 file, ast::attribute const& a);
     struct tessellation_mode
     {
         tessellation_partitioning partitioning = tessellation_partitioning::integer;

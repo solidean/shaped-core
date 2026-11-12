@@ -333,6 +333,7 @@ private:
         auto native_line_table = false;
         auto mesh = sgl::emit::mesh_form::native;
         auto polyfill_vertex = cc::string();
+        auto polyfill_task = cc::string();
         auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
         auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
         auto const requires_native
@@ -354,7 +355,13 @@ private:
             {
                 mesh = o.value == "compute" ? sgl::emit::mesh_form::compute
                      : o.value == "vertex"  ? sgl::emit::mesh_form::vertex_fetch
+                     : o.value == "scan"    ? sgl::emit::mesh_form::scan
                                             : sgl::emit::mesh_form::native;
+                continue;
+            }
+            if (o.name == slib::k_polyfill_task_option)
+            {
+                polyfill_task = o.value;
                 continue;
             }
             if (o.name == slib::k_polyfill_vertex_option)
@@ -408,7 +415,8 @@ private:
              .native = native,
              .native_line_table = native_line_table,
              .mesh = mesh,
-             .polyfill_vertex = polyfill_vertex});
+             .polyfill_vertex = polyfill_vertex,
+             .polyfill_task = polyfill_task});
         // what the front end checked rather than loaded, kept for the next process
         if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
             store != nullptr)
@@ -418,9 +426,11 @@ private:
         auto const& emitted = text.value();
         // CHK-524: a polyfilled mesh stage's half is the stage it became, which the compile after this one builds; the
         // pixel stage after it stays one
-        auto const is_polyfilled = desc.stage == sg::shader_stage::mesh || desc.stage == sg::shader_stage::geometry;
+        auto const is_polyfilled = desc.stage == sg::shader_stage::mesh || desc.stage == sg::shader_stage::geometry
+                                || desc.stage == sg::shader_stage::task;
         auto const form_stage = !is_polyfilled                             ? desc.stage
                               : mesh == sgl::emit::mesh_form::compute      ? sg::shader_stage::compute
+                              : mesh == sgl::emit::mesh_form::scan         ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::vertex_fetch ? sg::shader_stage::vertex
                                                                            : desc.stage;
         auto shader = sg::compiled_shader{.stage = form_stage, .format = _format, .entry_point = emitted.entry_point};
@@ -430,6 +440,11 @@ private:
             shader.mesh_polyfill_corners = l.corners;
             shader.mesh_polyfill_primitives = l.max_primitives;
             shader.mesh_polyfill_words = l.group_words;
+        }
+        if (emitted.task_layout.has_value())
+        {
+            shader.task_polyfill_record_words = emitted.task_layout.value().record_words();
+            shader.task_polyfill_meshes = emitted.task_layout.value().max_meshes;
         }
         auto result = slib::preprocessed_source{.source = emitted.text,
                                                 .entry_point = emitted.entry_point,

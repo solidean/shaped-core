@@ -137,6 +137,11 @@ inline constexpr cc::string_view k_mesh_form_option = "mesh_form";
 /// The option a pipeline that polyfills its geometry stage passes beside `k_mesh_form_option`: the name of the
 /// pipeline's vertex entry point, which the geometry stage's compute half runs on each corner (SGL's CHK-525).
 inline constexpr cc::string_view k_polyfill_vertex_option = "polyfill_vertex";
+
+/// The option a pipeline that polyfills its task stage passes beside `k_mesh_form_option` for its mesh stage's compute
+/// half and the scan before it, valued `scan` there: the name of the pipeline's task entry point, whose records both
+/// read (SGL's CHK-524).
+inline constexpr cc::string_view k_polyfill_task_option = "polyfill_task";
 } // namespace slib
 
 namespace slib

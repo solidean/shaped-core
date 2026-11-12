@@ -155,12 +155,33 @@ inline constexpr reserved_binding_address reserved_geometry_vertices[] = {
      .metal_buffer = 27},
 };
 
+/// A polyfilled task stage's records, which its compute form and the scan after it write; metal draws every task
+/// stage natively.
+inline constexpr reserved_binding_address reserved_task_output = {.name = "sg_task_output",
+                                                                  .dx12_space = 11,
+                                                                  .dx12_register = 9,
+                                                                  .vulkan_set = 3,
+                                                                  .vulkan_binding = 31,
+                                                                  .webgpu_group = 3,
+                                                                  .webgpu_binding = 31};
+/// The same records, which the compute half of the mesh stage it launches reads.
+inline constexpr reserved_binding_address reserved_task_input = {.name = "sg_task_input",
+                                                                 .dx12_space = 11,
+                                                                 .dx12_register = 10,
+                                                                 .vulkan_set = 3,
+                                                                 .vulkan_binding = 32,
+                                                                 .webgpu_group = 3,
+                                                                 .webgpu_binding = 32};
+
 inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window,         reserved_acceleration_pool,    reserved_acceleration_roots,
-       reserved_array_lengths,        reserved_dispatch_grid,        reserved_acceleration_addresses,
-       reserved_mesh_output,          reserved_mesh_input,           reserved_geometry_draw,
-       reserved_geometry_indices,     reserved_geometry_vertices[0], reserved_geometry_vertices[1],
-       reserved_geometry_vertices[2], reserved_geometry_vertices[3]};
+    = {reserved_debug_window,         reserved_acceleration_pool,
+       reserved_acceleration_roots,   reserved_array_lengths,
+       reserved_dispatch_grid,        reserved_acceleration_addresses,
+       reserved_mesh_output,          reserved_mesh_input,
+       reserved_geometry_draw,        reserved_geometry_indices,
+       reserved_geometry_vertices[0], reserved_geometry_vertices[1],
+       reserved_geometry_vertices[2], reserved_geometry_vertices[3],
+       reserved_task_output,          reserved_task_input};
 
 namespace impl
 {
