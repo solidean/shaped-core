@@ -1398,7 +1398,7 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         auto const readback = sr::submit_capture_readback(*im.ctx, im.offscreen);
 
         // A settled render takes the readback itself, and nothing is written.
-        // With it, the first traced layer's channels, where it asked for any: their sums and the tallies that count them.
+        // With it, the first traced layer's channels, where it asked for any: each pixel's count and sums.
         if (im.settled_landing != nullptr)
         {
             auto& landing = *im.settled_landing;
@@ -1412,7 +1412,6 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
                     paths != nullptr && paths->channel_mask != 0)
                 {
                     auto cmd = im.ctx->create_command_list();
-                    landing.tallies = cmd->download.data_from_buffer(paths->tallies);
                     landing.channel_sums = cmd->download.data_from_buffer(paths->channel_sums);
                     (void)im.ctx->submit_command_list(cc::move(cmd));
                     landing.channel_mask = paths->channel_mask;

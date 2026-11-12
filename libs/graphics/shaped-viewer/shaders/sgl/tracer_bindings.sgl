@@ -404,8 +404,8 @@ binding traced:
     /// Where each permutation's range of `queue_sorted` starts.
     shade_offsets: mut buffer[uint]
 
-    /// Per pixel, one float4 a channel `frame.channel_mask` names, in the order of their bits: their sums over the primary hits
-    /// since the restart, which `pixel_tally::guide_count` counts, so the mean is the sum over it.
+    /// Per pixel, its count of primary samples since the restart in the first float4's .x, then one float4 a channel
+    /// `frame.channel_mask` names, in the order of their bits: their sums over the primary hits, so a mean is a sum over the count.
     channel_sums: mut buffer[float4]
 
 /// The manager's bindless tables — group 1, which the host binds as the manager's own group.

@@ -28,7 +28,7 @@ struct sv::wavefront_state
     sg::buffer<shaders::tracer::shadow_ray> shadow_rays;
     sg::buffer<shaders::tracer::pixel_tally> tallies;
 
-    /// The channels this state sums, `render_settings::channels`, and their sums: a float4 a channel a slot.
+    /// The channels this state sums, `render_settings::channels`, and their sums: a slot's count, then a float4 a channel.
     u32 channel_mask = 0;
     sg::buffer<tg::vec4f> channel_sums;
     sg::buffer<u32> queue_a;

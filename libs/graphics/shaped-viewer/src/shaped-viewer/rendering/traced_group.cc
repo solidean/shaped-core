@@ -35,30 +35,30 @@ wavefront_state wavefront_state::create(sg::context& ctx, tg::vec2i extent, i32 
     auto const slots = isize(extent[0]) * isize(extent[1]);
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
     auto& p = ctx.persistent;
-    return {
-        .extent = extent,
-        .max_permutations = max_permutations,
-        .path_rays = p.create_buffer<tracer::path_ray>(slots, usage),
-        .path_states = p.create_buffer<tracer::path_state>(slots, usage),
-        .path_media = p.create_buffer<tracer::path_medium>(slots, usage),
-        .path_lights = p.create_buffer<tracer::path_light>(slots, usage),
-        .hits = p.create_buffer<tracer::hit_record>(slots, usage),
-        .shadow_rays = p.create_buffer<tracer::shadow_ray>(2 * slots, usage),
-        .tallies = p.create_buffer<tracer::pixel_tally>(slots, usage),
-        .channel_mask = channel_mask,
-        // a buffer of one where no channel is asked for, since the binding must be filled
-        .channel_sums = p.create_buffer<tg::vec4f>(channel_mask == 0 ? 1 : slots * cc::popcount(channel_mask), usage),
-        .queue_a = p.create_buffer<u32>(slots, usage),
-        .queue_b = p.create_buffer<u32>(slots, usage),
-        .queue_hits = p.create_buffer<u32>(slots, usage),
-        .queue_sorted = p.create_buffer<u32>(slots, usage),
-        .queue_shadow = p.create_buffer<u32>(slots, usage),
-        .queue_finished = p.create_buffer<u32>(slots, usage),
-        .counters = p.create_buffer<u32>(counter_count(max_permutations), usage),
-        .shade_offsets = p.create_buffer<u32>(max_permutations, usage),
-        // One record per stage counting a queue, then one per permutation: `tracer.dispatch_shade` is the first of those.
-        .args = p.create_buffer<tracer::dispatch_args>(4 + isize(max_permutations),
-                                                       usage | sg::buffer_usage::indirect_command_buffer)};
+    return {.extent = extent,
+            .max_permutations = max_permutations,
+            .path_rays = p.create_buffer<tracer::path_ray>(slots, usage),
+            .path_states = p.create_buffer<tracer::path_state>(slots, usage),
+            .path_media = p.create_buffer<tracer::path_medium>(slots, usage),
+            .path_lights = p.create_buffer<tracer::path_light>(slots, usage),
+            .hits = p.create_buffer<tracer::hit_record>(slots, usage),
+            .shadow_rays = p.create_buffer<tracer::shadow_ray>(2 * slots, usage),
+            .tallies = p.create_buffer<tracer::pixel_tally>(slots, usage),
+            .channel_mask = channel_mask,
+            // a buffer of one where no channel is asked for, since the binding must be filled
+            .channel_sums
+            = p.create_buffer<tg::vec4f>(channel_mask == 0 ? 1 : slots * (cc::popcount(channel_mask) + 1), usage),
+            .queue_a = p.create_buffer<u32>(slots, usage),
+            .queue_b = p.create_buffer<u32>(slots, usage),
+            .queue_hits = p.create_buffer<u32>(slots, usage),
+            .queue_sorted = p.create_buffer<u32>(slots, usage),
+            .queue_shadow = p.create_buffer<u32>(slots, usage),
+            .queue_finished = p.create_buffer<u32>(slots, usage),
+            .counters = p.create_buffer<u32>(counter_count(max_permutations), usage),
+            .shade_offsets = p.create_buffer<u32>(max_permutations, usage),
+            // One record per stage counting a queue, then one per permutation: `tracer.dispatch_shade` is the first of those.
+            .args = p.create_buffer<tracer::dispatch_args>(4 + isize(max_permutations),
+                                                           usage | sg::buffer_usage::indirect_command_buffer)};
 }
 
 isize wavefront_state::size_in_bytes() const

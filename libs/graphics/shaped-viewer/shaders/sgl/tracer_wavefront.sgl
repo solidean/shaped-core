@@ -77,14 +77,19 @@ const channel_material = 32u
 /// The hit instance's index in .x, and a number in [0, 1) of it in .y, the same for every hit on it.
 const channel_instance = 64u
 
-/// Where pixel slot `s`'s channel sums start, `slots` float4 apart.
-fun channel_base(s: int, slots: int) -> int:
-    return s * slots
+/// How many float4 a pixel's channel sums take: its count of primary samples, then one a channel `mask` names.
+fun channel_slots(mask: uint) -> int:
+    return count_bits(mask as int) + 1
 
-/// Adds a primary hit's channels to slot `s`'s sums, each `mask` names in the order of its bits.
+/// Where pixel slot `s`'s channel sums start: its count, then the channels.
+fun channel_base(s: int, mask: uint) -> int:
+    return s * channel_slots(mask)
+
+/// Adds a primary hit's channels to slot `s`'s sums, each `mask` names in the order of its bits, and counts it.
 fun add_channels(s: int, mask: uint, p: float3, view_depth: float, n: float3, shading_n: float3, surface: openpbr.surface, instance: uint){traced}:
-    let slots = count_bits(mask as int)
-    let mut at = channel_base(s, slots)
+    let mut at = channel_base(s, mask)
+    traced.channel_sums[at] += float4(1.0, 0.0, 0.0, 0.0)
+    at += 1
     if (mask & channel_position) != 0u:
         traced.channel_sums[at] += float4(..p, 1.0)
         at += 1
@@ -310,9 +315,8 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
     let mut tally = if restart => empty_tally() else traced.tallies[s]
     // the channels' sums are counted by the tally's guide count, so they restart with it
     if restart and f.channel_mask != 0u:
-        let slots = count_bits(f.channel_mask as int)
-        for k in 0 ..< slots:
-            traced.channel_sums[channel_base(s, slots) + k] = float4(0.0)
+        for k in 0 ..< channel_slots(f.channel_mask):
+            traced.channel_sums[channel_base(s, f.channel_mask) + k] = float4(0.0)
     tally.frame_count = 0.0
     tally.frame_sum = float3(0.0)
     tally.frame_sum_specular = float3(0.0)
@@ -425,6 +429,8 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
         // An escaped primary ray describes no surface, which the guides read as zeros: counted, nothing summed.
         if hit_t < 0.0:
             tally.guide_count += 1.0
+            // counted beside the channels too, which an escaped sample adds nothing to
+            if f.channel_mask != 0u => traced.channel_sums[channel_base(s, f.channel_mask)] += float4(1.0, 0.0, 0.0, 0.0)
             st.flags = st.flags & ~path_flag_primary
             // The depth raster sees where the first primary ray since the restart landed; one that escaped is the far plane.
             if tally.primary_view_depth < 0.0 => tally.primary_view_depth = escaped_view_depth
