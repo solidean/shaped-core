@@ -1,6 +1,7 @@
 #include <clean-core/platform/file_access.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
@@ -73,13 +74,18 @@ TEST("file_access - a missing file is noted as read, since finding it missing is
 
 TEST("file_access - code past clean-core declares what it touches", exclusive("cc-file-access"))
 {
+    // under the temp directory: a runner records these notes as the test's own accesses, so a path in the source tree
+    // would read as a write there and as an input the test depends on
+    auto const directory = cc::temp_file_path("cc-file-access-declared", "");
+    auto const read = cc::format("{}/read.txt", directory);
+    auto const written = cc::format("{}/out.txt", directory);
     recording_scope const recording;
-    cc::file_access::note_read("cc-file-access-declared/read.txt");
-    cc::file_access::note_write("cc-file-access-declared/out.txt");
-    cc::file_access::note_list("cc-file-access-declared");
-    CHECK(find("cc-file-access-declared/read.txt").read);
-    CHECK(find("cc-file-access-declared/out.txt").written);
-    CHECK(find("cc-file-access-declared").listed);
+    cc::file_access::note_read(read);
+    cc::file_access::note_write(written);
+    cc::file_access::note_list(directory);
+    CHECK(find(read).read);
+    CHECK(find(written).written);
+    CHECK(find(directory).listed);
 }
 
 TEST("file_access - nothing is noted while recording is off", exclusive("cc-file-access"))
