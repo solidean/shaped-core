@@ -169,6 +169,14 @@ def test_the_gate_follows_the_same_opt_in_and_its_flags_reach_child_runs() -> No
             os.environ[bs.ENV_ENABLE] = saved
 
 
+def test_a_request_s_binaries_count_its_wall_time_once_and_plain_ones_their_own() -> None:
+    from tools.dev.lib.core import report
+    served = lambda s, req: {"duration_s": s, "build_server": {"cached": False, "request": req, "request_s": 2.0}}  # noqa: E731
+    records = [served(5.0, 1), served(7.0, 1), served(3.0, 2), {"duration_s": 1.5}]
+    assert report.wall_s(records) == 2.0 + 2.0 + 1.5, "one wall time per request, side by side; a plain run's own"
+    assert report.wall_s([{"duration_s": 1.0, "build_server": {"cached": True}}]) == 1.0, "a record from before requests were timed"
+
+
 def test_a_missing_client_warns_once_and_builds_the_plain_way() -> None:
     with tempfile.TemporaryDirectory() as d:
         build = Path(d) / "build"

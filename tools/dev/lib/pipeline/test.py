@@ -15,9 +15,11 @@ Public API:
 from __future__ import annotations
 
 import functools
+import itertools
 import json
 import os
 import shutil
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -358,6 +360,10 @@ def _served_summary(r: dict, result: StepResult, xml_path: Path) -> None:
     ui.write_line(console.red(f"  {name} {verdict}{seed}"))
 
 
+# Numbers each request to the build server, so a report can tell which binaries shared one wall clock (report.wall_s).
+_REQUESTS = itertools.count()
+
+
 def _test_through_server(
     server: build_server.Session,
     preset: Preset,
@@ -393,6 +399,7 @@ def _test_through_server(
         if watchdog_fraction is not None and binary_timeout:
             args += ["--watchdog", f"{binary_timeout * watchdog_fraction:g}"]
         args += runner_args
+        request, started = next(_REQUESTS), time.monotonic()
         results = server.test(
             preset.build_dir, [t.name for t in group], runner_args=args, timeout=binary_timeout,
             threads=jobs or None, rerun=rerun, verbose=verbose, env=env,
@@ -402,6 +409,7 @@ def _test_through_server(
         if results is None:
             left.extend(group)
             continue
+        request_s = time.monotonic() - started
         by_name = {r["name"]: r for r in results}
         for t in group:
             r = by_name[t.name]
@@ -417,6 +425,8 @@ def _test_through_server(
             record = _record(result, t, preset, root=root, test_name=test_name, write_xml=True, verbose=verbose)
             if record is not None:
                 record["build_server"] = {k: r.get(k) for k in ("cached", "verified", "stored_ms", "seed")}
+                # The server runs a request's binaries side by side, so their own times overlap; the request's is the wall time.
+                record["build_server"].update(request=request, request_s=request_s)
                 records.append(record)
 
     served = [r for r in records if r["build_server"]["cached"]]

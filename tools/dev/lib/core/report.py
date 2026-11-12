@@ -180,9 +180,26 @@ def _print_test_table(records: list[dict]) -> None:
         serial = (f"{sum(r['junit']['serial_s'] for r in serial_records) / serial_wall * 100:.0f}%"
                   if serial_wall > 0 else "-")
         ui.write_line(console.dim(
-            f"  {'total':<{width}}  {fmt_dur(sum(r['duration_s'] for r in records)):>9}  "
+            f"  {'total':<{width}}  {fmt_dur(wall_s(records)):>9}  "
             f"{sum(r['junit']['tests'] for r in records if r['junit']):>6}  {load * 100:>4.0f}%  {cores:>6.1f}  "
             f"{_fmt_bytes(max(peaks) if peaks else None):>9}  {serial:>6}"))
+
+
+def wall_s(records: list[dict]) -> float:
+    """The wall time `records` took: a plain run's binaries one after another, a build server request's side by side.
+
+    A served binary's own time is the time it ran, or for a cached pass the stored run's, so their sum is no wall time at all.
+    """
+    plain = sum(r["duration_s"] for r in records if "request" not in (r.get("build_server") or {}))
+    requests = {r["build_server"]["request"]: r["build_server"]["request_s"] for r in records if "request" in (r.get("build_server") or {})}
+    return plain + sum(requests.values())
+
+
+def _took(records: list[dict]) -> str:
+    """`in <wall>`, and the binaries' own summed time where they ran side by side and it differs."""
+    wall, binaries = wall_s(records), sum(r["duration_s"] for r in records)
+    side_by_side = f" ({fmt_dur(binaries)} of binary time, side by side)" if binaries > wall + 1.0 else ""
+    return f"in {fmt_dur(wall)}{side_by_side}"
 
 
 def summarize_tests(records: list[dict], presets: list[Preset], root: Path, *, table: bool = True) -> bool:
@@ -192,7 +209,6 @@ def summarize_tests(records: list[dict], presets: list[Preset], root: Path, *, t
     """
     if table:
         _print_test_table(records)
-    total_s = sum(r["duration_s"] for r in records)
     failed = sum(1 for r in records if r["returncode"] != 0)
     tests = sum(r["junit"]["tests"] for r in records if r["junit"])
     checks = sum(r["junit"]["assertions"] for r in records if r["junit"])
@@ -200,12 +216,12 @@ def summarize_tests(records: list[dict], presets: list[Preset], root: Path, *, t
     stats = f"{tests} tests, {checks} checks"
     if failed:
         ui.write_line(
-            console.red(f"\n{failed} of {len(records)} test run(s) failed ({stats}) in {fmt_dur(total_s)}"))
+            console.red(f"\n{failed} of {len(records)} test run(s) failed ({stats}) {_took(records)}"))
         ui.write_line(console.red(f"tests failed - {test_diag_hint(presets, root)}"))
         _print_skips(records, skipped)
         return False
     ui.write_line(
-        console.green(f"\nAll {len(records)} test run(s) passed: {stats} in {fmt_dur(total_s)}."))
+        console.green(f"\nAll {len(records)} test run(s) passed: {stats} {_took(records)}."))
     _print_skips(records, skipped)
     return True
 
@@ -262,7 +278,7 @@ def summarize_check_timing(
     rows = []
     for preset in presets:
         tests = [r for r in test_records if r.get("preset") == preset.name]
-        rows.append((preset.name, build_secs(preset), sum(r["duration_s"] for r in tests), len(tests)))
+        rows.append((preset.name, build_secs(preset), wall_s(tests), len(tests)))
 
     width = max(len(name) for name, _, _, _ in rows)
     ui.write_line(console.dim("\ntiming, per preset:"))
