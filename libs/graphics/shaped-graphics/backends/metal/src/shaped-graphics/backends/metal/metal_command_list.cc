@@ -1042,10 +1042,10 @@ void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<ver
 
         // The stride is pipeline state on Metal, baked into the vertex descriptor, so a view carrying a different one
         // is a mismatch nothing below would report — the fetch simply reads the pipeline's stride.
-        // A polyfilled geometry stage or tessellation reads the buffers in a compute pass instead, by a stride its
-        // shader holds.
+        // A polyfilled geometry stage or tessellation reads the buffers in a compute pass or a mesh stage instead, by a
+        // stride its shader holds.
         if (_bound_raster != nullptr && _bound_raster->mesh_polyfill() == nullptr
-            && _bound_raster->tessellation_polyfill() == nullptr)
+            && _bound_raster->tessellation_polyfill() == nullptr && _bound_raster->geometry_mesh_corners() == 0)
         {
             auto const strides = _bound_raster->vertex_strides();
             CC_ASSERT(slot < strides.size(), "the bound raster pipeline declares no vertex input slot here");
@@ -1755,6 +1755,67 @@ void metal_command_list::raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill
     auto const corners = u64(polyfill.primitives_per_group) * u64(polyfill.corners);
     _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()), NS::UInteger(0),
                                     NS::UInteger(threads * corners), NS::UInteger(1), NS::UInteger(0));
+    ++_draws_in_render_encoder;
+}
+
+void metal_command_list::raster_draw_geometry_meshed(sg::impl::geometry_polyfill_draw const& draw)
+{
+    CC_ASSERT(in_rendering_scope(), "a draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr && _bound_raster->is_mesh(), "a geometry mesh route draws a mesh pipeline");
+    CC_ASSERT(!draw.is_indexed || _bound_index_buffer != nullptr, "an indexed draw needs a bound index buffer");
+    constexpr auto streams = cc::span<sg::reserved_binding_address const>(sg::reserved_geometry_vertices).size();
+    CC_ASSERTF(_bound_vertex_buffers.size() <= streams,
+               "a geometry mesh route reads at most {} vertex buffers, and {} are bound", streams,
+               _bound_vertex_buffers.size());
+
+    // What the mesh stage reads of the draw, as the compute route's half does, and the instances its lanes stop at.
+    u32 const values[12] = {draw.first,
+                            draw.primitives,
+                            draw.is_indexed ? (_index_format == sg::index_format::uint16 ? 1u : 2u) : 0u,
+                            u32(draw.vertex_offset),
+                            draw.first_instance,
+                            0,
+                            draw.instances,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0};
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(values)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed,
+                                             "a geometry mesh route's draw could not be staged: the metal device "
+                                             "refused a one-off staging buffer");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), values, sizeof(values));
+
+    // The draw's buffers are the mesh stage's to read, inside the pass: nothing splits it.
+    for (auto const& vertex_buffer : _bound_vertex_buffers)
+        if (vertex_buffer != nullptr)
+            declare_buffer(vertex_buffer, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    if (draw.is_indexed)
+        declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    auto* const table = argument_table();
+    auto const draw_address = staging.buffer->gpuAddress() + u64(staging.offset);
+    table->setAddress(draw_address, NS::UInteger(sg::reserved_geometry_draw.metal_buffer));
+    table->setAddress(draw.is_indexed ? _index_address : draw_address,
+                      NS::UInteger(sg::reserved_geometry_indices.metal_buffer));
+    for (auto i = isize(0); i < isize(streams); ++i)
+    {
+        auto const address = i < _bound_vertex_addresses.size() ? _bound_vertex_addresses[i] : u64(0);
+        table->setAddress(address != 0 ? address : draw_address,
+                          NS::UInteger(sg::reserved_geometry_vertices[i].metal_buffer));
+    }
+
+    declare_raster_draw(false);
+    resume_render_encoder();
+    auto const lanes = u64(_bound_raster->mesh_threads().width);
+    auto const groups = (u64(draw.primitives) * u64(draw.instances) + lanes - 1) / lanes;
+    _render_encoder->drawMeshThreadgroups(MTL::Size(NS::UInteger(groups), 1, 1), _bound_raster->object_threads(),
+                                          _bound_raster->mesh_threads());
     ++_draws_in_render_encoder;
 }
 

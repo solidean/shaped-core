@@ -133,3 +133,33 @@ TEST("sgl emit - a geometry stage the polyfill does not carry yet is refused by 
     REQUIRE(not_a_vertex.has_error());
     CHECK(not_a_vertex.error().contains("no vertex entry point named 'edges_gs'")).dump("error", not_a_vertex.error());
 }
+
+TEST("sgl emit - a geometry stage's mesh route is one mesh entry point of a workgroup's lanes' slots (CHK-525)")
+{
+    // 4 triangles and 6 vertices a primitive: 42 lanes would fill 256 vertices, so 42, under the cap of 64
+    for (auto const t : {target::msl, target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = half_of("twice_gs", t, mesh_form::mesh);
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        CHECK(e.value().stage == sgl::check::stage::mesh);
+        CHECK(e.value().workgroup[0] == 42);
+        CHECK(!e.value().mesh_layout.has_value());
+        CHECK(e.value().features.has(sgl::check::feature::mesh_shader));
+        CHECK(!e.value().features.has(sgl::check::feature::geometry_shader));
+    }
+    auto const msl = half_of("twice_gs", target::msl, mesh_form::mesh);
+    auto const& text = msl.value().text;
+    CHECK(text.contains("[[mesh]]")).dump("text", text);
+    CHECK(text.contains("metal::mesh<")).dump("text", text);
+    CHECK(text.contains(", 252, 168, metal::topology::triangle>")).dump("text", text);
+    CHECK(text.contains("sg_geometry_draw [[buffer(22)]]")).dump("text", text);
+    CHECK(!text.contains("sg_mesh_output")).dump("text", text);
+
+    // lines and points have no zero-area primitive to fill a slot a lane leaves, and are refused by name
+    auto const lines = half_of("edges_gs", target::msl, mesh_form::mesh);
+    REQUIRE(lines.has_error());
+    CHECK(lines.error().contains("appends lines, which the mesh route does not draw yet")).dump("error", lines.error());
+    auto const unnamed = half_of("twice_gs", target::msl, mesh_form::mesh, "");
+    REQUIRE(unnamed.has_error());
+    CHECK(unnamed.error().contains("none was named")).dump("error", unnamed.error());
+}

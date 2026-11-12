@@ -1354,7 +1354,9 @@ void sgl::emit::impl::validate(check::checked_module const& m,
                                bool writes_prints)
 {
     auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints};
-    if (e.input == e.result && e.entry_stage != stage::compute && e.entry_stage != stage::task)
+    // a mesh stage made from a geometry stage takes no payload and returns nothing, as a compute stage does
+    if (e.input == e.result && e.entry_stage != stage::compute && e.entry_stage != stage::task
+        && !(e.entry_stage == stage::mesh && !check::is_valid(e.input)))
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
 

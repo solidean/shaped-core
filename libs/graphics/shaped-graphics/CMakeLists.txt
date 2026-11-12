@@ -474,6 +474,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/sgl-mesh-test.cc
             tests/pipeline/mesh-polyfill-test.cc
             tests/pipeline/mesh-polyfill-benchmark.cc
+            tests/pipeline/geometry-polyfill-benchmark.cc
             tests/pipeline/software-trace-test.cc
             tests/pipeline/raytracing-pipeline-test.cc
             # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
@@ -522,6 +523,7 @@ if(SC_BUILD_TESTS)
                 sampling.sgl:*
                 shapes.sgl:*
                 stages.sgl:*
+                geometry_bench.sgl:*
                 subgroups.sgl:*
                 coherence.sgl:*
                 float_specials.sgl:*

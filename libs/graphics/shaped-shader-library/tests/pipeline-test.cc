@@ -44,7 +44,7 @@ TEST("slib pipeline - sg's mirrored structs keep the fields the prelude mirrors"
     auto [b1, b2, b3] = sg::blend_component{};
     auto [c1, c2] = sg::blend_state{};
     auto [t1, t2, t3] = sg::color_target_state{};
-    auto [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, p21]
+    auto [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, p21, p22]
         = sg::raster_pipeline_description{};
     SUCCEED();
 }

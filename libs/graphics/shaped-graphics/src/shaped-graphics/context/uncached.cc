@@ -246,6 +246,29 @@ sg::impl::tessellation_polyfill_state tessellation_state_of(sg::tessellation_pol
             .max_factor = p.max_factor};
 }
 
+/// Why a geometry stage's mesh route of `desc` cannot be built, or nothing when it can; nothing for a description
+/// without one (SGL's CHK-525).
+cc::optional<cc::string> geometry_mesh_refusal_of(sg::raster_pipeline_description const& desc, sg::context const& ctx)
+{
+    if (desc.geometry_mesh_corners == 0)
+        return {};
+    if (!ctx.draws_geometry_mesh_route())
+        return cc::string("the pipeline draws its geometry stage as a mesh stage, and this backend draws no such "
+                          "pipeline yet");
+    if (desc.geometry_mesh_corners < 1 || desc.geometry_mesh_corners > 3
+        || desc.topology != sg::primitive_topology::triangle_list)
+        return cc::string("the pipeline's geometry mesh route assembles points, lines or triangles, and draws a "
+                          "triangle list");
+    if (!desc.mesh_shader.has_value() || desc.task_shader.has_value() || desc.mesh_polyfill.has_value()
+        || desc.tessellation_polyfill.has_value())
+        return cc::string("the pipeline's geometry mesh route is its mesh stage alone, with no task stage or other "
+                          "polyfill");
+    if (desc.view_count > 1)
+        return cc::string("the pipeline renders several views from a geometry mesh route, which sg does not wire up "
+                          "yet");
+    return {};
+}
+
 /// Why a polyfilled tessellation of `desc` cannot be built, or nothing when it can; nothing for a description without
 /// one (SGL's CHK-527).
 cc::optional<cc::string> tessellation_refusal_of(sg::raster_pipeline_description const& desc, sg::context const& ctx)
@@ -496,10 +519,13 @@ cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_p
                                                    cc::string target_set,
                                                    sg::raster_target_formats formats,
                                                    bool is_mesh_shaded,
-                                                   sg::impl::pipeline_footprint footprint)
+                                                   sg::impl::pipeline_footprint footprint,
+                                                   int geometry_mesh_corners)
 {
     auto pipeline = co_await built;
     sg::impl::set_targets(*pipeline, target_set, formats, is_mesh_shaded);
+    if (geometry_mesh_corners > 0)
+        sg::impl::set_geometry_mesh_corners(*pipeline, geometry_mesh_corners);
     sg::impl::set_footprint(*pipeline, cc::move(footprint));
     co_return pipeline;
 }
@@ -651,6 +677,8 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
         return cc::error(cc::move(refusal.value()));
     if (auto refusal = tessellation_refusal_of(desc, _ctx); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
+    if (auto refusal = geometry_mesh_refusal_of(desc, _ctx); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
 
     // the compute halves first, so a refusal of one leaves no raster half behind
     auto halves = polyfill_halves();
@@ -712,6 +740,8 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     if (r.has_value())
     {
         impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc), desc.mesh_shader.has_value());
+        if (desc.geometry_mesh_corners > 0)
+            impl::set_geometry_mesh_corners(*r.value(), desc.geometry_mesh_corners);
         add_debug_sites(_ctx._debug_windows, desc);
         impl::set_footprint(*r.value(), footprint_of(desc));
         if (desc.mesh_polyfill.has_value())
@@ -744,6 +774,8 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
         refusal = polyfill_refusal_of(desc, _ctx);
     if (!refusal.has_value())
         refusal = tessellation_refusal_of(desc, _ctx);
+    if (!refusal.has_value())
+        refusal = geometry_mesh_refusal_of(desc, _ctx);
     if (refusal.has_value())
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
@@ -771,7 +803,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
     add_debug_sites(_ctx._debug_windows, desc);
     auto result = named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc),
-                        desc.mesh_shader.has_value(), footprint_of(desc));
+                        desc.mesh_shader.has_value(), footprint_of(desc), desc.geometry_mesh_corners);
     if (desc.tessellation_polyfill.has_value())
     {
         auto const passes = tessellation_passes_of(_ctx, desc);

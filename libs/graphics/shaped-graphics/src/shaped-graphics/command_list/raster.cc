@@ -209,6 +209,16 @@ void command_list::draw(draw_config const& config)
                                                 .first_instance = u32(config.instance_range.offset)});
         return;
     }
+    if (_raster_geometry_mesh_corners > 0)
+    {
+        auto const primitives = config.vertex_range.size / _raster_geometry_mesh_corners;
+        if (primitives > 0 && config.instance_range.size > 0)
+            raster_draw_geometry_meshed({.first = u32(config.vertex_range.offset),
+                                         .primitives = u32(primitives),
+                                         .instances = u32(config.instance_range.size),
+                                         .first_instance = u32(config.instance_range.offset)});
+        return;
+    }
     raster_draw(config);
 }
 
@@ -241,6 +251,18 @@ void command_list::draw_indexed(draw_indexed_config const& config)
                                                 .first_instance = u32(config.instance_range.offset),
                                                 .is_indexed = true,
                                                 .vertex_offset = config.vertex_offset});
+        return;
+    }
+    if (_raster_geometry_mesh_corners > 0)
+    {
+        auto const primitives = config.index_range.size / _raster_geometry_mesh_corners;
+        if (primitives > 0 && config.instance_range.size > 0)
+            raster_draw_geometry_meshed({.first = u32(config.index_range.offset),
+                                         .primitives = u32(primitives),
+                                         .instances = u32(config.instance_range.size),
+                                         .first_instance = u32(config.instance_range.offset),
+                                         .is_indexed = true,
+                                         .vertex_offset = config.vertex_offset});
         return;
     }
     raster_draw_indexed(config);
@@ -278,6 +300,11 @@ void command_list::raster_draw_geometry_polyfilled(impl::mesh_polyfill_state con
     CC_UNREACHABLE("a context whose draws_geometry_polyfill says so overrides this");
 }
 
+void command_list::raster_draw_geometry_meshed(impl::geometry_polyfill_draw const&)
+{
+    CC_UNREACHABLE("a context whose draws_geometry_mesh_route says so overrides this");
+}
+
 void command_list::raster_draw_tessellation_polyfilled(impl::tessellation_polyfill_state const&,
                                                        impl::geometry_polyfill_draw const&)
 {
@@ -286,7 +313,8 @@ void command_list::raster_draw_tessellation_polyfilled(impl::tessellation_polyfi
 
 void command_list::draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
 {
-    CC_ASSERT(!_raster_mesh_polyfill.has_value() && !_raster_tessellation_polyfill.has_value(),
+    CC_ASSERT(!_raster_mesh_polyfill.has_value() && !_raster_tessellation_polyfill.has_value()
+                  && _raster_geometry_mesh_corners == 0,
               "a polyfilled stage draws with draw, draw_indexed or draw_mesh_tasks alone so far, since its counts "
               "would "
               "be the GPU's to write");
@@ -378,6 +406,7 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
     _raster_tessellation_polyfill = {};
     if (auto const* const polyfill = pipeline.tessellation_polyfill(); polyfill != nullptr)
         _raster_tessellation_polyfill = *polyfill;
+    _raster_geometry_mesh_corners = pipeline.geometry_mesh_corners();
     raster_bind_pipeline(pipeline);
 }
 
