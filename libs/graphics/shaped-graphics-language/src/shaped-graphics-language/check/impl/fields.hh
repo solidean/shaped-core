@@ -75,7 +75,8 @@ void for_each_field(T& t, F&& f)
     // field is counted by brace elision, whose count compilers do not agree on, so it is visited by its elements instead.
     if constexpr (requires { std::tuple_size<std::remove_const_t<T>>::value; })
         static_assert(std::tuple_size<std::remove_const_t<T>>::value == std::size_t(n),
-                      "a tuple-like type whose tuple_size is not its field count (cc::fixed_array) is visited by its elements");
+                      "a tuple-like type whose tuple_size is not its field count (cc::fixed_array) is visited by its "
+                      "elements");
     static_assert(n > 0 || std::is_empty_v<std::remove_const_t<T>>, "an aggregate whose fields were not counted");
     // clang-format off: one line per count of fields, up to k_max_fields
     if constexpr (n == 0) { (void)t, (void)f; }
