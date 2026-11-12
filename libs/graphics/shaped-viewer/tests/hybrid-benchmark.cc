@@ -432,9 +432,9 @@ ASYNC_BENCHMARK("sv - the hybrid's whole frame in the White Room at 1920x1080, s
 
     auto const settings = sv::render_settings{.mode = sv::render_mode::hybrid,
                                               .hybrid_lighting = sv::hybrid_lighting::deferred,
+                                              .motion_hold_ms = 0.0f,
                                               .reconstruct = {.denoiser = sr::denoise_method::automatic},
-                                              .temporal_denoise_frames = u32(-1),
-                                              .motion_hold_ms = 0.0f};
+                                              .temporal_denoise_frames = u32(-1)};
     constexpr auto output = tg::vec2i(1920, 1080);
     co_await time_contender(context, resources, "white room",
                             {.name = "still, hybrid deferred, automatic", .settings = settings}, items, lights,
