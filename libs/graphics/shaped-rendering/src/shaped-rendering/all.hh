@@ -24,4 +24,5 @@
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
+#include <shaped-rendering/taa_routine.hh>
 #include <shaped-rendering/window.hh>

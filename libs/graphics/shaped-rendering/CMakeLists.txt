@@ -10,6 +10,7 @@ add_library(shaped-rendering
     src/shaped-rendering/capture.cc
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
+    src/shaped-rendering/taa_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
     src/shaped-rendering/display.cc
     src/shaped-rendering/reconstruct.cc
@@ -56,6 +57,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/all.hh
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
+    src/shaped-rendering/taa_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
     src/shaped-rendering/display.hh
     src/shaped-rendering/reconstruct.hh
@@ -286,6 +288,7 @@ sc_add_shader_package(
     SHADERS
         module:slug
         blit.sgl:*
+        taa.sgl:*
         imgui.sgl:*
         compression/bc.sgl:*
         raster_box_filter_mipmap.sgl:*
@@ -528,6 +531,14 @@ if(SC_BUILD_TESTS)
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-rendering-test)
+endif()
+
+# The link option a web page embeds the vendored UI font with, at the path `sr::system_ui_font_path` looks first under
+# Emscripten: a page opens no system font file.
+# For a page's own link alone, since a node binary reads the real filesystem.
+if(EMSCRIPTEN AND SC_UI_FONT_FILE)
+    set(SR_WEB_UI_FONT_LINK_OPTION "SHELL:--embed-file ${SC_UI_FONT_FILE}@/sc-fonts/Inter-Regular.ttf"
+        CACHE INTERNAL "embeds the UI font into a web page")
 endif()
 
 add_subdirectory(examples)

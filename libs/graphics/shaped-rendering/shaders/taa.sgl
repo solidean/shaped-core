@@ -1,0 +1,117 @@
+// Temporal antialiasing's resolve: a frame drawn at a sub-pixel jitter blended into the history of the frames before it,
+// reprojected through per-pixel motion and clipped to the colors the frame's own neighbourhood spans.
+//
+// The pieces are the published ones: the history read through a five-tap Catmull-Rom filter, so it does not blur over
+// many frames; its color clipped toward the neighbourhood's mean in YCoCg, within the variance there (Salvi, GDC 2016);
+// the motion of the nearest surface in the neighbourhood, so an edge carries its own motion; and every blend done on
+// colors compressed by their largest channel (Karis, SIGGRAPH 2014), so one bright sample does not flicker.
+// Paired with sr::taa_routine.
+
+binding taa_source:
+    /// This frame, drawn at the jitter.
+    @unfilterable current: texture_2d[float4]
+
+    /// In pixels, where each pixel's surface is now minus where it was last frame.
+    @unfilterable motion: texture_2d[float2]
+
+    /// Any depth that is smaller nearer the camera; only compared.
+    @unfilterable depth: texture_2d[float]
+
+    /// Last frame's resolved image.
+    history: texture_2d[float4]
+    sampler linear_clamp:
+        filter = .linear
+        address = .clamp_edge
+
+    /// The share of the history a pixel keeps, 1 where `history` holds last frame's image and 0 where it does not, and
+    /// how wide the clip box is in standard deviations; w unused.
+    settings: float4
+
+struct taa_varyings:
+    @position position: hpos4
+
+/// The resolved image twice: once in the caller's format, its alpha this frame's, and once as the next frame's history.
+@pixel struct taa_target:
+    color: float4
+    @format(.rgba16_float) history: float4
+
+/// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2): one triangle covering the target.
+@vertex fun taa_vs(@vertex_index vertex: int) -> taa_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+
+/// `c` compressed by its largest channel into [0, 1), which `expanded` undoes.
+fun compressed(c: float3) -> float3 => c / (1.0 + max(max(c.x, c.y), c.z))
+fun expanded(c: float3) -> float3 => c / max(1.0 - max(max(c.x, c.y), c.z), 1e-4)
+
+fun to_ycocg(c: float3) -> float3:
+    return float3(0.25 * c.x + 0.5 * c.y + 0.25 * c.z, 0.5 * c.x - 0.5 * c.z, -0.25 * c.x + 0.5 * c.y - 0.25 * c.z)
+
+fun from_ycocg(c: float3) -> float3:
+    return float3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z)
+
+/// The history at pixel position `at`, through a Catmull-Rom filter in five bilinear taps: the four corner taps of the
+/// sixteen weigh too little to read.
+fun history_at(at: float2, size: float2){taa_source} -> float3:
+    let center = floor(at - float2(0.5)) + float2(0.5)
+    let f = at - center
+    let w0 = f * (float2(-0.5) + f * (float2(1.0) - 0.5 * f))
+    let w1 = float2(1.0) + f * f * (float2(-2.5) + 1.5 * f)
+    let w2 = f * (float2(0.5) + f * (float2(2.0) - 1.5 * f))
+    let w3 = f * f * (float2(-0.5) + 0.5 * f)
+    let w12 = w1 + w2
+    let t0 = (center - float2(1.0)) / size
+    let t12 = (center + w2 / w12) / size
+    let t3 = (center + float2(2.0)) / size
+    let mut sum = taa_source.history.sample(float2(t12.x, t0.y), taa_source.linear_clamp, level = 0.0).xyz * (w12.x * w0.y)
+    sum += taa_source.history.sample(float2(t0.x, t12.y), taa_source.linear_clamp, level = 0.0).xyz * (w0.x * w12.y)
+    sum += taa_source.history.sample(t12, taa_source.linear_clamp, level = 0.0).xyz * (w12.x * w12.y)
+    sum += taa_source.history.sample(float2(t3.x, t12.y), taa_source.linear_clamp, level = 0.0).xyz * (w3.x * w12.y)
+    sum += taa_source.history.sample(float2(t12.x, t3.y), taa_source.linear_clamp, level = 0.0).xyz * (w12.x * w3.y)
+    let weight = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y
+    return max(sum / weight, float3(0.0))
+
+/// `c` moved toward `center` until it lies inside the box `center +- extent`, along the line between them.
+fun clipped(c: float3, center: float3, extent: float3) -> float3:
+    let offset = c - center
+    let reach = abs(offset / max(extent, float3(1e-5)))
+    let most = max(max(reach.x, reach.y), reach.z)
+    return if most > 1.0 => center + offset / most else c
+
+/// `c` alone, with no history to blend into.
+fun unblended(c: float4) -> taa_target:
+    return { color = c, history = float4(..c.xyz, 1.0) }
+
+@pixel fun taa_ps(p: taa_varyings){taa_source} -> taa_target:
+    let px = int2(p.position.x as int, p.position.y as int)
+    let size = taa_source.current.size()
+    let current = taa_source.current.load(px)
+
+    // The neighbourhood's colors, as their mean and spread, and the pixel of it nearest the camera.
+    let mut m1 = float3(0.0)
+    let mut m2 = float3(0.0)
+    let mut nearest = px
+    let mut nearest_depth = 3.0e38
+    for j in -1 ..< 2:
+        for i in -1 ..< 2:
+            let q = clamp(px + int2(i, j), int2(0), size - int2(1))
+            let c = to_ycocg(compressed(taa_source.current.load(q).xyz))
+            m1 += c
+            m2 += c * c
+            let d = taa_source.depth.load(q)
+            if d < nearest_depth:
+                nearest_depth = d
+                nearest = q
+    let mean = m1 / 9.0
+    let sigma = sqrt(abs(m2 / 9.0 - mean * mean))
+
+    if taa_source.settings.y == 0.0 => return unblended(current)
+    let at = float2(px) + float2(0.5) - taa_source.motion.load(nearest)
+    if at.x < 0.0 or at.y < 0.0 or at.x >= (size.x as float) or at.y >= (size.y as float) => return unblended(current)
+
+    let history = to_ycocg(compressed(history_at(at, float2(size))))
+    let kept = clipped(history, mean, sigma * taa_source.settings.z)
+    let now = to_ycocg(compressed(current.xyz))
+    let resolved = expanded(from_ycocg(mix(now, kept, taa_source.settings.x)))
+    return { color = float4(..resolved, current.w), history = float4(..resolved, 1.0) }
