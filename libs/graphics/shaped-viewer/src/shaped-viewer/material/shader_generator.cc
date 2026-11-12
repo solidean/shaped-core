@@ -138,6 +138,31 @@ enum class load_shape
     CC_UNREACHABLE("the layout has a slot for every attribute it was built from");
 }
 
+/// Which of the layout's texture slots attribute `index`'s is, counted in slot order: its texture and sampler in `sv_textures`.
+[[nodiscard]] i32 texture_ordinal(material_parameter_layout const& layout, i32 index)
+{
+    auto ordinal = 0;
+    for (auto const& s : layout.slots)
+    {
+        if (s.kind != material_slot_kind::texture_index)
+            continue;
+        if (s.attribute_index == index)
+            return ordinal;
+        ++ordinal;
+    }
+    CC_UNREACHABLE("the layout has a texture slot for every sampled attribute");
+}
+
+/// How many texture slots the layout holds, which is how many textures `sv_textures` binds.
+[[nodiscard]] i32 texture_count(material_parameter_layout const& layout)
+{
+    auto count = 0;
+    for (auto const& s : layout.slots)
+        if (s.kind == material_slot_kind::texture_index)
+            ++count;
+    return count;
+}
+
 /// The `xyzw` letter one selector names, or empty for a constant one: SGL's swizzle letters are the field names.
 [[nodiscard]] cc::string_view channel_letter(texture_channel c)
 {
@@ -262,9 +287,16 @@ struct body_spelling
     /// Whether the body reads the bound raster mode's pools, `raster_bound.bound`, in place of `tracer.bindless`.
     /// A record's offsets are the same either way; its slots are simply not read.
     bool bound = false;
+    /// With `bound`: whether the material samples textures, which its own group `sv_textures` holds beside the pools.
+    bool textured = false;
 
-    /// The group the body's functions list.
-    [[nodiscard]] cc::string_view group() const { return bound ? "raster_bound.bound" : "tracer.bindless"; }
+    /// The groups the body's functions list.
+    [[nodiscard]] cc::string_view group() const
+    {
+        if (!bound)
+            return "tracer.bindless";
+        return textured ? "raster_bound.bound, sv_textures" : "raster_bound.bound";
+    }
 
     /// The buffer holding the parameter block whose slot is the local `block`.
     [[nodiscard]] cc::string params() const
@@ -358,21 +390,22 @@ constexpr auto bound_spelling = body_spelling{.explicit_level = false, .mark = "
     case material_frequency::material_texture:
     case material_frequency::mesh_texture_binding:
     {
+        auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
+        cc::format_append(out, "    let uv_desc = material.load_attribute_desc({}, ctx.param_offset + {}u)\n", params,
+                          uv_slot.offset);
+        if (!spelling.bound)
+            out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
+        // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
+        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling));
         if (spelling.bound)
         {
-            // TEMPORARY(debt-sv-bound-textures-read-white): the bound mode binds no textures before C1, so a sample reads
-            // a white texel through the attribute's own swizzle and transform, which shows a factor-scaled map as its factor.
-            out += "    let texel = float4(1.0)\n";
+            // The material's own group holds the texture and its sampler, so the block's texture slot is not read.
+            auto const k = texture_ordinal(layout, index);
+            cc::format_append(out, "    let texel = sv_textures.t{0}.sample(uv, sv_textures.s{0})\n", k);
         }
         else
         {
             auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
-            auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
-            cc::format_append(out, "    let uv_desc = material.load_attribute_desc({}, ctx.param_offset + {}u)\n",
-                              params, uv_slot.offset);
-            out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
-            // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
-            cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling));
             cc::format_append(out, "    let image = {}.load(ctx.param_offset + {}u) as int\n", params, tex.offset);
             // An explicit level where there are no derivatives, at a hit.
             // The texel is named because a constant selector reads it twice.
@@ -783,28 +816,69 @@ constexpr auto bound_spelling = body_spelling{.explicit_level = false, .mark = "
     return src;
 }
 
-/// The bound raster mode's pixel stage of one triangle permutation, over `raster_bound_pass.sgl`'s vertex stage: `sv_raster_bound`.
+/// The bound raster mode's pixel stage of one permutation, over `raster_bound_pass.sgl`'s vertex stage: `sv_raster_bound`.
 ///
 /// The material body is spelled `bound`, so it reads the pools of `raster_bound.bound` and lists no bindless table.
-/// The draw is indexed, so a pixel learns its triangle from `@primitive_id`, as the raster path's does.
+/// An indexed draw's pixel learns its triangle from `@primitive_id`, as the raster path's does.
+/// A `pulled` one, `sv_raster_bound_pulled`, reads the flat triangle its vertex stage wrote, and so needs no `primitive_index`.
+/// A quadric permutation's pixel solves its primitive along its camera ray over the box `bound_quadric_vs` drew, as the
+/// raster path's does; it reads no triangle, so `pulled` changes only its entry's name.
 /// No cutout yet: the opacity record is read through `tracer.instance_opacity`, which reads a bindless table.
-[[nodiscard]] cc::string generate_bound_raster_pixel(resolved_material const& r, material_parameter_layout const& layout)
+[[nodiscard]] cc::string generate_bound_raster_pixel(resolved_material const& r,
+                                                     material_parameter_layout const& layout,
+                                                     geometry_kind kind,
+                                                     bool pulled)
 {
     cc::string_view const uses[] = {"raster", "raster_bound"};
-    auto src = source_header(r, geometry_kind::triangles, "require primitive_index\n", uses);
-    auto supplied_frame = cc::string();
-    src += material_body(r, layout, supplied_frame, bound_spelling);
+    auto const triangles = kind == geometry_kind::triangles;
+    auto src = source_header(r, kind, triangles && !pulled ? "require primitive_index\n" : "", uses);
 
+    // The material's textures and their samplers, a group of its own beside the pools: group 1 of the bound mode.
+    auto const textures = texture_count(layout);
+    auto spelling = bound_spelling;
+    spelling.textured = textures > 0;
+    if (spelling.textured)
+    {
+        src += "/// The material's textures, in the order of its texture slots, each with its own sampler.\nbinding "
+               "sv_textures:\n";
+        for (auto k = 0; k < textures; ++k)
+            cc::format_append(src, "    t{0}: texture_2d[float4]\n    s{0}: sampler\n", k);
+        src += "\n";
+    }
+
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, spelling);
+
+    // The decal atlas is group 1 of every bound pixel stage, and the material's textures group 2 where it has any.
+    auto const groups = spelling.textured ? cc::string_view("raster_bound.bound, slug.tables, sv_textures")
+                                          : cc::string_view("raster_bound.bound, slug.tables");
     auto const occlusion = r.type->occlusion_attribute.empty()
                              ? cc::string("1.0")
                              : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);
-    cc::format_append(src,
-                      "@pixel fun sv_raster_bound(p: raster_bound.varyings, @primitive_id primitive: "
-                      "int){{raster_bound."
-                      "bound}} -> raster_bound.targets:\n"
-                      "    let ctx = raster_bound.pixel_context(p, primitive as uint)\n"
-                      "    return raster_bound.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n",
-                      supplied_frame, occlusion);
+    if (!triangles)
+    {
+        cc::format_append(src,
+                          "@pixel fun {}(p: raster_bound.quadric_varyings){{{}}} -> raster_bound.quadric_targets:\n"
+                          "    let hit = raster_bound.quadric_pixel_of(p)\n"
+                          "    if not hit.valid => discard\n"
+                          "    let ctx = raster_bound.quadric_context_of(p)\n"
+                          "    return raster_bound.shade_quadric(p, hit, sv_evaluate_material(ctx), {}, {})\n",
+                          pulled ? "sv_raster_bound_pulled" : "sv_raster_bound", groups, supplied_frame, occlusion);
+        return src;
+    }
+    if (pulled)
+        cc::format_append(src,
+                          "@pixel fun sv_raster_bound_pulled(p: raster_bound.varyings){{{}}} -> raster_bound.targets:\n"
+                          "    let ctx = raster_bound.pixel_context(p, p.primitive)\n",
+                          groups);
+    else
+        cc::format_append(src,
+                          "@pixel fun sv_raster_bound(p: raster_bound.varyings, @primitive_id primitive: int){{{}}} "
+                          "-> raster_bound.targets:\n"
+                          "    let ctx = raster_bound.pixel_context(p, primitive as uint)\n",
+                          groups);
+    cc::format_append(src, "    return raster_bound.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n", supplied_frame,
+                      occlusion);
     return src;
 }
 
@@ -992,7 +1066,12 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     auto const triangles = opts.kind == geometry_kind::triangles;
     auto raster_source = triangles ? generate_raster_pixel(r, layout, opacity) : generate_quadric_raster_pixel(r, layout);
     auto hybrid_source = triangles ? generate_hybrid_pixel(r, layout, opacity) : generate_quadric_hybrid_pixel(r, layout);
-    auto bound_source = triangles ? generate_bound_raster_pixel(r, layout) : cc::string();
+    auto bound_source = generate_bound_raster_pixel(r, layout, opts.kind, false);
+    auto bound_pulled_source = generate_bound_raster_pixel(r, layout, opts.kind, true);
+    auto bound_samplers = cc::vector<sg::sampler>();
+    for (auto const& s : layout.slots)
+        if (s.kind == material_slot_kind::texture_index)
+            bound_samplers.push_back(r.attributes[s.attribute_index].sample->sampler);
     // Read off the layout before it is moved into the result.
     auto const factor_of = [&](cc::string const& attribute)
     { return attribute.empty() ? material_emission_factor{} : emission_factor_of(r, layout, attribute); };
@@ -1011,6 +1090,8 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
             .raster_source = cc::move(raster_source),
             .hybrid_source = cc::move(hybrid_source),
             .bound_source = cc::move(bound_source),
+            .bound_pulled_source = cc::move(bound_pulled_source),
+            .bound_samplers = cc::move(bound_samplers),
             .layout = cc::move(layout),
             .secondary = secondary,
             .opacity = opacity,

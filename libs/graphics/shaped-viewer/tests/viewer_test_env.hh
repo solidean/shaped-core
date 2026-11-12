@@ -198,7 +198,7 @@ inline sg::blas_handle blas_of(sv::gpu_resource_manager& resources, sv::quadric_
 {
     auto& ctx = resources.context();
     auto cmd = ctx.create_command_list();
-    auto blas = resources.quadrics.acquire_blas(*cmd, id);
+    auto blas = resources.quadrics.acquire_blas(*cmd, id, resources.meshes);
     ctx.submit_command_list(cc::move(cmd));
     return blas;
 }

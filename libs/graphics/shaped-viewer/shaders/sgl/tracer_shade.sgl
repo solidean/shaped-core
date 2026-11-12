@@ -916,12 +916,12 @@ struct quadric_attributes:
 
 /// A quadric batch's intersection: the ray solved against the box's primitive, in the batch's object space.
 ///
-/// `inst.vertices` names the batch's primitive records, the geometry buffer the instance reads.
+/// `inst.vertices` names the vertex pool, whose element `inst.base_vertex` starts the batch's primitive records.
 /// The box's `t_current` is the traversal's best so far, so a primitive behind an accepted hit rejects on the range test.
 fun intersect_quadric(b: procedural_box){traced, bindless} -> report[quadric_attributes]:
     let inst = scene.instance(..traced.instances[b.instance_id])
     let records = inst.vertices as int
-    let prim = quadric.load_primitive(bindless.buffers[nonuniform records], b.primitive_index as uint)
+    let prim = quadric.load_primitive(bindless.buffers[nonuniform records], inst.base_vertex, b.primitive_index as uint)
     let origin = float3(b.object_ray.origin.x, b.object_ray.origin.y, b.object_ray.origin.z)
     let direction = float3(b.object_ray.direction.x, b.object_ray.direction.y, b.object_ray.direction.z)
     let found = quadric.intersect(prim, origin, direction, b.ray.t_min, b.t_current)

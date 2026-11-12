@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/present/swapchain.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/view_state.hh>
@@ -33,6 +34,16 @@ struct sv::viewer_config
     /// a swapchain, so an authoring body cannot tell the difference.
     /// A headless loop is ended by `request_close` alone, since there is no window to close.
     bool headless = false;
+
+    /// A swapchain to present into, in place of a window the viewer opens: on the web, the page's canvas.
+    ///
+    /// Its window's `client_size`, or its `headless_extent`, is the viewer's first size, must be positive, and replaces `width` and `height`.
+    /// After that the viewer's size is the back buffer's; `viewer::set_surface_size` asks for a new one.
+    /// `buffer_count` and `format` are the viewer's own, whatever this says; every other field, `present_mode` and `enable_hdr` among them, is taken as given.
+    /// With no window there is no display scale, so drawings lay out at 1.0 on a high-density canvas.
+    /// No window backend comes up, so nothing polls input, and the loop is ended by `request_close` alone, as a headless one is.
+    /// Ignored when `headless` is set.
+    cc::optional<sg::swapchain_description> surface;
 
     /// How much GPU time a frame's still wavefront layers may take together, in milliseconds, split evenly among them; 0 runs each layer's `rounds_per_frame`.
     ///
@@ -156,9 +167,22 @@ public:
     /// The viewer must outlive the returned async.
     [[nodiscard]] cc::shared_async<cc::unit> finish();
 
+    /// Asks a `viewer_config::surface` to take `size` from the next frame on, as a page does when its canvas changes size.
+    /// Only a surface with no size of its own reads it: a canvas, or wayland; win32 and X11 report theirs, and a headless chain never resizes.
+    /// No effect on a viewer without a surface, whose window or offscreen texture decides.
+    void set_surface_size(tg::vec2i size);
+
     /// Ends the frame loop: the current frame still finishes and presents, then `frames()` stops.
     /// Exactly what the window's close button does, so a caller needs no handle on the window to quit.
     void request_close();
+
+    /// Queues an input event for the next frame, as a page does with its canvas's pointer, wheel and key events.
+    ///
+    /// For a viewer with no window -- a `viewer_config::surface` or a headless one -- whose input arrives from outside.
+    /// The next frame routes the queued events to the camera controllers exactly as a window's are routed, and
+    /// `frame::input_events` answers them; `window` must be null, and positions are pixels of the surface.
+    /// From the thread driving the viewer; ignored on a viewer with a window, which polls its own.
+    void feed_input(sr::input_event event);
 
 private:
     struct impl;
@@ -170,6 +194,9 @@ private:
     /// Reached through `frame::resources`, which is the only sanctioned way in — a caller has no viewer to ask.
     [[nodiscard]] sv::gpu_resource_manager& resources();
 
+    /// `frame::gpu_frame_ms`'s answer.
+    [[nodiscard]] cc::optional<double> gpu_frame_ms() const;
+
     /// The post-load work the resource managers still owe, as a const query — `frame::pending_resource_work`'s answer.
     /// Separate from `resources()` because that one hands out a mutable manager, and asking a count should not.
     [[nodiscard]] isize pending_resource_work() const;
@@ -177,7 +204,7 @@ private:
     /// The payloads still streaming in, as a const query — `frame::streaming_resources`'s answer.
     [[nodiscard]] isize streaming_resources() const;
 
-    /// The last poll's events, empty when headless — `frame::input_events`'s answer.
+    /// The last poll's events, or the events fed since the frame before on a viewer without a window — `frame::input_events`'s answer.
     [[nodiscard]] cc::span<sr::input_event const> input_events() const;
 
     /// `frame::background_work`'s answer.
@@ -242,6 +269,10 @@ private:
     /// What each does with the frame differs, and that is the whole difference between them.
     [[nodiscard]] frame acquire_frame();
 
+    /// `begin_frame` without its `sv.frame` record span, for `async_frames`: its frame is authored in the caller's
+    /// coroutine step, and a span may not stay open across the `co_await` that hands the frame over.
+    [[nodiscard]] frame& begin_frame_unrecorded();
+
     /// Opens the loop: the next frame is frame one and restamps the clock.
     /// `frames()` and `interactive()` call this, and a manual loop needs it only to number a second run of frames from
     /// one again.
@@ -278,6 +309,7 @@ private:
     friend class frame;
     friend class frame_iterator;
     friend class frame_range;
+    friend class async_frames;
 
     /// interactive() owns the viewer it opens, so it starts the loop the same way frames() does.
     friend frame_range interactive(cc::string_view id, viewer_config config);

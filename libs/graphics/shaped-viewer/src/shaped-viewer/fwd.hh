@@ -79,6 +79,12 @@ struct dome_lobe;             // one von Mises-Fisher lobe of a dome
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
+struct screen_ambient_occlusion;  // a raster_bound layer's screen-space ambient occlusion (view/render_settings.hh)
+enum class shadow_technique : u8; // how a raster_bound layer finds its shadows (view/render_settings.hh)
+struct shadow_settings;           // a raster_bound layer's shadows (view/render_settings.hh)
+struct screen_space_reflections;  // a raster_bound layer's mirror reflections (view/render_settings.hh)
+struct temporal_antialiasing;     // a raster_bound layer's temporal antialiasing (view/render_settings.hh)
+struct traced_indirect;           // a raster_bound layer's traced indirect light (view/render_settings.hh)
 enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
@@ -308,6 +314,7 @@ class id_scope;
 class frame_range;
 class frame_iterator;
 struct frame_sentinel;
+class async_frames; // interactive_async's awaited frame loop, the one a browser page runs (interactive.hh)
 
 // capturing a run to an image (see capture.hh); the protocol itself is sr::capture_request
 struct capture_context;

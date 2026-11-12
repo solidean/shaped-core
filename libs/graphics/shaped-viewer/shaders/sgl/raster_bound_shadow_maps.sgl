@@ -1,0 +1,253 @@
+// The bound raster mode's shadow maps: a depth map per rect light, and how a pixel reads its share of the direct light
+// visible through them.
+//
+// Every map is a tile of one depth atlas, seen from the rect's center along its normal through a 140 degree frustum.
+// What lies outside the frustum, or behind the rect's plane, is taken as lit: a rect lights it at a grazing angle if at all.
+// The maps hold reversed depth, `near / distance along the normal`, cleared to 0, so an empty texel blocks nothing.
+// A pixel's share is softened by percentage-closer soft shadows (Fernando, "Percentage-Closer Soft Shadows", 2005):
+// a blocker search sizes each light's penumbra from the rect's extent, and a comparison filter of that size reads it.
+// The lights' shares are weighed by each one's unshadowed diffuse light there, so the share serves the shading's
+// closed-form light as the traced share does (module `raster_bound_shadows`).
+module raster_bound_shadow_maps
+
+use pt
+use raster
+use raster_bound
+use scene
+use tracer
+
+/// The side of one light's tile in the atlas, in texels.
+const tile_size = 1024
+
+/// How many tiles a row of the atlas holds; the atlas is `tiles_per_row` tiles wide and as many rows tall as it needs.
+const tiles_per_row = 4
+
+/// The most lights with a map; a light past them is unshadowed.
+const max_mapped_lights = 16
+
+/// Where a map's frustum begins along the light's normal, in world units: nearer than this nothing casts.
+const map_near = 0.02
+
+/// The tangent of half the frustum's 140 degrees.
+const map_tan_half = 2.7474774
+
+/// The shadow-map pass's group, besides the frame's.
+binding shadow_map_scene:
+    /// One element, the frame constants.
+    frame: buffer[raster.frame_constants]
+
+    /// Every light of the layer, `light_count` of them.
+    lights: buffer[tracer.light_record]
+
+    /// The depth the prepass laid down, reversed, `near / view depth`.
+    depth: texture_2d_depth
+
+    /// The prepass's flat normal of each full-size pixel's triangle, turned toward the camera; zero where none was drawn.
+    normals: texture_2d[float4]
+
+    /// Every light's map, light `i` in tile `i`.
+    atlas: texture_2d_depth
+
+    /// Reversed depth: a receiver is lit where its own depth is at least the map's, nearer the light or level with it.
+    sampler atlas_smp:
+        filter = .linear
+        address = .clamp_edge
+        compare = .greater_equal
+
+    /// How soft the penumbrae are, 1 for the rect's own extent; the other lanes unused.
+    settings: float4
+
+/// Which light a caster draw renders into: its index into `raster_bound.bound.lights`.
+@inline binding shadow_caster:
+    light: uint
+    pad0: uint
+    pad1: uint
+    pad2: uint
+
+/// What the shadow-map pass writes: the share of the direct light visible at a half-size pixel.
+@pixel struct shadow_map_target:
+    @format(.r8_unorm) visibility: float
+
+/// Whether light `l` gets a map: a rect that casts shadows.
+fun is_mapped(l: scene.light) -> bool:
+    return l.path == scene.light_path_area and (l.flags & scene.light_flag_casts_no_shadow) == 0u
+
+/// `world` in `l`'s map space: across the rect in x and y, and the distance along its normal in z.
+fun in_light_space(l: scene.light, world: float3) -> float3:
+    let z = normalize(l.normal)
+    let x = normalize(l.u - z * dot(l.u, z))
+    let y = cross(z, x)
+    let rel = world - l.position
+    return float3(dot(rel, x), dot(rel, y), dot(rel, z))
+
+/// The clip position `world` has in `l`'s map, reversed depth and the whole frustum across the clip square.
+/// The caster pass's viewport puts that square on the light's tile.
+fun light_clip(l: scene.light, world: float3) -> hpos4:
+    let q = in_light_space(l, world)
+    return hpos4(q.x / map_tan_half, q.y / map_tan_half, map_near, q.z)
+
+/// What the caster pass hands its rasterizer: the position alone.
+struct caster_varyings:
+    @position position: hpos4
+
+/// Pool vertex `vertex` of row `instance`, as light `shadow_caster.light`'s map sees it.
+fun caster_vertex_at(vertex: uint, instance: uint){raster_bound.bound, shadow_caster} -> caster_varyings:
+    let inst = scene.instance(..raster_bound.bound.instances[instance as int])
+    let object = reinterpret_as_float(raster_bound.bound.vertices.load3(vertex * 12u))
+    let world = raster.to_world_point(inst, object)
+    let l = scene.light(..raster_bound.bound.lights[shadow_caster.light as int])
+    return { position = light_clip(l, world) }
+
+/// Vertex `vertex` of an indexed caster draw, as `raster_bound.vertex_of` takes it.
+fun caster_vertex_of(vertex: int, instance: uint){raster_bound.bound, shadow_caster} -> caster_varyings:
+    return caster_vertex_at(vertex as uint, instance)
+
+/// Corner `corner` of a caster draw with no index buffer, as `raster_bound.pulled_vertex_of` takes it.
+fun caster_pulled_vertex_of(corner: int, instance: uint){raster_bound.bound, shadow_caster} -> caster_varyings:
+    let inst = scene.instance(..raster_bound.bound.instances[instance as int])
+    let index = raster_bound.bound.indices.load(4u * (inst.first_index + (corner as uint)))
+    return caster_vertex_at(inst.base_vertex + index, instance)
+
+fun luminance(c: float3) -> float => dot(c, float3(0.2126, 0.7152, 0.0722))
+
+/// How much `l` lights a diffuse surface at `p` facing `n`, unshadowed: what each light's share is weighed by.
+fun light_weight(l: scene.light, p: float3, n: float3) -> float => luminance(l.emission) * light_geometry(l, p, n)
+
+/// The irradiance `l` puts on a surface at `p` facing `n` per unit of its emission, unshadowed.
+/// A rect's is its cosine-weighted solid angle in closed form, as `raster.rect_light` computes it.
+fun light_geometry(l: scene.light, p: float3, n: float3) -> float:
+    if l.path == scene.light_path_area:
+        let two_sided = (l.flags & scene.light_flag_two_sided) != 0u
+        if dot(l.normal, p - l.position) <= 0.0 and not two_sided => return 0.0
+        let mut corners = float3[4].filled(float3(0.0))
+        corners[0] = normalize(l.position - l.u - l.v - p)
+        corners[1] = normalize(l.position + l.u - l.v - p)
+        corners[2] = normalize(l.position + l.u + l.v - p)
+        corners[3] = normalize(l.position - l.u + l.v - p)
+        let mut field = float3(0.0)
+        for i in 0 ..< 4:
+            let a = corners[i]
+            let c = corners[(i + 1) % 4]
+            let edge = cross(a, c)
+            let edge_length = length(edge)
+            if edge_length > 1e-8:
+                field += acos(clamp(dot(a, c), -1.0, 1.0)) * (edge / edge_length)
+        field *= 0.5
+        if dot(field, l.position - p) < 0.0:
+            field = -field
+        return max(dot(field, n), 0.0)
+    if l.path == scene.light_path_point:
+        let to_light = l.position - p
+        let dist2 = max(dot(to_light, to_light), 1e-12)
+        let wi = to_light / sqrt(dist2)
+        return max(dot(n, wi), 0.0) * scene.light_cone(l, dot(l.normal, -wi)) / dist2
+    // An emissive mesh's record is the tracer's to sample; the bound mode reaches its light through the indirect alone.
+    if l.path == scene.light_path_mesh => return 0.0
+    // A distant light travels along its normal.
+    // A disc's emission is radiance, so it is weighed by the cone it subtends, as `raster.direct_light` weighs it.
+    let facing = max(dot(n, -l.normal), 0.0)
+    if l.path == scene.light_path_distant_point => return facing
+    return facing * 2.0 * pt.pi * l.one_minus_cos_angular_radius
+
+/// The world point a reversed depth `depth` shows at full-size pixel `pixel`, and 1 in w; 0 in w at the far plane.
+fun world_from(depth: texture_2d_depth, f: raster.frame_constants, pixel: int2) -> float4:
+    let clamped = clamp(pixel, int2(0), int2(f.size) - int2(1))
+    let d = depth.load(clamped)
+    if d <= 0.0 => return float4(0.0)
+    let cam = scene.camera(..f.camera)
+    let ray = scene.camera_ray_offset(cam, float2(clamped) + float2(0.5) + f.jitter, f.size)
+    return float4(..(cam.position + ray * (f.near_plane / d)), 1.0)
+
+/// The surface's normal at full-size pixel `pixel`, whose point is `p`, turned toward the camera at `eye`: the prepass's
+/// flat normal of the triangle there.
+/// Where the prepass drew nothing, a cutout's pixel, it is found from the depth around it, each axis from the side
+/// nearer in depth -- a guess that bends at a crease, where the neighbours straddle two surfaces.
+fun normal_from(normals: texture_2d[float4], depth: texture_2d_depth, f: raster.frame_constants, pixel: int2, p: float3, eye: float3) -> float3:
+    let stored = normals.load(clamp(pixel, int2(0), int2(f.size) - int2(1))).xyz
+    if dot(stored, stored) > 0.25 => return normalize(stored)
+    let r = world_from(depth, f, pixel + int2(2, 0))
+    let l = world_from(depth, f, pixel - int2(2, 0))
+    let d = world_from(depth, f, pixel + int2(0, 2))
+    let u = world_from(depth, f, pixel - int2(0, 2))
+    let dx = if r.w != 0.0 and (l.w == 0.0 or length(r.xyz - p) < length(p - l.xyz)) => r.xyz - p else p - l.xyz
+    let dy = if d.w != 0.0 and (u.w == 0.0 or length(d.xyz - p) < length(p - u.xyz)) => d.xyz - p else p - u.xyz
+    let n = normalize(cross(dx, dy))
+    return if dot(n, eye - p) < 0.0 => -n else n
+
+/// Tap `k` of 16 on a unit disc, a Vogel spiral turned by `angle`: spread evenly, and no two taps on one ring.
+fun disc_tap(k: int, angle: float) -> float2:
+    let r = sqrt(((k as float) + 0.5) / 16.0)
+    let theta = (k as float) * 2.3999632 + angle
+    return float2(cos(theta), sin(theta)) * r
+
+/// The share of light `i`'s rect visible from `p`, whose surface faces `n`, through its map; `angle` turns the taps.
+fun map_visibility(i: int, l: scene.light, p: float3, n: float3, angle: float){shadow_map_scene} -> float:
+    // Lifted off the surface by a texel and a half of the map as seen at that distance, so a surface never shadows itself.
+    let rough = in_light_space(l, p)
+    if rough.z <= map_near => return 1.0
+    let texel = 2.0 * rough.z * map_tan_half / (tile_size as float)
+    let q = in_light_space(l, p + n * (1.5 * texel))
+    if q.z <= map_near => return 1.0
+    let ndc = float2(q.x, q.y) / (q.z * map_tan_half)
+    if abs(ndc.x) >= 1.0 or abs(ndc.y) >= 1.0 => return 1.0
+    let uv = float2(0.5 + 0.5 * ndc.x, 0.5 - 0.5 * ndc.y)
+    let reference = map_near / q.z
+
+    let tile = float2(((i % tiles_per_row) * tile_size) as float, ((i / tiles_per_row) * tile_size) as float)
+    let atlas_size = float2(shadow_map_scene.atlas.size())
+    let size = tile_size as float
+    let lo = tile + float2(0.5)
+    let hi = tile + float2(size - 0.5)
+
+    // A rect's half-extent, in the map's units at unit distance: how wide a cone of its light reaches a point.
+    let extent = max(length(l.u), length(l.v)) * shadow_map_scene.settings.x
+    let spread = 0.5 * extent / map_tan_half
+
+    // The blockers' search, as wide as a blocker a quarter of the way to the light would spread the rect, capped.
+    let search = clamp(spread * (1.0 / max(0.25 * q.z, map_near) - 1.0 / q.z), 1.5 / size, 0.05)
+    let mut blockers = 0.0
+    let mut blocker_sum = 0.0
+    for k in 0 ..< 16:
+        let at = clamp(tile + (uv + disc_tap(k, angle) * search) * size, lo, hi)
+        let d = shadow_map_scene.atlas.load(int2(at))
+        if d > reference * 1.003:
+            blockers += 1.0
+            blocker_sum += map_near / d
+    if blockers == 0.0 => return 1.0
+
+    // The penumbra the average blocker casts, filtered by comparisons the sampler blends between texels.
+    let blocker = blocker_sum / blockers
+    let penumbra = clamp(spread * (q.z - blocker) / (q.z * blocker), 1.5 / size, search)
+    let mut lit = 0.0
+    for k in 0 ..< 16:
+        let at = clamp(tile + (uv + disc_tap(k, angle + 1.0) * penumbra) * size, lo, hi)
+        lit += shadow_map_scene.atlas.sample_compare(at / atlas_size, shadow_map_scene.atlas_smp, reference = reference * 1.003, level = 0.0)
+    return lit / 16.0
+
+/// The share of the direct light visible at half-size pixel `h`: every mapped light's share, weighed by its light there.
+/// 1 where no light reaches the pixel, and at the far plane.
+fun visibility(h: int2){shadow_map_scene} -> float:
+    let f = shadow_map_scene.frame[0]
+    let pixel = h * 2
+    let center = world_from(shadow_map_scene.depth, f, pixel)
+    if center.w == 0.0 => return 1.0
+    let p = center.xyz
+    let cam = scene.camera(..f.camera)
+    let n = normal_from(shadow_map_scene.normals, shadow_map_scene.depth, f, pixel, p, cam.position)
+
+    // The taps turn from pixel to pixel through a 4x4 pattern, which the blur that follows spans.
+    let x = h.x & 3
+    let y = h.y & 3
+    let e = x ^ y
+    let bayer = ((e & 1) << 3) | ((y & 1) << 2) | (((e >> 1) & 1) << 1) | ((y >> 1) & 1)
+    let angle = (bayer as float) * (6.2831853 / 16.0)
+
+    let mut total = 0.0
+    let mut visible = 0.0
+    for i in 0 ..< (f.light_count as int):
+        let l = scene.light(..shadow_map_scene.lights[i])
+        let w = light_weight(l, p, n)
+        if w > 0.0:
+            total += w
+            visible += w * (if i < max_mapped_lights and is_mapped(l) => map_visibility(i, l, p, n, angle) else 1.0)
+    return if total > 0.0 => visible / total else 1.0

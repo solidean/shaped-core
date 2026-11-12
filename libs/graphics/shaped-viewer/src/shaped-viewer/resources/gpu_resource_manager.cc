@@ -278,6 +278,11 @@ u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
     }
 
     CC_ASSERT(slot.kind == material_slot_kind::texture_index, "only a descriptor or a texture slot names an index");
+    return u32(acquire_texture(bindless_table::textures_2d, _slot_texture(slot).as_texture_view()));
+}
+
+sg::texture_2d const& gpu_resource_manager::_slot_texture(instance_slot const& slot)
+{
     auto const& record = textures.get(slot.texture);
 
     // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
@@ -291,12 +296,20 @@ u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
     // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
     // own factor, `failed` is "never" and wants to be seen.
     // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
-    auto const& texture
-        = record.state == residency::pending
-            ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
-            : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
-                                                 : record.texture);
-    return u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view()));
+    if (record.state == residency::pending)
+        return _placeholder_texture(slot.placeholder_texel, record.texture.format());
+    if (record.state == residency::failed)
+        return _placeholder_texture(k_failed_texel, record.texture.format());
+    return record.texture;
+}
+
+cc::vector<sg::texture_2d> gpu_resource_manager::instance_textures(instance_id id)
+{
+    auto out = cc::vector<sg::texture_2d>();
+    for (auto const& slot : get_instance(id).slots)
+        if (slot.kind == material_slot_kind::texture_index)
+            out.push_back(_slot_texture(slot));
+    return out;
 }
 
 cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record const& r)
@@ -442,7 +455,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     // The cube is uploaded directly rather than streamed, so it is never the thing being waited on.
     // A batch whose attributes still stream is the cube too, as the resolve draws it: its parameter block would bind them.
     auto const pending = q.state != residency::complete || !attributes_resident(instance);
-    auto const vertices = pending ? meshes.vertex_pool().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const pool = meshes.vertex_pool().raw()->as_raw_readonly();
     auto const& cube = meshes.placeholder_geometry();
 
     // The cube shades through the fallback, which reads no parameter block, so none is built: building it binds the attributes.
@@ -456,14 +469,16 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
         param_offset = u32(r.param_offset);
     }
 
-    // A landed quadric indexes nothing, so the field names its boxes, which the raster path draws each primitive as.
-    auto const indices = pending ? meshes.index_pool().raw()->as_raw_readonly() : q.aabbs.raw()->as_raw_readonly();
+    // A landed batch's records and boxes are both blocks of the vertex pool: `base_vertex` is where its records start
+    // and `first_index` where its boxes do, in the pool's 12-byte elements.
+    // It indexes nothing, so the second field names the boxes, which the raster paths draw each primitive as.
+    auto const indices = pending ? meshes.index_pool().raw()->as_raw_readonly() : pool;
     return {.param_buffer = param_buffer,
             .param_offset = param_offset,
-            .vertices = u32(acquire_buffer(vertices)),
+            .vertices = u32(acquire_buffer(pool)),
             .indices = u32(acquire_buffer(indices)),
-            .base_vertex = pending ? u32(cube.base_vertex) : 0u,
-            .first_index = pending ? u32(cube.first_index) : 0u,
+            .base_vertex = pending ? u32(cube.base_vertex) : u32(q.primitives.offset),
+            .first_index = pending ? u32(cube.first_index) : u32(q.aabbs.offset),
             .link_mask = ~0u,
             .shade_group = 0,
             .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
@@ -934,7 +949,7 @@ sv::resident_quadric_set const& gpu_resource_manager::create_quadric_set(sv::qua
         return data.cache.resources;
     }
 
-    auto const geometry = quadrics.acquire(quadric_data::of(data));
+    auto const geometry = quadrics.acquire(quadric_data::of(data), meshes);
 
     auto bindings = cc::vector<mesh_attribute_binding>();
     bindings.reserve(data.attributes.size());
@@ -1252,9 +1267,11 @@ bool gpu_resource_manager::_compress(sg::command_list& cmd, texture_id id)
     }
     // The element the uploaded texture was sampled through would otherwise hold it resident until the table fills,
     // and the swap would cost memory rather than save it.
+    // A device without binding arrays has no table, and nothing holds the uploaded texture but the record.
     auto const replaced = sg::raw_view(source.as_texture_view());
     textures.replace_with_compressed(id, cc::move(compressed));
-    _tables[u32(bindless_table::textures_2d)].array.transient.release(replaced);
+    if (has_bindless_tables())
+        _tables[u32(bindless_table::textures_2d)].array.transient.release(replaced);
     return true;
 }
 
@@ -1262,7 +1279,7 @@ void gpu_resource_manager::wait_for_pending_uploads()
 {
     attributes.wait_for_settled();
     meshes.wait_for_settled();
-    quadrics.wait_for_settled();
+    quadrics.wait_for_settled(meshes);
 
     auto landed = cc::vector<texture_id>();
     textures.wait_for_settled(landed);
@@ -1277,7 +1294,7 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
     // acquire set — this only collects the results.
     (void)attributes.collect_settled(&cmd);
     (void)meshes.collect_settled();
-    (void)quadrics.collect_settled();
+    (void)quadrics.collect_settled(meshes);
     _collect_textures();
 
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())

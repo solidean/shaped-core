@@ -115,7 +115,8 @@ Today every load indexes `tracer.bindless`: the vertex and index pools, the inst
   A **parameter pool** holds every instance's block, so `param_offset` is absolute and `param_buffer` unused.
   An **attribute pool** holds every attribute, so a descriptor's offset is absolute and its buffer unused.
 - **Group 0 is `raster.drawn`'s members plus those four pools**: frame, instances, lights, background, four pools.
-  That is exactly WebGPU's default of 8 storage buffers a stage, which is why decals wait: they would be 10.
+  The environment sits in the group's constant buffer, so that is seven storage buffers, and sg's shader diagnostics take the eighth, WebGPU's default for a stage.
+  That is why decals wait: they would make ten.
 - **Group 1 is the material's**, its textures and their samplers, which C1 fills; C0 materials are untextured.
 - **Group 2 stays `slug.tables`**, for decals once group 0 has room for their records, by packing them into one buffer.
 - **The generator gains a third spelling, `bound`**, beside the traced and raster ones: `bound.params.load(...)` where it wrote `tracer.bindless.buffers[block].load(...)`.
@@ -127,9 +128,61 @@ Today every load indexes `tracer.bindless`: the vertex and index pools, the inst
 The traced and raster spellings then read the same pools through a bindless slot, and `bound` through a bound buffer.
 
 **Status 2026-11-06**: `render_mode::raster_bound` draws, through `sv::raster_bound_routine`, and `automatic` picks it where a device lacks `binding_arrays` and ray tracing.
-raster-bound-test draws the Cornell box through it on a dx12 context withholding both.
-Not drawn yet: quadric batches, decals, and frame meshes over their own index buffers; textures read white ([debt-sv-bound-textures-read-white](../issues/debt-sv-bound-textures-read-white.md)).
-Next is the web sample page: sv on emscripten-webgpu, OpenPBR spheres, the frame loop awaited.
+raster-bound-test draws the Cornell box through it on a dx12 context withholding both, indexed and pulled.
+Not drawn yet: frame meshes over their own index buffers ([feat-sv-raster-bound-missing-geometry](../issues/feat-sv-raster-bound-missing-geometry.md)).
+Quadric batches draw since 2026-11-11, their records pooled in the vertex pool; decals too, as lanes of group 0's constant buffer, up to 1024.
+
+**Textures, the first part of C1 (2026-11-09)**: a textured material's bound stage declares a group of its own, `sv_textures`, one texture and one sampler per texture slot, as group 1.
+- Its layout is read off the compiled stage's reflection, so nothing on the host spells the generated group again.
+- The samplers are bound rather than static, and they are the permutation's, `material_permutation::bound_samplers`, since a sampler is part of what a permutation is generated from.
+- Each draw creates the group over its instance's textures, `gpu_resource_manager::instance_textures`, with the parameter block's placeholders while a texture streams.
+  A group per draw every frame is the simple shape; caching it, or a render bundle, is the assembly work's.
+
+**The web sample runs** (`examples/graphics/web-viewer`): the OpenPBR sphere grid on the page's canvas, in Firefox and Edge.
+- A device without `primitive_index` draws pulled: no index buffer, three corners a triangle.
+  That is every WebGPU device today, since the webgpu backend does not request the feature.
+  Its vertex stage reads each corner's index out of the pool, and hands the pixel stage its triangle as a flat varying.
+- `sr::mix_routine` needs `readwrite_image_formats`, so the viewer prewarms it only where the device reports the feature.
+- A page only hints at a GPU, and sg asks for the high-performance one.
+  Firefox ignores that today and takes a laptop's integrated GPU ([Bugzilla 2016063](https://bugzilla.mozilla.org/show_bug.cgi?id=2016063)); Windows' per-app graphics setting overrides it.
+  On the development laptop that is 40 frames a second on the AMD iGPU against 336 on the RTX 5070 ([perf-sv-raster-bound-shading-cost](../issues/perf-sv-raster-bound-shading-cost.md)).
+  The bound mode does not use it.
+
+**glTF over fetch, the next part of C1 (2026-11-09)**: the page's `?model=<glb>` is fetched through `cnet::fetch_http_client` and imported by `sv::asset_loader`.
+- The Research Scenes' modern hall draws in Firefox with every material, at the speed of the unlit sphere grid.
+- Its light is 13 emissive meshes and no lights, which the bound mode cannot light with.
+  The example turns each into a rect light ([feat-sv-raster-bound-emissive-instances](../issues/feat-sv-raster-bound-emissive-instances.md)).
+- The opaque draws lay down their depth first in a pass of their own, through the shading draws' own vertex stage; a cutout writes its depth as it shades.
+  On the hall that saved 8% natively, since its view has little overdraw.
+- **A rect light is two closure evaluations a pixel, not sixteen** (`raster.rect_light`).
+  Its diffuse half is in closed form over the four edges, its specular half at the most representative point, widened as Karis widens a sphere light.
+  The 4x4 grid stays as `rect_lights_by_grid`, the reference.
+  On the hall's 13 lights that took a native frame from 6.15 to 0.79 ms, and Firefox from 40 frames a second to 327.
+  This is ahead of C3's LTC rect lights, which stay the answer if the representative point's highlights fall short.
+
+**Shadows and reflections, ahead of C3 and C4 (2026-11-10)**: `sv::shadow_settings` picks the technique, and `sv::screen_space_reflections` adds mirror reflections.
+- **Shadow maps are the default** (`raster_bound_shadow_maps.sgl`): a 1024 tile per rect light in one depth atlas, a 140 degree frustum along its normal, read through percentage-closer soft shadows.
+  The atlas is redrawn only when the instances or the lights hash differently, so a still scene draws it once.
+  On the hall's 13 lights it costs 0.35 ms a frame in Firefox, against 0.7 ms for the traced share, and keeps no history, so nothing trails.
+  PCSS is Fernando's 2005 sketch; no patent was found.
+- **Traced shadows stay as a choice**, one ray a half-size pixel accumulated over frames, since they cover every light where the maps cover the first 16 rects.
+  A traced scene's TLAS is kept while its instances are unchanged: rebuilding it every frame made 36 bind groups a frame that Firefox frees only at a collection, and the collections stalled it.
+- **Screen-space reflections** (`raster_bound_reflections.sgl`) march each half-size pixel's mirror ray across the prepass's depth, as McGuire and Mara's 2014 paper does.
+  Where a ray lands, they read last frame's image.
+  Last frame's image is the layer's color target before the shading overwrites it, so nothing is copied.
+  The shading trusts them in place of the environment's reflection on surfaces up to roughness 0.15, fading out by 0.45.
+  The normal is the depth's, so a normal map does not bend a reflection yet.
+- **Every half-size signal maps texel `h` to full-size pixel `2h`, centered at `2h + 0.5`.**
+  A quarter-texel slip there made a still history slide toward the bottom-right without end ([bug-sv-raster-bound-shadow-smoke-on-motion](../issues/bug-sv-raster-bound-shadow-smoke-on-motion.md)).
+- The web-viewer loads the Research Scenes' Country Kitchen (CC-BY 3.0, credited on the page through `?credit=` and `?license=`) as the scene to judge reflections on.
+
+**A dome's lobes are lights (2026-11-12)**: each lobe of an analytic dome becomes a distant disc for the frame, and the environment's SH is projected from the dome without them.
+- The SH blurred a studio's softboxes into a glow nothing shadowed, so a studio-lit model lost every crease the traced modes show; the Research Scenes' dragon read as smooth.
+- A disc at the lobe's peak radiance over a cap of the lobe's own integral, `2 pi (1 - e^(-2k)) / k`, delivers the lobe's irradiance to a surface facing it.
+- The traced shadows and the indirect's shadow rays aim within the cap, so a disc's shadow softens with its size, a sun's included.
+- A mirror sees a lobe as the highlight of one direction rather than the softbox's shape, until the reflection term reads the lobes too.
+- Turning an authored lobe into a light is no extraction from an image, and a search for a patent on it found none.
+  US 9,928,641's claims, shadow-map channels over a BSP's light lists, read on nothing here.
 
 ### Probe GI
 

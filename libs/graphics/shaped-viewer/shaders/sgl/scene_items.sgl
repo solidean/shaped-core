@@ -162,6 +162,12 @@ struct instance:
     to_world_y: float4
     to_world_z: float4
 
+    /// The rows of the transform the instance was placed by last frame, which a raster frame's motion reprojects through;
+    /// the current rows where nothing remembers one, or where nothing reads them.
+    previous_to_world_x: float4
+    previous_to_world_y: float4
+    previous_to_world_z: float4
+
 // ---- The environment ------------------------------------------------------------------------------------------------
 //
 // The view's environment probe: an order-3 real spherical-harmonics radiance function, 16 RGB coefficients, mirroring `sv::background_gpu`.

@@ -44,9 +44,10 @@ fun load_quadric3(b: bytes, offset: uint) -> quadric3:
     let constant = reinterpret_as_float(b.load(offset + 36))
     return quadric3(diag, off_diag, linear_term, constant)
 
-/// The primitive at `index` out of the batch's own primitive buffer, which is a run of `sv::quadric_gpu` records.
-fun load_primitive(b: bytes, index: uint) -> primitive:
-    let base = index * stride
+/// The primitive at `index` of a batch whose `sv::quadric_gpu` records start at element `first` of the mesh manager's
+/// vertex pool `b`, an element 12 bytes: the instance's `base_vertex`.
+fun load_primitive(b: bytes, first: uint, index: uint) -> primitive:
+    let base = first * 12u + index * stride
     let origin = reinterpret_as_float(b.load3(base))
     let surface = load_quadric3(b, base + 12)
     let clip = load_quadric3(b, base + 52)

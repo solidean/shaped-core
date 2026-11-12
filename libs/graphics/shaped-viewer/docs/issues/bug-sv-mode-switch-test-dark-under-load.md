@@ -17,7 +17,7 @@ Seen again 2026-11-02 in a consumer's ship gate (relwithdebinfo, full suite besi
 
 ## Log
 
-2026-11-06: it fails alone too, every run, on dx12 hardware (RTX 5070 laptop), relwithdebinfo.
+2026-11-06: it failed alone too, on dx12 hardware (RTX 5070 laptop), relwithdebinfo, and later the same day passed in a full `sv dx12 - hardware` run, so it is intermittent rather than constant.
 The phase is `forward`: 375 to 531 of its frames are declined while its pipelines compile, and one frame shown in the middle of that is 0.235 near black.
-The failure reproduces at 1828c6adf, 695314073 and every sv commit between them, so none of those caused it; the earlier full-suite pass on 2026-11-06 most likely met warm pipeline caches.
-So "under load" is the wrong cue: what it needs is the forward stages compiling while the phase runs.
+It failed at 1828c6adf, 695314073 and the sv commits between them, so none of those introduced it.
+Load is not the only cue, then; compiling forward stages during the phase may be, which is unproven.

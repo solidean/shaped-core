@@ -172,6 +172,14 @@ struct sv::generated_material_shader
     /// Empty for a quadric permutation, which the bound mode does not draw yet.
     cc::string bound_source;
 
+    /// The same stage for a device without `primitive_index`, `@pixel fun sv_raster_bound_pulled`, over `bound_pulled_vs`.
+    /// Its triangle is the flat `raster_bound.varyings::primitive` a pulled draw writes, so it requires nothing.
+    cc::string bound_pulled_source;
+
+    /// The sampler of each of the bound stages' `sv_textures.s<k>`, in the order of the layout's texture slots; empty without textures.
+    /// The host binds them beside the instance's textures, since a permutation's samplers are part of what it was generated from.
+    cc::vector<sg::sampler> bound_samplers;
+
     material_parameter_layout layout;
 
     /// Where this permutation's secondary material lives.

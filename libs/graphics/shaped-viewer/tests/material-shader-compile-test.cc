@@ -89,9 +89,12 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
     {
         check_entry_compiles(g.raster_source, sg::shader_stage::fragment, "sv_raster");
 
-        // The bound mode's stage is WebGPU's above all, so it is compiled to WGSL as well as to this backend's format.
+        // Both bound stages are compiled to WGSL as well as to this backend's format; the pulled one is what WebGPU draws today.
         check_entry_compiles(g.bound_source, sg::shader_stage::fragment, "sv_raster_bound");
         check_entry_compiles(g.bound_source, sg::shader_stage::fragment, "sv_raster_bound", sg::shader_format::wgsl);
+        check_entry_compiles(g.bound_pulled_source, sg::shader_stage::fragment, "sv_raster_bound_pulled");
+        check_entry_compiles(g.bound_pulled_source, sg::shader_stage::fragment, "sv_raster_bound_pulled",
+                             sg::shader_format::wgsl);
     }
 }
 } // namespace

@@ -5,12 +5,14 @@
 #include <clean-core/common/time.hh>    // cc::current_time_steady_secs
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/mix_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/slug_atlas.hh>
 #include <shaped-rendering/slug_routine.hh> // sr::slug_instance
+#include <shaped-rendering/taa_routine.hh>
 #include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
 #include <shaped-viewer/impl/gpu_marks.hh>
@@ -165,6 +167,12 @@ constexpr u8 instance_mask_hybrid_shadow_skips = 0xFD;
 resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources, render_mode mode)
 {
     auto const traced = !is_rasterized(mode);
+    // A bound layer tracing its shadows where the device can needs its instances' BLAS, and nothing else a trace needs.
+    auto const builds_blas = traced
+                          || (mode == render_mode::raster_bound
+                              && (l.settings.shadows.technique == shadow_technique::traced || l.settings.indirect.enabled
+                                  || (l.settings.reflections.enabled && l.settings.reflections.traced))
+                              && cmd.context().supports(sg::feature::ray_query));
     auto out = resolved_view{};
 
     // A frame mesh's attributes are written here, ahead of every read this command list records, so they are resident this frame.
@@ -197,9 +205,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             auto const placement = pending ? placeholder_transform(set->bounds.value(), item.transform) : item.transform;
             // None on a raster frame, which draws from the records alone.
             auto blas = sg::blas_handle();
-            if (traced)
+            if (builds_blas)
                 blas = pending ? resources.meshes.placeholder_blas()
-                               : resources.quadrics.acquire_blas(cmd, item.quadrics);
+                               : resources.quadrics.acquire_blas(cmd, item.quadrics, resources.meshes);
             auto inst = sg::tlas_instance{.blas = cc::move(blas),
                                           .instance_id = u32(out.instances.size()),
                                           .hit_group_offset = permutation * 2,
@@ -232,10 +240,10 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         if (item.lifetime == mesh_lifetime::frame)
         {
             CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
-            auto const& m = resources.acquire_frame_mesh(cmd, item.frame_geometry, traced);
+            auto const& m = resources.acquire_frame_mesh(cmd, item.frame_geometry, builds_blas);
             auto const shade_fallback = !resources.attributes_resident(item.instance);
             auto const permutation = hit_group_of(out, shade_fallback ? fallback.key : item.shader_key, resources);
-            auto inst = sg::tlas_instance{.blas = traced ? m.blas : sg::blas_handle(),
+            auto inst = sg::tlas_instance{.blas = builds_blas ? m.blas : sg::blas_handle(),
                                           .instance_id = u32(out.instances.size()),
                                           .hit_group_offset = permutation * 2,
                                           .opaque_override = !out.hit_groups[permutation]->opacity.can_cut_out()};
@@ -293,7 +301,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             = is_pending ? cc::optional<tg::aabb3f>(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1))) : mesh->bounds;
         auto const object_area = mesh->surface_area;
         auto blas = sg::blas_handle();
-        if (traced)
+        if (builds_blas)
             blas = is_pending ? resources.meshes.placeholder_blas() : resources.meshes.acquire_blas(cmd, item.mesh);
         auto inst = sg::tlas_instance{.blas = cc::move(blas),
                                       .instance_id = u32(out.instances.size()),
@@ -368,7 +376,10 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.records.back().glass = 1u;
         }
 
-        if (!estimate.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
+        // A `raster_bound` layer reads an emitter's record alone, its estimated radiance, which its indirect light meets;
+        // it samples no point on one, so it needs no area distribution.
+        auto const bound = mode == render_mode::raster_bound;
+        if (!estimate.has_value() || !(traced ? resources.meshes.can_build_emitter_cdfs() : bound))
             continue;
         auto const state = permutation_state_in(cmd, mode, out.hit_groups[permutation]);
         if (estimate.value().shows_emission() && state != impl::permutation_state::failed)
@@ -383,19 +394,23 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
         // Not pending, so `triangle_count` is the mesh's own, read with `object_area` before any build could move `mesh`.
         auto const triangles = isize(triangle_count);
-        auto const* const cdf = resources.meshes.acquire_emitter_cdf(cmd, item.mesh);
-        if (cdf == nullptr)
+        auto cdf_index = u32(0);
+        if (traced)
         {
-            // Its kernels are still compiling: camera-only this frame.
-            out.emitters_pending = true;
-            continue;
+            auto const* const cdf = resources.meshes.acquire_emitter_cdf(cmd, item.mesh);
+            if (cdf == nullptr)
+            {
+                // Its kernels are still compiling: camera-only this frame.
+                out.emitters_pending = true;
+                continue;
+            }
+            cdf_index = u32(resources.acquire_buffer(cdf->raw()->as_raw_readonly()));
         }
-        auto const cdf_index = u32(resources.acquire_buffer(cdf->raw()->as_raw_readonly()));
 
         // Exact under a similarity; under any other placement the estimate stands in until the GPU's exact sum lands.
         // Selection alone reads the area, so the stand-in costs noise and the area landing restarts the image once.
         auto area = impl::world_area_of(object_area, item.transform);
-        if (auto const linear = item.transform.linear_mat(); !impl::is_similarity(linear))
+        if (auto const linear = item.transform.linear_mat(); traced && !impl::is_similarity(linear))
             if (auto const exact = resources.meshes.acquire_world_area(cmd, item.mesh, linear); exact.has_value())
                 area = exact.value();
 
@@ -448,6 +463,43 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         records.push_back(e);
 
     return pt_light_table::grouped(records);
+}
+
+/// What a `raster_bound` layer is lit by: `lights`, a distant disc for each lobe of the dome `seen`, and the
+/// environment with those lobes taken out of it.
+/// The traced modes sample a lobe exactly; the bound mode reads the environment as SH, which blurs a lobe into a glow
+/// nothing shadows.
+struct bound_lighting
+{
+    pt_light_table lights;
+    background_gpu background;
+};
+
+[[nodiscard]] bound_lighting bound_lighting_of(background const& seen, pt_light_table const& lights)
+{
+    if (!seen.is_dome || seen.analytic.lobe_count == 0)
+        return {.lights = lights, .background = background_gpu::from(seen)};
+
+    auto records = lights.records;
+    auto bare = seen.analytic;
+    bare.lobe_count = 0;
+    for (auto i = 0; i < seen.analytic.lobe_count; ++i)
+    {
+        auto const& lobe = seen.analytic.lobes[i];
+        if (lobe.radiance[0] <= 0.0f && lobe.radiance[1] <= 0.0f && lobe.radiance[2] <= 0.0f)
+            continue;
+        // A disc at the lobe's peak radiance over a cap of the lobe's own integral, 2 pi (1 - e^(-2k)) / k, delivers
+        // the lobe's irradiance to a surface facing it; a broad lobe is held short of the hemisphere.
+        auto const k = cc::max(lobe.concentration, 1e-3f);
+        auto const solid_angle = cc::min(2.0f * tg::pi<f32> * (1.0f - tg::exp(-2.0f * k)) / k, 1.8f * tg::pi<f32>);
+        auto const radius = tg::acos(1.0f - solid_angle / (2.0f * tg::pi<f32>));
+        auto const sin_r = tg::sin(radius);
+        // `light_record_of` divides lux by pi sin(r)^2, so this lux leaves the lobe's radiance as the record's.
+        auto disc = light::sun(-tg::normalize(lobe.direction), radius * 2.0f);
+        disc.color(lobe.radiance).lux(tg::pi<f32> * sin_r * sin_r);
+        records.push_back(light_record_of(disc));
+    }
+    return {.lights = pt_light_table::grouped(records), .background = background_gpu::from(background::of_dome(bare))};
 }
 
 /// Writes into each emissive instance's row of `r.records` the index of its light record in `lights`.
@@ -522,6 +574,58 @@ struct uploaded_decals
                                .atlas = &atlas};
     cmd.upload.data_to_buffer(out.decals, decals.decals);
     cmd.upload.data_to_buffer(out.shapes, decals.shapes);
+    return out;
+}
+
+/// `decals` as the lanes `raster_bound.bound.decals` reads: each record's 6, then each shape's 5.
+/// Whole decals while they fit the lanes group 0 holds; the rest are dropped, which is said once.
+struct bound_decals
+{
+    cc::vector<tg::vec4f> lanes;
+    u32 count = 0;
+};
+
+[[nodiscard]] bound_decals bound_decals_of(traced_decals const& decals)
+{
+    static_assert(sizeof(shaders::tracer::decal_record) == 6 * sizeof(tg::vec4f), "a decal record is 6 lanes");
+
+    // A decal's shapes follow the decals before it's, so the first `kept` decals cover the first `shapes` shapes.
+    auto kept = isize(0);
+    auto shapes = isize(0);
+    for (auto const& d : decals.decals)
+    {
+        auto const covered = isize(d.first_shape + d.shape_count);
+        if (6 * (kept + 1) + 5 * covered > raster_bound_frame_desc::decal_lane_count)
+            break;
+        ++kept;
+        shapes = covered;
+    }
+    if (kept < decals.decals.size())
+    {
+        static auto said = false;
+        if (!said)
+            CC_LOG_WARNING("a raster_bound layer holds {} decals and paints the first {}: their records and shapes "
+                           "fill "
+                           "the {} lanes the bound mode has for them",
+                           decals.decals.size(), kept, raster_bound_frame_desc::decal_lane_count);
+        said = true;
+    }
+
+    auto out
+        = bound_decals{.lanes = cc::vector<tg::vec4f>::create_uninitialized(6 * kept + 5 * shapes), .count = u32(kept)};
+    cc::memcpy(out.lanes.data(), decals.decals.data(), size_t(kept) * sizeof(shaders::tracer::decal_record));
+
+    // A shape lane by lane, since the host's struct pads its tail where the shader's five lanes do not.
+    for (auto i = isize(0); i < shapes; ++i)
+    {
+        auto const& s = decals.shapes[i];
+        auto* const lane = out.lanes.data() + 6 * kept + 5 * i;
+        lane[0] = s.em_to_object;
+        lane[1] = s.em_bounds;
+        lane[2] = s.banding;
+        lane[3] = tg::vec4f(s.origin[0], s.origin[1], cc::bit_cast<f32>(s.glyph[0]), cc::bit_cast<f32>(s.glyph[1]));
+        lane[4] = tg::vec4f(cc::bit_cast<f32>(s.color), 0.0f, 0.0f, 0.0f);
+    }
     return out;
 }
 
@@ -708,14 +812,14 @@ struct ensured_slot
     bool resized = false;
 };
 
-[[nodiscard]] ensured_slot ensure_temporal(sg::context& ctx,
-                                           view_store& store,
-                                           view_id id,
-                                           u64 temporal_id,
-                                           tg::vec2i resolution,
-                                           sg::pixel_format format)
+/// `ensure_temporal` over a view's state already in hand.
+[[nodiscard]] ensured_slot ensure_temporal_in(sg::context& ctx,
+                                              impl::view_state& rec,
+                                              u64 temporal_id,
+                                              tg::vec2i resolution,
+                                              sg::pixel_format format)
 {
-    auto& slot = store.get_or_create(id).temporal[temporal_id];
+    auto& slot = rec.temporal[temporal_id];
 
     auto const resized = slot.texture.raw() == nullptr || slot.texture.width() != resolution[0]
                       || slot.texture.height() != resolution[1];
@@ -738,6 +842,16 @@ struct ensured_slot
     }
 
     return {.slot = &slot, .resized = resized};
+}
+
+[[nodiscard]] ensured_slot ensure_temporal(sg::context& ctx,
+                                           view_store& store,
+                                           view_id id,
+                                           u64 temporal_id,
+                                           tg::vec2i resolution,
+                                           sg::pixel_format format)
+{
+    return ensure_temporal_in(ctx, store.get_or_create(id), temporal_id, resolution, format);
 }
 
 /// The mode a plan's layer is recorded in: `automatic` is the viewer's to resolve, and one that reaches a plan built by hand is the wavefront.
@@ -1141,45 +1255,237 @@ struct raster_batch
 {
     auto const& resolved = *scene.resolved;
     auto const batch = raster_batch_of(resolved);
+    auto& ctx = cmd.context();
 
-    // No motion is written, so the previous camera is this one.
+    // The occlusion accumulates over frames in two half-size slots, which alternate between read and written; the first
+    // remembers the camera last frame drew from, which the accumulation reprojects through.
+    auto const& ao = l.settings.ambient_occlusion;
+    auto const half = tg::vec2i((resolution[0] + 1) / 2, (resolution[1] + 1) / 2);
+    auto& ao_camera_slot = rec.temporal[temporal_id::raster_bound_camera(layer)];
+    auto const parity = int(ao_camera_slot.raster_bound_frames & 1u);
+    auto ao_read = ensured_slot{};
+    auto ao_write = ensured_slot{};
+    if (ao.enabled)
+    {
+        ao_read = ensure_temporal_in(ctx, rec, temporal_id::ambient_occlusion_history(layer, 1 - parity), half,
+                                     sg::pixel_format::rgba32_float);
+        ao_write = ensure_temporal_in(ctx, rec, temporal_id::ambient_occlusion_history(layer, parity), half,
+                                      sg::pixel_format::rgba32_float);
+    }
+    // Only traced shadows accumulate; the maps are the same every frame.
+    auto const& shadows = l.settings.shadows;
+    auto const traces_shadows = shadows.technique == shadow_technique::traced;
+    auto shadow_read = ensured_slot{};
+    auto shadow_write = ensured_slot{};
+    if (traces_shadows)
+    {
+        shadow_read = ensure_temporal_in(ctx, rec, temporal_id::shadow_history(layer, 1 - parity), half,
+                                         sg::pixel_format::rgba32_float);
+        shadow_write = ensure_temporal_in(ctx, rec, temporal_id::shadow_history(layer, parity), half,
+                                          sg::pixel_format::rgba32_float);
+    }
+    // The traced indirect light accumulates at its traced size, in two slots alternating as the occlusion's do.
+    auto const& indirect = l.settings.indirect;
+    auto const indirect_scale = cc::max(indirect.scale, 1);
+    auto const traced = tg::vec2i((resolution[0] + indirect_scale - 1) / indirect_scale,
+                                  (resolution[1] + indirect_scale - 1) / indirect_scale);
+    auto gi_read = ensured_slot{};
+    auto gi_write = ensured_slot{};
+    auto gi_depth_read = ensured_slot{};
+    auto gi_depth_write = ensured_slot{};
+    if (indirect.enabled)
+    {
+        gi_read = ensure_temporal_in(ctx, rec, temporal_id::indirect_history(layer, 1 - parity), traced,
+                                     sg::pixel_format::rgba16_float);
+        gi_write = ensure_temporal_in(ctx, rec, temporal_id::indirect_history(layer, parity), traced,
+                                      sg::pixel_format::rgba16_float);
+        gi_depth_read = ensure_temporal_in(ctx, rec, temporal_id::indirect_history_depth(layer, 1 - parity), traced,
+                                           sg::pixel_format::r32_float);
+        gi_depth_write = ensure_temporal_in(ctx, rec, temporal_id::indirect_history_depth(layer, parity), traced,
+                                            sg::pixel_format::r32_float);
+    }
+
+    // The traced reflections accumulate at half the size, likewise.
+    auto const& reflections = l.settings.reflections;
+    auto refl_read = ensured_slot{};
+    auto refl_write = ensured_slot{};
+    auto refl_depth_read = ensured_slot{};
+    auto refl_depth_write = ensured_slot{};
+    if (reflections.enabled && reflections.traced)
+    {
+        refl_read = ensure_temporal_in(ctx, rec, temporal_id::reflection_history(layer, 1 - parity), half,
+                                       sg::pixel_format::rgba16_float);
+        refl_write = ensure_temporal_in(ctx, rec, temporal_id::reflection_history(layer, parity), half,
+                                        sg::pixel_format::rgba16_float);
+        refl_depth_read = ensure_temporal_in(ctx, rec, temporal_id::reflection_history_depth(layer, 1 - parity), half,
+                                             sg::pixel_format::r32_float);
+        refl_depth_write = ensure_temporal_in(ctx, rec, temporal_id::reflection_history_depth(layer, parity), half,
+                                              sg::pixel_format::r32_float);
+    }
+
+    auto* const ao_camera = &ao_camera_slot;
+    auto const ao_history_valid = ao.enabled && ao_camera->has_last_camera && !ao_read.resized && !ao_write.resized;
+    auto const shadow_history_valid
+        = traces_shadows && ao_camera->has_last_camera && !shadow_read.resized && !shadow_write.resized;
+
+    // Temporal antialiasing draws each frame at the next offset of a Halton (2, 3) sequence of 8, within the pixel, and
+    // resolves it into the layer's image; the frame itself goes to a texture of its own.
+    // Until the resolve is built, a frame draws straight into the image, unjittered, so no frame is lost.
+    auto const& aa = l.settings.antialiasing;
+    auto const antialiased = aa.enabled && sr::taa_routine::is_ready(ctx, sg::pixel_format::rgba32_float);
+    auto const jitter = antialiased ? still_jitter(u32(u64(ctx.current_epoch()) % 8u)) : tg::vec2f(0, 0);
+
     auto const fc = make_frame_constants(v, l, *scene.lights, resolution);
+    auto const decals = bound_decals_of(*scene.decals);
+    auto& decal_atlas = resources.drawings.decal_atlas();
+    if (decals.count > 0)
+        decal_atlas.prepare(cmd);
     auto const frame = shaders::raster::frame_constants{
         .camera = fc.camera,
-        .previous_camera = fc.camera,
+        .previous_camera = ao_camera->has_last_camera ? ao_camera->last_camera : fc.camera,
         .near_plane = f32(v.camera.projection.near_plane),
         .light_count = u32(scene.lights->records.size()),
-        .decal_count = 0,
+        .decal_count = decals.count,
         .pixel_spread = fc.pixel_spread,
         .size = tg::vec2f(f32(resolution[0]), f32(resolution[1])),
-        .jitter = tg::vec2f(0, 0),
+        .jitter = jitter,
+        .previous_jitter = ao_camera->has_last_camera ? ao_camera->last_jitter : jitter,
     };
 
-    auto& ctx = cmd.context();
-    auto const background
-        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    cmd.upload.pod_to_buffer(background, *scene.background);
+    // Each row's placement last frame, by its instance, which its motion reprojects through; its own where it is new.
+    auto records = resolved.records;
+    auto placements = cc::map<u32, cc::fixed_array<tg::vec4f, 3>>();
+    for (auto i = isize(0); i < records.size(); ++i)
+    {
+        auto& r = records[i];
+        auto const id = u32(resolved.parameter_blocks[i]);
+        if (auto const* const last = ao_camera->last_placements.get_ptr(id); last != nullptr)
+        {
+            r.previous_to_world_x = (*last)[0];
+            r.previous_to_world_y = (*last)[1];
+            r.previous_to_world_z = (*last)[2];
+        }
+        placements[id] = cc::fixed_array<tg::vec4f, 3>{r.to_world_x, r.to_world_y, r.to_world_z};
+    }
+    auto const instance_table = ctx.transient.create_buffer<shaders::tracer::instance_record>(
+        records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd.upload.data_to_buffer(instance_table, records);
+
+    // The resolve reads the frame, its motion, its depth and last frame's history, and writes the image and the next history.
+    auto const frame_target = [&](sg::pixel_format format)
+    {
+        return ctx.transient.create_texture_2d({.format = format,
+                                                .width = resolution[0],
+                                                .height = resolution[1],
+                                                .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
+    };
+    auto aa_read = ensured_slot{};
+    auto aa_write = ensured_slot{};
+    auto current = slot.texture;
+    auto motion = sg::texture_2d();
+    if (antialiased)
+    {
+        aa_read = ensure_temporal_in(ctx, rec, temporal_id::antialiasing_history(layer, 1 - parity), resolution,
+                                     sg::pixel_format::rgba16_float);
+        aa_write = ensure_temporal_in(ctx, rec, temporal_id::antialiasing_history(layer, parity), resolution,
+                                      sg::pixel_format::rgba16_float);
+        current = frame_target(sg::pixel_format::rgba32_float);
+        motion = frame_target(sg::pixel_format::rg16_float);
+    }
 
     auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
+    auto depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d();
+    if (antialiased && depth.raw() == nullptr)
+        depth = frame_target(sg::pixel_format::r32_float);
+
+    // Each draw's instance's textures, which its material binds as `sv_textures`; a row and its draw share an index.
+    auto draw_textures = cc::vector<cc::vector<sg::texture_2d>>();
+    draw_textures.reserve(batch.draws.size());
+    for (auto const& draw : batch.draws)
+        draw_textures.push_back(resources.instance_textures(resolved.parameter_blocks[draw.instance]));
+
+    // What the shadow maps show: every instance where it stands, and every light.
+    auto const caster_key = cc::combine_hash(
+        cc::make_hash_of_bytes(cc::span<shaders::tracer::instance_record const>(resolved.records).as_bytes()),
+        cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(scene.lights->records).as_bytes()));
 
     auto stand_ins = stand_in_report{};
     auto const outcome = raster_bound_routine::execute(
-        cmd, {.frame = frame,
-              .background = background,
-              .instance_table = upload_instances(cmd, resolved),
-              .lights = upload_lights(cmd, *scene.lights),
-              .draws = batch.draws,
-              .vertex_pool = resources.meshes.vertex_pool(),
-              .index_pool = resources.meshes.index_pool(),
-              .parameter_pool = resources.parameter_pool(),
-              .attribute_pool = resources.attributes.pool(),
-              .permutations = batch.permutations,
-              .fallback = &resources.shaders.acquire_fallback(),
-              .color = slot.texture,
-              .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d(),
-              .stand_ins = &stand_ins});
+        cmd,
+        {.frame = frame,
+         .background = *scene.background,
+         .instance_table = instance_table,
+         .lights = upload_lights(cmd, *scene.lights),
+         .decal_lanes = decals.lanes,
+         .decal_atlas = decals.count > 0 ? &decal_atlas : nullptr,
+         .draws = batch.draws,
+         .draw_textures = draw_textures,
+         .vertex_pool = resources.meshes.vertex_pool(),
+         .index_pool = resources.meshes.index_pool(),
+         .parameter_pool = resources.parameter_pool(),
+         .attribute_pool = resources.attributes.pool(),
+         .permutations = batch.permutations,
+         .fallback = &resources.shaders.acquire_fallback(),
+         .color = current,
+         .primary_depth = depth,
+         .motion = motion,
+         .stand_ins = &stand_ins,
+         .ambient_occlusion = ao,
+         .ao_history_read = ao_read.slot != nullptr ? ao_read.slot->texture : sg::texture_2d(),
+         .ao_history_write = ao_write.slot != nullptr ? ao_write.slot->texture : sg::texture_2d(),
+         .ao_history_valid = ao_history_valid,
+         .shadows = shadows,
+         .caster_key = caster_key,
+         .light_records = scene.lights->records,
+         .instances = resolved.instances,
+         .shadow_history_read = shadow_read.slot != nullptr ? shadow_read.slot->texture : sg::texture_2d(),
+         .shadow_history_write = shadow_write.slot != nullptr ? shadow_write.slot->texture : sg::texture_2d(),
+         .shadow_history_valid = shadow_history_valid,
+         .indirect = indirect,
+         .indirect_history_read = gi_read.slot != nullptr ? gi_read.slot->texture : sg::texture_2d(),
+         .indirect_history_depth_read = gi_depth_read.slot != nullptr ? gi_depth_read.slot->texture : sg::texture_2d(),
+         .indirect_history_write = gi_write.slot != nullptr ? gi_write.slot->texture : sg::texture_2d(),
+         .indirect_history_depth_write = gi_depth_write.slot != nullptr ? gi_depth_write.slot->texture : sg::texture_2d(),
+         .indirect_history_valid = indirect.enabled && ao_camera->has_last_camera && !gi_read.resized
+                                && !gi_write.resized && !gi_depth_read.resized && !gi_depth_write.resized,
+         .reflections = l.settings.reflections,
+         .reflection_history_read = refl_read.slot != nullptr ? refl_read.slot->texture : sg::texture_2d(),
+         .reflection_history_depth_read
+         = refl_depth_read.slot != nullptr ? refl_depth_read.slot->texture : sg::texture_2d(),
+         .reflection_history_write = refl_write.slot != nullptr ? refl_write.slot->texture : sg::texture_2d(),
+         .reflection_history_depth_write
+         = refl_depth_write.slot != nullptr ? refl_depth_write.slot->texture : sg::texture_2d(),
+         .reflection_history_valid = reflections.enabled && reflections.traced && ao_camera->has_last_camera
+                                  && !refl_read.resized && !refl_write.resized && !refl_depth_read.resized
+                                  && !refl_depth_write.resized,
+         .previous_image = slot.texture,
+         .previous_image_valid = ao_camera->has_last_camera,
+         .debug_reflection_history = reflections.debug_history,
+         .frame_index = u32(u64(ctx.current_epoch()))});
     if (outcome == sg::routine_outcome::declined)
         return outcome;
+
+    if (antialiased)
+    {
+        [[maybe_unused]] auto const resolved_outcome
+            = sr::taa_routine::execute(cmd, {.current = current,
+                                             .motion = motion,
+                                             .depth = depth,
+                                             .history_read = aa_read.slot->texture,
+                                             .history_valid = ao_camera->has_last_camera && !aa_read.resized,
+                                             .history_write = aa_write.slot->texture,
+                                             .output = slot.texture,
+                                             .feedback = aa.feedback,
+                                             .clip_width = aa.clip_width});
+        CC_ASSERT(resolved_outcome == sg::routine_outcome::executed, "the resolve was ready before the frame was "
+                                                                     "drawn");
+    }
+
+    ao_camera->last_camera = fc.camera;
+    ao_camera->has_last_camera = true;
+    ao_camera->last_jitter = jitter;
+    ++ao_camera->raster_bound_frames;
+    ao_camera->last_placements = cc::move(placements);
 
     slot.stand_in_hash = stand_ins.hash;
     slot.reset_hash = stand_ins.pending ? cc::combine_hash(scene.hash, u64(1)) : scene.hash;
@@ -1340,10 +1646,46 @@ struct raster_batch
 }
 } // namespace
 
+namespace
+{
+/// The mode `SV_AUTOMATIC_MODE` names for `automatic`, read once; none where it is unset or names no mode.
+cc::optional<render_mode> automatic_override()
+{
+    static auto const named = []() -> cc::optional<render_mode>
+    {
+        auto const value = cc::environment_variable(automatic_mode_env_var);
+        if (!value.has_value())
+            return {};
+        struct named_mode
+        {
+            cc::string_view name;
+            render_mode mode = render_mode::automatic;
+        };
+        named_mode const modes[] = {{"megakernel", render_mode::megakernel},
+                                    {"wavefront", render_mode::wavefront},
+                                    {"raster", render_mode::raster},
+                                    {"raster_bound", render_mode::raster_bound},
+                                    {"hybrid", render_mode::hybrid}};
+        for (auto const& m : modes)
+            if (value.value() == m.name)
+            {
+                CC_LOG_INFO("{} names {}: every layer left render_mode::automatic draws in it", automatic_mode_env_var,
+                            m.name);
+                return m.mode;
+            }
+        CC_LOG_WARNING("{}={} names no render mode; automatic resolves as usual", automatic_mode_env_var, value.value());
+        return {};
+    }();
+    return named;
+}
+} // namespace
+
 render_mode resolve_render_mode(sg::context const& ctx, render_mode mode)
 {
     if (mode != render_mode::automatic)
         return mode;
+    if (auto const named = automatic_override(); named.has_value())
+        return named.value();
     if (ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query))
         return render_mode::hybrid;
     return ctx.supports(sg::feature::binding_arrays) ? render_mode::raster : render_mode::raster_bound;
@@ -1365,9 +1707,13 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
     // Warmed rather than declared: a layer that never crossfades must not wait on it, and one that does reaches the
     // fade a good many frames after the first trace — so the compile has long since finished by then.
     // It compiles per destination format, and what it fades is a denoised slot, which view_data declares half float.
-    sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
-    // A hybrid layer blends each frame into its full-float mean.
-    sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    // The mix reads and writes one image, which a device without readwrite_image_formats cannot build, and it would say so every run.
+    if (ctx.supports(sg::feature::readwrite_image_formats))
+    {
+        sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+        // A hybrid layer blends each frame into its full-float mean.
+        sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    }
 
     // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
     ++_shader_generation;
@@ -1593,7 +1939,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         auto const scene
             = raster_scene{.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash};
         if (mode == render_mode::raster_bound)
-            return raster_bound_layer(cmd, v, l, tr.layer, tr.resolution, scene, rec, *slot, resources);
+        {
+            auto const bound = bound_lighting_of(l.background.seen_from(v.camera), lights);
+            link_emitters(resolved, bound.lights);
+            auto bound_scene = scene;
+            bound_scene.lights = &bound.lights;
+            bound_scene.background = &bound.background;
+            return raster_bound_layer(cmd, v, l, tr.layer, tr.resolution, bound_scene, rec, *slot, resources);
+        }
         return raster_layer(cmd, v, l, tr.layer, tr.resolution, scene, rec, *slot, resources);
     }
 
@@ -2399,7 +2752,12 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
             = raster_scene{.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash};
         if (mode == render_mode::raster_bound)
         {
-            (void)raster_bound_layer(cmd, v, *scene, layer, v.resolution, drawn, store.get_or_create(v.id), slot,
+            auto const bound = bound_lighting_of(scene->background.seen_from(v.camera), lights);
+            link_emitters(resolved, bound.lights);
+            auto bound_drawn = drawn;
+            bound_drawn.lights = &bound.lights;
+            bound_drawn.background = &bound.background;
+            (void)raster_bound_layer(cmd, v, *scene, layer, v.resolution, bound_drawn, store.get_or_create(v.id), slot,
                                      resources);
             return slot.texture;
         }

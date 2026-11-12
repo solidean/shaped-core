@@ -15,6 +15,7 @@
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/input.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/impl/capture_session.hh> // sv::impl::partial_capture_path
 
@@ -550,6 +551,86 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     }
 
     co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A surface the viewer did not open: a headless chain, the one kind every backend with `headless_present` has, stands in for a canvas.
+// There is no window behind it, so the loop ends by `request_close`, and the viewer's size is the chain's.
+ASYNC_INVOCABLE_TEST("sv - a viewer presents into a caller's surface with no window", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!ctx.supports(sg::feature::headless_present))
+        SKIP("this device has no headless swapchain");
+
+    auto const size = tg::vec2i(48, 32);
+    auto v_r = sv::viewer::try_create(
+        ctx, "sv-test/surface", {.width = 7, .height = 9, .surface = sg::swapchain_description{.headless_extent = size}});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    // A headless chain never resizes, so this asks for nothing and the size below must hold.
+    viewer.set_surface_size(tg::vec2i(16, 16));
+
+    auto frames = 0;
+    while (viewer.is_running())
+    {
+        auto& f = viewer.begin_frame();
+        if (f.is_open())
+        {
+            CHECK(f.viewport_size() == size);
+            ++frames;
+        }
+        if (frames == 3)
+            viewer.request_close();
+        co_await viewer.end_frame_async();
+    }
+    co_await viewer.finish();
+    CHECK(frames == 3);
+}
+
+// A page feeds its canvas's events, since a viewer on its surface has no window to poll.
+ASYNC_INVOCABLE_TEST("sv - a windowless viewer answers the events fed to it in the next frame, and only there",
+                     (sg::context_handle const& ctx_h))
+{
+    auto v_r = sv::viewer::try_create(*ctx_h, "sv-test/fed-input", {.width = 32, .height = 32, .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    viewer.feed_input({.payload = sr::key_event{.scancode = sr::scancode::w, .is_down = true}});
+    viewer.feed_input({.payload = sr::mouse_wheel_event{.delta = tg::vec2f(0, 1), .cursor_pos = tg::pos2f(4, 5)}});
+
+    auto frames = 0;
+    while (viewer.is_running())
+    {
+        auto& f = viewer.begin_frame();
+        if (f.is_open())
+        {
+            ++frames;
+            if (frames == 1)
+            {
+                REQUIRE(f.input_events().size() == 2);
+                CHECK(f.input_events()[0].is_key());
+                CHECK(f.input_events()[0].as_key().scancode == sr::scancode::w);
+                CHECK(f.input_events()[1].is_mouse_wheel());
+            }
+            else
+                CHECK(f.input_events().empty());
+        }
+        if (frames == 2)
+            viewer.request_close();
+        co_await viewer.end_frame_async();
+    }
+    co_await viewer.finish();
+    CHECK(frames == 2);
+}
+
+INVOCABLE_TEST("sv - a surface needs a positive size", (sg::context_handle const& ctx_h))
+{
+    auto const no_size = sg::native_window{.platform = sg::window_platform::web_canvas, .handle = (void*)"#canvas"};
+    auto const created
+        = sv::viewer::try_create(*ctx_h, "sv-test/no-size", {.surface = sg::swapchain_description{.window = no_size}});
+    REQUIRE(created.has_error());
+    // A native backend refuses a canvas anyway, so the error must be the size check's rather than the swapchain's.
+    CHECK(created.error().to_string().contains("positive size"));
 }
 
 // The loop a context that never blocks needs, run here on one that may, since the shape is the same on both.

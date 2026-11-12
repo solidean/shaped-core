@@ -140,6 +140,11 @@ public:
     /// A frame the window could not draw is not a previous frame, so resuming from a minimized window reports the whole idle gap here — clamp it before integrating anything.
     [[nodiscard]] double delta_seconds() const { return _delta_seconds; }
 
+    /// What the GPU spent on the latest frame whose timing has come back, in milliseconds, from its frame command list's first command to its last.
+    /// Usually two or three frames old, since it is read back rather than waited for.
+    /// Empty without `sg::feature::timestamp_query`, and until the first timing lands.
+    [[nodiscard]] cc::optional<double> gpu_frame_ms() const;
+
     /// The default window, created on first use.
     [[nodiscard]] window_ref window();
 

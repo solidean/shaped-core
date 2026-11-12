@@ -61,9 +61,11 @@ void meter_auto_exposure(sg::command_list& cmd,
         {
             auto const average = sr::exposure_meter_routine::average_luminance(
                 cc::span<tg::vec2f const>(partials.value().data(), partials.value().size()));
-            if (average.has_value())
+            // A black image is skipped rather than metered: priming on one while the shaders compile starts the exposure
+            // some ten stops bright, and it takes many frames to adapt back down.
+            if (average.has_value() && average.value() > 2 * sr::exposure_meter_routine::darkest)
             {
-                // Held to a range a real image needs, so a black frame while the shaders compile does not throw it to infinity.
+                // Held to a range a real image needs.
                 auto const target = cc::clamp(sr::exposure_for_average(average.value()), -24.0f, 24.0f);
                 state.exposure = state.primed ? state.exposure + (target - state.exposure) * auto_exposure_rate : target;
                 state.primed = true;

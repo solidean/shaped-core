@@ -313,6 +313,10 @@ public:
     /// epoch's access declaration.
     [[nodiscard]] cc::vector<byte> build_instance_parameters(instance_record const& r);
 
+    /// The textures `id`'s texture slots name this epoch, in slot order: what the bound raster mode binds as a material's `sv_textures`.
+    /// A texture still arriving, or one that failed, is its placeholder, as in the parameter block.
+    [[nodiscard]] cc::vector<sg::texture_2d> instance_textures(instance_id id);
+
     /// The GPU record for one scene item: where its material parameters live, and where its geometry does.
     ///
     /// A view uploads one of these per item and the closest-hit reaches everything it needs from the instance index, rather than
@@ -502,6 +506,9 @@ private:
 
     /// The bindless index a descriptor or texture slot names this epoch, acquired: a texture still arriving names its placeholder.
     [[nodiscard]] u32 _slot_index(instance_slot const& slot);
+
+    /// The texture a texture slot names this epoch: its placeholder while it arrives, magenta once it failed.
+    [[nodiscard]] sg::texture_2d const& _slot_texture(instance_slot const& slot);
 
     /// Whether every id `set` names still resolves, and whether all of it has landed — the quadric counterparts of the
     /// mesh forms, and the same reason they exist: a cached slot is verified rather than believed.

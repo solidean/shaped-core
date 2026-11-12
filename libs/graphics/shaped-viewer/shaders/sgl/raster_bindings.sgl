@@ -27,6 +27,8 @@ struct frame_constants:
     /// How far this frame's samples sit from the pixels' centers, in pixels: 0 but where a frame is drawn for an upscaler.
     /// The tracer's `jitter` minus one half, so pixel `px` sees the image at `px + 0.5 + jitter`, where its ray would.
     jitter: float2
+    /// The previous frame's `jitter`, where the samples a history was gathered from sat.
+    previous_jitter: float2
     /// 0 cuts coverage below one half; anything else seeds a cut drawn per pixel and frame, which frames accumulated converge to the partial surface.
     coverage_seed: uint
 

@@ -9,13 +9,16 @@ module raster_bound
 use material
 use openpbr
 use pt
+use quadric
 use raster
 use scene
+use slug
 use tracer
 
 /// Group 0 of every bound pipeline: `raster.drawn`'s scene, then the pools.
 ///
-/// Eight storage buffers, WebGPU's default for one stage, which is why the decals `raster.drawn` holds wait for room.
+/// Seven storage buffers, under WebGPU's default of eight for one stage once sg's diagnostics window binds its own.
+/// That is why the decals are lanes of the group's constant buffer rather than the two buffers `raster.drawn` holds.
 binding bound:
     /// One element, the frame constants.
     frame: buffer[raster.frame_constants]
@@ -27,7 +30,8 @@ binding bound:
     lights: buffer[tracer.light_record]
 
     /// The environment, `sv::background_gpu` byte for byte: its 16 SH lanes, then a dome's.
-    background: buffer[float4]
+    /// In the group's constant buffer rather than a storage buffer: storage buffers are what WebGPU's default limit of 8 counts, and sg's diagnostics window takes one.
+    background: float4[28]
 
     /// The mesh manager's central pools: positions, three floats each, and indices relative to a mesh's base vertex.
     vertices: bytes
@@ -39,14 +43,107 @@ binding bound:
     /// The attribute pool, every attribute at its descriptor's offset.
     attributes: bytes
 
+    /// The screen-space ambient occlusion `ao_blur` resolved at half the image's size, 1 where nothing occludes, and the
+    /// view depth of each texel, which the shading's upsample weighs by.
+    /// A 1x1 white texture where none was computed, and in the passes that compute it; its depth reads as 0, which
+    /// weighs nothing out.
+    @unfilterable ao: texture_2d[float2]
+
+    /// The share of the direct light visible, accumulated from module `raster_bound_shadows`' rays at half the image's
+    /// size; the 1x1 white texture where nothing traces.
+    @unfilterable shadow: texture_2d[float2]
+
+    /// The mirror reflection module `raster_bound_reflections` found at half the image's size: radiance, and how far to
+    /// trust it from 0 to 1; and the view depth of each texel, which the shading's upsample weighs by.
+    /// A 1x1 black texture and depth where none was computed, and in the passes before it: trusted nowhere.
+    reflection: texture_2d[float4]
+    @unfilterable reflection_depth: texture_2d[float]
+
+    /// The traced indirect light module `raster_bound_indirect` found at a reduced size, blurred: the mean radiance
+    /// reaching each texel's surface, its irradiance over pi, and the texel's view depth in w, 0 where nothing was traced.
+    /// A 1x1 zero texture where none was, and the environment's light stands in.
+    indirect: texture_2d[float4]
+
+    /// How many full-size pixels one side of an `indirect` texel spans; the other lanes unused.
+    indirect_settings: float4
+
+    /// The prepass's instance ids, the row each full-size pixel shows plus 1, which the upsamples above match a pixel's
+    /// own row against; a 1x1 zero texture in the passes before the shading, and wherever no prepass ran.
+    ids: texture_2d[uint]
+
+    /// `sv::screen_ambient_occlusion`: radius, thickness, intensity and the direct light's share, in that order.
+    ao_settings: float4
+
+    /// The accumulation over frames: the frame's number, which turns the sampling patterns; 1 where last frame's
+    /// history is there to reproject, else 0; and the most frames a pixel's accumulation averages.
+    ao_temporal: float4
+
+    /// The decals every pixel is painted with: `frame.decal_count` `tracer.decal_record`s of 6 lanes each, then the
+    /// `tracer.decal_shape`s they cover of 5 lanes each, in the atlas bound as `slug.tables`; a uint is its float's bits.
+    /// In the group's constant buffer, so as many as `decal_lane_count` lanes hold, and no storage buffer is spent.
+    decals: float4[1024]
+
+/// What the AO pass reads besides group 0: the depth the prepass laid down, reversed, `near / view depth`.
+binding ao_source:
+    depth: texture_2d_depth
+
+/// What the AO accumulation reads besides group 0: the depth, this frame's noisy occlusion, and last frame's accumulation.
+binding ao_accumulate_source:
+    depth: texture_2d_depth
+    raw: texture_2d[float]
+    /// last frame's accumulated value, how many frames it holds, and the view depth it was accumulated at
+    @unfilterable history: texture_2d[float4]
+
+    /// The prepass's flat normal of each full-size pixel's triangle; zero where none was drawn.
+    normals: texture_2d[float4]
+
+    /// The prepass's instance row plus 1 at each full-size pixel; 0 where none was drawn.
+    /// Group 0's `ids` is a stand-in while the half-size signals resolve, since the shading reads them in its place.
+    ids: texture_2d[uint]
+
+/// What the AO blur reads besides group 0: that depth, and the accumulated occlusion -- or the AO pass's own result
+/// where nothing accumulates.
+binding ao_blur_source:
+    depth: texture_2d_depth
+    @unfilterable raw: texture_2d[float]
+
+    /// The prepass's flat normal of each full-size pixel's triangle; zero where none was drawn.
+    normals: texture_2d[float4]
+
+/// What the AO passes write: visibility, 1 where nothing occludes.
+@pixel struct ao_target:
+    @format(.r8_unorm) ao: float
+
+/// What the blur writes: the resolved signal, and the view depth of the texel it belongs to.
+@pixel struct ao_resolved_target:
+    @format(.rg32_float) ao: float2
+
+/// What the AO accumulation writes: the history the next frame reprojects, at full float precision so many frames blend
+/// without banding.
+@pixel struct ao_history_target:
+    /// the accumulated value, how many frames it holds, and the view depth it was accumulated at; w unused
+    @format(.rgba32_float) ao: float4
+
 /// What the vertex stage hands the pixel stage, as `raster.varyings` does.
 /// The row is flat rather than `@per_draw`: it comes from `@instance_index`, which is the row only because a draw is one instance.
 struct varyings:
     @position position: hpos4
     @interpolate(.flat) instance: uint
+    /// The triangle, which a pulled draw knows from its vertex index; an indexed draw leaves it 0 and reads `@primitive_id`.
+    @interpolate(.flat) primitive: uint
     /// the point in the mesh's own space, where the barycentrics are found
     object: float3
     world: float3
+    /// where the point was last frame, through the instance's previous placement
+    previous_world: float3
+
+/// What the prepass writes beside its depth: the row of the instance table each pixel shows, plus 1, and 0 where none
+/// does -- the environment, and a cutout, which lays its depth down as it shades.
+@pixel struct prepass_target:
+    @format(.r32_uint) instance: uint
+    /// The flat normal of the pixel's triangle, turned toward the camera, which the screen-space passes read rather
+    /// than guess it from the depth; zero where nothing was drawn.
+    @format(.rgba16_float) normal: float4
 
 /// What a bound frame writes: the lit radiance and the clip depth the layer's drawings test against.
 ///
@@ -56,6 +153,33 @@ struct varyings:
     @format(.rgba32_float) color: float4
     /// the clip depth, `1 - near_plane / depth`
     @format(.r32_float) primary_depth: float
+    /// In pixels, where the pixel's surface is now minus where last frame's camera saw it, both without the jitter;
+    /// what temporal antialiasing reprojects its history through.
+    @format(.rg16_float) motion: float2
+
+/// What a quadric box's vertex stage hands its pixel stage, as `raster.quadric_varyings` does.
+/// One draw is one batch: `@instance_index` numbers its boxes from the row `@first_instance` names.
+struct quadric_varyings:
+    @position position: hpos4
+    @interpolate(.flat) instance: uint
+    /// the primitive of the batch, one box an instance
+    @interpolate(.flat) primitive: uint
+    object: float3
+    world: float3
+
+/// `prepass_target` for a quadric's pixel, which writes the depth of the surface it solves rather than its box's.
+@pixel struct quadric_prepass_target:
+    @format(.r32_uint) instance: uint
+    @format(.rgba16_float) normal: float4
+    /// `near_plane / depth` at the surface, the prepass's own reversed depth
+    @depth(.greater_equal) surface_depth: float
+
+/// `targets` for a quadric's pixel, and the depth of the surface it solves.
+@pixel struct quadric_targets:
+    @format(.rgba32_float) color: float4
+    @format(.r32_float) primary_depth: float
+    @format(.rg16_float) motion: float2
+    @depth(.greater_equal) surface_depth: float
 
 /// The 16 SH coefficients of the environment, as `raster.background_sh` reads them from `raster.drawn`.
 fun background_sh(){bound} -> float4[16]:
@@ -71,19 +195,33 @@ fun background_lanes(){bound} -> float4[28]:
         env[k] = bound.background[k]
     return env
 
-/// Vertex `vertex` of row `instance` of the instance table, pulled out of the vertex pool, as `raster.vertex_of` pulls it.
-/// The draw is indexed through the index pool with the mesh's base vertex, so `vertex` is the pool's own index.
-fun vertex_of(vertex: int, instance: uint){bound} -> varyings:
+/// Pool vertex `vertex` of row `instance` of the instance table, as `raster.vertex_of` pulls it, carrying triangle `primitive`.
+fun vertex_at(vertex: uint, instance: uint, primitive: uint){bound} -> varyings:
     let f = bound.frame[0]
     let inst = scene.instance(..bound.instances[instance as int])
-    let object = reinterpret_as_float(bound.vertices.load3((vertex as uint) * 12u))
+    let object = reinterpret_as_float(bound.vertices.load3(vertex * 12u))
     let world = raster.to_world_point(inst, object)
+    let q = float4(..object, 1.0)
+    let previous_world = float3(dot(inst.previous_to_world_x, q), dot(inst.previous_to_world_y, q), dot(inst.previous_to_world_z, q))
     return {
         position = raster.project(scene.camera(..f.camera), world, f.near_plane, raster.jitter_shift(f.jitter, f.size))
         instance = instance
+        primitive = primitive
         object = object
         world = world
+        previous_world = previous_world
     }
+
+/// Vertex `vertex` of an indexed draw through the index pool with the mesh's base vertex, so `vertex` is the pool's own index.
+fun vertex_of(vertex: int, instance: uint){bound} -> varyings:
+    return vertex_at(vertex as uint, instance, 0u)
+
+/// Corner `corner` of a draw with no index buffer, its index pulled out of the pool: `corner / 3` is the triangle.
+/// What a device without `primitive_index` draws, since the pixel stage cannot ask for the triangle there.
+fun pulled_vertex_of(corner: int, instance: uint){bound} -> varyings:
+    let inst = scene.instance(..bound.instances[instance as int])
+    let index = bound.indices.load(4u * (inst.first_index + (corner as uint)))
+    return vertex_at(inst.base_vertex + index, instance, (corner as uint) / 3u)
 
 /// The shading context of the pixel's triangle `primitive`, as `raster.pixel_context` makes one.
 /// Its parameter block is read from `bound.params` at the record's offset, whatever slot the record names.
@@ -113,40 +251,162 @@ fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, 
         authored = openpbr.frame(normalize(raster.to_world_vector(inst, local.t)), normalize(raster.to_world_vector(inst, local.b)), normalize(raster.to_world_vector(inst, local.n)))
     return { n = n, exiting = exiting, authored = authored, reach = pt.corner_reach(world, w0, w1, w2) }
 
-/// The environment's light at a surface, unoccluded, as `raster.ambient` approximates it.
-fun ambient(surface: openpbr.surface, n: float3, v: float3){bound} -> float3:
+/// Vertex `vertex` of the box of primitive `primitive` of row `instance`'s quadric batch, as `raster.quadric_vertex_from`
+/// draws it.
+/// The batch's boxes are a block of the vertex pool from the record's `first_index`, 12-byte elements, one
+/// `tg::aabb3f` of 24 bytes a box: the boxes its acceleration structure is built from.
+fun quadric_vertex_of(vertex: int, instance: uint, primitive: uint){bound} -> quadric_varyings:
+    let f = bound.frame[0]
+    let inst = scene.instance(..bound.instances[instance as int])
+    let base = inst.first_index * 12u + primitive * 24u
+    let lo = reinterpret_as_float(bound.vertices.load3(base))
+    let hi = reinterpret_as_float(bound.vertices.load3(base + 12u))
+    let object = mix(lo, hi, raster.box_corner(vertex))
+    let world = raster.to_world_point(inst, object)
+    return {
+        position = raster.project(scene.camera(..f.camera), world, f.near_plane, raster.jitter_shift(f.jitter, f.size))
+        instance = instance
+        primitive = primitive
+        object = object
+        world = world
+    }
+
+/// Where the camera ray of the pixel `p` covers meets its quadric, as `raster.quadric_pixel_of` solves it, the
+/// primitive's record read from the vertex pool at the record's `base_vertex`.
+fun quadric_pixel_of(p: quadric_varyings){bound} -> raster.quadric_pixel:
+    let f = bound.frame[0]
+    let cam = scene.camera(..f.camera)
+    let inst = scene.instance(..bound.instances[p.instance as int])
+    let prim = quadric.load_primitive(bound.vertices, inst.base_vertex, p.primitive)
+    let dir = scene.camera_ray_offset(cam, float2(p.position.x, p.position.y) + f.jitter, f.size)
+    let found = quadric.intersect(prim, raster.to_object_point(inst, cam.position), raster.to_object_vector(inst, dir), 0.0, 3.0e38)
+    return raster.quadric_pixel(found.valid, raster.to_world_point(inst, found.point), found.normal)
+
+/// The shading context of the quadric `p` covers, as `tracer.quadric_context` makes one for a hit there.
+fun quadric_context_of(p: quadric_varyings){bound} -> material.shading_context:
+    return quadric.make_context(scene.instance(..bound.instances[p.instance as int]), p.primitive)
+
+/// The reversed depth, `near_plane / depth`, of the world point `world`.
+fun surface_depth_of(world: float3){bound} -> float:
+    let f = bound.frame[0]
+    let cam = scene.camera(..f.camera)
+    return f.near_plane / dot(world - cam.position, normalize(cam.forward))
+
+/// What the prepass writes for the quadric pixel `p` found at `hit`: its row, its outward normal turned toward the
+/// camera, and its depth.
+fun quadric_prepass(p: quadric_varyings, hit: raster.quadric_pixel){bound} -> quadric_prepass_target:
+    let f = bound.frame[0]
+    let inst = scene.instance(..bound.instances[p.instance as int])
+    let eye = scene.camera(..f.camera).position
+    let mut n = normalize(raster.to_world_vector(inst, hit.object_normal))
+    if dot(n, eye - hit.world) < 0.0:
+        n = -n
+    return { instance = p.instance + 1u, normal = float4(..n, 0.0), surface_depth = surface_depth_of(hit.world) }
+
+/// Shades the quadric pixel `p` found at `hit`, whose material evaluated to `surface_in`, as `shade` shades a triangle's,
+/// and writes its depth.
+fun shade_quadric(p: quadric_varyings, hit: raster.quadric_pixel, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){bound, slug.tables} -> quadric_targets:
+    let f = bound.frame[0]
+    let cam = scene.camera(..f.camera)
+    let inst = scene.instance(..bound.instances[p.instance as int])
+    let face = raster.quadric_face_of(inst, hit.object_normal, hit.world, cam.position, surface_in, supplied_tangent_frame)
+    let q = float4(..raster.to_object_point(inst, hit.world), 1.0)
+    let previous_world = float3(dot(inst.previous_to_world_x, q), dot(inst.previous_to_world_y, q), dot(inst.previous_to_world_z, q))
+    let lit = shade_face(float2(p.position.x, p.position.y), hit.world, previous_world, p.instance, face, surface_in, supplied_tangent_frame, occlusion)
+    return { color = lit.color, primary_depth = lit.primary_depth, motion = lit.motion, surface_depth = surface_depth_of(hit.world) }
+
+/// How many lanes `bound.decals` holds; `sv::raster_bound_routine` drops the decals past it.
+const decal_lane_count = 1024
+
+/// Decal `i` of `bound.decals`, read out of its lanes.
+fun decal_at(i: int){bound} -> tracer.decal_record:
+    let b = i * 6
+    let d4 = bound.decals[b + 4]
+    let d5 = bound.decals[b + 5]
+    return tracer.decal_record(bound.decals[b], bound.decals[b + 1], bound.decals[b + 2], bound.decals[b + 3], d4.xyz, reinterpret_as_uint(d4.w), d5.xy, reinterpret_as_uint(d5.z), reinterpret_as_uint(d5.w))
+
+/// Shape `k` of `bound.decals`, after its `frame.decal_count` decals.
+fun decal_shape_at(k: int){bound} -> tracer.decal_shape:
+    let b = (bound.frame[0].decal_count as int) * 6 + k * 5
+    let s3 = bound.decals[b + 3]
+    return tracer.decal_shape(bound.decals[b], bound.decals[b + 1], bound.decals[b + 2], s3.xy, reinterpret_as_uint(s3.zw), reinterpret_as_uint(bound.decals[b + 4].x), uint3(0u))
+
+/// Paints every decal reaching the point `p` facing `n` into `surface`, as `raster.apply_decals` does, `footprint` the
+/// world size of a pixel there.
+fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){bound, slug.tables}:
+    for i in 0 ..< (bound.frame[0].decal_count as int):
+        let d = decal_at(i)
+        let mut at = float2(0.0)
+        let fade = tracer.decal_reach(d, p, n, mut at)
+        if fade <= 0.0 => continue
+        let first = d.first_shape as int
+        for k in 0 ..< (d.shape_count as int):
+            tracer.paint_decal_shape(mut surface, d, decal_shape_at(first + k), at, footprint, fade)
+
+/// The environment's light at a surface, unoccluded, as `raster.ambient` approximates it, with the screen's reflection
+/// `reflected` -- radiance, and how far to trust it -- in place of the environment's where it is trusted.
+/// The screen's reflection is a mirror's, so it gives way to the environment's as the surface roughens.
+fun ambient(surface: openpbr.surface, n: float3, v: float3, reflected: float4, indirect: float4, occlusion: float){bound} -> float3:
     let sh = background_sh()
-    let diffuse = scene.background_irradiance(sh, n) / pt.pi
+    let unoccluded = scene.background_irradiance(sh, n) / pt.pi
+    // The traced light where there is some, which met what occludes it already; the environment darkened otherwise.
+    let diffuse = if indirect.w > 0.0 => indirect.xyz else unoccluded * occlusion
     let mirror = normalize(openpbr.reflect_about(-v, n))
-    let specular = mix(scene.background_radiance(sh, mirror), diffuse, openpbr.pt_roughness(surface))
+    let roughness = openpbr.pt_roughness(surface)
+    let environment = mix(scene.background_radiance(sh, mirror), unoccluded, roughness) * occlusion
+    let trust = reflected.w * (1.0 - smoothstep(0.15, 0.45, roughness))
+    let specular = mix(environment, reflected.xyz, trust)
     return openpbr.pt_diffuse_albedo(surface) * diffuse + openpbr.pt_specular_albedo(surface) * specular
 
 /// Shades the pixel `p` covers, whose material evaluated to `surface_in` through `ctx`, as `raster.shade` shades it.
 ///
 /// Lit directly from every light, unshadowed, and from the environment's SH; `occlusion` darkens the environment alone.
 /// No decals yet: they would need two more storage buffers than group 0 has room for.
-fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){bound} -> targets:
-    let f = bound.frame[0]
-    let cam = scene.camera(..f.camera)
+fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){bound, slug.tables} -> targets:
+    let cam = scene.camera(..bound.frame[0].camera)
     let inst = scene.instance(..bound.instances[p.instance as int])
     let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
-    let n = face.n
-    let v = normalize(cam.position - p.world)
-    let view_depth = dot(p.world - cam.position, normalize(cam.forward))
+    return shade_face(float2(p.position.x, p.position.y), p.world, p.previous_world, p.instance, face, surface_in, supplied_tangent_frame, occlusion)
 
+/// `shade` for the surface at world point `world`, last frame at `previous_world`, of row `instance`, that full-size
+/// pixel position `at` covers, described by `face`.
+fun shade_face(at: float2, world: float3, previous_world: float3, instance: uint, face: raster.pixel_face, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){bound, slug.tables} -> targets:
+    let f = bound.frame[0]
+    let cam = scene.camera(..f.camera)
+    let n = face.n
+    let v = normalize(cam.position - world)
+    let view_depth = dot(world - cam.position, normalize(cam.forward))
+
+    // Painted before anything reads the base.
     let mut surface = surface_in
+    apply_decals(mut surface, world, n, f.pixel_spread * length(world - cam.position))
     let shading = openpbr.shading_frame(mut surface, n, v, face.authored, supplied_tangent_frame)
     let b = openpbr.bsdf_prepare(surface, face.exiting, 3u)
     let wo_local = openpbr.to_local(shading, v)
 
+    // The screen's occlusion darkens the environment fully and the direct light by its share, `ao_settings.w`.
+    let ssao = screen_occlusion(at, world, n, instance)
+    let visible = screen_shadow(at, world, n, instance)
+    let reflected = screen_reflection(at, world, n, instance)
+    let indirect = screen_indirect(at, world, n, instance)
     let mut color = b.emission
     if wo_local.z > 0.0:
+        let mut direct = float3(0.0)
         for i in 0 ..< (f.light_count as int):
-            color += raster.direct_light(scene.light(..bound.lights[i]), b, shading, n, wo_local, p.world)
-        color += ambient(surface, shading.n, v) * occlusion
+            direct += raster.direct_light(scene.light(..bound.lights[i]), b, shading, n, wo_local, world)
+        color += direct * visible * mix(1.0, ssao, bound.ao_settings.w)
+        color += ambient(surface, shading.n, v, reflected, indirect, occlusion * ssao)
+    let previous = scene.camera(..f.previous_camera)
+    let now = at + f.jitter
+    // The clip depth at the pixel's own center rather than at the jittered point it was shaded at: the drawings test
+    // against it unjittered, and a sloped surface's depth moves with the jitter, turning their strokes on and off.
+    // Depth is linear across a triangle on screen, so its screen derivatives carry it back exactly.
+    let jittered_depth = max(1.0 - f.near_plane / view_depth, 0.0)
+    let primary_depth = jittered_depth - ddx(jittered_depth) * f.jitter.x - ddy(jittered_depth) * f.jitter.y
     return {
         color = float4(..color, pt.moment_of(color))
-        primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
+        primary_depth = primary_depth
+        motion = now - scene.camera_project(previous, previous_world - previous.position, f.size)
     }
 
 /// What a pixel no surface covers holds: the environment along its camera ray, and the far clip depth.
@@ -155,7 +415,427 @@ fun environment(pixel: float2){bound} -> targets:
     let cam = scene.camera(..f.camera)
     let dir = normalize(scene.camera_ray_offset(cam, pixel + f.jitter, f.size))
     let backdrop = scene.environment_backdrop(background_lanes(), dir)
+    // The environment is infinitely far, so only the camera's turn moves it.
+    let previous = scene.camera(..f.previous_camera)
     return {
         color = float4(..backdrop, pt.moment_of(backdrop))
         primary_depth = 1.0
+        motion = pixel + f.jitter - scene.camera_project(previous, dir, f.size)
     }
+
+// -- screen-space ambient occlusion: a visibility bitmask (Therrien, Levesque and Gilet, "Screen Space Indirect Lighting
+// with Visibility Bitmask", 2023) over the prepass's depth, at half the image's size, then a blur.
+
+// Radius, thickness, intensity and the direct light's share are `bound.ao_settings`, `sv::screen_ambient_occlusion`.
+/// The slices each pixel walks, and the samples on each side of a slice.
+/// How far above a surface's plane a sample must lie to occlude it, as the sine of its elevation.
+const ao_plane_bias = 0.05
+const ao_slices = 2
+const ao_steps = 8
+
+/// The world point the depth shows at full-size pixel `pixel`, and 1 in w; 0 in w where the depth is the far plane.
+fun ao_world_at(depth: texture_2d_depth, pixel: int2){bound} -> float4:
+    let f = bound.frame[0]
+    let size = int2(f.size)
+    let clamped = clamp(pixel, int2(0), size - int2(1))
+    let d = depth.load(clamped)
+    if d <= 0.0 => return float4(0.0)
+    let cam = scene.camera(..f.camera)
+    // The depth was drawn at the jitter, so its pixel saw the point at its center moved by it.
+    let ray = scene.camera_ray_offset(cam, float2(clamped) + float2(0.5) + f.jitter, f.size)
+    return float4(..(cam.position + ray * (f.near_plane / d)), 1.0)
+
+/// A 4x4 interleaved pattern: the slice rotation and step offset of half-size pixel `h`, which the blur averages over,
+/// turned from frame to frame for the accumulation.
+fun ao_noise(h: int2){bound} -> float2:
+    // The 4x4 Bayer order, its bits interleaved from x xor y and y, so neighbours differ as much as they can.
+    let x = h.x & 3
+    let y = h.y & 3
+    let e = x ^ y
+    let bayer = ((e & 1) << 3) | ((y & 1) << 2) | (((e >> 1) & 1) << 1) | ((y >> 1) & 1)
+    let r = ((bayer as float) + 0.5) / 16.0
+    // Turned every frame by the golden ratio's fractions, so the frames an accumulation blends sample other directions.
+    let frame = bound.ao_temporal.x
+    return float2(fract(r + frame * 0.6180340), fract(r * 7.0 + 0.37 + frame * 0.7548777))
+
+/// The sectors between two horizons, each in 0 to 1 across the slice's hemisphere, set in a 32-sector mask.
+fun ao_sectors(lo: float, hi: float) -> uint:
+    let start = min(lo * 32.0, 31.0) as uint
+    let span = min(ceil((hi - lo) * 32.0), 32.0) as uint
+    if span == 0u => return 0u
+    let run = if span >= 32u => ~0u else (1u << span) - 1u
+    return run << start
+
+/// The visibility at half-size pixel `h`: how much of the hemisphere over its surface the depth leaves open, 1 for all of it.
+fun ambient_occlusion(h: int2){bound, ao_source} -> float:
+    let f = bound.frame[0]
+    let pixel = h * 2
+    let center = ao_world_at(ao_source.depth, pixel)
+    if center.w == 0.0 => return 1.0
+    let cam = scene.camera(..f.camera)
+    let p = center.xyz
+    let v = normalize(cam.position - p)
+
+    // The surface's normal from its neighbours, each axis from the side nearer in depth, so an edge does not bend it.
+    let r = ao_world_at(ao_source.depth, pixel + int2(2, 0))
+    let l = ao_world_at(ao_source.depth, pixel - int2(2, 0))
+    let d = ao_world_at(ao_source.depth, pixel + int2(0, 2))
+    let u = ao_world_at(ao_source.depth, pixel - int2(0, 2))
+    let dx = if r.w != 0.0 and (l.w == 0.0 or length(r.xyz - p) < length(p - l.xyz)) => r.xyz - p else p - l.xyz
+    let dy = if d.w != 0.0 and (u.w == 0.0 or length(d.xyz - p) < length(p - u.xyz)) => d.xyz - p else p - u.xyz
+    let mut n = normalize(cross(dx, dy))
+    if dot(n, v) < 0.0:
+        n = -n
+
+    let view_depth = dot(p - cam.position, normalize(cam.forward))
+    let radius_px = bound.ao_settings.x / max(view_depth * f.pixel_spread, 1e-6)
+    if radius_px < 1.0 => return 1.0
+
+    let noise = ao_noise(h)
+    let mut visibility = 0.0
+    for s in 0 ..< ao_slices:
+        let phi = ((s as float) + noise.x) * pt.pi / (ao_slices as float)
+        let dir = float2(cos(phi), sin(phi))
+        // The slice's direction in the world, as the image carries it: `camera_ray_offset`'s axes, y down.
+        let along = normalize(cam.right_scaled * dir.x - cam.up_scaled * dir.y)
+        let ortho = normalize(along - dot(along, v) * v)
+        let axis = cross(ortho, v)
+        let projected = n - axis * dot(n, axis)
+        let cos_n = clamp(dot(projected, v) / max(length(projected), 1e-6), -1.0, 1.0)
+        let n_angle = sign(dot(ortho, projected)) * acos(cos_n)
+
+        let mut bits = 0u
+        for side_index in 0 ..< 2:
+            let side = if side_index == 0 => -1.0 else 1.0
+            for k in 0 ..< ao_steps:
+                let t = ((k as float) + noise.y) / (ao_steps as float)
+                let offset = dir * side * max(t * t * radius_px, (k as float) + 1.0)
+                let q = ao_world_at(ao_source.depth, pixel + int2(offset))
+                if q.w == 0.0 => continue
+                let front = q.xyz - p
+                // A sample in or below the surface's own plane occludes nothing; counted, every flat surface would
+                // darken by the sliver each such sample sets at the horizon.
+                if dot(front, n) <= ao_plane_bias * length(front) => continue
+                let back = front - v * bound.ao_settings.y
+                let angles = acos(clamp(float2(dot(normalize(front), v), dot(normalize(back), v)), float2(-1.0), float2(1.0)))
+                let horizons = saturate((side * -angles - float2(n_angle) + float2(0.5 * pt.pi)) / pt.pi)
+                let ordered = if side >= 0.0 => horizons.yx else horizons.xy
+                bits = bits | ao_sectors(ordered.x, ordered.y)
+        visibility += 1.0 - (count_bits(bits) as float) / 32.0
+    return pow(visibility / (ao_slices as float), bound.ao_settings.z)
+
+/// This frame's signal at half-size pixel `h` averaged into last frame's, reprojected through the previous camera: the
+/// average, how many frames it holds, the view depth it holds them at, and the instance it holds them for, as its row
+/// plus 1, 0 for none known.
+///
+/// An average of up to `ao_temporal.z` frames, each weighed alike, so a still view converges rather than settling at a
+/// fixed share of noise.
+/// Whether the history is this surface's is decided by geometry, not by value: the signals averaged here are noisy
+/// enough -- a shadow ray's 0 or 1 above all -- that any clamp to the neighbourhood's values would throw good history away.
+/// A remembered texel is this surface's where it holds this point's instance and the point it showed lies on this
+/// point's plane, or, where the prepass drew no normal, where its depth is the depth this point had from the previous
+/// camera.
+/// The instance is what tells a pillar's foot from the floor it stands on, which lie on one plane where they touch: a
+/// texel the jitter moves between the two would otherwise average both, and its neighbours spread that a little further
+/// every frame.
+/// Where none is, something moved or was uncovered, and the pixel starts over; so does one off last frame's image, or
+/// without history.
+fun ao_accumulated(h: int2){bound, ao_accumulate_source} -> float4:
+    let f = bound.frame[0]
+    let half_size = (int2(f.size) + int2(1)) / 2
+    let current = ao_accumulate_source.raw.load(h)
+    let world = ao_world_at(ao_accumulate_source.depth, h * 2)
+    if world.w == 0.0 => return float4(1.0, 1.0, 0.0, 0.0)
+    let cam = scene.camera(..f.camera)
+    let depth_now = dot(world.xyz - cam.position, normalize(cam.forward))
+    let id = ao_accumulate_source.ids.load(clamp(h * 2, int2(0), int2(f.size) - int2(1))) as float
+    let fresh = float4(current, 1.0, depth_now, id)
+    if bound.ao_temporal.y == 0.0 => return fresh
+
+    let previous = scene.camera(..f.previous_camera)
+    let at = scene.camera_project(previous, world.xyz - previous.position, f.size)
+    if at.x < 0.0 or at.y < 0.0 or at.x >= f.size.x or at.y >= f.size.y => return fresh
+
+    // The four history texels around the point, and which of them remember this surface's depth.
+    // Half-size texel h holds full-size pixel 2h, whose center is 2h + 0.5, at the jitter its frame was drawn at:
+    // anything else drifts a still history across the image by the difference every frame.
+    let hp = (at - float2(0.5) - f.previous_jitter) * 0.5
+    let base = int2(floor(hp))
+    let w = hp - floor(hp)
+    let q0 = clamp(base, int2(0), half_size - int2(1))
+    let q1 = clamp(base + int2(1, 0), int2(0), half_size - int2(1))
+    let q2 = clamp(base + int2(0, 1), int2(0), half_size - int2(1))
+    let q3 = clamp(base + int2(1, 1), int2(0), half_size - int2(1))
+    let a = ao_accumulate_source.history.load(q0)
+    let b = ao_accumulate_source.history.load(q1)
+    let c = ao_accumulate_source.history.load(q2)
+    let e = ao_accumulate_source.history.load(q3)
+    let depth_then = dot(world.xyz - previous.position, normalize(previous.forward))
+    let bilinear = float4((1.0 - w.x) * (1.0 - w.y), w.x * (1.0 - w.y), (1.0 - w.x) * w.y, w.x * w.y)
+    let n = ao_accumulate_source.normals.load(clamp(h * 2, int2(0), int2(f.size) - int2(1))).xyz
+    let planar = dot(n, n) > 0.25
+    let remembered = float4(a.z, b.z, c.z, e.z)
+    let mut same = same_surface(remembered, depth_then)
+    if planar:
+        same = on_plane_then4(f, q0, q1, q2, q3, 2.0, remembered, world.xyz, normalize(n), depth_now)
+    let weights = bilinear * same * same_id(float4(a.w, b.w, c.w, e.w), id)
+    let total = weights.x + weights.y + weights.z + weights.w
+    if total > 0.0:
+        let value = (a.x * weights.x + b.x * weights.y + c.x * weights.z + e.x * weights.w) / total
+        let count = (a.y * weights.x + b.y * weights.y + c.y * weights.z + e.y * weights.w) / total
+        return blended(value, count, current, depth_now, id, at, h)
+
+    // Without a normal, none of the four matches on its own on a surface seen edge-on, where depth changes faster from
+    // texel to texel than any tolerance; the depth interpolated between them still does, since reciprocal depth is
+    // linear across a plane in screen space.
+    // Only where that fails too was this point hidden last frame, and it starts over.
+    if planar => return fresh
+    if a.z <= 0.0 or b.z <= 0.0 or c.z <= 0.0 or e.z <= 0.0 => return fresh
+    let plane = 1.0 / dot(bilinear, float4(1.0 / a.z, 1.0 / b.z, 1.0 / c.z, 1.0 / e.z))
+    if abs(plane - depth_then) > 0.03 * depth_then => return fresh
+    let value = dot(bilinear, float4(a.x, b.x, c.x, e.x))
+    let count = dot(bilinear, float4(a.y, b.y, c.y, e.y))
+    let ids = same_id(float4(a.w, b.w, c.w, e.w), id)
+    if ids.x * ids.y * ids.z * ids.w == 0.0 => return fresh
+    return blended(value, count, current, depth_now, id, at, h)
+
+/// The accumulation's step: `current` averaged into the reprojected history `value` of `count` frames, at half-size
+/// pixel `h` of instance `id`, whose point last frame's image showed at full-size position `at`.
+fun blended(value: float, count: float, current: float, depth_now: float, id: float, at: float2, h: int2){bound} -> float4:
+    // A pixel the camera's motion carried across the image keeps fewer frames, so what changed with the view -- the
+    // screen's occlusion above all -- does not trail behind it.
+    let motion = length(at - (float2(h * 2) + float2(0.5) + bound.frame[0].jitter))
+    // A pixel that held still keeps averaging without a cap, so its value settles for good.
+    // Any cap turns the average into a moving one, and neighbours draw nearly alike from frame to frame, so the
+    // fluctuation a moving average keeps drifts across whole regions of a still image.
+    // One moving at all drops to `ao_temporal.z`, and one moving far to 6 frames.
+    let still_cap = if motion < 0.25 => 65536.0 else bound.ao_temporal.z
+    let cap = mix(still_cap, 6.0, saturate(motion / 8.0))
+    let n = min(count + 1.0, cap)
+    return float4(mix(value, current, 1.0 / n), n, depth_now, id)
+
+/// 1 where texel `q` of last frame's grid, `scale` full-size pixels to a side, remembering view depth `remembered`,
+/// showed a point on the plane through `world` facing `n`, within 0.3% of `distance` off it; else 0.
+///
+/// What a history asks beside its depth: at a crease -- a pillar on a floor, a wall under a ceiling -- the other
+/// surface's texels lie at nearly the same depth, and a reprojection that takes them bleeds their value a little
+/// further across every frame.
+fun on_plane_then(f: raster.frame_constants, q: int2, scale: float, remembered: float, world: float3, n: float3, distance: float) -> float:
+    if remembered <= 0.0 => return 0.0
+    let previous = scene.camera(..f.previous_camera)
+    let taken = float2(q) * scale + float2(0.5) + f.previous_jitter
+    let point = previous.position + scene.camera_ray_offset(previous, taken, f.size) * remembered
+    return if abs(dot(point - world, n)) <= 0.003 * distance => 1.0 else 0.0
+
+/// The same for the four texels a bilinear reprojection reads, `q0` to `q3`, remembering the four depths `remembered`.
+fun on_plane_then4(f: raster.frame_constants, q0: int2, q1: int2, q2: int2, q3: int2, scale: float, remembered: float4, world: float3, n: float3, distance: float) -> float4:
+    let x = on_plane_then(f, q0, scale, remembered.x, world, n, distance)
+    let y = on_plane_then(f, q1, scale, remembered.y, world, n, distance)
+    let z = on_plane_then(f, q2, scale, remembered.z, world, n, distance)
+    let w = on_plane_then(f, q3, scale, remembered.w, world, n, distance)
+    return float4(x, y, z, w)
+
+/// 1 for each of four remembered instances that is `id`, or where either is unknown; else 0.
+fun same_id(remembered: float4, id: float) -> float4:
+    let x = if remembered.x == id or remembered.x == 0.0 or id == 0.0 => 1.0 else 0.0
+    let y = if remembered.y == id or remembered.y == 0.0 or id == 0.0 => 1.0 else 0.0
+    let z = if remembered.z == id or remembered.z == 0.0 or id == 0.0 => 1.0 else 0.0
+    let w = if remembered.w == id or remembered.w == 0.0 or id == 0.0 => 1.0 else 0.0
+    return float4(x, y, z, w)
+
+/// 1 for each of four remembered depths within 3% of `depth`, else 0.
+fun same_surface(depths: float4, depth: float) -> float4:
+    let limit = 0.03 * depth
+    let x = if abs(depths.x - depth) <= limit => 1.0 else 0.0
+    let y = if abs(depths.y - depth) <= limit => 1.0 else 0.0
+    let z = if abs(depths.z - depth) <= limit => 1.0 else 0.0
+    let w = if abs(depths.w - depth) <= limit => 1.0 else 0.0
+    return float4(x, y, z, w)
+
+/// The AO pass's result at half-size pixel `h` averaged over the 4x4 the noise repeats in, weighted by how near in
+/// depth each neighbour lies, so an occluder's darkening stops at its silhouette.
+fun ao_blurred(h: int2){bound, ao_blur_source} -> float2:
+    let f = bound.frame[0]
+    let half_size = (int2(f.size) + int2(1)) / 2
+    let d0 = ao_blur_source.depth.load(clamp(h * 2, int2(0), int2(f.size) - int2(1)))
+    if d0 <= 0.0 => return float2(1.0, 0.0)
+    // This texel's surface, where the prepass drew it: a neighbour off its plane is another surface, a ceiling beside
+    // a wall at the same depth, and is left out though its depth is near.
+    let p0 = ao_world_at(ao_blur_source.depth, h * 2)
+    let n0 = ao_blur_source.normals.load(clamp(h * 2, int2(0), int2(f.size) - int2(1))).xyz
+    let planar = dot(n0, n0) > 0.25
+    let distance = f.near_plane / d0
+    let mut sum = 0.0
+    let mut weight = 0.0
+    for j in -1 ..< 3:
+        for i in -1 ..< 3:
+            let q = clamp(h + int2(i, j), int2(0), half_size - int2(1))
+            let dq = ao_blur_source.depth.load(clamp(q * 2, int2(0), int2(f.size) - int2(1)))
+            // Reversed depth is `near / view depth`, so this is the neighbour's view depth relative to this one's.
+            let mut w = if dq > 0.0 => max(0.0, 1.0 - abs(d0 / dq - 1.0) * 20.0) else 0.0
+            if w > 0.0 and planar:
+                let pq = ao_world_at(ao_blur_source.depth, q * 2)
+                if abs(dot(pq.xyz - p0.xyz, normalize(n0))) > 0.003 * distance:
+                    w = 0.0
+                // A surface meeting this one at a crease, a pillar's foot on its floor, lies on this plane where the
+                // two touch: it is told apart by the way it faces.
+                let nq = ao_blur_source.normals.load(clamp(q * 2, int2(0), int2(f.size) - int2(1))).xyz
+                if dot(nq, nq) > 0.25 and dot(normalize(nq), normalize(n0)) < 0.9:
+                    w = 0.0
+            sum += ao_blur_source.raw.load(q) * w
+            weight += w
+    // The view depth beside the value, for the shading's upsample: reversed depth is `near / view depth`.
+    return float2(if weight > 0.0 => sum / weight else 1.0, f.near_plane / d0)
+
+/// Whether texel `q` of a reduced grid, `scale` full-size pixels to a side, belongs to instance row `instance`: the
+/// full-size pixel it was taken at shows that instance, or no instance is known there -- a cutout, or the stand-in.
+/// Depth alone cannot tell a surface from one just behind it, a pane of glass in its frame, so an upsample asks both.
+fun same_instance(q: int2, scale: int, instance: uint){bound} -> bool:
+    let f = bound.frame[0]
+    let limit = min(int2(f.size), bound.ids.size()) - int2(1)
+    let id = bound.ids.load(clamp(q * scale, int2(0), limit))
+    return id == 0u or id == instance + 1u
+
+/// How much reduced texel `q`, `scale` full-size pixels to a side, whose surface lies at view depth `texel_depth`,
+/// counts toward a pixel at world point `world` of instance row `instance` facing `n`: 1 where it is the same surface,
+/// else 0.
+///
+/// The same surface is the same instance, and a point within 0.3% of its distance off the pixel's plane: a groove's
+/// wall, a door's inset panel or a step's riser is off it, though its depth is near; the same plane at a grazing
+/// angle is on it, though its depth is far.
+fun same_surface_weight(q: int2, scale: int, instance: uint, texel_depth: float, world: float3, n: float3){bound} -> float:
+    if texel_depth <= 0.0 => return 0.0
+    let f = bound.frame[0]
+    let cam = scene.camera(..f.camera)
+    let taken = float2(q * scale) + float2(0.5) + f.jitter
+    let point = cam.position + scene.camera_ray_offset(cam, taken, f.size) * texel_depth
+    let distance = dot(world - cam.position, normalize(cam.forward))
+    if abs(dot(point - world, n)) > 0.003 * distance => return 0.0
+    return if same_instance(q, scale, instance) => 1.0 else 0.0
+
+/// The weight reduced texel `offset` from `base` gets at reduced position `at`, before its surface is asked about.
+///
+/// Narrow, the bilinear weight of the four around `at`, and 0 for the rest of the 4x4 around them.
+/// Wide, a Gaussian on its distance from `at` across all sixteen: what an edge gathers, where some of the four are
+/// another surface's, so each pixel blends the matching texels around it rather than copying the one left.
+fun tap_weight(offset: int2, w: float2, wide: bool) -> float:
+    if wide:
+        let d = float2(offset) - w
+        return exp(-1.25 * dot(d, d))
+    if offset.x < 0 or offset.y < 0 or offset.x > 1 or offset.y > 1 => return 0.0
+    // Never quite 0, so each of the four is still asked whether it is the same surface where `at` sits on a texel.
+    return max((if offset.x == 1 => w.x else 1.0 - w.x) * (if offset.y == 1 => w.y else 1.0 - w.y), 1e-4)
+
+/// A resolved half-size signal at full-size pixel position `pixel`, whose surface is instance row `instance` at world
+/// point `world`, facing `n`.
+///
+/// Bilinear over the four texels around it where all four are the same surface; where some are not, a wide gather of
+/// the 4x4 around it, each texel weighed out unless it is the same surface, so a step's value never bleeds onto the
+/// floor behind it nor a pane's onto its frame, and an edge comes out smooth rather than in blocks.
+/// Where none of the sixteen is, the nearest stands in.
+/// A 1x1 texture reads as its one texel, and a texel with depth 0 -- the stand-in's -- weighs nothing out.
+fun half_size_bilinear(t: texture_2d[float2], pixel: float2, world: float3, n: float3, instance: uint){bound} -> float:
+    let f = bound.frame[0]
+    let half_size = (int2(f.size) + int2(1)) / 2
+    let at = (pixel - float2(0.5)) * 0.5
+    let base = int2(floor(at))
+    let w = at - floor(at)
+    let limit = min(half_size, t.size()) - int2(1)
+    let mut result = 0.0
+    let mut found = false
+    for pass in 0 ..< 2:
+        if not found:
+            let wide = pass == 1
+            let mut sum = 0.0
+            let mut total = 0.0
+            let mut matched = 0
+            for k in 0 ..< 16:
+                let offset = int2((k & 3) - 1, (k >> 2) - 1)
+                let tap = tap_weight(offset, w, wide)
+                if tap > 0.0:
+                    let q = clamp(base + offset, int2(0), limit)
+                    let s = t.load(q)
+                    let same = if s.y == 0.0 => 1.0 else same_surface_weight(q, 2, instance, s.y, world, n)
+                    if same > 0.0:
+                        matched += 1
+                    sum += s.x * tap * same
+                    total += tap * same
+            if (wide and total > 1e-6) or matched == 4:
+                result = sum / total
+                found = true
+    if found => return result
+    let nearest = t.load(clamp(int2(floor(at + float2(0.5))), int2(0), limit))
+    return nearest.x
+
+/// The blurred occlusion at full-size pixel position `pixel`, whose surface `half_size_bilinear` takes.
+fun screen_occlusion(pixel: float2, world: float3, n: float3, instance: uint){bound} -> float => half_size_bilinear(bound.ao, pixel, world, n, instance)
+
+/// The share of the direct light visible at full-size pixel position `pixel`, whose surface `half_size_bilinear` takes.
+fun screen_shadow(pixel: float2, world: float3, n: float3, instance: uint){bound} -> float => half_size_bilinear(bound.shadow, pixel, world, n, instance)
+
+/// The screen's reflection at full-size pixel position `pixel`, whose surface `half_size_bilinear` takes: radiance, and
+/// how far to trust it.
+/// Gathered as `half_size_bilinear` gathers; where none of the sixteen texels is the same surface, it is trusted nowhere.
+fun screen_reflection(pixel: float2, world: float3, n: float3, instance: uint){bound} -> float4:
+    let f = bound.frame[0]
+    let half_size = (int2(f.size) + int2(1)) / 2
+    let at = (pixel - float2(0.5)) * 0.5
+    let base = int2(floor(at))
+    let w = at - floor(at)
+    let limit = min(half_size, bound.reflection.size()) - int2(1)
+    let mut result = float4(0.0)
+    let mut found = false
+    for pass in 0 ..< 2:
+        if not found:
+            let wide = pass == 1
+            let mut sum = float4(0.0)
+            let mut total = 0.0
+            let mut matched = 0
+            for k in 0 ..< 16:
+                let offset = int2((k & 3) - 1, (k >> 2) - 1)
+                let tap = tap_weight(offset, w, wide)
+                if tap > 0.0:
+                    let q = clamp(base + offset, int2(0), limit)
+                    let same = same_surface_weight(q, 2, instance, bound.reflection_depth.load(q), world, n)
+                    if same > 0.0:
+                        matched += 1
+                    sum += bound.reflection.load(q) * (tap * same)
+                    total += tap * same
+            if (wide and total > 1e-6) or matched == 4:
+                result = sum / total
+                found = true
+    return result
+
+/// The traced indirect light at full-size pixel position `pixel`, whose surface `half_size_bilinear` takes: the mean
+/// radiance reaching it, and a w above 0 where it holds some.
+/// Gathered as `half_size_bilinear` gathers, on the traced grid; where none of the sixteen texels is the same surface,
+/// it holds none, and the environment stands in.
+fun screen_indirect(pixel: float2, world: float3, n: float3, instance: uint){bound} -> float4:
+    let scale = max(bound.indirect_settings.x, 1.0)
+    let at = (pixel - float2(0.5)) / scale
+    let base = int2(floor(at))
+    let w = at - floor(at)
+    let limit = bound.indirect.size() - int2(1)
+    let mut result = float4(0.0)
+    let mut found = false
+    for pass in 0 ..< 2:
+        if not found:
+            let wide = pass == 1
+            let mut sum = float3(0.0)
+            let mut total = 0.0
+            let mut matched = 0
+            for k in 0 ..< 16:
+                let offset = int2((k & 3) - 1, (k >> 2) - 1)
+                let tap = tap_weight(offset, w, wide)
+                if tap > 0.0:
+                    let q = clamp(base + offset, int2(0), limit)
+                    let s = bound.indirect.load(q)
+                    let same = if s.w > 0.0 => same_surface_weight(q, scale as int, instance, s.w, world, n) else 0.0
+                    if same > 0.0:
+                        matched += 1
+                    sum += s.xyz * (tap * same)
+                    total += tap * same
+            if (wide and total > 1e-6) or matched == 4:
+                result = float4(..(sum / total), 1.0)
+                found = true
+    return result

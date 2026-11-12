@@ -1,0 +1,27 @@
+// The bound raster mode's shadow maps: the caster draws that lay down each rect light's depth, and the pass that reads
+// them into the share of the direct light visible at half the image's size, which module `raster_bound` blurs.
+// sv::raster_bound_routine builds them; module `raster_bound_shadow_maps` holds what they share.
+
+use raster_bound
+use raster_bound_shadow_maps
+
+/// One vertex of an indexed caster draw, in light `shadow_caster.light`'s map.
+@vertex fun bound_caster_vs(@vertex_index vertex: int, @instance_index row: int){raster_bound.bound, raster_bound_shadow_maps.shadow_caster} -> raster_bound_shadow_maps.caster_varyings:
+    return raster_bound_shadow_maps.caster_vertex_of(vertex, row as uint)
+
+/// One corner of a pulled caster draw, on a device without `primitive_index`.
+@vertex fun bound_caster_pulled_vs(@vertex_index corner: int, @instance_index row: int){raster_bound.bound, raster_bound_shadow_maps.shadow_caster} -> raster_bound_shadow_maps.caster_varyings:
+    return raster_bound_shadow_maps.caster_pulled_vertex_of(corner, row as uint)
+
+struct map_varyings:
+    @position position: hpos4
+
+/// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2): one triangle covering the target.
+@vertex fun bound_shadow_map_vs(@vertex_index vertex: int) -> map_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+
+/// The share of the direct light the maps leave visible, at half the image's size.
+@pixel fun bound_shadow_map_ps(p: map_varyings){raster_bound_shadow_maps.shadow_map_scene} -> raster_bound_shadow_maps.shadow_map_target:
+    return { visibility = raster_bound_shadow_maps.visibility(int2(p.position.x as int, p.position.y as int)) }
