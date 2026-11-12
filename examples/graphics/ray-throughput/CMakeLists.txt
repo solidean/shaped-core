@@ -53,31 +53,11 @@ sc_add_shader_package(
         ray_throughput.sgl:*
 )
 
-# A standalone page for the web build, as sgl-cube makes one: a second link of the same sources.
-if(EMSCRIPTEN AND _ray_throughput_backend STREQUAL "shaped-graphics-webgpu" AND TARGET graphics-ray-throughput-example)
-    set(_ray_throughput_web graphics-ray-throughput-example-web)
-    get_target_property(_ray_throughput_srcs graphics-ray-throughput-example SOURCES)
-    get_target_property(_ray_throughput_libs graphics-ray-throughput-example LINK_LIBRARIES)
-    get_target_property(_ray_throughput_incs graphics-ray-throughput-example INCLUDE_DIRECTORIES)
-    get_target_property(_ray_throughput_defs graphics-ray-throughput-example COMPILE_DEFINITIONS)
-
-    add_executable(${_ray_throughput_web} ${_ray_throughput_srcs})
-    target_link_libraries(${_ray_throughput_web} PRIVATE ${_ray_throughput_libs})
-    target_include_directories(${_ray_throughput_web} PRIVATE ${_ray_throughput_incs})
-    target_compile_definitions(${_ray_throughput_web} PRIVATE ${_ray_throughput_defs})
-
-    target_link_options(${_ray_throughput_web} PRIVATE
-        "SHELL:-s SINGLE_FILE=1"
-        "SHELL:-s NODERAWFS=0"
-        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/web-arguments.js"
-        "SHELL:--shell-file ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html"
-    )
-    set_property(TARGET ${_ray_throughput_web} APPEND PROPERTY LINK_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/web-arguments.js" "${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html")
-    set_target_properties(${_ray_throughput_web} PROPERTIES
-        SUFFIX ".html"
-        OUTPUT_NAME "ray-throughput"
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/web"
+# A standalone page for the web build: a second link of the same sources.
+if(_ray_throughput_backend STREQUAL "shaped-graphics-webgpu")
+    sc_add_example_web_page(graphics-ray-throughput-example
+        EXAMPLE shaped-graphics/ray-throughput
+        OUTPUT ray-throughput
+        SHELL ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html
     )
 endif()

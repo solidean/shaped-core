@@ -69,31 +69,11 @@ sc_add_shader_package(
         cube.sgl:*
 )
 
-# A standalone page for the web build, exactly as rotating-cube makes one: a second link of the same sources.
-if(EMSCRIPTEN AND _sgl_cube_backend STREQUAL "shaped-graphics-webgpu" AND TARGET graphics-sgl-cube-example)
-    set(_sgl_cube_web graphics-sgl-cube-example-web)
-    get_target_property(_sgl_cube_srcs graphics-sgl-cube-example SOURCES)
-    get_target_property(_sgl_cube_libs graphics-sgl-cube-example LINK_LIBRARIES)
-    get_target_property(_sgl_cube_incs graphics-sgl-cube-example INCLUDE_DIRECTORIES)
-    get_target_property(_sgl_cube_defs graphics-sgl-cube-example COMPILE_DEFINITIONS)
-
-    add_executable(${_sgl_cube_web} ${_sgl_cube_srcs})
-    target_link_libraries(${_sgl_cube_web} PRIVATE ${_sgl_cube_libs})
-    target_include_directories(${_sgl_cube_web} PRIVATE ${_sgl_cube_incs})
-    target_compile_definitions(${_sgl_cube_web} PRIVATE ${_sgl_cube_defs})
-
-    target_link_options(${_sgl_cube_web} PRIVATE
-        "SHELL:-s SINGLE_FILE=1"
-        "SHELL:-s NODERAWFS=0"
-        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/web-arguments.js"
-        "SHELL:--shell-file ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html"
-    )
-    set_property(TARGET ${_sgl_cube_web} APPEND PROPERTY LINK_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/web-arguments.js" "${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html")
-    set_target_properties(${_sgl_cube_web} PROPERTIES
-        SUFFIX ".html"
-        OUTPUT_NAME "sgl-cube"
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/web"
+# A standalone page for the web build: a second link of the same sources.
+if(_sgl_cube_backend STREQUAL "shaped-graphics-webgpu")
+    sc_add_example_web_page(graphics-sgl-cube-example
+        EXAMPLE shaped-graphics/sgl-cube
+        OUTPUT sgl-cube
+        SHELL ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html
     )
 endif()

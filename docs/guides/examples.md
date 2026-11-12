@@ -374,6 +374,13 @@ and `--shell-file` supplies the page itself instead of emcc's default shell.
 `examples/graphics/sgl-cube` builds `graphics-sgl-cube-example-web` the same way, into `web/sgl-cube.html`.
 It is the same cube with its shader written in SGL: one `cube.sgl` where `rotating-cube` has an HLSL file and two WGSL ones.
 
+**`sc_add_example_web_page`** (nexus's `Examples.cmake`) is that second link: `sc_add_example_web_page(<target> EXAMPLE <name> OUTPUT <stem> SHELL <html>)`.
+It generates the `--pre-js` naming the example, so an example's page needs only its shell.
+
+**shaped-viewer's examples run on the web through `sv::interactive_async`**, whose frames are awaited rather than blocked on.
+They share one shell, `libs/graphics/shaped-viewer/web/example-shell.html`, and each that draws what the bound raster mode draws is a page: `web/<stem>.html`.
+`SV_AUTOMATIC_MODE=raster_bound uv run dev.py example shaped-viewer/<stem> --capture` shows one natively as the page draws it, in seconds and without a browser.
+
 Take the pattern where an example is worth showing to someone who will not build it.
 It is not automatic: an example that needs a window system, or a backend with no web arm, has nothing to put on a page.
 

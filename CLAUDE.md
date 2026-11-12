@@ -184,7 +184,7 @@ One-liner per library:
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`.
-  Depends on shaped-rendering, plus babel-serializer for the asset importer.
+  Depends on shaped-rendering, plus babel-serializer for the asset importer, and clean-net on the web, where `load_async` fetches.
   A first vertical slice today: path-traced views blitted into a window.
   Every shader is SGL, so the trace runs on dx12, vulkan and metal; the default context and the examples are dx12's on Windows and metal's on Apple.
   **A material type is an SGL fragment** (`sv::material_type::shader`), generated into one hit group per permutation.
