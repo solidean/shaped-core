@@ -287,7 +287,8 @@ TEST("symbolize - a recorded module table resolves addresses this process did no
 #endif
 }
 
-TEST("symbolize - a module table with no usable binaries still names the module")
+// Alone, since it times its own resolve, which waits on the lock every other symbolize test holds.
+TEST("symbolize - a module table with no usable binaries still names the module", exclusive())
 {
     if (!cc::symbolizer::is_available())
         SKIP("no symbolization on this platform");
