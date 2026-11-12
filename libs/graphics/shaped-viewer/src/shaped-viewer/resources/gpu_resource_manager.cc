@@ -1,6 +1,7 @@
 #include "gpu_resource_manager.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh> // cc::memcmp
 #include <sgl_modules/tracer.hh>        // the manager's group is module tracer's `binding bindless`
 #include <shaped-graphics/binding/staging_binding_group.hh>

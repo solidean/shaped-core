@@ -19,7 +19,8 @@ A disc becomes a square of its area, and a curved emitter has no good rect at al
 ## Log
 
 2026-11-12: one bounce of it works.
-A `raster_bound` layer now gets each emissive instance's light record, its estimated radiance without the area CDF a tracer samples by, and the traced indirect brings back the emission of an emitter its ray meets.
+A `raster_bound` layer now gets each emissive instance's light record: its estimated radiance, without the area CDF a tracer samples by.
+The traced indirect brings back the emission of an emitter its ray meets.
 The Research Scenes' kitchen, White Room, Modern Hall and staircase went from near black to lit.
 What stays: a surface that sees no emitter gets nothing, since the hit a ray meets is lit by the analytic lights alone, so the Cornell box's short box faces away dark.
 A second bounce, from what last frame left at the hit where it is on screen, is the next step.

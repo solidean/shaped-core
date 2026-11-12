@@ -20,8 +20,6 @@ using namespace cnet;
 
 namespace
 {
-using cnet::cc_rec_domain;
-
 [[nodiscard]] cc::string failure_text(cc::async_error const* e)
 {
     return e == nullptr ? cc::string() : e->underlying().to_string();
