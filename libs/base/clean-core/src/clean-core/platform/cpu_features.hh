@@ -31,7 +31,7 @@ struct cc::cpu_features
     bool popcnt = false;
     bool cx16 = false;
     bool lahf = false;
-    bool avx = false;
+    bool avx = false; ///< and ymm saved by the OS (OSXSAVE, XCR0): false on a CPU with AVX whose OS does not save them
     bool avx2 = false;
     bool fma = false;
     bool f16c = false;

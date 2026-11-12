@@ -23,9 +23,17 @@ TEST("cc cpu_features - the CPU has every extension the build was compiled for")
     CHECK(f.sse42);
     CHECK(f.popcnt);
 #endif
+#if defined(__AVX__)
+    CHECK(f.avx);
+#endif
 #if defined(__AVX2__)
     CHECK(f.avx);
     CHECK(f.avx2);
+#endif
+#if defined(CC_X64_AVX)
+    // SC_X64_LEVEL=v2-avx: AVX on top of v2, and an OS that saves ymm, since `avx` is false without it.
+    CHECK(f.avx);
+    CHECK(f.x86_64_v2);
 #endif
 #if defined(__FMA__)
     CHECK(f.fma);
