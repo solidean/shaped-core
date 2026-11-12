@@ -4,6 +4,8 @@ parent: epic-sgl-every-stage-everywhere
 blocked-by: [feat-sg-metal-tessellation]
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/incubator/stage-polyfills.md
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-12T08:34Z
 ---
 
 # Tessellation on metal, natively
