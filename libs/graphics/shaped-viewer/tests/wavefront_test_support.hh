@@ -95,10 +95,11 @@ namespace sv_test::wavefront
 inline constexpr i32 k_max_bounces = 5;
 
 /// The rounds a draining frame of the Cornell box runs at `max_bounces`.
-/// The box holds no medium, so a path ends within `max_bounces + 1` rounds and the last round must find every slot empty.
+/// The box holds no medium, so a path ends within `max_bounces + 2` rounds, the segment past its last bounce included,
+/// and the last round must find every slot empty.
 [[nodiscard]] constexpr int drain_rounds_of(i32 max_bounces)
 {
-    return max_bounces + 2;
+    return max_bounces + 3;
 }
 
 /// Checks that the last round of a draining frame started with no live path, so its image holds every sample it started.

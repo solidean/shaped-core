@@ -769,6 +769,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // Bring up the inline transfer ring buffers; each system creates + maps its own heap (colocated
     // with its logic) off the now-populated device.
     ctx->_execution = config.execution;
+    ctx->_withhold_binding_arrays = config.withhold_binding_arrays;
+    ctx->_withhold_primitive_index = config.withhold_primitive_index;
     ctx->_native_dxil = config.native_dxil;
     ctx->_native_line_tables = config.native_line_tables;
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));

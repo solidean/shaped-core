@@ -39,6 +39,11 @@ fun cw_tc(patch: control_point[3]) -> tri_factors:
 fun culled_tc(patch: control_point[3]) -> tri_factors:
     return {edges = [0.0, 4.0, 4.0], inside = 4.0}
 
+// Factors of 8 under a `max_factor` of 1: the patch is cut as a factor of 1 cuts it, into the one triangle.
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise, max_factor = 1)
+fun capped_tc(patch: control_point[3]) -> tri_factors:
+    return {edges = [8.0, 8.0, 8.0], inside = 8.0}
+
 @tessellation_evaluation
 fun domain_te(patch: control_point[3], f: tri_factors, @domain_location uvw: float3) -> staged:
     let p = patch[0].position * uvw.x + patch[1].position * uvw.y + patch[2].position * uvw.z
@@ -61,6 +66,32 @@ pipeline tessellated_cw:
     tessellation_evaluation = domain_te
     pixel = staged_ps
     cull = .back
+    format = .rgba32_float
+
+// The domain location squared, which only the patch's corners carry exactly once interpolated across a triangle.
+// So the color tells one triangle, which interpolates the corners linearly, from a patch cut finer.
+@tessellation_evaluation
+fun squared_te(patch: control_point[3], f: tri_factors, @domain_location uvw: float3) -> staged:
+    let p = patch[0].position * uvw.x + patch[1].position * uvw.y + patch[2].position * uvw.z
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        color = float4(uvw.x * uvw.x, uvw.y * uvw.y, uvw.z * uvw.z, f.inside)
+    }
+
+pipeline tessellated_capped:
+    vertex = corner_vs
+    tessellation_control = capped_tc
+    tessellation_evaluation = squared_te
+    pixel = staged_ps
+    cull = .none
+    format = .rgba32_float
+
+pipeline tessellated_squared:
+    vertex = corner_vs
+    tessellation_control = ccw_tc
+    tessellation_evaluation = squared_te
+    pixel = staged_ps
+    cull = .none
     format = .rgba32_float
 
 pipeline tessellated_culled:

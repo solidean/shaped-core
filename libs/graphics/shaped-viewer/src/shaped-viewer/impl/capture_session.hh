@@ -71,6 +71,14 @@ public:
     /// True once per drain, so work that comes and goes restarts the views each time it goes, and the timeout still ends the run.
     [[nodiscard]] bool note_owed_work(isize owed);
 
+    /// How many frames in a row, this one included, owed no work; 0 for one that does.
+    /// What a rasterized layer's histories converge over, since nothing they hold is counted as samples.
+    [[nodiscard]] i32 note_quiet_frame(bool quiet)
+    {
+        _quiet_frames = quiet ? _quiet_frames + 1 : 0;
+        return _quiet_frames;
+    }
+
     /// Whether the image has already been written, so the run is finishing rather than still converging.
     [[nodiscard]] bool is_done() const { return _done; }
     void mark_done() { _done = true; }
@@ -106,6 +114,7 @@ private:
     bool _applied = false;
     bool _done = false;
     bool _settled_before_writing = false;
+    i32 _quiet_frames = 0;
 
     /// Whether the last frame `note_owed_work` saw owed any work.
     bool _owing = false;

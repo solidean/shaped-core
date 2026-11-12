@@ -294,7 +294,8 @@ surface.emission_color = color
     return material_type::create({.name = cc::string(builtin_material::unlit),
                                   .signature = cc::move(signature),
                                   .shader = cc::string(unlit_shader),
-                                  .opacity_attribute = "opacity"});
+                                  .opacity_attribute = "opacity",
+                                  .display_only = true});
 }
 } // namespace
 

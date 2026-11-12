@@ -1,0 +1,237 @@
+<!doctype html>
+<!--
+  The page a shaped-viewer example's web build is wrapped in (sc_add_example_web_page): the viewer's canvas, its loading
+  overlay, and what the module prints.
+  sv::interactive_async draws into #canvas and writes #loading-text until its image stands; emcc substitutes the
+  module's script at the placeholder near the end.
+  Dev-server hooks, opt-in through the URL: `?log=1` POSTs every printed line to /log, `?snap=<seconds>` POSTs the
+  canvas to /snap that often (.tmp/serve-https.py answers both; a static host answers 404 and nothing else changes).
+  `?fill=1` fills the window, `?credit=<text>&license=<https url>` shows an attribution.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shaped-viewer (WebGPU)</title>
+<style>
+    :root { color-scheme: dark; }
+    body {
+        margin: 0;
+        padding: 16px;
+        background: #14151c;
+        color: #c9ccd6;
+        font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+    }
+    #title { color: #e6e8ef; font-size: 16px; }
+    #stage { position: relative; width: min(100%, 1280px); }
+    canvas { width: 100%; height: auto; aspect-ratio: 16 / 9; display: block; outline: none; }
+    #loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        align-items: center;
+        justify-content: center;
+        background: #14151c;
+        color: #8f94a3;
+        font-size: 15px;
+        pointer-events: none;
+    }
+    .spinner {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 3px solid #2b2e3a;
+        border-top-color: #8fb4ff;
+        animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #fullscreen {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        width: 34px;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 6px;
+        background: rgba(20, 21, 28, 0.6);
+        color: #e6e8ef;
+        cursor: pointer;
+        opacity: 0.55;
+        transition: opacity 0.15s;
+    }
+    #stage:hover #fullscreen, #fullscreen:focus-visible { opacity: 1; }
+    #stage:fullscreen { width: 100vw; height: 100vh; background: #000; }
+    #stage:fullscreen canvas { width: 100%; height: 100%; aspect-ratio: auto; }
+    body.fill { padding: 0; }
+    body.fill #stage { width: 100vw; height: 100vh; }
+    body.fill canvas { width: 100%; height: 100%; aspect-ratio: auto; }
+    body.fill #title, body.fill #controls, body.fill #log { display: none; }
+    #controls { color: #8f94a3; font-size: 13px; }
+    #credit {
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(20, 21, 28, 0.6);
+        color: #c9ccd6;
+        font-size: 12px;
+    }
+    #credit:empty { display: none; }
+    #credit a { color: #9fb4ff; }
+    #log {
+        width: min(100%, 1280px);
+        box-sizing: border-box;
+        max-height: 240px;
+        overflow: auto;
+        background: #1b1d26;
+        padding: 12px;
+        border-radius: 6px;
+        font: 12px/1.45 ui-monospace, Consolas, monospace;
+        white-space: pre;
+        margin: 0;
+    }
+    .error { color: #e2705f; }
+</style>
+</head>
+<body>
+<div id="title"></div>
+<div id="stage">
+    <canvas id="canvas" width="1280" height="720" tabindex="-1"></canvas>
+    <div id="loading"><div class="spinner"></div><div id="loading-text">starting …</div></div>
+    <div id="credit"></div>
+    <button id="fullscreen" type="button" title="fullscreen (F)" aria-label="fullscreen">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M2 7V2h5M11 2h5v5M16 11v5h-5M7 16H2v-5"/>
+        </svg>
+    </button>
+</div>
+<div id="controls">click the view to steer it with the mouse and keys, as the example's comment describes; F for fullscreen</div>
+<pre id="log"></pre>
+
+<script>
+    var pageParameters = new URLSearchParams(location.search);
+    (function ()
+    {
+        var credit = pageParameters.get('credit');
+        if (!credit)
+            return;
+        var box = document.getElementById('credit');
+        box.textContent = credit;
+        var license = pageParameters.get('license');
+        if (license && license.indexOf('https://') === 0)
+        {
+            box.appendChild(document.createTextNode(' · '));
+            var link = document.createElement('a');
+            link.href = license;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = 'license';
+            box.appendChild(link);
+        }
+    })();
+    if (pageParameters.get('fill') === '1')
+        document.body.classList.add('fill');
+
+    var relayLog = pageParameters.get('log') === '1';
+    var snapSeconds = parseFloat(pageParameters.get('snap') || '0');
+    var pendingLines = [];
+    function flushLog()
+    {
+        if (pendingLines.length === 0)
+            return;
+        var body = pendingLines.join('\n');
+        pendingLines = [];
+        fetch('/log', { method: 'POST', body: body, keepalive: true }).catch(function () {});
+    }
+    function relay(text, isError)
+    {
+        if (!relayLog)
+            return;
+        pendingLines.push((isError ? 'E ' : '  ') + text);
+        if (isError)
+            flushLog();
+    }
+    if (relayLog)
+    {
+        pendingLines.push('--- ' + location.href + ' — ' + navigator.userAgent);
+        setInterval(flushLog, 500);
+        addEventListener('pagehide', flushLog);
+        addEventListener('error', function (e) { relay('uncaught: ' + e.message + ' at ' + e.filename + ':' + e.lineno, true); });
+        addEventListener('unhandledrejection', function (e) { relay('unhandled rejection: ' + e.reason, true); });
+    }
+
+    // A WebGPU canvas holds its frame only until the browser presents it at the end of the task that drew it,
+    // so a snapshot is taken right after a queue submit, in that task, and the last one taken in the task is sent.
+    if (snapSeconds > 0 && navigator.gpu && window.GPUQueue)
+    {
+        var snapDueAt = performance.now() + snapSeconds * 1000;
+        var snapIssued = 0;
+        var snapResetQueued = false;
+        var originalSubmit = GPUQueue.prototype.submit;
+        GPUQueue.prototype.submit = function (buffers)
+        {
+            var result = originalSubmit.call(this, buffers);
+            if (performance.now() >= snapDueAt)
+            {
+                var id = ++snapIssued;
+                if (!snapResetQueued)
+                {
+                    snapResetQueued = true;
+                    setTimeout(function ()
+                    {
+                        snapResetQueued = false;
+                        snapDueAt = performance.now() + snapSeconds * 1000;
+                    }, 0);
+                }
+                document.getElementById('canvas').toBlob(function (blob)
+                {
+                    if (blob && id === snapIssued)
+                        fetch('/snap', { method: 'POST', body: blob }).catch(function () {});
+                }, 'image/png');
+            }
+            return result;
+        };
+    }
+
+    var logElement = document.getElementById('log');
+    function appendLine(text, isError)
+    {
+        var line = document.createElement('span');
+        line.textContent = text + '\n';
+        if (isError)
+            line.className = 'error';
+        logElement.appendChild(line);
+        logElement.scrollTop = logElement.scrollHeight;
+        relay(text, isError);
+    }
+    var Module = {
+        canvas: document.getElementById('canvas'),
+        print: function (text) { appendLine(text, false); },
+        printErr: function (text) { appendLine(text, true); console.error(text); },
+        // The command line names the example this page runs, which titles the page.
+        preRun: [function ()
+        {
+            var name = (Module['arguments'] || [])[0] || 'shaped-viewer';
+            document.title = name + ' (WebGPU)';
+            document.getElementById('title').textContent = name;
+        }],
+    };
+    if (!navigator.gpu)
+    {
+        document.getElementById('loading-text').textContent = 'this browser has no WebGPU here: it needs a browser with WebGPU, over https or localhost';
+        document.getElementById('loading-text').className = 'error';
+    }
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

@@ -232,8 +232,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                 return cc::error(cc::format("{}: error: the compute half of tessellation control entry point '{}' "
                                             "runs its pipeline's vertex stage, and none was named\n",
                                             source_name, e.name));
+            // CHK-304: the factors the evaluation stage reads back are capped, as a native tessellator's are
             auto made = check::tessellation_as_compute(m, check::legalize(m, *polyfill_vertex, graft),
-                                                       check::legalize(m, e, graft));
+                                                       check::with_capped_factors(m, check::legalize(m, e, graft)));
             if (made.has_error())
                 return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
             fused = cc::move(made.value());
@@ -296,6 +297,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     // CHK-524: a polyfilled mesh entry point is written, reflected and described as the form it becomes
     auto mesh_layout = polyfill_layout;
     auto form = legal;
+    // CHK-304: a native tessellator takes factors up to 64, so a control stage's `max_factor` caps what it returns
+    if (legal.entry_stage == check::stage::tessellation_control)
+        form = check::with_capped_factors(m, legal);
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::geometry)
         form = check::geometry_as_vertex_fetch(m, legal);
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::tessellation_evaluation)

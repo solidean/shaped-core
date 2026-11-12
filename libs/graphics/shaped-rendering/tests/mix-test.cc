@@ -148,3 +148,27 @@ ASYNC_INVOCABLE_TEST("sr - a mix interpolates every channel on its own",
         CHECK(uniform).context(what);
     }
 }
+
+// A half float holds nothing past 65504, and a value converted to one past that becomes infinity.
+// A denoiser that reads such a frame turns the infinity into NaN, which it spreads, so the mix saturates instead.
+// A 32-bit destination, which an accumulated mean is, keeps the value whole: saturating it there would bias the mean.
+ASYNC_INVOCABLE_TEST("sr - a mix saturates a source past a half float's range, and keeps it whole in a 32-bit image",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+
+    auto const bright = tg::vec4f(1e6f, 7e4f, 1.0f, 1.0f);
+
+    auto const half = co_await mix_once(ctx, sg::pixel_format::rgba16_float, tg::vec4f(0, 0, 0, 0), bright, 1.0f);
+    REQUIRE(half.size() == k_size * k_size);
+    CHECK(half[0][0] == 65504.0f).dump("red", half[0][0]);
+    CHECK(half[0][1] == 65504.0f).dump("green", half[0][1]);
+    CHECK(half[0][2] == 1.0f).dump("blue", half[0][2]);
+
+    auto const full = co_await mix_once(ctx, sg::pixel_format::rgba32_float, tg::vec4f(0, 0, 0, 0), bright, 1.0f);
+    REQUIRE(full.size() == k_size * k_size);
+    CHECK(tg::abs(full[0][0] - 1e6f) < 1.0f).dump("red", full[0][0]);
+}

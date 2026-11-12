@@ -1,6 +1,7 @@
 #include "webgpu-test-common.hh"
 
 #include <clean-core/math/bit.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -612,6 +613,120 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a grown pool keeps every region, the ones an o
     CHECK(contains(root, box{{0, 10, 0}, {1, 11, 0}}));
 }
 
+namespace
+{
+/// The low 10 bits of `v`, moved to every third bit, as the sort kernels spread them.
+[[nodiscard]] u32 spread_bits(u32 v)
+{
+    auto x = v & 0x3ffu;
+    x = (x | (x << 16)) & 0x030000ffu;
+    x = (x | (x << 8)) & 0x0300f00fu;
+    x = (x | (x << 4)) & 0x030c30c3u;
+    x = (x | (x << 2)) & 0x09249249u;
+    return x;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg webgpu - a build of many triangles sorts them by the Morton code of their centers, each kept "
+                     "once with its own index",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    // A 30 x 30 grid of unit quads, two triangles each, handed over shuffled.
+    // 30 rather than a power of two: a quantized center then lands well inside its Morton cell, never on an edge
+    // the GPU's division could round across.
+    constexpr int cells = 30;
+    constexpr int count = 2 * cells * cells;
+    auto source = cc::vector<float>();
+    for (auto y = 0; y < cells; ++y)
+        for (auto x = 0; x < cells; ++x)
+        {
+            auto const fx = float(x);
+            auto const fy = float(y);
+            for (auto const f : {fx, fy, 0.0f, fx + 1, fy, 0.0f, fx, fy + 1, 0.0f})
+                source.push_back(f);
+            for (auto const f : {fx + 1, fy, 0.0f, fx + 1, fy + 1, 0.0f, fx, fy + 1, 0.0f})
+                source.push_back(f);
+        }
+    auto order = cc::vector<int>::create_defaulted(count);
+    for (auto i = 0; i < count; ++i)
+        order[i] = i;
+    auto rng = cc::random(0x5047u);
+    rng.shuffle(order);
+    // Triangle t of the build is source triangle order[t]; its record must carry t.
+    auto vertices = cc::vector<float>();
+    for (auto const s : order)
+        for (auto k = 0; k < 9; ++k)
+            vertices.push_back(source[s * 9 + k]);
+    sg::blas_triangles const tri = {.vertices = build_input(ctx, vertices), .vertex_count = 3 * count};
+
+    auto cmd = ctx.create_command_list();
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
+    auto const future = static_cast<webgpu::webgpu_command_list&>(*cmd).download_acceleration_pool();
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    auto const pool = pool_reader{.bytes = bytes.span()};
+    auto const region = static_cast<webgpu::webgpu_blas const&>(*blas).unit();
+    auto const first = pool.word(region, 1);
+    REQUIRE(pool.word(region, 2) == u32(count));
+
+    // Every record is a triangle of the build, once, with its own vertices and index.
+    auto seen = cc::vector<int>::create_filled(count, 0);
+    auto wrong_vertices = 0;
+    for (u32 j = 0; j < u32(count); ++j)
+    {
+        auto const t = pool.word(first + 3 * j, 3);
+        REQUIRE(t < u32(count));
+        ++seen[t];
+        for (auto k = 0; k < 3; ++k)
+        {
+            auto const v = pool.xyz(first + 3 * j + u32(k));
+            auto const* e = vertices.data() + t * 9 + u32(k) * 3;
+            if (v.x != e[0] || v.y != e[1] || v.z != e[2])
+                ++wrong_vertices;
+        }
+    }
+    CHECK(each_exactly_once(seen));
+    CHECK(wrong_vertices == 0);
+
+    // In Morton order of the triangles' box centers, quantized over the centers' own box.
+    auto centers = cc::vector<vec3>();
+    for (u32 j = 0; j < u32(count); ++j)
+    {
+        vec3 const v[] = {pool.xyz(first + 3 * j), pool.xyz(first + 3 * j + 1), pool.xyz(first + 3 * j + 2)};
+        auto const b = bounds_of(v);
+        centers.push_back({0.5f * (b.lo.x + b.hi.x), 0.5f * (b.lo.y + b.hi.y), 0.5f * (b.lo.z + b.hi.z)});
+    }
+    auto const extent = bounds_of(centers);
+    auto const quantize = [](float c, float lo, float hi)
+    { return u32(cc::clamp((c - lo) / cc::max(hi - lo, 1.0e-30f), 0.0f, 1.0f) * 1023.0f); };
+    auto out_of_order = 0;
+    auto previous = u32(0);
+    for (auto const& c : centers)
+    {
+        auto const code = spread_bits(quantize(c.x, extent.lo.x, extent.hi.x))
+                        | (spread_bits(quantize(c.y, extent.lo.y, extent.hi.y)) << 1)
+                        | (spread_bits(quantize(c.z, extent.lo.z, extent.hi.z)) << 2);
+        if (code < previous)
+            ++out_of_order;
+        previous = code;
+    }
+    CHECK(out_of_order == 0);
+
+    // The tree over them still holds each, in boxes that nest.
+    auto const walked
+        = walk(pool, region,
+               [&](u32 j)
+               {
+                   vec3 const v[] = {pool.xyz(first + 3 * j), pool.xyz(first + 3 * j + 1), pool.xyz(first + 3 * j + 2)};
+                   return bounds_of(v);
+               });
+    CHECK(walked.boxes_nest);
+    CHECK(walked.leaves_hold_at_most_four);
+    CHECK(each_exactly_once(walked.hits));
+}
+
 ASYNC_INVOCABLE_TEST("sg webgpu - a build input past the storage offset alignment is read from where it starts",
                      (webgpu::webgpu_context_handle const& handle))
 {
@@ -708,4 +823,39 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a dispatch reads its acceleration roots from g
     CHECK(data[2] == 3u);
     CHECK(data[3] == 77u);
     CHECK(data[4] == 0u);
+}
+
+ASYNC_INVOCABLE_TEST("sg webgpu - a transient group over a new TLAS each epoch is one WebGPU group carrying each root",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    float const vertices[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    sg::blas_triangles const tri = {.vertices = build_input(ctx, vertices), .vertex_count = 3};
+    auto const scene_binding
+        = sg::binding{.name = "scene", .group_index = 0, .index = 0, .type = sg::binding_type::acceleration_structure};
+    auto const layout = ctx.cached.acquire_binding_group_layout({scene_binding});
+
+    // A frame rebuilds its scene and binds it anew, as a renderer tracing every frame does.
+    auto const frame = [&]
+    {
+        auto build = ctx.create_command_list();
+        auto const blas = build->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
+        sg::tlas_instance const instances[] = {{.blas = blas}};
+        auto const tlas = build->raytracing.build_tlas(instances);
+        ctx.submit_command_list(cc::move(build));
+        sg::named_view const scene = {.name = "scene", .view = tlas->as_view()};
+        auto const group = std::dynamic_pointer_cast<webgpu::webgpu_binding_group const>(
+            ctx.transient.create_binding_group(layout, cc::span<sg::named_view const>(&scene, 1)));
+        CHECK(group->acceleration_roots.size() == 1);
+        CHECK(group->acceleration_roots[0] == static_cast<webgpu::webgpu_tlas const&>(*tlas).unit());
+        ctx.advance_epoch();
+        return group->raw();
+    };
+
+    auto const first = frame();
+    auto const before = ctx.created();
+    for (auto i = 0; i < 3; ++i)
+        CHECK(frame() == first);
+    CHECK(ctx.created().bind_groups == before.bind_groups);
+    co_return;
 }

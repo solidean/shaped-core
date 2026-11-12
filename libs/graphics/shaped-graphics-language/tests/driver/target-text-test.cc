@@ -617,4 +617,41 @@ TEST("sgl target text - a dx12 ray query sees the opacity micromaps of a device 
     CHECK(vulkan.value().text.contains(", RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>"));
     CHECK(vulkan.value().text.contains("[[vk::ext_capability(5381)]]"));
     CHECK(vulkan.value().features.has(sgl::check::feature::opacity_micromap));
+    // vulkan sees micromaps without the flag, and DXC takes minutes over either and can write invalid SPIR-V, so a
+    // query not forced to 2 states carries neither
+    auto const vulkan_plain = compiled(source, target::hlsl_vulkan, device);
+    REQUIRE(vulkan_plain.has_value());
+    CHECK(!vulkan_plain.value().text.contains("OPACITY_MICROMAPS"));
+    CHECK(!vulkan_plain.value().text.contains("ext_capability(5381)"));
+}
+
+TEST("sgl target text - a ray query takes the flags its trace hands it through a local as its template")
+{
+    // EMIT-159: a local given a constant and never assigned again is that constant; a mixed world's trace hands its
+    // flags on through one
+    constexpr auto source = "require ray_query\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.mixed]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "struct ball:\n"
+                            "    normal: vec3\n"
+                            "\n"
+                            "fun nothing(b: procedural_box) -> report[ball] => report.none()\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    work.values[id.x] = work.world.trace(r, nothing, flags = "
+                            "ray_flags.accept_first_hit_and_end_search).t\n";
+    auto const out = compiled(source, target::hlsl_dx12);
+    REQUIRE(out.has_value());
+    CHECK(out.value().text.contains("RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH>"));
+    // EMIT-184: known flags that force nothing leave a vulkan query without the micromap flag and its capability
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::opacity_micromap);
+    auto const vulkan = compiled(source, target::hlsl_vulkan, device);
+    REQUIRE(vulkan.has_value());
+    CHECK(!vulkan.value().text.contains("OPACITY_MICROMAPS"));
+    CHECK(!vulkan.value().text.contains("ext_capability(5381)"));
 }

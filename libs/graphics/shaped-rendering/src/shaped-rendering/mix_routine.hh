@@ -27,6 +27,7 @@ public:
     /// The two must have the same extent, and they must not be the same texture.
     /// Blending an image into itself is a no-op written the expensive way.
     /// `destination` must carry `image` usage, in a float or normalized format the device reads and writes as an image.
+    /// `source` saturates at the largest magnitude `destination`'s format holds, 65504 for a half float, rather than becoming infinity.
     /// `weight` 0 and 1 are still dispatched rather than skipped: a caller stepping a fade reaches them on the frames
     /// where the answer is one input exactly, and branching here would make those frames differ in cost for nothing.
     ///

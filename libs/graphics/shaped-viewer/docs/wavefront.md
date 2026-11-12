@@ -373,8 +373,8 @@ Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the 
 What is still open:
 
 - **A draining frame is bounded rather than empty.**
-  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 25` rounds.
-  That is enough for every surface bounce, eight free refractions through smooth glass, and a medium walk up to where its roulette starts.
+  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 26` rounds.
+  That is enough for every surface bounce, eight free refractions through smooth glass, the segment past the last bounce, and a medium walk up to where its roulette starts.
   A deeper walk finishes on the next still frame, or is dropped by the next restart.
 - **A moving frame is one sample per pixel**, where the megakernel's is `samples_per_pixel`; starting several per pixel on a draining frame is the fix, if a moving image turns out too noisy.
 - **A still image is an exact mean only once its pixels stop.**

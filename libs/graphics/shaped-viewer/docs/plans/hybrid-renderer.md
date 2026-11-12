@@ -418,6 +418,37 @@ Throttling was the same in both runs, and the clocks within 3%.
 Measured warm, forward's raster pass, which is its lighting, took 48.5 ms against deferred's 19.5 ms of lighting in the same run, and dlss_rr 10.4 ms against svgf and FSR's 2.3 ms.
 Both want a cool measurement before they decide anything.
 
+### The White Room at 1920x1080
+
+The same benchmark draws the White Room as research-studio does by default: hybrid deferred at the native scale, the automatic denoiser (dlss_rr) on every frame, the room's own lights and camera.
+**The frame is the GPU's, about 21 ms of it**: the CPU records in 3.5 ms and waits out the rest.
+Each frame alone, on the laptop RTX 5070 in November 2026:
+
+| stage | still | orbiting | orbiting, quality scale |
+|---|---|---|---|
+| TLAS build | 0.11 ms | 0.10 ms | 0.10 ms |
+| raster: culling, pyramid, depth and shading | 0.75 ms | 0.70 ms | 0.45 ms |
+| deferred lighting | 13.3 ms | 12.6 ms | 5.6 ms |
+| guide blend | 0.33 ms | — | — |
+| blend into the mean | 0.42 ms | 0.47 ms | 0.08 ms |
+| dlss_rr | 6.9 ms | 6.9 ms | 3.6 ms, upscaling from 1280x720 |
+| **the whole frame** | **21.9 ms** | **20.8 ms** | **9.9 ms** |
+
+What the lighting's parts cost, measured by cutting the kernel short after each:
+- the primary hit's light sample and its shadow ray, about 2.5 ms;
+- the bounce ray, its glass passage included, about 2.4 ms;
+- the bounced surface's material, light sample and environment sample, about 4.5 ms;
+- the next and last rays that weigh the lights against the BSDF, about 3.1 ms.
+
+Rays dominate it: with every trace missing and every shadow ray arriving, the kernel took 3.4 ms.
+Cutouts cost nothing in this room, 12.5 ms with every instance opaque, and reading the bounced surface's material through its parameters cost nothing either.
+Three savings followed, each leaving the image as it was:
+- an environment sample toward a direction the environment sends nothing from returns no sample, so it traces no shadow ray;
+- a third surface nothing follows is no longer prepared, since everything lit from it came to zero;
+- an environment that is black everywhere skips both environment samplers whole, the bounced surface's BSDF sample with them.
+
+The deferred lighting went from 12.7 to 8.3 ms, and the still frame from 21.9 to 16.8 ms.
+
 ## Phasing
 
 Each phase lands with its tests, and its measurement on Sponza and on one large geometry scene.

@@ -12,8 +12,44 @@
 #include <shaped-viewer/asset/impl/asset_import.hh>
 #include <shaped-viewer/material/material_library.hh>
 
+#ifdef __EMSCRIPTEN__
+#include <clean-core/string/uri.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <clean-net/http/fetch_http_client.hh>
+#include <clean-net/io/io_system.hh>
+#endif
+
 namespace sv
 {
+#ifdef __EMSCRIPTEN__
+namespace
+{
+/// `uri` fetched over the page's own `fetch`, resolved against the page's address: where a web build's `load_async`
+/// reads, since a page has no filesystem and no way to fetch synchronously.
+[[nodiscard]] cc::shared_async<cc::result<cc::pinned_data<byte const>>> fetched(cc::string uri)
+{
+    using bytes_result = cc::result<cc::pinned_data<byte const>>;
+    auto url = uri;
+    if (auto const page = cnet::fetch_http_client::document_url(); page.has_value())
+        if (auto const base = cc::uri::parse(page.value()); base.has_value())
+            if (auto const resolved = base.value().resolve(uri); resolved.has_value())
+                url = cc::string(resolved.value().text());
+
+    auto io = cnet::io_system::create();
+    auto client = cnet::fetch_http_client(*io);
+    auto const response = cnet::http_get(client, url, {.timeout = cnet::deadline::after_secs(300)});
+    co_await cc::async_settled(response);
+    if (auto const* const e = response->try_error(); e != nullptr)
+        co_return bytes_result(
+            cc::error(cc::any_error(cc::format("fetching {} failed: {}", url, e->underlying().to_string()))));
+    auto taken = response->take_value();
+    if (!taken.is_success())
+        co_return bytes_result(cc::error(cc::any_error(cc::format("fetching {} answered {}", url, taken.status()))));
+    co_return bytes_result(cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(taken.body))));
+}
+} // namespace
+#endif
+
 cc::optional<asset_format> asset_format_of_uri(cc::string_view uri)
 {
     auto const extension = impl::extension_of(uri);
@@ -122,6 +158,36 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
 
     // Raised when the `sv::asset` is dropped, so a load that has not reached the loader yet never does.
     auto dropped = cc::make_shared<cc::atomic<bool>>(false);
+
+#ifdef __EMSCRIPTEN__
+    // A page fetches what no resolver was installed for, relative to its own address, and imports it on its one thread.
+    if (!_config.resolve && !impl::resolve_uri_is_set())
+    {
+        auto load = [](asset_loader const* self, cc::string uri,
+                       cc::shared_ptr<cc::atomic<bool>> gone) -> cc::shared_async<impl::imported_asset>
+        {
+            auto const format = asset_format_of_uri(uri);
+            if (!format.has_value())
+                co_return cc::error(
+                    cc::any_error(cc::format("shaped-viewer: '{}' names no format asset_loader reads", uri)));
+            auto const fetching = fetched(uri);
+            auto const& bytes = co_await fetching;
+            if (bytes.has_error())
+                co_return cc::error(cc::any_error(bytes.error().to_string()));
+            // Dropped while fetching: the loader may be gone too, so nothing of it is read.
+            if (gone->load())
+                co_return cc::error(cc::any_error("the load was dropped"));
+            auto out = impl::imported_asset();
+            auto imported = self->_import(bytes.value(), format.value(), uri, uri, out.definitions);
+            if (imported.has_error())
+                co_return cc::error(cc::move(imported).error());
+            out.data = cc::move(imported.value());
+            co_return out;
+        };
+        auto node = cc::async_start(load(this, cc::move(owned_uri), dropped));
+        return sv::asset(cc::move(node), this, cc::move(dropped));
+    }
+#endif
 
     // One frame for the whole worker half — fetch, parse, import — rather than a node per stage.
     //

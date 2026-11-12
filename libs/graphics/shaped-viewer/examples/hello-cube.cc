@@ -1,11 +1,12 @@
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 
-// The smallest thing that shows a viewer: one mesh, one light, one sky, in a window that orbits.
+// The smallest thing that shows a viewer: one mesh, one light, one sky, in a window that orbits, or a browser's canvas.
 //
 // Nothing here is set up by hand — no context, no window, no swapchain, no shader library, no resource acquire.
-// `sv::interactive` owns the viewer for the loop's lifetime and acquires its context through `sv::set_acquire_context`,
-// which is unset here, so the built-in default answers.
+// `sv::interactive_async` owns the viewer for the loop's lifetime and acquires its context through `sv::set_acquire_context`,
+// which is unset here, so the built-in default answers: dx12 or metal natively, the page's WebGPU device on the web.
+// Each frame is awaited rather than blocked on, which is what lets the same loop run in a browser.
 //
 // The mesh is built ONCE, outside the loop, because that is what pins its buffers and hashes their contents.
 // Placing it every frame then uploads nothing after the first: `add_mesh` is keyed by those hashes.
@@ -16,6 +17,7 @@
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/hello-cube
+// On the web, build the emscripten-webgpu preset and open web/hello-cube.html, served over https or from localhost.
 
 namespace
 {
@@ -73,7 +75,7 @@ cc::vector<tg::vec3f> face_colors()
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/hello-cube")
+ASYNC_EXAMPLE("shaped-viewer/hello-cube")
 {
     // Built once: this is what pins the buffers and hashes them.
     // A mesh naming no material draws with `sv::default_material` — the builtin unbound `pbr` — so none is set here.
@@ -82,10 +84,11 @@ EXAMPLE("shaped-viewer/hello-cube")
         .geometry = sv::triangle_geometry::create_from_positions(cube_triangles(2.0f)),
         .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, face_colors())}};
 
-    for (auto f : sv::interactive("shaped-viewer/hello-cube"))
+    auto frames = sv::interactive_async("shaped-viewer/hello-cube");
+    while (auto* f = co_await frames.next())
     {
         // The window's own view, which fills the window when nothing lays it out.
-        auto view = f.window().view();
+        auto view = f->window().view();
 
         // Applied the first time this view id is seen; after that whatever the user orbited to wins.
         view.initial_orbit({.target = tg::pos3d(0, 0, 0),

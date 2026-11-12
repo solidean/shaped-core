@@ -24,7 +24,7 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | UDP datagrams | — | **done** | done, unverified (`recvmmsg` arm) | done, unverified | planned |
 | listeners | — | **done** | done, unverified | done, unverified | planned |
 | HTTP server (loopback) | — | **done** | done, unverified | done, unverified | planned |
-| HTTP client | planned (`fetch`) | **done** (native) | done, unverified | done, unverified | planned |
+| HTTP client | **done** (`fetch`) | **done** (native) | done, unverified | done, unverified | planned |
 | WebSocket (client + server) | planned (browser) | **done** (native) | done, unverified | done, unverified | planned |
 | TLS | browser's | **done** | done, unverified | done, unverified | Android: no trust store |
 | name resolution | — (the browser resolves inside `fetch`) | **done** | done, unverified | done, unverified | planned |
@@ -93,7 +93,7 @@ on the way through to another one.
 
 **[planned]**, roughly in the order it will be built:
 
-1. the `fetch` and browser-`WebSocket` backends for wasm, and a `dlopen`ed system libcurl where one is present.
+1. the browser-`WebSocket` backend for wasm, and a `dlopen`ed system libcurl where one is present.
 
 ## Teardown settles rather than abandons
 

@@ -469,6 +469,7 @@ private:
             shader.tessellation_vertex_words = l.vertex_words;
             shader.tessellation_partitioning = l.partitioning;
             shader.tessellation_output = l.output;
+            shader.tessellation_max_factor = l.max_factor;
         }
         if (emitted.task_layout.has_value())
         {

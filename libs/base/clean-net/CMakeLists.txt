@@ -30,6 +30,7 @@ add_library(clean-net
     src/clean-net/http/impl/http1.cc
     src/clean-net/http/connection_pool.cc
     src/clean-net/http/http_client.cc
+    src/clean-net/http/fetch_http_client.cc
     src/clean-net/http/polite_client.cc
     src/clean-net/http/http_server.cc
     src/clean-net/ws/impl/ws_frame.cc
@@ -70,6 +71,7 @@ target_sources(clean-net
     src/clean-net/http/message.hh
     src/clean-net/http/connection_pool.hh
     src/clean-net/http/http_client.hh
+    src/clean-net/http/fetch_http_client.hh
     src/clean-net/http/polite_client.hh
     src/clean-net/http/http_server.hh
     src/clean-net/ws/websocket.hh
@@ -149,6 +151,7 @@ if(SC_BUILD_TESTS)
         tests/http1-test.cc
         tests/http1-fuzz-test.cc
         tests/http-client-test.cc
+        tests/fetch-http-client-test.cc
         tests/http-politeness-test.cc
         tests/http-server-test.cc
         tests/websocket-test.cc

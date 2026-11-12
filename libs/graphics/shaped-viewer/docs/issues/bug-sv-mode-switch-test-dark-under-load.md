@@ -14,3 +14,10 @@ Run alone with `--repeat 3` the test passes every time, so it depends on load: m
 Which phase it was is unknown, since the check dumped the phase name as a pointer; the dump now prints the name, so the next failure says.
 
 Seen again 2026-11-02 in a consumer's ship gate (relwithdebinfo, full suite beside it); the test alone passed right after.
+
+## Log
+
+2026-11-06: it failed alone too, on dx12 hardware (RTX 5070 laptop), relwithdebinfo, and later the same day passed in a full `sv dx12 - hardware` run, so it is intermittent rather than constant.
+The phase is `forward`: 375 to 531 of its frames are declined while its pipelines compile, and one frame shown in the middle of that is 0.235 near black.
+It failed at 1828c6adf, 695314073 and the sv commits between them, so none of those introduced it.
+Load is not the only cue, then; compiling forward stages during the phase may be, which is unproven.

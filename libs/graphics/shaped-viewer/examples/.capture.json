@@ -18,6 +18,15 @@
             {}
         ]
     },
+    "shaped-viewer/environment-estimate": {
+        "mechanism": "sv",
+        "size": "1440x600",
+        "format": "jpg",
+        "accumulate": 1,
+        "captures": [
+            {}
+        ]
+    },
     "shaped-viewer/lights": {
         "mechanism": "sv",
         "size": "1440x720",

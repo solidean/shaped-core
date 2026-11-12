@@ -253,6 +253,9 @@ class native_http_client;
 
 /// The same, owning the transport and resolver it needs.
 class owned_http_client;
+
+/// The client over a browser's `fetch`, which is the only HTTP a wasm program has.
+class fetch_http_client;
 } // namespace cnet
 
 // ---- websockets ----------------------------------------------------------------------------------------

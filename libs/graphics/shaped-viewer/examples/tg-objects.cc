@@ -1,5 +1,5 @@
 #include <clean-core/container/vector.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/geometry/primitives/primitives.hh>
 
@@ -17,9 +17,10 @@
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/tg-objects
+// On the web, build the emscripten-webgpu preset and open web/tg-objects.html, served over https or from localhost.
 //   uv run dev.py example shaped-viewer/tg-objects --capture    # headless, writes an image
 
-EXAMPLE("shaped-viewer/tg-objects")
+ASYNC_EXAMPLE("shaped-viewer/tg-objects")
 {
     auto& lib = *sv::acquire_material_library().value();
     auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
@@ -61,9 +62,10 @@ EXAMPLE("shaped-viewer/tg-objects")
 
     auto const above = tg::rigid_transform3f::make_translation(tg::vec3f(0, 2.6f, 0));
 
-    for (auto f : sv::interactive("shaped-viewer/tg-objects"))
+    auto frames = sv::interactive_async("shaped-viewer/tg-objects");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
         view.initial_orbit({.target = tg::pos3d(1.5, 1.6, 0),
                             .distance = 9.5,
                             .azimuth = tg::angle_d::make_from_degree(20.0),

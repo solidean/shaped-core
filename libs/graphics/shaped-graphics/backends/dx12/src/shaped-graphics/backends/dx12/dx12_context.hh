@@ -135,6 +135,18 @@ struct sg::backend::dx12::dx12_config
     /// Building an acceleration structure then breaks its precondition, exactly as it would on an adapter without DXR.
     bool withhold_raytracing = false;
 
+    /// Whether this context reports no `binding_arrays` whatever the device has, as WebGPU's core does.
+    ///
+    /// Test-only in intent, like `withhold_raytracing`.
+    /// It is how a suite runs a caller's non-bindless path, sv's bound raster mode above all, natively on a host whose device has them.
+    /// Only the report changes: a layout with an array binding still builds, so it is the caller's to honor it.
+    bool withhold_binding_arrays = false;
+
+    /// Whether this context reports no `primitive_index`, as the webgpu backend always does.
+    ///
+    /// Test-only in intent, like `withhold_binding_arrays`: it is how sv's pulled bound draws run natively.
+    bool withhold_primitive_index = false;
+
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
     isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
@@ -251,14 +263,16 @@ public:
             return supports_raytracing();
         case sg::feature::timestamp_query:
             return _query_system.supports_timestamps();
+        case sg::feature::binding_arrays:
+            return !_withhold_binding_arrays;
+        case sg::feature::primitive_index:
+            return !_withhold_primitive_index;
         case sg::feature::headless_present:
         case sg::feature::geometry_shader:
-        case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
         case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
         case sg::feature::multisampled_array_textures:
-        case sg::feature::primitive_index:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
         case sg::feature::depth32_float_stencil8:
@@ -762,6 +776,8 @@ public:
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false;    // D3D12_OPTIONS8, cached at creation
     bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
+    bool _withhold_binding_arrays = false;     // dx12_config::withhold_binding_arrays
+    bool _withhold_primitive_index = false;    // dx12_config::withhold_primitive_index
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
     bool _native_dxil = false;                 // dx12_config::native_dxil

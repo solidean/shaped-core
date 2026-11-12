@@ -94,6 +94,8 @@ struct sgl::check::tessellation_polyfill_layout
     i32 partitioning = 0;
     /// As D3D's output topologies, which the tessellator writes: 0 `triangle_cw`, 1 `triangle_ccw`, 2 lines.
     i32 output = 0;
+    /// The control stage's `max_factor`, which a patch's factors are capped at and sg sizes the scratch for.
+    i32 max_factor = k_max_tessellation_factor;
 
     [[nodiscard]] i32 patch_words() const { return control_points * control_words + factor_words; }
 
@@ -243,6 +245,10 @@ tessellation_polyfill_layout_of(checked_module const& m, flat_entry_point const&
 [[nodiscard]] cc::result<flat_entry_point, cc::string> tessellation_evaluation_as_compute(checked_module const& m,
                                                                                           flat_entry_point const& tc,
                                                                                           flat_entry_point const& te);
+
+/// A native control stage `tc`, a core tree, whose every return caps each factor at its `max_factor`, so a tessellator
+/// that takes factors up to 64 cuts a patch as the polyfill does (CHK-304); `tc` itself where it states none.
+[[nodiscard]] flat_entry_point with_capped_factors(checked_module const& m, flat_entry_point const& tc);
 
 /// The vertex entry point a polyfilled tessellation draws with: vertex `i` is point `i`, as `te`'s compute form wrote it.
 [[nodiscard]] flat_entry_point tessellation_as_vertex_fetch(checked_module const& m, flat_entry_point const& te);

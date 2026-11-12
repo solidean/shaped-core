@@ -116,10 +116,14 @@ A box, 2 units:
 On webgpu every build is recorded compute work, ordered like any other command, so a trace recorded after it sees the result.
 On dx12 and vulkan a build computes the same words on the CPU, boxes included, from the description's `cpu_*` spans.
 
-* **The tree is built over the primitive order, with no spatial sort.**
-  Consecutive runs of up to 4 primitives are the leaves, and each level above pairs consecutive nodes.
+* **The records are sorted by the Morton code of their box centers first**, quantized to 10 bits an axis over the centers' own box.
+  A GPU radix sort does it, after the records are written and before any box is, for a BLAS of triangles or boxes and for a TLAS alike.
+  So a record's position says nothing about its primitive: the index a hit reports is the one the record carries in its `w` word.
+  Fewer than 16 records, a build asking `fast_build`, or more than the 128 MiB scratch binding holds, keep the caller's order.
+  Unsorted, a shuffled mesh traced up to 2500 times slower than the same mesh sorted (perf-sg-polyfill-unsorted-tree).
+* **The tree is built over that order.**
+  Consecutive runs of up to 4 records are the leaves, and each level above pairs consecutive nodes.
   The topology is fixed by the counts alone, so the CPU writes it and the GPU fills in the boxes, one dispatch per level.
-  A mesh in a coherent triangle order traces well, and a triangle soup traces slowly.
 * **A TLAS box is an instance's BLAS root box, transformed to world space**, by one dispatch before the levels.
   It is widened on each axis by 1e-6 of that axis's centre and half extent together, since the transform rounds and the box must still hold every point of the instance.
 

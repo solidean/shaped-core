@@ -2285,6 +2285,7 @@ void checker::compile_function(symbol_id id)
         .max_meshes = task_limits.meshes,
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,
+        .max_factor = tessellation.max_factor,
         .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),
         .type_parameters = {.first = u32(out.type_lists.size()), .count = u32(type_parameters.size())},
     });

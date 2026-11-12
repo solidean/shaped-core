@@ -83,36 +83,11 @@ else()
     )
 endif()
 
-# A standalone page for the web build: one .html file with the wasm inside it, opened straight from disk.
-#
-# The example target itself is a nexus binary the test presets link for node, which a browser cannot load --
-# NODERAWFS alone sees to that -- so the page is a second link of the same sources rather than a wrapper around it.
-# SINGLE_FILE embeds the wasm as a data URI, which is what lets `file://` work with no server and no CORS.
-if(EMSCRIPTEN AND _cube_backend STREQUAL "shaped-graphics-webgpu" AND TARGET graphics-rotating-cube-example)
-    set(_cube_web graphics-rotating-cube-example-web)
-    get_target_property(_cube_srcs graphics-rotating-cube-example SOURCES)
-    get_target_property(_cube_libs graphics-rotating-cube-example LINK_LIBRARIES)
-    get_target_property(_cube_incs graphics-rotating-cube-example INCLUDE_DIRECTORIES)
-    get_target_property(_cube_defs graphics-rotating-cube-example COMPILE_DEFINITIONS)
-
-    add_executable(${_cube_web} ${_cube_srcs})
-    target_link_libraries(${_cube_web} PRIVATE ${_cube_libs})
-    target_include_directories(${_cube_web} PRIVATE ${_cube_incs})
-    target_compile_definitions(${_cube_web} PRIVATE ${_cube_defs})
-
-    # nexus runs whatever its command line names, and a page has no command line -- so the page supplies one.
-    target_link_options(${_cube_web} PRIVATE
-        "SHELL:-s SINGLE_FILE=1"
-        "SHELL:-s NODERAWFS=0"
-        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/web-arguments.js"
-        "SHELL:--shell-file ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html"
-    )
-    set_property(TARGET ${_cube_web} APPEND PROPERTY LINK_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/web-arguments.js" "${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html")
-    set_target_properties(${_cube_web} PROPERTIES
-        SUFFIX ".html"
-        OUTPUT_NAME "rotating-cube"
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/web"
+# A standalone page for the web build: a second link of the same sources.
+if(_cube_backend STREQUAL "shaped-graphics-webgpu")
+    sc_add_example_web_page(graphics-rotating-cube-example
+        EXAMPLE shaped-graphics/rotating-cube
+        OUTPUT rotating-cube
+        SHELL ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html
     )
 endif()

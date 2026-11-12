@@ -44,7 +44,11 @@ void asset::_drop()
     // Without the wait the worker would go on reading a loader the caller is free to destroy next.
     if (_dropped != nullptr)
         _dropped->store(true);
+#ifdef __EMSCRIPTEN__
+    // A page cannot wait: its load runs on this one thread, and reads nothing of the loader once it sees the flag.
+#else
     (void)cc::try_async_blocking_get(_node);
+#endif
     _node = nullptr;
 }
 

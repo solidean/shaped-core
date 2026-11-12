@@ -21,6 +21,7 @@ const per_thread = 16
 const per_cell = 8
 
 // The luminance a black cell is metered at, so a few of them darken the mean rather than send it to minus infinity.
+// `exposure_meter_routine::darkest` must match.
 const darkest = 0.0001
 
 /// The mean luminance over cell `gx`, `gy` of an image of `size`.

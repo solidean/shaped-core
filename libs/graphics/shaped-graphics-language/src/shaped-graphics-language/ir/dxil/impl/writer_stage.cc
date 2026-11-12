@@ -1,5 +1,6 @@
 #include "writer.hh"
 
+#include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
 
 #include <initializer_list>
@@ -584,7 +585,7 @@ void writer::stage_properties(cc::vector<u32>& properties)
                                                                             : u32(4);
     // a line, or a triangle in the domain's own orientation
     _summary.output_primitive = shape.domain == tessellation_domain::isoline ? 2 : shape.is_output_clockwise ? 3 : 4;
-    auto const max_factor = _m.constant_float(_m.float_type(), 0x42800000u);
+    auto const max_factor = _m.constant_float(_m.float_type(), cc::bit_cast<u32>(float(shape.max_factor)));
     u32 const state[] = {_m.md_value(_m.type_of(_body), _body),
                          _m.md_i32(shape.input_vertices),
                          _m.md_i32(shape.input_vertices),

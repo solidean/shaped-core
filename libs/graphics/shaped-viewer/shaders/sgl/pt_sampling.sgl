@@ -111,6 +111,25 @@ fun is_finite(v: float3) -> bool:
 
 // ---- Leaving a surface ----------------------------------------------------------------------------------------------
 
+/// How far a point found as `origin + dir * t` may lie off the surface the ray met.
+/// It is rounded to the ray's own scale, the origin's largest coordinate plus the length,
+/// where `offset_ray` allows for a point rounded to its own coordinates, as one interpolated from its corners is.
+/// A floor near y = 0 seen from far off is where the two part: such a point starts under the floor, and its rays hit it.
+/// `reach` is a triangle's `corner_reach`, since the traversal's `t` is rounded to the corners' distance from the origin rather than to its own;
+/// 0 for a hit whose `t` was refined, as a quadric's is.
+fun hit_rounding(origin: float3, dir: float3, t: float, reach: float) -> float:
+    return (max(abs(origin.x), max(abs(origin.y), abs(origin.z))) + length(dir) * abs(t) + reach) * (1.0 / 1048576.0)
+
+/// The largest coordinate of a triangle's world corners `w0`, `w1`, `w2` seen from a ray's `origin`, which `hit_rounding` takes.
+/// A short ray onto a large floor is where it outweighs the ray: the studio floor's corners lie a thousand units out.
+fun corner_reach(origin: float3, w0: float3, w1: float3, w2: float3) -> float:
+    let m = max(abs(w0 - origin), max(abs(w1 - origin), abs(w2 - origin)))
+    return max(m.x, max(m.y, m.z))
+
+/// `offset_ray` for a point found along a ray, lifted by its `rounding` first toward `n`, the side the next ray leaves on.
+fun offset_hit(p: float3, n: float3, rounding: float) -> float3:
+    return offset_ray(p + n * rounding, n)
+
 /// `p`, on a surface whose geometric normal is `n` turned to the side a ray leaves on, moved just off it: where that ray starts, traced with a `t_min` of 0.
 ///
 /// A few steps of each coordinate's own float bits rather than a fixed distance, so it clears the hit's rounding at any scale.
@@ -200,3 +219,18 @@ fun sample_cosine_hemisphere(n: float3, u1: float, u2: float) -> float3:
     let t = normalize(cross(up, n))
     let b = cross(n, t)
     return normalize(t * x + b * y + n * z)
+
+/// The unit normal of a triangle whose edges from one corner are `e1` and `e2`, or `fallback` where their cross product is too short to have a direction.
+/// A sliver whose area rounds away still covers a pixel or meets a ray now and then, and normalizing its zero cross product is NaN, which a blended guide keeps for good.
+fun triangle_normal(e1: float3, e2: float3, fallback: float3) -> float3:
+    let c = cross(e1, e2)
+    let length_squared = dot(c, c)
+    return if length_squared > 1e-30 => c / sqrt(length_squared) else fallback
+
+/// What one sample of radiance `c` adds to its pixel's second moment: its luminance squared.
+/// The accumulated image carries the mean of these in its alpha, beside the mean radiance, so a filter reads each pixel's
+/// variance as `(alpha - luminance(rgb)^2) / samples`, which is what sr's à-trous steers its edge-stop by.
+/// Capped where its square still fits a float, as SVGF caps its moments.
+fun moment_of(c: float3) -> float:
+    let l = dot(c, float3(0.2126, 0.7152, 0.0722))
+    return min(l * l, 1e18)
