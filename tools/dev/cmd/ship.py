@@ -10,6 +10,7 @@ A push the remote rejected because it moved merges again and re-runs the static 
 the tests ran on this change already, and what came in was gated by whoever pushed it.
 A submodule's push is retried the same way, its own static gate re-run and its pointer bumped again, within the same rounds.
 
+The gate builds and tests through the build server when it is opted in, as `check` does; `--no-server` keeps every gate off it.
 With the build server opted in, `--proof` (or the project's `BuildServer.ship_proof`) replaces the gate's build and test steps with the server's proof:
 a green build of exactly this tree and every test green at least once, the tests without such a result run, then the likeliest affected within a short budget.
 The static gates run as always; any problem with the server runs the full gate instead (lib/pipeline/build_server.py).
@@ -28,6 +29,7 @@ from tools.dev import console
 from ..lib.pipeline import build_server
 from ..lib.pipeline import test as pipeline_test
 from ..lib.project import submodules as lib
+from . import args as a
 from .context import Context
 
 NAME = "ship"
@@ -50,6 +52,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Prove the build and the tests through the build server instead of the gate's build and test steps "
                         "(default: the project's BuildServer.ship_proof, off); needs the server opted in, "
                         "and runs the full gate whenever the server cannot prove")
+    a.server(p)
     return p
 
 
@@ -239,6 +242,8 @@ def _is_rejected(text: str) -> bool:
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    # The gates run in child dev.py processes, the submodules' own among them, and read the flags from the environment.
+    build_server.export(a.server_flag(args))
     branch = _branch_of(ctx.root)
     if branch is None:
         ctx.die("ship needs a checked-out branch here")

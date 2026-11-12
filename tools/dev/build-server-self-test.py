@@ -149,8 +149,24 @@ def test_no_server_wins_over_every_other_opt_in() -> None:
     assert bs.session(on, flag=False, environ={}) is None
 
 
-def test_the_gate_stays_without_the_server_for_now() -> None:
-    assert bs.GATE_USES_BUILD_SERVER is False
+def test_the_gate_follows_the_same_opt_in_and_its_flags_reach_child_runs() -> None:
+    from tools.dev.cmd import args as a
+    from tools.dev.cmd.context import Context
+    ctx = types.SimpleNamespace(policy=types.SimpleNamespace(build_server=bs.BuildServer(client=None, enabled=True)))
+    saved = os.environ.pop(bs.ENV_ENABLE, None)
+    try:
+        assert Context.build_server(ctx, gate=True) is not None, "an opted-in project's gate builds through the server"
+        bs.export(a.server_flag(types.SimpleNamespace(no_server=True, server=False)))
+        assert os.environ[bs.ENV_ENABLE] == "0" and Context.build_server(ctx, gate=True) is None, "check --no-server"
+        bs.export(a.server_flag(types.SimpleNamespace(no_server=False, server=False)))
+        assert os.environ[bs.ENV_ENABLE] == "0", "no flag leaves what the parent run set"
+        bs.export(True)
+        off = types.SimpleNamespace(policy=types.SimpleNamespace(build_server=bs.BuildServer(client=None)))
+        assert Context.build_server(off, gate=True) is not None, "check --server"
+    finally:
+        os.environ.pop(bs.ENV_ENABLE, None)
+        if saved is not None:
+            os.environ[bs.ENV_ENABLE] = saved
 
 
 def test_a_missing_client_warns_once_and_builds_the_plain_way() -> None:

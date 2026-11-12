@@ -66,6 +66,11 @@ def server(p: argparse.ArgumentParser) -> None:
     )
 
 
+def server_flag(args: argparse.Namespace) -> bool | None:
+    """The build server flags' answer: False for `--no-server`, True for `--server`, None when neither was passed."""
+    return False if getattr(args, "no_server", False) else True if getattr(args, "server", False) else None
+
+
 def profile(p: argparse.ArgumentParser) -> None:
     """The profiling flags, repeated per subcommand so they bind on either side of it.
 

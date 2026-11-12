@@ -21,6 +21,8 @@ from tools.dev.lib.core import disk_guard, memory_guard
 from tools.dev.lib.pipeline import build_server
 from tools.dev.lib.project.targets import carries_examples, carries_tests, is_stub, is_tool
 
+from . import args as a
+
 
 @dataclass(frozen=True)
 class Policy:
@@ -79,14 +81,11 @@ class Context:
     def build_server(self, args: argparse.Namespace | None = None, *, gate: bool = False) -> build_server.Session | None:
         """The build server to build through, or None: `--no-server` / `--server` in `args`, then SC_BUILD_SERVER, then the Policy.
 
-        A gate build (`check`, so `ship`) passes `gate=True` and gets None while GATE_USES_BUILD_SERVER is off.
+        A gate build (`check`, so `ship`) passes `gate=True` and no `args`: its `--server` / `--no-server` reach it as SC_BUILD_SERVER,
+        which `check` sets, so the ship that runs `check` in a child process passes them on too.
         """
-        if gate and not build_server.GATE_USES_BUILD_SERVER:
-            return None
-        flag = None
-        if args is not None:
-            flag = False if getattr(args, "no_server", False) else True if getattr(args, "server", False) else None
-        return build_server.session(self.policy.build_server, flag=flag)
+        del gate  # the gate builds through the server like any other command; the keyword stays for the projects that pass it
+        return build_server.session(self.policy.build_server, flag=a.server_flag(args) if args is not None else None)
 
     def is_test_target(self, target: dev.Target) -> bool:
         """A nexus binary carrying tests, as the build's nexus-binaries.json records it."""

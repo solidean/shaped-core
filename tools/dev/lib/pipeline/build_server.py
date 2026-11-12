@@ -24,6 +24,7 @@ The client contract, which is all dev.py knows of a server:
 What opts in, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1|0`, the project's `BuildServer.enabled`.
 A checkout's gitignored `dev.toml` sets the project's half through its `[build_server]` table (`from_dev_toml`): enabled, client, speculative_tests, ship_proof.
 Background test runs are the project's choice alone, off unless `BuildServer.speculative_tests` is set.
+`check`, and so `ship`, builds and runs its test suite through the server under the same opt-in, `check --no-server` and `ship --no-server` included.
 `ship` proves through the server instead of running the gate's build and test steps only with the server opted in and
 `ship --proof` or the project's `BuildServer.ship_proof`; any problem with the server runs the full gate instead.
 `SC_BUILD_SERVER_CLIENT` names the client executable, over the project's `BuildServer.client`.
@@ -46,20 +47,13 @@ import threading
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Mapping, MutableMapping
 
 from ..core import console, memory_guard, ui
 from ..core.models import StepResult
 
 ENV_ENABLE = "SC_BUILD_SERVER"
 ENV_CLIENT = "SC_BUILD_SERVER_CLIENT"
-
-# Whether `check` (and so `ship`) builds through the server; the gate stays independent of it until the server has proven itself.
-# Flipping this is the whole switch: every gate build already asks Context.build_server(gate=True).
-# The gate's other way through the server is `ship`'s proof (Session.proof), which replaces the gate's build and test steps:
-# off unless `ship --proof` or the project's BuildServer.ship_proof asks for it, and switched on under the same debt.
-# TEMPORARY(debt-devpy-gate-without-build-server)
-GATE_USES_BUILD_SERVER = False
 
 # The exit codes that mean the server cannot serve right now, for both `ensure` and `build`.
 UNAVAILABLE = {
@@ -144,6 +138,12 @@ def enabled(config: BuildServer | None, *, flag: bool | None, environ: Mapping[s
     if env is not None:
         return env
     return bool(config and config.enabled)
+
+
+def export(flag: bool | None, environ: MutableMapping[str, str] = os.environ) -> None:
+    """Hands a command's `--server` / `--no-server` on as SC_BUILD_SERVER, to its own steps and to every dev.py it runs; None leaves it."""
+    if flag is not None:
+        environ[ENV_ENABLE] = "1" if flag else "0"
 
 
 def session(config: BuildServer | None, *, flag: bool | None, environ: Mapping[str, str] = os.environ) -> Session | None:
