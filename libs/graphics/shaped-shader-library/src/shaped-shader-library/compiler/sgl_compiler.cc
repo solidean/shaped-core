@@ -430,8 +430,8 @@ private:
              .native_line_table = native_line_table,
              .mesh = mesh,
              .polyfill_vertex = polyfill_vertex,
-             .polyfill_task = polyfill_task,
-             .polyfill_control = polyfill_control});
+             .polyfill_control = polyfill_control,
+             .polyfill_task = polyfill_task});
         // what the front end checked rather than loaded, kept for the next process
         if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
             store != nullptr)

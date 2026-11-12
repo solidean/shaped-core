@@ -361,10 +361,10 @@ ASYNC_INVOCABLE_TEST("sg - a cluster pool is built in place from records a compu
 
     // room for more clusters than the shader writes, so only the count it bumps says how many there are
     auto const pool = ctx->persistent.create_cluster_pool({.max_clusters = 4,
-                                                           .max_total_triangles = 4,
-                                                           .max_total_vertices = 12,
                                                            .max_triangles_per_cluster = 1,
-                                                           .max_vertices_per_cluster = 3});
+                                                           .max_vertices_per_cluster = 3,
+                                                           .max_total_triangles = 4,
+                                                           .max_total_vertices = 12});
     REQUIRE(pool != nullptr);
     CHECK(pool->generation() == 0);
     // the build reads both as its input
