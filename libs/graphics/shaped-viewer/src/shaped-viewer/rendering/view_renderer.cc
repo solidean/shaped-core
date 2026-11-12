@@ -791,9 +791,11 @@ enum class trace_hash_scope : u8
                               background_gpu const& bg,
                               pt_light_table const& lights,
                               resolved_view const& r,
-                              tg::vec2i resolution)
+                              tg::vec2i resolution,
+                              u32 sequence)
 {
     auto h = cc::make_hash_of_bytes(cc::span<shaders::tracer::camera_record const>(&fc.camera, 1).as_bytes());
+    h = cc::combine_hash(h, cc::make_hash(sequence));
     h = cc::combine_hash(h, cc::make_hash(fc.max_bounces, fc.samples_per_pixel, resolution[0], resolution[1]));
     // The channel mask is not here: the image does not depend on it, and a new mask reallocates the wavefront state,
     // which restarts the accumulation by itself.
@@ -2017,7 +2019,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (slot->reset_hash != hash)
         impl::restart_accumulation(*slot);
     slot->reset_hash = hash;
-    slot->seed_key = seed_key_of(fc, bg, lights, resolved, tr.resolution);
+    slot->seed_key = seed_key_of(fc, bg, lights, resolved, tr.resolution, l.settings.sequence);
 
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
@@ -2827,7 +2829,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     if (acc.resized || slot.reset_hash != hash)
         impl::restart_accumulation(slot);
     slot.reset_hash = hash;
-    slot.seed_key = seed_key_of(fc, bg, lights, resolved, v.resolution);
+    slot.seed_key = seed_key_of(fc, bg, lights, resolved, v.resolution, scene->settings.sequence);
 
     if (mode == render_mode::hybrid)
     {

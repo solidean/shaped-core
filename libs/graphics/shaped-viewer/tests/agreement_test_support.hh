@@ -312,9 +312,11 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
         co_return out;
     };
 
-    // A frame a hair to the side and the camera's return each restart the mean, and a restart reseeds it.
+    // A frame a hair to the side and the camera's return each restart the mean, onto a sequence of its own:
+    // an image draws one sequence however often it restarts, so a restart alone would draw the same samples again.
     auto const restart = [&]() -> cc::shared_async<cc::unit>
     {
+        ++def.views[0].layers[0].settings.sequence;
         def.views[0].camera.position = camera.position + tg::vec3d(1e-3, 0, 0);
         (void)co_await frame();
         def.views[0].camera = camera;
