@@ -14,6 +14,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import Watch, console
+from tools.dev.lib.pipeline import build_server
 from tools.dev.lib.pipeline.eligibility import nexus_filter, query_listing
 from tools.dev.lib.toolchain import jsruntime as jsr
 
@@ -41,6 +42,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--fix", action="store_true",
                    help="Let fixable checks apply unambiguous fixes (e.g. clang-format -i)")
     a.change_scope(p, default_all=False)
+    a.server(p)
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")
@@ -276,6 +278,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
 
         presets = ctx.resolve_presets([ctx.default_preset_name()])
         with tempfile.TemporaryDirectory(prefix="ccrec-reader-") as tmp:
+            # Never through the build server: a stored pass would leave the fixture this gate reads next unwritten.
             records = dev.test(
                 presets, ["clean-core-test"], root=ctx.root,
                 test_name="the Python reader's fixture round-trips through the C++ loader",
@@ -569,7 +572,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             preset_records = dev.test(
                 [preset], to_run, root=ctx.root,
                 test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
-                extra_args=[] if preset == presets[0] else ["--smoke"],
+                extra_args=[] if preset == presets[0] else ["--smoke"], server=ctx.build_server(gate=True),
             )
             records += preset_records
             if memo is not None:
@@ -588,6 +591,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                 presets[:1], [binary], root=ctx.root, test_name=None,
                 extra_args=["--thorough", *(nexus_filter(t) for t in tests)],
                 timeout=60.0 * THOROUGH_TIMEOUT_FACTOR, write_xml=True, mirror=mirror, verbose=verbose,
+                server=ctx.build_server(gate=True),
             )
             ran = sum(r["junit"]["tests"] for r in thorough_records if r.get("junit"))
             if ran < len(tests):
@@ -822,6 +826,8 @@ def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    # Every gate build and test run asks the environment, so that is where the flags go (Context.build_server).
+    build_server.export(a.server_flag(args))
     # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads, unless --memo asks; both still record.
     memo = _memo(ctx, read=args.memo or not (args.all or bool(args.names)))
     try:
