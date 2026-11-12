@@ -429,48 +429,96 @@ void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_stat
 {
     CC_ASSERT(_in_render_pass, "draw_mesh_tasks requires an open rendering scope");
     CC_ASSERT(_bound_raster_layout != nullptr && _bound_raster_pso != nullptr, "bind a raster pipeline before drawing");
-    auto const* const compute = dynamic_cast<dx12_compute_pipeline const*>(polyfill.compute.get());
-    CC_ASSERT(compute != nullptr, "a mesh polyfill's compute half is not a dx12 compute_pipeline");
     keep_bound(polyfill.compute);
+    keep_bound(polyfill.task);
+    keep_bound(polyfill.task_scan);
 
-    // A buffer of the draw's own, so no draw's compute half waits on an earlier one's vertex reads.
+    // Buffers of the draw's own, so no draw's compute forms wait on an earlier one's reads; a task stage's draw holds
+    // slots for the mesh workgroups it may launch, which the GPU counts into its records.
     auto const groups = i64(x) * i64(y) * i64(z);
+    auto const slots = polyfill.task != nullptr ? i64(polyfill.task_capacity(isize(groups))) : groups;
     auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(_ctx.transient.create_raw_buffer(
-        isize(groups * polyfill.words_per_group * 4), sg::buffer_usage::readwrite_buffer));
+        isize(slots * polyfill.words_per_group * 4), sg::buffer_usage::readwrite_buffer));
     CC_ASSERT(scratch != nullptr, "the mesh polyfill's slot buffer is not a dx12 buffer");
     keep_bound(scratch);
-
-    // The compute half over the groups bound for the draw, with its inline constants and the grid it reads.
-    // D3D12 dispatches inside the scope, which binds its targets with OMSetRenderTargets rather than a render pass.
-    auto const& layout = *compute->layout;
-    _list->SetComputeRootSignature(layout.root_signature.Get());
-    _list->SetPipelineState(compute->pipeline_state.Get());
-    bind_debug_window(layout, compute->footprint(), false);
-    for (isize g = 0; g < _bound_raster_groups.size() && g < layout.groups.size(); ++g)
-        if (auto const* const group = _bound_raster_groups[g]; group != nullptr)
-        {
-            if (layout.groups[g].resource_root_param >= 0)
-                _list->SetComputeRootDescriptorTable(UINT(layout.groups[g].resource_root_param), group->table_start);
-            if (layout.groups[g].sampler_root_param >= 0)
-                _list->SetComputeRootDescriptorTable(UINT(layout.groups[g].sampler_root_param),
-                                                     group->sampler_table_start);
-        }
-    if (layout.inline_constants_root_param >= 0 && !_raster_inline_constants.empty())
-        _list->SetComputeRoot32BitConstants(UINT(layout.inline_constants_root_param),
-                                            UINT(_raster_inline_constants.size()), _raster_inline_constants.data(), 0);
-    bind_software_trace(layout, _bound_raster_groups, false);
-    if (layout.dispatch_grid_root_param >= 0)
+    auto records = std::shared_ptr<dx12_buffer const>();
+    if (polyfill.task != nullptr)
     {
-        u32 const grid[4]
-            = {u32(x * polyfill.workgroup.x), u32(y * polyfill.workgroup.y), u32(z * polyfill.workgroup.z), 0};
-        _list->SetComputeRoot32BitConstants(UINT(layout.dispatch_grid_root_param), 4, grid, 0);
+        records = std::dynamic_pointer_cast<dx12_buffer const>(_ctx.transient.create_raw_buffer(
+            isize((9 + groups * polyfill.task_record_words) * 4),
+            sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer));
+        CC_ASSERT(records != nullptr, "the task polyfill's record buffer is not a dx12 buffer");
+        keep_bound(records);
     }
-    CC_ASSERT(layout.mesh_slots_root_param >= 0, "a mesh polyfill's compute half holds its slots");
-    _list->SetComputeRootUnorderedAccessView(UINT(layout.mesh_slots_root_param), scratch->gpu_virtual_address());
-    declare_group_accesses(_bound_raster_groups, &compute->footprint(), sg::pipeline_stage_flag::compute);
-    track_buffer_access(scratch, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
-    flush_barriers();
-    _list->Dispatch(UINT(x), UINT(y), UINT(z));
+
+    // Each compute form over the groups bound for the draw, with its inline constants, the grid where it reads one,
+    // and the slots and records its layout holds.
+    // D3D12 dispatches inside the scope, which binds its targets with OMSetRenderTargets rather than a render pass.
+    auto const bind_half = [&](sg::compute_pipeline const& pipeline, cc::optional<cc::fixed_array<u32, 4>> grid)
+    {
+        auto const* const half = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
+        CC_ASSERT(half != nullptr, "a polyfill's compute form is not a dx12 compute_pipeline");
+        auto const& layout = *half->layout;
+        _list->SetComputeRootSignature(layout.root_signature.Get());
+        _list->SetPipelineState(half->pipeline_state.Get());
+        bind_debug_window(layout, half->footprint(), false);
+        for (isize g = 0; g < _bound_raster_groups.size() && g < layout.groups.size(); ++g)
+            if (auto const* const group = _bound_raster_groups[g]; group != nullptr)
+            {
+                if (layout.groups[g].resource_root_param >= 0)
+                    _list->SetComputeRootDescriptorTable(UINT(layout.groups[g].resource_root_param), group->table_start);
+                if (layout.groups[g].sampler_root_param >= 0)
+                    _list->SetComputeRootDescriptorTable(UINT(layout.groups[g].sampler_root_param),
+                                                         group->sampler_table_start);
+            }
+        if (layout.inline_constants_root_param >= 0 && !_raster_inline_constants.empty())
+            _list->SetComputeRoot32BitConstants(UINT(layout.inline_constants_root_param),
+                                                UINT(_raster_inline_constants.size()), _raster_inline_constants.data(),
+                                                0);
+        bind_software_trace(layout, _bound_raster_groups, false);
+        if (layout.dispatch_grid_root_param >= 0 && grid.has_value())
+            _list->SetComputeRoot32BitConstants(UINT(layout.dispatch_grid_root_param), 4, grid.value().data(), 0);
+        if (layout.mesh_slots_root_param >= 0)
+        {
+            _list->SetComputeRootUnorderedAccessView(UINT(layout.mesh_slots_root_param), scratch->gpu_virtual_address());
+            track_buffer_access(scratch, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+        }
+        if (layout.task_slots_root_param >= 0)
+        {
+            auto const writes = layout.mesh_slots_root_param < 0;
+            if (writes)
+                _list->SetComputeRootUnorderedAccessView(UINT(layout.task_slots_root_param),
+                                                         records->gpu_virtual_address());
+            else
+                _list->SetComputeRootShaderResourceView(UINT(layout.task_slots_root_param),
+                                                        records->gpu_virtual_address());
+            track_buffer_access(records, sg::pipeline_stage_flag::compute,
+                                writes ? sg::access_flag::shader_write : sg::access_flag::shader_read);
+        }
+        declare_group_accesses(_bound_raster_groups, &half->footprint(), sg::pipeline_stage_flag::compute);
+    };
+    if (polyfill.task != nullptr)
+    {
+        // the task stage's records, then their scan, cut to the slots held, then each launched mesh workgroup
+        auto const& w = polyfill.task_workgroup;
+        bind_half(*polyfill.task, cc::fixed_array<u32, 4>{u32(x * w.x), u32(y * w.y), u32(z * w.z), 0});
+        flush_barriers();
+        _list->Dispatch(UINT(x), UINT(y), UINT(z));
+        bind_half(*polyfill.task_scan, cc::fixed_array<u32, 4>{u32(slots), 0, 0, 0});
+        flush_barriers();
+        _list->Dispatch(1, 1, 1);
+        bind_half(*polyfill.compute, cc::nullopt);
+        track_buffer_access(records, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+        flush_barriers();
+        _list->ExecuteIndirect(_ctx._dispatch_signature.Get(), 1, records->_resource.Get(), 2 * 4, nullptr, 0);
+    }
+    else
+    {
+        auto const& w = polyfill.workgroup;
+        bind_half(*polyfill.compute, cc::fixed_array<u32, 4>{u32(x * w.x), u32(y * w.y), u32(z * w.z), 0});
+        flush_barriers();
+        _list->Dispatch(UINT(x), UINT(y), UINT(z));
+    }
 
     // The list's compute binding is gone with its pipeline state, as after any raster bind: a dispatch binds again.
     _bound_pipeline_layout = nullptr;
@@ -485,9 +533,15 @@ void dx12_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_stat
     _list->SetGraphicsRootShaderResourceView(UINT(_bound_raster_layout->mesh_slots_root_param),
                                              scratch->gpu_virtual_address());
     track_buffer_access(scratch, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
+    if (records != nullptr)
+        track_buffer_access(records, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
     declare_raster_draw_barriers(false);
     flush_barriers();
-    _list->DrawInstanced(UINT(groups * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
+    // behind a task stage, as many corners as the scan counted
+    if (records != nullptr)
+        _list->ExecuteIndirect(_ctx._draw_signature.Get(), 1, records->_resource.Get(), 5 * 4, nullptr, 0);
+    else
+        _list->DrawInstanced(UINT(groups * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
 }
 
 void dx12_command_list::raster_draw_indexed(sg::draw_indexed_config const& config)

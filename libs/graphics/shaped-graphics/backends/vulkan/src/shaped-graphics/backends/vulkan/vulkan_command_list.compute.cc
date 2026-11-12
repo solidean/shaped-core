@@ -176,11 +176,12 @@ void vulkan_command_list::bind_software_trace(vulkan_pipeline_layout const& layo
         && cc::memcmp(_software_set_lengths, lengths, sizeof(lengths)) == 0
         && cc::memcmp(_software_set_grid, grid, sizeof(grid)) == 0
         && cc::memcmp(_software_set_addresses, addresses, sizeof(addresses)) == 0
-        && _software_set_mesh_slots == _mesh_slots)
+        && _software_set_mesh_slots == _mesh_slots && _software_set_task_slots == _task_slots)
         return;
     layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots, lengths, grid, addresses,
-                               _mesh_slots, _mesh_slots_bytes);
+                               _mesh_slots, _mesh_slots_bytes, _task_slots, _task_slots_bytes);
     _software_set_mesh_slots = _mesh_slots;
+    _software_set_task_slots = _task_slots;
     _software_set_layout = &layout;
     _software_set_pool = pool.gpu_address;
     cc::memcpy(_software_set_roots, roots, sizeof(roots));

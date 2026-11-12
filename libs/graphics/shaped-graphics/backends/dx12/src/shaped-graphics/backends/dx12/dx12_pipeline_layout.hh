@@ -65,6 +65,9 @@ public:
     /// Root-parameter index of a polyfilled mesh stage's slots: a root UAV for its compute half, a root SRV for its
     /// vertex half; -1 where the layout holds neither.
     int mesh_slots_root_param = -1;
+    /// The same of a polyfilled task stage's records: a root UAV for its compute form and scan, a root SRV for the mesh
+    /// stage's compute half that reads them; -1 where the layout holds neither.
+    int task_slots_root_param = -1;
 
     /// Whether the root signature carries a static sampler, a group's or the layout's own.
     /// **A pipeline over one neither restores from a cached blob nor hands one out.**

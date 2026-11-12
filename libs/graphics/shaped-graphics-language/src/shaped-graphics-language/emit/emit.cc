@@ -205,13 +205,36 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
 
     // CHK-524: a polyfilled mesh entry point is written as a compute or a vertex entry point, from the same slots
-    if (e.entry_stage == check::stage::mesh && sources.mesh != mesh_form::native)
+    // A task entry point is written as the compute entry point of its records; a mesh stage it launches takes it by
+    // name, which only a compile of the whole source has (`text_request::polyfill_task`).
+    if (e.entry_stage == check::stage::task && sources.mesh == mesh_form::compute)
     {
-        auto const layout = check::mesh_polyfill_layout_of(m, e);
+        auto const layout = check::task_polyfill_layout_of(m, e);
         if (layout.has_error())
         {
             auto refused = emitted_text();
             refused.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = layout.error()});
+            return refused;
+        }
+        auto native = sources;
+        native.mesh = mesh_form::native;
+        auto result = emit_entry_point(m, check::task_as_compute(m, e), t, native);
+        result.task_layout = layout.value();
+        return result;
+    }
+    if (e.entry_stage == check::stage::mesh && sources.mesh != mesh_form::native)
+    {
+        auto const layout = check::mesh_polyfill_layout_of(m, e, sources.mesh == mesh_form::vertex_fetch);
+        auto const refusal = layout.has_error()              ? layout.error()
+                           : sources.mesh == mesh_form::scan ? cc::format("the scan of {} runs after its pipeline's "
+                                                                          "task stage, which only a compile of its "
+                                                                          "source names",
+                                                                          e.name)
+                                                             : cc::string();
+        if (!refusal.empty())
+        {
+            auto refused = emitted_text();
+            refused.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = refusal});
             return refused;
         }
         auto native = sources;

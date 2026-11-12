@@ -1,11 +1,13 @@
 #pragma once
 
 #include <clean-core/bytes/hash128.hh>
+#include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -27,7 +29,41 @@ enum class sg::mesh_polyfill_slots : sg::u8
     output,
     /// `sg_mesh_input`, which the vertex half reads.
     input,
+    /// `sg_task_output`, which a polyfilled task stage's compute form and the scan after it write, and the grid both
+    /// read.
+    task,
+    /// `sg_mesh_output` and `sg_task_input`: the compute half of a mesh stage a polyfilled task stage launches.
+    launched,
 };
+
+namespace sg::impl
+{
+/// One buffer a layout of a polyfill's slots holds: the mesh stage's slots, or a task stage's records.
+struct polyfill_slot
+{
+    reserved_binding_address const* address = nullptr;
+    bool is_writable = false;
+    /// Read by a vertex half rather than written or read by a compute form.
+    bool is_vertex = false;
+    /// The task stage's records rather than the mesh stage's slots.
+    bool is_task = false;
+};
+
+/// The buffers a layout of `slots` holds, in binding order; empty for `none`.
+[[nodiscard]] inline cc::fixed_vector<polyfill_slot, 2> polyfill_slots_of(mesh_polyfill_slots slots)
+{
+    auto result = cc::fixed_vector<polyfill_slot, 2>();
+    if (slots == mesh_polyfill_slots::output || slots == mesh_polyfill_slots::launched)
+        result.push_back({.address = &reserved_mesh_output, .is_writable = true});
+    if (slots == mesh_polyfill_slots::input)
+        result.push_back({.address = &reserved_mesh_input, .is_vertex = true});
+    if (slots == mesh_polyfill_slots::task)
+        result.push_back({.address = &reserved_task_output, .is_writable = true, .is_task = true});
+    if (slots == mesh_polyfill_slots::launched)
+        result.push_back({.address = &reserved_task_input, .is_task = true});
+    return result;
+}
+} // namespace sg::impl
 
 /// Description for building a pipeline_layout: an ordered list of binding_group_layouts, one per bind slot, plus any extra register-bound static samplers.
 /// `groups[i]` is the schema bound at slot `i` — the `group_index` of cmd.compute.bind_group.

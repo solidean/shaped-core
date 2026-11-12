@@ -131,6 +131,31 @@ TEST("sgl emit - a polyfilled mesh stage's values per primitive follow its verti
     CHECK(sgl::emit::dump_errors(emit_source(program, 1, target::hlsl_vulkan, {})) == "");
 }
 
+TEST("sgl emit - a polyfilled task stage writes its first invocation's launch into its record (CHK-524)")
+{
+    constexpr auto program = cc::string_view("require mesh_shader\n"
+                                             "struct handed:\n    blue: float\n    id: uint3\n"
+                                             "@task(8, meshes = 3) fun ts():\n"
+                                             "    let h: handed = {blue = 1.0, id = uint3(1u)}\n"
+                                             "    dispatch_mesh(5u, 1u, 1u, h)\n");
+    for (auto const t : {target::wgsl, target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = emit_source(program, 0, t, {.mesh = mesh_form::compute});
+        REQUIRE(sgl::emit::dump_errors(e) == "");
+        REQUIRE(e.task_layout.has_value());
+        // a float and a uint3 behind the launch, its grid and its first
+        CHECK(e.task_layout.value().payload_words == 4);
+        CHECK(e.task_layout.value().record_words() == 9);
+        CHECK(e.task_layout.value().max_meshes == 3);
+        CHECK(e.text.contains("sg_task_output")).dump("text", e.text);
+        CHECK(!e.text.contains("DispatchMesh")).dump("text", e.text);
+    }
+    auto const wgsl = emit_source(program, 0, target::wgsl, {.mesh = mesh_form::compute});
+    CHECK(wgsl.text.contains("@compute @workgroup_size(8, 1, 1)")).dump("text", wgsl.text);
+    // the launch is cut to the stated bound
+    CHECK(wgsl.text.contains("min(")).dump("text", wgsl.text);
+}
+
 TEST("sgl emit - a mesh stage the polyfill does not carry yet is refused by name, not guessed (CHK-524)")
 {
     constexpr auto with_task = cc::string_view("require mesh_shader\n"

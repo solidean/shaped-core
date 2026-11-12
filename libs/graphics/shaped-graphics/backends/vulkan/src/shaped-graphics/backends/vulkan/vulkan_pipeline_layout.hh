@@ -67,7 +67,9 @@ public:
                              cc::span<u32 const> grid,
                              cc::span<u32 const> addresses,
                              VkDeviceAddress mesh_slots = 0,
-                             isize mesh_slots_bytes = 0) const;
+                             isize mesh_slots_bytes = 0,
+                             VkDeviceAddress task_slots = 0,
+                             isize task_slots_bytes = 0) const;
 
     /// Whether set 3 holds values of the op, so each op binds it (bind_software_trace) rather than the pipeline bind.
     [[nodiscard]] bool binds_set_per_op() const
@@ -118,6 +120,10 @@ public:
     isize _grid_offset = 0;
     /// Where a polyfilled mesh stage's slot buffer's descriptor goes, at the binding its `mesh_polyfill` names.
     isize _mesh_slots_offset = 0;
+    /// The same of a polyfilled task stage's records.
+    isize _task_slots_offset = 0;
+    bool _holds_mesh_slots = false;
+    bool _holds_task_slots = false;
     /// Each group's position among the lengths, -1 for a group with none.
     cc::vector<isize> _length_bases;
 

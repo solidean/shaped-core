@@ -37,6 +37,7 @@ COMMAND("emit")
     auto module_dirs = cc::vector<cc::string>();
     auto mesh_name = cc::string("native");
     auto polyfill_vertex = cc::string();
+    auto polyfill_task = cc::string();
     auto args = nx::args({.name = "sgl emit",
                           .description = "Compiles one entry point of an SGL file and prints the target text, with its "
                                          "warnings on stderr, or the diagnostics that kept it from being written."});
@@ -74,9 +75,13 @@ COMMAND("emit")
     args.arg({"module-dir"}, module_dirs,
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     args.arg({"mesh"}, mesh_name,
-             {.desc = "a mesh or geometry entry point as itself, or as the compute or the vertex half of its "
-                      "polyfill, and a pixel entry point as the one after the vertex half: native, compute or vertex",
+             {.desc = "a mesh, task or geometry entry point as itself, or as the compute or the vertex half of its "
+                      "polyfill, or the scan between a task and a mesh stage, and a pixel entry point as the one after "
+                      "the vertex half: native, compute, scan or vertex",
               .metavar = "FORM"});
+    args.arg({"task"}, polyfill_task,
+             {.desc = "the task stage that launches a mesh entry point's compute half or scan, its pipeline's",
+              .metavar = "NAME"});
     args.arg({"vertex"}, polyfill_vertex,
              {.desc = "the vertex stage a geometry entry point's compute half runs, its pipeline's", .metavar = "NAME"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
@@ -128,9 +133,11 @@ COMMAND("emit")
         mesh = sgl::emit::mesh_form::compute;
     else if (mesh_name == "vertex")
         mesh = sgl::emit::mesh_form::vertex_fetch;
+    else if (mesh_name == "scan")
+        mesh = sgl::emit::mesh_form::scan;
     else if (mesh_name != "native")
     {
-        cc::eprintln("sgl emit: unknown --mesh '{}' (one of native, compute, vertex)", mesh_name);
+        cc::eprintln("sgl emit: unknown --mesh '{}' (one of native, compute, scan, vertex)", mesh_name);
         return exit_usage;
     }
 
@@ -177,7 +184,8 @@ COMMAND("emit")
          .native = is_spirv || is_dxil ? sgl::emit::native_route::require : sgl::emit::native_route::text,
          .native_line_table = native_line_table,
          .mesh = mesh,
-         .polyfill_vertex = polyfill_vertex});
+         .polyfill_vertex = polyfill_vertex,
+         .polyfill_task = polyfill_task});
     if (text.has_error())
     {
         cc::eprint(text.error());

@@ -118,6 +118,43 @@ ASYNC_INVOCABLE_TEST("sg - an SGL task stage launches two mesh workgroups and ha
         }
 }
 
+namespace
+{
+/// The image `culled` draws in four task workgroups: columns 2, 4 and 5 alone, by the task workgroup and the launch.
+tg::vec4i culled_pixel(int x)
+{
+    if (x == 2)
+        return tg::vec4i(64, 0, 255, 255);
+    if (x == 4)
+        return tg::vec4i(128, 0, 255, 255);
+    if (x == 5)
+        return tg::vec4i(128, 255, 255, 255);
+    return tg::vec4i(0, 0, 0, 0);
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - an SGL task workgroup that launches no mesh workgroup draws nothing, beside ones that do",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::culled);
+    REQUIRE(pipeline->mesh_polyfill() == nullptr);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, mesh_target(),
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.draw_mesh_tasks(4);
+                                                         });
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            CHECK(pixels[0].rgba8(x, y) == culled_pixel(x)).context(cc::format("pixel ({}, {})", x, y));
+}
+
 ASYNC_INVOCABLE_TEST("sg - an SGL pixel stage reads what its mesh stage wrote per triangle (CHK-489)",
                      (sg::context_handle const& ctx))
 {

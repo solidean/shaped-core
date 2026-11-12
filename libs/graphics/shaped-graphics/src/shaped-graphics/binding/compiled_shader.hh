@@ -88,6 +88,12 @@ struct sg::compiled_shader
     i32 mesh_polyfill_corners = 0;
     i32 mesh_polyfill_primitives = 0;
     i32 mesh_polyfill_words = 0;
+    /// A polyfilled task stage's numbers, which its compute form and its mesh stage's compute half and scan carry
+    /// alike: the 32-bit words of one task workgroup's record, and the mesh workgroups one launches at most, 0 where
+    /// it states none; all 0 for every other shader.
+    /// SGL states them, as it does the mesh stage's.
+    i32 task_polyfill_record_words = 0;
+    i32 task_polyfill_meshes = 0;
 
     compiler_info compiler;
 

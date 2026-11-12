@@ -176,17 +176,15 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         params.push_back(param);
     }
 
-    // a polyfilled mesh stage's slots, written by its compute half and read by its vertex half, both by address
-    if (mesh_polyfill != sg::mesh_polyfill_slots::none)
+    // a polyfill's slots and records, each written by one half and read by another, all by address
+    for (auto const& slot : sg::impl::polyfill_slots_of(mesh_polyfill))
     {
-        auto const is_output = mesh_polyfill == sg::mesh_polyfill_slots::output;
-        auto const& address = is_output ? sg::reserved_mesh_output : sg::reserved_mesh_input;
         D3D12_ROOT_PARAMETER param = {};
-        param.ParameterType = is_output ? D3D12_ROOT_PARAMETER_TYPE_UAV : D3D12_ROOT_PARAMETER_TYPE_SRV;
+        param.ParameterType = slot.is_writable ? D3D12_ROOT_PARAMETER_TYPE_UAV : D3D12_ROOT_PARAMETER_TYPE_SRV;
         param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        param.Descriptor.ShaderRegister = UINT(address.dx12_register);
-        param.Descriptor.RegisterSpace = UINT(address.dx12_space);
-        pl->mesh_slots_root_param = int(params.size());
+        param.Descriptor.ShaderRegister = UINT(slot.address->dx12_register);
+        param.Descriptor.RegisterSpace = UINT(slot.address->dx12_space);
+        (slot.is_task ? pl->task_slots_root_param : pl->mesh_slots_root_param) = int(params.size());
         params.push_back(param);
     }
 

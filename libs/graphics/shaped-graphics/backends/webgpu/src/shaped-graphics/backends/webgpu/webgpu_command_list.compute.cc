@@ -239,46 +239,81 @@ void webgpu_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const&
 void webgpu_command_list::raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z)
 {
     CC_ASSERT(_in_rendering_scope, "a mesh draw is only valid inside a rendering scope");
-    auto const* const compute = dynamic_cast<webgpu_compute_pipeline const*>(polyfill.compute.get());
-    CC_ASSERT(compute != nullptr, "a mesh polyfill's compute half is not a webgpu compute_pipeline");
+
     CC_ASSERTF(x <= sg::max_dispatch_groups_per_dimension && y <= sg::max_dispatch_groups_per_dimension
                    && z <= sg::max_dispatch_groups_per_dimension,
                "a mesh draw of ({}, {}, {}) workgroups exceeds the {} per dimension every backend dispatches", x, y, z,
                sg::max_dispatch_groups_per_dimension);
     auto const groups = i64(x) * i64(y) * i64(z);
-    (void)_ctx.mesh_scratch_for(isize(groups * polyfill.words_per_group * 4));
+    // a task stage's draw holds slots for the mesh workgroups it may launch, which the GPU counts
+    auto const slots = polyfill.task != nullptr ? i64(polyfill.task_capacity(isize(groups))) : groups;
+    (void)_ctx.mesh_scratch_for(isize(slots * polyfill.words_per_group * 4));
+    auto const task_records = polyfill.task != nullptr
+                                ? _ctx.task_scratch_for(isize((9 + groups * polyfill.task_record_words) * 4))
+                                : WGPUBuffer(nullptr);
     _keep_alive.push_back(polyfill.compute);
+    _keep_alive.push_back(polyfill.task);
+    _keep_alive.push_back(polyfill.task_scan);
     bring_pool_writes_forward();
 
-    // The compute half sees what the draw would: the raster state's groups and its reserved block, which the compute
-    // twin's layout holds at the same offsets, the grid behind them.
-    auto half = bound_state();
-    rebind_layout(half, compute->layout.get());
-    half.compute_pipeline = compute->pipeline;
-    half.writes_debug = !compute->footprint().debug_stages().is_empty();
-    for (isize i = 0; i < half.groups.size() && i < _raster.groups.size(); ++i)
-        half.groups[i] = _raster.groups[i];
-    cc::memcpy(half.constants.data(), _raster.constants.data(),
-               size_t(cc::min(half.constants.size(), _raster.constants.size())));
-    u32 const grid[4] = {u32(x * polyfill.workgroup.x), u32(y * polyfill.workgroup.y), u32(z * polyfill.workgroup.z), 0};
-    cc::memcpy(half.constants.data() + compute->layout->grid_offset_in_block(), grid, sizeof(grid));
-    half.constants_dirty = true;
-    _keep_alive.push_back(compute->layout);
+    // Each compute form sees what the draw would: the raster state's groups and its reserved block, which the compute
+    // twin's layout holds at the same offsets, the grid behind them where it reads one.
+    auto const half_of = [&](sg::compute_pipeline const& pipeline, cc::optional<cc::fixed_array<u32, 4>> grid)
+    {
+        auto const* const p = dynamic_cast<webgpu_compute_pipeline const*>(&pipeline);
+        CC_ASSERT(p != nullptr, "a polyfill's compute form is not a webgpu compute_pipeline");
+        auto half = bound_state();
+        rebind_layout(half, p->layout.get());
+        half.compute_pipeline = p->pipeline;
+        half.writes_debug = !p->footprint().debug_stages().is_empty();
+        for (isize i = 0; i < half.groups.size() && i < _raster.groups.size(); ++i)
+            half.groups[i] = _raster.groups[i];
+        cc::memcpy(half.constants.data(), _raster.constants.data(),
+                   size_t(cc::min(half.constants.size(), _raster.constants.size())));
+        if (grid.has_value())
+            cc::memcpy(half.constants.data() + p->layout->grid_offset_in_block(), grid.value().data(), 16);
+        half.constants_dirty = true;
+        _keep_alive.push_back(p->layout);
+        return half;
+    };
 
     end_open_pass("a polyfilled mesh draw", split_remedy::none);
     auto kept = cc::move(_compute);
-    _compute = cc::move(half);
     open_compute_pass();
-    apply_compute_state();
-    wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(x), u32(y), u32(z));
+    if (polyfill.task != nullptr)
+    {
+        // the task stage's records, then their scan, cut to the slots held, then each launched mesh workgroup; WebGPU
+        // orders each dispatch of a pass after the one before it
+        auto const& w = polyfill.task_workgroup;
+        _compute = half_of(*polyfill.task, cc::fixed_array<u32, 4>{u32(x * w.x), u32(y * w.y), u32(z * w.z), 0});
+        apply_compute_state();
+        wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(x), u32(y), u32(z));
+        _compute = half_of(*polyfill.task_scan, cc::fixed_array<u32, 4>{u32(slots), 0, 0, 0});
+        apply_compute_state();
+        wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), 1, 1, 1);
+        _compute = half_of(*polyfill.compute, cc::nullopt);
+        apply_compute_state();
+        wgpuComputePassEncoderDispatchWorkgroupsIndirect(compute_pass(), task_records, 2 * 4);
+    }
+    else
+    {
+        auto const& w = polyfill.workgroup;
+        _compute = half_of(*polyfill.compute, cc::fixed_array<u32, 4>{u32(x * w.x), u32(y * w.y), u32(z * w.z), 0});
+        apply_compute_state();
+        wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(x), u32(y), u32(z));
+    }
     end_open_pass("a polyfilled mesh draw", split_remedy::none);
     _compute = cc::move(kept);
     _compute.needs_full_apply = true;
 
-    // The vertex half reopens the pass, loading what it held, and draws every corner of every slot in order.
+    // The vertex half reopens the pass, loading what it held, and draws every corner of every slot in order; behind a
+    // task stage, as many as the scan counted.
     order_draw_within_pass(false);
     apply_raster_state();
-    wgpuRenderPassEncoderDraw(render_pass(), u32(groups * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
+    if (polyfill.task != nullptr)
+        wgpuRenderPassEncoderDrawIndirect(render_pass(), task_records, 5 * 4);
+    else
+        wgpuRenderPassEncoderDraw(render_pass(), u32(groups * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
 }
 
 // -- raster state helpers shared with webgpu_command_list.raster.cc --

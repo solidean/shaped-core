@@ -89,38 +89,49 @@ void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features
 
 WGPUBuffer webgpu_context::mesh_scratch_for(isize bytes)
 {
+    return scratch_for(_mesh_scratch, bytes, false);
+}
+
+WGPUBuffer webgpu_context::task_scratch_for(isize bytes)
+{
+    return scratch_for(_task_scratch, bytes, true);
+}
+
+WGPUBuffer webgpu_context::scratch_for(mesh_scratch_buffer& scratch, isize bytes, bool is_task)
+{
     // WebGPU's default maxStorageBufferBindingSize, which the device is requested with
     constexpr auto max_bytes = isize(128) << 20;
     CC_ASSERTF(bytes <= max_bytes,
                "a polyfilled mesh draw's slots take {} bytes, past the {} a storage binding holds; draw fewer "
                "workgroups at once",
                bytes, max_bytes);
-    if (_mesh_scratch.buffer && bytes <= _mesh_scratch.bytes)
-        return _mesh_scratch.buffer.get();
+    if (scratch.buffer && bytes <= scratch.bytes)
+        return scratch.buffer.get();
 
     // Grown by half again at least, so a run of slightly larger draws grows it a few times rather than once a draw.
-    auto const grown = cc::min(max_bytes, cc::max(bytes, cc::max(isize(64) << 10, _mesh_scratch.bytes * 3 / 2)));
+    auto const grown = cc::min(max_bytes, cc::max(bytes, cc::max(isize(64) << 10, scratch.bytes * 3 / 2)));
+    // a task stage's records hold the arguments the mesh pass is dispatched and the draw is drawn by
     auto const desc = WGPUBufferDescriptor{
         .nextInChain = nullptr,
-        .label = to_wgpu("sg mesh polyfill slots"),
-        .usage = WGPUBufferUsage_Storage,
+        .label = to_wgpu(is_task ? "sg task polyfill records" : "sg mesh polyfill slots"),
+        .usage = is_task ? WGPUBufferUsage_Storage | WGPUBufferUsage_Indirect : WGPUBufferUsage_Storage,
         .size = u64(cc::max(isize(4), grown)),
         .mappedAtCreation = WGPU_FALSE,
     };
     auto buffer = wgpu_buffer(wgpuDeviceCreateBuffer(device(), &desc));
-    CC_ASSERT(bool(buffer), "wgpuDeviceCreateBuffer returned no mesh polyfill buffer");
+    CC_ASSERT(bool(buffer), "wgpuDeviceCreateBuffer returned no polyfill buffer");
 
     // A list still open may have bound the old buffer, and every one of them submits before this epoch retires.
-    if (_mesh_scratch.buffer)
+    if (scratch.buffer)
     {
         auto expiring = webgpu_expiring_resource{};
-        expiring.buffer = cc::move(_mesh_scratch.buffer);
+        expiring.buffer = cc::move(scratch.buffer);
         schedule_deferred_deletion(cc::move(expiring));
     }
-    _mesh_scratch.buffer = cc::move(buffer);
-    _mesh_scratch.bytes = grown;
-    ++_mesh_scratch.generation;
-    return _mesh_scratch.buffer.get();
+    scratch.buffer = cc::move(buffer);
+    scratch.bytes = grown;
+    ++scratch.generation;
+    return scratch.buffer.get();
 }
 
 void webgpu_context::shutdown()

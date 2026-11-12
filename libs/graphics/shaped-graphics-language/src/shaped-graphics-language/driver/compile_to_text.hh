@@ -61,6 +61,9 @@ struct sgl::text_request
     emit::mesh_form mesh = emit::mesh_form::native;
     /// The vertex stage a geometry entry point's compute half runs on each corner (CHK-525): its pipeline's.
     cc::string_view polyfill_vertex;
+    /// The task stage that launches a mesh entry point whose compute half or scan is asked for (CHK-524): its
+    /// pipeline's, where it has one.
+    cc::string_view polyfill_task;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
@@ -158,6 +161,9 @@ struct sgl::emitted_source
     /// The slots a polyfilled mesh or geometry entry point's halves agree on (CHK-524, CHK-525); empty unless
     /// `text_request::mesh` asked.
     cc::optional<check::mesh_polyfill_layout> mesh_layout;
+    /// The records a polyfilled task stage's forms agree on (CHK-524): the task entry point's compute form, and a mesh
+    /// entry point's compute half and scan where `text_request::polyfill_task` named the task; empty otherwise.
+    cc::optional<check::task_polyfill_layout> task_layout;
     /// The names of the library files the source reached through `use`, which an edit of any of them changes the text of.
     cc::vector<cc::string> library_files;
     /// One entry per warning, `cube.sgl:12:5: warning: no-effect: ...` and its notes on the lines under it.

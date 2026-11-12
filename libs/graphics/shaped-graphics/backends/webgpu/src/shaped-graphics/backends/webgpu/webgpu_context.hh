@@ -530,9 +530,14 @@ public:
         u64 generation = 0;
     };
     mesh_scratch_buffer _mesh_scratch;
+    /// The same for a polyfilled task stage's records, which also hold the indirect arguments of the draw after them.
+    mesh_scratch_buffer _task_scratch;
 
     /// `_mesh_scratch`'s buffer, grown first to hold at least `bytes`; on the device thread only.
     WGPUBuffer mesh_scratch_for(isize bytes);
+    /// `_task_scratch`'s, likewise.
+    WGPUBuffer task_scratch_for(isize bytes);
+    WGPUBuffer scratch_for(mesh_scratch_buffer& scratch, isize bytes, bool is_task);
 
     [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
 

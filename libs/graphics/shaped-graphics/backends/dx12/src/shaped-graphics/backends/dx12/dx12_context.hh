@@ -745,6 +745,8 @@ public:
 
     // What ExecuteIndirect reads a `sg::dispatch_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _dispatch_signature;
+    // What ExecuteIndirect reads a `D3D12_DRAW_ARGUMENTS` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _draw_signature;
     // What ExecuteIndirect reads a `sg::draw_indexed_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _draw_indexed_signature;
     // A mesh draw's, made only where the device has mesh shaders.

@@ -264,9 +264,13 @@ public:
     u32 _software_set_addresses[2 * sg::impl::acceleration_address_capacity] = {};
     u32 _software_set_lengths[16] = {};
     VkDeviceAddress _software_set_mesh_slots = 0;
+    VkDeviceAddress _software_set_task_slots = 0;
     /// The slot buffer of the polyfilled mesh draw being recorded, which set 3 names where the layout holds its slots.
     VkDeviceAddress _mesh_slots = 0;
     isize _mesh_slots_bytes = 0;
+    /// The record buffer of its task stage, likewise.
+    VkDeviceAddress _task_slots = 0;
+    isize _task_slots_bytes = 0;
 
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,

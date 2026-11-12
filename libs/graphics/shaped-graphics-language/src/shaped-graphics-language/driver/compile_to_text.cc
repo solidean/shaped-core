@@ -151,7 +151,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  emit::native_route native = emit::native_route::text,
                                                  bool native_line_table = false,
                                                  emit::mesh_form mesh = emit::mesh_form::native,
-                                                 check::flat_entry_point const* polyfill_vertex = nullptr)
+                                                 check::flat_entry_point const* polyfill_vertex = nullptr,
+                                                 check::flat_entry_point const* polyfill_task = nullptr)
 {
     // CHK-524: a polyfilled mesh stage that writes values per primitive hands them on in one struct beside its vertex's,
     // which its vertex half returns and its pixel stage takes, and which a copy of the module holds
@@ -241,14 +242,33 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     auto form = legal;
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::geometry)
         form = check::geometry_as_vertex_fetch(m, legal);
-    if (mesh != emit::mesh_form::native && legal.entry_stage == check::stage::mesh)
+    // CHK-524: the records a polyfilled task stage writes, which its compute form and a launched mesh stage's agree on
+    auto task_layout = cc::optional<check::task_polyfill_layout>();
+    if (mesh != emit::mesh_form::native && (legal.entry_stage == check::stage::task || polyfill_task != nullptr))
     {
-        auto const layout = check::mesh_polyfill_layout_of(m, legal);
+        auto const layout = check::task_polyfill_layout_of(m, polyfill_task != nullptr ? *polyfill_task : e);
         if (layout.has_error())
             return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, layout.error()));
+        task_layout = layout.value();
+    }
+    if (mesh == emit::mesh_form::compute && legal.entry_stage == check::stage::task)
+        form = check::task_as_compute(m, legal);
+    if (mesh != emit::mesh_form::native && legal.entry_stage == check::stage::mesh)
+    {
+        // the vertex half reads no payload, so only a compute half without a task stage refuses one
+        auto const layout
+            = check::mesh_polyfill_layout_of(m, legal, mesh != emit::mesh_form::compute || task_layout.has_value());
+        if (layout.has_error())
+            return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, layout.error()));
+        if (mesh == emit::mesh_form::scan && !task_layout.has_value())
+            return cc::error(cc::format("{}: error: the scan of mesh entry point '{}' runs after its pipeline's task "
+                                        "stage, and none was named\n",
+                                        source_name, e.name));
         mesh_layout = layout.value();
-        form = mesh == emit::mesh_form::compute ? check::mesh_as_compute(m, legal)
-                                                : check::mesh_as_vertex_fetch(m, legal, corner);
+        form = mesh == emit::mesh_form::compute
+                 ? check::mesh_as_compute(m, legal, task_layout.has_value() ? &task_layout.value() : nullptr)
+             : mesh == emit::mesh_form::scan ? check::mesh_task_scan(m, legal, task_layout.value())
+                                             : check::mesh_as_vertex_fetch(m, legal, corner);
     }
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::pixel && check::is_valid(corner))
         form = check::pixel_after_mesh_polyfill(m, legal, corner);
@@ -268,23 +288,25 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
             text.appendf("{}: error: {}: {}\n", source_name, emit::to_string(error.kind), error.detail);
         return cc::error(cc::move(text));
     }
-    auto result = sgl::emitted_source{.text = cc::move(emitted.text),
-                                      .spirv = cc::move(emitted.spirv),
-                                      .dxil = cc::move(emitted.dxil),
-                                      .native_gap = cc::move(emitted.native_gap),
-                                      .signature = cc::move(emitted.signature),
-                                      .stage = form.entry_stage,
-                                      .entry_point = cc::move(emitted.entry_point),
-                                      .bindings = interface_of(m, form, emitted.bound_names),
-                                      .color_targets = emitted.color_targets,
-                                      .target_struct = cc::move(emitted.target_struct),
-                                      .features = mesh_layout.has_value() ? form.features : entry.features,
-                                      .options = driver::impl::option_names_of(m, e),
-                                      .footprint = check::footprint_of(m, form),
-                                      .layouts = cc::move(emitted.layouts),
-                                      .lines = cc::move(emitted.lines),
-                                      .debug_sites = cc::move(emitted.debug_sites),
-                                      .mesh_layout = mesh_layout};
+    auto result = sgl::emitted_source{
+        .text = cc::move(emitted.text),
+        .spirv = cc::move(emitted.spirv),
+        .dxil = cc::move(emitted.dxil),
+        .native_gap = cc::move(emitted.native_gap),
+        .signature = cc::move(emitted.signature),
+        .stage = form.entry_stage,
+        .entry_point = cc::move(emitted.entry_point),
+        .bindings = interface_of(m, form, emitted.bound_names),
+        .color_targets = emitted.color_targets,
+        .target_struct = cc::move(emitted.target_struct),
+        .features = mesh_layout.has_value() || task_layout.has_value() ? form.features : entry.features,
+        .options = driver::impl::option_names_of(m, e),
+        .footprint = check::footprint_of(m, form),
+        .layouts = cc::move(emitted.layouts),
+        .lines = cc::move(emitted.lines),
+        .debug_sites = cc::move(emitted.debug_sites),
+        .mesh_layout = mesh_layout,
+        .task_layout = task_layout};
     for (auto const name : names)
         result.line_files.push_back(cc::string(name));
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
@@ -381,10 +403,21 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
             return cc::error(cc::format("{}: error: no vertex entry point named '{}'\n", request.source_name,
                                         request.polyfill_vertex));
     }
+    // CHK-524: the task stage that launches a polyfilled mesh stage, whose records its compute half and scan read
+    auto const* polyfill_task = static_cast<check::flat_entry_point const*>(nullptr);
+    if (!request.polyfill_task.empty())
+    {
+        for (auto const& t : m.entry_points)
+            if (t.name == request.polyfill_task && t.entry_stage == check::stage::task)
+                polyfill_task = &t;
+        if (polyfill_task == nullptr)
+            return cc::error(
+                cc::format("{}: error: no task entry point named '{}'\n", request.source_name, request.polyfill_task));
+    }
     auto result
         = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.guards_undefined,
                     request.software_trace, request.weakens_float, request.device_features, request.native,
-                    request.native_line_table, request.mesh, polyfill_vertex);
+                    request.native_line_table, request.mesh, polyfill_vertex, polyfill_task);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(

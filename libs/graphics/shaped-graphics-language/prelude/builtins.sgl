@@ -3645,6 +3645,14 @@
     words: buffer[uint]
 
 
+@internal binding sg_task_output:
+    words: mut buffer[uint]
+
+
+@internal binding sg_task_input:
+    words: buffer[uint]
+
+
 /// What a weak compare-exchange read, and whether it stored `desired`.
 struct exchange_result[T]:
     old: T

@@ -338,15 +338,14 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         layout->_reserved_block_bytes = layout->_grid_offset_in_block + dispatch_grid_bytes;
     }
 
-    // A polyfilled mesh stage's slots: the compute half writes them, the vertex half reads them, never through one layout.
-    if (desc.mesh_polyfill != sg::mesh_polyfill_slots::none)
+    // A polyfill's slots: what one half writes another reads, never through one layout.
+    for (auto const& slot : sg::impl::polyfill_slots_of(desc.mesh_polyfill))
     {
-        auto const is_output = desc.mesh_polyfill == sg::mesh_polyfill_slots::output;
-        auto slots = WGPUBindGroupLayoutEntry{};
-        slots.binding = u32(is_output ? sg::reserved_mesh_output.webgpu_binding : sg::reserved_mesh_input.webgpu_binding);
-        slots.visibility = is_output ? WGPUShaderStage_Compute : WGPUShaderStage_Vertex;
-        slots.buffer.type = is_output ? WGPUBufferBindingType_Storage : WGPUBufferBindingType_ReadOnlyStorage;
-        reserved.push_back(slots);
+        auto entry = WGPUBindGroupLayoutEntry{};
+        entry.binding = u32(slot.address->webgpu_binding);
+        entry.visibility = slot.is_vertex ? WGPUShaderStage_Vertex : WGPUShaderStage_Compute;
+        entry.buffer.type = slot.is_writable ? WGPUBufferBindingType_Storage : WGPUBufferBindingType_ReadOnlyStorage;
+        reserved.push_back(entry);
     }
 
     // The context's debug window, which a print or an assert writes (EMIT-183); WebGPU's vertex stage writes no storage.
@@ -436,11 +435,14 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
     if (mesh_polyfill() != sg::mesh_polyfill_slots::none)
     {
         (void)_ctx.mesh_scratch_for(0);
-        if (_reserved_groups_scratch_generation != _ctx._mesh_scratch.generation)
+        (void)_ctx.task_scratch_for(0);
+        // both only grow, so the sum moves whenever either is replaced
+        auto const generation = _ctx._mesh_scratch.generation + _ctx._task_scratch.generation;
+        if (_reserved_groups_scratch_generation != generation)
         {
             _reserved_groups.clear();
             _reserved_groups_without_page.clear();
-            _reserved_groups_scratch_generation = _ctx._mesh_scratch.generation;
+            _reserved_groups_scratch_generation = generation;
         }
     }
 
@@ -488,16 +490,14 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             grid.size = u64(dispatch_grid_bytes);
             entries.push_back(grid);
         }
-        if (mesh_polyfill() != sg::mesh_polyfill_slots::none)
+        for (auto const& slot : sg::impl::polyfill_slots_of(mesh_polyfill()))
         {
-            auto slots = WGPUBindGroupEntry{};
-            slots.binding
-                = u32(mesh_polyfill() == sg::mesh_polyfill_slots::output ? sg::reserved_mesh_output.webgpu_binding
-                                                                         : sg::reserved_mesh_input.webgpu_binding);
-            slots.buffer = _ctx._mesh_scratch.buffer.get();
-            slots.offset = 0;
-            slots.size = WGPU_WHOLE_SIZE;
-            entries.push_back(slots);
+            auto entry = WGPUBindGroupEntry{};
+            entry.binding = u32(slot.address->webgpu_binding);
+            entry.buffer = slot.is_task ? _ctx._task_scratch.buffer.get() : _ctx._mesh_scratch.buffer.get();
+            entry.offset = 0;
+            entry.size = WGPU_WHOLE_SIZE;
+            entries.push_back(entry);
         }
         if (debug_window != nullptr)
         {

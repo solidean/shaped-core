@@ -43,6 +43,20 @@ struct sg::mesh_polyfill_description
     /// For a geometry stage drawn this way, the corners of each primitive a draw assembles from the bound buffers, 1, 2
     /// or 3: a primitive's output then takes a workgroup's slots, and the pipeline draws with `draw` (SGL's CHK-525).
     int input_corners = 0;
+
+    /// A task stage before the mesh stage, drawn the same way: its compute form, which writes each task workgroup's
+    /// record of `sg_task_output`, and the scan that numbers what they launched; `compute_shader` then reads them.
+    /// The draw's mesh workgroups are then the GPU's to count, so the draw is indirect.
+    cc::optional<compiled_shader> task_shader;
+    compiled_shader task_scan_shader;
+    /// The 32-bit words of one task workgroup's record.
+    int task_record_words = 0;
+    /// The mesh workgroups one task workgroup launches at most, which a draw holds slots for; 0 where the task stage
+    /// states none, and `task_budget` bounds the draw instead.
+    int task_meshes = 0;
+    /// The mesh workgroups a draw of a task stage that states no bound launches at most; the excess is dropped.
+    /// A host may set it for a pipeline; at most `max_dispatch_groups_per_dimension`.
+    int task_budget = 4096;
 };
 
 /// What a polyfilled raster pipeline draws with, which the context attaches once both halves are built.
@@ -56,6 +70,20 @@ struct sg::impl::mesh_polyfill_state
     int words_per_group = 0;
     /// `mesh_polyfill_description::input_corners`: 0 for a mesh stage, the assembled primitive's for a geometry stage.
     int input_corners = 0;
+    /// A polyfilled task stage's compute form and scan, both null without one; `compute` is then dispatched indirectly.
+    compute_pipeline_handle task;
+    compute_pipeline_handle task_scan;
+    compute_dimensions task_workgroup;
+    int task_record_words = 0;
+    int task_meshes = 0;
+    int task_budget = 0;
+
+    /// The mesh workgroups a draw of `tasks` task workgroups holds slots for.
+    [[nodiscard]] isize task_capacity(isize tasks) const
+    {
+        auto const wanted = task_meshes > 0 ? tasks * isize(task_meshes) : isize(task_budget);
+        return wanted < isize(max_dispatch_groups_per_dimension) ? wanted : isize(max_dispatch_groups_per_dimension);
+    }
 };
 
 /// One draw of a polyfilled geometry stage, as its compute half reads it from `sg_geometry_draw`.

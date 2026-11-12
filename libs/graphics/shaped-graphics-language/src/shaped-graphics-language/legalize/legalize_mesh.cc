@@ -44,6 +44,90 @@ namespace
     return -1;
 }
 
+/// The number `g` of the launched mesh workgroup this one of the indirect dispatch is, which owns slots `g`.
+/// Its task workgroup is the last whose first launched is at most `g`, which a binary search over the records finds.
+/// The workgroup id it reads is `g`'s place in that task workgroup's grid, and its payload is the record's.
+[[nodiscard]] flat_expr_id launched_workgroup(checked_module const& m,
+                                              flat_builder& out,
+                                              words& w,
+                                              task_polyfill_layout const& task,
+                                              stmt_list& into)
+{
+    using t = task_polyfill_layout;
+    auto in = words{.out = out, .binding = listed(out, "sg_task_input")};
+    auto const int3 = out.type_named("int3");
+    auto const uint = w.uint_type();
+
+    // the workgroup id the body reads is the launched one's, and the dispatch's is a stage input of its own
+    auto user_group = local_id::none;
+    for (auto i = isize(0); i < out.e.stage_inputs.size(); ++i)
+        if (out.e.stage_inputs[i].input == stage_input::workgroup_id)
+        {
+            user_group = out.e.stage_inputs[i].local;
+            out.e.locals[index_of(user_group)].kind = local_kind::temporary;
+            out.e.stage_inputs.remove_at(i);
+            break;
+        }
+    auto const dispatch = stage_input_of(out, stage_input::workgroup_id, "mesh_dispatch_id", int3);
+    auto const g = w.bound("mesh_launched", w.unary("convert_int_to_uint", out.member(out.local(dispatch), 0)), into);
+
+    auto const record_of = [&](flat_expr_id index)
+    {
+        return w.binary("add_uint", w.word(u32(t::k_first_record_word)),
+                        w.binary("multiply_uint", index, w.word(u32(task.record_words()))));
+    };
+
+    // the last record whose first launched is at most `g`; a record that launched none shares its first with the next
+    auto const low = out.add_local(local_kind::temporary, "mesh_task_low", uint);
+    auto const high = out.add_local(local_kind::temporary, "mesh_task_high", uint);
+    into.push_back(out.var(low, w.word(0)));
+    into.push_back(out.var(high, w.binary("subtract_uint", in.at(w.word(u32(t::k_task_count_word))), w.word(1))));
+    auto step = stmt_list();
+    auto const middle = w.bound(
+        "mesh_task_middle",
+        w.binary("divide_uint", w.binary("add_uint", w.binary("add_uint", out.local(low), out.local(high)), w.word(1)),
+                 w.word(2)),
+        step);
+    flat_stmt_id const up[] = {out.assign(out.local(low), middle)};
+    flat_stmt_id const down[] = {out.assign(out.local(high), w.binary("subtract_uint", middle, w.word(1)))};
+    step.push_back(out.if_(w.binary("less_equal_uint", in.at(record_of(middle), u32(t::k_record_first)), g), up, down));
+    into.push_back(
+        out.while_(out.add_label("mesh_task_search"), w.binary("less_uint", out.local(low), out.local(high)), step));
+
+    auto const record = w.bound("mesh_task_record", record_of(out.local(low)), into);
+    auto const j = w.bound("mesh_in_task", w.binary("subtract_uint", g, in.at(record, u32(t::k_record_first))), into);
+    auto const gx = w.bound("mesh_task_gx", in.at(record, u32(t::k_record_grid)), into);
+    auto const gy = w.bound("mesh_task_gy", in.at(record, u32(t::k_record_grid + 1)), into);
+    if (is_valid(user_group))
+    {
+        auto const to_int = [&](flat_expr_id v) { return w.unary("convert_uint_to_int", v); };
+        flat_expr_id const lanes[] = {
+            to_int(w.binary("remainder_uint", j, gx)),
+            to_int(w.binary("remainder_uint", w.binary("divide_uint", j, gx), gy)),
+            to_int(w.binary("divide_uint", j, w.binary("multiply_uint", gx, gy))),
+        };
+        into.push_back(out.let(user_group, out.construct(int3, lanes)));
+    }
+
+    // the payload parameter is the record's
+    for (auto i = isize(0); i < out.e.locals.size(); ++i)
+    {
+        auto is_input = false;
+        for (auto const& s : out.e.stage_inputs)
+            is_input = is_input || index_of(s.local) == i;
+        auto const type = out.e.locals[i].type;
+        if (out.e.locals[i].kind != local_kind::parameter || is_input || m.at(type).kind != type_kind::structure)
+            continue;
+        out.e.locals[i].kind = local_kind::temporary;
+        auto const payload_at
+            = w.bound("mesh_payload_at", w.binary("add_uint", record, w.word(u32(t::k_record_payload))), into);
+        auto next = isize(0);
+        into.push_back(out.let(local_id(i), in.read_value(type, payload_at, next)));
+        break;
+    }
+    return g;
+}
+
 /// A pixel stage's second struct, what a mesh stage wrote per primitive (CHK-489); `none` where it takes none.
 [[nodiscard]] local_id primitive_parameter_of(checked_module const& m, flat_entry_point const& e)
 {
@@ -63,7 +147,8 @@ namespace
 } // namespace
 
 cc::result<mesh_polyfill_layout, cc::string> sgl::check::mesh_polyfill_layout_of(checked_module const& m,
-                                                                                 flat_entry_point const& e)
+                                                                                 flat_entry_point const& e,
+                                                                                 bool is_launched)
 {
     CC_ASSERT(e.entry_stage == stage::mesh, "only a mesh entry point has a polyfill layout");
     auto const output = output_of(m, e);
@@ -75,8 +160,13 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::mesh_polyfill_layout_of
         auto is_input = false;
         for (auto const& input : e.stage_inputs)
             is_input = is_input || index_of(input.local) == i;
-        if (e.locals[i].kind == local_kind::parameter && local_id(i) != output && !is_input)
-            return cc::error(cc::format("{} takes a task stage's payload, which the polyfill does not carry yet", e.name));
+        if (e.locals[i].kind != local_kind::parameter || local_id(i) == output || is_input)
+            continue;
+        if (!is_launched)
+            return cc::error(
+                cc::format("{} takes a task stage's payload, and no polyfilled task stage launches it", e.name));
+        if (auto const payload = leaves_of(m, e.locals[i].type); payload.has_error())
+            return cc::error(cc::format("{}'s payload holds a '{}', which no word holds", e.name, payload.error()));
     }
     auto const leaves = leaves_of(m, t.element);
     if (leaves.has_error())
@@ -102,9 +192,11 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::mesh_polyfill_layout_of
     return layout;
 }
 
-flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry_point const& e)
+flat_entry_point sgl::check::mesh_as_compute(checked_module const& m,
+                                             flat_entry_point const& e,
+                                             task_polyfill_layout const* task)
 {
-    auto const layout = mesh_polyfill_layout_of(m, e);
+    auto const layout = mesh_polyfill_layout_of(m, e, task != nullptr);
     CC_ASSERTF(layout.has_value(), "{}", layout.has_error() ? layout.error() : cc::string());
     auto const output = output_of(m, e);
     auto const vertex_type = m.at(e.at(output).type).element;
@@ -114,29 +206,16 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
 
     auto out = flat_builder::extend(m, e);
     auto w = words{.out = out, .binding = listed(out, "sg_mesh_output")};
-    auto const grid = listed(out, "sg_dispatch_grid");
-
-    auto group = local_id::none;
-    for (auto const& input : out.e.stage_inputs)
-        if (input.input == stage_input::workgroup_id)
-            group = input.local;
-    if (!is_valid(group))
-    {
-        group = out.add_local(local_kind::parameter, "workgroup_id", out.type_named("int3"));
-        out.e.stage_inputs.push_back({.input = stage_input::workgroup_id, .local = group});
-    }
-
-    // `base = (x + nx * (y + ny * z)) * group_words`, the grid being the threads sg dispatched
     auto prologue = stmt_list();
-    auto const lane = [&](flat_expr_id v, i32 axis) { return out.member(v, axis); };
-    auto const id = [&](i32 axis) { return w.unary("convert_int_to_uint", lane(out.local(group), axis)); };
-    auto const threads = out.binding_member(grid, 0);
-    auto const nx = w.bound("mesh_nx", w.binary("divide_uint", lane(threads, 0), w.word(u32(e.workgroup[0]))), prologue);
-    auto const ny = w.bound(
-        "mesh_ny", w.binary("divide_uint", lane(out.binding_member(grid, 0), 1), w.word(u32(e.workgroup[1]))), prologue);
-    auto const linear
-        = w.binary("add_uint", id(0),
-                   w.binary("multiply_uint", nx, w.binary("add_uint", id(1), w.binary("multiply_uint", ny, id(2)))));
+    auto linear = flat_expr_id::none;
+    if (task == nullptr)
+    {
+        // `base = (x + nx * (y + ny * z)) * group_words`, the grid being the threads sg dispatched
+        auto const group = stage_input_of(out, stage_input::workgroup_id, "workgroup_id", out.type_named("int3"));
+        linear = linear_workgroup(w, group, e.workgroup, prologue);
+    }
+    else
+        linear = launched_workgroup(m, out, w, *task, prologue);
     auto const base
         = w.bound("mesh_base", w.binary("multiply_uint", linear, w.word(u32(layout.value().group_words))), prologue);
 
@@ -171,7 +250,7 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
                                                          w.binary("multiply_uint", arguments[1], w.word(corners)))),
                                        into);
             for (auto c = u32(0); c < corners; ++c)
-                store(first, c, lane(indices, i32(c)));
+                store(first, c, out.member(indices, i32(c)));
             return true;
         }
         // a vertex or a primitive: its leaves in field order
@@ -195,9 +274,8 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
     for (auto const s : out.e.at(rest))
         body.push_back(s);
     out.e.locals[index_of(output)].kind = local_kind::temporary;
-    // an output that is the first parameter stands as the entry point's stage struct, which a compute stage has none of
-    if (out.e.input == out.e.at(output).type)
-        out.e.input = type_id::none;
+    // the output or the payload, standing first, is no stage struct of a compute stage
+    out.e.input = type_id::none;
     out.e.entry_stage = stage::compute;
     out.e.features.remove(feature::mesh_shader);
     // the slots' base and the grid are read by every store, which the compaction gives a node each
@@ -206,7 +284,7 @@ flat_entry_point sgl::check::mesh_as_compute(checked_module const& m, flat_entry
 
 flat_entry_point sgl::check::mesh_as_vertex_fetch(checked_module const& m, flat_entry_point const& e, type_id corner)
 {
-    auto const layout = mesh_polyfill_layout_of(m, e);
+    auto const layout = mesh_polyfill_layout_of(m, e, true);
     CC_ASSERTF(layout.has_value(), "{}", layout.has_error() ? layout.error() : cc::string());
     CC_ASSERT(layout.value().primitive_words == 0 || is_valid(corner), "a mesh stage that writes values per primitive "
                                                                        "hands them on in add_mesh_corner's struct");
