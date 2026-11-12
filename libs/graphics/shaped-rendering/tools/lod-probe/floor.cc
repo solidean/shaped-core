@@ -29,14 +29,23 @@ constexpr int detail_mips = 11;
 /// The level the heatmap's last colour stands for; the floor seldom reaches past it.
 constexpr float heatmap_top = 8.0f;
 
+/// What the colour render samples: the page, the page with each mip's ink in its own colour, or one flat colour per mip.
+enum class detail_kind
+{
+    page,
+    tinted,
+    mip_colors,
+};
+
 /// One render: the floor when `page_lod` < 0, else the page flat on screen with a footprint of level `page_lod`.
-/// `tinted` draws each mip's ink in its own colour.
+/// `floor_repeat` is how many floor units one repeat of the texture spans, so a larger one reads lower levels.
 struct view_setting
 {
     float page_lod;
     int anisotropy;
     float sampler_bias;
-    bool tinted = false;
+    detail_kind detail = detail_kind::page;
+    float floor_repeat = 1.0f;
 };
 
 // On the floor, the setting a renderer with a negative bias for an upscaler would use first, then the two that isolate it.
@@ -48,7 +57,9 @@ constexpr view_setting view_settings[] = {
     {.page_lod = -1.0f, .anisotropy = 16, .sampler_bias = 0.0f},
     {.page_lod = -1.0f, .anisotropy = 1, .sampler_bias = -1.0f},
     {.page_lod = 1.25f, .anisotropy = 16, .sampler_bias = 0.0f},
-    {.page_lod = 1.25f, .anisotropy = 16, .sampler_bias = 0.0f, .tinted = true},
+    {.page_lod = 1.25f, .anisotropy = 16, .sampler_bias = 0.0f, .detail = detail_kind::tinted},
+    // Levels 0 to 5 over the frame, each mip its own colour: a band per mip, and where two blend.
+    {.page_lod = -1.0f, .anisotropy = 16, .sampler_bias = 0.0f, .detail = detail_kind::mip_colors, .floor_repeat = 4.0f},
 };
 
 [[nodiscard]] tg::mat4f floor_view_projection()
@@ -59,14 +70,13 @@ constexpr view_setting view_settings[] = {
     return tg::compose(projection, tg::look_at(eye, tg::pos3f(0.0f, 0.0f, 7.0f))).to_mat();
 }
 
-/// The floor: one quad from below the camera to far beyond the horizon's resolution, one texture repeat per unit.
-/// Dense enough that most of the frame sits between levels 1 and 6, where both mips of a blend are real detail.
-[[nodiscard]] cc::vector<floor_vertex> floor_vertices()
+/// The floor: one quad from below the camera to far beyond the horizon's resolution, one texture repeat per `units_per_repeat`.
+/// At one unit, most of the frame sits between levels 1 and 6, where both mips of a blend are real detail.
+[[nodiscard]] cc::vector<floor_vertex> floor_vertices(float units_per_repeat)
 {
     constexpr float half_width = 80.0f;
     constexpr float near_z = -2.0f;
     constexpr float far_z = 300.0f;
-    constexpr float units_per_repeat = 1.0f;
     auto out = cc::vector<floor_vertex>();
     for (auto const corner : {tg::vec2f(-half_width, near_z), tg::vec2f(half_width, near_z),
                               tg::vec2f(half_width, far_z), tg::vec2f(-half_width, far_z)})
@@ -193,8 +203,30 @@ constexpr u8 glyph_rows[][7] = {
     return out;
 }
 
-/// The page with every mip box-filtered from the one below it; `tinted` recolours each mip's ink (see tint_ink).
-[[nodiscard]] sg::texture_2d create_detail(sg::context& ctx, bool tinted)
+/// Mip `mip` of the mip-colour texture: its own colour, in an 8x8 checker of two shades that keeps its texture-space size on every mip.
+[[nodiscard]] cc::vector<u8> mip_color_level(int mip)
+{
+    constexpr u8 colors[][3] = {{235, 235, 235}, {40, 110, 230}, {225, 45, 45},  {40, 170, 70},
+                                {245, 165, 20},  {150, 60, 200}, {30, 190, 200}, {240, 90, 170}};
+    auto const* const color = colors[cc::min(mip, int(sizeof(colors) / sizeof(colors[0])) - 1)];
+    auto const size = detail_size >> mip;
+    auto const square = cc::max(1, size / 8);
+    auto out = cc::vector<u8>::create_defaulted(isize(size) * size * 4);
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const shade = ((x / square + y / square) % 2 == 0 || size < 8) ? 1.0f : 0.82f;
+            auto* const p = &out[(isize(y) * size + x) * 4];
+            for (auto c = 0; c < 3; ++c)
+                p[c] = u8(float(color[c]) * shade + 0.5f);
+            p[3] = 255;
+        }
+    return out;
+}
+
+/// The page with every mip box-filtered from the one below it, its ink recoloured per mip for `tinted` (see tint_ink),
+/// or for `mip_colors` no page at all but mip_color_level.
+[[nodiscard]] sg::texture_2d create_detail(sg::context& ctx, detail_kind kind)
 {
     auto const detail = ctx.persistent.create_texture_2d({
         .format = sg::pixel_format::rgba8_unorm,
@@ -207,7 +239,10 @@ constexpr u8 glyph_rows[][7] = {
     auto level = detail_mip0();
     for (auto mip = 0; mip < detail_mips; ++mip)
     {
-        auto const uploaded = tinted ? tint_ink(level, mip) : cc::vector<u8>::create_copy_of(cc::span<u8 const>(level));
+        auto const uploaded = kind == detail_kind::tinted ? tint_ink(level, mip)
+                            : kind == detail_kind::mip_colors
+                                ? mip_color_level(mip)
+                                : cc::vector<u8>::create_copy_of(cc::span<u8 const>(level));
         cmd->upload.bytes_to_texture(detail.raw(), cc::as_bytes(cc::span<u8 const>(uploaded)),
                                      {.mip_level = mip, .array_layer = 0, .aspect = sg::texture_aspect::color});
         if (mip + 1 < detail_mips)
@@ -311,11 +346,13 @@ void draw_contours(rgb_image& img, cc::span<float const> lod, tg::vec3f color)
             }
 }
 
-/// A level map, dimmed, with its own contours in white.
-[[nodiscard]] rgb_image heatmap_with_contours(cc::span<float const> lod, tg::vec2i size)
+/// A level map with its own contours in white, or in black for a standalone image.
+[[nodiscard]] rgb_image heatmap_with_contours(cc::span<float const> lod,
+                                              tg::vec2i size,
+                                              tg::vec3f color = tg::vec3f(1, 1, 1))
 {
     auto img = heatmap_panel(lod, size);
-    draw_contours(img, lod, tg::vec3f(1, 1, 1));
+    draw_contours(img, lod, color);
     return img;
 }
 
@@ -381,11 +418,16 @@ cc::shared_async<cc::result<floor_capture>> capture_floor(sg::context_handle ctx
     // Every view's two readbacks land in one epoch; the new budget applies from the next.
     auto const per_view = isize(image_size[0]) * image_size[1] * (isize(sizeof(float)) + 4);
     ctx->download.set_budget(isize(sizeof(view_settings) / sizeof(view_settings[0])) * per_view + (isize(1) << 20));
+    // The three detail textures and the pyramid upload in that epoch too, 4 MB per mip 0 and a third more for the chain.
+    ctx->upload.set_inline_budget(isize(32) << 20);
     ctx->advance_epoch();
 
     auto const pyramid = create_pyramid(*ctx);
-    auto const detail = create_detail(*ctx, false);
-    auto const tinted_detail = create_detail(*ctx, true);
+    sg::texture_2d const details[] = {
+        create_detail(*ctx, detail_kind::page),
+        create_detail(*ctx, detail_kind::tinted),
+        create_detail(*ctx, detail_kind::mip_colors),
+    };
     auto const indices
         = ctx->persistent.create_buffer_from_data(cc::vector<u16>{0, 1, 2, 0, 2, 3}, sg::buffer_usage::index_buffer);
 
@@ -395,7 +437,8 @@ cc::shared_async<cc::result<floor_capture>> capture_floor(sg::context_handle ctx
     {
         auto const is_page = setting.page_lod >= 0.0f;
         auto const vertices = ctx->persistent.create_buffer_from_data(
-            is_page ? page_vertices(setting.page_lod) : floor_vertices(), sg::buffer_usage::vertex_buffer);
+            is_page ? page_vertices(setting.page_lod) : floor_vertices(setting.floor_repeat),
+            sg::buffer_usage::vertex_buffer);
         auto const constants = shaders::floor::floor_constants{.view_projection = is_page ? tg::mat4f::identity
                                                                                           : floor_view_projection()};
         auto const smp = probe_sampler(setting.anisotropy, setting.sampler_bias);
@@ -427,8 +470,7 @@ cc::shared_async<cc::result<floor_capture>> capture_floor(sg::context_handle ctx
         {
             auto const group = ctx->transient.create_binding_group(
                 *cmd, color_layout,
-                shaders::floor::color_source{.detail = (setting.tinted ? tinted_detail : detail).as_texture_view(),
-                                             .smp = smp});
+                shaders::floor::color_source{.detail = details[int(setting.detail)].as_texture_view(), .smp = smp});
             auto scope = cmd->raster.render_to(shaders::floor::color_out{
                 .color = color_rt.as_render_target_view().cleared(tg::vec4f(0.1f, 0.1f, 0.1f, 1))});
             scope.bind_pipeline(*color_pipeline);
@@ -442,11 +484,11 @@ cc::shared_async<cc::result<floor_capture>> capture_floor(sg::context_handle ctx
         auto const color_back = cmd->download.bytes_from_texture(color_rt.raw());
         ctx->submit_command_list(cc::move(cmd));
 
-        auto view
-            = floor_view{.scene = is_page ? cc::format("{}-lod{}", setting.tinted ? "tinted" : "page", setting.page_lod)
-                                          : cc::string("floor"),
-                         .anisotropy = setting.anisotropy,
-                         .sampler_bias = setting.sampler_bias};
+        auto const scene = is_page ? cc::format("{}-lod{}", setting.detail == detail_kind::tinted ? "tinted" : "page",
+                                                setting.page_lod)
+                         : setting.detail == detail_kind::mip_colors ? cc::string("mip-colors")
+                                                                     : cc::string("floor");
+        auto view = floor_view{.scene = scene, .anisotropy = setting.anisotropy, .sampler_bias = setting.sampler_bias};
         {
             auto const landing = lod_back.bytes();
             auto const& bytes = co_await landing;
@@ -475,7 +517,7 @@ cc::result<cc::vector<cc::string>> write_floor_images(cc::span<floor_capture con
             CC_RETURN_IF_ERROR(write_png(color_path, color_panel(v, c.size)));
             written.push_back(color_path);
             auto const lod_path = cc::format("{}-{}-{}-lod.png", base, view_name(v), c.backend);
-            CC_RETURN_IF_ERROR(write_png(lod_path, heatmap_panel(v.lod, c.size)));
+            CC_RETURN_IF_ERROR(write_png(lod_path, heatmap_with_contours(v.lod, c.size, tg::vec3f(0, 0, 0))));
             written.push_back(lod_path);
         }
 

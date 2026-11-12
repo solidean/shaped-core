@@ -1,8 +1,8 @@
 ---
 title: LOD bias across dx12 and vulkan
-status: done
+status: active
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-12
 ---
 
 # LOD bias across dx12 and vulkan
@@ -91,6 +91,33 @@ Measured 2026-11-09 on an RTX 5080 (dx12 driver 32.0.16.1088, vulkan driver 2559
 - [x] P5.2 Report format others can send back
   - Outcome: `lod-probe-<gpu>.txt` and `.json` per GPU; the readme asks for both
 
+## P6: Standalone probe for the blog post
+
+- [x] P6.1 Repo skeleton `lod-check` next to shaped-core, unpublished: CMake, MIT license, readme
+  - Outcome: c:/Users/Julius/projects/lod-check, one local commit, no remote
+- [x] P6.2 Shared measurement and report: the sweep, half-level crossings against the spec, a paste-ready markdown block, no network code
+  - Note: a compute dispatch with explicit levels and gradients (D7); the 3x finding below is reported as one line, not a table
+- [x] P6.3 D3D12 backend, compiling its HLSL at run time through the d3dcompiler that ships with Windows
+- [~] P6.4 Vulkan backend, loading the loader at run time, with committed SPIR-V
+  - Note: runs on Windows; the Linux arm (dlopen, os-release) is unbuilt until CI or a Linux machine
+- [x] P6.5 Metal backend, compiling its MSL at run time
+  - Outcome: built without warnings on an M4; no shift, linear blend at every anisotropy
+- [x] P6.6 Validate against lod-probe on the RTX 5080 and the Radeon iGPU
+  - Outcome: NVIDIA vulkan +0.161 / +0.213 / +0.247 against dx12 ~0, AMD 0 on both with vulkan widths 0.64 / 0.53 / 0.40 — lod-probe's numbers
+- [~] P6.7 Release builds in CI for Windows x64, Linux x64 and macOS arm64
+  - Note: .github/workflows/build.yml written (macOS universal, Linux on 22.04 with gcc 13); unrun until the repo exists
+
+## P7: lod-probe on metal
+
+- [ ] P7.1 A metal path in shaped-core's lod-probe, so the Mac renders the images too
+
+## P8: Blog post
+
+- [ ] P8.1 Collect results: the Mac, and colleagues' machines
+  - Note: the GitHub repo, its Results discussions and the Mastodon account wait on colleagues' agreement
+- [ ] P8.2 Draft the post on solidean.com/blog, with sliders and links to both tools
+  - Note: includes an aside on 3x anisotropy applied as 2
+
 ## Decisions
 
 ### D1: Affine-UV tiles instead of a perspective floor for measuring (2026-11-09) [P2.1, P2.2]
@@ -118,6 +145,24 @@ Measured 2026-11-09 on an RTX 5080 (dx12 driver 32.0.16.1088, vulkan driver 2559
 - **Why:** No start-up cost and nothing to cache, and lod-probe reports a new driver that differs as a nonzero `dx12 minus vulkan+sg` row.
 - **Alternatives:** Running the probe at context creation (start-up cost, and a GPU readback before the first frame).
 
+### D5: The blog's tool is a standalone repo with no dependencies, beside lod-probe (2026-11-11) [P6.1, P6.2]
+- **Context:** Readers should check the finding on their own GPU, and also meet our stack.
+- **Decision:** `lod-check` is plain D3D12, Vulkan and Metal in a few files, reporting numbers against the spec; lod-probe stays the in-stack version with images.
+- **Why:** A probe readable in one sitting is one people trust, and comparing against the spec gives a single-API machine (a Mac) a result.
+- **Alternatives:** Shipping lod-probe alone, which needs most of shaped-core to build from source.
+
+### D6: lod-check never touches the network (2026-11-11) [P6.2]
+- **Context:** Results should be shared, but only by a deliberate act.
+- **Decision:** It prints a markdown block and writes it to a local file, holding no hostname, user name or LUID; at most it prints the Discussions link.
+- **Why:** People rightly distrust tools that phone home, and the source makes the claim checkable.
+- **Alternatives:** An upload flag, or opening a prefilled form in the browser.
+
+### D7: lod-check samples in a compute shader, with explicit levels and gradients only (2026-11-11) [P6.2]
+- **Context:** lod-probe draws tiles and samples in a pixel shader, which needs a render target and a vertex path per API.
+- **Decision:** One compute dispatch; the paths are an explicit level, a square footprint's gradients and a 4:1 footprint's gradients.
+- **Why:** lod-probe showed every path shifts alike, implicit derivatives included, and a compute dispatch halves each backend.
+- **Alternatives:** Porting lod-probe's draw, which would add implicit derivatives and a shader bias at about twice the code.
+
 ## Deviations
 
 ### X1: Read the level at half-level crossings of a sweep, not as a per-tile mean (2026-11-09) [P2.2, P2.4]
@@ -135,3 +180,11 @@ Measured 2026-11-09 on an RTX 5080 (dx12 driver 32.0.16.1088, vulkan driver 2559
 - 2026-11-09: P5 done; the packed zip ran standalone and reproduced both results.
 - 2026-11-09: P1.2 follow-up: the images show a page of text instead of the checker, whose moiré hid the blur.
   A flat page at level 1.25, natural and with one ink colour per mip, joins the floor; the tinted page exposed AMD's differing blend shape, now in Findings.
+- 2026-11-11: P6-P8 added for the blog post (D5, D6); P6.1 started.
+- 2026-11-11: lod-check measures what lod-probe did on both local GPUs (P6.1-P6.3, P6.6 done; D7).
+  Side findings: a max anisotropy of 3 is applied as 2 for a 4:1 footprint on both vendors and APIs, and NVIDIA dx12 sharpens 3x like 4x (width 0.46) where vulkan uses 0.53.
+- 2026-11-11: anisotropic-lod.md gained dx12's 3x slope and the 3x-as-2 finding; publishing lod-check deferred until colleagues agree.
+- 2026-11-11: P6.5 done on an M4: Metal centres and blends as the specification says, so dx12 stays the reference.
+  Its 4:1 footprint at 3x reads -0.410, which fits 3x applied as 4 where NVIDIA and AMD apply it as 2; anisotropic-lod.md records both.
+- 2026-11-12: lod-probe's `--images` gained a floor with one colour per mip, and its level maps carry their half-level contours.
+  Both feed P8.2 (Draft the blog post), which lives on the website's jn/blog/anisotropic-mip-blend branch.

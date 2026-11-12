@@ -18,7 +18,7 @@
 /// One scene under one sampler setting, as both renders.
 struct lod_probe::floor_view
 {
-    cc::string scene; ///< "floor", or "page-lod<L>" / "tinted-lod<L>" for a flat page whose footprint is level L before the bias
+    cc::string scene; ///< "floor", "mip-colors" for the floor with a colour per mip, or "page-lod<L>" / "tinted-lod<L>" for a flat page of level L
     int anisotropy = 1;
     float sampler_bias = 0;
     cc::vector<float> lod; ///< per pixel; -1 where no floor was drawn
