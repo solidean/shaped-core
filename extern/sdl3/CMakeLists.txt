@@ -110,6 +110,11 @@ if(SANITIZE AND NOT MSVC)
     add_compile_options(-fno-sanitize=all)
 endif()
 
+# No precompiled header for SDL's own sources: it compiles once and rarely changes, and a PCH ties each of its TUs to one
+# build-dir artifact, which a compile cache cannot reuse across build dirs.
+# Directory-scoped, so it reaches every target SDL defines and nothing outside this directory.
+set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
+
 # SYSTEM marks every target SDL defines as a system include, so <SDL3/SDL.h> cannot trip the consuming TU's
 # warnings — the same intent as the SYSTEM include directories on zydis and dxc.
 # EXCLUDE_FROM_ALL keeps SDL out of a plain `cmake --build .`.
