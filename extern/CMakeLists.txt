@@ -191,6 +191,9 @@ if(SC_USE_VENDORED_IMGUI)
     add_subdirectory(imgui)
 endif()
 
+# Inter, the UI font a web page draws text in; one vendored file, built into nothing.
+add_subdirectory(inter)
+
 # APPLE covers macOS and iOS alike, which is the platform set metal-cpp compiles on at all.
 # The metal backend gates itself on the target existing, so a non-Apple build simply never sees one.
 if(SC_USE_VENDORED_METAL_CPP AND APPLE)
