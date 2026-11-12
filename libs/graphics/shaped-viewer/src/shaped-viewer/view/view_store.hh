@@ -70,6 +70,10 @@ public:
     /// Read once after a render, it tells two runs apart without logging every frame, which changes their timing.
     [[nodiscard]] accumulation_history history_of(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
 
+    /// The wavefront paths of view `id`'s layer `temporal_id`, the first traced one by default, or null where it has none.
+    /// What a reader of its channels downloads: their sums, and the tallies that count them.
+    [[nodiscard]] wavefront_state const* wavefront_paths(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
+
     /// The fewest samples per pixel across every traced layer of `id`, and 0 for a view with none.
     /// See `impl::min_accumulated_samples`, which is the rule.
     [[nodiscard]] u32 min_accumulated_samples(view_id id) const;

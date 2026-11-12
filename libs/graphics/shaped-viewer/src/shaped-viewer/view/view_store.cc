@@ -99,6 +99,15 @@ view_store::accumulation_history view_store::history_of(view_id id, u64 temporal
                            : accumulation_history{.seed_key = slot->seed_key, .loading_frames = slot->loading_frames};
 }
 
+wavefront_state const* view_store::wavefront_paths(view_id id, u64 temporal_id) const
+{
+    auto const* const st = _entries.peek_ptr(id); // a query must not keep a view alive
+    if (st == nullptr)
+        return nullptr;
+    auto const* const slot = st->temporal.get_ptr(temporal_id);
+    return slot == nullptr || !slot->paths.has_value() ? nullptr : &slot->paths.value();
+}
+
 u32 view_store::min_accumulated_samples(view_id id) const
 {
     auto const* const st = _entries.peek_ptr(id);

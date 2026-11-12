@@ -24,3 +24,5 @@ A trace of where the 33 s went (time on the DbgHelp lock vs. inside a file open)
 Its first resolve made DbgHelp walk the working directory recursively for the image, holding the lock every symbolizer shares.
 CI runs from the repository root with its build tree, and that test ran beside each failure here.
 The symbolizer no longer registers such a module, but no CI run has shown the failures gone yet, so this stays open until one does.
+
+Sighting, 2026-11-12, locally under a full gate: `symbolize - a module table with no usable binaries still names the module` took 1.14 s against its 1 s bound and failed; a rerun passed.

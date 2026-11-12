@@ -60,6 +60,51 @@ const dispatch_shade = 4
 
 /// `frame_constants::wavefront_flags`: every path and every tally starts over, since the image describes something else now.
 const wavefront_flag_restart = 1u
+
+// The channels a primary hit adds to its pixel beside the image, as `frame.channel_mask` names them; `sv::render_channel` mirrors them.
+/// The hit's world position, and 1 in .w, so a pixel's mean .w is how much of it a surface covers.
+const channel_position = 1u
+/// The hit's depth along the camera's forward axis, in .x.
+const channel_view_depth = 2u
+/// The surface's normal, turned toward the ray.
+const channel_geometric_normal = 4u
+/// The normal its material shades with, its normal map applied.
+const channel_shading_normal = 8u
+/// The material's base color.
+const channel_base_color = 16u
+/// The material's specular roughness, base metalness and micro-occlusion, and its opacity in .w.
+const channel_material = 32u
+/// The hit instance's index in .x, and a number in [0, 1) of it in .y, the same for every hit on it.
+const channel_instance = 64u
+
+/// Where pixel slot `s`'s channel sums start, `slots` float4 apart.
+fun channel_base(s: int, slots: int) -> int:
+    return s * slots
+
+/// Adds a primary hit's channels to slot `s`'s sums, each `mask` names in the order of its bits.
+fun add_channels(s: int, mask: uint, p: float3, view_depth: float, n: float3, shading_n: float3, surface: openpbr.surface, instance: uint){traced}:
+    let slots = count_bits(mask as int)
+    let mut at = channel_base(s, slots)
+    if (mask & channel_position) != 0u:
+        traced.channel_sums[at] += float4(..p, 1.0)
+        at += 1
+    if (mask & channel_view_depth) != 0u:
+        traced.channel_sums[at] += float4(view_depth, 0.0, 0.0, 0.0)
+        at += 1
+    if (mask & channel_geometric_normal) != 0u:
+        traced.channel_sums[at] += float4(..n, 0.0)
+        at += 1
+    if (mask & channel_shading_normal) != 0u:
+        traced.channel_sums[at] += float4(..shading_n, 0.0)
+        at += 1
+    if (mask & channel_base_color) != 0u:
+        traced.channel_sums[at] += float4(..surface.base_color, 0.0)
+        at += 1
+    if (mask & channel_material) != 0u:
+        traced.channel_sums[at] += float4(surface.specular_roughness, surface.base_metalness, surface.micro_occlusion, surface.geometry_opacity)
+        at += 1
+    if (mask & channel_instance) != 0u:
+        traced.channel_sums[at] += float4(instance as float, ((pt.hash(instance) >> 8u) as float) / 16777216.0, 0.0, 0.0)
 /// `frame_constants::wavefront_flags`: the guides come from guide rays rather than the samples' camera rays, set where the trace writes guides and holds a partial coverage.
 /// A sample's camera ray takes or skips a partial coverage at random, so guides of its hit would flicker with the cutout, and a temporal denoiser keeps what its guides explain.
 const wavefront_flag_guide_rays = 2u
@@ -204,8 +249,8 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
     let dir = normalize(scene.camera_ray_offset(cam, pixel, image_size()))
 
     let s = slot as int
-    traced.path_rays[s] = path_ray(cam.position, dir)
-    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, 0.0, f.primary_spread)
+    traced.path_rays[s] = path_ray(scene.camera_origin(cam, pixel, image_size()), dir)
+    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, f.pixel_width * f.primary_scale, f.pixel_spread * f.primary_scale)
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
 
@@ -221,8 +266,9 @@ fun start_guide(slot: uint, rng: uint){traced, wavefront_step}:
     let jitter_y = pt.rand(mut jitter_rng)
     let jitter = if f.fixed_jitter != 0u => f.jitter else float2(jitter_x, jitter_y)
     let cam = scene.camera(..f.camera)
-    let dir = normalize(scene.camera_ray_offset(cam, float2(px.x as float, px.y as float) + jitter, image_size()))
-    traced.path_rays[s] = path_ray(cam.position, dir)
+    let at = float2(px.x as float, px.y as float) + jitter
+    let dir = normalize(scene.camera_ray_offset(cam, at, image_size()))
+    traced.path_rays[s] = path_ray(scene.camera_origin(cam, at, image_size()), dir)
     let mut st = traced.path_states[s]
     st.rng = rng
     st.jitter = jitter
@@ -262,6 +308,11 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
     let restart = (f.wavefront_flags & wavefront_flag_restart) != 0u
 
     let mut tally = if restart => empty_tally() else traced.tallies[s]
+    // the channels' sums are counted by the tally's guide count, so they restart with it
+    if restart and f.channel_mask != 0u:
+        let slots = count_bits(f.channel_mask as int)
+        for k in 0 ..< slots:
+            traced.channel_sums[channel_base(s, slots) + k] = float4(0.0)
     tally.frame_count = 0.0
     tally.frame_sum = float3(0.0)
     tally.frame_sum_specular = float3(0.0)
@@ -664,6 +715,13 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
             tally.primary_view_depth = t_forward * dot(center, normalize(cam.forward))
         traced.tallies[s] = tally
 
+        // Beside the image, the channels the layer asks for, summed over the same hits the guide count counts.
+        if f.channel_mask != 0u:
+            let world = ray_origin + ray_dir * hit.t
+            let mut shaded = surface
+            let shading_n = openpbr.shading_frame(mut shaded, n, v, authored, supplied_tangent_frame).n
+            add_channels(s, f.channel_mask, world, dot(world - cam.position, normalize(cam.forward)), n, shading_n, surface, hit.instance)
+
     // A guide ray gathers nothing and ends here, its stream untouched, and finalize starts the sample it stood in for.
     // It still leaves through the tail's one push_finished, since each queue is appended from one place (docs/wavefront.md).
     let gathers = not guide
@@ -845,8 +903,8 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
         traced.guide_hit_distance[xy] = float2(diffuse, specular)
 
     // The near plane is applied here rather than stored, since a drawing that starts needing depth changes it without a restart.
-    // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
-    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_view_depth < 0.0 => 1.0 else max(1.0 - f.near_plane / tally.primary_view_depth, 0.0)
+    // It is the depth the projection sv::matrices_of builds gives: 1 - near / depth for a pinhole, linear for an orthographic camera.
+    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_view_depth < 0.0 => 1.0 else scene.camera_primary_depth(scene.camera(..f.camera), f.near_plane, tally.primary_view_depth)
 
     if f.write_guides != 0u:
         traced.sample_counts[xy] = tally.count

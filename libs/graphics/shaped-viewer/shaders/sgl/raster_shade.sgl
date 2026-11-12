@@ -80,11 +80,12 @@ fun mirroring_of(inst: scene.instance) -> float:
     let sign = if det < 0.0 => -1.0 else 1.0
     return sign
 
-/// Where world point `p` lands through `cam`, as the clip position of the pinhole `scene.camera_ray_offset` traces through.
+/// Where world point `p` lands through `cam`, as the clip position of the camera `scene.camera_ray_offset` traces through.
 ///
-/// `w` is the view depth along the camera's forward axis, and `z / w` is `near / w`: reversed, 1 at the near plane and 0 at infinity.
+/// A pinhole's `w` is the view depth along the camera's forward axis, and `z / w` is `near / w`: reversed, 1 at the near plane and 0 at infinity.
 /// A float's spacing shrinks toward 0 as fast as `near / w` does, so the depth test resolves a far surface as finely as a near one.
-/// That is the raster pass's own depth alone; `primary_depth` stays `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
+/// An orthographic camera's `w` is 1, and its `z` is `scene.camera_reversed_depth`, linear from the near plane to the far one.
+/// That is the raster pass's own depth alone; `primary_depth` stays `scene.camera_primary_depth`, the depth `sv::matrices_of` builds and the tracer writes.
 /// Up is up in clip space, which is the tracer's image read top row first.
 /// `shift` moves the image in clip space, `jitter_shift` of a frame's jitter, so a pixel's center lands where its jittered ray would.
 fun project(cam: scene.camera, p: float3, near: float, shift: float2) -> hpos4:
@@ -92,6 +93,7 @@ fun project(cam: scene.camera, p: float3, near: float, shift: float2) -> hpos4:
     let depth = dot(offset, normalize(cam.forward))
     let x = dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled)
     let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
+    if scene.camera_is_orthographic(cam) => return hpos4(x + shift.x, y + shift.y, scene.camera_reversed_depth(cam, near, depth), 1.0)
     return hpos4(x + shift.x * depth, y + shift.y * depth, near, depth)
 
 /// The clip-space shift that moves an image of `size` pixels by `-jitter`, so pixel `px` samples the image at `px + 0.5 + jitter`.
@@ -171,7 +173,7 @@ struct quadric_pixel:
 fun quadric_pixel_from(inst: scene.instance, primitive: uint, cam: scene.camera, at: float2, size: float2){tracer.bindless} -> quadric_pixel:
     let prim = quadric.load_primitive(tracer.bindless.buffers[inst.vertices as int], primitive)
     let dir = scene.camera_ray_offset(cam, at, size)
-    let found = quadric.intersect(prim, to_object_point(inst, cam.position), to_object_vector(inst, dir), 0.0, 3.0e38)
+    let found = quadric.intersect(prim, to_object_point(inst, scene.camera_origin(cam, at, size)), to_object_vector(inst, dir), 0.0, 3.0e38)
     return quadric_pixel(found.valid, to_world_point(inst, found.point), found.normal)
 
 /// `quadric_pixel_from` for the pixel `p` covers, through `drawn`.
@@ -347,7 +349,7 @@ fun quadric_face_of(inst: scene.instance, object_normal: float3, world: float3, 
 fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> targets:
     let cam = scene.camera(..drawn.frame[0].camera)
     let inst = scene.instance(..drawn.instances[p.instance as int])
-    let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
+    let face = face_of(inst, ctx, p.world, scene.camera_eye_of(cam, p.world), surface_in, supplied_tangent_frame)
     return shade_face(float2(p.position.x, p.position.y), p.world, face, surface_in, supplied_tangent_frame, occlusion)
 
 /// Shades the quadric pixel `p` found at `hit`, whose material evaluated to `surface_in`, and writes every target and its depth.
@@ -355,9 +357,9 @@ fun shade_quadric(p: quadric_varyings, hit: quadric_pixel, surface_in: openpbr.s
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
     let inst = scene.instance(..drawn.instances[p.instance as int])
-    let face = quadric_face_of(inst, hit.object_normal, hit.world, cam.position, surface_in, supplied_tangent_frame)
+    let face = quadric_face_of(inst, hit.object_normal, hit.world, scene.camera_eye_of(cam, hit.world), surface_in, supplied_tangent_frame)
     let lit = shade_face(float2(p.position.x, p.position.y), hit.world, face, surface_in, supplied_tangent_frame, occlusion)
-    return with_surface_depth(lit, f.near_plane / dot(hit.world - cam.position, normalize(cam.forward)))
+    return with_surface_depth(lit, scene.camera_reversed_depth(cam, f.near_plane, dot(hit.world - cam.position, normalize(cam.forward))))
 
 /// `t` and the reversed depth `surface_depth` of the surface it was shaded at.
 fun with_surface_depth(t: targets, surface_depth: float) -> quadric_targets:
@@ -379,14 +381,15 @@ fun shade_face(pixel: float2, world: float3, face: pixel_face, surface_in: openp
     let cam = scene.camera(..f.camera)
     let n = face.n
     let exiting = face.exiting
-    let v = normalize(cam.position - world)
+    let eye = scene.camera_eye_of(cam, world)
+    let v = normalize(eye - world)
 
-    let to_point = world - cam.position
-    let view_depth = dot(to_point, normalize(cam.forward))
+    let to_point = world - eye
+    let view_depth = dot(world - cam.position, normalize(cam.forward))
 
     // Painted before anything reads the base, the G-buffer included.
     let mut surface = surface_in
-    apply_decals(mut surface, world, n, f.pixel_spread * length(to_point))
+    apply_decals(mut surface, world, n, f.pixel_width + f.pixel_spread * length(to_point))
 
     let shading = openpbr.shading_frame(mut surface, n, v, face.authored, supplied_tangent_frame)
     // Every wavelength at once: a dispersive interface has no single path here to collapse onto one.
@@ -402,10 +405,10 @@ fun shade_face(pixel: float2, world: float3, face: pixel_face, surface_in: openp
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel + f.jitter - scene.camera_project(prev, world - prev.position, f.size)
-    return lit_targets(color, n, view_depth, surface, motion, f.near_plane)
+    return lit_targets(color, n, view_depth, surface, motion, scene.camera_primary_depth(cam, f.near_plane, view_depth))
 
 /// What a lit pixel writes: `color`, and the guides of `surface` at view depth `view_depth`, whose turned geometric normal is `n`.
-fun lit_targets(color: float3, n: float3, view_depth: float, surface: openpbr.surface, motion: float2, near: float) -> targets:
+fun lit_targets(color: float3, n: float3, view_depth: float, surface: openpbr.surface, motion: float2, primary_depth: float) -> targets:
     return {
         color = float4(..color, 1.0)
         normal = float4(..n, 0.0)
@@ -414,7 +417,7 @@ fun lit_targets(color: float3, n: float3, view_depth: float, surface: openpbr.su
         specular_albedo = float4(..openpbr.pt_specular_albedo(surface), 0.0)
         roughness = openpbr.pt_roughness(surface)
         motion = motion
-        primary_depth = max(1.0 - near / view_depth, 0.0)
+        primary_depth = primary_depth
     }
 
 /// What a pixel no surface covers holds: the environment along its camera ray, and an empty G-buffer.

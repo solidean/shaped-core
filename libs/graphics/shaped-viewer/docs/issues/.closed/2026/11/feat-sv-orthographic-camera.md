@@ -4,6 +4,8 @@ parent: epic-sv-baking
 refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/rendering/view_renderer.cc
   - symbol: camera_record_of
+closed: 2026-11-12
+resolution: fixed
 ---
 
 # An orthographic camera through every path

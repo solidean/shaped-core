@@ -18,3 +18,7 @@ What it lacks is three general pieces, each its own issue:
 3. `feat-sv-render-channels`: outputs beyond radiance, named, each accumulated over the jittered samples like the image.
 
 Done before this epic, 2026-11-11: anisotropic texture filtering at traced hits, and `render_settings::expected_samples_per_pixel`.
+
+Left from `feat-sv-settled-render`, closed 2026-11-12:
+- **An async form**, for a caller that must not block a worker thread; the call blocks today.
+- **Linear radiance beside the displayed image**, which `feat-sv-render-channels` returns.

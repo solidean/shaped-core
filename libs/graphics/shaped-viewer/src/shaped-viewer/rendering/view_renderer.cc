@@ -524,15 +524,15 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     auto cam = v.camera;
     cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
     fc.camera = camera_record_of(cam);
-    fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(resolution[1] > 0 ? resolution[1] : 1);
+    set_pixel_footprint(fc, resolution[1]);
 
     lights.describe_in(fc);
 
     fc.samples_per_pixel = l.settings.samples_per_pixel;
     // the primary cone narrows where the image averages many samples, which filter the pixel already (pbrt-v4's rule)
     auto const expected = l.settings.expected_samples_per_pixel;
-    fc.primary_spread
-        = expected > 1 ? fc.pixel_spread * cc::max(0.125f, 1.0f / tg::sqrt(f32(expected))) : fc.pixel_spread;
+    fc.primary_scale = expected > 1 ? cc::max(0.125f, 1.0f / tg::sqrt(f32(expected))) : 1.0f;
+    fc.channel_mask = l.settings.channels;
     // A hybrid layer lights its own count of bounces, which its shaders read from the same field.
     fc.max_bounces
         = l.settings.mode == render_mode::hybrid ? cc::clamp(l.settings.hybrid_bounces, 1, 2) : l.settings.max_bounces;
@@ -674,7 +674,9 @@ enum class trace_hash_scope : u8
 {
     auto h = cc::make_hash_of_bytes(cc::span<shaders::tracer::camera_record const>(&fc.camera, 1).as_bytes());
     h = cc::combine_hash(h, cc::make_hash(fc.max_bounces, fc.samples_per_pixel, resolution[0], resolution[1]));
-    h = cc::combine_hash(h, cc::make_hash(cc::bit_cast<u32>(fc.primary_spread)));
+    // The channel mask is not here: the image does not depend on it, and a new mask reallocates the wavefront state,
+    // which restarts the accumulation by itself.
+    h = cc::combine_hash(h, cc::make_hash(cc::bit_cast<u32>(fc.primary_scale)));
     h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<background_gpu const>(&bg, 1).as_bytes()));
     h = cc::combine_hash(
         h, cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(lights.records).as_bytes()));
@@ -932,10 +934,11 @@ void mark_denoised(impl::temporal_slot& slot, shaders::tracer::camera_record con
     auto const extent = tg::vec2i(d.output.width(), d.output.height());
     auto const permutations = i32(d.hit_groups.size());
     auto& held = scaled ? slot.scaled_paths : slot.paths;
-    if (!held.has_value() || held.value().extent != extent || held.value().max_permutations < permutations)
+    if (!held.has_value() || held.value().extent != extent || held.value().max_permutations < permutations
+        || held.value().channel_mask != settings.channels)
     {
         // Twice today's permutations, so a material appearing does not reallocate every slot of the view.
-        held = wavefront_state::create(cmd.context(), extent, cc::max(16, 2 * permutations));
+        held = wavefront_state::create(cmd.context(), extent, cc::max(16, 2 * permutations), settings.channels);
         // A new state holds no paths, so its mean starts over whatever the hash says.
         impl::restart_accumulation(slot);
     }
@@ -1089,6 +1092,7 @@ struct raster_batch
         .light_count = u32(scene.lights->records.size()),
         .decal_count = u32(scene.decals->decals.size()),
         .pixel_spread = fc.pixel_spread,
+        .pixel_width = fc.pixel_width,
         .size = tg::vec2f(f32(resolution[0]), f32(resolution[1])),
         .jitter = tg::vec2f(0, 0),
     };
@@ -1758,9 +1762,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         jitter = sr::reconstruct_jitter(ctx, upscale_settings, tr.resolution, slot->scaled_frame, traceable_guides());
         fc.fixed_jitter = 1;
         fc.jitter = jitter + tg::vec2f(0.5f, 0.5f);
-        fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(input_extent[1]);
+        set_pixel_footprint(fc, input_extent[1]);
         // an upscaled frame is one sample a pixel, averaged with no others, so its primaries read a whole pixel
-        fc.primary_spread = fc.pixel_spread;
+        fc.primary_scale = 1.0f;
         // A moving frame's mean restarts every time, so the accumulation's seed would draw one sequence on all of them.
         fc.rng_seed = slot->scaled_frame + 1;
         fc.guide_frame = 0;

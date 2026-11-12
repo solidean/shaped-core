@@ -44,12 +44,14 @@ sv::view_id                      // stable identity across frames; view_id::from
 sv::view_index                   // enum class : u32 — a view's slot in `viewer_definition::views` THIS frame; not an identity, so never persist one
 sv::display_name_of("angle##0")  // -> "angle"; the id up to its first ##, and what a view's display name defaults to
 sv::push_id_seed(seed, "name") / (seed, i64 n)  // fold a scope into a seed; what frame::push_id does, for a caller minting ids by hand
-sv::camera                       // { pos3d position; quat_d orientation; perspective_projection projection; } — double-precision pose + projection
+sv::camera                       // { pos3d position; quat_d orientation; camera_projection projection; } — double-precision pose + projection
 sv::camera::looking_at(eye, target, up=+y)     // -> camera at eye aimed at target (static factory); default projection
 sv::camera::orbiting(target, distance, azimuth, elevation)  // -> camera orbiting target, looking inward (azimuth around +y, elevation off the horizon)
 sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at target (static); cam.look_at(target, up=+y) sets it from position
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
-sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
+sv::camera_projection            // { kind; angle_d vertical_fov; f64 view_height; f64 aspect_ratio; f64 near_plane; f64 far_plane; }
+                                 //   kind = projection_kind::perspective (a pinhole, vertical_fov) or ::orthographic (view_height meters high,
+                                 //   raster depth linear up to far_plane); traced, raster and hybrid alike
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; sr::display_transform display; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
@@ -1046,6 +1048,11 @@ sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = view
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
 sv::interactive([ctx,] "id", cfg, req)  // takes this sr::capture_request instead of the environment; req must be active with an output path
                                  //   how a test reaches req.clock_seconds, so a capture timeout is advanced rather than waited out
+sv::render_settled([ctx,] "id", {.size, .samples, .timeout_seconds}, [&](sv::frame& f) { ... })
+                                 // -> cc::result<sv::settled_image>: the loop inside one call, the capture handed back as rgba bytes
+                                 //   the same body draws the same image here and in a window; .settled is false where time ran out
+                                 //   .channels: what the first wavefront layer averaged at its primary hits, render_settings::channels =
+                                 //   u32(sv::render_channel::position) | ... (position+coverage, view_depth, normals, base_color, material, instance)
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
                                  //   yields sv::frame_scope: a frame whose destructor presents, so the loop body needs no present call

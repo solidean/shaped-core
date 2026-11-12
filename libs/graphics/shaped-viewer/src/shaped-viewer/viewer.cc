@@ -23,6 +23,7 @@
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
 #include <shaped-viewer/impl/capture_session.hh>
+#include <shaped-viewer/impl/settled_landing.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
@@ -30,6 +31,7 @@
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
+#include <shaped-viewer/settled.hh>
 #include <shaped-viewer/shader_library.hh>
 #include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_store.hh>
@@ -180,6 +182,9 @@ struct viewer::impl
     /// The capture's images still being read back and encoded, oldest first; each resolves to why it failed, or empty.
     /// Drained before the run closes, since a tool reads the files once the process ends.
     cc::vector<cc::shared_async<cc::string>> capture_writes;
+
+    /// Where a settled render's image lands in place of a file, or null on any other run; owned by `render_settled`.
+    sv::impl::settled_landing* settled_landing = nullptr;
 
     gpu_resource_manager resources;
 
@@ -451,6 +456,13 @@ void viewer::install_capture(sr::capture_request req)
     _impl->views.set_snaps_auto_exposure(!req.is_sequence());
     _impl->capture = cc::make_unique<sv::impl::capture_session>(cc::move(req));
     _impl->capture->begin();
+}
+
+void viewer::install_settled(sr::capture_request req, sv::impl::settled_landing* landing)
+{
+    CC_ASSERT(landing != nullptr, "a settled render needs somewhere for its image to land");
+    _impl->settled_landing = landing;
+    install_capture(cc::move(req));
 }
 
 void viewer::apply_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body, frame& f)
@@ -1384,6 +1396,33 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
 
         auto const readback = sr::submit_capture_readback(*im.ctx, im.offscreen);
+
+        // A settled render takes the readback itself, and nothing is written.
+        // With it, the first traced layer's channels, where it asked for any: their sums and the tallies that count them.
+        if (im.settled_landing != nullptr)
+        {
+            auto& landing = *im.settled_landing;
+            landing.readback = readback;
+            landing.settled = session.settled_before_writing();
+            for (auto const& tr : plan.traces)
+            {
+                if (!tr.refresh)
+                    continue;
+                if (auto const* const paths = im.views.wavefront_paths(tr.id);
+                    paths != nullptr && paths->channel_mask != 0)
+                {
+                    auto cmd = im.ctx->create_command_list();
+                    landing.tallies = cmd->download.data_from_buffer(paths->tallies);
+                    landing.channel_sums = cmd->download.data_from_buffer(paths->channel_sums);
+                    (void)im.ctx->submit_command_list(cc::move(cmd));
+                    landing.channel_mask = paths->channel_mask;
+                    landing.extent = paths->extent;
+                }
+                break;
+            }
+            return;
+        }
+
         auto const opts = babel::image::write_options{.jpg_quality = 88,
                                                       .png_compression_level = session.request().is_sequence() ? 1 : -1};
         auto writing = capture_failure(sr::encode_capture_image_async(
@@ -1438,7 +1477,13 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     auto const path = session.settled_before_writing() ? cc::string(session.request().output_path)
                                                        : sv::impl::partial_capture_path(session.request().output_path);
     // A wavefront layer names how many pixels hold its floor down, since one stalled pixel stalls the whole capture.
-    if (!session.settled_before_writing())
+    // A settled render reports it through its result, which says it did not settle, so it warns of no path.
+    if (!session.settled_before_writing() && im.settled_landing != nullptr)
+        CC_LOG_WARNING("settled render: giving up after {}s at {}/{} samples per pixel{}{}, handing back what it has",
+                       session.elapsed_seconds(), lowest, session.request().accumulate,
+                       short_pixels == 0 ? cc::string() : cc::format(", {} pixels short of it", short_pixels),
+                       held.empty() ? cc::string() : cc::format(", held for {}", held));
+    else if (!session.settled_before_writing())
         CC_LOG_WARNING("capture: giving up after {}s at {}/{} samples per pixel{}{} — writing what it has to {}, and "
                        "nothing to {}",
                        session.elapsed_seconds(), lowest, session.request().accumulate,

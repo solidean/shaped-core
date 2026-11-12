@@ -11,6 +11,8 @@ camera orbit_state::to_camera() const
 {
     auto cam = camera::orbiting(target, distance, azimuth, elevation);
     cam.projection.vertical_fov = vertical_fov;
+    cam.projection.kind = kind;
+    cam.projection.view_height = 2.0 * distance * (vertical_fov * 0.5).tan();
     return cam;
 }
 
@@ -25,7 +27,8 @@ orbit_state orbit_state::from_camera(camera const& cam, f64 distance)
             .distance = distance,
             .azimuth = tg::atan2(offset[0], -offset[2]),
             .elevation = tg::asin(cc::clamp(offset[1] / distance, -1.0, 1.0)),
-            .vertical_fov = cam.projection.vertical_fov};
+            .vertical_fov = cam.projection.vertical_fov,
+            .kind = cam.projection.kind};
 }
 
 bool orbit_camera_controller::handle(sr::input_event const& e)

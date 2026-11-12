@@ -21,17 +21,19 @@ struct sv::camera_matrices
 
 namespace sv
 {
-/// `cam`'s pinhole basis as the tracer reads it, module `tracer`'s `camera_record`, its pads zero.
-/// `right_scaled` and `up_scaled` carry the aspect and the field of view baked in, `right * aspect * tan(fov_y / 2)` and
+/// `cam`'s basis as the tracer reads it, module `tracer`'s `camera_record`, its pads zero.
+/// A pinhole's `right_scaled` and `up_scaled` carry the aspect and the field of view baked in, `right * aspect * tan(fov_y / 2)` and
 /// `up * tan(fov_y / 2)`, so the raygen forms `forward + right_scaled * ndc.x - up_scaled * ndc.y`.
+/// An orthographic camera's carry half its image's width and height in meters, and the raygen moves the origin by them instead.
 /// The aspect ratio is taken from `cam.projection.aspect_ratio`.
 [[nodiscard]] shaders::tracer::camera_record camera_record_of(camera const& cam);
 
-/// The matrices `cam`'s pinhole basis amounts to, with an infinite far plane.
+/// The matrices `cam`'s basis amounts to: a pinhole's with an infinite far plane, an orthographic camera's up to its far plane.
 ///
 /// Derived from the SAME basis `camera_ray_offset` and `camera_project` form their rays from, so all three describe
-/// one pinhole: `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's
+/// one camera: `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, or the half extents, which is the projection's
 /// diagonal, and `forward` is its third view axis.
+/// Clip depth `z / w` is `scene.camera_primary_depth`: `1 - near / depth` for a pinhole, linear from near to far for an orthographic camera.
 /// A camera whose basis is degenerate — a zero `right_scaled` or `forward` — yields identities rather than NaNs.
 [[nodiscard]] camera_matrices matrices_of(shaders::tracer::camera_record const& cam, f32 near_plane);
 
@@ -46,15 +48,36 @@ namespace sv
                                                            f32 near_plane);
 } // namespace sv
 
-/// A perspective projection: vertical field of view, aspect ratio (width / height), and near plane.
-///
-/// This is the only projection kind for now.
-/// `aspect_ratio` is a property of the projection, not of the render target — set it from the target size before baking the GPU basis (the view renderer does this).
-struct sv::perspective_projection
+/// How a camera's rays leave it.
+enum class sv::projection_kind : sv::u8
 {
+    /// A pinhole at the camera's position: every ray leaves it, spread over `vertical_fov`.
+    perspective,
+
+    /// Every ray runs along the view direction, from its own point of an image plane `view_height` high through the camera's position.
+    /// Parallel lines stay parallel and a thing's size does not change with its distance, as a technical view and a bake want.
+    orthographic,
+};
+
+/// A camera's projection: its kind, the extent of its image, its aspect ratio (width / height), and its depth range.
+///
+/// `aspect_ratio` is a property of the projection, not of the render target — set it from the target size before baking the GPU basis (the view renderer does this).
+struct sv::camera_projection
+{
+    projection_kind kind = projection_kind::perspective;
+
+    /// A perspective camera's vertical field of view.
     tg::angle_d vertical_fov = tg::angle_d::make_from_degree(60.0);
+
+    /// An orthographic camera's image height, in meters.
+    f64 view_height = 2.0;
+
     f64 aspect_ratio = 1.0;
     f64 near_plane = 0.01;
+
+    /// Where an orthographic camera's raster depth ends, in meters along the view; a perspective camera's has no end.
+    /// Nothing past it is drawn by raster, and a traced hit past it writes the far depth, 1.
+    f64 far_plane = 1000.0;
 };
 
 /// A camera's axes in world space — where the camera frame's +x, +y and +z point.
@@ -77,7 +100,7 @@ struct sv::camera
 {
     tg::pos3d position = tg::pos3d(2.2, 1.8, -3.2);
     tg::quat_d orientation = look_rotation(position, tg::pos3d::zero);
-    perspective_projection projection = {};
+    camera_projection projection = {};
 
     /// A camera sitting at `eye` and looking at `target`, `up` fixing the roll; the projection stays default.
     [[nodiscard]] static camera looking_at(tg::pos3d eye, tg::pos3d target, tg::vec3d up = tg::vec3d(0, 1, 0))
