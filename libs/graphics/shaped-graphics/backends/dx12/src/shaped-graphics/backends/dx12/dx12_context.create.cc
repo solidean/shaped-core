@@ -54,7 +54,18 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
     return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id;
 }
 
-/// The first hardware adapter that supports D3D12, into `out`.
+/// Adapter `i` in high-performance order where DXGI offers one, else in its plain enumeration order.
+///
+/// Plain order puts the adapter driving the display first, which on a hybrid laptop is the integrated GPU.
+[[nodiscard]] HRESULT enum_adapter(IDXGIFactory4* factory, UINT i, ComPtr<IDXGIAdapter1>& out)
+{
+    if (ComPtr<IDXGIFactory6> factory6; SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory6))))
+        return factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                                                    IID_PPV_ARGS(out.ReleaseAndGetAddressOf()));
+    return factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf());
+}
+
+/// The first hardware adapter that supports D3D12, the discrete GPU before an integrated one, into `out`.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
 ///
 /// **A device-loss HRESULT stops the search rather than skipping the adapter.**
@@ -63,7 +74,7 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
 /// A reset is what `is_device_lost()` exists to report, so it is reported.
 adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
 {
-    for (UINT i = 0; factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    for (UINT i = 0; enum_adapter(factory, i, out) != DXGI_ERROR_NOT_FOUND; ++i)
     {
         DXGI_ADAPTER_DESC1 ad = {};
         out->GetDesc1(&ad);
