@@ -135,6 +135,31 @@ impl::resume_point sgl::check::impl::seal_layer(checker& c, i32 files, bool is_l
     for (auto i = isize(0); i < c.out.call_records.size(); ++i)
         if (auto const b = c.out.at(c.out.call_records[i].type_arguments); !b.empty() && !c.is_closed(b))
             c.open_calls_below.push_back(i);
+    // The layer's names, once, for every program behind it; a program's check makes a set of its own names alone.
+    // A program behind a link takes the names of the files it reaches instead, so a link's are made only where its next
+    // link flattens a test (`checker::module_names`).
+    c.module_names_below = nullptr;
+    c.module_names_below_count = c.out.symbols.size();
+    if (!is_link)
+        c.module_names_below = c.names_up_to(c.module_names_below_count);
+    // CHK-527: the prelude's own entry points mint over every name of the layer, which outlives the sets they were
+    // flattened with: those go with `out.module_names` below
+    for (auto i = c.out.internal_entry_points.first_own(); i < c.out.internal_entry_points.size(); ++i)
+    {
+        auto& e = c.out.internal_entry_points.own(i);
+        auto const repoint = [&](name_mint& names)
+        {
+            names.also_taken = c.module_names_below.get();
+            names.also_taken_below = nullptr;
+        };
+        repoint(e.names);
+        if (e.legalized != nullptr)
+        {
+            auto legalized = *e.legalized;
+            repoint(legalized.names);
+            e.legalized = cc::make_shared<flat_entry_point const>(cc::move(legalized));
+        }
+    }
     c.out.freeze_tables();
     c.prelude_names.freeze();
     c.prelude_operators.freeze();
@@ -143,13 +168,6 @@ impl::resume_point sgl::check::impl::seal_layer(checker& c, i32 files, bool is_l
     c.interned_types.freeze();
     c.prelude_visible.freeze();
     c.instances.freeze();
-    // The layer's names, once, for every program behind it; a program's check makes a set of its own names alone.
-    // A program behind a link takes the names of the files it reaches instead, so a link's are made only where its next
-    // link flattens a test (`checker::module_names`).
-    c.module_names_below = nullptr;
-    c.module_names_below_count = c.out.symbols.size();
-    if (!is_link)
-        c.module_names_below = c.names_up_to(c.module_names_below_count);
     c.own_module_names = nullptr;
     c.module_names_for = -1;
     c.out.module_names = {};

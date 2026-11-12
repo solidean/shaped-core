@@ -48,6 +48,8 @@ class sgl::check::layered
 
 public:
     [[nodiscard]] isize size() const { return _base_size + _own.size(); }
+    /// The first entry this layer owns; every one before it is a lower layer's.
+    [[nodiscard]] isize first_own() const { return _base_size; }
     [[nodiscard]] bool empty() const { return size() == 0; }
 
     /// Reading is all indexing does: a write names `own`, so every write is one a reader can find.

@@ -314,6 +314,9 @@ struct sgl::check::checked_module
 
     /// Only the entry points that checked without an error; a broken one has diagnostics and no flat tree.
     cc::vector<flat_entry_point> entry_points;
+    /// The `@internal` entry points of the prelude, which no program lists and a polyfill compiles by name (CHK-527).
+    /// Checked once with the prelude, so every module behind it shares them.
+    layered<flat_entry_point> internal_entry_points;
 
     /// Every test, in the order the pass found them: file scope and type bodies first, then the tests of function bodies.
     layered<test_info> tests;
@@ -498,6 +501,7 @@ struct sgl::check::checked_module
         files.freeze();
         tests.freeze();
         test_units.freeze();
+        internal_entry_points.freeze();
     }
 
     [[nodiscard]] bool operator==(checked_module const& rhs) const
@@ -517,8 +521,9 @@ struct sgl::check::checked_module
             && is_equal(target_texts, rhs.target_texts) && is_equal(target_preambles, rhs.target_preambles)
             && is_equal(target_type_branches, rhs.target_type_branches) && is_equal(files, rhs.files)
             && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
-            && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
-            && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
+            && is_equal(test_units, rhs.test_units) && is_equal(internal_entry_points, rhs.internal_entry_points)
+            && is_equal(entry_expectations, rhs.entry_expectations) && is_equal(diagnostics, rhs.diagnostics)
+            && builtins == rhs.builtins;
     }
 };
 

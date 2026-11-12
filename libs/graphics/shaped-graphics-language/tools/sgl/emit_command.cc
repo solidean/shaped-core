@@ -37,6 +37,7 @@ COMMAND("emit")
     auto module_dirs = cc::vector<cc::string>();
     auto mesh_name = cc::string("native");
     auto polyfill_vertex = cc::string();
+    auto polyfill_control = cc::string();
     auto polyfill_task = cc::string();
     auto args = nx::args({.name = "sgl emit",
                           .description = "Compiles one entry point of an SGL file and prints the target text, with its "
@@ -75,7 +76,8 @@ COMMAND("emit")
     args.arg({"module-dir"}, module_dirs,
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     args.arg({"mesh"}, mesh_name,
-             {.desc = "a mesh, task or geometry entry point as itself, or as the compute or the vertex half of its "
+             {.desc = "a mesh, task, geometry or tessellation entry point as itself, or as the compute or the vertex "
+                      "half of its "
                       "polyfill, or the scan between a task and a mesh stage, and a pixel entry point as the one after "
                       "the vertex half: native, compute, scan or vertex",
               .metavar = "FORM"});
@@ -83,7 +85,12 @@ COMMAND("emit")
              {.desc = "the task stage that launches a mesh entry point's compute half or scan, its pipeline's",
               .metavar = "NAME"});
     args.arg({"vertex"}, polyfill_vertex,
-             {.desc = "the vertex stage a geometry entry point's compute half runs, its pipeline's", .metavar = "NAME"});
+             {.desc = "the vertex stage a geometry or tessellation control entry point's compute half runs, its "
+                      "pipeline's",
+              .metavar = "NAME"});
+    args.arg({"control"}, polyfill_control,
+             {.desc = "the control stage a tessellation evaluation entry point's compute half reads, its pipeline's",
+              .metavar = "NAME"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
     auto const library = sgl_tool::read_module_dirs(module_dirs);
@@ -185,6 +192,7 @@ COMMAND("emit")
          .native_line_table = native_line_table,
          .mesh = mesh,
          .polyfill_vertex = polyfill_vertex,
+         .polyfill_control = polyfill_control,
          .polyfill_task = polyfill_task});
     if (text.has_error())
     {

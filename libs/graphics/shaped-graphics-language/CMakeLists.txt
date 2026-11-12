@@ -139,6 +139,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_guards.cc
     src/shaped-graphics-language/legalize/legalize_grid.cc
     src/shaped-graphics-language/legalize/legalize_geometry.cc
+    src/shaped-graphics-language/legalize/legalize_tessellation.cc
     src/shaped-graphics-language/legalize/legalize_mesh.cc
     src/shaped-graphics-language/legalize/legalize_task.cc
     src/shaped-graphics-language/legalize/legalize_polyfill.cc
@@ -521,6 +522,7 @@ if(SC_BUILD_TESTS)
         tests/emit/primitive-stage-emit-test.cc
         tests/emit/mesh-stage-emit-test.cc
         tests/emit/geometry-polyfill-emit-test.cc
+        tests/emit/tessellation-polyfill-emit-test.cc
         tests/emit/mesh-polyfill-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/bytes-emit-test.cc

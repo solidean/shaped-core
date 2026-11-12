@@ -399,11 +399,11 @@
         if index == w.corner_bad => return w.corner_replacement
     return index
 
-@internal fun tessellation_put_index[S](w: tessellation_walk, s: mut S, index: int, at: int):
+@internal fun tessellation_put_index[S](w: tessellation_walk, s: mut S, index: int, at: int){sg_tessellation_points, sg_tessellation_indices}:
     tessellation_index(mut s, at, tessellation_patched(w, index))
 
 /// A triangle the walk hands clockwise, stored in the walk's own winding.
-@internal fun tessellation_put_triangle[S](w: tessellation_walk, s: mut S, i0: int, i1: int, i2: int, at: int):
+@internal fun tessellation_put_triangle[S](w: tessellation_walk, s: mut S, i0: int, i1: int, i2: int, at: int){sg_tessellation_points, sg_tessellation_indices}:
     tessellation_put_index(w, mut s, i0, at)
     if w.output == tessellation_triangle_cw():
         tessellation_put_index(w, mut s, i1, at + 1)
@@ -416,7 +416,7 @@
 @internal fun tessellation_stitch_regular[S](
     w: tessellation_walk, s: mut S, is_trapezoid: bool, diagonals: int, base_index: int, inside_points: int
     inside_base: int, outside_base: int
-):
+){sg_tessellation_points, sg_tessellation_indices}:
     let mut at = base_index
     let mut inside = inside_base
     let mut outside = outside_base
@@ -475,7 +475,7 @@
 @internal fun tessellation_stitch_transition[S](
     w: tessellation_walk, s: mut S, base_index: int, inside_base: int, inside_half_in: int, inside_odd: bool
     outside_base: int, outside_half_in: int, outside_odd: bool
-):
+){sg_tessellation_points, sg_tessellation_indices}:
     let mut at = base_index
     let inside_half = inside_half_in - select(inside_odd, 1, 0)
     let outside_half = outside_half_in - select(outside_odd, 1, 0)
@@ -529,7 +529,7 @@
 
 /// Every point and primitive of a processed patch, in D3D's order, through the sink.
 /// `output` is one of `tessellation_triangle_cw()`, `tessellation_triangle_ccw()` and `tessellation_line()`.
-@internal fun tessellate[S](p: tessellation_patch, output: int, s: mut S):
+@internal fun tessellate[S](p: tessellation_patch, output: int, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
     if p.is_culled => return
     let w = tessellation_walk.of(output)
     if p.domain == 2:
@@ -554,7 +554,7 @@
         tessellate_quad_points(p, mut s)
         tessellate_quad_connectivity(p, w, mut s)
 
-@internal fun tessellate_isolines[S](p: tessellation_patch, s: mut S):
+@internal fun tessellate_isolines[S](p: tessellation_patch, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
     let lines = p.outside_points[0]
     let per_line = p.outside_points[1]
     let mut at = 0
@@ -571,7 +571,7 @@
             index += 2
 
 /// The exterior ring clockwise from V, then the interior rings spiralling in, then the center of an even patch.
-@internal fun tessellate_triangle_points[S](p: tessellation_patch, s: mut S):
+@internal fun tessellate_triangle_points[S](p: tessellation_patch, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
     let mut at = 0
     for edge in 0 ..< 3:
         let last = p.outside_points[edge] - 1
@@ -600,7 +600,7 @@
                 at += 1
     if not odd => tessellation_point(mut s, at, fxp_one_third(), fxp_one_third())
 
-@internal fun tessellate_triangle_connectivity[S](p: tessellation_patch, w_in: tessellation_walk, s: mut S):
+@internal fun tessellate_triangle_connectivity[S](p: tessellation_patch, w_in: tessellation_walk, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
     let mut w = w_in
     let rings = (p.inside_points[0] + 1) >> 1
     let mut outside_half = int3(
@@ -652,7 +652,7 @@
 
 /// The exterior ring clockwise from the top left, then the interior rings spiralling in, then the middle row of an
 /// even patch.
-@internal fun tessellate_quad_points[S](p: tessellation_patch, s: mut S):
+@internal fun tessellate_quad_points[S](p: tessellation_patch, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
     let mut at = 0
     for edge in 0 ..< 4:
         let last = p.outside_points[edge] - 1
@@ -688,7 +688,7 @@
             at += 1
             i -= 1
 
-@internal fun tessellate_quad_connectivity[S](p: tessellation_patch, w_in: tessellation_walk, s: mut S):
+@internal fun tessellate_quad_connectivity[S](p: tessellation_patch, w_in: tessellation_walk, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
     let mut w = w_in
     let rows = int2((p.inside_points[0] + 1) >> 1, (p.inside_points[1] + 1) >> 1)
     let rings = min(rows.x, rows.y)
@@ -795,3 +795,89 @@
 @internal fun tessellation_index(s: mut tessellation_counter, at: int, index: int):
     s.is_in_order = s.is_in_order and at == s.indices
     s.indices += 1
+
+/// A triangle (`domain` 3), a quad (4) or isolines (2) as the tessellator reads it, from the factors a control stage
+/// returned: a triangle's edges and inside, a quad's edges and two insides, the isolines' density and detail.
+@internal fun tessellation_patch_of(domain: int, partitioning: int, edges: float4, inside: float2) -> tessellation_patch:
+    if domain == 2 => return tessellation_process_isolines(partitioning, edges.x, edges.y)
+    return tessellation_process(domain, partitioning, edges, inside)
+
+/// `x`, or `cap` where `x` is above it; a NaN stays one, so it still culls.
+@internal fun tessellation_capped(x: float, cap: float) -> float:
+    if x > cap => return cap
+    return x
+
+/// Patch `patch`'s factors from its record, capped at the pipeline's largest factor, which the scratch is sized for.
+@internal fun tessellation_patch_at(patch: uint){sg_tessellation_draw, sg_tessellation_patches} -> tessellation_patch:
+    let draw = sg_tessellation_draw.values[0]
+    let shape = sg_tessellation_draw.values[1]
+    let cap = reinterpret_as_float(shape.w)
+    let at = patch * 8u
+    let mut f = float4(0.0)
+    for i in 0 ..< 4:
+        f[i] = tessellation_capped(reinterpret_as_float(sg_tessellation_patches.words[at + (i as uint)]), cap)
+    let mut inside = float2(0.0)
+    for i in 0 ..< 2:
+        inside[i] = tessellation_capped(reinterpret_as_float(sg_tessellation_patches.words[at + 4u + (i as uint)]), cap)
+    return tessellation_patch_of(shape.x as int, draw.z as int, f, inside)
+
+/// The sink the GPU walk writes through: a patch's points and indices at the places the scan gave it.
+@internal struct tessellation_writer:
+    patch: uint
+    first_point: uint
+    first_index: uint
+
+@internal fun tessellation_point(s: mut tessellation_writer, at: int, u: uint, v: uint){sg_tessellation_points}:
+    let word = (s.first_point + (at as uint)) * 3u
+    sg_tessellation_points.words[word] = u
+    sg_tessellation_points.words[word + 1u] = v
+    sg_tessellation_points.words[word + 2u] = s.patch
+
+@internal fun tessellation_index(s: mut tessellation_writer, at: int, index: int){sg_tessellation_indices}:
+    sg_tessellation_indices.words[s.first_index + (at as uint)] = s.first_point + (index as uint)
+
+// The passes between the control stage's and the evaluation stage's (CHK-527), one thread a patch of every instance.
+// `sg_tessellation_draw` says what the draw is; the factors come first, written by the control stage's compute form.
+
+/// Each patch's point and index counts, into words 6 and 7 of its record.
+@internal @compute(64) fun sg_tessellation_count(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches}:
+    let draw = sg_tessellation_draw.values[0]
+    let patch = id.x as uint
+    if patch >= draw.x * draw.y => return
+    let p = tessellation_patch_at(patch)
+    sg_tessellation_patches.words[patch * 8u + 6u] = p.point_count as uint
+    sg_tessellation_patches.words[patch * 8u + 7u] = p.index_count as uint
+
+/// The counts scanned into each patch's first point and index, in patch order, then the draw's and the evaluation
+/// pass's arguments.
+@internal @compute(1) fun sg_tessellation_scan(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches, sg_tessellation_args}:
+    let draw = sg_tessellation_draw.values[0]
+    let patches = (draw.x * draw.y) as int
+    let mut points = 0u
+    let mut indices = 0u
+    for patch in 0 ..< patches:
+        let at = (patch as uint) * 8u
+        let point_count = sg_tessellation_patches.words[at + 6u]
+        let index_count = sg_tessellation_patches.words[at + 7u]
+        sg_tessellation_patches.words[at + 6u] = points
+        sg_tessellation_patches.words[at + 7u] = indices
+        points += point_count
+        indices += index_count
+    sg_tessellation_args.words[0] = indices
+    sg_tessellation_args.words[1] = 1u
+    sg_tessellation_args.words[2] = 0u
+    sg_tessellation_args.words[3] = 0u
+    sg_tessellation_args.words[4] = 0u
+    sg_tessellation_args.words[5] = (points + 63u) / 64u
+    sg_tessellation_args.words[6] = 1u
+    sg_tessellation_args.words[7] = 1u
+    sg_tessellation_args.words[8] = points
+
+/// Each patch's points and indices, at the places the scan gave it.
+@internal @compute(64) fun sg_tessellation_generate(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches, sg_tessellation_points, sg_tessellation_indices}:
+    let draw = sg_tessellation_draw.values[0]
+    let patch = id.x as uint
+    if patch >= draw.x * draw.y => return
+    let p = tessellation_patch_at(patch)
+    let mut s = tessellation_writer(patch, sg_tessellation_patches.words[patch * 8u + 6u], sg_tessellation_patches.words[patch * 8u + 7u])
+    tessellate(p, draw.w as int, mut s)

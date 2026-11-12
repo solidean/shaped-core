@@ -26,6 +26,8 @@ enum class sgl::check::reserved_use : sgl::u8
     mesh_polyfill,
     /// A geometry stage polyfilled as a compute pass and a draw (CHK-525).
     geometry_polyfill,
+    /// The tessellation stages polyfilled as compute passes and a draw (CHK-527).
+    tessellation_polyfill,
 };
 
 /// Where one target finds an entry.
@@ -210,6 +212,68 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
          {.group = 3, .slot = 30, .stages = stage_bit(stage::compute)},
          {.group = 3, .slot = 30, .stages = stage_bit(stage::compute)},
          {.group = -1, .slot = 27, .stages = stage_bit(stage::compute)},
+     }},
+    // what a polyfilled tessellation draw is (CHK-527): `[0]` patches an instance, instances, partitioning, output;
+    // `[1]` domain, control points a patch, words a control point, the most points a patch makes; metal binds the
+    // tessellation entries where a kernel has no vertex input
+    {.name = "sg_tessellation_draw",
+     .declaration = "@internal binding sg_tessellation_draw:\n    values: buffer[uint4]\n",
+     .enabled_by = reserved_use::tessellation_polyfill,
+     .targets = {
+         {.group = 11, .slot = 11, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 33, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 33, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 10, .stages = stage_bit(stage::compute)},
+     }},
+    // a record of 8 words a patch: its 6 factors as the control stage returned them, then its first point and index
+    {.name = "sg_tessellation_patches",
+     .declaration = "@internal binding sg_tessellation_patches:\n    words: mut buffer[uint]\n",
+     .enabled_by = reserved_use::tessellation_polyfill,
+     .targets = {
+         {.group = 11, .slot = 12, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 34, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 34, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 11, .stages = stage_bit(stage::compute)},
+     }},
+    // each patch's control points as its vertex stage returned them, which the evaluation stage reads
+    {.name = "sg_tessellation_controls",
+     .declaration = "@internal binding sg_tessellation_controls:\n    words: mut buffer[uint]\n",
+     .enabled_by = reserved_use::tessellation_polyfill,
+     .targets = {
+         {.group = 11, .slot = 13, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 35, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 35, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 12, .stages = stage_bit(stage::compute)},
+     }},
+    // 3 words a point: u and v in 16.16, and its patch
+    {.name = "sg_tessellation_points",
+     .declaration = "@internal binding sg_tessellation_points:\n    words: mut buffer[uint]\n",
+     .enabled_by = reserved_use::tessellation_polyfill,
+     .targets = {
+         {.group = 11, .slot = 14, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 36, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 36, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 13, .stages = stage_bit(stage::compute)},
+     }},
+    // the draw's index buffer, each index a point
+    {.name = "sg_tessellation_indices",
+     .declaration = "@internal binding sg_tessellation_indices:\n    words: mut buffer[uint]\n",
+     .enabled_by = reserved_use::tessellation_polyfill,
+     .targets = {
+         {.group = 11, .slot = 15, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 37, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 37, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 14, .stages = stage_bit(stage::compute)},
+     }},
+    // the indexed draw's 5 arguments, then the evaluation pass's 3 workgroup counts, then the points in all
+    {.name = "sg_tessellation_args",
+     .declaration = "@internal binding sg_tessellation_args:\n    words: mut buffer[uint]\n",
+     .enabled_by = reserved_use::tessellation_polyfill,
+     .targets = {
+         {.group = 11, .slot = 16, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 38, .stages = stage_bit(stage::compute)},
+         {.group = 3, .slot = 38, .stages = stage_bit(stage::compute)},
+         {.group = -1, .slot = 15, .stages = stage_bit(stage::compute)},
      }},
     // a polyfilled task stage's records, one a task workgroup behind a header, which its compute form and the scan after
     // it write (CHK-524); metal draws every task stage natively

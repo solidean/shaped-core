@@ -389,11 +389,7 @@ fun tessellation_index(s: mut tessellation_hash, at: int, index: int):
     s.indices += 1
     s.h = (s.h ^ (index as uint)) * 16777619u
 
-fun tessellation_patch_of(domain: int, partitioning: int, edges: float4, inside: float2) -> tessellation_patch:
-    if domain == 2 => return tessellation_process_isolines(partitioning, edges.x, edges.y)
-    return tessellation_process(domain, partitioning, edges, inside)
-
-fun tessellation_hash_of(p: tessellation_patch, output: int) -> uint:
+fun tessellation_hash_of(p: tessellation_patch, output: int){sg_tessellation_points, sg_tessellation_indices} -> uint:
     let counted = (2166136261u ^ (p.point_count as uint)) * 16777619u
     let mut s = tessellation_hash((counted ^ (p.index_count as uint)) * 16777619u, 0, 0, true)
     tessellate(p, output, mut s)
@@ -418,7 +414,8 @@ cc::string failures_of(cc::span<tessellation_case const> cases)
             = cc::format("tessellation_patch_of({}, {}, float4({}, {}, {}, {}), float2({}, {}))", c.domain,
                          c.partitioning, float_text(c.edges[0]), float_text(c.edges[1]), float_text(c.edges[2]),
                          float_text(c.edges[3]), float_text(c.inside[0]), float_text(c.inside[1]));
-        source.appendf("\ntest:\n    let p = {}\n    p.point_count == {}\n    p.index_count == {}\n"
+        source.appendf("\ntest {{sg_tessellation_points, sg_tessellation_indices}}:\n    let p = {}\n    p.point_count "
+                       "== {}\n    p.index_count == {}\n"
                        "    tessellation_hash_of(p, {}) == {}u\n",
                        call, c.points, c.indices, c.output, c.hash);
     }

@@ -1,5 +1,6 @@
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/impl/flattener.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -942,8 +943,12 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.is_auto_workgroup = info.is_auto_workgroup;
     f.entry.preferred_subgroup_size = info.preferred_subgroup_size;
     f.entry.features = info.features;
+    // CHK-527: a reserved binding an internal entry point of the prelude lists keeps its reserved place
     for (auto const binding : out.at(info.bindings))
-        f.entry.bindings.push_back(binding);
+        if (is_internal(id) && reserved_binding_named(out.at(binding).name) != nullptr)
+            f.entry.reserved.push_back(binding);
+        else
+            f.entry.bindings.push_back(binding);
 
     // Every module-level name is taken, so no local can hide a type, a binding or a builtin an emitter writes.
     auto const taken = module_names();
@@ -1361,7 +1366,11 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         legalized.value().options = f.entry.options;
         f.entry.legalized = cc::make_shared<flat_entry_point const>(cc::move(legalized.value()));
     }
-    out.entry_points.push_back(cc::move(f.entry));
+    // CHK-527: the prelude's own entry points are no program's, and only a polyfill compiles them, by name
+    if (is_internal(id))
+        out.internal_entry_points.push_back(cc::move(f.entry));
+    else
+        out.entry_points.push_back(cc::move(f.entry));
 }
 
 void checker::flatten_metal_traversals()

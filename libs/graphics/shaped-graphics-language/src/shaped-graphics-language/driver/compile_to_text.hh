@@ -59,8 +59,12 @@ struct sgl::text_request
     /// A mesh or geometry entry point as one half of its polyfill (CHK-524, CHK-525), which
     /// `emitted_source::mesh_layout` then describes.
     emit::mesh_form mesh = emit::mesh_form::native;
-    /// The vertex stage a geometry entry point's compute half runs on each corner (CHK-525): its pipeline's.
+    /// The vertex stage a geometry or tessellation control entry point's compute half runs (CHK-525, CHK-527): its
+    /// pipeline's.
     cc::string_view polyfill_vertex;
+    /// The tessellation control stage before a tessellation evaluation entry point whose compute half is asked for
+    /// (CHK-527): its pipeline's.
+    cc::string_view polyfill_control;
     /// The task stage that launches a mesh entry point whose compute half or scan is asked for (CHK-524): its
     /// pipeline's, where it has one.
     cc::string_view polyfill_task;
@@ -164,6 +168,9 @@ struct sgl::emitted_source
     /// The records a polyfilled task stage's forms agree on (CHK-524): the task entry point's compute form, and a mesh
     /// entry point's compute half and scan where `text_request::polyfill_task` named the task; empty otherwise.
     cc::optional<check::task_polyfill_layout> task_layout;
+    /// What a polyfilled tessellation's forms agree on (CHK-527): the control stage's compute half, and the evaluation
+    /// stage's compute and vertex halves; empty otherwise.
+    cc::optional<check::tessellation_polyfill_layout> tessellation_layout;
     /// The names of the library files the source reached through `use`, which an edit of any of them changes the text of.
     cc::vector<cc::string> library_files;
     /// One entry per warning, `cube.sgl:12:5: warning: no-effect: ...` and its notes on the lines under it.

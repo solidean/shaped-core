@@ -3645,6 +3645,30 @@
     words: buffer[uint]
 
 
+@internal binding sg_tessellation_draw:
+    values: buffer[uint4]
+
+
+@internal binding sg_tessellation_patches:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_controls:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_points:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_indices:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_args:
+    words: mut buffer[uint]
+
+
 @internal binding sg_task_output:
     words: mut buffer[uint]
 

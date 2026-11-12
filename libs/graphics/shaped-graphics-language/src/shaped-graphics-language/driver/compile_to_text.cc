@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/driver/impl/describe_binding.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
+#include <shaped-graphics-language/legalize/impl/polyfill.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 #include <shaped-graphics-language/test/run_tests.hh>
 
@@ -152,7 +153,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  bool native_line_table = false,
                                                  emit::mesh_form mesh = emit::mesh_form::native,
                                                  check::flat_entry_point const* polyfill_vertex = nullptr,
-                                                 check::flat_entry_point const* polyfill_task = nullptr)
+                                                 check::flat_entry_point const* polyfill_task = nullptr,
+                                                 check::flat_entry_point const* polyfill_control = nullptr)
 {
     // CHK-524: a polyfilled mesh stage that writes values per primitive hands them on in one struct beside its vertex's,
     // which its vertex half returns and its pixel stage takes, and which a copy of the module holds
@@ -188,6 +190,60 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                        .lowers_asserts = diagnostics};
             auto made = check::geometry_as_compute(m, check::legalize(m, *polyfill_vertex, graft),
                                                    check::legalize(m, e, graft));
+            if (made.has_error())
+                return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
+            fused = cc::move(made.value());
+        }
+    }
+    // CHK-527: a polyfilled tessellation's control stage runs with its pipeline's vertex stage, and its evaluation stage
+    // reads what the control stage wrote; both are grafted as the geometry stage is
+    auto tessellation_layout = cc::optional<check::tessellation_polyfill_layout>();
+    auto const is_tessellation
+        = e.entry_stage == check::stage::tessellation_control || e.entry_stage == check::stage::tessellation_evaluation;
+    if (mesh != emit::mesh_form::native && is_tessellation)
+    {
+        auto const* const control = e.entry_stage == check::stage::tessellation_control ? &e : polyfill_control;
+        // the evaluation stage's vertex half reads its points back alone, and needs no control stage
+        if (control == nullptr && mesh == emit::mesh_form::vertex_fetch)
+        {
+            auto const leaves = check::impl::leaves_of(m, e.result);
+            if (leaves.has_error())
+                return cc::error(cc::format("{}: error: unsupported: {}'s result holds a '{}', which no word holds\n",
+                                            source_name, e.name, leaves.error()));
+            tessellation_layout = check::tessellation_polyfill_layout{.vertex_words = i32(leaves.value().size())};
+        }
+        else if (control == nullptr)
+            return cc::error(cc::format("{}: error: the polyfilled tessellation evaluation entry point '{}' reads what "
+                                        "its pipeline's control stage wrote, and none was named\n",
+                                        source_name, e.name));
+        else
+        {
+            auto const* const evaluation = e.entry_stage == check::stage::tessellation_evaluation ? &e : nullptr;
+            auto const layout = check::tessellation_polyfill_layout_of(m, *control, evaluation);
+            if (layout.has_error())
+                return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, layout.error()));
+            tessellation_layout = layout.value();
+        }
+        auto const graft = check::legalize_options{.is_emulated = target == emit::target::wgsl || asks_software_trace,
+                                                   .lowers_asserts = diagnostics};
+        if (mesh == emit::mesh_form::compute && e.entry_stage == check::stage::tessellation_control)
+        {
+            if (polyfill_vertex == nullptr)
+                return cc::error(cc::format("{}: error: the compute half of tessellation control entry point '{}' "
+                                            "runs its pipeline's vertex stage, and none was named\n",
+                                            source_name, e.name));
+            auto made = check::tessellation_as_compute(m, check::legalize(m, *polyfill_vertex, graft),
+                                                       check::legalize(m, e, graft));
+            if (made.has_error())
+                return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
+            fused = cc::move(made.value());
+        }
+        else if (mesh == emit::mesh_form::compute)
+        {
+            CC_ASSERT(control != nullptr, "an evaluation stage's compute half was refused above without its control "
+                                          "stage");
+            auto made = check::tessellation_evaluation_as_compute(m, check::legalize(m, *control, graft),
+                                                                  check::legalize(m, e, graft));
             if (made.has_error())
                 return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
             fused = cc::move(made.value());
@@ -242,6 +298,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     auto form = legal;
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::geometry)
         form = check::geometry_as_vertex_fetch(m, legal);
+    if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::tessellation_evaluation)
+        form = check::tessellation_as_vertex_fetch(m, legal);
     // CHK-524: the records a polyfilled task stage writes, which its compute form and a launched mesh stage's agree on
     auto task_layout = cc::optional<check::task_polyfill_layout>();
     if (mesh != emit::mesh_form::native && (legal.entry_stage == check::stage::task || polyfill_task != nullptr))
@@ -299,14 +357,17 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         .bindings = interface_of(m, form, emitted.bound_names),
         .color_targets = emitted.color_targets,
         .target_struct = cc::move(emitted.target_struct),
-        .features = mesh_layout.has_value() || task_layout.has_value() ? form.features : entry.features,
+        .features = mesh_layout.has_value() || task_layout.has_value() || tessellation_layout.has_value()
+                      ? form.features
+                      : entry.features,
         .options = driver::impl::option_names_of(m, e),
         .footprint = check::footprint_of(m, form),
         .layouts = cc::move(emitted.layouts),
         .lines = cc::move(emitted.lines),
         .debug_sites = cc::move(emitted.debug_sites),
         .mesh_layout = mesh_layout,
-        .task_layout = task_layout};
+        .task_layout = task_layout,
+        .tessellation_layout = tessellation_layout};
     for (auto const name : names)
         result.line_files.push_back(cc::string(name));
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
@@ -364,12 +425,17 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
             return cc::error(cc::move(failed));
     }
 
-    auto index = isize(-1);
-    for (auto i = isize(0); i < m.entry_points.size(); ++i)
-        if (m.entry_points[i].name == request.entry_point)
-            index = i;
+    auto const* found = static_cast<check::flat_entry_point const*>(nullptr);
+    for (auto const& candidate : m.entry_points)
+        if (candidate.name == request.entry_point)
+            found = &candidate;
+    // CHK-527: a polyfill's own pass, which the prelude declares and no program lists
+    if (found == nullptr)
+        for (auto i = isize(0); i < m.internal_entry_points.size(); ++i)
+            if (m.internal_entry_points[i].name == request.entry_point)
+                found = &m.internal_entry_points[i];
 
-    if (index < 0)
+    if (found == nullptr)
     {
         // CHK-402: an entry point whose own body did not check has no flat tree, and its errors say why
         for (auto i = isize(0); i < m.symbols.size(); ++i)
@@ -384,7 +450,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
                                     request.entry_point, held.empty() ? cc::string_view("none") : cc::string_view(held)));
     }
 
-    auto const& e = m.entry_points[index];
+    auto const& e = *found;
     if (request.stage != check::stage::none && e.entry_stage != request.stage)
         return cc::error(cc::format("{}: error: entry point '{}' is a {} entry point, and a {} one was asked for\n",
                                     request.source_name, e.name, check::stage_name(e.entry_stage),
@@ -414,10 +480,21 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
             return cc::error(
                 cc::format("{}: error: no task entry point named '{}'\n", request.source_name, request.polyfill_task));
     }
+    // CHK-527: the control stage a polyfilled tessellation evaluation stage reads the patches of
+    auto const* polyfill_control = static_cast<check::flat_entry_point const*>(nullptr);
+    if (!request.polyfill_control.empty())
+    {
+        for (auto const& c : m.entry_points)
+            if (c.name == request.polyfill_control && c.entry_stage == check::stage::tessellation_control)
+                polyfill_control = &c;
+        if (polyfill_control == nullptr)
+            return cc::error(cc::format("{}: error: no tessellation control entry point named '{}'\n",
+                                        request.source_name, request.polyfill_control));
+    }
     auto result
         = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.guards_undefined,
                     request.software_trace, request.weakens_float, request.device_features, request.native,
-                    request.native_line_table, request.mesh, polyfill_vertex, polyfill_task);
+                    request.native_line_table, request.mesh, polyfill_vertex, polyfill_task, polyfill_control);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(

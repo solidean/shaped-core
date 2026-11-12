@@ -155,6 +155,62 @@ inline constexpr reserved_binding_address reserved_geometry_vertices[] = {
      .metal_buffer = 27},
 };
 
+/// What a polyfilled tessellation draw is, `uint4[2]`, which its compute passes read (CHK-527).
+/// Metal binds the tessellation entries at slots a kernel leaves free, having no vertex input.
+inline constexpr reserved_binding_address reserved_tessellation_draw = {.name = "sg_tessellation_draw",
+                                                                        .dx12_space = 11,
+                                                                        .dx12_register = 11,
+                                                                        .vulkan_set = 3,
+                                                                        .vulkan_binding = 33,
+                                                                        .webgpu_group = 3,
+                                                                        .webgpu_binding = 33,
+                                                                        .metal_buffer = 10};
+/// A record of 8 words a patch: its factors as the control stage returned them, then its first point and index.
+inline constexpr reserved_binding_address reserved_tessellation_patches = {.name = "sg_tessellation_patches",
+                                                                           .dx12_space = 11,
+                                                                           .dx12_register = 12,
+                                                                           .vulkan_set = 3,
+                                                                           .vulkan_binding = 34,
+                                                                           .webgpu_group = 3,
+                                                                           .webgpu_binding = 34,
+                                                                           .metal_buffer = 11};
+/// Each patch's control points as its vertex stage returned them, which the evaluation pass reads.
+inline constexpr reserved_binding_address reserved_tessellation_controls = {.name = "sg_tessellation_controls",
+                                                                            .dx12_space = 11,
+                                                                            .dx12_register = 13,
+                                                                            .vulkan_set = 3,
+                                                                            .vulkan_binding = 35,
+                                                                            .webgpu_group = 3,
+                                                                            .webgpu_binding = 35,
+                                                                            .metal_buffer = 12};
+/// 3 words a point: u and v in 16.16, and its patch.
+inline constexpr reserved_binding_address reserved_tessellation_points = {.name = "sg_tessellation_points",
+                                                                          .dx12_space = 11,
+                                                                          .dx12_register = 14,
+                                                                          .vulkan_set = 3,
+                                                                          .vulkan_binding = 36,
+                                                                          .webgpu_group = 3,
+                                                                          .webgpu_binding = 36,
+                                                                          .metal_buffer = 13};
+/// The draw's index buffer, each index a point, which the tessellation pass writes.
+inline constexpr reserved_binding_address reserved_tessellation_indices = {.name = "sg_tessellation_indices",
+                                                                           .dx12_space = 11,
+                                                                           .dx12_register = 15,
+                                                                           .vulkan_set = 3,
+                                                                           .vulkan_binding = 37,
+                                                                           .webgpu_group = 3,
+                                                                           .webgpu_binding = 37,
+                                                                           .metal_buffer = 14};
+/// The indexed draw's 5 arguments, then the evaluation pass's 3 workgroup counts, then the points in all.
+inline constexpr reserved_binding_address reserved_tessellation_args = {.name = "sg_tessellation_args",
+                                                                        .dx12_space = 11,
+                                                                        .dx12_register = 16,
+                                                                        .vulkan_set = 3,
+                                                                        .vulkan_binding = 38,
+                                                                        .webgpu_group = 3,
+                                                                        .webgpu_binding = 38,
+                                                                        .metal_buffer = 15};
+
 /// A polyfilled task stage's records, which its compute form and the scan after it write; metal draws every task
 /// stage natively.
 inline constexpr reserved_binding_address reserved_task_output = {.name = "sg_task_output",
@@ -174,14 +230,17 @@ inline constexpr reserved_binding_address reserved_task_input = {.name = "sg_tas
                                                                  .webgpu_binding = 32};
 
 inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window,         reserved_acceleration_pool,
-       reserved_acceleration_roots,   reserved_array_lengths,
-       reserved_dispatch_grid,        reserved_acceleration_addresses,
-       reserved_mesh_output,          reserved_mesh_input,
-       reserved_geometry_draw,        reserved_geometry_indices,
-       reserved_geometry_vertices[0], reserved_geometry_vertices[1],
-       reserved_geometry_vertices[2], reserved_geometry_vertices[3],
-       reserved_task_output,          reserved_task_input};
+    = {reserved_debug_window,          reserved_acceleration_pool,
+       reserved_acceleration_roots,    reserved_array_lengths,
+       reserved_dispatch_grid,         reserved_acceleration_addresses,
+       reserved_mesh_output,           reserved_mesh_input,
+       reserved_geometry_draw,         reserved_geometry_indices,
+       reserved_geometry_vertices[0],  reserved_geometry_vertices[1],
+       reserved_geometry_vertices[2],  reserved_geometry_vertices[3],
+       reserved_tessellation_draw,     reserved_tessellation_patches,
+       reserved_tessellation_controls, reserved_tessellation_points,
+       reserved_tessellation_indices,  reserved_tessellation_args,
+       reserved_task_output,           reserved_task_input};
 
 namespace impl
 {

@@ -75,6 +75,31 @@ struct sgl::check::mesh_polyfill_layout
     bool operator==(mesh_polyfill_layout const&) const = default;
 };
 
+/// How a pipeline's polyfilled tessellation stages lie in sg's buffers (CHK-527).
+/// Patch `t` of every instance's patches owns `patch_words()` words of `sg_tessellation_controls` from `t * patch_words()`:
+/// its control points as the vertex stage returned them, then the factors struct as the control stage did, a word a
+/// scalar leaf each, in field order.
+/// Its record of `sg_tessellation_patches` is 8 words: the tessellator's 6 factors as floats, then its first point and
+/// index, and each point it makes is `vertex_words` words of `sg_mesh_output`.
+struct sgl::check::tessellation_polyfill_layout
+{
+    /// 3 for triangles, 4 for quads, 2 for isolines.
+    i32 domain = 3;
+    i32 control_points = 0;
+    i32 control_words = 0;
+    i32 factor_words = 0;
+    /// What the evaluation stage returns; 0 where the layout was made from the control stage alone.
+    i32 vertex_words = 0;
+    /// As `prelude/tessellation.sgl` numbers them: 0 integer, 1 fractional even, 2 fractional odd.
+    i32 partitioning = 0;
+    /// As D3D's output topologies, which the tessellator writes: 0 `triangle_cw`, 1 `triangle_ccw`, 2 lines.
+    i32 output = 0;
+
+    [[nodiscard]] i32 patch_words() const { return control_points * control_words + factor_words; }
+
+    bool operator==(tessellation_polyfill_layout const&) const = default;
+};
+
 /// The words of `sg_task_output` a polyfilled task stage's draw takes (CHK-524), behind a header of
 /// `k_first_record_word` words: the task workgroups, the mesh workgroups launched, the mesh pass's dispatch arguments
 /// and the draw's arguments.
@@ -193,6 +218,31 @@ inline constexpr i32 k_geometry_polyfill_workgroup = 64;
 /// The vertex entry point that draws what `geometry_as_compute` wrote: `mesh_as_vertex_fetch`'s, over `g`'s layout.
 /// `g` must have a layout.
 [[nodiscard]] flat_entry_point geometry_as_vertex_fetch(checked_module const& m, flat_entry_point const& g);
+
+/// The threads of a workgroup of a polyfilled tessellation's compute passes (CHK-527).
+inline constexpr i32 k_tessellation_polyfill_workgroup = 64;
+
+/// The layout a tessellation control entry point `tc` and the evaluation entry point `te` after it polyfill into, or
+/// why they have none yet; `te` may be null, which leaves `vertex_words` 0.
+[[nodiscard]] cc::result<tessellation_polyfill_layout, cc::string>
+tessellation_polyfill_layout_of(checked_module const& m, flat_entry_point const& tc, flat_entry_point const* te);
+
+/// The vertex stage `v` and the tessellation control stage `tc` as one compute entry point: a thread a patch of every
+/// instance runs `v` on each control point and `tc` on the patch, and writes both into the patch's words, and the
+/// tessellator's factors into its record (CHK-527).
+[[nodiscard]] cc::result<flat_entry_point, cc::string> tessellation_as_compute(checked_module const& m,
+                                                                               flat_entry_point const& v,
+                                                                               flat_entry_point const& tc);
+
+/// The tessellation evaluation stage `te` as a compute entry point: a thread a point the tessellator made runs `te` at
+/// its domain location, and writes the result into the point's words of `sg_mesh_output` (CHK-527).
+/// `tc` is the control stage before it, whose layout says where the patch lies.
+[[nodiscard]] cc::result<flat_entry_point, cc::string> tessellation_evaluation_as_compute(checked_module const& m,
+                                                                                          flat_entry_point const& tc,
+                                                                                          flat_entry_point const& te);
+
+/// The vertex entry point a polyfilled tessellation draws with: vertex `i` is point `i`, as `te`'s compute form wrote it.
+[[nodiscard]] flat_entry_point tessellation_as_vertex_fetch(checked_module const& m, flat_entry_point const& te);
 
 /// A mesh entry point `e` as the compute entry point that writes its workgroup's slots of `sg_mesh_output` instead of
 /// handing them to the rasterizer; its grid is the one sg writes into `sg_dispatch_grid`.
