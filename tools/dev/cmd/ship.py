@@ -190,6 +190,14 @@ def _prover(ctx: Context, flag: bool | None) -> build_server.Session | None:
 def _prove(ctx: Context, server: build_server.Session) -> bool | None:
     """The server's proof of the default preset's build: whether it holds, or None when the full gate has to run instead."""
     preset = ctx.resolve_presets([ctx.default_preset_name()])[0]
+    # Built here first, in the build environment and through the server: the proof's own build runs in the tests'
+    # environment, which its results are keyed on, and a tool such as rc.exe cannot build in that one.
+    # `all` and every test binary, as the proof builds them, since a project may leave one out of `all`.
+    targets = ["all", *(t.name for t in ctx.discover(preset) if ctx.is_test_target(t))]
+    results = dev.build([preset], targets, root=ctx.root, auto_configure=True, server=server)
+    if not all(r.ok for r in results):
+        dev.report.print_build_failure(results, [preset], ctx.root)
+        return False
     proof = server.proof(preset.build_dir, env=pipeline_test.server_env(preset, ctx.root),
                          progress=lambda line: dev.ui.write_line(console.dim(f"  {line}")))
     if proof is None:
