@@ -90,7 +90,8 @@ ASYNC_BENCHMARK("sg geometry polyfill - a frame through a geometry stage, by the
                                                                .width = size,
                                                                .height = size,
                                                                .usage = sg::texture_usage::render_target});
-        auto const triangles = ctx->persistent.create_buffer_from_data(corners_of(false), sg::buffer_usage::vertex_buffer);
+        auto const triangles
+            = ctx->persistent.create_buffer_from_data(corners_of(false), sg::buffer_usage::vertex_buffer);
         auto const points = ctx->persistent.create_buffer_from_data(corners_of(true), sg::buffer_usage::vertex_buffer);
         auto const use_before = ctx->geometry_polyfill();
         auto const route_before = ctx->geometry_polyfill_route();
@@ -100,15 +101,14 @@ ASYNC_BENCHMARK("sg geometry polyfill - a frame through a geometry stage, by the
                 for (auto const route : {sg::geometry_polyfill_route::compute, sg::geometry_polyfill_route::mesh})
                 {
                     ctx->set_geometry_polyfill_route(route);
-                    auto const pipeline
-                        = is_points ? co_await ctx->cached.acquire_raster_pipeline(
-                                          sg::test::sgl_shaders::geometry_bench::billboards)
-                                    : co_await ctx->cached.acquire_raster_pipeline(
-                                          sg::test::sgl_shaders::geometry_bench::passed_on);
+                    auto const pipeline = is_points ? co_await ctx->cached.acquire_raster_pipeline(
+                                                          sg::test::sgl_shaders::geometry_bench::billboards)
+                                                    : co_await ctx->cached.acquire_raster_pipeline(
+                                                          sg::test::sgl_shaders::geometry_bench::passed_on);
                     auto const* const corners = is_points ? &points : &triangles;
                     (void)co_await nx::bench::run_async(
-                        cc::format("{} {}, {} draw{}, {} route", factory.backend, is_points ? "billboards" : "passed on",
-                                   draws, draws == 1 ? "" : "s",
+                        cc::format("{} {}, {} draw{}, {} route", factory.backend,
+                                   is_points ? "billboards" : "passed on", draws, draws == 1 ? "" : "s",
                                    route == sg::geometry_polyfill_route::mesh ? "mesh" : "compute"),
                         [&] { return render_frames(ctx, pipeline, corners, &target, draws); });
                 }
