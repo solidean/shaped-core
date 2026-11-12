@@ -180,8 +180,8 @@
   "dxil": 56
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::begin": {
-  "spirv": 526,
-  "dxil": 633
+  "spirv": 555,
+  "dxil": 650
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::connect": {
   "spirv": 1410,
@@ -212,7 +212,7 @@
   "dxil": 40
  },
  "libs/graphics/shaped-viewer/tests/data/pbr_shade_kernel.sgl::sv_shade": {
-  "spirv": 7017,
-  "dxil": 6193
+  "spirv": 7249,
+  "dxil": 6442
  }
 }
