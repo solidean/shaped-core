@@ -227,6 +227,9 @@ public:
         sg::partitioned_tlas_description const& desc) override;
     [[nodiscard]] u64 blas_address_of(sg::blas const& blas) const override;
     [[nodiscard]] u64 buffer_address_of(sg::raw_buffer const& buffer) const override;
+    /// Sizes and allocates a cluster pool through the preview runtime; refused on any other.
+    [[nodiscard]] cc::result<sg::cluster_pool_handle> try_create_cluster_pool(
+        sg::cluster_pool_description const& desc) override;
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
@@ -319,8 +322,8 @@ public:
             // the preview runtime's, which reports it for clusters and partitioned tlas together
             return _clusters_and_ptlas;
         case sg::feature::clustered_geometry:
-            // the preview runtime reports it too, but no dx12 cluster build exists yet (feat-sg-dx12-clusters)
-            return false;
+            // the preview runtime's, reported with the partitioned tlas under one cap
+            return _clusters_and_ptlas;
         }
         return false;
     }

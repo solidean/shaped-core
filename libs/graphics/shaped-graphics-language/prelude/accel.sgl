@@ -33,7 +33,7 @@ struct clas_triangles:
         @bits(4) micromap_index_format: uint = 0u
         @bits(24) geometry_index: uint = 0u
         @bits(5) geometry_reserved: uint = 0u
-        /// `geometry_opaque()` where no any-hit runs for the cluster's triangles.
+        /// `geometry_opaque` where no any-hit runs for the cluster's triangles.
         @bits(3) geometry_flags: uint = 0u
         @bits(16) index_stride: uint = 4u
         @bits(16) vertex_stride: uint = 12u
@@ -82,12 +82,10 @@ fun buffer_ref.offset(self, bytes: uint) -> buffer_ref:
 fun no_buffer() -> buffer_ref => buffer_ref(uint2(0u, 0u))
 
 /// `clas_triangles.geometry_flags`: no any-hit runs for the cluster's triangles.
-/// Vulkan's cluster flag and D3D12's geometry flag; the D3D12 bit positions are unverified until dx12 builds one.
-fun geometry_opaque() -> uint:
-    const if target_api == .vulkan:
-        return 0x4
-    else:
-        return 0x1
+/// The top bit of the word on both APIs: Vulkan's cluster flag, and D3D12's `CLUSTERED_GEOMETRY_FLAG_OPAQUE`.
+const geometry_opaque: uint = 0x4
+/// `clas_triangles.geometry_flags`: an any-hit runs at most once for a triangle, bit 30 of the word on both APIs.
+const geometry_no_duplicate_any_hit: uint = 0x2
 
 /// Writes one instance of a partitioned TLAS: what it places, where, and into which partition.
 /// Built by name, `accel.ptlas_write(index = i, blas = b)`, every field but those two having a default.

@@ -385,6 +385,10 @@ private:
                 rest = end < rest.size() ? rest.subview(end + 1) : cc::string_view();
             }
         }
+        // A hit's cluster needs Shader Model 6.10 on dx12, which the pinned DXC lacks and SGL's DXIL refuses, so a dx12
+        // compile reads -1 for it until the preview DXC is pinned (the plan's D8), rather than failing every trace.
+        if (is_dxil)
+            device_features.remove(sgl::check::feature::clustered_geometry);
         auto const library = slib::impl::sgl_library_of(desc.modules);
         auto text = sgl::compile_to_text(
             {.source = desc.source,
