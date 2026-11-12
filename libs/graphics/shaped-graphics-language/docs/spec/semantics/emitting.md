@@ -212,6 +212,7 @@ const light_kind_sun: i32 = 2;
   * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
   * a control stage is a passthrough hull function that returns `patch[point_index]`, named by its `domain`, `partitioning`, `outputtopology`, `outputcontrolpoints` and `patchconstantfunc`;
   * the SGL body is that patch-constant function, `<name>_patch`, taking the `InputPatch`;
+  * a stated `max_factor` (CHK-304) is `[maxtessfactor(N)]`, and every return of the body caps each factor at it;
   * an evaluation stage is `[domain(…)]` over the function, taking the `const OutputPatch`, the patch constants, and `SV_DomainLocation`;
   * in patch constants, `@edge_factors` is `SV_TessFactor` and `@inside_factors` `SV_InsideTessFactor`;
   * the other members of patch constants take the locations after those the control point's members and pieces take, so vulkan's two never collide.

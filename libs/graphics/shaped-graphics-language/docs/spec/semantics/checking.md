@@ -1379,9 +1379,12 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   A triangle patch evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z` of counter-clockwise corners is `.counter_clockwise`.
   So is a quad patch of corners counter-clockwise from its first, blended by `uv.x` from the first to the second and by `uv.y` from that edge to the opposite one.
   Power-of-two partitioning is none of them, since vulkan lacks it.
+  `max_factor = N` may follow, an integer from 1 to 64, and 64 where it is absent: every factor the stage returns above `N` is `N`, on every target.
+  A NaN factor is no factor above `N`, and reaches the tessellator as it is.
+  A polyfilled draw holds room for each patch cut at `N` (CHK-527), so a smaller `N` is less scratch memory.
   Its first parameter is the patch: an array of from 1 to 32 of the struct the vertex stage returns.
   Stage inputs follow it, and it returns a **factors struct**; no other parameter stands.
-  A repeated argument is `invalid-attribute-arguments`.
+  A repeated argument, and a `max_factor` that is no such integer, is `invalid-attribute-arguments`.
 * **CHK-305** A factors struct has exactly one `@edge_factors` member, `float[2]`, `float[3]` or `float[4]`, which makes its domain isolines, triangles or quads.
   It has one `@inside_factors` member, `float` for triangles and `float[2]` for quads, and none for isolines; any other member reaches the evaluation stage as it is.
 * **CHK-306** `@tessellation_evaluation` makes an entry point of the tessellation evaluation stage, which needs `tessellation_shader`.

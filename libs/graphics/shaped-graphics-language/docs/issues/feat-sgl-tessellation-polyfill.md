@@ -35,11 +35,13 @@ Measured against dx12's native tessellation on the same patches.
 - 2026-11-12: the control and evaluation stages' compute halves, the vertex half, and the prelude's count, scan and generate passes, which the prelude holds as internal entry points no program lists.
   sg, slib and metal draw it: metal's `sg - a tessellated triangle patch …` and `… quad patch …` tests pass through the polyfill, opt-in by `ctx.set_tessellation_polyfill`.
   Found on the way: slib stated no workgroup size for a compute form of a stage declared otherwise, so metal ran one thread a group; the geometry polyfill had the same flaw unseen.
+- 2026-11-12: `@tessellation_control(…, max_factor = N)`, CHK-304; its patches' scratch is sized by it, through slib's emit cache.
+  It caps every factor the stage returns, natively too: every return caps each factor, and HLSL states `[maxtessfactor(N)]`.
+  So the evaluation stage reads the same factors on every target, which `sg - a control stage's max_factor …` checks on metal through the polyfill.
 
 ## Still open
 
 - dx12 and vulkan: the layout twins that hold the six `sg_tessellation_*` entries, the draw, and the benchmark against their native stages that decides `where_missing`; on Windows.
 - webgpu: the control pass reads nine storage buffers with the debug window, over WebGPU's default of eight a stage.
-- `max_factor` as a control stage's attribute; every pipeline holds room for 64 now, which a draw of many patches pays for in memory.
 - The scan is one invocation, and the tessellator one thread a patch, 8192 triangles at factor 64 on a quad; a thread a point and a triangle is the faster form, once measured.
 - An indexed draw's `vertex_index` in the vertex stage is the index read, as the geometry polyfill takes it; unchecked against D3D.

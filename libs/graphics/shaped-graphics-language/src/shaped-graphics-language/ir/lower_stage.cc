@@ -391,6 +391,7 @@ void lowering::describe_primitive_stage()
                               : tessellation_domain::quad;
     shape.partitioning = info.partitioning;
     shape.is_output_clockwise = !info.is_clockwise;
+    shape.max_factor = u32(info.max_factor);
     if (_e.entry_stage == stage::tessellation_control)
     {
         shape.body_name_first = add_name(_plan.patch_function);

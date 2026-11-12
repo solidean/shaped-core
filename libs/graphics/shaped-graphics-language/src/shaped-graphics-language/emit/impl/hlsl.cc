@@ -688,6 +688,8 @@ public:
         out.appendf("[partitioning(\"{}\")]\n", partitionings[isize(info.partitioning)]);
         out.appendf("[outputtopology(\"{}\")]\n", topology);
         out.appendf("[outputcontrolpoints({})]\n", patch.count);
+        if (info.max_factor < check::k_max_tessellation_factor)
+            out.appendf("[maxtessfactor({}.0)]\n", info.max_factor);
         out.appendf("[patchconstantfunc(\"{}\")]\n", p.patch_function);
         out.appendf("{} {}(InputPatch<{}, {}> {}, uint {} : SV_OutputControlPointID)\n{{\n", point, p.entry_name, point,
                     patch.count, p.locals[0], p.point_index);

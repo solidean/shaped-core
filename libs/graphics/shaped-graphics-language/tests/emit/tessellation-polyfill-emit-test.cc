@@ -45,7 +45,7 @@ fun tri_te(patch: control_point[3], f: tri_factors, @domain_location uvw: float3
     let p = patch[0].position * uvw.x + patch[1].position * uvw.y + patch[2].position * uvw.z
     return {position = hpos4(p.x, p.y, 0.5, 1.0), color = float4(uvw.x, uvw.y, uvw.z, f.inside)}
 
-@tessellation_control(partitioning = .integer, winding = .counter_clockwise)
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise, max_factor = 6)
 fun quad_tc(patch: control_point[4]) -> quad_factors:
     return {edges = [3.0, 3.0, 3.0, 3.0], inside = [3.0, 3.0], scale = 2.0}
 
@@ -109,6 +109,26 @@ TEST("sgl emit - a polyfilled tessellation's halves agree on a patch's words (CH
     CHECK(l.domain == 4);
     CHECK(l.factor_words == 4 + 2 + 1);
     CHECK(l.output == 0);
+    CHECK(l.max_factor == 6);
+    // a control stage that states no `max_factor` holds room for D3D's largest
+    CHECK(half_of("tri_tc", target::msl, mesh_form::compute, "corner_vs").value().tessellation_layout.value().max_factor
+          == 64);
+}
+
+TEST("sgl emit - a control stage's `max_factor` caps the factors it returns, natively and polyfilled (CHK-304)")
+{
+    // natively, every return caps each factor, and HLSL promises the cap to D3D
+    auto const hlsl = half_of("quad_tc", target::hlsl_dx12, mesh_form::native);
+    REQUIRE(hlsl.has_value()).dump("error", hlsl.has_error() ? hlsl.error() : cc::string());
+    CHECK(hlsl.value().text.contains("[maxtessfactor(6.0)]")).dump("text", hlsl.value().text);
+    CHECK(hlsl.value().text.contains("> 6.0")).dump("text", hlsl.value().text);
+    auto const uncapped = half_of("tri_tc", target::hlsl_dx12, mesh_form::native);
+    REQUIRE(uncapped.has_value()).dump("error", uncapped.has_error() ? uncapped.error() : cc::string());
+    CHECK(!uncapped.value().text.contains("maxtessfactor")).dump("text", uncapped.value().text);
+    // the polyfill's control pass stores the capped factors the evaluation stage reads back
+    auto const polyfilled = half_of("quad_tc", target::msl, mesh_form::compute, "corner_vs");
+    REQUIRE(polyfilled.has_value()).dump("error", polyfilled.has_error() ? polyfilled.error() : cc::string());
+    CHECK(polyfilled.value().text.contains("> 6.0")).dump("text", polyfilled.value().text);
 }
 
 TEST("sgl emit - a polyfilled tessellation's compute halves bind sg's buffers at their reserved places (CHK-527)")
