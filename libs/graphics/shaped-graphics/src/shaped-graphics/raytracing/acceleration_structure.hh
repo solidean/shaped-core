@@ -250,6 +250,9 @@ public:
     /// Whether the build took triangles or AABBs.
     [[nodiscard]] blas_geometry geometry() const { return _geometry; }
 
+    /// Whether this is a cluster BLAS whose pool was rebuilt since, so the clusters it lists are gone.
+    [[nodiscard]] bool is_stale() const;
+
     /// The shader-table records one geometry of this BLAS takes, as build_blas was given it.
     /// It is the ray count of the pipelines that trace it, and only metal bakes it into the structure.
     [[nodiscard]] int hit_record_stride() const { return _hit_record_stride; }
@@ -300,6 +303,7 @@ private:
     int _hit_record_stride = 1;
     cc::vector<micromap_handle> _micromaps; // the ownership edge: keeps every micromap a geometry named alive
     cluster_set_handle _clusters;           // the ownership edge of a cluster BLAS: keeps the clusters it lists alive
+    u64 _cluster_generation = 0;            // the generation of `_clusters` the BLAS was built from
 };
 
 /// A top-level acceleration structure: an opaque index over a set of instances, each placing a blas with a transform.

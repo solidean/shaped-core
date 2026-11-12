@@ -1,4 +1,5 @@
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
+#include <shaped-graphics/raytracing/clusters.hh>
 #include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 namespace sg
@@ -102,7 +103,19 @@ void impl::set_instance_records(tlas const& tlas, cc::vector<tlas_instance_recor
 
 void impl::set_clusters(blas const& blas, cluster_set_handle clusters)
 {
-    const_cast<sg::blas&>(blas)._clusters = cc::move(clusters);
+    auto& b = const_cast<sg::blas&>(blas);
+    b._cluster_generation = clusters != nullptr ? clusters->generation() : 0;
+    b._clusters = cc::move(clusters);
+}
+
+bool blas::is_stale() const
+{
+    return _clusters != nullptr && _clusters->generation() != _cluster_generation;
+}
+
+u64 impl::bump_generation(cluster_pool const& pool)
+{
+    return pool._generation.fetch_add(1, std::memory_order_acq_rel) + 1;
 }
 
 void impl::clear_instance_records(tlas const& tlas)

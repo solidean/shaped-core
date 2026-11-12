@@ -209,7 +209,10 @@ Retail `1.620.1` stays the default Agility pin, so a default build and test run 
      A CLAS address exists only on the GPU, in the pool's address array, so a described cluster BLAS names a contiguous range of the pool's clusters.
      SGL's `cluster_id` is a field of a hit and a candidate, -1 outside a cluster; it reads `ClusterIDNV` in SGL's own SPIR-V and through inline SPIR-V on the HLSL route (SGL's EMIT-260).
      The prelude reads it only where the device has the feature, so no other device's shader needs the capability.
-   - (b) the GPU-written CLAS tier, over `accel.clas_triangles` once SGL places `@bits` and `@absent` fields.
+   - (b) (built on vulkan) the GPU-written CLAS tier: SGL's `@bits` and `@absent` (CHK-526) lay out `accel.clas_triangles`, and `build_clusters_indirect` rebuilds a `cluster_pool` in place.
+     A record's buffers are a `buffer_table`'s addresses, the input set D3 asks for; a pool's generation makes each BLAS built from it before a rebuild stale.
+     A shader builds a record whole, since a packed or absent field is never read or written alone yet.
+     The cluster BLAS over a pool is still described; a GPU-written cluster BLAS, whose addresses only the GPU knows, waits for a consumer.
    - (c) dx12's half, compiled in the `--agility-preview` build; its HLSL `cluster_id` waits for the preview DXC pin of D8.
 5. **Templates and moves**, once a consumer needs them: instantiation, and moves as the only way to compact cluster memory.
 

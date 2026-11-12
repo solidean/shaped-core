@@ -252,6 +252,8 @@ protected:
     // Reached only where the context reports sg::feature::clustered_geometry, after the scope validated the inputs.
     [[nodiscard]] virtual cluster_set_handle raytracing_build_clusters(cc::span<cluster_triangles const> clusters,
                                                                        accel_build_flags flags);
+    // `stride` is the backend's own record, which the scope does not know; the pool was bumped already.
+    virtual void raytracing_build_clusters_indirect(cluster_pool const& pool, cluster_indirect_build const& build);
     [[nodiscard]] virtual cc::vector<blas_handle> raytracing_build_cluster_blas(cluster_set_handle const& clusters,
                                                                                 cc::span<cluster_range const> ranges,
                                                                                 accel_build_flags flags,

@@ -134,7 +134,7 @@ Only a package's own HLSL still reads the descriptor, where a partitioned tlas w
 - **The records are SGL's `accel` module's**, which a shader writes by field name: `accel.ptlas_write`, `accel.ptlas_update` and `accel.ptlas_translation`.
   Each backend lays them out natively, so nothing translates them before the build.
 - **The shader writes the records and bumps a count; sg writes the operation array** and copies each count into it, so no shader writes an operation.
-  `ptlas_indirect_records` names a buffer of records, its `max_count`, and where the count is; a count past `max_count` is a caller bug.
+  `indirect_records` names a buffer of records, its `max_count`, and where the count is; a count past `max_count` is a caller bug.
 - **A record names a BLAS by an address only a `blas_table` hands out**: `ctx.persistent.create_blas_table(blases)` holds them, and a shader binds `table->view()` as `buffer[accel.blas_ref]`.
   An update's `tables` are every table a record may name afterwards, which the structure holds in place of the earlier update's.
 - **`accel.ptlas_write` is opaque on the host**: `sg::gpu_ptlas_write` sizes a buffer of them, since only a shader fills one.
@@ -149,6 +149,13 @@ Only a package's own HLSL still reads the descriptor, where a partitioned tlas w
   A range is contiguous because a cluster's address exists only on the GPU, in the set's address array, which the BLAS build reads in place.
 - **A cluster BLAS is a blas like any other**: a tlas or a partitioned tlas places it, and a trace meets its triangles.
   A hit's `cluster_id` in SGL is the cluster's `cluster_id`, and its `primitive_index` the triangle's within the cluster.
+
+**A `cluster_pool` is the GPU-written tier**: `cmd.raytracing.build_clusters_indirect` replaces its clusters in place, from `accel.clas_triangles` records a shader wrote.
+- **A record names its buffers by address**, which only a `buffer_table` hands out: `ctx.persistent.create_buffer_table(buffers)`, bound as `buffer[accel.buffer_ref]`.
+  The build names the tables, so their buffers are what it declares it reads.
+- **A pool has a generation, which each build bumps**, and a cluster BLAS records the one it was built from.
+  A stale one, `blas.is_stale()`, lists clusters that are gone: a tlas or a partitioned tlas build asserts on it, and a structure built from it earlier must not be traced after the rebuild.
+- **`accel.clas_triangles` differs in shape per backend**, so its host type `sg::gpu_clas_triangles` is opaque and sized for the larger record; each backend strides by its own.
 - **Requires `sg::feature::clustered_geometry`**, which vulkan grants with `VK_NV_cluster_acceleration_structure`; dx12's waits for the preview runtime, as the partitioned tlas's does.
 
 ## Invariants

@@ -76,6 +76,14 @@ public:
     [[nodiscard]] cluster_set_handle build_clusters(cc::span<cluster_triangles const> clusters,
                                                     accel_build_flags flags = accel_build_flag::fast_trace);
 
+    /// Replaces every cluster of `pool` with those a compute pass wrote as `accel.clas_triangles` records, in place.
+    /// The records and their count carry `buffer_usage::accel_structure_build_input`, which the build reads them as.
+    /// The count must not exceed `build.clusters.max_count`, nor that the pool's capacity, and every record's buffers
+    /// must be addresses of `build.tables`, whose index format is the pool's.
+    /// Every cluster BLAS built from the pool before is stale from then on.
+    /// Requires `sg::feature::clustered_geometry`.
+    void build_clusters_indirect(cluster_pool const& pool, cluster_indirect_build const& build);
+
     /// Builds one BLAS per range, each listing those clusters of `clusters`, and each holding the set.
     /// A range is non-empty and within the set, and ranges may overlap.
     /// A cluster BLAS has `max_geometry_index() + 1` geometries, and `hit_record_stride` is build_blas's.

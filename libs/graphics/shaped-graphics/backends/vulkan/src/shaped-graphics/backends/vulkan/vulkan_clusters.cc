@@ -38,7 +38,140 @@ namespace
     CC_ASSERTF(vk != nullptr, "{} is not a vulkan buffer", what);
     return vk;
 }
+
+/// A pool's limits, as both its sizing and every build into it state them.
+[[nodiscard]] VkClusterAccelerationStructureTriangleClusterInputNV triangle_input_of(sg::cluster_pool_description const& d)
+{
+    return {
+        .sType = VK_STRUCTURE_TYPE_CLUSTER_ACCELERATION_STRUCTURE_TRIANGLE_CLUSTER_INPUT_NV,
+        .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+        .maxGeometryIndexValue = u32(d.max_geometry_index),
+        .maxClusterUniqueGeometryCount = 1,
+        .maxClusterTriangleCount = u32(d.max_triangles_per_cluster),
+        .maxClusterVertexCount = u32(d.max_vertices_per_cluster),
+        .maxTotalTriangleCount = u32(d.max_total_triangles),
+        .maxTotalVertexCount = u32(d.max_total_vertices),
+        .minPositionTruncateBitCount = 0,
+    };
+}
+
+[[nodiscard]] VkClusterAccelerationStructureInputInfoNV pool_input_of(
+    sg::cluster_pool_description const& d,
+    VkClusterAccelerationStructureTriangleClusterInputNV const* triangles)
+{
+    return {
+        .sType = VK_STRUCTURE_TYPE_CLUSTER_ACCELERATION_STRUCTURE_INPUT_INFO_NV,
+        .maxAccelerationStructureCount = u32(d.max_clusters),
+        .flags = build_flags_of(d.flags),
+        .opType = VK_CLUSTER_ACCELERATION_STRUCTURE_OP_TYPE_BUILD_TRIANGLE_CLUSTER_NV,
+        .opMode = VK_CLUSTER_ACCELERATION_STRUCTURE_OP_MODE_IMPLICIT_DESTINATIONS_NV,
+        .opInput = {.pTriangleClusters = const_cast<VkClusterAccelerationStructureTriangleClusterInputNV*>(triangles)},
+    };
+}
+
+/// The storage and the addresses of a set or a pool.
+[[nodiscard]] vulkan_clusters vulkan_clusters_of(sg::cluster_set const& clusters)
+{
+    if (auto const* const set = dynamic_cast<vulkan_cluster_set const*>(&clusters))
+        return {.storage = set->_vulkan_storage, .addresses = set->_addresses};
+    auto const* const pool = dynamic_cast<vulkan_cluster_pool const*>(&clusters);
+    CC_ASSERT(pool != nullptr, "the clusters are no vulkan cluster set or pool");
+    return {.storage = pool->_vulkan_storage, .addresses = pool->_addresses};
+}
 } // namespace
+
+u64 vulkan_context::buffer_address_of(sg::raw_buffer const& buffer) const
+{
+    auto const* const vk = dynamic_cast<vulkan_buffer const*>(&buffer);
+    CC_ASSERT(vk != nullptr, "buffer_address_of: a buffer is not a vulkan buffer");
+    return u64(vk->_device_address);
+}
+
+cc::result<sg::cluster_pool_handle> vulkan_context::try_create_cluster_pool(sg::cluster_pool_description const& desc)
+{
+    if (!is_clustered_geometry_supported())
+        return cc::error("create_cluster_pool: this device has no VK_NV_cluster_acceleration_structure");
+    auto const& props = cluster_properties();
+    if (u32(desc.max_triangles_per_cluster) > props.maxTrianglesPerCluster
+        || u32(desc.max_vertices_per_cluster) > props.maxVerticesPerCluster)
+        return cc::error("create_cluster_pool: a cluster exceeds the device's limits");
+    auto const triangles = triangle_input_of(desc);
+    auto const input = pool_input_of(desc, &triangles);
+    auto sizes = VkAccelerationStructureBuildSizesInfoKHR{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    _raytracing_functions.get_cluster_build_sizes(_device, &input, &sizes);
+    if (sizes.accelerationStructureSize == 0)
+        return cc::error("create_cluster_pool: the device sized the pool at zero bytes");
+    auto storage = vulkan_buffer_of(
+        persistent.create_raw_buffer(isize(sizes.accelerationStructureSize) + isize(props.clusterByteAlignment),
+                                     sg::buffer_usage::accel_structure_storage),
+        "create_cluster_pool: the storage");
+    auto addresses = vulkan_buffer_of(
+        persistent.create_raw_buffer(isize(desc.max_clusters) * isize(sizeof(VkDeviceAddress)),
+                                     sg::buffer_usage::readwrite_buffer | sg::buffer_usage::accel_structure_build_input),
+        "create_cluster_pool: the address array");
+    return sg::cluster_pool_handle(std::make_shared<vulkan_cluster_pool>(desc, isize(sizes.accelerationStructureSize),
+                                                                         isize(sizes.buildScratchSize),
+                                                                         cc::move(storage), cc::move(addresses)));
+}
+
+void vulkan_command_list::raytracing_build_clusters_indirect(sg::cluster_pool const& pool,
+                                                             sg::cluster_indirect_build const& build)
+{
+    auto const& rt = _ctx._raytracing_functions;
+    auto const& props = _ctx.cluster_properties();
+    auto const& vk = static_cast<vulkan_cluster_pool const&>(pool);
+    auto const& d = pool.description();
+    auto const& r = build.clusters;
+    auto const records = vulkan_buffer_of(r.records, "build_clusters_indirect: the records");
+    auto const count = vulkan_buffer_of(r.count, "build_clusters_indirect: the count");
+    auto const stride = isize(sizeof(VkClusterAccelerationStructureBuildTriangleClusterInfoNV));
+
+    auto const scratch = vulkan_buffer_of(
+        _ctx.transient.create_raw_buffer(vk._build_scratch_size_in_bytes + isize(props.clusterScratchByteAlignment),
+                                         sg::buffer_usage::readwrite_buffer),
+        "build_clusters_indirect: the scratch");
+
+    // The pool is written in place, its addresses with it; the records and their count are what the build reads, and
+    // so is every buffer a table lists, which the records name by address.
+    track_buffer_access(*vk._vulkan_storage, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);
+    track_buffer_access(*vk._addresses, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);
+    track_buffer_access(*scratch, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
+    track_buffer_access(*records, sg::pipeline_stage_flag::accel_build,
+                        sg::access_flag::indirect_read | sg::access_flag::shader_read);
+    if (count != records)
+        track_buffer_access(*count, sg::pipeline_stage_flag::accel_build,
+                            sg::access_flag::indirect_read | sg::access_flag::shader_read);
+    for (auto const& table : build.tables)
+        for (auto const& b : table->buffers())
+            track_buffer_access(*vulkan_buffer_of(b, "build_clusters_indirect: a table's buffer"),
+                                sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    flush_barriers();
+
+    auto const triangles = triangle_input_of(d);
+    auto const commands = VkClusterAccelerationStructureCommandsInfoNV{
+        .sType = VK_STRUCTURE_TYPE_CLUSTER_ACCELERATION_STRUCTURE_COMMANDS_INFO_NV,
+        .input = pool_input_of(d, &triangles),
+        .dstImplicitData = aligned(vk._vulkan_storage->_device_address, props.clusterByteAlignment),
+        .scratchData = aligned(scratch->_device_address, props.clusterScratchByteAlignment),
+        .dstAddressesArray = {.deviceAddress = vk._addresses->_device_address,
+                              .stride = sizeof(VkDeviceAddress),
+                              .size = VkDeviceSize(isize(d.max_clusters) * isize(sizeof(VkDeviceAddress)))},
+        .dstSizesArray = {},
+        .srcInfosArray = {.deviceAddress = records->_device_address + VkDeviceAddress(r.offset_in_bytes),
+                          .stride = VkDeviceSize(stride),
+                          .size = VkDeviceSize(isize(r.max_count) * stride)},
+        .srcInfosCount = count->_device_address + VkDeviceAddress(r.count_offset_in_bytes),
+        .addressResolutionFlags = 0,
+    };
+    rt.cmd_build_clusters(_buffer, &commands);
+
+    keep_bound(r.records);
+    keep_bound(r.count);
+    for (auto const& table : build.tables)
+        keep_bound(table);
+    keep_bound(pool.shared_from_this());
+}
 
 sg::cluster_set_handle vulkan_command_list::raytracing_build_clusters(cc::span<sg::cluster_triangles const> clusters,
                                                                       sg::accel_build_flags flags)
@@ -185,8 +318,7 @@ cc::vector<sg::blas_handle> vulkan_command_list::raytracing_build_cluster_blas(s
 {
     auto const& rt = _ctx._raytracing_functions;
     auto const& props = _ctx.cluster_properties();
-    auto const* const set = dynamic_cast<vulkan_cluster_set const*>(clusters.get());
-    CC_ASSERT(set != nullptr, "build_cluster_blas: the cluster set is not a vulkan one");
+    auto const set = vulkan_clusters_of(*clusters);
 
     auto const input_of = [](u32 total, u32 max_per)
     {
@@ -233,13 +365,13 @@ cc::vector<sg::blas_handle> vulkan_command_list::raytracing_build_cluster_blas(s
                                "build_cluster_blas: a blas's storage");
         auto const address = aligned(storage->_device_address, props.clusterBottomLevelByteAlignment);
         destinations.push_back(address);
-        records.push_back({.clusterReferencesCount = u32(r.count),
-                           .clusterReferencesStride = sizeof(VkDeviceAddress),
-                           .clusterReferences
-                           = set->_addresses->_device_address + VkDeviceAddress(r.first) * sizeof(VkDeviceAddress)});
+        records.push_back(
+            {.clusterReferencesCount = u32(r.count),
+             .clusterReferencesStride = sizeof(VkDeviceAddress),
+             .clusterReferences = set.addresses->_device_address + VkDeviceAddress(r.first) * sizeof(VkDeviceAddress)});
         blases.push_back(std::make_shared<vulkan_blas>(_ctx, storage, VK_NULL_HANDLE, address,
                                                        isize(sizes.accelerationStructureSize), 0, 0, flags,
-                                                       set->max_geometry_index() + 1));
+                                                       clusters->max_geometry_index() + 1));
         storages.push_back(storage);
     }
 
@@ -271,8 +403,8 @@ cc::vector<sg::blas_handle> vulkan_command_list::raytracing_build_cluster_blas(s
         "build_cluster_blas: the scratch");
 
     // The clusters and their addresses are read; each blas is written.
-    track_buffer_access(*set->_vulkan_storage, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_read);
-    track_buffer_access(*set->_addresses, sg::pipeline_stage_flag::accel_build,
+    track_buffer_access(*set.storage, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_read);
+    track_buffer_access(*set.addresses, sg::pipeline_stage_flag::accel_build,
                         sg::access_flag::accel_read | sg::access_flag::shader_read);
     for (auto const& s : storages)
         track_buffer_access(*s, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);

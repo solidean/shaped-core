@@ -170,6 +170,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::partitioned_tlas:
         // Metal 4 has no partitioned instance structure
         return false;
+    case sg::feature::clustered_geometry:
+        // Metal 4 builds no acceleration structure from clusters
+        return false;
     case sg::feature::vertex_pipeline_stores:
         // a vertex function writes a device buffer on every Apple GPU
         return true;

@@ -652,6 +652,17 @@ cc::result<partitioned_tlas_handle> context::try_create_partitioned_tlas(partiti
     return cc::error("this context has no sg::feature::partitioned_tlas");
 }
 
+u64 context::buffer_address_of(raw_buffer const&) const
+{
+    CC_ASSERT(false, "buffer_address_of: this context has no sg::feature::clustered_geometry");
+    return 0;
+}
+
+cc::result<cluster_pool_handle> context::try_create_cluster_pool(cluster_pool_description const&)
+{
+    return cc::error("this context has no sg::feature::clustered_geometry");
+}
+
 u64 context::blas_address_of(blas const&) const
 {
     CC_ASSERT(false, "blas_address_of: this context has no sg::feature::partitioned_tlas");

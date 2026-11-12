@@ -110,6 +110,39 @@ cc::shared_async<cc::unit> trace_and_check(sg::context_handle ctx,
         }
     co_return;
 }
+
+/// Traces the grid against `world`, a square of two clusters, and checks each hit reads the cluster it is in:
+/// 7 below its diagonal and 9 above it.
+cc::shared_async<cc::unit> check_cluster_ids(sg::context_handle ctx, sg::tlas_handle world)
+{
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+    auto const clustered = co_await shaders::raytracing::trace_cells_clusters.acquire_pipeline(*ctx);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+    auto cmd = ctx->create_command_list();
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::raytracing::scene{.world = world->as_view(),
+                                                                                      .hits = hits.as_readwrite_buffer(),
+                                                                                      .ids = ids.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*clustered);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(grid, grid);
+    auto const ids_back = cmd->download.data_from_buffer(ids);
+    ctx->submit_command_list(cc::move(cmd));
+    auto const got = co_await ids_back.data();
+    REQUIRE(got.size() == grid * grid);
+    for (auto y = 0; y < 4; ++y)
+        for (auto x = 0; x < 4; ++x)
+        {
+            auto const is_below = float(x) + 0.25f + float(y) + 0.5f < 4.0f;
+            CHECK(got[y * grid + x][2] == (is_below ? 7 : 9)).context(cc::format("cell ({}, {})", x, y));
+        }
+    co_return;
+}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg - a partitioned tlas traces as a tlas does, and an update in place moves what it holds",
@@ -284,35 +317,7 @@ ASYNC_INVOCABLE_TEST("sg - a cluster BLAS traces as a blas does, through a tlas 
     ctx->submit_command_list(cc::move(build));
     co_await trace_and_check(ctx, pipeline, world, {{.instance_id = 10, .slot = 0, .x = 0, .z = 0}}, "a tlas");
 
-    // each hit reads the cluster it is in
-    {
-        auto const clustered = co_await shaders::raytracing::trace_cells_clusters.acquire_pipeline(*ctx);
-        auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
-        auto const hits
-            = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
-        auto const ids
-            = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
-        auto cmd = ctx->create_command_list();
-        auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
-        auto const group
-            = ctx->transient.create_binding_group(*cmd, layout,
-                                                  shaders::raytracing::scene{.world = world->as_view(),
-                                                                             .hits = hits.as_readwrite_buffer(),
-                                                                             .ids = ids.as_readwrite_buffer()});
-        cmd->compute.bind_pipeline(*clustered);
-        cmd->compute.bind_group(0, *group);
-        cmd->compute.dispatch_threads(grid, grid);
-        auto const ids_back = cmd->download.data_from_buffer(ids);
-        ctx->submit_command_list(cc::move(cmd));
-        auto const got = co_await ids_back.data();
-        REQUIRE(got.size() == grid * grid);
-        for (auto y = 0; y < 4; ++y)
-            for (auto x = 0; x < 4; ++x)
-            {
-                auto const is_below = float(x) + 0.25f + float(y) + 0.5f < 4.0f;
-                CHECK(got[y * grid + x][2] == (is_below ? 7 : 9)).context(cc::format("cell ({}, {})", x, y));
-            }
-    }
+    co_await check_cluster_ids(ctx, world);
 
     if (!ctx->supports(sg::feature::partitioned_tlas))
         co_return;
@@ -331,4 +336,70 @@ ASYNC_INVOCABLE_TEST("sg - a cluster BLAS traces as a blas does, through a tlas 
         ctx, pipeline, ptlas,
         {{.instance_id = 10, .slot = 0, .x = 0, .z = 0}, {.instance_id = 20, .slot = 1, .x = 4, .z = 2}},
         "a partitioned tlas");
+}
+
+ASYNC_INVOCABLE_TEST("sg - a cluster pool is built in place from records a compute pass wrote, and its old BLASes go "
+                     "stale",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::clustered_geometry))
+        SKIP("this device has no clustered geometry");
+    auto const pipeline = co_await shaders::raytracing::trace_cells_opaque.acquire_pipeline(*ctx);
+    auto const write_clusters = co_await shaders::ptlas_records::write_clusters.acquire_pipeline(*ctx);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    u32 const indices[] = {0, 1, 2};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const index_input
+        = ctx->persistent.create_buffer_from_data(indices, sg::buffer_usage::accel_structure_build_input);
+    sg::raw_buffer_handle const listed[] = {input.raw(), index_input.raw()};
+    auto const buffers = ctx->persistent.create_buffer_table(listed);
+    CHECK(buffers->size() == 2);
+
+    // room for more clusters than the shader writes, so only the count it bumps says how many there are
+    auto const pool = ctx->persistent.create_cluster_pool({.max_clusters = 4,
+                                                           .max_total_triangles = 4,
+                                                           .max_total_vertices = 12,
+                                                           .max_triangles_per_cluster = 1,
+                                                           .max_vertices_per_cluster = 3});
+    REQUIRE(pool != nullptr);
+    CHECK(pool->generation() == 0);
+    // the build reads both as its input
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::accel_structure_build_input;
+    auto const records = ctx->persistent.create_buffer<sg::gpu_clas_triangles>(4, usage);
+    auto const counts = ctx->persistent.create_buffer_from_data(cc::vector<u32>{0}, usage | sg::buffer_usage::copy_src);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::ptlas_records::cluster_records>();
+    auto const group = ctx->persistent.create_binding_group(
+        layout, shaders::ptlas_records::cluster_records{.buffers = buffers->view(),
+                                                        .clusters = records.as_readwrite_buffer(),
+                                                        .counts = counts.as_readwrite_buffer()});
+    sg::buffer_table_handle const tables[] = {buffers};
+
+    auto build = ctx->create_command_list();
+    build->compute.bind_pipeline(*write_clusters);
+    build->compute.bind_group(0, *group);
+    build->compute.dispatch_threads(2);
+    build->raytracing.build_clusters_indirect(
+        *pool, {.clusters = {.records = records.raw(), .max_count = 4, .count = counts.raw()}, .tables = tables});
+    CHECK(pool->generation() == 1);
+    sg::cluster_range const whole[] = {{.first = 0, .count = 2}};
+    auto const blases = build->raytracing.build_cluster_blas(pool, whole);
+    REQUIRE(blases.size() == 1);
+    CHECK(!blases[0]->is_stale());
+    sg::tlas_instance const placed[] = {{.blas = blases[0], .instance_id = 10}};
+    auto const world = build->raytracing.build_tlas(placed);
+    ctx->submit_command_list(cc::move(build));
+    co_await trace_and_check(ctx, pipeline, world, {{.instance_id = 10, .slot = 0, .x = 0, .z = 0}}, "a pool");
+    co_await check_cluster_ids(ctx, world);
+
+    // a second build replaces every cluster, so a BLAS of the first lists clusters that are gone
+    auto again = ctx->create_command_list();
+    again->raytracing.build_clusters_indirect(
+        *pool, {.clusters = {.records = records.raw(), .max_count = 4, .count = counts.raw()}, .tables = tables});
+    ctx->submit_command_list(cc::move(again));
+    CHECK(pool->generation() == 2);
+    CHECK(blases[0]->is_stale());
 }

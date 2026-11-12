@@ -39,7 +39,23 @@ struct sg::gpu_ptlas_translation
     float translation[3] = {0, 0, 0};
 };
 
+/// SGL's `accel.buffer_ref`: a buffer's GPU address, which only a `buffer_table` hands out.
+struct sg::gpu_buffer_ref
+{
+    u64 address = 0;
+};
+
+/// SGL's `accel.clas_triangles`, a cluster's build record: opaque here, since its fields differ per backend.
+/// Sized for the largest backend's record, D3D12's 80 bytes, so a buffer of n of them has room for n on every backend;
+/// a build strides by its own backend's record, which is Vulkan's 64 bytes there.
+struct alignas(8) sg::gpu_clas_triangles
+{
+    byte bytes[80] = {};
+};
+
 static_assert(sizeof(sg::gpu_blas_ref) == 8);
+static_assert(sizeof(sg::gpu_buffer_ref) == 8);
+static_assert(sizeof(sg::gpu_clas_triangles) == 80);
 static_assert(sizeof(sg::gpu_ptlas_write) == 112);
 static_assert(sizeof(sg::gpu_ptlas_update) == 16);
 static_assert(sizeof(sg::gpu_ptlas_translation) == 16);
@@ -69,10 +85,33 @@ private:
     buffer<gpu_blas_ref> _addresses;
 };
 
+/// A fixed list of buffers, held, and a buffer of their addresses a shader binds as `buffer[accel.buffer_ref]`.
+/// A shader copies `table[k]` into a cluster's record, and offsets it by bytes, so every address it names is a table's.
+/// Each buffer must carry `buffer_usage::accel_structure_build_input`, which a build reads them as.
+/// Created through `ctx.persistent.create_buffer_table`; a build naming the table holds it for its list.
+class sg::buffer_table
+{
+public:
+    buffer_table(cc::vector<raw_buffer_handle> buffers, buffer<gpu_buffer_ref> addresses)
+      : _buffers(cc::move(buffers)), _addresses(cc::move(addresses))
+    {
+    }
+
+    [[nodiscard]] cc::span<raw_buffer_handle const> buffers() const { return _buffers; }
+    [[nodiscard]] isize size() const { return _buffers.size(); }
+
+    /// The addresses, for a binding of `buffer[accel.buffer_ref]`.
+    [[nodiscard]] readonly_buffer_view<gpu_buffer_ref> view() const { return _addresses.as_readonly_buffer(); }
+
+private:
+    cc::vector<raw_buffer_handle> _buffers;
+    buffer<gpu_buffer_ref> _addresses;
+};
+
 /// One kind of record a compute pass wrote for an update: `max_count` of room from `offset_in_bytes`, and the count it
 /// wrote, a `u32` at `count_offset_in_bytes` of `count`.
 /// The count must not exceed `max_count`, which is what sg declares the build reads; a `max_count` of 0 is no records.
-struct sg::ptlas_indirect_records
+struct sg::indirect_records
 {
     raw_buffer_handle records = nullptr;
     isize offset_in_bytes = 0;
@@ -86,11 +125,11 @@ struct sg::ptlas_indirect_records
 struct sg::ptlas_indirect_operations
 {
     /// `accel.ptlas_write` records, strided by `sizeof(gpu_ptlas_write)`.
-    ptlas_indirect_records writes;
+    indirect_records writes;
     /// `accel.ptlas_update` records, strided by `sizeof(gpu_ptlas_update)`.
-    ptlas_indirect_records updates;
+    indirect_records updates;
     /// `accel.ptlas_translation` records, strided by `sizeof(gpu_ptlas_translation)`.
-    ptlas_indirect_records translations;
+    indirect_records translations;
     /// Every table a record of the partitioned TLAS may name after this update, including the instances earlier
     /// updates wrote: the structure holds these, and lets go of the tables an earlier update named.
     cc::span<blas_table_handle const> tables = {};

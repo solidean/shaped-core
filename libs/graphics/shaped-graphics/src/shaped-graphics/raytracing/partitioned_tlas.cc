@@ -52,6 +52,8 @@ cc::vector<blas_handle> impl::apply_to_slots(partitioned_tlas const& ptlas, ptla
                            d.partition_count);
                 CC_ASSERT(w.instance.blas != nullptr && !w.instance.blas->is_expired(), "update: a write's blas is "
                                                                                         "null or expired");
+                CC_ASSERT(!w.instance.blas->is_stale(), "update: a write's cluster BLAS is stale: its pool was rebuilt "
+                                                        "since");
                 CC_ASSERT(!w.instance.transform_at_end.has_value(), "update: a partitioned tlas has no motion, so a "
                                                                     "write's instance must not move");
                 CC_ASSERT(w.instance.instance_id < (1u << 24), "update: instance_id must fit in 24 bits");
@@ -65,6 +67,7 @@ cc::vector<blas_handle> impl::apply_to_slots(partitioned_tlas const& ptlas, ptla
             {
                 name_slot(u.index, "an update");
                 CC_ASSERT(u.blas != nullptr && !u.blas->is_expired(), "update: an update's blas is null or expired");
+                CC_ASSERT(!u.blas->is_stale(), "update: an update's cluster BLAS is stale: its pool was rebuilt since");
                 CC_ASSERT(u.hit_group_offset < (1u << 24), "update: hit_group_offset must fit in 24 bits");
                 auto& slot = slots[u.index];
                 CC_ASSERTF(slot.blas != nullptr, "update: slot {} is empty, so only a write can fill it", u.index);

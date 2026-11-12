@@ -251,7 +251,7 @@ void vulkan_command_list::raytracing_update_partitioned_tlas_indirect(sg::partit
 
     struct kind
     {
-        sg::ptlas_indirect_records const* records;
+        sg::indirect_records const* records;
         VkPartitionedAccelerationStructureOpTypeNV type;
         isize stride;
     };
@@ -269,7 +269,7 @@ void vulkan_command_list::raytracing_update_partitioned_tlas_indirect(sg::partit
 
     // The commands with no count yet, each counted below by a copy of the count its shader wrote.
     auto commands = cc::vector<VkBuildPartitionedAccelerationStructureIndirectCommandNV>();
-    auto counted = cc::vector<sg::ptlas_indirect_records const*>();
+    auto counted = cc::vector<sg::indirect_records const*>();
     auto read = cc::vector<vulkan_buffer_handle>();
     for (auto const& k : kinds)
     {

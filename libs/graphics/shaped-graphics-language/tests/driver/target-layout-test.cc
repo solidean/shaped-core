@@ -104,3 +104,54 @@ TEST("sgl target layout - only a module SGL ships declares one")
                      "        a: float\n")
               .contains("@target_layout on a struct outside the modules SGL ships"));
 }
+
+namespace
+{
+constexpr cc::string_view k_clusters = "use accel\n"
+                                       "\n"
+                                       "binding records:\n"
+                                       "    buffers: buffer[accel.buffer_ref]\n"
+                                       "    clusters: mut buffer[accel.clas_triangles]\n"
+                                       "\n"
+                                       "@compute(64) fun main_cs(@thread_id id: int3){records}:\n"
+                                       "    let c = accel.clas_triangles(cluster_id = 7u, triangle_count = 2u, "
+                                       "vertex_count = 4u, index_buffer = records.buffers[0], vertex_buffer = "
+                                       "records.buffers[1])\n"
+                                       "    records.clusters[id.x] = c\n";
+} // namespace
+
+TEST("sgl target layout - @bits packs fields into words, and @absent drops one a target lacks (CHK-526)")
+{
+    auto const vulkan = compiled(k_clusters, target::hlsl_vulkan);
+    auto const dx12 = compiled(k_clusters, target::hlsl_dx12);
+    REQUIRE(vulkan.has_value());
+    REQUIRE(dx12.has_value());
+    // Vulkan's 64-byte record: four packed words after the id and the flags, then five addresses
+    CHECK(vulkan.value().text.contains("[[vk::offset(8)]] uint sgl_bits2;"));
+    CHECK(vulkan.value().text.contains("[[vk::offset(20)]] uint sgl_bits5;"));
+    CHECK(vulkan.value().text.contains("[[vk::offset(56)]] buffer_ref micromap_index_buffer;"));
+    CHECK(!vulkan.value().text.contains("micromap_base"));
+    // 2 triangles in bits 0-8, 4 vertices in 9-17, the default 4-byte index format in 24-27, all of it folded
+    CHECK(vulkan.value().text.contains("c.sgl_bits2 = 67110914u;"));
+    // the index stride 4 below the vertex stride 12
+    CHECK(vulkan.value().text.contains("c.sgl_bits4 = 786436u;"));
+    // D3D12's 80-byte record: its micromap base stands where Vulkan has none, and no index format at all
+    CHECK(dx12.value().text.contains("uint micromap_base;"));
+    CHECK(!dx12.value().text.contains("index_format"));
+    CHECK(dx12.value().text.contains("buffer_ref geometry_index_buffer;"));
+}
+
+TEST("sgl target layout - a packed or an absent field is never read or written alone")
+{
+    auto source = cc::string(k_clusters);
+    source.replace_first("    records.clusters[id.x] = c\n", "    let mut d = c\n    d.triangle_count = 3u\n    "
+                                                             "records.clusters[id.x] = d\n");
+    auto const alone = compiled(source, target::hlsl_vulkan);
+    REQUIRE(alone.has_error());
+    CHECK(alone.error().contains("a read or a write of clas_triangles.triangle_count alone"));
+    CHECK(reports_of("struct pair:\n"
+                     "    @bits(4) a: uint\n"
+                     "\n"
+                     "fun f(p: pair) -> uint => p.a\n")
+              .contains("which a branch of a @target_layout struct alone says"));
+}

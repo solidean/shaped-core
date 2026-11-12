@@ -11,6 +11,84 @@ module accel
 struct blas_ref:
     address: uint2
 
+/// A buffer as a record names it: its address, which only an sg buffer table hands out.
+struct buffer_ref:
+    address: uint2
+
+/// Builds one cluster: up to 256 triangles over up to 256 float3 vertices, by index.
+/// Built by name, `accel.clas_triangles(cluster_id = c, triangle_count = t, vertex_count = v, index_buffer = i,
+/// vertex_buffer = p)`, every other field having a default; a field is never read or written alone (CHK-526).
+/// Vulkan packs its counts into bits and D3D12 gives them 16 each, so `@bits` places them, and `@absent` a field one
+/// API lacks: D3D12 states the index format per build, and Vulkan has no micromap base or geometry index buffer.
+@target_layout
+struct clas_triangles:
+    const if target_api == .vulkan:
+        cluster_id: uint
+        flags: uint = 0u
+        @bits(9) triangle_count: uint
+        @bits(9) vertex_count: uint
+        @bits(6) truncate_bits: uint = 0u
+        /// 1, 2 or 4 bytes an index, as D3D12_INDEX_FORMAT and Vulkan's index format number them.
+        @bits(4) index_format: uint = 4u
+        @bits(4) micromap_index_format: uint = 0u
+        @bits(24) geometry_index: uint = 0u
+        @bits(5) geometry_reserved: uint = 0u
+        /// `geometry_opaque()` where no any-hit runs for the cluster's triangles.
+        @bits(3) geometry_flags: uint = 0u
+        @bits(16) index_stride: uint = 4u
+        @bits(16) vertex_stride: uint = 12u
+        @bits(16) geometry_stride: uint = 0u
+        @bits(16) micromap_index_stride: uint = 0u
+        index_buffer: buffer_ref
+        vertex_buffer: buffer_ref
+        geometry_buffer: buffer_ref = no_buffer()
+        micromap_array: buffer_ref = no_buffer()
+        micromap_index_buffer: buffer_ref = no_buffer()
+        @absent micromap_base: uint = 0u
+        @absent geometry_index_buffer: buffer_ref = no_buffer()
+        @absent reserved: uint = 0u
+    else if target_api == .dx12:
+        cluster_id: uint
+        flags: uint = 0u
+        @bits(16) triangle_count: uint
+        @bits(16) vertex_count: uint
+        @bits(24) geometry_index: uint = 0u
+        @bits(5) geometry_reserved: uint = 0u
+        @bits(3) geometry_flags: uint = 0u
+        micromap_base: uint = 0u
+        @bits(16) vertex_stride: uint = 12u
+        @bits(16) index_stride: uint = 4u
+        @bits(16) micromap_index_stride: uint = 0u
+        @bits(16) geometry_stride: uint = 0u
+        @bits(16) truncate_bits: uint = 0u
+        @bits(16) reserved: uint = 0u
+        vertex_buffer: buffer_ref
+        index_buffer: buffer_ref
+        geometry_buffer: buffer_ref = no_buffer()
+        geometry_index_buffer: buffer_ref = no_buffer()
+        micromap_array: buffer_ref = no_buffer()
+        micromap_index_buffer: buffer_ref = no_buffer()
+        @absent index_format: uint = 4u
+        @absent micromap_index_format: uint = 0u
+
+/// The address `bytes` past this one: a cluster's part of a buffer the table lists whole.
+fun buffer_ref.offset(self, bytes: uint) -> buffer_ref:
+    let low = self.address.x + bytes
+    let carry = if low < self.address.x => 1u else 0u
+    return buffer_ref(uint2(low, self.address.y + carry))
+
+/// No buffer at all, for a record's address that names none.
+@internal
+fun no_buffer() -> buffer_ref => buffer_ref(uint2(0u, 0u))
+
+/// `clas_triangles.geometry_flags`: no any-hit runs for the cluster's triangles.
+/// Vulkan's cluster flag and D3D12's geometry flag; the D3D12 bit positions are unverified until dx12 builds one.
+fun geometry_opaque() -> uint:
+    const if target_api == .vulkan:
+        return 0x4
+    else:
+        return 0x1
+
 /// Writes one instance of a partitioned TLAS: what it places, where, and into which partition.
 /// Built by name, `accel.ptlas_write(index = i, blas = b)`, every field but those two having a default.
 @target_layout

@@ -26,3 +26,17 @@ binding records:
     if id.x >= 1 => return
     let at = records.counts[1].add(1u)
     records.translations[at] = accel.ptlas_translation(partition = 0u, translation = [4.0, 0.0, 0.0])
+
+binding cluster_records:
+    buffers: buffer[accel.buffer_ref]
+    clusters: mut buffer[accel.clas_triangles]
+    counts: mut buffer[atomic[uint]]
+
+// The square as two clusters, a triangle each: 7 over the vertices at the buffer's start, 9 over those 36 bytes in.
+@compute fun write_clusters(@thread_id id: int3){cluster_records}:
+    if id.x >= 2 => return
+    let vertices = cluster_records.buffers[0].offset(if id.x == 0 => 0u else 36u)
+    let indices = cluster_records.buffers[1]
+    let c = accel.clas_triangles(cluster_id = if id.x == 0 => 7u else 9u, triangle_count = 1u, vertex_count = 3u, index_buffer = indices, vertex_buffer = vertices)
+    let at = cluster_records.counts[0].add(1u)
+    cluster_records.clusters[at] = c

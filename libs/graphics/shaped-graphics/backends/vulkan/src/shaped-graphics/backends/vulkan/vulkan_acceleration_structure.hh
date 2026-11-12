@@ -179,6 +179,35 @@ public:
     vulkan_buffer_handle _addresses;
 };
 
+/// A cluster pool, built in place in implicit-destination mode like a set, from records a compute pass wrote.
+class sg::backend::vulkan::vulkan_cluster_pool final : public sg::cluster_pool
+{
+public:
+    vulkan_cluster_pool(sg::cluster_pool_description const& description,
+                        isize size_in_bytes,
+                        isize build_scratch_size_in_bytes,
+                        vulkan_buffer_handle storage,
+                        vulkan_buffer_handle addresses)
+      : sg::cluster_pool(description, size_in_bytes),
+        _build_scratch_size_in_bytes(build_scratch_size_in_bytes),
+        _vulkan_storage(cc::move(storage)),
+        _addresses(cc::move(addresses))
+    {
+    }
+
+    isize _build_scratch_size_in_bytes = 0;
+    vulkan_buffer_handle _vulkan_storage;
+    /// One `VkDeviceAddress` per cluster of the last build, in record order.
+    vulkan_buffer_handle _addresses;
+};
+
+/// The storage and the address array of a cluster set or a pool, which a cluster BLAS build reads.
+struct sg::backend::vulkan::vulkan_clusters
+{
+    vulkan_buffer_handle storage;
+    vulkan_buffer_handle addresses;
+};
+
 /// What a binding takes of a tlas, either kind: the storage a trace reads, the address a trace converts, and what its
 /// descriptor names, which is 0, the null structure, for a partitioned one.
 struct sg::backend::vulkan::vulkan_trace_target

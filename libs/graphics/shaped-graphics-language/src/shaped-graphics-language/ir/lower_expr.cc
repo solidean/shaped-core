@@ -102,7 +102,7 @@ value_ref lowering::literal(flat_expr const& x)
         return float_constant(type, l->value);
     if (auto const* const l = x.node.try_as<flat_int_literal>())
     {
-        auto const& t = _out.at(type);
+        auto const t = _out.at(type);
         if (t.kind == type_kind::float_)
             return float_constant(type, f64(l->value));
         if (t.width == 64)
@@ -132,7 +132,7 @@ i32 lowering::position_in(type_id object, i32 member) const
 
 value_ref lowering::extracted(value_ref composite, type_ref type, u32 index)
 {
-    auto const& t = _out.at(_out.type_of(composite));
+    auto const t = _out.at(_out.type_of(composite));
     if (t.kind != type_kind::vector && t.kind != type_kind::structure && t.kind != type_kind::array
         && t.kind != type_kind::matrix)
         return composite;
@@ -155,7 +155,7 @@ value_ref lowering::member_of(flat_expr const& x, flat_member const& m)
 
 value_ref lowering::splat(value_ref scalar, type_ref vector)
 {
-    auto const& t = _out.at(vector);
+    auto const t = _out.at(vector);
     if (t.kind != type_kind::vector)
         return scalar;
     u32 const operands[] = {u32(scalar), u32(scalar), u32(scalar), u32(scalar)};
