@@ -182,7 +182,7 @@ A draw's vertices are its patches' control points, `control_points` a patch, and
 
 `draw` and `draw_indexed` of such a pipeline then:
 
-1. take scratch buffers sized for every patch at the largest factor, `max_factor`, 64 by default;
+1. take scratch buffers sized for every patch at the largest factor, the control stage's `max_factor`, 64 where it states none;
 2. leave the rendering scope's pass;
 3. dispatch the control pass over `patches * instances` threads, which runs the vertex stage on each control point and the control stage on the patch;
 4. count each patch's points and indices, scan them in patch order in one invocation, then tessellate each patch, a thread a patch;

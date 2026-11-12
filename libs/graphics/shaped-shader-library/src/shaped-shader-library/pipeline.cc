@@ -506,7 +506,8 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                               .patch_words = control.tessellation_patch_words,
                                                               .vertex_words = evaluation.tessellation_vertex_words,
                                                               .partitioning = control.tessellation_partitioning,
-                                                              .output = control.tessellation_output};
+                                                              .output = control.tessellation_output,
+                                                              .max_factor = float(control.tessellation_max_factor)};
         polyfill.count_shader = co_await pass("sg_tessellation_count");
         polyfill.scan_shader = co_await pass("sg_tessellation_scan");
         polyfill.generate_shader = co_await pass("sg_tessellation_generate");

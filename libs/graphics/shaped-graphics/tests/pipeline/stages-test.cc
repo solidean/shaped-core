@@ -172,6 +172,59 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
         }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a control stage's max_factor cuts a patch as that factor does, and its evaluation stage "
+                     "reads the capped factors (CHK-304)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_tessellation(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = tessellation_polyfilling(*ctx);
+
+    auto const p0 = tg::vec2f(-1, -1);
+    auto const p1 = tg::vec2f(1, -1);
+    auto const p2 = tg::vec2f(-1, 1);
+    shaders::stages::stage_corner const corners[] = {{.position = p0}, {.position = p1}, {.position = p2}};
+    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+    auto const draw_with = [&](auto const& declared) -> cc::shared_async<sg_test::offscreen_pixels>
+    {
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(declared);
+        co_return co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                   [&](sg::rendering_scope& scope)
+                                                   {
+                                                       scope.bind_pipeline(*pipeline);
+                                                       scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                       scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+                                                   });
+    };
+
+    // Squared domain locations interpolate linearly across one triangle, and bend where the patch is cut finer.
+    auto const capped = co_await draw_with(shaders::stages::tessellated_capped);
+    auto const finer = co_await draw_with(shaders::stages::tessellated_squared);
+    auto const near = [](float a, float b, float tolerance) { return a - b < tolerance && b - a < tolerance; };
+    auto bent = 0;
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const c = centre_of(x, y);
+            if (side_of(c, p0, p1, p2) <= 0)
+                continue;
+            auto const where = cc::format("pixel ({}, {})", x, y);
+            auto const v = (c[0] + 1.0f) / 2.0f;
+            auto const w = (c[1] + 1.0f) / 2.0f;
+            auto const got = capped[0].rgba_float(x, y);
+            CHECK((near(got[0], 1.0f - v - w, 0.001f) && near(got[1], v, 0.001f) && near(got[2], w, 0.001f)))
+                .context(cc::format("{}: ({}, {}, {})", where, got[0], got[1], got[2]));
+            // the evaluation stage's factors are the capped ones on every target
+            CHECK(got[3] == 1.0f).context(where);
+            auto const fine = finer[0].rgba_float(x, y);
+            CHECK(fine[3] == 4.0f).context(where);
+            if (!near(fine[1], v, 0.05f))
+                ++bent;
+        }
+    CHECK(bent > 0);
+}
+
 ASYNC_INVOCABLE_TEST("sg - a tessellated quad patch covers its quad, reports its domain, and winds as its control "
                      "stage says",
                      (sg::context_handle const& ctx))

@@ -751,6 +751,8 @@ struct sgl::ir::primitive_stage
     check::tessellation_partitioning partitioning = check::tessellation_partitioning::integer;
     /// In the domain's own orientation, which is both targets' and mirrors SGL's `winding` (EMIT-134).
     bool is_output_clockwise = false;
+    /// A control stage's `max_factor`, which its factors are capped at already.
+    u32 max_factor = 64;
     /// A control stage's body as a function of its own, a range of `program::names`.
     u32 body_name_first = 0;
     u32 body_name_size = 0;
