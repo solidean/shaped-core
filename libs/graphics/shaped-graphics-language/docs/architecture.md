@@ -189,10 +189,11 @@ The registry has no signature language of its own: `registry::finalize` parses t
 A family of overloads is a C++ loop that formats one signature per type, unless SGL's generics can say it once, in `prelude/core.sgl`.
 `builtins::default_registry()` is the one cached value in the library: it is immutable, and building it parses the whole prelude.
 
-**The prelude is three files.**
-`prelude/builtins.sgl` is generated from the registry and committed, and `prelude/core.sgl` and `prelude/raytracing.sgl` are hand-written SGL.
+**The prelude is four files.**
+`prelude/builtins.sgl` is generated from the registry and committed, and `prelude/core.sgl`, `prelude/raytracing.sgl` and `prelude/tessellation.sgl` are hand-written SGL.
 `raytracing.sgl` holds the trace, its vocabulary, and the software traversal webgpu runs ([spec/raytracing.md](spec/raytracing.md)).
-The compiler never opens the committed file: it generates the same text in memory, and the hand-written two are embedded when CMake configures.
+`tessellation.sgl` holds D3D's fixed-function tessellator, for a device without one (CHK-527); a test reaches its `@internal` functions by appending to the file itself.
+The compiler never opens the committed file: it generates the same text in memory, and the hand-written three are embedded when CMake configures.
 The two texts are byte-identical, which is why a diagnostic's line and column are right in the committed file, and why `*.sgl` is `eol=lf` in `.gitattributes`.
 A library test compares them as well, so a plain test run catches drift without the tool.
 The `sgl-prelude` step of `dev.py check` refuses a generated file that differs from the registry, and `--fix` regenerates it.

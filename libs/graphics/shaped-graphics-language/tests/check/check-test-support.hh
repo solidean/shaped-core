@@ -97,7 +97,7 @@ inline void check_golden(cc::string_view actual, cc::string_view expected, cc::s
 
 } // namespace sgl_test
 
-/// Stands for the library's own prelude, both files of it, which every test here checks against unless it brings one.
+/// Stands for the library's own prelude, every file of it, which every test here checks against unless it brings one.
 struct sgl_test::library_prelude
 {
 };
@@ -119,7 +119,7 @@ struct sgl_test::checked_sources
     /// Parallel to the files between the prelude and the user file: each one's position in the library the test gave.
     cc::vector<sgl::i32> library_files;
 
-    /// The position of the user file, which a diagnostic and an origin name it by: 1 behind one prelude file, 3 behind the library's.
+    /// The position of the user file, which a diagnostic and an origin name it by: 1 behind one prelude file, 4 behind the library's.
     [[nodiscard]] sgl::i32 user_file() const { return sgl::i32(files.size() - 1); }
     /// The side tables of the user file.
     [[nodiscard]] sgl::check::file_tables const& tables() const { return module.files[user_file()]; }
@@ -177,7 +177,7 @@ inline checked_sources check_sources(cc::string_view prelude, cc::string_view us
     return check_files(sources);
 }
 
-/// `user` behind the library's prelude, so the user file is file 2.
+/// `user` behind the library's prelude, so the user file is file 4.
 inline checked_sources check_sources(library_prelude, cc::string_view user)
 {
     cc::string_view const sources[] = {user};

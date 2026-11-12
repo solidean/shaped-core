@@ -1442,6 +1442,10 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   A strip is cut into primitives as it grows, an odd triangle's first two corners swapped so every one winds alike; what is appended past `max_vertices` is dropped.
   `vertex_index` counts from the draw's first vertex, or is the index an indexed draw read; `instance_index` counts from the draw's first instance, and `primitive_id` within the instance.
   A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
+* **CHK-527** Where a device has no tessellator, D3D's own stands in: `prelude/tessellation.sgl` cuts a patch into the domain points and primitives D3D's reference tessellator makes, in its order.
+  Every location is 16.16 fixed point, as D3D computes it, so no target's float rounding moves a point.
+  The factors are clamped and rounded as D3D does, and a patch with an edge factor that is zero, negative or NaN is culled; a NaN inside factor is the partitioning's least.
+  Every domain and every partitioning is carried, the walk writing through a sink, so the GPU and a test run the same code.
 
 ## Ray tracing
 
@@ -1837,8 +1841,8 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## The files of the prelude
 
-* **CHK-138** The prelude has three files, in this order: `builtins.sgl`, `core.sgl` and `raytracing.sgl` ([why](why/checking.md#chk-138)).
-  The builtin registry generates the first, and the other two are written by hand.
+* **CHK-138** The prelude has four files, in this order: `builtins.sgl`, `core.sgl`, `raytracing.sgl` and `tessellation.sgl` ([why](why/checking.md#chk-138)).
+  The builtin registry generates the first, and the other three are written by hand.
 * **CHK-140** The text of `builtins.sgl` that is checked is generated in memory, and the committed file is byte for byte the same, so a diagnostic's line and column are right in it.
 * **CHK-141** Every record of the registry carries its declaration as SGL source, and that text goes through the same parser as any other: the registry has no second signature language.
 

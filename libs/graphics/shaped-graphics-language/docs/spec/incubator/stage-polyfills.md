@@ -8,10 +8,10 @@
 The geometry and tessellation stages are gated by `geometry_shader` and `tessellation_shader`, which no webgpu and no metal device grants.
 The mesh and task stages are gated by `mesh_shader`, which no webgpu device grants.
 
-**Metal's tessellation is native, not a polyfill.**
-Metal has tessellation, shaped differently from DX12's: a compute kernel writes the factors, and a post-tessellation vertex function evaluates.
-So the control stage becomes that kernel and the evaluation stage that vertex function, with Metal's fixed-function tessellator between them.
-That is a lowering of modest cost, which by the comparison matrix's rules makes a refusal on metal a gap rather than a target's limit.
+**Metal 4 has no tessellation, so metal takes the polyfill too.**
+Metal's tessellator lives on the encoders before Metal 4: `MTL4RenderCommandEncoder` has no `drawPatches`, and `MTL4RenderPipelineDescriptor` no tessellation state.
+sg's metal backend is Metal 4 throughout, so reaching the old tessellator would take a second queue and command path for one stage.
+The compute tessellator serves webgpu and metal alike, and places points exactly where D3D does, which the old one never promised.
 
 Where a target has no form of the stage, the work can move ahead of the draw:
 a compute entry point writes the vertices the stage would have produced into a buffer, and an ordinary draw of that buffer follows.
@@ -20,7 +20,8 @@ a compute entry point writes the vertices the stage would have produced into a b
   Strips are cut into lists where `end_strip` is called, and unused slots are degenerate.
 * **The geometry stage on metal could become a mesh stage instead.**
   Metal has mesh shaders, a geometry stage's per-primitive output with a bound is what a mesh workgroup writes, and it stays one draw with no buffer between passes.
-* **The tessellation stages on webgpu** become a compute pass that evaluates the control stage's factors, then a grid of domain locations per patch, then the evaluation stage at each.
+* **The tessellation stages on webgpu and metal** become compute passes: the control stage's factors, then a prefix sum of each patch's points and primitives.
+  Then D3D's tessellator per patch, and the evaluation stage at each point.
 * **The mesh and task stages on webgpu** become a compute pass that runs the task stage, then each mesh workgroup it launches.
   Each mesh workgroup writes fixed slots of a buffer, bounded by its `vertices` and `triangles`, and one indexed draw of the buffer follows.
   The task stage's payload is a buffer slot per launched workgroup.
@@ -50,7 +51,7 @@ The mesh and task stages' polyfill is the first decided: automatic where the dev
 * Emitting: a compute text per stage, from the same flat tree the stage's own text comes from; a mesh text for a geometry stage on metal.
 * The pipeline: a polyfilled pipeline is a compute pipeline, a buffer, and a raster pipeline whose vertex stage reads the buffer.
 * slib: acquiring a pipeline with a polyfilled stage acquires all three, and a draw records the dispatch ahead of itself.
-* sg: metal's native tessellation, which it does not have yet, and a GPU-written indirect count where the mesh polyfill needs one.
+* sg: a GPU-written indirect count, where the mesh polyfill and the tessellation polyfill need one.
 * The feature: a pipeline that could polyfill no longer needs the feature, so `require geometry_shader` becomes a request rather than a gate.
 
 ## Already fixed by the syntax
@@ -62,5 +63,4 @@ The mesh and task stages' polyfill is the first decided: automatic where the dev
 
 ## Open
 
-* How a polyfilled tessellation picks its grid when the factors vary per patch: the largest factor's grid, or a prefix sum over patches first.
 * What "a small factor of native" is, and whether it is one threshold or one per stage.

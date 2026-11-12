@@ -26,10 +26,10 @@ A geometry stage may become a mesh stage on metal, and divergent compute or a wo
 
 Children, native first where there is a native:
 
-- [feat-sgl-metal-tessellation](feat-sgl-metal-tessellation.md): native, on sg's [feat-sg-metal-tessellation](../../../shaped-graphics/docs/issues/feat-sg-metal-tessellation.md).
 - [feat-sgl-geometry-stage-polyfill](feat-sgl-geometry-stage-polyfill.md): metal and webgpu.
-- [feat-sgl-tessellation-polyfill](feat-sgl-tessellation-polyfill.md): webgpu.
+- [feat-sgl-tessellation-polyfill](feat-sgl-tessellation-polyfill.md): metal and webgpu.
 - [feat-sgl-mesh-task-polyfill](feat-sgl-mesh-task-polyfill.md): webgpu.
 - [feat-sgl-work-lists](feat-sgl-work-lists.md): native on three targets, on sg's [feat-sg-device-generated-commands](../../../shaped-graphics/docs/issues/feat-sg-device-generated-commands.md).
+- Closed as obsolete, since Metal 4 has no tessellation: [feat-sgl-metal-tessellation](.closed/2026/11/feat-sgl-metal-tessellation.md).
 - Closed as wontfix: [feat-sgl-work-graphs](.closed/2026/11/feat-sgl-work-graphs.md) and [feat-sgl-work-graph-polyfill](.closed/2026/11/feat-sgl-work-graph-polyfill.md).
 - [question-sgl-raygen-ser-scheduler](question-sgl-raygen-ser-scheduler.md): whether a raygen with SER beats compute for divergent work.
