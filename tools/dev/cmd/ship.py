@@ -209,17 +209,116 @@ def _prove(ctx: Context, server: build_server.Session) -> bool | None:
          f"{len(plan.get('over_budget') or [])} past the budget")
     for s in proof.report.get("sideband") or []:
         _say(f"sideband, not blocking: {s.get('config')} {s.get('mode')} {s.get('binary')}: {s.get('outcome')} {s.get('range')}")
-    # Reds the change did not cause, by the server's judgement: flaky, red before it, or unrelated by the evidence.
+    passed, filed, blockers = _settle_at_base(ctx, preset, proof)
+    # Reds the change did not cause: flaky, red before it, or red at its base too.
     # The push goes on; each is the session's to file as an issue, after `issues known <test>`.
-    filed = proof.report.get("filed") or []
-    for f in filed:
-        dev.ui.write_line(console.yellow(
-            f"ship: not blocking, file an issue: {f.get('binary')}: {f.get('test')}: {f.get('outcome')} ({f.get('filed')})"))
+    for binary, test, outcome, why in filed:
+        dev.ui.write_line(console.yellow(f"ship: not blocking, file an issue: {binary}: {test}: {outcome} ({why})"))
     if filed:
         _say(f"{len(filed)} red test(s) above are not this change's; `uv run dev.py issues known <test>`, then file each that is not known")
-    for reason in proof.reasons:
+    for reason in blockers:
         dev.ui.write_line(console.red(f"ship: proof: {reason}"))
-    return proof.passed
+    return passed
+
+
+# The judgements only a run at the change's base settles; the server decides `flaky` and `red_before` itself.
+_SETTLED_AT_BASE = {"green_before", "tied", "untied", "unknown"}
+
+
+def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bool, list[tuple[str, str, str, str]], list[str]]:
+    """The proof's verdict once its reds are run at the change's base: whether it holds, the reds to file, the blockers.
+
+    A red the server judged by its history or its evidence alone is run again in a worktree at the base (lib/project/base_worktree.py):
+    red there too, the change did not cause it, whatever the evidence said; green there, the change did, and it blocks.
+    A red whose base run cannot be made or read keeps the server's judgement.
+    """
+    report = proof.report
+    ran = report.get("ran") or []
+    red = [r for r in ran if r.get("outcome") not in ("pass", "skip")]
+    unfiled = [r for r in red if not r.get("filed")]
+    # Each red that blocks is one of the proof's reasons; the rest (a failed build, a moved tree, an unbuilt binary) stand.
+    others = [why for why in proof.reasons if not any(why.startswith(f"{r['binary']}: {r['test']}: ") for r in unfiled)]
+    settle = [r for r in red if r.get("judged") in _SETTLED_AT_BASE]
+    at_base: dict[tuple[str, str], bool | None] = {}
+    base = (report.get("delta") or {}).get("base")
+    if settle and base:
+        at_base = _red_at_base(ctx, preset, base, settle)
+    filed, blockers = [], list(others)
+    for r in red:
+        key, desc = (r["binary"], r["test"]), f"{r['binary']}: {r['test']}: {r['outcome']}"
+        verdict = at_base.get(key)
+        if verdict is True:
+            filed.append((*key, r["outcome"], f"red at the change's base {base[:12]} too"))
+        elif verdict is False:
+            blockers.append(f"{desc} (green at the change's base {base[:12]}, red with it)")
+        elif r.get("filed"):
+            filed.append((*key, r["outcome"], r["filed"]))
+        else:
+            blockers.append(f"{desc} ({r.get('why')})")
+    return not blockers, filed, blockers
+
+
+def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tuple[str, str], bool | None]:
+    """Per red (binary, test): whether it is red at `base`, run through `dev.py test` in the base worktree; None where unknown."""
+    from ..lib.project import base_worktree
+
+    _say(f"running {len(reds)} red test(s) at the change's base {base[:12]}, in {base_worktree.DIR}")
+    wt, why = base_worktree.ensure(ctx.root, base)
+    if wt is None:
+        _say(f"the base worktree could not be made, so the server's judgement stands: {why}")
+        return {}
+    artifacts = {t.name: t.artifact for t in ctx.discover(preset) if t.artifact}
+    try:
+        build_rel = preset.build_dir.resolve().relative_to(ctx.root.resolve())
+    except ValueError:
+        _say(f"{preset.build_dir} is outside the checkout, so the base worktree has no build dir to mirror it")
+        return {}
+    def run(r: dict) -> bool | None:
+        art = artifacts.get(r["binary"])
+        if art is None:
+            return None
+        rel = Path(art).resolve().relative_to(preset.build_dir.resolve())
+        xml = wt / build_rel / rel.parent / f"{rel.name}.results.xml"
+        xml.unlink(missing_ok=True)
+        subprocess.run(["uv", "run", "dev.py", "test", "--preset", preset.name, "-t", r["binary"], r["test"]], cwd=str(wt),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return _case_red(xml, r["test"])
+
+    out = {(r["binary"], r["test"]): run(r) for r in reds}
+    for (b, t), red in out.items():
+        _say(f"  at the base: {b}: {t}: {({True: 'red', False: 'green', None: 'no result'})[red]}")
+    # A red at the base counts only where the worktree reproduces the checkout: red there too at the commit being pushed,
+    # which is everything ship pushes, since it refuses uncommitted work.
+    # Green there, the worktree differs from the checkout, and its base run says nothing.
+    reproduce = [r for r in reds if out[(r["binary"], r["test"])] is True]
+    head = subprocess.run(["git", "-C", str(ctx.root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if reproduce and head:
+        wt, why = base_worktree.ensure(ctx.root, head)
+        if wt is None:
+            _say(f"the worktree could not be moved to {head[:12]} to check it, so the server's judgement stands: {why}")
+            return {k: (None if v else v) for k, v in out.items()}
+        for r in reproduce:
+            key = (r["binary"], r["test"])
+            if run(r) is not True:
+                _say(f"  but green in the worktree at {head[:12]} too, so the worktree differs from the checkout: {key[0]}: {key[1]}")
+                out[key] = None
+    return out
+
+
+def _case_red(xml: Path, test: str) -> bool | None:
+    """Whether a JUnit report has `test` failed (True) or passed (False); None when it does not hold the case."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        cases = ET.parse(xml).getroot().iter("testcase")
+    except (OSError, ET.ParseError):
+        return None
+    for c in cases:
+        if c.get("name") == test:
+            if c.find("skipped") is not None:
+                return None  # not run at the base: it says nothing either way
+            return c.find("failure") is not None or c.find("error") is not None
+    return None
 
 
 def _gate(ctx: Context, *, tests: bool, prover: build_server.Session | None = None) -> None:
