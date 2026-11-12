@@ -32,7 +32,8 @@ add_library(zstd STATIC ${ZSTD_SOURCES})
 # SYSTEM so zstd.h does not trip our warnings in the consuming TU.
 # src/ itself is the public include dir: the only headers directly in it are zstd.h, zstd_errors.h and zdict.h,
 # and everything internal sits one level down where nothing outside can name it.
-target_include_directories(zstd SYSTEM PUBLIC ${ZSTD_DIR}/src)
+# The build tree's only: every library links it PRIVATE, so an installed copy is an archive to link, never a header to include.
+target_include_directories(zstd SYSTEM PUBLIC $<BUILD_INTERFACE:${ZSTD_DIR}/src>)
 
 if (NOT ZSTD_WITH_ASM)
     target_compile_definitions(zstd PRIVATE ZSTD_DISABLE_ASM)

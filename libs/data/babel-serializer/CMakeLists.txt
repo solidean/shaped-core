@@ -74,7 +74,7 @@ target_compile_features(babel-serializer
 # Expose "src" so '#include <babel-serializer/...>' works for consumers.
 target_include_directories(babel-serializer
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # babel-data is the sibling library next door (libs/data/babel-data): base64, JSON and markdown over clean-core.

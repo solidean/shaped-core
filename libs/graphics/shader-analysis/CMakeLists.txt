@@ -33,7 +33,7 @@ target_sources(shader-analysis
 target_compile_features(shader-analysis PUBLIC cxx_std_23)
 
 # Expose "src" so '#include <shader-analysis/...>' works for consumers.
-target_include_directories(shader-analysis PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(shader-analysis PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 
 # babel-data reads the binaries, and a public header names its module type, so it is linked PUBLIC.
 target_link_libraries(shader-analysis PUBLIC clean-core babel-data)

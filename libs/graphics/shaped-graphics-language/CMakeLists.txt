@@ -361,7 +361,7 @@ target_sources(shaped-graphics-language
 target_compile_features(shaped-graphics-language PUBLIC cxx_std_23)
 
 # Expose "src" so '#include <shaped-graphics-language/...>' works for consumers.
-target_include_directories(shaped-graphics-language PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(shaped-graphics-language PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 
 target_link_libraries(shaped-graphics-language PUBLIC clean-core)
 

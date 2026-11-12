@@ -86,7 +86,7 @@ target_compile_features(clean-net
 # Expose "src" so '#include <clean-net/...>' works for consumers.
 target_include_directories(clean-net
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 target_link_libraries(clean-net PUBLIC clean-core)

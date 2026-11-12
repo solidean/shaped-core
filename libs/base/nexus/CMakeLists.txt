@@ -155,7 +155,7 @@ target_compile_features(nexus
 # Expose "src" so '#include <nexus/dummy.hh>' works for consumers.
 target_include_directories(nexus
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 target_link_libraries(nexus

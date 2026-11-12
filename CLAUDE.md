@@ -332,6 +332,12 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   See [docs/platforms.md](docs/platforms.md#threading-sc_threads).
 * `SC_X64_LEVEL` (default `v3`; `v2` on Android) is the x86-64 feature level **every** function may assume → `-march=x86-64-vN` / `/arch:` and `CC_X64_LEVEL`.
   A floor, not a ceiling: anything above it is clean-simd's dispatched kernels, never this switch.
+  `v2-avx` is `v2` plus AVX without AVX2, matching a consumer built for AVX alone → `CC_X64_LEVEL` 2 and `CC_X64_AVX`; the `v2-avx-msvc` preset builds it.
+* The build-wide ABI settings (`CC_DEBUG`, `CC_SINGLE_THREADED`, `CC_X64_LEVEL`, …) are no compile definitions: they are clean-core's generated `clean-core/build_config.hh`, which `macros.hh` includes first.
+* `SC_LIBRARIES` (default empty, every library) builds a subset: the named libraries, their shaped-core dependencies, and nexus only where tests, tools or examples are built.
+  The dependency table is [tools/cmake/Libraries.cmake](tools/cmake/Libraries.cmake), and configure fails where a library links what its row does not name.
+* `SC_INSTALL` (default OFF) adds install rules and the `shaped-core` CMake package (`find_package(shaped-core)`, `shaped-core::<library>`) — [tools/cmake/Install.cmake](tools/cmake/Install.cmake).
+  `uv run tools/install-test/install-test.py` installs a subset and builds a consumer against it.
   `SC_WASM_SIMD` (default ON) is the wasm counterpart, `-msimd128`.
   See [docs/platforms.md](docs/platforms.md#x86-64-feature-level-sc_x64_level).
 * **Floating-point contraction is off on every compiler, and there is no switch for it** — like fast-math, shaped-core does not support it.

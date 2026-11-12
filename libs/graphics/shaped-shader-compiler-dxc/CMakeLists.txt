@@ -37,7 +37,7 @@ target_compile_features(shaped-shader-compiler-dxc PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-shader-compiler-dxc/...>' works for consumers.
 target_include_directories(shaped-shader-compiler-dxc
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # shaped-graphics provides sg::compiled_shader (public API surface). DXC is an implementation detail

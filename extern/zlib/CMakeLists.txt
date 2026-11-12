@@ -21,7 +21,8 @@ add_library(zlib STATIC
 # SYSTEM so zlib.h does not trip our warnings in the consuming TU.
 # include/ holds zlib.h and zconf.h and nothing else, which is exactly the public API;
 # the internal headers stay in src/ where nothing outside can name them.
-target_include_directories(zlib SYSTEM PUBLIC ${ZLIB_DIR}/include)
+# The build tree's only: every library links it PRIVATE, so an installed copy is an archive to link, never a header to include.
+target_include_directories(zlib SYSTEM PUBLIC $<BUILD_INTERFACE:${ZLIB_DIR}/include>)
 
 # The internal headers reach zlib.h with a quote include. That misses in src/ and then resolves against
 # include/ above, so src/ only has to be visible to zlib's own TUs.

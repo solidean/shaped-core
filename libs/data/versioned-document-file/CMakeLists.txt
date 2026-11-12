@@ -50,7 +50,7 @@ target_compile_features(versioned-document-file
 # Expose "src" so '#include <versioned-document-file/...>' works for consumers.
 target_include_directories(versioned-document-file
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # versioned-document is the model this persists.

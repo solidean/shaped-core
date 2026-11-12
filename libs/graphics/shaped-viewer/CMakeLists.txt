@@ -155,7 +155,7 @@ target_compile_features(shaped-viewer PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-viewer/...>' works for consumers.
 target_include_directories(shaped-viewer
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # babel-serializer is what reads the asset formats sv imports (glTF, OBJ, STL, FBX) and decodes their images.

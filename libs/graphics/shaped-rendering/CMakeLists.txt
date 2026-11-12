@@ -99,7 +99,7 @@ target_compile_features(shaped-rendering PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-rendering/...>' works for consumers.
 target_include_directories(shaped-rendering
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # sr depends on slib because concrete routines acquire their shaders through it (a routine-author dependency).
