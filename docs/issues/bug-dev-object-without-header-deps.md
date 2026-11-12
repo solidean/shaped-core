@@ -11,7 +11,9 @@ ninja -t deps showed 'compute.cc.obj: #deps 0 (VALID)' for libs/graphics/shaped-
 It kept command_list's old layout, and the binary mixed two layouts: a free in ~command_list, a read of _rendering_targets, each depending on which members a test touched.
 Two other objects had no dependencies either: clean-core's node-allocation-design-benchmark.cc and mbedtls's ecp_curves_new.c.
 Deleting the three objects fixed it, and compute.cc.obj then recorded 442.
-Not known how it lost them: likely a compile through the build server that handed back no include list, since touching the header and building with --no-server did not rebuild it either.
+Not known how it lost them.
+The build server is not a likely cause: two build directories lost exactly the same three entries, which points at something about those files.
+`ninja -t deps | grep "#deps 0"` finds such an object in a second, and is the first thing to run on a binary that mixes two layouts.
 dev.py could refuse, or rebuild, an object whose deps entry is empty, at build time or in doctor.
 
 The same three objects had no dependencies in the `--agility-preview` build directory too, on 2026-11-12, with the same crash; deleting them fixed it there as well.
