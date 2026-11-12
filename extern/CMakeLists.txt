@@ -201,7 +201,7 @@ endif()
 if(SC_USE_VENDORED_LZ4)
     add_subdirectory(lz4 ${_sc_extern_scope})
 else()
-    _sc_external_package(lz4 SC_USE_VENDORED_LZ4 lz4 lz4::lz4)
+    _sc_external_package(lz4 SC_USE_VENDORED_LZ4 lz4 lz4::lz4 LZ4::lz4 LZ4::lz4_static LZ4::lz4_shared)
 endif()
 
 if(SC_USE_VENDORED_ZLIB)
