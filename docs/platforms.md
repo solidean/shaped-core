@@ -169,7 +169,8 @@ The MSVC, GCC, iOS, Android and wasm presets stay at `FULL`: wasm has no address
 
 ## x86-64 feature level (`SC_X64_LEVEL`)
 
-`SC_X64_LEVEL` (default `v3`) is the x86-64 feature level every function in the build may assume: `v1` (SSE2), `v2` (SSE4.2, POPCNT), `v2-avx`, `v3` (AVX2, FMA, F16C, BMI) or `v4` (AVX-512 F/BW/CD/DQ/VL).
+`SC_X64_LEVEL` (default `v3`) is the x86-64 feature level every function in the build may assume.
+It is `v1` (SSE2), `v2` (SSE4.2, POPCNT), `v2-avx`, `v3` (AVX2, FMA, F16C, BMI) or `v4` (AVX-512 F/BW/CD/DQ/VL).
 It reaches the compiler as `-march=x86-64-vN`, as `/clang:-march=…` under clang-cl, or as MSVC's `/arch:` spelling.
 It reaches the code as `CC_X64_LEVEL=N` in clean-core's generated `build_config.hh`, which every consumer of clean-core includes, installed or not.
 The define exists because cl.exe reports `__AVX2__` but none of the SSE levels, so a header cannot recover `v2` from the predefined macros alone.
