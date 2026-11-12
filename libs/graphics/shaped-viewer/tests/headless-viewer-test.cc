@@ -719,3 +719,118 @@ ASYNC_INVOCABLE_TEST("sv - frame imgui opens one imgui frame per frame and ends 
     }
     CHECK(ImGui::GetCurrentContext() == nullptr);
 }
+
+// A settled render is the capture a headless `sv::interactive` takes, handed back rather than written.
+// So one body rendered both ways is one image: the capture's lossless file against the returned pixels, byte for byte.
+// It renders with the wavefront and no denoiser, whose image is its samples' mean: the default hybrid denoises through
+// a history of frames, and the first viewer of a process runs more of them while its shaders compile.
+// Measured, 2026-11-12: under the hybrid the two differ by up to 13 of 255 in half the pixels, the same on every run.
+ASYNC_INVOCABLE_TEST("sv - a settled render hands back the image a capture of the same body writes",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto const path = cc::temp_file_path("sv-settled-test", ".png");
+    auto const size = tg::vec2i(96, 64);
+    auto const box = sv_test::make_cornell_box();
+    auto const lit = sv_test::as_lit_meshes(box, box.light.emission[0]);
+    auto const body = [&](sv::frame& f)
+    {
+        auto view = f.window().view();
+        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+        auto scene = view.add_scene();
+        // the wavefront with no denoiser, whose image is its samples' mean whatever frames it took to reach them
+        scene.settings({.mode = sv::render_mode::wavefront});
+        scene.studio();
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
+    };
+
+    // WARP traces in software, so few samples, and a timeout no hardware run comes near
+    auto const request
+        = sr::capture_request{.active = true, .output_path = path, .size = size, .accumulate = 4, .timeout_seconds = 120.0};
+    for (auto f : sv::interactive(ctx, "sv-test/settled", {}, request))
+        body(f);
+    co_await cc::async_settled(sv::background_work(ctx));
+
+    auto const settled
+        = sv::render_settled(ctx, "sv-test/settled", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+    co_await cc::async_settled(sv::background_work(ctx));
+    REQUIRE(settled.has_value()).context(settled.has_error() ? settled.error().to_string() : cc::string());
+    CHECK(settled.value().settled);
+    CHECK(settled.value().size == size);
+    REQUIRE(settled.value().rgba.size() == isize(size[0]) * size[1] * 4);
+
+    auto written = babel::image::image();
+    {
+        auto reread = cc::file_read_stream_adapter::open(path);
+        REQUIRE(reread.has_value());
+        cc::read_stream in = reread.value();
+        auto decoded = babel::image::read(in);
+        REQUIRE(decoded.has_value());
+        written = cc::move(decoded.value());
+    }
+    cc::remove_file(path);
+    REQUIRE(written.width == size[0]);
+    REQUIRE(written.height == size[1]);
+
+    // the file holds red, green and blue; the settled image red, green, blue and alpha, opaque
+    auto differing = 0;
+    auto lit_pixels = 0;
+    for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+    {
+        auto same = true;
+        for (auto c = 0; c < 3; ++c)
+            same = same && settled.value().rgba[i * 4 + c] == u8(written.pixels[i * written.channels + c]);
+        differing += same ? 0 : 1;
+        lit_pixels += settled.value().rgba[i * 4 + 0] > 16 ? 1 : 0;
+    }
+    {
+        auto const again
+            = sv::render_settled(ctx, "sv-test/settled", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+        co_await cc::async_settled(sv::background_work(ctx));
+        REQUIRE(again.has_value());
+        auto self_max = 0;
+        auto self_diff = 0;
+        for (auto i = isize(0); i < again.value().rgba.size(); ++i)
+        {
+            auto const d = i32(again.value().rgba[i]) - i32(settled.value().rgba[i]);
+            self_max = cc::max(self_max, d < 0 ? -d : d);
+            self_diff += d != 0 ? 1 : 0;
+        }
+        CHECK(self_diff == 0).dump("self_differing", self_diff).dump("self_max", self_max);
+    }
+    auto max_diff = 0;
+    auto sum_diff = 0.0;
+    auto sum_a = 0.0;
+    auto sum_b = 0.0;
+    for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+        for (auto c = 0; c < 3; ++c)
+        {
+            auto const a = i32(settled.value().rgba[i * 4 + c]);
+            auto const b = i32(u8(written.pixels[i * written.channels + c]));
+            max_diff = cc::max(max_diff, a > b ? a - b : b - a);
+            sum_diff += a > b ? a - b : b - a;
+            sum_a += a;
+            sum_b += b;
+        }
+    CHECK(differing == 0)
+        .dump("differing", differing)
+        .dump("max", max_diff)
+        .dump("mean", sum_diff / (3.0 * size[0] * size[1]))
+        .dump("mean_settled", sum_a / (3.0 * size[0] * size[1]))
+        .dump("mean_written", sum_b / (3.0 * size[0] * size[1]));
+    // and it is a picture of the box, not a cleared target
+    CHECK(lit_pixels > size[0] * size[1] / 4).dump("lit", lit_pixels);
+}

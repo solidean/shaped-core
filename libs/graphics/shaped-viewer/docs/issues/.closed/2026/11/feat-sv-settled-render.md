@@ -6,6 +6,8 @@ refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/interactive.cc
   - file: libs/graphics/shaped-rendering/src/shaped-rendering/capture.cc
   - symbol: advance_capture
+closed: 2026-11-12
+resolution: fixed
 ---
 
 # A settled render: the frame loop inside one call, the image handed back

@@ -309,9 +309,14 @@ struct frame_sentinel;
 // capturing a run to an image (see capture.hh); the protocol itself is sr::capture_request
 struct capture_context;
 
+// a render that settles inside one call and hands its image back (see settled.hh)
+struct settled_options;
+struct settled_image;
+
 namespace impl
 {
 class capture_session;
+struct settled_landing; // where a settled render's readback lands (impl/settled_landing.hh)
 } // namespace impl
 
 // authoring handles (see refs.hh) — all non-owning {frame*, index} pairs

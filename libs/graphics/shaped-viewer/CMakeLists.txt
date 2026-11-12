@@ -40,6 +40,7 @@ add_library(shaped-viewer
     src/shaped-viewer/refs.cc
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/capture.cc
+    src/shaped-viewer/settled.cc
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/impl/wavefront_pacing.cc
     src/shaped-viewer/resources/resource_managers.cc

@@ -1046,6 +1046,9 @@ sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = view
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
 sv::interactive([ctx,] "id", cfg, req)  // takes this sr::capture_request instead of the environment; req must be active with an output path
                                  //   how a test reaches req.clock_seconds, so a capture timeout is advanced rather than waited out
+sv::render_settled([ctx,] "id", {.size, .samples, .timeout_seconds}, [&](sv::frame& f) { ... })
+                                 // -> cc::result<sv::settled_image>: the loop inside one call, the capture handed back as rgba bytes
+                                 //   the same body draws the same image here and in a window; .settled is false where time ran out
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
                                  //   yields sv::frame_scope: a frame whose destructor presents, so the loop body needs no present call
