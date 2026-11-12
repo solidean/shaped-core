@@ -740,3 +740,205 @@ ASYNC_INVOCABLE_TEST("sg - a routine whose init fails reports failed, not pendin
 
     broken_routine::evict(*ctx);
 }
+
+namespace
+{
+/// Ends its init in an error rather than through fail_init, as a phase does when something it calls refuses, and counts its runs.
+class erroring_routine : public sg::render_routine<erroring_routine>
+{
+public:
+    static inline cc::atomic<int> runs = 0;
+
+protected:
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    {
+        runs.fetch_add(1);
+        co_await cc::make_async_from_error<cc::unit>(cc::async_error::make_error(cc::any_error("this phase refuses")));
+    }
+};
+
+/// Fails in init_once, so init must never run, and counts both.
+class once_failing_routine : public sg::render_routine<once_failing_routine>
+{
+public:
+    static inline cc::atomic<int> once_runs = 0;
+    static inline cc::atomic<int> init_runs = 0;
+
+protected:
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
+    {
+        once_runs.fetch_add(1);
+        fail_init();
+        co_return;
+    }
+
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    {
+        init_runs.fetch_add(1);
+        co_return;
+    }
+};
+
+/// Fails in init_once once `gate` opens, which a test holds shut across a reload.
+class gated_once_failing_routine : public sg::render_routine<gated_once_failing_routine>
+{
+public:
+    static inline cc::atomic<int> once_runs = 0;
+    static inline cc::shared_async<cc::unit> gate;
+
+protected:
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
+    {
+        once_runs.fetch_add(1);
+        co_await gate;
+        fail_init();
+    }
+};
+
+/// Cancelled by something other than a reload, and counts its runs.
+class cancelled_routine : public sg::render_routine<cancelled_routine>
+{
+public:
+    static inline cc::atomic<int> runs = 0;
+
+protected:
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    {
+        runs.fetch_add(1);
+        co_await cc::make_async_from_error<cc::unit>(cc::async_error::make_cancelled());
+    }
+};
+
+/// One tick held to a few passes by an injected clock, so a phase restarted on every pass shows up as runs rather than as a tick that never ends.
+sg::routine_tick_result bounded_tick(sg::context& ctx)
+{
+    return ctx.routines.tick({
+        .budget_secs = 1.0,
+        .clock_seconds =
+            []
+        {
+            static auto now = 0.0;
+            return now += 0.25;
+        },
+    });
+}
+
+/// Bounded ticks until `done` holds, at most `max_ticks` of them; whether it held.
+template <class F>
+bool tick_until(sg::context& ctx, F&& done, int max_ticks = 10000)
+{
+    for (auto i = 0; i < max_ticks; ++i)
+    {
+        if (done())
+            return true;
+        (void)bounded_tick(ctx);
+    }
+    return done();
+}
+} // namespace
+
+// A phase that ends in an error has failed at this generation, and only a reload runs it again.
+// Restarting it instead is a loop inside the tick: it froze a browser's page, and on a last-in-first-out phase queue the
+// restart starved every other routine's phase beneath it.
+ASYNC_INVOCABLE_TEST("sg - a routine whose init ends in an error runs once, and only a reload runs it again",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    erroring_routine::evict(*ctx);
+    erroring_routine::runs.store(0);
+
+    CHECK(erroring_routine::try_acquire(*ctx).is_pending());
+    REQUIRE(tick_until(*ctx, [&] { return erroring_routine::try_acquire(*ctx).is_failed(); }));
+    for (auto i = 0; i < 4; ++i)
+        (void)bounded_tick(*ctx);
+    CHECK(erroring_routine::try_acquire(*ctx).is_failed());
+    REQUIRE(erroring_routine::runs.load() == 1);
+
+    sg::signal_reload();
+    (void)co_await ctx->routines.idle_completion();
+    CHECK(erroring_routine::try_acquire(*ctx).is_failed());
+    CHECK(erroring_routine::runs.load() == 2);
+
+    erroring_routine::evict(*ctx);
+}
+
+// fail_init in init_once is a failure like any other: init does not run over it, and a reload tries init_once again.
+ASYNC_INVOCABLE_TEST("sg - a routine failing in init_once stays failed, and a reload runs init_once again",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    once_failing_routine::evict(*ctx);
+    once_failing_routine::once_runs.store(0);
+    once_failing_routine::init_runs.store(0);
+
+    CHECK(once_failing_routine::try_acquire(*ctx).is_pending());
+    REQUIRE(tick_until(*ctx, [&] { return once_failing_routine::try_acquire(*ctx).is_failed(); }));
+    for (auto i = 0; i < 4; ++i)
+        (void)bounded_tick(*ctx);
+    CHECK(once_failing_routine::try_acquire(*ctx).is_failed());
+    CHECK(once_failing_routine::once_runs.load() == 1);
+    REQUIRE(once_failing_routine::init_runs.load() == 0);
+
+    sg::signal_reload();
+    (void)co_await ctx->routines.idle_completion();
+    CHECK(once_failing_routine::try_acquire(*ctx).is_failed());
+    CHECK(once_failing_routine::once_runs.load() == 2);
+    CHECK(once_failing_routine::init_runs.load() == 0);
+
+    once_failing_routine::evict(*ctx);
+}
+
+// init_once is never cancelled, so one started before a reload can fail after it.
+// That failure belongs to the old generation: the routine is pending at the new one, and init_once runs again there.
+ASYNC_INVOCABLE_TEST("sg - an init_once failing after a reload is the old generation's verdict, not the new one's",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    gated_once_failing_routine::evict(*ctx);
+    gated_once_failing_routine::once_runs.store(0);
+    auto const gate = cc::make_async_manual<cc::unit>();
+    gated_once_failing_routine::gate = gate;
+
+    gated_once_failing_routine::prewarm(*ctx);
+    REQUIRE(tick_until(*ctx, [] { return gated_once_failing_routine::once_runs.load() == 1; }));
+
+    sg::signal_reload();
+    gate->push_value(cc::unit{});
+
+    // The first run settles at the new generation; one idle_completion must go on to a second run rather than stop at a stale failure.
+    (void)co_await ctx->routines.idle_completion();
+    CHECK(gated_once_failing_routine::once_runs.load() == 2);
+    CHECK(gated_once_failing_routine::try_acquire(*ctx).is_failed());
+
+    gated_once_failing_routine::gate = {};
+    gated_once_failing_routine::evict(*ctx);
+}
+
+// Cancelled with no reload behind it, nothing would ever end the restarts, so it is a failure at this generation.
+ASYNC_INVOCABLE_TEST("sg - a routine cancelled at its own generation is not restarted",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    cancelled_routine::evict(*ctx);
+    cancelled_routine::runs.store(0);
+
+    CHECK(cancelled_routine::try_acquire(*ctx).is_pending());
+    // Ticked inside a node of its own, as idle_completion ticks: the phase it starts ends cancelled, and that must not reach the test's own frame.
+    auto const ticked = co_await cc::make_async_scheduled<bool>(
+        [&](cc::async_context<bool>& actx)
+        {
+            auto const failed = tick_until(*ctx, [&] { return cancelled_routine::try_acquire(*ctx).is_failed(); });
+            for (auto i = 0; i < 4; ++i)
+                (void)bounded_tick(*ctx);
+            return actx.success(failed);
+        });
+    REQUIRE(ticked);
+    CHECK(cancelled_routine::try_acquire(*ctx).is_failed());
+    CHECK(cancelled_routine::runs.load() == 1);
+
+    cancelled_routine::evict(*ctx);
+}

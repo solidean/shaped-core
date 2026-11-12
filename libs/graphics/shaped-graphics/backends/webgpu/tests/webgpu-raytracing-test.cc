@@ -710,3 +710,38 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a dispatch reads its acceleration roots from g
     CHECK(data[3] == 77u);
     CHECK(data[4] == 0u);
 }
+
+ASYNC_INVOCABLE_TEST("sg webgpu - a transient group over a new TLAS each epoch is one WebGPU group carrying each root",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    float const vertices[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    sg::blas_triangles const tri = {.vertices = build_input(ctx, vertices), .vertex_count = 3};
+    auto const scene_binding
+        = sg::binding{.name = "scene", .group_index = 0, .index = 0, .type = sg::binding_type::acceleration_structure};
+    auto const layout = ctx.cached.acquire_binding_group_layout({scene_binding});
+
+    // A frame rebuilds its scene and binds it anew, as a renderer tracing every frame does.
+    auto const frame = [&]
+    {
+        auto build = ctx.create_command_list();
+        auto const blas = build->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
+        sg::tlas_instance const instances[] = {{.blas = blas}};
+        auto const tlas = build->raytracing.build_tlas(instances);
+        ctx.submit_command_list(cc::move(build));
+        sg::named_view const scene = {.name = "scene", .view = tlas->as_view()};
+        auto const group = std::dynamic_pointer_cast<webgpu::webgpu_binding_group const>(
+            ctx.transient.create_binding_group(layout, cc::span<sg::named_view const>(&scene, 1)));
+        CHECK(group->acceleration_roots.size() == 1);
+        CHECK(group->acceleration_roots[0] == static_cast<webgpu::webgpu_tlas const&>(*tlas).unit());
+        ctx.advance_epoch();
+        return group->raw();
+    };
+
+    auto const first = frame();
+    auto const before = ctx.created();
+    for (auto i = 0; i < 3; ++i)
+        CHECK(frame() == first);
+    CHECK(ctx.created().bind_groups == before.bind_groups);
+    co_return;
+}

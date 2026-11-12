@@ -111,12 +111,12 @@ private:
     /// It shares _init with the derived routine's own state, so a phase runs only once even under a concurrent acquire.
     struct init_state
     {
-        /// init_once has completed.
+        /// init_once has completed without failing.
         /// It never runs again, whatever the generation does.
         bool once_done = false;
 
-        /// The generation `init` last COMPLETED at.
-        /// Readiness is this equalling the current one.
+        /// The generation a phase last COMPLETED or failed at.
+        /// Readiness is this equalling the current one with no failure.
         cc::optional<u64> ready_generation;
 
         /// The phase currently running, if any.

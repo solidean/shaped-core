@@ -10,7 +10,7 @@
 /// WebGPU implementation of sg::binding_group: one WGPUBindGroup.
 ///
 /// It holds the resources it binds, since an sg group keeps its views alive and a WebGPU group only keeps the objects.
-/// A transient group is not recycled — WebGPU owns the object — so its scope changes nothing but the expiry check at bind.
+/// A transient group over the same WebGPU objects as one in this epoch or the last shares that group's WGPUBindGroup (webgpu_context::claim_binding_group).
 class sg::backend::webgpu::webgpu_binding_group final : public sg::binding_group
 {
 public:

@@ -463,6 +463,74 @@ public:
     [[nodiscard]] std::shared_ptr<webgpu_texture> register_if_transient(std::shared_ptr<webgpu_texture> texture,
                                                                         sg::lifetime_scope scope);
 
+    // -- reuse across epochs --
+    //
+    // A browser frees a bind group or a view only when its garbage collector runs, so objects made every frame pile up
+    // until it does -- and Firefox runs out of descriptors first, reporting it as out of memory.
+    // So what a frame asks for again is handed back rather than made again, by one rule for every kind:
+    // an object is reused while it keeps being asked for, and released once an epoch has passed without a request.
+    // No fence is needed for any of it: WebGPU orders all queued work, and nothing here is ever mapped.
+    // libs/graphics/shaped-graphics/docs/issues/bug-sg-webgpu-per-frame-objects-exhaust-firefox.md is the measurement.
+
+    /// What this context has created, for a test asserting that a repeated frame creates nothing new.
+    struct created_objects
+    {
+        i64 textures = 0;
+        i64 buffers = 0;
+        i64 texture_views = 0;
+        i64 bind_groups = 0;
+    };
+    [[nodiscard]] created_objects created() const { return _created; }
+    void count_created_view() { ++_created.texture_views; }
+
+    /// A fresh serial for a WebGPU buffer or texture; never 0, never repeated.
+    [[nodiscard]] u64 next_resource_serial() { return _next_serial++; }
+
+    /// The open epoch, as a plain number, for what records when it was last used.
+    [[nodiscard]] u64 current_epoch_number() const { return u64(_current_epoch); }
+
+    /// A transient texture or buffer between its handles.
+    struct reusable_texture
+    {
+        sg::texture_description desc;
+        std::shared_ptr<webgpu_texture_storage> storage;
+    };
+    struct reusable_buffer
+    {
+        isize size_in_bytes = 0;
+        WGPUBufferUsage usage = WGPUBufferUsage_None;
+        wgpu_buffer buffer;
+        u64 serial = 0;
+    };
+
+    /// The claimable side's texture of exactly `desc`, taken off it; null when there is none.
+    [[nodiscard]] std::shared_ptr<webgpu_texture_storage> claim_texture(sg::texture_description const& desc);
+
+    /// The claimable side's buffer of exactly this size and usage, taken off it; an empty buffer when there is none.
+    [[nodiscard]] reusable_buffer claim_buffer(isize size_in_bytes, WGPUBufferUsage usage);
+
+    /// A transient texture's storage that just expired, claimable from the next epoch on.
+    void offer_texture(sg::texture_description const& desc, std::shared_ptr<webgpu_texture_storage> storage);
+
+    /// A transient buffer that just expired, claimable from the next epoch on.
+    void offer_buffer(isize size_in_bytes, WGPUBufferUsage usage, wgpu_buffer buffer, u64 serial);
+
+    /// Records that a transient request in this epoch was handed the object of `serial`, in the order requests came.
+    void note_handed_out(u64 serial) { _handed_out.push_back(serial); }
+
+    /// Registers a texture storage that holds a view over less than the whole texture, for the epoch sweep.
+    void sweep_views_of(std::shared_ptr<webgpu_texture_storage> const& storage);
+
+    /// A transient binding group made this epoch or the last over `layout` and the entries `key` encodes, or null.
+    [[nodiscard]] wgpu_bind_group claim_binding_group(webgpu_binding_group_layout_handle const& layout,
+                                                      cc::span<u64 const> key);
+
+    /// Keeps a transient binding group made this epoch, for the same request in this epoch or the next.
+    void keep_binding_group(webgpu_binding_group_layout_handle const& layout,
+                            cc::vector<u64> key,
+                            wgpu_bind_group const& group);
+    void count_created_bind_group() { ++_created.bind_groups; }
+
     /// Asks the queue to call back once everything submitted so far has run, raising the completed submission to `submission` and the completed epoch to `epoch`, where nonzero.
     void notify_when_queue_done(u64 submission, u64 epoch);
 
@@ -521,6 +589,39 @@ private:
 
     cc::vector<std::weak_ptr<sg::raw_buffer const>> _transient_buffers;
     cc::vector<std::weak_ptr<sg::raw_texture const>> _transient_textures;
+
+    /// Releases what went an epoch unclaimed, makes what expired claimable, and sweeps old partial views; at every advance.
+    void advance_reuse();
+
+    struct reusable_binding_group
+    {
+        webgpu_binding_group_layout_handle layout; // held, so a freed layout's pointer cannot match a later one
+        cc::vector<u64> key;
+        u64 hash = 0;
+        wgpu_bind_group group;
+    };
+
+    /// The two sides: what expired in the last epoch and may be claimed in this one, and what expires in this one.
+    cc::vector<reusable_texture> _claimable_textures;
+    cc::vector<reusable_texture> _incoming_textures;
+    cc::vector<reusable_buffer> _claimable_buffers;
+    cc::vector<reusable_buffer> _incoming_buffers;
+
+    /// The serials this epoch's transient requests were handed, in request order.
+    /// The incoming side is sorted by it before it turns claimable, so a frame repeating the last one's requests is
+    /// handed the same objects for each, and the groups over them are found again.
+    /// Expiry order would not do: a handle dropped mid-frame offers its object early.
+    cc::vector<u64> _handed_out;
+
+    /// Transient binding groups made or claimed in this epoch, and in the last.
+    cc::vector<reusable_binding_group> _current_groups;
+    cc::vector<reusable_binding_group> _previous_groups;
+
+    /// Texture storages holding a view over less than the whole texture.
+    cc::vector<std::weak_ptr<webgpu_texture_storage>> _view_sweep;
+
+    created_objects _created;
+    u64 _next_serial = 1;
 };
 
 namespace sg
