@@ -176,7 +176,6 @@ fun pt_is_finite(c: float4) => not (any(is_nan(c)) or any(is_inf(c)))
     // Blurred over 3x3, so one pixel whose samples happened to agree is still filtered, each tap capped against the median.
     if is_measured():
         let mut taps = float[9].filled(0.0)
-        @unroll
         for k in 0 ..< 9:
             let q = clamp(p + int2(k % 3 - 1, k / 3 - 1), int2(0), size - int2(1))
             taps[k] = variance_at(q)
@@ -193,7 +192,6 @@ fun pt_is_finite(c: float4) => not (any(is_nan(c)) or any(is_inf(c)))
         tap_cap = cap
         let mut blurred = 0.0
         let mut blur_weight = 0.0
-        @unroll
         for k in 0 ..< 9:
             let w = (if k % 3 == 1 => 0.5 else 0.25) * (if k / 3 == 1 => 0.5 else 0.25)
             blurred += min(taps[k], cap) * w
