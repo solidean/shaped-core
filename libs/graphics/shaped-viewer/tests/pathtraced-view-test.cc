@@ -1,5 +1,6 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/container/tuple.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -1791,6 +1792,87 @@ namespace
     return f32(tg::sqrt(sum / f64(a.size())));
 }
 } // namespace
+
+namespace
+{
+/// A relief floor whose horizon is `lo` and `hi` everywhere, its tangent along +x and its bitangent along -z, so a
+/// horizon's direction 0 faces +x; a diffuse gray with no specular.
+[[nodiscard]] sv::mesh horizon_floor(tg::vec4f lo, tg::vec4f hi)
+{
+    auto& lib = sv_test::shared_material_library();
+    auto const material = lib.acquire(sv::material::create(
+        cc::format("horizon floor {} {} {} {}", lo[0], lo[1], hi[0], hi[1]),
+        lib.acquire_type(sv::builtin_material::openpbr_relief).value(),
+        {sv::material_attribute_binding::of("base_color", tg::vec3f(0.5f, 0.5f, 0.5f)),
+         sv::material_attribute_binding::of("specular_weight", 0.0f),
+         sv::material_attribute_binding::of("horizon_lo", lo), sv::material_attribute_binding::of("horizon_hi", hi)}));
+    auto floor = sv_test::cornell_box{};
+    sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          sv_test::pbr_material{});
+    auto const frame
+        = tg::quat_f::make_from_basis(tg::vec3f(1, 0, 0), tg::vec3f(0, 0, -1), tg::vec3f(0, 1, 0)).normalized();
+    return {.name = "horizon floor",
+            .geometry = sv::triangle_geometry::create_from_positions(floor.positions),
+            .attributes
+            = {sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                          cc::vector<tg::quat_f>::create_filled(floor.positions.size(), frame))},
+            .material = material};
+}
+} // namespace
+
+// A relief's horizon shadows it as the relief would itself: light from below the horizon in its direction is closed,
+// and light above it, or from a direction whose horizon is open, is not.
+// A floor whose horizon rises to 45 degrees toward +x and nowhere else: a light from +x at 30 degrees is shadowed,
+// one from +x at 60 degrees and one from -x at 30 degrees are not, each against the same floor wholly open.
+ASYNC_INVOCABLE_TEST("sv - a relief's horizon shadows the light below it, in its own direction alone",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+    auto const blocked = tg::vec4f(tg::sin(tg::angle_f::make_from_degree(45.0f)), 0, 0, 0);
+    auto const open = tg::vec4f(0, 0, 0, 0);
+
+    auto const shade = [&](tg::vec4f lo, f32 from_x, f32 elevation_degrees) -> cc::shared_async<f32>
+    {
+        auto const e = tg::angle_f::make_from_degree(elevation_degrees);
+        // the light travels toward the floor from the side `from_x` names
+        auto const light
+            = sv::light::directional(tg::vec3f(-from_x * tg::cos(e), -tg::sin(e), 0.0f)).lux(2).casts_shadows(false);
+        auto const lights = table_of(cc::span<sv::light const>(&light, 1));
+        auto scene = make_light_scene(resources, horizon_floor(lo, open), cam);
+        if (!scene.has_value())
+            co_return -1.0f;
+        auto const traced = trace_under(&ctx, &resources, scene.value(), {lights});
+        auto const& images = co_await traced;
+        co_return images.size() == 1 ? mean_brightness(images[0], scene.value().size, 4) : -1.0f;
+    };
+
+    for (auto const [from_x, elevation, wanted, what] :
+         {cc::tuple<f32, f32, f32, cc::string_view>{1.0f, 30.0f, 0.0f, "from +x below the horizon"},
+          {1.0f, 60.0f, 1.0f, "from +x above it"},
+          {-1.0f, 30.0f, 1.0f, "from -x, where it is open"}})
+    {
+        auto const relief_traced = shade(blocked, from_x, elevation);
+        auto const relief = co_await relief_traced;
+        auto const plain_traced = shade(open, from_x, elevation);
+        auto const plain = co_await plain_traced;
+        REQUIRE(relief >= 0.0f);
+        REQUIRE(plain > 0.0f);
+        CHECK(tg::abs(relief / plain - wanted) < 0.02f).dump("light", what).dump("ratio", relief / plain);
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
 
 // Parallax occlusion mapping against geometry: a relief whose height is one flat plane 0.2 m below its face must look
 // exactly as a face 0.2 m lower does, its stripes moved by the ray's own slant (Tatarchuk 2006).
