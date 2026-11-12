@@ -1398,10 +1398,28 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         auto const readback = sr::submit_capture_readback(*im.ctx, im.offscreen);
 
         // A settled render takes the readback itself, and nothing is written.
+        // With it, the first traced layer's channels, where it asked for any: their sums and the tallies that count them.
         if (im.settled_landing != nullptr)
         {
-            im.settled_landing->readback = readback;
-            im.settled_landing->settled = session.settled_before_writing();
+            auto& landing = *im.settled_landing;
+            landing.readback = readback;
+            landing.settled = session.settled_before_writing();
+            for (auto const& tr : plan.traces)
+            {
+                if (!tr.refresh)
+                    continue;
+                if (auto const* const paths = im.views.wavefront_paths(tr.id);
+                    paths != nullptr && paths->channel_mask != 0)
+                {
+                    auto cmd = im.ctx->create_command_list();
+                    landing.tallies = cmd->download.data_from_buffer(paths->tallies);
+                    landing.channel_sums = cmd->download.data_from_buffer(paths->channel_sums);
+                    (void)im.ctx->submit_command_list(cc::move(cmd));
+                    landing.channel_mask = paths->channel_mask;
+                    landing.extent = paths->extent;
+                }
+                break;
+            }
             return;
         }
 

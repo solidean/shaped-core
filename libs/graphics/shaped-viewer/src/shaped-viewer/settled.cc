@@ -7,6 +7,7 @@
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/impl/settled_landing.hh>
 #include <shaped-viewer/settled.hh>
+#include <shaped-viewer/view/render_settings.hh> // sv::render_channel
 #include <shaped-viewer/viewer.hh>
 
 namespace sv
@@ -54,6 +55,38 @@ cc::result<settled_image> render_settled(sg::context& ctx,
         out.rgba[i + 1] = u8(span[i + 1]);
         out.rgba[i + 2] = u8(span[i + 0]);
         out.rgba[i + 3] = u8(span[i + 3]);
+    }
+
+    // Each channel's mean: its sum over the samples the tally's guide count counts, an escaped one adding nothing.
+    if (landing.channel_sums.has_value() && landing.tallies.has_value())
+    {
+        auto const sums_landing = landing.channel_sums.value().data();
+        auto const tallies_landing = landing.tallies.value().data();
+        auto const sums = cc::try_async_blocking_get(sums_landing);
+        auto const tallies = cc::try_async_blocking_get(tallies_landing);
+        if (sums.has_error() || tallies.has_error())
+            return cc::error(cc::format("reading the settled render {}'s channels back failed", id));
+        auto const pixels = isize(landing.extent[0]) * landing.extent[1];
+        auto const slots = isize(cc::popcount(landing.channel_mask));
+        if (landing.extent != options.size || tallies.value().span().size() < pixels
+            || sums.value().span().size() < pixels * slots)
+            return cc::error(cc::format("the settled render {}'s channels are laid out over {} by {}, not its image",
+                                        id, landing.extent[0], landing.extent[1]));
+        auto k = isize(0);
+        for (auto bit = u32(1); bit != 0 && bit <= landing.channel_mask; bit <<= 1)
+        {
+            if ((landing.channel_mask & bit) == 0)
+                continue;
+            auto channel = settled_channel{.channel = render_channel(bit),
+                                           .values = cc::vector<tg::vec4f>::create_uninitialized(pixels)};
+            for (auto s = isize(0); s < pixels; ++s)
+            {
+                auto const n = tallies.value().span()[s].guide_count;
+                channel.values[s] = sums.value().span()[s * slots + k] / cc::max(n, 1.0f);
+            }
+            out.channels.push_back(cc::move(channel));
+            ++k;
+        }
     }
     return out;
 }

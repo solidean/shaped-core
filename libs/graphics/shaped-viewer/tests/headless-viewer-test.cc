@@ -896,3 +896,97 @@ ASYNC_INVOCABLE_TEST("sv - an orthographic camera draws a quad the same size at 
             CHECK(covered == 16 * 16).dump("renderer", name).dump("distance", distance).dump("covered", covered);
         }
 }
+
+// A wavefront layer averages the channels it asks for at its pixels' primary hits, and a settled render hands them back.
+// A floor quad 2 m wide seen straight down by an orthographic view 4 m high over 32 pixels: every quantity is known.
+// Covered pixels hold their own ray's point, the camera's height as depth, the floor's normal and its material;
+// uncovered ones hold nothing, coverage 0.
+ASYNC_INVOCABLE_TEST("sv - a settled render hands back the channels a wavefront layer averages at its primary hits",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto& lib = sv_test::shared_material_library();
+    auto const color = tg::vec3f(0.2f, 0.5f, 0.7f);
+    auto const material
+        = lib.acquire(sv::material::create("channel test floor", lib.acquire_type(sv::builtin_material::openpbr).value(),
+                                           {sv::material_attribute_binding::of("base_color", color),
+                                            sv::material_attribute_binding::of("specular_roughness", 0.35f),
+                                            sv::material_attribute_binding::of("base_metalness", 0.25f)}));
+    // two meters square at y = 0, its winding facing up
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(-1, 0, -1), tg::pos3f(-1, 0, 1), tg::pos3f(1, 0, 1),
+                                                 tg::pos3f(-1, 0, -1), tg::pos3f(1, 0, 1),  tg::pos3f(1, 0, -1)};
+    auto const floor = sv::mesh{.name = "channel test floor",
+                                .geometry = sv::triangle_geometry::create_from_positions(positions),
+                                .material = material};
+
+    auto const size = tg::vec2i(32, 32);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 5, 0), tg::pos3d(0, 0, 0), tg::vec3d(0, 0, 1));
+    cam.projection.kind = sv::projection_kind::orthographic;
+    cam.projection.view_height = 4.0;
+    cam.projection.far_plane = 20.0;
+    auto const channels = u32(sv::render_channel::position) | u32(sv::render_channel::view_depth)
+                        | u32(sv::render_channel::geometric_normal) | u32(sv::render_channel::shading_normal)
+                        | u32(sv::render_channel::base_color) | u32(sv::render_channel::material)
+                        | u32(sv::render_channel::instance);
+    auto const body = [&](sv::frame& f)
+    {
+        auto view = f.window().view();
+        view.camera(cam);
+        auto scene = view.add_scene();
+        scene.settings({.channels = channels, .mode = sv::render_mode::wavefront});
+        scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
+        scene.add_mesh(floor);
+    };
+    auto const image
+        = sv::render_settled(ctx, "sv-test/channels", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+    co_await cc::async_settled(sv::background_work(ctx));
+    REQUIRE(image.has_value()).context(image.has_error() ? image.error().to_string() : cc::string());
+    REQUIRE(image.value().channels.size() == 7);
+
+    auto const& c = image.value().channels;
+    CHECK(c[0].channel == sv::render_channel::position);
+    CHECK(c[6].channel == sv::render_channel::instance);
+    auto const at = [&](i32 channel, i32 x, i32 y) { return c[channel].values[isize(y) * size[0] + x]; };
+
+    // inside the quad, away from its edges: the camera's right is the world's -x, its up the world's +z
+    auto const b = cam.basis();
+    for (auto const [x, y] : {cc::pair<i32, i32>{16, 16}, {10, 12}, {20, 21}})
+    {
+        auto const ndc_x = (f64(x) + 0.5) / 32.0 * 2.0 - 1.0;
+        auto const ndc_y = (f64(y) + 0.5) / 32.0 * 2.0 - 1.0;
+        auto const ray = cam.position + b.right * (2.0 * ndc_x) - b.up * (2.0 * ndc_y);
+        auto const p = at(0, x, y);
+        // the sample jitter spreads a pixel's points over its 1/8 m width, and their mean lies inside it, half a width either way
+        // a tighter bound is a bet on the sequence: 4 samples put the mean's standard deviation at about 0.018 m
+        CHECK(tg::abs(p[0] - f32(ray[0])) <= 0.0625f + 1e-4f).dump("x", p[0]).dump("wanted", ray[0]);
+        CHECK(tg::abs(p[2] - f32(ray[2])) <= 0.0625f + 1e-4f).dump("z", p[2]).dump("wanted", ray[2]);
+        CHECK(tg::abs(p[1]) < 1e-4f);
+        CHECK(tg::abs(p[3] - 1.0f) < 1e-6f).dump("coverage", p[3]);
+        CHECK(tg::abs(at(1, x, y)[0] - 5.0f) < 1e-3f).dump("depth", at(1, x, y)[0]);
+        CHECK(tg::abs(at(2, x, y)[1] - 1.0f) < 1e-4f).dump("geometric up", at(2, x, y)[1]);
+        CHECK(tg::abs(at(3, x, y)[1] - 1.0f) < 1e-4f).dump("shading up", at(3, x, y)[1]);
+        for (auto k = 0; k < 3; ++k)
+            CHECK(tg::abs(at(4, x, y)[k] - color[k]) < 1e-5f).dump("base color", at(4, x, y)[k]);
+        CHECK(tg::abs(at(5, x, y)[0] - 0.35f) < 1e-5f).dump("roughness", at(5, x, y)[0]);
+        CHECK(tg::abs(at(5, x, y)[1] - 0.25f) < 1e-5f).dump("metalness", at(5, x, y)[1]);
+        CHECK(at(6, x, y)[1] == at(6, 16, 16)[1]);
+    }
+    CHECK(at(6, 16, 16)[1] > 0.0f);
+
+    // outside it, nothing: no sample hit a surface there
+    for (auto const [x, y] : {cc::pair<i32, i32>{1, 1}, {30, 2}, {3, 29}})
+        for (auto ch = 0; ch < 7; ++ch)
+            CHECK(at(ch, x, y) == tg::vec4f(0, 0, 0, 0)).dump("channel", ch).dump("x", x).dump("y", y);
+}

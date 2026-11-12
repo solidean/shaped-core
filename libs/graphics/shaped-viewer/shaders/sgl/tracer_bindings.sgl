@@ -197,6 +197,10 @@ struct frame_constants:
     permutation_count: uint
     roulette_after: uint
 
+    /// The channels every primary hit adds to its pixel's sums beside the image, `channel_*` bits; 0 for none.
+    /// The wavefront tracer's alone: `sv::render_settings::channels`.
+    channel_mask: uint
+
 /// One decal as `traced.decals` holds it, 96 bytes; the host fills it through `sv::impl::decal_record_of`.
 ///
 /// The rows take a world point (x, y, z, 1) to the drawing's own units and to the projection's depth.
@@ -386,7 +390,6 @@ binding traced:
     /// two per slot: the light's sample at 2 * slot, the environment's at 2 * slot + 1
     shadow_rays: mut buffer[shadow_ray]
     tallies: mut buffer[pixel_tally]
-
     /// The queues of slots between stages: two that alternate as a round's input and output, then the hits waiting to shade,
     /// the same sorted by permutation, the slots with shadow rays to test, and the paths that finished.
     queue_a: mut buffer[uint]
@@ -400,6 +403,10 @@ binding traced:
     counters: mut buffer[atomic[uint]]
     /// Where each permutation's range of `queue_sorted` starts.
     shade_offsets: mut buffer[uint]
+
+    /// Per pixel, one float4 a channel `frame.channel_mask` names, in the order of their bits: their sums over the primary hits
+    /// since the restart, which `pixel_tally::guide_count` counts, so the mean is the sum over it.
+    channel_sums: mut buffer[float4]
 
 /// The manager's bindless tables — group 1, which the host binds as the manager's own group.
 ///

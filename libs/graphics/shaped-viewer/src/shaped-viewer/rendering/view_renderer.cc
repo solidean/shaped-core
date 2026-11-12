@@ -532,6 +532,7 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     // the primary cone narrows where the image averages many samples, which filter the pixel already (pbrt-v4's rule)
     auto const expected = l.settings.expected_samples_per_pixel;
     fc.primary_scale = expected > 1 ? cc::max(0.125f, 1.0f / tg::sqrt(f32(expected))) : 1.0f;
+    fc.channel_mask = l.settings.channels;
     // A hybrid layer lights its own count of bounces, which its shaders read from the same field.
     fc.max_bounces
         = l.settings.mode == render_mode::hybrid ? cc::clamp(l.settings.hybrid_bounces, 1, 2) : l.settings.max_bounces;
@@ -673,6 +674,8 @@ enum class trace_hash_scope : u8
 {
     auto h = cc::make_hash_of_bytes(cc::span<shaders::tracer::camera_record const>(&fc.camera, 1).as_bytes());
     h = cc::combine_hash(h, cc::make_hash(fc.max_bounces, fc.samples_per_pixel, resolution[0], resolution[1]));
+    // The channel mask is not here: the image does not depend on it, and a new mask reallocates the wavefront state,
+    // which restarts the accumulation by itself.
     h = cc::combine_hash(h, cc::make_hash(cc::bit_cast<u32>(fc.primary_scale)));
     h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<background_gpu const>(&bg, 1).as_bytes()));
     h = cc::combine_hash(
@@ -931,10 +934,11 @@ void mark_denoised(impl::temporal_slot& slot, shaders::tracer::camera_record con
     auto const extent = tg::vec2i(d.output.width(), d.output.height());
     auto const permutations = i32(d.hit_groups.size());
     auto& held = scaled ? slot.scaled_paths : slot.paths;
-    if (!held.has_value() || held.value().extent != extent || held.value().max_permutations < permutations)
+    if (!held.has_value() || held.value().extent != extent || held.value().max_permutations < permutations
+        || held.value().channel_mask != settings.channels)
     {
         // Twice today's permutations, so a material appearing does not reallocate every slot of the view.
-        held = wavefront_state::create(cmd.context(), extent, cc::max(16, 2 * permutations));
+        held = wavefront_state::create(cmd.context(), extent, cc::max(16, 2 * permutations), settings.channels);
         // A new state holds no paths, so its mean starts over whatever the hash says.
         impl::restart_accumulation(slot);
     }

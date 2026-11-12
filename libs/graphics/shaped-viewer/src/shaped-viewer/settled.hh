@@ -25,6 +25,13 @@ struct sv::settled_options
     f64 timeout_seconds = 60.0;
 };
 
+/// One channel of a settled render: its mean at every pixel, rows from the top.
+struct sv::settled_channel
+{
+    render_channel channel = {};
+    cc::vector<tg::vec4f> values;
+};
+
 /// The finished image of a settled render.
 struct sv::settled_image
 {
@@ -32,6 +39,9 @@ struct sv::settled_image
 
     /// The composited image as a display shows it: 8 bits each of red, green, blue and alpha, sRGB, rows from the top.
     cc::vector<u8> rgba;
+
+    /// The channels the first traced layer averaged beside its image (`render_settings::channels`), in the order of their bits.
+    cc::vector<settled_channel> channels;
 
     /// False where the time ran out first and this is the image it had: a layer short of its samples, or a payload streaming.
     bool settled = false;

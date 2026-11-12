@@ -1051,6 +1051,8 @@ sv::interactive([ctx,] "id", cfg, req)  // takes this sr::capture_request instea
 sv::render_settled([ctx,] "id", {.size, .samples, .timeout_seconds}, [&](sv::frame& f) { ... })
                                  // -> cc::result<sv::settled_image>: the loop inside one call, the capture handed back as rgba bytes
                                  //   the same body draws the same image here and in a window; .settled is false where time ran out
+                                 //   .channels: what the first wavefront layer averaged at its primary hits, render_settings::channels =
+                                 //   u32(sv::render_channel::position) | ... (position+coverage, view_depth, normals, base_color, material, instance)
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
                                  //   yields sv::frame_scope: a frame whose destructor presents, so the loop body needs no present call
