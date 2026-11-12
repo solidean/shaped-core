@@ -21,3 +21,6 @@ Seen again 2026-11-02 in a consumer's ship gate (relwithdebinfo, full suite besi
 The phase is `forward`: 375 to 531 of its frames are declined while its pipelines compile, and one frame shown in the middle of that is 0.235 near black.
 It failed at 1828c6adf, 695314073 and the sv commits between them, so none of those introduced it.
 Load is not the only cue, then; compiling forward stages during the phase may be, which is unproven.
+
+Seen 2026-11-12 on an RTX 4090 (driver 32.0.16.1088): it fails run alone too, every time, on main as fetched (a7f315776) with no local change.
+The forward phase's darkest pixel is 0.247 against a ceiling of 0.05, at pixel 280 in one run and 4561 in another.

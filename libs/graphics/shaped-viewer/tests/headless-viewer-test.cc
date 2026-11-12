@@ -10,6 +10,9 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <imgui/imgui.h>
 #include <nexus/async-test.hh>
 #include <nexus/rec.hh>
@@ -873,10 +876,11 @@ ASYNC_INVOCABLE_TEST("sv - a settled render hands back the image a capture of th
         body(f);
     co_await cc::async_settled(sv::background_work(ctx));
 
-    auto const settled
+    auto const rendering
         = sv::render_settled(ctx, "sv-test/settled", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+    auto const settled = co_await cc::async_as_result(rendering);
     co_await cc::async_settled(sv::background_work(ctx));
-    REQUIRE(settled.has_value()).context(settled.has_error() ? settled.error().to_string() : cc::string());
+    REQUIRE(settled.has_value()).context(settled.has_error() ? settled.error().underlying().to_string() : cc::string());
     CHECK(settled.value().settled);
     CHECK(settled.value().size == size);
     REQUIRE(settled.value().rgba.size() == isize(size[0]) * size[1] * 4);
@@ -906,8 +910,9 @@ ASYNC_INVOCABLE_TEST("sv - a settled render hands back the image a capture of th
         lit_pixels += settled.value().rgba[i * 4 + 0] > 16 ? 1 : 0;
     }
     {
-        auto const again
+        auto const rendering_again
             = sv::render_settled(ctx, "sv-test/settled", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+        auto const again = co_await cc::async_as_result(rendering_again);
         co_await cc::async_settled(sv::background_work(ctx));
         REQUIRE(again.has_value());
         auto self_max = 0;
@@ -994,10 +999,11 @@ ASYNC_INVOCABLE_TEST("sv - an orthographic camera draws a quad the same size at 
                 scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
                 scene.add_mesh(quad);
             };
-            auto const image = sv::render_settled(ctx, cc::format("sv-test/orthographic-{}-{}", name, distance),
-                                                  {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+            auto const rendering = sv::render_settled(ctx, cc::format("sv-test/orthographic-{}-{}", name, distance),
+                                                      {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+            auto const image = co_await cc::async_as_result(rendering);
             co_await cc::async_settled(sv::background_work(ctx));
-            REQUIRE(image.has_value()).context(image.has_error() ? image.error().to_string() : cc::string());
+            REQUIRE(image.has_value()).context(image.has_error() ? image.error().underlying().to_string() : cc::string());
 
             auto covered = 0;
             for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
@@ -1058,10 +1064,11 @@ ASYNC_INVOCABLE_TEST("sv - a settled render hands back the channels a wavefront 
         scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
         scene.add_mesh(floor);
     };
-    auto const image
+    auto const rendering
         = sv::render_settled(ctx, "sv-test/channels", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+    auto const image = co_await cc::async_as_result(rendering);
     co_await cc::async_settled(sv::background_work(ctx));
-    REQUIRE(image.has_value()).context(image.has_error() ? image.error().to_string() : cc::string());
+    REQUIRE(image.has_value()).context(image.has_error() ? image.error().underlying().to_string() : cc::string());
     REQUIRE(image.value().channels.size() == 7);
 
     auto const& c = image.value().channels;
@@ -1098,4 +1105,102 @@ ASYNC_INVOCABLE_TEST("sv - a settled render hands back the channels a wavefront 
     for (auto const [x, y] : {cc::pair<i32, i32>{1, 1}, {30, 2}, {3, 29}})
         for (auto ch = 0; ch < 7; ++ch)
             CHECK(at(ch, x, y) == tg::vec4f(0, 0, 0, 0)).dump("channel", ch).dump("x", x).dump("y", y);
+}
+
+// A guest render lives inside its host's frames: it records and submits on the host's home, between them, and the host
+// alone advances epochs, so a library rendering this way never disturbs the frame pacing of the app it runs in.
+// Here the host is a thread of the test's own: it pumps the home, then advances, as an app's loop does once a frame.
+ASYNC_INVOCABLE_TEST("sv - a guest settled render advances no epoch of its own, and settles in its host's frames",
+                     (sg::context_handle const& ctx_h))
+{
+#if !CC_HAS_THREADS
+    SKIP("the host is a thread of its own");
+#else
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto& lib = sv_test::shared_material_library();
+    auto const white
+        = lib.acquire(sv::material::create("guest test white", lib.acquire_type(sv::builtin_material::unlit).value(),
+                                           {sv::material_attribute_binding::of("color", tg::vec3f(1, 1, 1))}));
+    auto const positions
+        = cc::vector<tg::pos3f>{tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(-0.5f, 0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),
+                                tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),  tg::pos3f(0.5f, -0.5f, 0)};
+    auto const quad = sv::mesh{.name = "guest test quad",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = white};
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 0, -3.0), tg::pos3d(0, 0, 0));
+    cam.projection.kind = sv::projection_kind::orthographic;
+    cam.projection.view_height = 4.0;
+    cam.projection.far_plane = 50.0;
+    auto const body = [&](sv::frame& f)
+    {
+        auto view = f.window().view();
+        view.camera(cam);
+        auto scene = view.add_scene();
+        scene.settings({.mode = sv::render_mode::wavefront});
+        scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
+        scene.add_mesh(quad);
+    };
+
+    // the host: its home bound to its own thread and living there, pumped and then followed by an advance, round after round
+    auto home = cc::atomic<cc::thread_bound_scheduler*>(nullptr);
+    auto stop = cc::atomic<bool>(false);
+    auto host_advances = cc::atomic<i64>(0);
+    auto const epoch_before = u64(ctx.current_epoch());
+    auto host = cc::native_thread::start(
+        [&]
+        {
+            auto own = cc::thread_bound_scheduler();
+            own.bind_to_current_thread();
+            home.store(&own, cc::memory_order_release);
+            while (!stop.load(cc::memory_order_acquire))
+            {
+                (void)own.pump_for(1.0);
+                ctx.advance_epoch();
+                host_advances.fetch_add(1, cc::memory_order_relaxed);
+            }
+            own.drain();
+        });
+    while (home.load(cc::memory_order_acquire) == nullptr)
+        co_await cc::async_yield();
+
+    auto const size = tg::vec2i(64, 64);
+    auto covered = -1;
+    auto settled = false;
+    {
+        auto const rendering = sv::render_settled(
+            ctx, "sv-test/guest",
+            {.size = size, .samples = 4, .timeout_seconds = 120.0, .host = home.load(cc::memory_order_acquire)}, body);
+        auto const image = co_await cc::async_as_result(rendering);
+        if (image.has_value())
+        {
+            settled = image.value().settled;
+            covered = 0;
+            for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+                covered += image.value().rgba[i * 4 + 1] > 128 ? 1 : 0;
+        }
+    }
+    stop.store(true, cc::memory_order_release);
+    host.join();
+    auto const advanced = u64(ctx.current_epoch()) - epoch_before;
+
+    CHECK(settled);
+    // a meter square, four meters tall in a 64-pixel view: 16 by 16 pixels
+    CHECK(covered == 16 * 16).dump("covered", covered);
+    // every epoch since the render began is one its host advanced
+    CHECK(advanced == u64(host_advances.load(cc::memory_order_relaxed)))
+        .dump("advanced", advanced)
+        .dump("host", host_advances.load(cc::memory_order_relaxed));
+#endif
 }
