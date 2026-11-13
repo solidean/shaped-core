@@ -64,6 +64,17 @@ test:
     dm.column(1).x == 2.0
     dp.x == 2.0
 
+// a position moved by a direction changes by both directions: the tangent of `p + v` is a vec3, `dp + dv`
+fun moved(p: pos3, v: vec3) => distance(p + v, pos3(0.0))
+
+test fwd_diff(moved, pos3(3.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0)) == 2.0
+test:
+    let mut dp = vec3(0.0)
+    let mut dv = vec3(0.0)
+    bwd_diff(moved, pos3(3.0, 0.0, 0.0), mut dp, vec3(1.0, 0.0, 0.0), mut dv, 1.0)
+    dp.x == 1.0
+    dv.x == 1.0
+
 // a struct's tangent is the struct itself for now, so a position in one holds its direction
 struct particle:
     at: pos3
