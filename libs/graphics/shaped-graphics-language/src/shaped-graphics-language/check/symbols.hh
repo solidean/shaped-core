@@ -446,7 +446,7 @@ struct sgl::check::member_info
     i32 layout_bits = 0;
     /// `@absent` in such a branch: the target's record has no such field, and a construction drops it (CHK-526).
     bool is_absent = false;
-    /// PROTOTYPE (incubator/autodiff.md): `@gradient(binding.member)` on a buffer, as written: the buffer of atomics a
+    /// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): `@gradient(binding.member)` on a buffer, as written: the buffer of atomics a
     /// backward derivative adds a read's adjoint to, at the read's index; empty without one.
     cc::string gradient;
     /// PROTOTYPE: `@tangent(binding.member)` on a buffer, as written: the buffer a forward derivative reads a read's

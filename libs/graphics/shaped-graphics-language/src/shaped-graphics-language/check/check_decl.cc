@@ -1060,7 +1060,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 collected.back().layout_bits = count.value();
         }
         collected.back().is_absent = is_struct && find_attribute(file, f.attributes, "absent") != nullptr;
-        // PROTOTYPE (incubator/autodiff.md): kept as written, and resolved where a derivative reads the buffer, since the
+        // PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): kept as written, and resolved where a derivative reads the buffer, since the
         // binding it names may come later in the file
         for (auto const which : {cc::string_view("gradient"), cc::string_view("tangent")})
         {
