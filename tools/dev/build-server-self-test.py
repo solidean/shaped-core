@@ -569,6 +569,46 @@ def test_a_red_run_at_the_change_s_base_decides_whether_it_blocks() -> None:
     assert "the build is not green" in blockers and not passed
 
 
+def test_reds_at_the_base_run_each_binary_once() -> None:
+    from tools.dev.cmd import ship
+    from tools.dev.lib.project import base_worktree
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root, wt = Path(tmp) / "co", Path(tmp) / "wt"
+        art = lambda b: root / "build" / "bin" / f"{b}.exe"  # noqa: E731
+        ctx = types.SimpleNamespace(root=root, discover=lambda p: [types.SimpleNamespace(name=b, artifact=str(art(b))) for b in "bc"])
+        preset = types.SimpleNamespace(name="p", build_dir=root / "build")
+        (wt / "build" / "bin").mkdir(parents=True)
+        # The base has x and z red and y green; the commit being pushed has all three red, as the checkout did.
+        at = {"base": {"x": True, "y": False, "z": True, "w": False}, "head": {"x": True, "y": True, "z": True, "w": True}}
+        state, runs = {"at": "base"}, []
+
+        def ensure(_root, commit):
+            state["at"] = "head" if commit == "h" * 40 else "base"
+            return wt, ""
+
+        def run(cmd, **_kw):
+            if cmd[0] == "git":
+                return types.SimpleNamespace(stdout="h" * 40 + "\n", returncode=0)
+            binary, only = cmd[cmd.index("-t") + 1], cmd[cmd.index("-t") + 2:]
+            runs.append((state["at"], binary, tuple(only)))
+            cases = only or [t for t, b in (("x", "b"), ("y", "b"), ("z", "b"), ("w", "c")) if b == binary]
+            body = "".join(f'<testcase name="{t}">{"<failure/>" if at[state["at"]][t] else ""}</testcase>' for t in cases)
+            (wt / "build" / "bin" / f"{binary}.exe.results.xml").write_text(f"<testsuites><testsuite>{body}</testsuite></testsuites>")
+            return types.SimpleNamespace(returncode=0)
+
+        reds = [{"binary": "b", "test": t} for t in "xyz"] + [{"binary": "c", "test": "w"}]
+        saved = base_worktree.ensure, ship.subprocess, ship._say
+        base_worktree.ensure, ship.subprocess, ship._say = ensure, types.SimpleNamespace(run=run, DEVNULL=-3), lambda *_: None
+        try:
+            out = ship._red_at_base(ctx, preset, "base", reds)
+        finally:
+            base_worktree.ensure, ship.subprocess, ship._say = saved
+    assert runs == [("base", "b", ()), ("base", "c", ("w",)), ("head", "b", ())], \
+        f"several reds of a binary run it whole, once; a lone red runs alone: {runs}"
+    assert out == {("b", "x"): True, ("b", "y"): False, ("b", "z"): True, ("c", "w"): False}, out
+
+
 def main() -> int:
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     failures = 0
