@@ -304,7 +304,9 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
             # A binary that ended without a report (a crash, a timeout) has every case red by the binary's ending:
             # it says nothing of a single case, only the whole binary run again can show whether it ends that way at the base too.
             whole = len(mine) > 1 or any(_binary_red(r) for r in mine)
-            rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"]]))
+            # a case of an invocable test is named by its path, `driver / child / test`, which selects nothing as a filter;
+            # its leaf selects every child, and the report names each by its path again
+            rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"].rsplit(" / ", 1)[-1]]))
             found = _cases_red(xml)
             # a binary that wrote no report of its own gets dev.py's stand-in, one case named after the binary
             if set(found) == {binary}:

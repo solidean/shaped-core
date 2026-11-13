@@ -601,7 +601,8 @@ def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]]
                 return types.SimpleNamespace(returncode=1 if (at, binary) in unbuilt else 0)
             if (at, binary) in crashes:
                 return types.SimpleNamespace(returncode=3)
-            mine = {t: red for t, red in cases[at][binary].items() if not only or t in only}
+            # as nexus selects: by the test's own name, which a case of an invocable test carries last in its path
+            mine = {t: red for t, red in cases[at][binary].items() if not only or t.rsplit(" / ", 1)[-1] in only}
             body = "".join(f'<testcase name="{t}">{"<failure/>" if red else ""}</testcase>' for t, red in mine.items())
             (wt / "build" / "bin" / f"{binary}.exe.results.xml").write_text(f"<testsuites><testsuite>{body}</testsuite></testsuites>")
             return types.SimpleNamespace(returncode=1 if any(mine.values()) else 0)
@@ -625,6 +626,14 @@ def test_reds_at_the_base_run_each_binary_once() -> None:
     assert runs == [("base", "test", "b", None), ("base", "test", "c", "w")], \
         f"several reds of a binary run it whole, once; a lone red runs alone; nothing runs at HEAD: {runs}"
     assert out == {("b", "x"): True, ("b", "y"): False, ("b", "z"): True, ("c", "w"): False}, out
+
+
+def test_a_lone_red_of_an_invocable_test_runs_by_its_own_name() -> None:
+    # a case named by its path selects nothing as a filter, so the base run selects the test and reads its case back
+    cases = {"base": {"v": {"drv / one / t": True, "drv / two / t": False}}, "head": {}}
+    runs, out = _reds_at_base([{"binary": "v", "test": "drv / one / t", "outcome": "fail"}], cases)
+    assert runs == [("base", "test", "v", "t")], runs
+    assert out == {("v", "drv / one / t"): True}, out
 
 
 def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> None:
