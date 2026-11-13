@@ -4,6 +4,8 @@ parent: epic-sgl-float-guarantee-ladder
 refs:
   - file: libs/graphics/shaped-shader-library/src/shaped-shader-library/compiler/sgl_compiler.cc
   - test: "sg - an SGL float keeps NaNs, infinities, signed zeros and the order of a sum on the GPU"
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-13T14:33Z
 ---
 
 # Each target's compile keeps the level its entry point states
