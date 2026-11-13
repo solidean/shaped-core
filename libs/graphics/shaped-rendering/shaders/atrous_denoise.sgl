@@ -223,7 +223,8 @@ fun pt_is_finite(c: float4) => not (any(is_nan(c)) or any(is_inf(c)))
             // Modeled, Gaussian in the difference: a tap several modeled widths away must count for nothing, or a converged
             // mean's detail is averaged away by the long tail of many such taps.
             // Measured, exponential as SVGF's: path-tracing noise is heavy-tailed, and the width itself shrinks to nothing as the mean converges.
-            let lum_ratio = (luminance(c.xyz) - center_lum) / pair_width
+            // The center is exactly its own luminance: computed twice it may round apart, and one ulp over a converged width refuses it.
+            let lum_ratio = if dx == 0 and dy == 0 => 0.0 else (luminance(c.xyz) - center_lum) / pair_width
             w *= if is_measured() => exp(-abs(lum_ratio)) else exp(-lum_ratio * lum_ratio)
 
             // An emitter and a surface it lights never average into each other, as the sky and geometry do not.
