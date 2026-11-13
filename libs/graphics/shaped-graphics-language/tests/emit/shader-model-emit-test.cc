@@ -630,6 +630,131 @@ TEST("sgl emit - a has() a constant decision folded away inside a condition stil
     }
 }
 
+TEST("sgl emit - a has() passed as an argument still makes the side its parameter decides an axis (EMIT-264)")
+{
+    // the parameter stands for a copy of the has() literal, which no grant flips, while the argument's own literal
+    // was flattened before the condition the callee decides
+    struct passed_case
+    {
+        cc::string_view what;
+        cc::string_view callee;
+    };
+    passed_case const cases[] = {
+        {"a const if of the parameter", "fun more(fast: bool) -> float:\n"
+                                        "    const if fast:\n"
+                                        "        const if has(.shader_int64):\n"
+                                        "            return 1.0\n"
+                                        "    return 0.0\n"},
+        {"a value if of the parameter", "fun more(fast: bool) -> float:\n"
+                                        "    return if fast => (if has(.shader_int64) => 1.0 else 0.5) else 0.0\n"},
+    };
+    for (auto const& c : cases)
+    {
+        auto const source = cc::format("binding work:\n"
+                                       "    values: mut buffer[float]\n"
+                                       "\n"
+                                       "{}"
+                                       "\n"
+                                       "@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                                       "    work.values[id.x] = more(has(.subgroups))\n",
+                                       c.callee);
+        for (auto const device : {feature_set(), feature_set(feature::subgroups)})
+        {
+            auto const e = sgl::compile_to_text(
+                {.source = source, .entry_point = "cs", .target = target::hlsl_dx12, .device_features = device});
+            REQUIRE(e.has_value()).dump("case", c.what).dump("error", e.has_error() ? e.error() : cc::string());
+            auto axes = feature_set();
+            for (auto const& a : e.value().axes)
+                axes.set(a.f);
+            CHECK(axes == (feature::subgroups | feature::shader_int64))
+                .dump("case", c.what)
+                .dump("subgroups granted", device.has(feature::subgroups));
+        }
+    }
+}
+
+TEST("sgl emit - the nvapi fill of opacity micromaps traces constant flags that force no 2 states (EMIT-184)")
+{
+    // flags a trace writes as a constant, however it spells them, force nothing, and the nvapi fill traces them
+    struct spelled
+    {
+        cc::string_view what;
+        cc::string_view body;
+    };
+    spelled const cases[] = {
+        {"a combination held in a let", "    let flags = ray_flags.force_opaque | ray_flags.cull_back_facing\n"
+                                        "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags = "
+                                        "flags).t\n"},
+        {"a combination as the argument", "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags "
+                                          "= "
+                                          "ray_flags.force_opaque | ray_flags.cull_back_facing).t\n"},
+        {"two traces with flags of their own",
+         "    let a = work.world.trace(r, c => hit_decision.ignore, flags = ray_flags.force_opaque).t\n"
+         "    let b = work.world.trace(r, c => hit_decision.ignore, flags = ray_flags.cull_back_facing).t\n"
+         "    work.values[id.x] = a + b\n"},
+        // shaped-viewer's raster_bound_indirect.sgl: a callee's value if of a parameter each call hands a literal
+        {"a value if of a literal argument",
+         "    work.values[id.x] = traced(r, true) + traced(r, false)\n"
+         "\n"
+         "fun traced(r: ray, any: bool){work} -> float:\n"
+         "    let flags = if any => ray_flags.accept_first_hit_and_end_search else ray_flags.none\n"
+         "    return work.world.trace(r, c => hit_decision.ignore, flags = flags).t\n"},
+    };
+    for (auto const& c : cases)
+    {
+        auto const source
+            = cc::format("require ray_query\n"
+                         "\n"
+                         "binding work:\n"
+                         "    world: acceleration_structure[.triangles]\n"
+                         "    values: mut buffer[float]\n"
+                         "\n"
+                         "@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                         "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                         "{}",
+                         c.body);
+        for (auto const route : k_routes)
+        {
+            auto const e = filled(source, "cs", feature::opacity_micromap, fill::nvapi, route);
+            CHECK(e.has_value())
+                .dump("case", c.what)
+                .dump("route", route == native_route::text ? "text" : "dxil")
+                .dump("error", e.has_error() ? e.error() : cc::string());
+        }
+    }
+}
+
+TEST("sgl emit - the nvapi fill of opacity micromaps refuses flags that are no constant on both routes, and only it "
+     "(EMIT-184)")
+{
+    // flags no constant decides, though neither value forces 2 states
+    constexpr auto chosen = "require ray_query\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.triangles]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    let flags = if id.x > 0 => ray_flags.force_opaque else ray_flags.none\n"
+                            "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags = flags).t\n";
+    for (auto const route : k_routes)
+    {
+        auto const refused = filled(chosen, "cs", feature::opacity_micromap, fill::nvapi, route);
+        REQUIRE(refused.has_error());
+        CHECK(refused.error().contains("cs traces a ray query with flags that are no constant"))
+            .dump("error", refused.error());
+        // the DXIL route does not lower the library's runtime `has` of flags yet, whatever the fill
+        if (route != native_route::text)
+            continue;
+        auto const native = filled(chosen, "cs", feature::opacity_micromap, fill::native, route);
+        CHECK(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+        auto const without
+            = sgl::compile_to_text({.source = chosen, .entry_point = "cs", .target = target::hlsl_dx12, .native = route});
+        CHECK(without.has_value()).dump("error", without.has_error() ? without.error() : cc::string());
+    }
+}
+
 TEST("sgl emit - the nvapi fill of opacity micromaps refuses a trace that forces 2 states, which NVAPI cannot "
      "(EMIT-184)")
 {
