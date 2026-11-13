@@ -272,6 +272,11 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
         // a construction of a position builds its tangent as the direction it is: `pos3(x)`'s is `vec3(dx)`
         if (tangent(type) != type && name == m().name_of(type))
             return {use(result), call(m().name_of(tangent(type)), written)};
+        // a tangent of other types than the primal's, as `pos3 + vec3`'s two directions are, takes the builtin of its types
+        auto const parameters = m().at(m().functions[m().at(n.callee).info].parameters);
+        for (auto i = isize(0); i < written.size(); ++i)
+            if (type_of(written[i]) != parameters[i].type)
+                return {use(result), call(name, written)};
         return {use(result), f.builtin_call(at, n.callee, written)};
     }
 

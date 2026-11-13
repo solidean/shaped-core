@@ -471,6 +471,7 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/check/autodiff-fuzz-test.cc
         tests/corpus/corpus-test.cc
         tests/check/array-check-test.cc
         tests/check/module-check-test.cc

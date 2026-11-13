@@ -61,6 +61,8 @@ So a derivative written by hand is part of the first design, not an extension of
 A prototype is built: [flatten_diff.cc](../../../src/shaped-graphics-language/check/flatten_diff.cc) and the files it names.
 Its tests are [corpus/derivatives/](../../../tests/corpus/derivatives/).
 They hold both modes to central differences, among them the whole gradient of one Gaussian splat's opacity at a pixel, whose backward kernel every target writes.
+[autodiff-fuzz-test.cc](../../../tests/check/autodiff-fuzz-test.cc) writes random programs over every form the prototype takes, and holds each function's two modes to each other.
+They must agree even beside a kink, and both match a central difference wherever one-sided and central differences say the function is smooth there.
 
 * **The surface is two prelude names**, and a call that names a function resolves against an overload the check pass writes for it.
   `fwd_diff(f, a, da, b, db)` gives the tangent of the result, and `bwd_diff(f, a, mut da, b, mut db, dr)` adds each adjoint to the caller's place.
