@@ -1,6 +1,8 @@
 // differential: setup floats
 // differential: routes relative 0.00001
+// differential: across relative 0.00001
 // The routes' bound, until SGL's DXIL divides as DXC's does; issue: bug-sgl-dxil-division-and-normalize-round-unlike-dxc
+// Across APIs, a division within its few ULP and then a sum that cancels lands beyond a bound in ULP of the result.
 // Float arithmetic as shading math writes it: the four operations, roundings, and the clamps around them.
 use diff_floats
 

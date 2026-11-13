@@ -7,5 +7,6 @@ use diff_floats
     let a = abs(diff_floats.io.input[i])
     diff_floats.io.output[4 * i] = sqrt(a)
     diff_floats.io.output[4 * i + 1] = inverse_sqrt(a)
-    diff_floats.io.output[4 * i + 2] = sqrt(a) * sqrt(a) - a
+    // the square rather than its difference from `a`, which a few ULP of `a` put beyond any bound in ULP of 0
+    diff_floats.io.output[4 * i + 2] = sqrt(a) * sqrt(a)
     diff_floats.io.output[4 * i + 3] = 1.0 / a
