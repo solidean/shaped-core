@@ -115,8 +115,9 @@ auto differentiator::is_linear_function(cc::string_view name, isize arity) -> bo
     if ((name == "+" || name == "-") && arity <= 2)
         return true;
     cc::string_view const linear[]
-        = {"transpose", "matrix_column", "matrix_row", "select", "float", "half", "float2", "float3", "float4",
-           "half2",     "half3",         "half4",      "vec3",   "pos3",  "mat2", "mat3",   "mat4"};
+        = {"transpose", "matrix_column", "matrix_row", "select",          "float",      "half", "float2",
+           "float3",    "float4",        "half2",      "half3",           "half4",      "vec3", "pos3",
+           "mat2",      "mat3",          "mat4",       "affine3_of_rows", "affine3_row"};
     for (auto const l : linear)
         if (name == l)
             return true;
@@ -231,6 +232,39 @@ auto differentiator::transform_position_tangent(cc::span<flat_expr_id const> pri
     return result;
 }
 
+auto differentiator::affine_tangent(cc::span<flat_expr_id const> primals,
+                                    cc::span<flat_expr_id const> tangents,
+                                    type_id type,
+                                    f64 w) -> flat_expr_id
+{
+    auto const float4 = named_type("float4");
+    auto const scalar = named_type(builtins::k_float);
+    // a position is (p, 1) to the matrix and its change (dp, 0); a direction is (v, 0) and a float4 itself
+    auto const extended = [&](flat_expr_id v, f64 last)
+    {
+        if (type_of(v) == float4)
+            return use(v);
+        auto parts = cc::vector<flat_expr_id>();
+        for (auto i = 0; i < 3; ++i)
+            parts.push_back(add(f.field_type(type_of(v), i), flat_member{.object = use(v), .member = i}));
+        parts.push_back(add(scalar, flat_literal{.value = last}));
+        return add(float4, flat_construct{.arguments = f.add_list(parts)});
+    };
+    auto const dm = is_valid(tangents[0]) ? share_tangent(tangents[0]) : flat_expr_id::none;
+    auto const dv = is_valid(tangents[1]) ? share_tangent(tangents[1]) : flat_expr_id::none;
+    auto parts = cc::vector<flat_expr_id>();
+    for (auto i = 0; i < 3; ++i)
+    {
+        auto part = flat_expr_id::none;
+        if (is_valid(dm))
+            part = call("dot", call("affine3_row", use(dm), integer(i)), extended(primals[1], w));
+        if (is_valid(dv))
+            part = sum(part, call("dot", call("affine3_row", use(primals[0]), integer(i)), extended(dv, 0.0)));
+        parts.push_back(part);
+    }
+    return add(tangent(type), flat_construct{.arguments = f.add_list(parts)});
+}
+
 auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
 {
     auto const arguments = copy_of(n.arguments);
@@ -258,11 +292,11 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
     // `m * p` takes the translation, and its tangent does not: a position's change moves through `m` as a direction
     if (m().at(n.callee).name == "transform_position")
         return {use(result), transform_position_tangent(primals, tangents, type)};
-    if (m().at(n.callee).name == "transform_position_affine")
-    {
-        failed("an affine3 times a position, which has no rule yet");
-        return {use(result), flat_expr_id::none};
-    }
+    // an affine3's products are dots of its rows, which reverse mode transposes as it does any dot
+    if (auto const& callee = m().at(n.callee).name; callee == "transform_position_affine"
+                                                    || callee == "transform_direction_affine"
+                                                    || callee == "transform_float4_affine")
+        return {use(result), affine_tangent(primals, tangents, type, callee == "transform_position_affine" ? 1.0 : 0.0)};
 
     if (is_linear_function(name, arguments.size()))
     {

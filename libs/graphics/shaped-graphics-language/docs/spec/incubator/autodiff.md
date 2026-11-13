@@ -75,6 +75,7 @@ They must agree even beside a kink, and both match a central difference wherever
 * **Reverse mode runs on straight structured code.**
   Every declaration is hoisted, every early leave becomes a flag that guards what follows it, and every condition is recorded.
   The backward sweep restores what each statement overwrote from a save, and transposes that statement's tangent.
+  A `case` is the chain of `if` it means, its scrutinee held once, and an assignment through a swizzle writes each field it names.
 * **A loop of constant bounds stays a loop, over a tape.**
   Inside it, each save and each recorded condition is a local array with one slot per iteration, of every kept loop around it.
   The backward sweep walks the loop down from its last iteration, and every read of its index in what it clones reads the index reversed.
@@ -97,6 +98,8 @@ They must agree even beside a kink, and both match a central difference wherever
   [written-derivatives.sgl](../../../tests/corpus/derivatives/written-derivatives.sgl) composites front to back until almost nothing shows through, and walks back without a tape.
   The attribute names `f` by its text for now, which a resolved expression would replace.
 * **A position's tangent is its direction**: a `pos3`'s is a `vec3`, an `hpos4`'s a `float4`, and `mat4 * pos3` moves a change of the position without the translation.
+  An `affine3`'s products are a dot of each row with `(p, 1)`, `(v, 0)` or the `float4`, so the matrix and what it moves are both differentiable.
+  [cases-swizzles-affine.sgl](../../../tests/corpus/derivatives/cases-swizzles-affine.sgl) holds the three to central differences.
 * **A type's tangent is `tangent[T]`**, which a caller names to declare the place `bwd_diff` adds to.
   A struct's is a struct of its differentiable fields' tangents, under their names: `tangent[splat]` holds `at: vec3` and `weight: float`, and no `count: int`.
   A struct whose fields are all their own tangents is its own, and so is a float or a vector; an array's is an array of its element's.
