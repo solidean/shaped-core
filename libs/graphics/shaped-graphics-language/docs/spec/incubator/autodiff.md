@@ -109,7 +109,8 @@ What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buff
   The pairs are buffers the program declares and the host binds, so neither sg nor slib knows a derivative exists.
   The entry point lists the paired bindings, since the derivative reaches what the function never named.
   [autodiff-buffer-test.cc](../../../tests/interpret/autodiff-buffer-test.cc) runs both on buffers a driver binds.
-  sg's [compute-differentiable-buffers-test.cc](../../../../shaped-graphics/tests/compute/compute-differentiable-buffers-test.cc) runs them on dx12, vulkan and webgpu, both native routes and Dawn and wgpu included.
+  sg's [compute-differentiable-buffers-test.cc](../../../../shaped-graphics/tests/compute/compute-differentiable-buffers-test.cc) runs them on dx12, vulkan and webgpu.
+  That includes both native routes, and webgpu on Dawn and on wgpu.
 * A read of any other buffer is `unsupported-yet`, and the diagnostic says what to do instead.
   So is a read of a buffer of anything but floats, whose gradient needs an atomic per component.
 * `no_diff(x)` reads anything as a constant, which is the opt-out at an expression where `@no_diff` is the one at a parameter.
