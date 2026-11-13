@@ -25,4 +25,5 @@ The first of them alone, `--repeat 30`, never failed, so it needs the full mix.
 It is not the drivers' new `finish_each` step: with it switched off the same tests fail the same way.
 
 The hypothesis, not traced: a phase the reload drops before it is collected still runs, carrying the test's context.
-That is the case the rework now calls a failure; [bug-sg-cancelled-phase-crashes-ticking-frame](../../../bug-sg-cancelled-phase-crashes-ticking-frame.md) suspects the same inheritance of the caller's context.
+That is the case the rework now calls a failure.
+[bug-sg-cancelled-phase-crashes-ticking-frame](../../../bug-sg-cancelled-phase-crashes-ticking-frame.md) suspects the same inheritance of the caller's context.
