@@ -117,7 +117,8 @@ TEST("sgl autodiff rules - every rule and every linear builtin of floats agrees 
         auto parameters = cc::string();
         for (auto i = isize(0); i < arity; ++i)
             parameters += cc::format("{}a{}: {}", i == 0 ? "" : ", ", i, f.parameters[i]);
-        source += cc::format("// {}\nfun f{}({}) -> {} => {}\n", f.signature, k, parameters, result, call_of(f, arity, result));
+        source += cc::format("// {}\nfun f{}({}) -> {} => {}\n", f.signature, k, parameters, result,
+                             call_of(f, arity, result));
 
         auto const weights = value_of(result, seed);
         source += cc::format("fun agrees{}() -> bool:\n    let h = 1e-3\n", k);
