@@ -149,8 +149,10 @@ constexpr listed k_not_compiled[] = {
 
 [[nodiscard]] listed const* listed_as(cc::string_view file, cc::string_view entry)
 {
+    // the listed path ends the file's at a directory boundary, so `a/b.sgl` lists no `xa/b.sgl`
     for (auto const& l : k_not_compiled)
-        if (file.ends_with(l.file) && entry == l.entry)
+        if (entry == l.entry && file.ends_with(l.file)
+            && (file.size() == l.file.size() || file[file.size() - l.file.size() - 1] == '/'))
             return &l;
     return nullptr;
 }

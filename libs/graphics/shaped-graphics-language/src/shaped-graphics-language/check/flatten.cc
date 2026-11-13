@@ -323,7 +323,18 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
     if (auto const* const l = x.node.try_as<flat_wide_literal>())
         return add_expr(x.type, from, *l);
     if (auto const* const l = x.node.try_as<flat_bool_literal>())
-        return add_expr(x.type, from, *l);
+    {
+        auto const copy = add_expr(x.type, from, *l);
+        // EMIT-264: a copy of a `has` literal, as a parameter that stands for one reads, is a `has` literal as well, so
+        // a decision the copy makes is one a grant can turn
+        for (auto const h : has_literals)
+            if (h == id)
+            {
+                has_literals.push_back(copy);
+                break;
+            }
+        return copy;
+    }
     if (auto const* const v = x.node.try_as<flat_enum_value>())
         return add_expr(x.type, from, *v);
     if (auto const* const m = x.node.try_as<flat_binding_member>())
