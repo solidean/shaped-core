@@ -616,18 +616,19 @@ def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]]
 
 
 def test_reds_at_the_base_run_each_binary_once() -> None:
-    # The base has x and z red and y green; the commit being pushed has all three red, as the checkout did.
+    # The base has x and z red and y green; at the commit being pushed x passes, as a flaky test may.
+    # A red at the base is the base's whatever the change's own run shows, so nothing runs at HEAD.
     cases = {"base": {"b": {"x": True, "y": False, "z": True}, "c": {"w": False}},
-             "head": {"b": {"x": True, "y": True, "z": True}, "c": {"w": True}}}
+             "head": {"b": {"x": False, "y": True, "z": True}, "c": {"w": True}}}
     reds = [{"binary": "b", "test": t, "outcome": "fail"} for t in "xyz"] + [{"binary": "c", "test": "w", "outcome": "fail"}]
     runs, out = _reds_at_base(reds, cases)
-    assert runs == [("base", "test", "b", None), ("base", "test", "c", "w"), ("head", "test", "b", None)], \
-        f"several reds of a binary run it whole, once; a lone red runs alone: {runs}"
+    assert runs == [("base", "test", "b", None), ("base", "test", "c", "w")], \
+        f"several reds of a binary run it whole, once; a lone red runs alone; nothing runs at HEAD: {runs}"
     assert out == {("b", "x"): True, ("b", "y"): False, ("b", "z"): True, ("c", "w"): False}, out
 
 
 def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> None:
-    # d crashed in the checkout, every case red by its ending; at the base it crashes too, and in the worktree at HEAD again.
+    # d crashed in the checkout, every case red by its ending; at the base it crashes too.
     # e crashed only with the change: its base run reports, and its cases are green there.
     # f cannot be built at the base, which says nothing; g's own failing case at a crashing base is no result either.
     cases = {"base": {"e": {"p": False, "q": False}, "g": {}}, "head": {}}
@@ -635,7 +636,7 @@ def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> N
     reds = [crashed("d", "p"), crashed("d", "q"), crashed("e", "p"), crashed("e", "q"), crashed("f", "p"),
             {"binary": "g", "test": "p", "outcome": "fail"}]
     runs, out = _reds_at_base(reds, cases, crashes={("base", "d"), ("head", "d"), ("base", "g")}, unbuilt={("base", "f")})
-    assert ("base", "test", "d", None) in runs and ("head", "test", "d", None) in runs, "a crashed binary runs whole, at the base and at HEAD"
+    assert ("base", "test", "d", None) in runs and not any(r[0] == "head" for r in runs), "a crashed binary runs whole, at the base alone"
     assert ("base", "test", "e", None) in runs and not any(r[2] == "f" for r in runs), runs
     assert out == {("d", "p"): True, ("d", "q"): True, ("e", "p"): False, ("e", "q"): False, ("f", "p"): None, ("g", "p"): None}, out
 

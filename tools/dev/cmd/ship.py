@@ -316,20 +316,8 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
 
     out = run(reds)
     _say_at_base(out)
-    # A red at the base counts only where the worktree reproduces the checkout: red there too at the commit being pushed,
-    # which is everything ship pushes, since it refuses uncommitted work.
-    # Green there, the worktree differs from the checkout, and its base run says nothing.
-    reproduce = [r for r in reds if out[(r["binary"], r["test"])] is True]
-    head = subprocess.run(["git", "-C", str(ctx.root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    if reproduce and head:
-        wt, why = base_worktree.ensure(ctx.root, head)
-        if wt is None:
-            _say(f"the worktree could not be moved to {head[:12]} to check it, so the server's judgement stands: {why}")
-            return {k: (None if v else v) for k, v in out.items()}
-        for key, red in run(reproduce).items():
-            if red is not True:
-                _say(f"  but green in the worktree at {head[:12]} too, so the worktree differs from the checkout: {key[0]}: {key[1]}")
-                out[key] = None
+    # A red at the base is the base's, whatever a run at the change would show: a flaky test is red at the base too, and
+    # a run of it at the change that happens to pass says nothing about the change.
     return out
 
 
