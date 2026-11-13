@@ -3,6 +3,7 @@
 #include "../shaders/shader_fixtures.hh"
 
 #include <clean-core/math/bit.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -125,9 +126,13 @@ sg_diff::corpus sg_diff::read_corpus()
     auto result = corpus();
     (void)sg_test::shader_fixtures(); // fills the package's handles
 
+    // `SC_DIFFERENTIAL_ONLY` narrows the corpus to the files whose path holds it, to chase one file on one machine
+    auto const only = cc::environment_variable("SC_DIFFERENTIAL_ONLY");
     for (auto const& def : sg::test::differential::package().definitions)
     {
         if (def.asset == nullptr || *def.asset == nullptr)
+            continue;
+        if (only.has_value() && !only.value().empty() && !cc::string_view(def.path).contains(only.value()))
             continue;
         auto const& asset = *def.asset;
         auto const source = asset->read_source();
