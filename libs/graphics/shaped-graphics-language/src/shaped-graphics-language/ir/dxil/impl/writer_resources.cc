@@ -35,7 +35,7 @@ constexpr u32 k_component_i32 = 4;
 /// PSV's `UAVStructuredWithCounter`.
 constexpr u32 k_psv_uav_with_counter = 9;
 /// `NvShaderExtnStruct`, a record of NVAPI's protocol (EMIT-263).
-constexpr u32 k_nvapi_record_bytes = 256;
+constexpr auto k_nvapi_record_bytes = u32(check::k_nvapi_record_bytes);
 
 /// What a binding is to DXIL, per `global_kind`; the row of a new kind is what adds it.
 struct resource_rule

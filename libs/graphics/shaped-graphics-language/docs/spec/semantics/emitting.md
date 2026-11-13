@@ -652,20 +652,30 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   `text_request::fills` holds a `check::feature_fill` per feature, and `text_request::core` the fills of `draw_start` (EMIT-128) and `wave_size` (EMIT-148).
   A granted feature that names no fill, and either core construct by default, is `native`: the target's own form.
   `emit::fills_of` lists the fills a target offers, most demanding first, and asking another is `unsupported`, naming the fill.
+  So is a fill of a feature `device_features` does not grant, and two fills of one feature.
+  `compile_all_to_text` hands each target the fills it offers and `native` for the rest, so one request serves every target; a fill none of them offers is `unsupported`.
   dx12 offers `nvapi` for `shader_execution_reordering` and `opacity_micromap`, `root_constant` for `draw_start` and `none` for `wave_size`; every other target offers `native` alone.
   `nvapi` writes through NVAPI's HLSL shader extensions, which NVIDIA's driver runs at Shader Model 6.6 on a device the host enabled them on.
   Its reordering is `NvHitObject`, `NvTraceRayHitObject`, `NvReorderThread` and `NvInvokeHitObject`, and a hit's `t` is its `GetRayDesc().TMax`, as vulkan reads it.
   Its text defines `NV_SHADER_EXTN_SLOT` as `u0` and `NV_SHADER_EXTN_REGISTER_SPACE` as `space13`, and includes `nvHLSLExtns.h`: `emitted_source::needs_nvapi_header`.
   The host puts that header on DXC's include path; SGL's own DXIL needs none, and writes the protocol the pinned NVAPI's header does: R615's, under its MIT notice.
   That protocol is counter bumps and stores into the records of the UAV `g_NvidiaExt`, and a `TraceRay` by the handle they hand back.
-  Both routes list that UAV in `bindings` as `is_reserved`, at space 13 and register 0: the host enables the slot on its device and binds nothing there.
-  A hit object invoked apart from its trace is `unsupported` under `nvapi`, since NVAPI invokes one by tracing it again through the structure its trace took.
+  Both routes list that UAV in `bindings` as `is_reserved`, at space 13 and register 0, a structured buffer of 256-byte records with a counter.
+  The host covers it in its root signature as a UAV in a descriptor table, since no root descriptor has a counter, binds a null or a valid buffer there, and enables the slot on its device.
+  NVAPI invokes a hit object by tracing it again, so `h.invoke(mut p)` names the acceleration structure of the `trace_hit` that made `h`.
+  A hit object is the `let` its trace gave (CHK-434), so that holds through a loop and through a call, which is inlined.
+  An element of an array of structures is that structure where its index stays what it was at the trace: a constant, a `let`, a loop's index, or pure work of those.
+  An index a statement may assign in between is `unsupported` under `nvapi`, naming that the hit object may be of another structure there.
   The `nvapi` fill of `opacity_micromap` writes nothing: NVIDIA's driver applies a structure's micromaps itself (EMIT-184).
 * **EMIT-264** A compile reports what an entry point's output varies with, `emitted_source::axes`: each feature it consulted, granted or not, with the fills its target offers.
   It consults a feature where `has` asks for it (CHK-426), where a trace may reorder (CHK-433) and where a ray query may see micromaps (EMIT-184).
-  What the flattened entry point consulted is recorded before its branches are discarded, so one compile tells a bake every variant there is.
+  It consults one in a branch its compile does not take too, however deep, as `has` in a `const if` it does not take inside one it does not take.
+  The flattening records those before it drops the branches, without judging them (CHK-356); a branch is read once per place it is inlined at.
+  The conditions of the preambles of each file it writes a body in target text from consult what they name (CHK-528), and so do a text type's (CHK-432).
+  So one compile, for its target and its options, tells a bake every variant there is.
   A bake compiles a variant per choice on each axis, each fill or the feature not granted, and a host runs the first its device takes, most demanding first.
-  `sgl::variant_key` names one variant: its `to_string` is `feature=fill` for each granted feature in feature order, then `draw_start=` and `wave_size=` where not `native`, joined by `;`.
+  `sgl::variant_key::of` names one variant, its fills in feature order whatever order they came in, so two keys of one variant are equal; a feature named twice is an error.
+  Its `to_string` is `feature=fill` for each granted feature in feature order, then `draw_start=` and `wave_size=` where not `native`, joined by `;`.
 * **EMIT-260** A hit's `cluster_id` is read only where the device builds a BLAS from clusters, `clustered_geometry`, and is -1 everywhere else.
   The prelude asks with `has`, so no program names the feature, and an entry point on any other device needs nothing of it.
   SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.

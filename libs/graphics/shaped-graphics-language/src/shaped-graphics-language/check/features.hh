@@ -241,8 +241,10 @@ inline constexpr cc::string_view k_core_construct_names[] = {"draw_start", "wave
 
 /// The register and space of the counter UAV through which an `nvapi` fill talks to NVIDIA's driver, `u0, space13`.
 /// The text defines `NV_SHADER_EXTN_SLOT` and `NV_SHADER_EXTN_REGISTER_SPACE` to it, and the host enables that slot.
+/// It is a structured buffer of `k_nvapi_record_bytes`-byte records, `NvShaderExtnStruct`, with a counter.
 inline constexpr i32 k_nvapi_register = 0;
 inline constexpr i32 k_nvapi_space = 13;
+inline constexpr i32 k_nvapi_record_bytes = 256;
 
 /// The fill `fills` asks for `f`, `native` where it names none.
 [[nodiscard]] constexpr fill fill_of(cc::span<feature_fill const> fills, feature f)

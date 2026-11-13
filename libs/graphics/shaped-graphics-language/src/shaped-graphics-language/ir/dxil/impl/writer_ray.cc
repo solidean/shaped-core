@@ -329,8 +329,20 @@ void writer::nvapi_hit_object_op(u32 index, instruction const& i)
     case op::reorder_thread:
         return reorder(ll_value::none, at(0), at(1));
     case op::hit_object_invoke:
-        // the emit refuses it under this fill: NVAPI invokes through the structure its trace took
-        return unsupported("a hit object invoked apart from its trace, through NVAPI");
+    {
+        // `NvInvokeHitObject` through the structure the hit object's trace took, which the emit found as a third operand
+        if (operands.size() < 3)
+            return unsupported("a hit object invoked through NVAPI with no structure to trace it through");
+        auto const& root = _payload_roots[index_of(value_ref(operands[1]))];
+        auto const record = nvapi_increment();
+        nvapi_store(record, k_nv_opcode, word(k_nv_invoke));
+        nvapi_store(record, k_nv_src0, at(0));
+        auto const handle = nvapi_increment();
+        auto const zero = word(0);
+        auto const none = _m.constant_float(_m.float_type(), 0);
+        ll_value const ray[] = {zero, zero, zero, zero, none, none, none, none, none, none, none, none};
+        return trace(at(2), ray, handle, root);
+    }
     default:
         break;
     }

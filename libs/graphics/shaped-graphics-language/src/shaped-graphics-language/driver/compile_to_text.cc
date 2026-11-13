@@ -428,7 +428,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         result.dxil_shader_model = check::dxil_shader_model_of(check::core_construct::wave_size, check::fill::native);
     if (emitted.states_payload_qualifiers && result.dxil_shader_model < check::dxil_shader_model{.minor = 7})
         result.dxc_args.push_back(cc::string("-enable-payload-qualifiers"));
-    // EMIT-263: an nvapi fill talks to NVIDIA's driver through a counter UAV at a slot the host enables, never binds
+    // EMIT-263: an nvapi fill talks to NVIDIA's driver through a counter UAV, which the host lays out and binds itself
     if (emitted.writes_nvapi)
     {
         result.needs_nvapi_header = result.dxil.empty();
@@ -439,6 +439,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                    .group = check::k_nvapi_space,
                                    .slot = check::k_nvapi_register,
                                    .is_used = true,
+                                   .stride = check::k_nvapi_record_bytes,
+                                   .has_counter = true,
                                    .access = "read_write"});
     }
     // EMIT-264: what the entry consulted, each with what this target offers for it
@@ -585,6 +587,50 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
 
 cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
 {
+    // EMIT-263: each fill on the targets that offer it, and one none of them offers is the request's error
+    auto const offers = [](cc::span<check::fill const> offered, check::fill how)
+    {
+        for (auto const f : offered)
+            if (f == how)
+                return true;
+        return false;
+    };
+    for (auto const& asked : request.fills)
+    {
+        auto is_offered = false;
+        for (auto const t : request.targets)
+            is_offered = is_offered || offers(emit::fills_of(t, asked.f), asked.how);
+        if (!is_offered && !request.targets.empty())
+            return cc::error(cc::format("{}: error: unsupported: a {} fill of {}, which none of the targets offers\n",
+                                        request.source_name, check::name_of(asked.how), check::name_of(asked.f)));
+    }
+    for (auto const c : {check::core_construct::draw_start, check::core_construct::wave_size})
+    {
+        auto const how = c == check::core_construct::draw_start ? request.core.draw_start : request.core.wave_size;
+        auto is_offered = false;
+        for (auto const t : request.targets)
+            is_offered = is_offered || offers(emit::fills_of(t, c), how);
+        if (!is_offered && !request.targets.empty())
+            return cc::error(cc::format("{}: error: unsupported: a {} fill of {}, which none of the targets offers\n",
+                                        request.source_name, check::name_of(how), check::name_of(c)));
+    }
+    auto const fills_on = [&](emit::target t)
+    {
+        auto own = cc::vector<check::feature_fill>();
+        for (auto const& asked : request.fills)
+            if (offers(emit::fills_of(t, asked.f), asked.how))
+                own.push_back(asked);
+        return own;
+    };
+    auto const core_on = [&](emit::target t)
+    {
+        auto own = request.core;
+        if (!offers(emit::fills_of(t, check::core_construct::draw_start), own.draw_start))
+            own.draw_start = check::fill::native;
+        if (!offers(emit::fills_of(t, check::core_construct::wave_size), own.wave_size))
+            own.wave_size = check::fill::native;
+        return own;
+    };
     // CHK-426: each target is a check of its own, since an inlined body reads the target it is written for
     auto fronts = cc::vector<driver::impl::front_end>();
     for (auto const t : request.targets)
@@ -604,33 +650,52 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
             auto const& e = front.module.entry_points[i];
             // CHK-402: an entry point's own errors are that element's, and leave the others built
             auto own = front.errors_of(e.function);
-            auto text = own.empty() ? emit_text(front, e, request.targets[k], false, false, check::undefined_guard::none,
-                                                false, false, request.device_features, request.fills, request.core)
-                                    : cc::result<emitted_source, cc::string>(cc::error(own));
+            auto const fills = fills_on(request.targets[k]);
+            auto text = own.empty()
+                          ? emit_text(front, e, request.targets[k], false, false, check::undefined_guard::none, false,
+                                      false, request.device_features, fills, core_on(request.targets[k]))
+                          : cc::result<emitted_source, cc::string>(cc::error(own));
             add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = request.targets[k], .text = cc::move(text)});
         }
     return result;
 }
 
+cc::result<sgl::variant_key, cc::string> sgl::variant_key::of(cc::span<check::feature_fill const> fills,
+                                                              check::core_fills core)
+{
+    auto key = variant_key();
+    key._core = core;
+    for (auto i = isize(0); i < check::k_feature_count; ++i)
+    {
+        auto named = 0;
+        for (auto const& entry : fills)
+            if (entry.f == check::feature(i))
+            {
+                if (++named == 2)
+                    return cc::error(cc::format("a variant names {} twice", check::name_of(entry.f)));
+                key._fills.push_back(entry);
+            }
+    }
+    return key;
+}
+
 cc::string sgl::variant_key::to_string() const
 {
     auto text = cc::string();
-    for (auto i = isize(0); i < check::k_feature_count; ++i)
-        for (auto const& entry : fills)
-            if (entry.f == check::feature(i))
-                text.appendf("{}{}={}", text.empty() ? "" : ";", check::name_of(entry.f), check::name_of(entry.how));
-    if (core.draw_start != check::fill::native)
-        text.appendf("{}draw_start={}", text.empty() ? "" : ";", check::name_of(core.draw_start));
-    if (core.wave_size != check::fill::native)
-        text.appendf("{}wave_size={}", text.empty() ? "" : ";", check::name_of(core.wave_size));
+    for (auto const& entry : _fills)
+        text.appendf("{}{}={}", text.empty() ? "" : ";", check::name_of(entry.f), check::name_of(entry.how));
+    if (_core.draw_start != check::fill::native)
+        text.appendf("{}draw_start={}", text.empty() ? "" : ";", check::name_of(_core.draw_start));
+    if (_core.wave_size != check::fill::native)
+        text.appendf("{}wave_size={}", text.empty() ? "" : ";", check::name_of(_core.wave_size));
     return text;
 }
 
 sgl::check::feature_set sgl::variant_key::granted() const
 {
     auto result = check::feature_set();
-    for (auto const& entry : fills)
+    for (auto const& entry : _fills)
         result.set(entry.f);
     return result;
 }

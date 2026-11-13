@@ -52,7 +52,9 @@ struct sgl::text_request
     /// vulkan and metal, and a `uint`'s bits elsewhere.
     check::feature_set device_features;
     /// How each granted feature is written, which `emit::fills_of` offers per target (EMIT-263).
-    /// A granted feature named here not is `native`, so a compile that names none writes what it always wrote.
+    /// A granted feature not named here is `native`, so a compile that names none writes what it always wrote.
+    /// A fill of a feature `device_features` does not grant, a feature named twice, and a fill the target does not
+    /// offer are each an error of the request.
     cc::span<check::feature_fill const> fills;
     /// How the core constructs are written (EMIT-263); `native` for both is the default, at Shader Model 6.8 on dx12.
     /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`.
@@ -91,11 +93,20 @@ struct sgl::variant_axis
 
 /// One variant a bake compiles: each granted feature with its fill, and the core constructs' fills (EMIT-264).
 /// A feature absent from `fills` is not granted.
-struct sgl::variant_key
+/// It is canonical: its fills stand in feature order, each feature at most once, so two keys of one variant are equal.
+class sgl::variant_key
 {
-    cc::vector<check::feature_fill> fills;
-    check::core_fills core;
+public:
+    /// Nothing granted, and both core constructs `native`.
+    variant_key() = default;
+    /// The key of `fills` and `core`, its fills in feature order whatever order they came in.
+    /// A feature named twice is an error, which names it.
+    [[nodiscard]] static cc::result<variant_key, cc::string> of(cc::span<check::feature_fill const> fills,
+                                                                check::core_fills core = {});
 
+    /// In feature order; what `text_request::fills` takes.
+    [[nodiscard]] cc::span<check::feature_fill const> fills() const { return _fills; }
+    [[nodiscard]] check::core_fills core() const { return _core; }
     /// `shader_execution_reordering=nvapi;draw_start=root_constant;wave_size=none`: the granted features in feature
     /// order, then each core construct whose fill is not `native`; empty for nothing granted and both native.
     [[nodiscard]] cc::string to_string() const;
@@ -104,8 +115,12 @@ struct sgl::variant_key
 
     [[nodiscard]] bool operator==(variant_key const& rhs) const
     {
-        return ast::impl::is_equal(fills, rhs.fills) && core == rhs.core;
+        return ast::impl::is_equal(_fills, rhs._fills) && _core == rhs._core;
     }
+
+private:
+    cc::vector<check::feature_fill> _fills;
+    check::core_fills _core;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
@@ -117,8 +132,11 @@ struct sgl::all_text_request
     /// The files whose modules the source may `use`.
     cc::span<library_file const> library;
     cc::span<emit::target const> targets;
-    /// What the device has and how it is filled, for every target alike, as `text_request`'s.
+    /// What the device has, for every target alike, as `text_request`'s.
     check::feature_set device_features;
+    /// How it is filled, as `text_request`'s, each fill on the targets that offer it; a target that offers a fill
+    /// writes its feature or construct `native` (EMIT-263).
+    /// A fill none of `targets` offers is an error of the request, as `text_request`'s other errors of fills are.
     cc::span<check::feature_fill const> fills;
     check::core_fills core;
 };
@@ -137,8 +155,11 @@ struct sgl::interface_binding
     bool is_inline = false;
     /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
     bool is_file_sampler = false;
-    /// A slot the host reserves rather than binds: the counter UAV an `nvapi` fill talks to NVIDIA's driver through
-    /// (EMIT-263), at the register `slot` of the space `group`, which the host enables on its device and holds clear.
+    /// A slot no binding of the program declares, which the host lays out itself: NVAPI's shader extension slot, the
+    /// counter UAV an `nvapi` fill talks to NVIDIA's driver through (EMIT-263), at register `slot` of space `group`.
+    /// It is a structured buffer of `stride` bytes with a counter, which no root descriptor can be: the host covers it
+    /// as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot
+    /// on its device.
     bool is_reserved = false;
     /// The group it is listed at, counted without the `@inline` binding, and its slot there.
     /// -1 and 0 for the `@inline` block, -1 and its index for a file-scope sampler, and the dx12 space and register of
@@ -151,6 +172,10 @@ struct sgl::interface_binding
     bool is_used = false;
     /// A block's size in bytes, where its last constant ends; 0 for a resource.
     i32 block_size = 0;
+    /// A reserved slot's structured buffer: its element's bytes, and that it has a counter; 0 and false elsewhere,
+    /// where `emit::emitted_layout` places a buffer's elements.
+    i32 stride = 0;
+    bool has_counter = false;
     cc::string access;
     cc::string texture_dimension;
     cc::string sample_type;

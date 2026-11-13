@@ -1321,6 +1321,10 @@ struct writer
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
+            auto const invoked = p.reorders_through_nvapi && !arguments.empty()
+                                   ? invoked_structure_of(p, p.e.at(c.arguments)[0])
+                                   : check::flat_expr_id::none;
+            auto const structure = check::is_valid(invoked) ? expr(invoked).text : cc::string();
             auto result = how.custom({.target = d.language(),
                                       .is_vulkan = p.which == emit::target::hlsl_vulkan,
                                       .reorders_through_nvapi = p.reorders_through_nvapi,
@@ -1333,6 +1337,7 @@ struct writer
                                                        ? type_text(p, d, type)
                                                        : cc::string_view(),
                                       .hit_offsets = offsets,
+                                      .invoked_structure = structure,
                                       .is_device_coherent = is_device_coherent,
                                       .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
                                       .native_float_atomics = p.native_float_atomics});

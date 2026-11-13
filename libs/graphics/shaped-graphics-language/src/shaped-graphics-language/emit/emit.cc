@@ -456,6 +456,21 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 return true;
         return false;
     };
+    for (auto i = isize(0); i < sources.fills.size(); ++i)
+    {
+        auto const& asked = sources.fills[i];
+        auto const refused = [&](cc::string detail)
+        {
+            result.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = cc::move(detail)});
+            return result;
+        };
+        if (!sources.device_features.has(asked.f))
+            return refused(cc::format("a {} fill of {}, which the compile does not grant", check::name_of(asked.how),
+                                      check::name_of(asked.f)));
+        for (auto k = isize(0); k < i; ++k)
+            if (sources.fills[k].f == asked.f)
+                return refused(cc::format("two fills of {}", check::name_of(asked.f)));
+    }
     for (auto const& asked : sources.fills)
         if (!offers(fills_of(t, asked.f), asked.how))
         {
@@ -509,22 +524,28 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                && nvapi(check::feature::shader_execution_reordering);
     plan.states_micromaps = e.features.has(check::feature::opacity_micromap) && !nvapi(check::feature::opacity_micromap);
     result.writes_nvapi = plan.reorders_through_nvapi;
-    // NVAPI invokes a hit object by tracing through it again, which takes the structure its trace took: a step that
-    // invokes one apart from its trace has no structure to name
+    // NVAPI invokes a hit object by tracing through it again, which takes the structure its trace took: each
+    // invocation names the one its hit object's `trace_hit` traced, and one that more than one may be is refused
     if (plan.reorders_through_nvapi)
         for (auto const& x : e.exprs)
             if (auto const* const call = x.node.try_as<check::flat_call>())
                 if (auto const* const record = m.builtin_function(call->intrinsic);
                     record != nullptr && record->name == "hit_object_invoke")
                 {
-                    result.errors.push_back({.kind = error_kind::unsupported,
-                                             .symbol = e.function,
-                                             .detail = cc::format("{} invokes a hit object apart from its trace, which "
-                                                                  "the nvapi fill of shader_execution_reordering "
-                                                                  "cannot: NVAPI invokes one by tracing it again "
-                                                                  "through its acceleration structure",
-                                                                  e.name)});
-                    return result;
+                    auto const hit = e.at(call->arguments)[0];
+                    auto const found = impl::traced_structure(m, e, hit);
+                    if (found.has_error())
+                    {
+                        result.errors.push_back(
+                            {.kind = error_kind::unsupported,
+                             .symbol = e.function,
+                             .detail = cc::format("{} invokes a hit object {}, which the nvapi fill of "
+                                                  "shader_execution_reordering cannot: NVAPI invokes one by tracing it "
+                                                  "again through the one acceleration structure it was traced through",
+                                                  e.name, found.error())});
+                        return result;
+                    }
+                    plan.invoked_structures.push_back({.hit = hit, .structure = found.value()});
                 }
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
@@ -623,4 +644,73 @@ cc::string sgl::emit::dump_errors(emitted_text const& e)
     for (auto const& error : e.errors)
         out.appendf("{} {}\n", to_string(error.kind), error.detail);
     return out;
+}
+
+namespace
+{
+/// Whether `x` names one value wherever the entry point reads it: what no statement assigns, and pure work of that.
+[[nodiscard]] bool is_settled(sgl::check::flat_entry_point const& e, sgl::check::flat_expr_id x)
+{
+    using namespace sgl::check;
+    auto const& node = e.at(x).node;
+    if (node.is<flat_literal>() || node.is<flat_int_literal>() || node.is<flat_wide_literal>()
+        || node.is<flat_bool_literal>() || node.is<flat_enum_value>() || node.is<flat_binding_member>())
+        return true;
+    if (auto const* const ref = node.try_as<flat_local_ref>())
+        return !e.at(ref->local).is_mut && e.at(ref->local).kind != local_kind::var;
+    if (auto const* const element = node.try_as<flat_element>())
+        return is_settled(e, element->object) && is_settled(e, element->index);
+    if (auto const* const member = node.try_as<flat_member>())
+        return is_settled(e, member->object);
+    if (auto const* const call = node.try_as<flat_call>(); call != nullptr && call->is_pure)
+    {
+        for (auto const argument : e.at(call->arguments))
+            if (!is_settled(e, argument))
+                return false;
+        return true;
+    }
+    return false;
+}
+} // namespace
+
+cc::result<sgl::check::flat_expr_id, cc::string> sgl::emit::impl::traced_structure(check::checked_module const& m,
+                                                                                   check::flat_entry_point const& e,
+                                                                                   check::flat_expr_id hit)
+{
+    // CHK-434: a hit object is the `let` its `trace_hit` gave, and a call inlined hands that `let` on, so the hit
+    // object names its local, and the local the trace that gave it, wherever it is read: in a loop, in a callee
+    auto const* const ref = e.at(hit).node.try_as<check::flat_local_ref>();
+    if (ref == nullptr)
+        return cc::error(cc::string("that no let holds"));
+    auto structure = check::flat_expr_id::none;
+    for (auto const& st : e.stmts)
+    {
+        auto const* const let = st.node.try_as<check::flat_let>();
+        if (let == nullptr || let->local != ref->local || !check::is_valid(let->value))
+            continue;
+        auto const* const call = e.at(let->value).node.try_as<check::flat_call>();
+        auto const* const record = call != nullptr ? m.builtin_function(call->intrinsic) : nullptr;
+        if (record == nullptr || !record->name.starts_with("trace_hit_ray"))
+            return cc::error(cc::string("that no trace_hit made"));
+        auto const traced = e.at(call->arguments)[0];
+        if (check::is_valid(structure))
+            return cc::error(cc::string("that more than one trace_hit may have made, through different acceleration "
+                                        "structures"));
+        structure = traced;
+    }
+    if (!check::is_valid(structure))
+        return cc::error(cc::string("that no trace_hit made"));
+    // an element of an array of structures is one structure only where its index stays what it was at the trace
+    if (!is_settled(e, structure))
+        return cc::error(cc::string("traced through an element of an array of acceleration structures whose index may "
+                                    "change before the invocation, so it may be another structure there"));
+    return structure;
+}
+
+sgl::check::flat_expr_id sgl::emit::impl::invoked_structure_of(plan const& p, check::flat_expr_id hit)
+{
+    for (auto const& entry : p.invoked_structures)
+        if (entry.hit == hit)
+            return entry.structure;
+    return check::flat_expr_id::none;
 }

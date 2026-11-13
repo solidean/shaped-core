@@ -255,6 +255,14 @@ struct plan
     /// dx12: the entry point reorders through NVAPI's shader extensions, the `nvapi` fill of shader execution
     /// reordering (EMIT-263): its hit objects are `NvHitObject`s, which talk to the driver through `u0, space13`.
     bool reorders_through_nvapi = false;
+    /// Under that fill, each `hit_object_invoke`'s hit object, the expression of its first argument, with the
+    /// acceleration structure of the `trace_hit` that made it, which NVAPI invokes it through (EMIT-263).
+    struct invoked_structure
+    {
+        check::flat_expr_id hit = check::flat_expr_id::none;
+        check::flat_expr_id structure = check::flat_expr_id::none;
+    };
+    cc::vector<invoked_structure> invoked_structures;
     /// The entry point's traces see opacity micromaps: it holds the feature, and its fill writes them (EMIT-184).
     /// The `nvapi` fill writes nothing, since NVIDIA's driver applies them to every trace of a structure that has them.
     bool states_micromaps = false;
@@ -311,6 +319,14 @@ struct plan
 /// The position in `workgroup` of `binding.member`, or -1 where that member is no workgroup memory.
 [[nodiscard]] i32 workgroup_of(plan const& p, check::symbol_id binding, i32 member);
 /// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
+/// The acceleration structure NVAPI invokes the hit object `hit` through, of `plan::invoked_structures`; none where it
+/// has none.
+[[nodiscard]] check::flat_expr_id invoked_structure_of(plan const& p, check::flat_expr_id hit);
+/// The acceleration structure the `trace_hit` that made the hit object `hit` traced, under CHK-434's rule that a hit object
+/// is the `let` its trace gave; or why there is no one structure, for a refusal to name.
+[[nodiscard]] cc::result<check::flat_expr_id, cc::string> traced_structure(check::checked_module const& m,
+                                                                           check::flat_entry_point const& e,
+                                                                           check::flat_expr_id hit);
 [[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
 
 /// Where vulkan's `sg_acceleration_addresses` holds the address of resource `index`, an acceleration member: its rank

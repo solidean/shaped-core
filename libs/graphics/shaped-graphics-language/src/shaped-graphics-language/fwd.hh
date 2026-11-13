@@ -31,7 +31,7 @@ struct entry_text;
 struct tested_source;
 struct emitted_source;
 struct variant_axis;
-struct variant_key;
+class variant_key;
 struct interface_binding;
 struct prelude_file;
 struct library_file;

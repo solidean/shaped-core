@@ -43,8 +43,9 @@ A table edited on one side alone stops the build.
 
 On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and hands it every stage it calls through `sgl_context` (EMIT-183).
 
-`u0, space13` on dx12 is no entry of this table but NVAPI's: an `nvapi` fill's counter UAV `g_NvidiaExt`, which the host enables on its device rather than sg binding it (EMIT-263).
-`emitted_source::bindings` lists it with `is_reserved`, and no entry here takes space 13.
+`u0, space13` on dx12 is no entry of this table but NVAPI's: an `nvapi` fill's counter UAV `g_NvidiaExt`, which the host lays out and binds itself (EMIT-263).
+It covers it as a UAV with a counter in a descriptor table, binds a null or a valid buffer there, and enables the slot on its device; sg lays out none, and slib refuses it.
+`emitted_source::bindings` lists it with `is_reserved`, DXC's reflection as `sg::compiled_shader::reserved_slots`, and no entry here takes space 13.
 
 `sg_array_lengths` is a block of 16 lengths, `uint4[4]`, one per unbounded binding array of the bound groups in the order of their groups.
 sg writes it at each dispatch and draw from the groups bound, beside the roots, and an emit for dx12 or vulkan rewrites `xs.length` into a read of it (CHK-491).

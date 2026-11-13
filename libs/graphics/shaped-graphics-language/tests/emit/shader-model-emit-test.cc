@@ -370,13 +370,147 @@ TEST("sgl emit - an entry's axes reach through calls and generics, in feature or
 TEST("sgl emit - a variant's key names its granted features with their fills, then the core fills that are not native")
 {
     CHECK(sgl::variant_key().to_string() == "");
-    auto const key = sgl::variant_key{.fills = {{.f = feature::opacity_micromap, .how = fill::nvapi},
-                                                {.f = feature::shader_execution_reordering, .how = fill::native}},
-                                      .core = k_six_six_fills};
-    CHECK(key.to_string()
+    sgl::check::feature_fill const out_of_order[] = {{.f = feature::opacity_micromap, .how = fill::nvapi},
+                                                     {.f = feature::shader_execution_reordering, .how = fill::native}};
+    auto const key = sgl::variant_key::of(out_of_order, k_six_six_fills);
+    REQUIRE(key.has_value());
+    CHECK(key.value().to_string()
           == "shader_execution_reordering=native;opacity_micromap=nvapi;draw_start=root_constant;wave_size=none");
-    CHECK(key.granted() == (feature::shader_execution_reordering | feature::opacity_micromap));
-    CHECK(sgl::variant_key{.core = {.wave_size = fill::none}}.to_string() == "wave_size=none");
+    CHECK(key.value().granted() == (feature::shader_execution_reordering | feature::opacity_micromap));
+    // canonical: its fills in feature order, so the same variant named in another order is the same key
+    REQUIRE(key.value().fills().size() == 2);
+    CHECK(key.value().fills()[0].f == feature::shader_execution_reordering);
+    sgl::check::feature_fill const in_order[] = {out_of_order[1], out_of_order[0]};
+    auto const same = sgl::variant_key::of(in_order, k_six_six_fills);
+    REQUIRE(same.has_value());
+    CHECK(same.value() == key.value());
+    CHECK(!(same.value() == sgl::variant_key::of(in_order).value()));
+    // a feature named twice names no variant
+    sgl::check::feature_fill const twice[] = {out_of_order[0], {.f = feature::opacity_micromap, .how = fill::native}};
+    auto const refused = sgl::variant_key::of(twice);
+    REQUIRE(refused.has_error());
+    CHECK(refused.error() == "a variant names opacity_micromap twice");
+    auto const wave = sgl::variant_key::of({}, {.wave_size = fill::none});
+    REQUIRE(wave.has_value());
+    CHECK(wave.value().to_string() == "wave_size=none");
+}
+
+TEST("sgl emit - a fill of a feature the compile does not grant, or two of one, is the request's error (EMIT-263)")
+{
+    sgl::check::feature_fill const nvapi[] = {{.f = feature::shader_execution_reordering, .how = fill::nvapi}};
+    auto const ungranted = sgl::compile_to_text(
+        {.source = k_reordering, .entry_point = "shoot", .target = target::hlsl_dx12, .fills = nvapi});
+    REQUIRE(ungranted.has_error());
+    CHECK(ungranted.error().contains("a nvapi fill of shader_execution_reordering, which the compile does not grant"));
+    sgl::check::feature_fill const twice[] = {nvapi[0], {.f = feature::shader_execution_reordering, .how = fill::native}};
+    auto const doubled = sgl::compile_to_text({.source = k_reordering,
+                                               .entry_point = "shoot",
+                                               .target = target::hlsl_dx12,
+                                               .device_features = feature::shader_execution_reordering,
+                                               .fills = twice});
+    REQUIRE(doubled.has_error());
+    CHECK(doubled.error().contains("two fills of shader_execution_reordering"));
+}
+
+TEST("sgl emit - every target's compile of a source takes the fills it offers, and native for the rest (EMIT-263)")
+{
+    sgl::check::feature_fill const nvapi[] = {{.f = feature::shader_execution_reordering, .how = fill::nvapi}};
+    auto const all = sgl::compile_all_to_text({.source = k_reordering,
+                                               .targets = sgl::emit::all_targets(),
+                                               .device_features = feature::shader_execution_reordering,
+                                               .fills = nvapi,
+                                               .core = k_six_six_fills});
+    REQUIRE(all.has_value()).dump("error", all.has_error() ? all.error() : cc::string());
+    auto seen = 0;
+    for (auto const& entry : all.value())
+    {
+        if (entry.entry_point != "shoot" || !entry.text.has_value())
+            continue;
+        ++seen;
+        auto const& text = entry.text.value().text;
+        if (entry.target == target::hlsl_dx12)
+        {
+            CHECK(text.contains("NvHitObject"));
+            CHECK(entry.text.value().dxil_shader_model == k_six_six);
+        }
+        else
+            CHECK(!text.contains("NvHitObject")).dump("target", sgl::emit::to_string(entry.target));
+    }
+    CHECK(seen >= 2);
+    // a fill no target of the request offers is its error
+    target const vulkan_only[] = {target::hlsl_vulkan};
+    auto const refused = sgl::compile_all_to_text({.source = k_reordering,
+                                                   .targets = vulkan_only,
+                                                   .device_features = feature::shader_execution_reordering,
+                                                   .fills = nvapi});
+    REQUIRE(refused.has_error());
+    CHECK(refused.error().contains("a nvapi fill of shader_execution_reordering, which none of the targets offers"));
+}
+
+TEST("sgl emit - an entry's axes are every has() it can reach, through branches its compile does not take (EMIT-264)")
+{
+    // nested under a branch this compile does not take, in either order, and in a value if
+    constexpr auto nested = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun pick() -> float:\n"
+                            "    return if has(.shader_f64) => 1.0 else 2.0\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    const if has(.subgroups):\n"
+                            "        const if has(.shader_int64):\n"
+                            "            work.values[id.x] = 1.0\n"
+                            "    else if has(.shader_int16):\n"
+                            "        work.values[id.x] = 2.0\n"
+                            "    else:\n"
+                            "        const if has(.helper_lane_query):\n"
+                            "            work.values[id.x] = pick()\n";
+    auto const features_of = [](cc::span<sgl::variant_axis const> axes)
+    {
+        auto result = feature_set();
+        for (auto const& a : axes)
+            result.set(a.f);
+        return result;
+    };
+    auto const expected = feature::subgroups | feature::shader_int64 | feature::shader_int16
+                        | feature::helper_lane_query | feature::shader_f64;
+    for (auto const device : {feature_set(), feature_set(feature::subgroups),
+                              feature::subgroups | feature::shader_int64, feature_set(feature::helper_lane_query)})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = nested, .entry_point = "cs", .target = target::hlsl_dx12, .device_features = device});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        CHECK(features_of(e.value().axes) == expected);
+    }
+    // a preamble's condition varies the text, so it is an axis of every entry that writes a body of its file
+    constexpr auto preambled = "const if has(.subgroups):\n"
+                               "    \"hlsl\n"
+                               "        float with_subgroups(float x);\n"
+                               "    \"\n"
+                               "\n"
+                               "binding work:\n"
+                               "    values: mut buffer[float]\n"
+                               "\n"
+                               "fun twice(x: float) -> float:\n"
+                               "    \"hlsl\n"
+                               "        $result = $x * 2.0;\n"
+                               "    \"\n"
+                               "    \"wgsl\n"
+                               "        $result = $x * 2.0;\n"
+                               "    \"\n"
+                               "    \"msl\n"
+                               "        $result = $x * 2.0;\n"
+                               "    \"\n"
+                               "\n"
+                               "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                               "    work.values[id.x] = twice(work.values[id.x])\n";
+    auto const with = sgl::compile_to_text({.source = preambled, .entry_point = "cs", .target = target::hlsl_dx12});
+    REQUIRE(with.has_value()).dump("error", with.has_error() ? with.error() : cc::string());
+    CHECK(features_of(with.value().axes) == feature_set(feature::subgroups));
+    // an entry that writes no body of that file has no such axis
+    auto const plain = sgl::compile_to_text({.source = k_plain, .entry_point = "cs", .target = target::hlsl_dx12});
+    REQUIRE(plain.has_value());
+    CHECK(plain.value().axes.empty());
 }
 
 TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through nvHLSLExtns.h at 6.6 (EMIT-263)")
@@ -417,6 +551,8 @@ TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through
             CHECK(b.group == 13);
             CHECK(b.slot == 0);
             CHECK(b.access == "read_write");
+            CHECK(b.stride == 256);
+            CHECK(b.has_counter);
         }
     CHECK(reserved == 1);
     // its axis offers both fills
@@ -463,24 +599,120 @@ TEST("sgl emit - SGL's DXIL of the nvapi fill talks to the driver through the co
     CHECK(reserved == 1);
 }
 
-TEST("sgl emit - the nvapi fill of reordering refuses a hit object invoked apart from its trace (EMIT-263)")
+namespace
 {
-    auto source = cc::string(k_reordering);
-    auto const at = source.find("        h.reorder()\n");
-    REQUIRE(at >= 0);
-    source = cc::format("{}        h.invoke(mut p)\n{}", source.subview({.offset = 0, .size = at}),
-                        source.subview({.offset = at, .size = source.size() - at}));
+/// A raygen of `body`, its lines at four spaces, over a pipeline with an array of structures beside its one structure.
+[[nodiscard]] cc::string invoking(cc::string_view declarations, cc::string_view body)
+{
+    auto source = cc::string("require raytracing_pipeline\n"
+                             "require binding_arrays\n"
+                             "binding frame:\n"
+                             "    world: acceleration_structure[.triangles]\n"
+                             "    worlds: acceleration_structure[.triangles][4]\n"
+                             "    seen: mut buffer[float]\n"
+                             "struct radiance:\n"
+                             "    color: float3\n"
+                             "rays path_rays:\n"
+                             "    surface: radiance\n");
+    source += declarations;
+    source += "@raygen fun shoot(@launch_id id: int3){frame}:\n"
+              "    require shader_execution_reordering\n"
+              "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+              "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n";
+    auto is_line_start = true;
+    for (auto const ch : body)
+    {
+        if (is_line_start)
+            source += "    ";
+        source += ch;
+        is_line_start = ch == '\n';
+    }
+    source += "    frame.seen[id.x] = p.color.x\n"
+              "@miss fun on_miss(p: mut radiance):\n"
+              "    p.color = float3(1.0, 0.0, 0.0)\n"
+              "@closest_hit fun on_hit(h: triangle_hit, p: mut radiance):\n"
+              "    p.color = float3(0.0, 1.0, 0.0)\n"
+              "hit_group hits for path_rays:\n"
+              "    surface = (closest_hit = on_hit)\n"
+              "@raytracing pipeline path:\n"
+              "    rays = path_rays\n"
+              "    raygen = shoot\n"
+              "    miss.surface = on_miss\n"
+              "    hit_groups = (hits)\n";
+    return source;
+}
+} // namespace
+
+TEST("sgl emit - the nvapi fill invokes a hit object through the structure its trace_hit took, wherever it is "
+     "(EMIT-263)")
+{
+    struct invoked_case
+    {
+        cc::string_view what;
+        cc::string_view declarations;
+        cc::string_view body;
+        cc::string_view structure;
+    };
+    invoked_case const cases[] = {
+        {"its own let", "",
+         "let h = trace_hit(frame.world, r, path_rays.surface, mut p)\nh.reorder()\nh.invoke(mut p)\n", "frame_world"},
+        {"a callee that traces and invokes",
+         "fun run(q: mut radiance, s: ray){frame}:\n"
+         "    let h = trace_hit(frame.world, s, path_rays.surface, mut q)\n"
+         "    h.invoke(mut q)\n",
+         "run(mut p, r)\n", "frame_world"},
+        {"a loop's body", "",
+         "for i in 0 ..< 2:\n    let h = trace_hit(frame.world, r, path_rays.surface, mut p)\n    h.invoke(mut p)\n",
+         "frame_world"},
+        {"an element by a let's index", "",
+         "let k = id.x % 4\nlet h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\nh.invoke(mut "
+         "p)\n",
+         "frame_worlds["},
+        {"an element by a loop's index", "",
+         "for i in 0 ..< 4:\n    let h = trace_hit(frame.worlds[i], r, path_rays.surface, mut p)\n    h.invoke(mut "
+         "p)\n",
+         "frame_worlds["},
+    };
+    for (auto const& c : cases)
+    {
+        auto const source = invoking(c.declarations, c.body);
+        for (auto const route : k_routes)
+        {
+            auto const e = filled(source, "shoot", feature::shader_execution_reordering, fill::nvapi, route);
+            REQUIRE(e.has_value()).dump("case", c.what).dump("error", e.has_error() ? e.error() : cc::string());
+            if (route == native_route::text)
+                CHECK(e.value().text.contains(cc::format("NvInvokeHitObject({}", c.structure)))
+                    .dump("case", c.what)
+                    .dump("text", e.value().text);
+            else
+                CHECK(!e.value().dxil.empty()).dump("case", c.what);
+        }
+        // the native fill invokes it as Shader Model 6.9 does, through no structure
+        auto const native
+            = filled(source, "shoot", feature::shader_execution_reordering, fill::native, native_route::text);
+        REQUIRE(native.has_value()).dump("case", c.what).dump("error", native.has_error() ? native.error() : cc::string());
+        CHECK(native.value().text.contains("dx::HitObject::Invoke(")).dump("case", c.what);
+    }
+}
+
+TEST("sgl emit - the nvapi fill refuses a hit object that may be of more than one structure, naming it (EMIT-263)")
+{
+    // its element's index may change between the trace and the invocation
+    auto const source = invoking("", "let mut k = id.x % 4\n"
+                                     "let h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
+                                     "k = (k + 1) % 4\n"
+                                     "h.invoke(mut p)\n");
     for (auto const route : k_routes)
     {
         auto const refused = filled(source, "shoot", feature::shader_execution_reordering, fill::nvapi, route);
         REQUIRE(refused.has_error());
-        CHECK(refused.error().contains("shoot invokes a hit object apart from its trace, which the nvapi fill of "
-                                       "shader_execution_reordering cannot"));
+        CHECK(refused.error().contains("shoot invokes a hit object traced through an element of an array of "
+                                       "acceleration structures whose index may change before the invocation"))
+            .dump("error", refused.error());
     }
-    // the native fill invokes it
+    // the native fill needs no structure, and takes it
     auto const native = filled(source, "shoot", feature::shader_execution_reordering, fill::native, native_route::text);
     REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
-    CHECK(native.value().text.contains("dx::HitObject::Invoke(h, "));
 }
 
 TEST("sgl emit - the nvapi fill of opacity micromaps writes nothing, at 6.6 (EMIT-263, EMIT-184)")

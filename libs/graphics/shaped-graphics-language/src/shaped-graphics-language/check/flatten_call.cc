@@ -451,12 +451,30 @@ auto sgl::check::impl::flattener::flatten_value_if(ast::expr_id id, type_id type
         if (!taken.has_value())
             break;
         condition = flat_expr_id::none;
+        auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
         if (taken.value())
         {
+            // EMIT-264: what the branches after it consult is a variant all the same
             auto const& first = branches.front();
+            auto const after = ast::index_of(first.condition) * 2 + 1;
+            if (rest.size() == 1)
+                probe_consults(after, [&](flattener& p) { (void)p.taken_value(id, type, rest.front().then); });
+            else
+                probe_consults(after,
+                               [&](flattener& p)
+                               {
+                                   auto const label = p.add_label("if");
+                                   p.flatten_if_branches({.file = p.file(), .expr = id}, rest, label, flat_expr_id::none);
+                               });
             return granting(first.condition, [&] { return taken_value(id, type, first.then); });
         }
-        branches = branches.subspan({.offset = 1, .size = branches.size() - 1});
+        probe_consults(ast::index_of(branches.front().condition) * 2,
+                       [&](flattener& p)
+                       {
+                           (void)p.granting(branches.front().condition,
+                                            [&] { return p.taken_value(id, type, branches.front().then); });
+                       });
+        branches = rest;
         if (branches.size() == 1)
             return taken_value(id, type, branches.front().then);
     }
@@ -528,7 +546,17 @@ void sgl::check::impl::flattener::flatten_if_branches(origin from,
     if (auto const taken = constant_condition(condition); taken.has_value())
     {
         if (taken.value())
+        {
+            // EMIT-264: what the arms after it consult is a variant all the same
+            auto const after = ast::index_of(head.condition) * 2 + 1;
+            if (rest.size() == 1)
+                probe_consults(after, [&](flattener& p) { (void)p.flatten_arm_body(rest.front().then, value_block); });
+            else
+                probe_consults(after, [&](flattener& p) { p.flatten_if_branches(from, rest, value_block); });
             return add_taken(from, granting(head.condition, [&] { return flatten_arm_body(head.then, value_block); }));
+        }
+        probe_consults(ast::index_of(head.condition) * 2, [&](flattener& p)
+                       { (void)p.granting(head.condition, [&] { return p.flatten_arm_body(head.then, value_block); }); });
         if (rest.size() == 1)
             return add_taken(from, flatten_arm_body(rest.front().then, value_block));
         return flatten_if_branches(from, rest, value_block);

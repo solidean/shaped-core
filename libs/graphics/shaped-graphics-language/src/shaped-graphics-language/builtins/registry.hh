@@ -79,6 +79,9 @@ struct sgl::builtins::call_context
     cc::string_view hit_offsets;
     /// The entry point holds a `@coherent` member, whose writes a barrier publishes to the whole dispatch (EMIT-150).
     bool is_device_coherent = false;
+    /// Under the `nvapi` fill, a hit object's invocation: the acceleration structure its `trace_hit` traced, which NVAPI
+    /// invokes it through (EMIT-263); empty for every other call.
+    cc::string_view invoked_structure;
     /// The entry point is a pixel stage, whose helper invocations run its atomics without effect (EMIT-162).
     bool is_pixel_stage = false;
     /// The entry point's `atomic[float]`s are the target's own float atomics, which add in one instruction: the

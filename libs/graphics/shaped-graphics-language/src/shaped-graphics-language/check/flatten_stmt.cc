@@ -60,7 +60,17 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
     if (auto const taken = constant_condition(condition); taken.has_value())
     {
         if (taken.value())
+        {
+            // EMIT-264: what the branches after it consult is a variant all the same
+            auto const after = ast::index_of(first.condition) * 2 + 1;
+            if (!rest.empty() && !ast::is_valid(rest.front().condition))
+                probe_consults(after, [&](flattener& p) { (void)p.flatten_body(rest.front().then); });
+            else if (!rest.empty())
+                probe_consults(after, [&](flattener& p) { p.flatten_if(from, rest, false); });
             return add_taken(from, granting(first.condition, [&] { return flatten_body(first.then); }));
+        }
+        probe_consults(ast::index_of(first.condition) * 2, [&](flattener& p)
+                       { (void)p.granting(first.condition, [&] { return p.flatten_body(first.then); }); });
         if (!rest.empty() && !ast::is_valid(rest.front().condition))
             return add_taken(from, flatten_body(rest.front().then));
         return flatten_if(from, rest, is_const);
@@ -921,6 +931,7 @@ void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id 
             {.file = file(), .call = literal, .features = granted, .within = cc::move(within), .granted = granted});
     }
 
+    consult_preambles_of(chosen);
     auto const return_label = current()->return_label;
     auto const result_type = current()->result;
     auto const is_void = !is_valid(result_type) || result_type == checked_module::void_type;
@@ -963,6 +974,12 @@ void sgl::check::impl::flattener::judge_text_types()
                 return d.second;
         auto const& name = c.out.name_of(type);
         auto const chosen = chosen_type_branch(c.out, c.out.at(type).symbol, target);
+        // EMIT-264: what every branch's condition consults is a variant of the type, taken or not (CHK-432)
+        for (auto const& branch : c.out.target_type_branches)
+            if (branch.type_symbol == c.out.at(type).symbol)
+                for (auto const& node : branch.condition)
+                    if (node.kind == target_condition::kind_t::has)
+                        entry.consulted.set(feature(node.value));
         auto result = -3;
         if (chosen >= 0 && c.out.target_type_branches[chosen].is_fields)
             result = -2;
@@ -1152,4 +1169,16 @@ void sgl::check::impl::flattener::place_target_layouts()
         x.type = placed(x.type);
     for (auto& l : entry.locals)
         l.type = placed(l.type);
+}
+
+void sgl::check::impl::flattener::consult_preambles_of(i32 text)
+{
+    if (text < 0 || text >= c.out.target_texts.size())
+        return;
+    auto const& body = c.out.target_texts[text];
+    for (auto const& preamble : c.out.target_preambles)
+        if (preamble.file == body.file && preamble.language == body.language)
+            for (auto const& node : preamble.condition)
+                if (node.kind == target_condition::kind_t::has)
+                    entry.consulted.set(feature(node.value));
 }

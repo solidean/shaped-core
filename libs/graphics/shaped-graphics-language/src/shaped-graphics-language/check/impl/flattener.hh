@@ -1,6 +1,8 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/set.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
@@ -613,6 +615,30 @@ struct flattener
         granted = outer;
         return result;
     }
+    /// EMIT-264: what a side a constant does not take consults, which is a variant of the entry all the same.
+    /// `flatten_untaken` flattens that side on a copy of this flattener, which is dropped but for what it consulted, so
+    /// nothing of it reaches the entry and nothing judges it (CHK-356).
+    /// A side is probed once for each place it is inlined at, however often that place repeats, such as in an unrolled
+    /// loop: `node` is the side's first node in the current file, which with the call chain names it.
+    template <class F>
+    void probe_consults(u32 node, F&& flatten_untaken)
+    {
+        auto key = cc::format("{}:{}", file(), node);
+        for (auto const& site : entry.at(current()->chain))
+            key.appendf("<{}:{}", site.file, ast::index_of(site.call));
+        if (!probed.is_valid())
+            probed = cc::make_shared<cc::set<cc::string>>();
+        if (probed->contains(key))
+            return;
+        probed->insert(key);
+        auto copy = *this;
+        flatten_untaken(copy);
+        entry.consulted |= copy.entry.consulted;
+    }
+    /// The sides probed so far, shared by this flattener and the copies its probes make.
+    cc::shared_ptr<cc::set<cc::string>> probed;
+    /// EMIT-264: what the conditions of the preambles a body in target text `text` brings consult (CHK-528).
+    void consult_preambles_of(i32 text);
     /// The case of a feature an argument names as a constant, `.subgroups`; -1 where it names none.
     [[nodiscard]] i32 feature_case_of(ast::expr_id argument);
     /// Refuses what a compile stands for inside a const, whose value one check computes for every compile (CHK-426).

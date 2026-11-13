@@ -809,6 +809,10 @@ written write_hit_object_step(call_context const& ctx)
         return {.text = ctx.data == 1 ? cc::format("sgl_reorder_thread({}, uint({}), uint({}))", ctx.arguments[0].text,
                                                    ctx.arguments[1].text, ctx.arguments[2].text)
                                       : cc::format("sgl_reorder_thread({})", ctx.arguments[0].text)};
+    // EMIT-263: NVAPI invokes through the structure the hit object's trace took, which the emit found for it
+    if (ctx.data == 2 && ctx.reorders_through_nvapi)
+        return {.text = cc::format("NvInvokeHitObject({}, {}, {})", ctx.invoked_structure, ctx.arguments[0].text,
+                                   ctx.arguments[1].text)};
     if (ctx.data == 2)
         return {.text = cc::format("dx::HitObject::Invoke({}, {})", ctx.arguments[0].text, ctx.arguments[1].text)};
     if (ctx.data == 1)
