@@ -49,6 +49,9 @@ HLSL writes `RaytracingAccelerationStructure`, MSL `instance_acceleration_struct
 * **`hit_decision`** is what an any-hit decision says of a candidate: `accept`, `ignore`, or `accept_and_end_search`.
 * **`triangle_candidate`** is a triangle the traversal could not decide alone, a non-opaque one.
   It holds `t`, `ray`, the instance's `instance_id` and `instance_index`, `geometry_index`, `primitive_index`, `barycentrics` and `is_front_face`.
+  **A front face turns the side its vertices wind counterclockwise around to the ray**, in the instance's object space, as dx12 and vulkan hardware report it.
+  DXR says "clockwise from the ray's origin" of the same faces, since it states its winding in a left-handed space.
+  An instance whose cull mode is `front` flips it, and `cull_back_facing` and `cull_front_facing` cull by it.
   `cluster_id` is the cluster the triangle is in, as its build numbered it, and -1 in a BLAS built from no clusters (EMIT-260).
   Its `primitive_index` is then the triangle's within its cluster.
 * **`triangle_hit`** is the nearest triangle a trace accepted, with the candidate's fields and `is_hit`.
