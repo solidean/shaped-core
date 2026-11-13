@@ -56,6 +56,7 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
                 fold_sampler(b, m.samplers[s.info]);
         }
         b.add_string(member.gradient);
+        b.add_bool(member.is_no_diff);
         b.add_string(member.tangent);
         fold_type(b, m, member.type);
     }

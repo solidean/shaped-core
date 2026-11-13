@@ -164,3 +164,56 @@ ASYNC_INVOCABLE_TEST("sg - a declared subgroups shares a gradient's atomic throu
     for (auto i = 0; i < 8; ++i)
         CHECK(g[i] == expected[i]);
 }
+
+// One row of four texels, 0, 10, 20 and 30, sampled at u = 0.5 by every invocation: halfway between texels 1 and 2,
+// so each takes half of the 2 the loss has, and the coordinate's slope is 2 * 4 * (20 - 10).
+ASYNC_INVOCABLE_TEST("sg - a texture with a @gradient takes a linear sample's adjoint at the texels it weighs",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    namespace shader = shaders::differentiable_buffers;
+    auto const backward = co_await shader::canvas_backward.acquire_pipeline(*ctx);
+    constexpr auto count = 4096;
+    auto const canvas = sg::texture_2d::from_raw(ctx->persistent.create_raw_texture({
+        .format = sg::pixel_format::r32_float,
+        .dimension = sg::texture_dimension::d2,
+        .width = 4,
+        .height = 1,
+        .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst,
+    }));
+    auto const texels = cc::vector<f32>{0.0f, 10.0f, 20.0f, 30.0f};
+    auto const gradients = ctx->persistent.create_buffer_from_data(
+        cc::vector<f32>::create_filled(4, 0.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const slopes = ctx->persistent.create_buffer_from_data(
+        cc::vector<f32>::create_filled(count, 0.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(canvas.raw(), cc::as_bytes(texels));
+    auto const painted
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shader::painted>(),
+                                              shader::painted{.canvas = canvas.as_texture_view()});
+    auto const painting = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shader::painting>(),
+        shader::painting{.gradients = gradients.as_readwrite_buffer(), .slopes = slopes.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*backward);
+    cmd->compute.bind_group(0, *painted);
+    cmd->compute.bind_group(1, *painting);
+    cmd->compute.dispatch_threads(count);
+    auto const gradient_future = cmd->download.data_from_buffer(gradients);
+    auto const slope_future = cmd->download.data_from_buffer(slopes);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const g = co_await gradient_future.data();
+    REQUIRE(g.size() == 4);
+    CHECK(g[0] == 0.0f);
+    CHECK(g[1] == 4096.0f);
+    CHECK(g[2] == 4096.0f);
+    CHECK(g[3] == 0.0f);
+    auto const s = co_await slope_future.data();
+    REQUIRE(s.size() == count);
+    CHECK(s[0] == 80.0f);
+    CHECK(s[count - 1] == 80.0f);
+}
