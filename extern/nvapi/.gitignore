@@ -1,0 +1,3 @@
+# The fetched headers; hydrate them with fetch-nvapi.py.
+.install/
+.install.staging/

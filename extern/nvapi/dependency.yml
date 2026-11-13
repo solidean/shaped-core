@@ -1,0 +1,59 @@
+# Pin and license for the upstream fetched here.
+# fetch-nvapi.py reads its pin from this file.
+# tools/dev/lib/pipeline/prereqs.py scans this file for the `pin_hash:` line to decide whether .install/ is current,
+# without paying to start Python — keep that key on a line of its own.
+
+upstreams:
+  - name: NVAPI
+    homepage: https://developer.nvidia.com/rtx/path-tracing/nvapi/get-started
+    install: on-request
+    source: github-files
+    repo: https://github.com/NVIDIA/nvapi
+    track: default-branch
+    version: R615
+    tag: 70d337db9186e968eab622f7e786de7e437faf3d
+    digest_algo: sha256
+
+    # The pin over the whole set: the sha256 of the `path sha256` lines below, in order.
+    pin_hash: 90458bca7c1cddfd90b8e4dec78e6ebea8783ce80b976c52a9ef24cf99696065
+
+    license: MIT
+    used_by: shaped-graphics-language's DXIL writer, which encodes the protocol of its headers (EMIT-263); and shaped-shader-library's tests, which compile an nvapi fill's HLSL with DXC
+    # The notice each of the three headers carries, which SGL's DXIL writer carries beside its encoding of their protocol
+    license_text: |
+      SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+      SPDX-License-Identifier: MIT
+
+      Permission is hereby granted, free of charge, to any person obtaining a
+      copy of this software and associated documentation files (the "Software"),
+      to deal in the Software without restriction, including without limitation
+      the rights to use, copy, modify, merge, publish, distribute, sublicense,
+      and/or sell copies of the Software, and to permit persons to whom the
+      Software is furnished to do so, subject to the following conditions:
+
+      The above copyright notice and this permission notice shall be included in
+      all copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+      THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+      FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+      DEALINGS IN THE SOFTWARE.
+    files:
+      - path: nvHLSLExtns.h
+        sha256: 0db84e21de4db66eac4dcdf9666dbd171d6d3150c4999d796c012b4ba984e684
+      - path: nvHLSLExtnsInternal.h
+        sha256: 9afa085e4596d2761decd56c9ae8ef62b0b0f70069e75a33b989e95e4a6dd2a6
+      - path: nvShaderExtnEnums.h
+        sha256: 9e2532fdc36281fd6923084078ad55fd4474337bf1ee3d9e123335d3b5158165
+    notes: |
+      NVIDIA's HLSL shader extensions, the three headers an `nvapi` fill's text includes (EMIT-263), and nothing of the API library.
+      SGL writes `#include "nvHLSLExtns.h"` and a host puts this folder on DXC's include path; SGL's DXIL writer encodes the same protocol itself.
+      Each header carries NVIDIA's MIT notice, which `license_text` repeats.
+
+      FETCHED ON REQUEST, because only tests read it: they compile an nvapi fill's text with DXC, and skip without it.
+      `uv run extern/nvapi/fetch-nvapi.py` fetches it; nothing in dev.py does.
+
+      R615, the last release older than two weeks when it was pinned; SER through NvHitObject has stood since R520.
