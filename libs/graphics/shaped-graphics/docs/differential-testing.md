@@ -50,6 +50,7 @@ The setup fills the module's generated binding type, so the two sides cannot dri
 A setup registers itself with `sg_diff::register_setup`, naming the stage it runs, its run, its default tolerances, and its interpreter half where it has one.
 Its module is `diff_<name>` unless it names another, as `blended` and `samples` share `targets`' module and vertex stage.
 One that needs a feature names it, as `scene` names `ray_query`, and a context without it skips the setup's files rather than failing them.
+A corpus file's own `require` lines do the same for it alone, as `half_math.sgl` requires `shader_f16` on the `floats` setup.
 Its run is handed the entry point compiled on the route, and builds the pipeline itself.
 A stage the setup brings, as the raster setup brings its vertex stage, compiles on the same route through `sg_diff::compiled_on`.
 Those stages live in [tests/differential/setups/shaders/](../tests/differential/setups/shaders/), a package of their own.

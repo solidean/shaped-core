@@ -9,6 +9,7 @@
 #include <sg_test_differential.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
@@ -136,6 +137,7 @@ sg_diff::corpus sg_diff::read_corpus()
             continue;
         }
 
+        auto required = cc::vector<sg::feature>();
         auto setup_name = cc::string();
         auto routes = cc::optional<tolerance>();
         auto across = cc::optional<tolerance>();
@@ -148,6 +150,26 @@ sg_diff::corpus sg_diff::read_corpus()
                 ++end;
             auto const line = trimmed(rest.subview({.offset = 0, .size = end}));
             rest = end < rest.size() ? rest.subview(end + 1) : cc::string_view();
+            if (line.starts_with("require "))
+            {
+                // SGL's `require` spells a feature as sg::to_string names it, several to a line, comma separated
+                for (auto const f : sg::k_all_features)
+                {
+                    auto const name = sg::to_string(f);
+                    auto rest_of_line = trimmed(line.subview(8));
+                    while (!rest_of_line.empty())
+                    {
+                        auto end = isize(0);
+                        while (end < rest_of_line.size() && rest_of_line[end] != ',')
+                            ++end;
+                        if (trimmed(rest_of_line.subview({.offset = 0, .size = end})) == name)
+                            required.push_back(f);
+                        rest_of_line
+                            = end < rest_of_line.size() ? trimmed(rest_of_line.subview(end + 1)) : cc::string_view();
+                    }
+                }
+                continue;
+            }
             if (!line.starts_with(k_marker))
                 continue;
 
@@ -203,6 +225,7 @@ sg_diff::corpus sg_diff::read_corpus()
             .setup = found,
             .routes = routes.has_value() ? routes.value() : found->routes,
             .across = across.has_value() ? across.value() : found->across,
+            .required = cc::move(required),
         });
     }
     return result;
@@ -238,6 +261,10 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
 
     if (w->setup->required.has_value() && !ctx->supports(w->setup->required.value()))
         co_return run_result{.skipped = cc::format("this context lacks what the {} setup requires", w->setup->name)};
+    for (auto const f : w->required)
+        if (!ctx->supports(f))
+            co_return run_result{.skipped
+                                 = cc::format("this context lacks {}, which {} requires", sg::to_string(f), w->file)};
     auto const shader = co_await compiled_on(*ctx, r, *w->asset);
     if (r.native && shader.compiler.name != "sgl")
         co_return run_result{.skipped = cc::format("SGL writes no {} of it yet, so {} compiled it",
