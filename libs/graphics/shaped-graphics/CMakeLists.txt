@@ -452,6 +452,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-matrix-arithmetic-test.cc
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-differentiable-buffers-test.cc
+            tests/compute/compute-splat-fitting-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/raster/mixed-route-test.cc
@@ -539,6 +540,7 @@ if(SC_BUILD_TESTS)
                 matrix_arithmetic.sgl:*
                 float_atomics.sgl:*
                 differentiable_buffers.sgl:*
+                splat_fitting.sgl:*
                 option_formats.sgl:*
         )
         sc_add_shader_package(
