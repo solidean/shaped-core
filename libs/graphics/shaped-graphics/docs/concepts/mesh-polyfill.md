@@ -167,7 +167,8 @@ dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage
 **The mesh route**, where the device has mesh shaders: SGL writes the vertex and geometry stages as one mesh entry point, a primitive a lane.
 slib builds a mesh pipeline of it and the pixel stage, marked by `geometry_mesh_corners`.
 `draw` and `draw_indexed` of it bind the same `sg_geometry_*` entries to the mesh stage and draw `ceil(primitives * instances / lanes)` mesh workgroups, inside the pass.
-Each lane owns `max_vertices` vertices and `max_primitives` triangles of its workgroup's output, in lane order, so the order is the native one, and a triangle a lane leaves is its first vertex thrice.
+Each lane owns `max_vertices` vertices and `max_primitives` primitives of its workgroup's output, in lane order, so the order is the native one.
+A triangle a lane leaves is its first vertex thrice; a line it leaves joins the workgroup's filler vertex, outside the clip volume, to itself, and the pipeline draws a line list.
 `ctx.geometry_polyfill_route()` picks it, `mesh` by default; the compute route stands where the device has no mesh shaders, or the backend no `draws_geometry_mesh_route`.
 Measured on an Apple M4 by `tests/pipeline/geometry-polyfill-benchmark.cc`, 10 frames into 1024 x 1024:
 

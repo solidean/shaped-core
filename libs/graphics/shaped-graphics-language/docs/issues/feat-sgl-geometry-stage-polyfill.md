@@ -39,11 +39,14 @@ Each route is measured against dx12's native geometry stage on the same scene, w
   `geometry-polyfill-benchmark.cc` measured it faster in every scene: a third in one draw, and 17 to 27 times over 256 draws, each splitting the compute route's pass.
   So `mesh` is the default route; triangles out only, since a line has no filler for a slot a lane leaves.
 
+2026-11-13: lines out by the mesh route, with a filler vertex per workgroup outside the clip volume that an unwritten line joins to itself.
+The workgroup keeps room for it, `max_vertices = lanes * V + 1`, and the mesh function is a line mesh, so slib draws a line list.
+`sg - a geometry stage that appends lines draws each triangle's outline and nothing inside it` holds both routes to an outline on an M4.
+
 ## Still open
 
 - **dx12 and vulkan draw it**, beside their native stage, so the two images can be compared and the benchmark run: a Windows machine's work.
   The compute half's layout twin needs the `sg_geometry_*` slots there, as the mesh polyfill's holds `sg_mesh_output`.
 - **webgpu draws it**, which needs `buffer_usage::readonly_buffer` on a vertex and an index buffer a polyfilled pipeline reads, since WebGPU binds no other as storage.
 - **Strip topologies in**, whose primitives share corners, and points in and out.
-- **Lines out by the mesh route**, which needs a filler a rasterizer surely drops, or lanes that compact their slots.
 - Whether `vertex_index` on an indexed draw matches D3D's and vulkan's, which differ on the vertex offset.

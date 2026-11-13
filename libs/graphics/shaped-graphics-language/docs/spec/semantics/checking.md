@@ -1453,7 +1453,9 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
   Where the target has mesh shaders, the same body can be a mesh entry point instead, a primitive a lane of a workgroup.
   Each lane writes its slots of the mesh output in lane order, so the draw is one mesh draw.
-  A slot a lane leaves unwritten is a triangle of one vertex thrice, which covers nothing; one that appends lines has no such filler, and is `unsupported-yet` by this route.
+  A triangle slot a lane leaves unwritten is one vertex thrice, which covers nothing.
+  A line slot joins the workgroup's filler vertex to itself: one vertex past the lanes', which lane 0 writes outside the clip volume at (2, 2, 2, 1).
+  Every rasterizer drops a line wholly outside a clip plane, where a zero-length line it might not.
 * **CHK-527** Where a device has no tessellator, D3D's own stands in: `prelude/tessellation.sgl` cuts a patch into the domain points and primitives D3D's reference tessellator makes, in its order.
   Every location is 16.16 fixed point, as D3D computes it, so no target's float rounding moves a point.
   The factors are clamped and rounded as D3D does, and a patch with an edge factor that is zero, negative or NaN is culled; a NaN inside factor is the partitioning's least.

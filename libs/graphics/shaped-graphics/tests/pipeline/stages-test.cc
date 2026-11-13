@@ -357,6 +357,77 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage's ended strips draw each copy and no
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a geometry stage that appends lines draws each triangle's outline and nothing inside it",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+
+        // One triangle well inside the target, which the geometry stage draws as its three edges and no more.
+        // Each primitive leaves two of its five line slots unwritten, which the mesh route fills with lines that draw nothing.
+        auto const a = tg::vec2f(-0.75f, -0.75f);
+        auto const b = tg::vec2f(0.75f, -0.75f);
+        auto const c = tg::vec2f(0.0f, 0.75f);
+        shaders::stages::stage_corner const corners[] = {{.position = a}, {.position = b}, {.position = c}};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::outlined);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                             [&](sg::rendering_scope& scope)
+                                                             {
+                                                                 scope.bind_pipeline(*pipeline);
+                                                                 scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                                 scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+                                                             });
+
+        // in pixels, how far a pixel's centre lies from the nearest edge
+        auto const pixel = 2.0f / float(size);
+        auto const distance_to_edges = [&](tg::vec2f p)
+        {
+            auto best = 1e9f;
+            tg::vec2f const ends[][2] = {{a, b}, {b, c}, {c, a}};
+            for (auto const& e : ends)
+            {
+                auto const d = e[1] - e[0];
+                auto const t
+                    = cc::clamp(((p - e[0])[0] * d[0] + (p - e[0])[1] * d[1]) / (d[0] * d[0] + d[1] * d[1]), 0.0f, 1.0f);
+                auto const q = e[0] + d * t;
+                best = cc::min(best, (p - q).length() / pixel);
+            }
+            return best;
+        };
+        auto lit = 0;
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+            {
+                if (!drawn(pixels, x, y))
+                    continue;
+                ++lit;
+                CHECK(distance_to_edges(centre_of(x, y)) < 1.5f)
+                    .context(cc::format("{}: pixel ({}, {}) is lit away from every edge", by, x, y));
+            }
+        // each edge's middle is drawn: a pixel within one of it is lit
+        tg::vec2f const middles[] = {(a + b) * 0.5f, (b + c) * 0.5f, (c + a) * 0.5f};
+        for (auto const& mid : middles)
+        {
+            auto found = false;
+            for (auto y = 0; y < size; ++y)
+                for (auto x = 0; x < size; ++x)
+                    if (drawn(pixels, x, y) && (centre_of(x, y) - mid).length() / pixel < 1.0f)
+                        found = true;
+            CHECK(found).context(cc::format("{}: no pixel lit at the edge middle ({}, {})", by, mid[0], mid[1]));
+        }
+        CHECK(lit > 3 * 8).context(by); // three edges of some 10 to 20 pixels each, not a few stray ones
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id and passes it on flat",
                      (sg::context_handle const& ctx))
 {
