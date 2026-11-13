@@ -601,7 +601,8 @@ def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]]
                 return types.SimpleNamespace(returncode=1 if (at, binary) in unbuilt else 0)
             if (at, binary) in crashes:
                 return types.SimpleNamespace(returncode=3)
-            mine = {t: red for t, red in cases[at][binary].items() if not only or t in only}
+            # as nexus selects: by the test's own name, which a case of an invocable test carries last in its path
+            mine = {t: red for t, red in cases[at][binary].items() if not only or t.rsplit(" / ", 1)[-1] in only}
             body = "".join(f'<testcase name="{t}">{"<failure/>" if red else ""}</testcase>' for t, red in mine.items())
             (wt / "build" / "bin" / f"{binary}.exe.results.xml").write_text(f"<testsuites><testsuite>{body}</testsuite></testsuites>")
             return types.SimpleNamespace(returncode=1 if any(mine.values()) else 0)
@@ -616,18 +617,27 @@ def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]]
 
 
 def test_reds_at_the_base_run_each_binary_once() -> None:
-    # The base has x and z red and y green; the commit being pushed has all three red, as the checkout did.
+    # The base has x and z red and y green; at the commit being pushed x passes, as a flaky test may.
+    # A red at the base is the base's whatever the change's own run shows, so nothing runs at HEAD.
     cases = {"base": {"b": {"x": True, "y": False, "z": True}, "c": {"w": False}},
-             "head": {"b": {"x": True, "y": True, "z": True}, "c": {"w": True}}}
+             "head": {"b": {"x": False, "y": True, "z": True}, "c": {"w": True}}}
     reds = [{"binary": "b", "test": t, "outcome": "fail"} for t in "xyz"] + [{"binary": "c", "test": "w", "outcome": "fail"}]
     runs, out = _reds_at_base(reds, cases)
-    assert runs == [("base", "test", "b", None), ("base", "test", "c", "w"), ("head", "test", "b", None)], \
-        f"several reds of a binary run it whole, once; a lone red runs alone: {runs}"
+    assert runs == [("base", "test", "b", None), ("base", "test", "c", "w")], \
+        f"several reds of a binary run it whole, once; a lone red runs alone; nothing runs at HEAD: {runs}"
     assert out == {("b", "x"): True, ("b", "y"): False, ("b", "z"): True, ("c", "w"): False}, out
 
 
+def test_a_lone_red_of_an_invocable_test_runs_by_its_own_name() -> None:
+    # a case named by its path selects nothing as a filter, so the base run selects the test and reads its case back
+    cases = {"base": {"v": {"drv / one / t": True, "drv / two / t": False}}, "head": {}}
+    runs, out = _reds_at_base([{"binary": "v", "test": "drv / one / t", "outcome": "fail"}], cases)
+    assert runs == [("base", "test", "v", "t")], runs
+    assert out == {("v", "drv / one / t"): True}, out
+
+
 def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> None:
-    # d crashed in the checkout, every case red by its ending; at the base it crashes too, and in the worktree at HEAD again.
+    # d crashed in the checkout, every case red by its ending; at the base it crashes too.
     # e crashed only with the change: its base run reports, and its cases are green there.
     # f cannot be built at the base, which says nothing; g's own failing case at a crashing base is no result either.
     cases = {"base": {"e": {"p": False, "q": False}, "g": {}}, "head": {}}
@@ -635,9 +645,28 @@ def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> N
     reds = [crashed("d", "p"), crashed("d", "q"), crashed("e", "p"), crashed("e", "q"), crashed("f", "p"),
             {"binary": "g", "test": "p", "outcome": "fail"}]
     runs, out = _reds_at_base(reds, cases, crashes={("base", "d"), ("head", "d"), ("base", "g")}, unbuilt={("base", "f")})
-    assert ("base", "test", "d", None) in runs and ("head", "test", "d", None) in runs, "a crashed binary runs whole, at the base and at HEAD"
+    assert ("base", "test", "d", None) in runs and not any(r[0] == "head" for r in runs), "a crashed binary runs whole, at the base alone"
     assert ("base", "test", "e", None) in runs and not any(r[2] == "f" for r in runs), runs
     assert out == {("d", "p"): True, ("d", "q"): True, ("e", "p"): False, ("e", "q"): False, ("f", "p"): None, ("g", "p"): None}, out
+
+
+def test_a_child_green_at_the_base_beside_a_red_one_is_flaky_there() -> None:
+    # t's two children are red with the change; at the base one is red and one passed, so t is red there, and neither blocks
+    # u passed at the base and has no red child there, so it blocks
+    from tools.dev.cmd import ship
+    ran = [{"binary": "g", "test": n, "outcome": "fail", "why": "ran alongside", "judged": "green_before"}
+           for n in ("drv / one / t", "drv / two / t", "drv / one / u")]
+    proof = bs.Proof(passed=False, reasons=[f"g: {r['test']}: fail (ran alongside)" for r in ran],
+                     report={"ran": ran, "delta": {"base": "abc123"}})
+    saved = ship._red_at_base
+    ship._red_at_base = lambda ctx, preset, base, reds: {("g", "drv / one / t"): True, ("g", "drv / two / t"): False,
+                                                         ("g", "drv / one / u"): False}
+    try:
+        passed, filed, blockers = ship._settle_at_base(types.SimpleNamespace(), None, proof)
+    finally:
+        ship._red_at_base = saved
+    assert not passed and len(blockers) == 1 and "drv / one / u" in blockers[0], blockers
+    assert sorted(f[1] for f in filed) == ["drv / one / t", "drv / two / t"], filed
 
 
 def test_a_crash_at_the_base_too_is_filed_as_unproven_and_listed_once() -> None:

@@ -1,0 +1,77 @@
+#include "../shaders/shader_fixtures.hh"
+
+#include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+#include <sg_test_sgl_shaders.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/context/context.hh>
+
+using namespace cc::primitive_defines;
+
+namespace shaders = sg::test::sgl_shaders;
+
+// The SGL fixture in tests/shaders/sgl/differentiable_buffers.sgl.
+// At x = 0.5 with weights 1, 2, 3, 4, each loss's d_k = w_k / 2 - 1 is -0.5, 0, 0.5, 1, and its gradient of w_k is
+// 2 d_k x = d_k, its change along tangent t_k is d_k t_k.
+
+ASYNC_INVOCABLE_TEST("sg - a buffer with a @gradient takes every invocation's adjoint, and one with a @tangent its "
+                     "change",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const backward = co_await shaders::differentiable_buffers::loss_backward.acquire_pipeline(*ctx);
+    auto const forward = co_await shaders::differentiable_buffers::loss_forward.acquire_pipeline(*ctx);
+    auto const params_layout = ctx->cached.acquire_binding_group_layout<shaders::differentiable_buffers::params>();
+    auto const training_layout = ctx->cached.acquire_binding_group_layout<shaders::differentiable_buffers::training>();
+
+    constexpr auto count = 4096;
+    auto const weights = ctx->persistent.create_buffer_from_data(cc::vector<f32>{1.0f, 2.0f, 3.0f, 4.0f},
+                                                                 sg::buffer_usage::readonly_buffer);
+    auto const tangents = ctx->persistent.create_buffer_from_data(cc::vector<f32>{1.0f, 2.0f, 3.0f, 4.0f},
+                                                                  sg::buffer_usage::readonly_buffer);
+    auto const gradients = ctx->persistent.create_buffer_from_data(
+        cc::vector<f32>::create_filled(4, 0.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const changes = ctx->persistent.create_buffer_from_data(
+        cc::vector<f32>::create_filled(count, 0.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const params = ctx->transient.create_binding_group(
+        *cmd, params_layout, shaders::differentiable_buffers::params{.weights = weights.as_readonly_buffer()});
+    auto const training = ctx->transient.create_binding_group(
+        *cmd, training_layout,
+        shaders::differentiable_buffers::training{.gradients = gradients.as_readwrite_buffer(),
+                                                  .tangents = tangents.as_readonly_buffer(),
+                                                  .forward = changes.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*backward);
+    cmd->compute.bind_group(0, *params);
+    cmd->compute.bind_group(1, *training);
+    cmd->compute.dispatch_threads(count);
+    cmd->compute.bind_pipeline(*forward);
+    cmd->compute.bind_group(0, *params);
+    cmd->compute.bind_group(1, *training);
+    cmd->compute.dispatch_threads(count);
+    auto const gradient_future = cmd->download.data_from_buffer(gradients);
+    auto const change_future = cmd->download.data_from_buffer(changes);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // each weight is read by a quarter of the invocations, and every partial sum is exact in a float
+    auto const g = co_await gradient_future.data();
+    REQUIRE(g.size() == 4);
+    CHECK(g[0] == -512.0f);
+    CHECK(g[1] == 0.0f);
+    CHECK(g[2] == 512.0f);
+    CHECK(g[3] == 1024.0f);
+
+    auto const c = co_await change_future.data();
+    REQUIRE(c.size() == count);
+    for (auto i = 0; i < 8; ++i)
+    {
+        f32 const expected[] = {-0.5f, 0.0f, 1.5f, 4.0f};
+        CHECK(c[i] == expected[i % 4]);
+    }
+}

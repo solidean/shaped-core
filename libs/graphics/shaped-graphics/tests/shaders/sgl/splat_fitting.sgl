@@ -1,0 +1,67 @@
+// 2D Gaussians fitted to an image by gradient descent, every gradient written by `bwd_diff` (incubator/autodiff.md).
+// A splat is eight floats of `params`: its mean, the log of its two scales, its angle, and its color.
+// The image is the splats' colors added up, each weighted by its falloff, and the loss its squared distance to `target`.
+
+const k_side = 32
+const k_splats = 16
+const k_floats = 8
+
+binding scene:
+    @gradient(fitting.gradients) params: buffer[float]
+    // k_side * k_side pixels of three floats
+    target: buffer[float]
+
+binding fitting:
+    gradients: mut buffer[atomic[float]]
+    // one sum of every pixel's loss per round
+    losses: mut buffer[atomic[float]]
+
+binding update:
+    params: mut buffer[float]
+    gradients: mut buffer[atomic[float]]
+    // Adam's moments, one each per float of `params`
+    first: mut buffer[float]
+    second: mut buffer[float]
+
+@inline binding round:
+    iteration: int
+
+// splat `k`'s color where it covers `p`, in the unit square
+fun splat_at(k: int, p: float2){scene} -> float3:
+    let base = k * k_floats
+    let d = p - float2(scene.params[base], scene.params[base + 1])
+    let c = cos(scene.params[base + 4])
+    let s = sin(scene.params[base + 4])
+    let u = (c * d.x + s * d.y) / exp(scene.params[base + 2])
+    let v = (c * d.y - s * d.x) / exp(scene.params[base + 3])
+    let color = float3(scene.params[base + 5], scene.params[base + 6], scene.params[base + 7])
+    return color * exp(-0.5 * (u * u + v * v))
+
+fun color_at(pixel: int){scene} -> float3:
+    let p = float2(float(pixel % k_side) + 0.5, float(pixel / k_side) + 0.5) / float(k_side)
+    let mut color = float3(0.0)
+    for k in 0 ..< k_splats:
+        color += splat_at(k, p)
+    return color
+
+fun pixel_loss(pixel: int){scene} -> float:
+    let base = pixel * 3
+    let e = color_at(pixel) - no_diff(float3(scene.target[base], scene.target[base + 1], scene.target[base + 2]))
+    return dot(e, e)
+
+// every pixel's loss and its gradient of every float of every splat
+@compute(64) fun fit_backward(@thread_id id: int3){scene, fitting, round}:
+    if id.x < k_side * k_side:
+        fitting.losses[round.iteration].add(pixel_loss(id.x))
+        bwd_diff(pixel_loss, id.x, 1.0)
+
+// one step of Adam for each float, with the gradient cleared for the next round
+@compute(64) fun fit_step(@thread_id id: int3){update}:
+    let i = id.x
+    if i < k_splats * k_floats:
+        let g = update.gradients[i].exchange(0.0)
+        let m = 0.9 * update.first[i] + 0.1 * g
+        let v = 0.999 * update.second[i] + 0.001 * g * g
+        update.first[i] = m
+        update.second[i] = v
+        update.params[i] = update.params[i] - 0.01 * m / (sqrt(v) + 1e-8)
