@@ -126,7 +126,7 @@ sg_diff::corpus sg_diff::read_corpus()
 
     for (auto const& def : sg::test::differential::package().definitions)
     {
-        if (def.stage != sg::shader_stage::compute || def.asset == nullptr || *def.asset == nullptr)
+        if (def.asset == nullptr || *def.asset == nullptr)
             continue;
         auto const& asset = *def.asset;
         auto const source = asset->read_source();
@@ -183,9 +183,18 @@ sg_diff::corpus sg_diff::read_corpus()
             problem = cc::format("'{}' is no registered setup", setup_name);
         if (!problem.empty())
         {
-            result.problems.push_back(cc::format("{}: {}", def.path, problem));
+            // once a file, however many entry points it holds
+            auto const said = cc::format("{}: {}", def.path, problem);
+            auto is_known = false;
+            for (auto const& p : result.problems)
+                is_known = is_known || p == said;
+            if (!is_known)
+                result.problems.push_back(said);
             continue;
         }
+        // a stage the setup does not run is the file's own business, a helper stage or a later setup's
+        if (def.stage != found->stage)
+            continue;
 
         result.workloads.push_back(workload{
             .file = cc::string(def.path),
@@ -227,9 +236,20 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
 
+    auto const shader = co_await compiled_on(*ctx, r, *w->asset);
+    if (r.native && shader.compiler.name != "sgl")
+        co_return run_result{.skipped = cc::format("SGL writes no {} of it yet, so {} compiled it",
+                                                   r.format == sg::shader_format::dxil ? "DXIL" : "SPIR-V",
+                                                   shader.compiler.name)};
+
+    co_return run_result{.outputs = co_await w->setup->run(ctx, {.entry = shader, .route = r})};
+}
+
+sg::async_compiled_shader sg_diff::compiled_on(sg::context const& ctx, route const& r, slib::shader_asset const& asset)
+{
     // the context's own options, with the route stated rather than the context's preference
     auto options = cc::vector<slib::shader_option>();
-    slib::add_context_options(options, *ctx);
+    slib::add_context_options(options, ctx);
     auto kept = cc::vector<slib::shader_option>();
     for (auto& o : options)
         if (o.name != slib::k_native_dxil_option && o.name != slib::k_native_spirv_option)
@@ -238,16 +258,7 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
         kept.push_back({.name = cc::string(r.format == sg::shader_format::dxil ? slib::k_native_dxil_option
                                                                                : slib::k_native_spirv_option),
                         .value = cc::string("true")});
-
-    auto const shader = co_await w->asset->acquire(r.format, kept);
-    if (r.native && shader.compiler.name != "sgl")
-        co_return run_result{.skipped = cc::format("SGL writes no {} of it yet, so {} compiled it",
-                                                   r.format == sg::shader_format::dxil ? "DXIL" : "SPIR-V",
-                                                   shader.compiler.name)};
-
-    auto const pipeline
-        = co_await ctx->cached.acquire_compute_pipeline({.shader = shader, .layout = w->setup->layout(*ctx)});
-    co_return run_result{.outputs = co_await w->setup->run(ctx, pipeline)};
+    return asset.acquire(r.format, kept);
 }
 
 cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result const& b, tolerance t)

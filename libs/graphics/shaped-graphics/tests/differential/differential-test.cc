@@ -86,7 +86,7 @@ ASYNC_TEST("sg differential - every corpus entry point computes alike on every b
     auto configurations = cc::vector<configuration>();
     for (auto& factory : sg_test::context_factories())
     {
-        auto created = factory.create();
+        auto created = factory.create_for_test();
         if (created.has_error())
             continue;
         auto const ctx = created.value();

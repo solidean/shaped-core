@@ -644,7 +644,20 @@ if(SC_BUILD_TESTS)
             SHADERS
                 module:diff_words
                 module:diff_floats
+                module:diff_texels
+                module:diff_raster
                 ${_sg_differential_corpus}
+        )
+        # The stages a setup brings itself, such as the raster setup's vertex stage, compiled on each run's route.
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_differential_setups
+            NAMESPACE  sg::test::differential_setups
+            SOURCE_DIR tests/differential/setups/shaders
+            LANGUAGE   sgl
+            MODULE_DIRS tests/differential/setups
+            SHADERS
+                fullscreen.sgl:*
         )
     endif()
 

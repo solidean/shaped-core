@@ -6,6 +6,8 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/fwd.hh>
 
@@ -24,6 +26,7 @@ struct setup;
 struct workload;
 struct corpus;
 struct route;
+struct shaders_on_route;
 struct run_result;
 } // namespace sg_diff
 
@@ -52,14 +55,14 @@ struct sg_diff::output
     cc::vector<byte> bytes;
 };
 
-/// What a setup does with a compute pipeline built over its module's binding list: fill the inputs, dispatch, read back.
+/// What a setup does with a corpus entry point: build its pipeline over the setup's module, fill the inputs, run it, read back.
 struct sg_diff::setup
 {
     cc::string name;
-    /// The pipeline layout every entry point of this setup is built over, which its SGL module's binding states.
-    cc::unique_function<sg::pipeline_layout_handle(sg::context&)> layout;
+    /// The stage of the entry points it runs; a corpus file's entry points of another stage are not its.
+    sg::shader_stage stage = sg::shader_stage::compute;
     /// Runs on the context's device home, where it has one.
-    cc::unique_function<cc::shared_async<cc::vector<output>>(sg::context*, sg::compute_pipeline_handle)> run;
+    cc::unique_function<cc::shared_async<cc::vector<output>>(sg::context*, shaders_on_route)> run;
     /// Two routes of one context, unless an entry point's comment block says otherwise.
     tolerance routes;
     /// Two contexts, unless an entry point's comment block says otherwise.
@@ -93,6 +96,13 @@ struct sg_diff::route
     bool native = false;
 };
 
+/// What a setup is handed for one run: the corpus entry point compiled on the route, and the route, which the setup's own stages compile on too.
+struct sg_diff::shaders_on_route
+{
+    sg::compiled_shader entry;
+    sg_diff::route route;
+};
+
 /// One workload run on one route: the outputs, or why the route had nothing to compare.
 struct sg_diff::run_result
 {
@@ -114,7 +124,12 @@ bool register_setup(setup s);
 /// The routes `ctx` takes for SGL, in the order it prefers its formats; DXIL and SPIR-V give two routes, the rest one.
 [[nodiscard]] cc::vector<route> routes_of(sg::context const& ctx);
 
-/// Compiles `w` for `r`, builds its pipeline, and has its setup run it; a failed compile or build is the async's error.
+/// `asset` compiled for `r`: the context's own options, with the route stated rather than the context's preference.
+[[nodiscard]] sg::async_compiled_shader compiled_on(sg::context const& ctx,
+                                                    route const& r,
+                                                    slib::shader_asset const& asset);
+
+/// Compiles `w` for `r` and has its setup run it; a failed compile is the async's error.
 [[nodiscard]] cc::shared_async<run_result> run(sg::context* ctx, workload const* w, route r);
 
 /// Where `b` strays from `a` beyond `t`: one line per output that differs, naming the first elements that do.

@@ -1,0 +1,21 @@
+// The `raster` setup's contract, which setups.cc fills: one triangle covering a 16 by 16 rgba32_float target.
+// The setup's own vertex stage (shaders/fullscreen.sgl) writes `varyings`; a corpus pixel stage takes them and writes `target`.
+// `uv` runs 0 to 1 across the target, row 0 at the top, and `weight` is a second varying that bends across it.
+// `source` and `linear` are the `texels` setup's texture and sampler, so a pixel stage can sample at the level its derivatives pick.
+module diff_raster
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+    weight: float
+
+@pixel struct target:
+    color: float4
+
+binding io:
+    input: buffer[float]
+    source: texture_2d[float4]
+    sampler linear:
+        filter = .linear
+        mip_filter = .linear
+        address = .clamp_edge
