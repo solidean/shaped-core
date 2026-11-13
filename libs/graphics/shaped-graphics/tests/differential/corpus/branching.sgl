@@ -1,0 +1,52 @@
+// differential: setup words
+// Control flow as a state machine or a parser writes it: case over an enum and over integers, a while loop that continues and breaks, and early returns.
+use diff_words
+
+enum gait:
+    idle
+    walking
+    running
+    falling
+
+fun gait_of(x: uint) -> gait => case x & 3u:
+    0u => gait.idle
+    1u => gait.walking
+    2u => gait.running
+    _ => gait.falling
+
+fun cost(g: gait, x: uint) -> uint => case g:
+    .idle => 1u
+    .walking => x & 0xffu
+    .running or .falling => (x >> 8u) & 0xffu
+
+/// x's nibbles from the top: a zero one is skipped, and one over 12 ends the scan.
+fun scanned(x: uint) -> uint:
+    let mut i = 0
+    let mut total = 0u
+    while i < 8:
+        let nibble = (x >> (((7 - i) as uint) * 4u)) & 0xfu
+        i = i + 1
+        if nibble == 0u => continue
+        if nibble > 12u => break
+        total = total * 3u + nibble
+    return total + (i as uint) * 1000u
+
+/// The lowest set bit's index, or 99 for zero.
+fun lowest_set(x: uint) -> uint:
+    for k in 0 ..< 32:
+        if ((x >> (k as uint)) & 1u) == 1u => return k as uint
+    return 99u
+
+fun banded(x: uint) -> uint:
+    if x >= 0x8000'0000u and (x & 1u) == 1u => return x / 3u
+    if x < 100u => return x * x
+    if (x & 0xf0u) == 0u => return x ^ 0x5555'5555u
+    return ~x
+
+@compute(64) fun branches(@thread_id id: int3){diff_words.io}:
+    let i = id.x
+    let x = diff_words.io.input[i]
+    diff_words.io.output[4 * i] = cost(gait_of(x), x)
+    diff_words.io.output[4 * i + 1] = scanned(x)
+    diff_words.io.output[4 * i + 2] = lowest_set(x)
+    diff_words.io.output[4 * i + 3] = banded(x)

@@ -167,6 +167,24 @@ enum class sgl::builtins::written_argument : sgl::u8
     element,
 };
 
+/// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): how a derivative passes through a
+/// call of a builtin that gives a float and takes one, which `state_derivatives` states for each.
+enum class sgl::builtins::derivative_kind : sgl::u8
+{
+    /// Nobody said; a registry test refuses it for a builtin that can carry a derivative.
+    unstated,
+    /// What it gives is no function of its arguments a derivative follows: an atomic's update, a workgroup's load.
+    none,
+    /// Constant between the points where it jumps, so its tangent is zero: `floor`, `step`.
+    zero,
+    /// Linear in its float arguments: its tangent is the call of their tangents, and its transpose a call of its shape.
+    linear,
+    /// A rule of the differentiator's own, written once for both modes.
+    rule,
+    /// Differentiable, with no rule written yet, which a derivative refuses as `unsupported-yet`.
+    not_yet,
+};
+
 /// What a mark on an index into a binding array says of it (CHK-300).
 enum class sgl::builtins::index_mark : sgl::u8
 {
@@ -347,6 +365,8 @@ struct sgl::builtins::function_record
     /// Impure only for what its value depends on, with no effect: a call of it whose value nothing reads may go.
     /// It stays impure, since moving it would read state that may have changed in between.
     bool reads_only = false;
+    /// PROTOTYPE (autodiff): how a derivative passes through it; `unstated` until `state_derivatives` runs.
+    derivative_kind derivative = derivative_kind::unstated;
     /// Called by a test alone, which it states what the run binds or which lane runs to (EVAL-127, EVAL-140).
     /// No target writes it, so an entry point that reaches one is `stage-not-allowed` (CHK-512).
     bool is_test_only = false;

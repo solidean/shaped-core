@@ -90,6 +90,8 @@ struct sg_diff::workload
     sg_diff::setup const* setup = nullptr;
     tolerance routes;
     tolerance across;
+    /// What its file's `require` lines name, which a context must support to run it; a run on one without is skipped.
+    cc::vector<sg::feature> required;
 };
 
 /// Every compute entry point of the corpus package.

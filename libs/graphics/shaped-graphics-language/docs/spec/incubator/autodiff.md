@@ -2,6 +2,8 @@
 
 *Incubator: not normative.*
 
+**The rules are normative now**, in [semantics/differentiation.md](../semantics/differentiation.md) (`DIFF`); this note keeps the design, its reasons and what is open.
+
 ## The idea
 
 **SGL differentiates a function for you**: `fwd_diff f` and `bwd_diff f` are functions the compiler writes from the body of `f`, so a training kernel runs on sg like any other.
@@ -72,6 +74,11 @@ They must agree even beside a kink, and both match a central difference wherever
 * **One rule per builtin serves both modes.**
   `derive` writes a tangent as linear operations over primal values, and reverse mode **transposes** that linear expression, as JAX linearizes and then transposes.
   So a new builtin needs only its forward rule, and only the linear primitives have a transpose: `+`, `-`, `*`, `/` by a value, `dot`, `cross`, `transpose`, `select`, constructions and fields.
+* **Each builtin's record states how a derivative passes through it**: linear, a rule of the differentiator's, zero, none, or not yet.
+  [register_derivatives.cc](../../../src/shaped-graphics-language/builtins/register_derivatives.cc) states it by name or by operator, for every overload.
+  A registry test refuses a builtin that gives a float and takes one and states nothing, so a new builtin is decided when it is added.
+  Another holds every rule and every linear builtin of floats to a central difference in both modes, one generated call per overload.
+  A builtin stated not yet, such as `determinant` or a subgroup's add, is `unsupported-yet` with its name.
 * **Reverse mode runs on straight structured code.**
   Every declaration is hoisted, every early leave becomes a flag that guards what follows it, and every condition is recorded.
   The backward sweep restores what each statement overwrote from a save, and transposes that statement's tangent.
@@ -176,7 +183,7 @@ What it found in SGL itself:
 * **Control flow**: an `if` records its condition for the reverse pass.
   A loop with a constant or a stated bound keeps a local tape sized by the bound.
   Any other loop is refused unless its function has a `@backward`.
-* **The builtin registry**: a derivative rule per differentiable record, and `prelude/builtins.sgl` regenerated with them.
+* **The builtin registry**: how a derivative passes through each record, which the prototype states beside the records; SGL rules in the prelude are still to come.
 * **Atomics**: an adjoint added from many invocations, which [Buffers and textures](#buffers-and-textures) describes.
 * **Testing**: `central_difference` or its like in the prelude, and an approximate comparison a `test` can state.
 
@@ -191,9 +198,9 @@ What it found in SGL itself:
 ## The order to build it in
 
 The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and `tangent[T]` for the geometry types and for structs.
-It has buffers of floats, vectors and structs differentiable by their `@gradient` and `@tangent` too.
+It has buffers of floats, vectors and structs differentiable by their `@gradient` and `@tangent` too, and textures, and every builtin states its derivative in the registry.
 
-1. The rules as registry records.
+1. Rules for the builtins stated not yet: `determinant`, `refract`, the gathers, `ddx` and `ddy`, and the subgroup and quad operations.
 
 ## Open
 

@@ -280,7 +280,7 @@ auto differentiator::transpose(flat_expr_id t, flat_expr_id g) -> void
         }
         return transpose(arguments[0], share(assemble(ut, parts)));
     }
-    if (is_linear_function(name, arguments.size()) && leaf_count(r) > 0)
+    if (derivative_of(n->callee) == builtins::derivative_kind::linear && leaf_count(r) > 0)
     {
         // a construction or a conversion: each argument's adjoint is the components of `g` it filled
         auto total = 0;

@@ -1,5 +1,6 @@
-// The `targets` and `blended` setups' contract, which setups.cc fills: two triangles over a 16 by 16 target set.
+// The `targets`, `blended` and `samples` setups' contract, which setups.cc fills: two triangles over a 16 by 16 target set.
 // `targets` writes `target`'s five formats behind a depth test; `blended` blends `blend_target` over a cleared set, with no depth.
+// `samples` draws `sampled_target` into a 4-sample rgba16_float target cleared to (0.2, 0.4, 0.6, 0.5), and reads back every sample of every pixel.
 // The setup's own vertex stage (shaders/layered.sgl) writes `varyings`; a corpus pixel stage takes them and writes `target`.
 // Layer 0 covers the whole target at depth 0.5; layer 1, drawn after it, is a smaller triangle whose depth runs 0.2 to 0.8 left to right.
 // So the depth test keeps layer 1 on the left of its triangle and layer 0 on the right, and no pixel center ties.
@@ -28,5 +29,13 @@ struct varyings:
     darkest: float4
     difference: float4
 
+@pixel struct sampled_target:
+    color: float4
+
 binding io:
     input: buffer[float]
+
+// What the `samples` setup's read stage (shaders/read_samples.sgl) binds: the drawn target, and each pixel's four samples.
+binding samples:
+    target: texture_2d_ms[float4]
+    values: mut buffer[float4]

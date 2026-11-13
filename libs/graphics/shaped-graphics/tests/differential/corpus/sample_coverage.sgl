@@ -1,0 +1,9 @@
+// differential: setup samples
+// Multisampled coverage as antialiased geometry has it: two triangles whose edges cut pixels, each covered sample taking the pixel's color.
+// Both APIs place 4 samples at the standard positions, so every edge pixel's samples are the same ones on every device that has them.
+use diff_targets
+
+@pixel fun covered_ps(p: diff_targets.varyings){diff_targets.io} -> diff_targets.sampled_target:
+    let cell = (p.position.x as int) + 16 * (p.position.y as int)
+    let s = fract(abs(diff_targets.io.input[cell & 255]) * 0.37)
+    return {color = float4(p.uv.x, s, p.layer, 1.0 - p.uv.y)}

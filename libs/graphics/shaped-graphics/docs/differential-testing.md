@@ -48,8 +48,9 @@ Its contract with a corpus file is an SGL module in [tests/differential/setups/]
 So a shader that binds the wrong thing does not compile, rather than failing on one backend at bind time.
 The setup fills the module's generated binding type, so the two sides cannot drift apart.
 A setup registers itself with `sg_diff::register_setup`, naming the stage it runs, its run, its default tolerances, and its interpreter half where it has one.
-Its module is `diff_<name>` unless it names another, as `blended` shares `targets`' module and vertex stage.
+Its module is `diff_<name>` unless it names another, as `blended` and `samples` share `targets`' module and vertex stage.
 One that needs a feature names it, as `scene` names `ray_query`, and a context without it skips the setup's files rather than failing them.
+A corpus file's own `require` lines do the same for it alone, as `half_math.sgl` requires `shader_f16` on the `floats` setup.
 Its run is handed the entry point compiled on the route, and builds the pipeline itself.
 A stage the setup brings, as the raster setup brings its vertex stage, compiles on the same route through `sg_diff::compiled_on`.
 Those stages live in [tests/differential/setups/shaders/](../tests/differential/setups/shaders/), a package of their own.
@@ -63,10 +64,15 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 | `scene` | compute | a TLAS of a two-geometry terrain and four placed octahedra, one mirrored | two float4 a thread, `hits` and `ids` | exact | relative 0.0001 | yes |
 | `targets` | pixel | two depth-tested triangles over a 16 by 16 set of rgba8 sRGB, rgba16_float, rgb10a2, rg11b10_float and r32_uint targets | each target, decoded to a float a channel; `word` as its integers | exact | relative 0.005 | not yet |
 | `blended` | pixel | the same two triangles blended over a cleared rgba8 sRGB, two rgba16_float and an rgb10a2 target: alpha over, added, subtracted and min | each target, decoded to a float a channel | exact | relative 0.005 | not yet |
+| `samples` | pixel | the same two triangles over a cleared 4-sample rgba16_float target | every sample of every pixel, read back by a compute stage on the same route | exact | relative 0.005 | not yet |
+| `tallies` | compute | the `words` input, and 64 atomic totals starting at 0 or all ones | the totals, which no thread order may change | exact | exact | yes |
+| `records` | compute | 256 records of mixed members, a nested struct and a fixed array among them, written through SGL's generated struct | the rearranged records, and each member as the GPU read it | exact | exact | not yet |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 The `targets` bound allows a step of the coarsest format, since an implementation may round a float into one either way.
 An output a setup marks `is_exact`, as `targets` marks its integer target, is compared byte for byte and committed as a hash, whatever its file's bound.
+`records` also holds what the GPU read to what the host wrote, member by member, and logs the first member read from elsewhere as an error.
+Agreement between configurations cannot see a layout every backend gets wrong alike; that check can.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
 
 A comment block naming no known setup, or a tolerance that does not parse, fails both tests, naming the file.
@@ -132,7 +138,7 @@ A machine whose GPU disagrees beyond `across` is a finding: who is right is a qu
 
 ## Not yet
 
-- **More setups:** multisampled targets resolved.
+- **A resolve:** sg has no multisample resolve yet, so `samples` reads each sample instead; a resolve setup waits on that API.
 - **Workgroups on the interpreter:** a workgroup's invocations run together up to each barrier, a change to the interpreter itself.
 
 [feat-sg-differential-references-and-setups](issues/feat-sg-differential-references-and-setups.md) tracks them.

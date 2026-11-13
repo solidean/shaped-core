@@ -1,0 +1,20 @@
+// differential: setup words
+// 64-bit integer work as a hash, a timestamp or a fixed-point accumulator does it: full products, division, shifts and signed comparison.
+// Every result is exact, and stored as the 32-bit words a buffer of the words setup holds.
+require shader_int64
+use diff_words
+
+@compute(64) fun wide(@thread_id id: int3){diff_words.io}:
+    let i = id.x
+    let x = diff_words.io.input[i]
+    let y = diff_words.io.input[(i + 11) & 255]
+    let product = (x as ulong) * (y as ulong)
+    diff_words.io.output[4 * i] = (product >> 32u64) as uint
+    let joined = ((x as ulong) << 32u64) | (y as ulong)
+    let quotient = joined / ((y as ulong) | 1u64)
+    diff_words.io.output[4 * i + 1] = (quotient ^ (quotient >> 29u64)) as uint
+    let shifted = (joined as long) >> 7i64
+    diff_words.io.output[4 * i + 2] = ((shifted as ulong) >> 16u64) as uint
+    let signed = ((x as int) as long) - ((y as int) as long) * 3i64
+    let clamped = clamp(signed, -(1i64 << 33i64), 1i64 << 33i64)
+    diff_words.io.output[4 * i + 3] = ((clamped as ulong) as uint) ^ (((clamped >> 32i64) as ulong) as uint)
