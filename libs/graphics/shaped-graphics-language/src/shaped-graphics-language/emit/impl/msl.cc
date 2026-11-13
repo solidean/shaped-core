@@ -410,6 +410,10 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        // EMIT-262: the text states its math mode, which the Metal compiler takes over its own options, so an entry point
+        // that keeps no float guarantee compiles fast and one that keeps any compiles safe, whatever the compile asked
+        out += p.float_guarantee == check::float_level::fast ? "#pragma METAL fp math_mode(fast)\n"
+                                                             : "#pragma METAL fp math_mode(safe)\n";
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
         if (uses_ray_tracing(p))
         {

@@ -17,7 +17,7 @@ What they do not do yet, in the order it pays off:
   `texels` and `raster` exist since 2026-11-13; per-texel `relative` turned out to be enough for both at 16 by 16.
   `scene` exists since 2026-11-13: inline traces over a fixed TLAS, ids exact by value and hits within relative 0.0001 across APIs.
   Render targets of other formats and a depth test are next.
-  The scene's interpreter half would build with `accel_build_flag::software_trace` and bind the pool that writes, which the interpreter reads.
+  Its interpreter half binds the software pool a `software_trace` build writes, so 12 of the 13 entry points now run on the interpreter.
   Each is one C++ setup and one SGL module, and every corpus file naming it is free after that.
 - **The interpreter as a third opinion.**
   Since 2026-11-13 a fourth test holds every configuration to SGL's interpreter: 11 of the 12 entry points run there, and all agree.

@@ -150,7 +150,8 @@ struct pool_writer
 };
 
 // Two triangles over the unit square's lower left, primitive 0 at z = 5 and primitive 1 nearer at z = 2.
-// Along +z each is front facing: DXR's front is clockwise as the ray sees it.
+// Along +z each is a back face: its counterclockwise side faces -z, away from the ray, and a front face turns that side to it.
+// That is how dx12 and vulkan hardware report it: DXR's "clockwise from the ray's origin" is stated in a left-handed space.
 constexpr triangle k_pair[] = {
     {{0, 0, 5}, {1, 0, 5}, {0, 1, 5}},
     {{0, 0, 2}, {1, 0, 2}, {0, 1, 2}},
@@ -384,7 +385,7 @@ TEST("sgl emulated trace - the nearest of two triangles is the hit, with its t, 
                       "    h.instance_id == 7 and h.instance_index == 0\n"
                       "    is_near(h.barycentrics.x, 0.5) and is_near(h.barycentrics.y, 0.25) and "
                       "is_near(h.barycentrics.z, 0.25)\n"
-                      "    h.is_front_face\n"
+                      "    not h.is_front_face\n"
                       // a ray that ends before the nearer triangle reaches only the farther one, and one past both none
                       "test {scenes}:\n"
                       "    let r = along_z(0.25, 0.25)\n"
@@ -529,15 +530,15 @@ TEST("sgl emulated trace - the any-hit decision cuts a non-opaque triangle out, 
 
 TEST("sgl emulated trace - an instance culling front faces flips its winding")
 {
-    // the pair faces the ray, so under cull mode front its triangles are back faces: culling those drops both
+    // the pair turns its back to the ray, so under cull mode front its triangles are front faces: culling those drops both
     CHECK(failures_of("test {scenes}:\n"
                       "    let h = scenes.flipped.trace(along_z(0.25, 0.25))\n"
                       "    h.is_hit and h.primitive_index == 1 and h.instance_id == 17\n"
-                      "    not h.is_front_face\n"
-                      "    not scenes.flipped.trace(along_z(0.25, 0.25), flags = ray_flags.cull_back_facing).is_hit\n"
-                      "    scenes.flipped.trace(along_z(0.25, 0.25), flags = ray_flags.cull_front_facing).is_hit\n"
+                      "    h.is_front_face\n"
+                      "    not scenes.flipped.trace(along_z(0.25, 0.25), flags = ray_flags.cull_front_facing).is_hit\n"
+                      "    scenes.flipped.trace(along_z(0.25, 0.25), flags = ray_flags.cull_back_facing).is_hit\n"
                       // the default mode keeps the winding: the same ray culls the other way round there
-                      "    not scenes.pair.trace(along_z(0.25, 0.25), flags = ray_flags.cull_front_facing).is_hit\n")
+                      "    not scenes.pair.trace(along_z(0.25, 0.25), flags = ray_flags.cull_back_facing).is_hit\n")
           == "");
 }
 
@@ -620,7 +621,7 @@ TEST("sgl emulated trace - a mixed trace hits a triangle, and gives it as a tria
                             "    is_near(h.t, 3.0)\n"
                             "    h.instance_id == 7 and h.instance_index == 0 and h.primitive_index == 1\n"
                             "    is_near(h.barycentrics.y, 0.25) and is_near(h.barycentrics.z, 0.25)\n"
-                            "    h.is_front_face\n"
+                            "    not h.is_front_face\n"
                             "    let t = h.triangle()\n"
                             "    t.is_hit and is_near(t.t, 3.0) and t.primitive_index == 1\n"
                             "    not h.procedural().is_hit\n")
@@ -632,11 +633,11 @@ TEST("sgl emulated trace - a mixed trace flips the winding of an instance cullin
     CHECK(mixed_failures_of("test {scenes}:\n"
                             "    let h = scenes.flipped_mixed.trace(along_z(0.25, 0.25), ball_report)\n"
                             "    h.kind == hit_kind.triangle and h.instance_id == 17\n"
-                            "    not h.is_front_face\n"
+                            "    h.is_front_face\n"
                             "    not scenes.flipped_mixed.trace(along_z(0.25, 0.25), ball_report, flags = "
-                            "ray_flags.cull_back_facing).is_hit\n"
+                            "ray_flags.cull_front_facing).is_hit\n"
                             "    scenes.flipped_mixed.trace(along_z(0.25, 0.25), ball_report, flags = "
-                            "ray_flags.cull_front_facing).is_hit\n")
+                            "ray_flags.cull_back_facing).is_hit\n")
           == "");
 }
 

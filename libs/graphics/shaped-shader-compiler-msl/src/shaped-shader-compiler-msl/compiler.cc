@@ -42,6 +42,7 @@ using namespace cc::primitive_defines;
     args.push_back("metal");
     args.push_back(cc::string(optimization_flag(options.optimization)));
     // Metal defaults to fast math, which folds NaNs, infinities and signed zeros away and reassociates sums.
+    // SGL's text states its entry point's own mode in a pragma, which wins over this (EMIT-262).
     args.push_back("-fmetal-math-mode=safe");
 
     if (!options.language_version.empty())

@@ -73,7 +73,8 @@ struct sg_diff::setup
     /// Two contexts, unless an entry point's comment block says otherwise.
     tolerance across;
     /// The same run for SGL's interpreter, the same inputs bound by name; null for a setup it cannot run yet.
-    interpreter_half (*interpreted)() = nullptr;
+    /// It may build what the inputs need on the context it is given, which must be on its device home.
+    interpreter_half (*interpreted)(sg::context& ctx) = nullptr;
 };
 
 /// One corpus entry point, under the setup and tolerances its file's comment block states.
@@ -122,14 +123,22 @@ struct sg_diff::run_result
 /// Every value is laid out as the interpreter reads it, unpadded, and a texture's texels are the floats a shader reads.
 struct sg_diff::interpreter_half
 {
-    /// The groups the setup's module declares, by the names the module gives them; the output bound through `mutable_bytes`.
+    /// One output the runs store into, which `bindings` holds too, through `mutable_bytes`.
+    struct output
+    {
+        cc::string name;
+        cc::pinned_data<byte> bytes;
+    };
+
+    /// The groups the setup's module declares, by the names the module gives them.
     sgl::check::driver_bindings bindings;
-    /// The output's name and the bytes the runs store into, which `bindings` holds too.
-    cc::string output;
-    cc::pinned_data<byte> output_bytes;
+    /// For a compute stage; a pixel stage's one output is named by the first, which has no bytes.
+    cc::vector<output> outputs;
+    /// Set where the half cannot give this context's inputs, which skips the run.
+    cc::optional<cc::string> skipped;
     /// The dispatch's threads along x, each one invocation with its `@thread_id`.
     isize threads = 0;
-    /// For a pixel stage, in place of `threads` and `output_bytes`: a square target this many pixels wide, run as 2 by 2 quads.
+    /// For a pixel stage, in place of `threads`: a square target this many pixels wide, run as 2 by 2 quads.
     isize extent = 0;
     /// Each pixel's stage struct as the rasterizer interpolates it at the pixel's center `(x, y)`, every scalar a float.
     void (*pixel_varyings)(f32 x, f32 y, cc::span<f32> leaves) = nullptr;
@@ -161,7 +170,8 @@ bool register_setup(setup s);
 
 /// `w` run on SGL's interpreter: the outputs, `skipped` where it cannot model the run, an error where the run fails.
 /// The interpreter takes no target's rounding, so it is a third opinion beside the GPUs and held to them at `across`.
-[[nodiscard]] cc::result<run_result> interpreted(workload const& w);
+/// Built on `ctx` where the setup's half needs a device; called on its device home.
+[[nodiscard]] cc::result<run_result> interpreted(workload const& w, sg::context& ctx);
 
 /// The name of `w`'s file's committed reference, `integer_bits.ref` for `integer_bits.sgl`.
 [[nodiscard]] cc::string reference_name(workload const& w);
