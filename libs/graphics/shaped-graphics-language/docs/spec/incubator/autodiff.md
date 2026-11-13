@@ -129,7 +129,17 @@ What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buff
   So a `buffer[mark]` of a `pos3` and a `float` adds four floats per element, and a struct's int field adds none.
   Its `@tangent` is a `buffer[tangent[T]]`, read at the read's index.
   sg runs a buffer of such structs on every backend, in the same test as the floats.
-* A read of any other buffer is `unsupported-yet`, and the diagnostic says what to do instead.
+* **A texture_2d is differentiable by the same attributes**: `@gradient` names a `mut buffer[atomic[float]]` of its level 0, texel `(x, y)`'s channels at `(y * width + x) * channels`.
+  A `load` adds its adjoint to the texel it read, and a `sample` at level 0 to the texels it weighs, at their weights.
+  A linear sample changes with its coordinate too, by the slope between those texels; a nearest one does not, between texels.
+  Its `@tangent` is a texture of its type, whose read at the same place is the read's change.
+  The derivative reads the taps again, by `load`, so a GPU's filtering at a few bits of weight does not enter it.
+  How it filters is known at compile time from a static sampler alone, so a sample through a sampler bound at run time is refused.
+  So is a sample at another level, with a bias or an offset, and one through an anisotropic sampler.
+  `@no_diff` on a texture holds its texels constant, and its sample still changes with its coordinate: an environment map.
+  [textures.sgl](../../../tests/corpus/derivatives/textures.sgl) holds what every target writes and refuses.
+  [autodiff-texture-test.cc](../../../tests/interpret/autodiff-texture-test.cc) runs it on textures a driver binds, and sg on every backend.
+* A read of any other buffer or texture is `unsupported-yet`, and the diagnostic says what to do instead.
   So is a read of a buffer whose tangent holds a half, since an atomic holds a float or an integer alone.
 * `no_diff(x)` reads anything as a constant, which is the opt-out at an expression where `@no_diff` is the one at a parameter.
 * A function that reads an element can carry its own derivatives instead: `@forward` reads the tangent, and `@backward` adds the adjoint.
@@ -147,8 +157,7 @@ What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buff
 What is left of a differentiable buffer:
 
 * **A pairing is matched by its text**, as `@forward(f)` is, until an attribute's argument is an expression the check pass resolves.
-* **A texture's sample scatters its adjoint to the texels it filtered**, four atomic adds at the bilinear weights, one level for a sample at a level.
-  A texture that is trained is an image with a gradient image beside it.
+* **A texture's levels past 0**: a sample at a level, or between two, adds to a level's texels, which a gradient of every level would hold.
 
 What it found in SGL itself:
 

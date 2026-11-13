@@ -97,6 +97,21 @@ struct differentiator
         i32 stride = 1;
     };
     cc::vector<gradient_read> gradient_reads;
+    /// Reverse: a read of a texture with a `@gradient`, in the statement being transposed; its taps are read again
+    /// where its adjoint is added, at their weights.
+    struct texture_read
+    {
+        local_id placeholder = local_id::none;
+        paired_buffer gradients;
+        /// The texture member, which a read names again, and the coordinate or the texel, shared.
+        flat_expr_id texture = flat_expr_id::none;
+        flat_expr_id at = flat_expr_id::none;
+        bool is_load = false;
+        bool is_linear = false;
+        i32 mode_u = 0;
+        i32 mode_v = 0;
+    };
+    cc::vector<texture_read> texture_reads;
 
     [[nodiscard]] checked_module const& m() const { return f.c.out; }
     [[nodiscard]] flat_expr const& node(flat_expr_id id) const { return f.entry.at(id); }
@@ -250,6 +265,19 @@ struct differentiator
     [[nodiscard]] i32 float_leaves(type_id t) const;
     /// Each float leaf of the shared value `g`, in that order.
     void leaves_into(flat_expr_id g, cc::vector<flat_expr_id>& out);
+    /// A texture_2d member's `load` at a level or its `sample` at level 0 through a static sampler: going forward the
+    /// texels' change from the `@tangent` texture and the coordinate's through the taps' slopes, and going backward a
+    /// placeholder whose adjoint goes to the `@gradient` at the taps' weights.
+    flat_expr_id texture_tangent(flat_call const& n,
+                                 cc::span<flat_expr_id const> primals,
+                                 cc::span<flat_expr_id const> tangents,
+                                 type_id type);
+    /// The builtin `name` that takes `texture` first and `arity` arguments: one of its exact type, or of its shape.
+    [[nodiscard]] symbol_id texture_builtin(cc::string_view name, type_id texture, isize arity) const;
+    /// A call of the prelude's SGL function `name`, inlined where it stands.
+    flat_expr_id prelude_call(cc::string_view name, cc::span<flat_expr_id const> arguments);
+    /// Reverse: each texture read of the statement just transposed, its adjoint added to its gradient at each tap.
+    void add_texture_reads();
     /// Whether a gradient's atomics are shared through the subgroup first: where the entry point declares `subgroups`,
     /// outside a test, whose run has no device.
     [[nodiscard]] bool reduces_gradients() const;

@@ -47,3 +47,22 @@ fun mark_loss(k: int){marked} -> float:
     // a third of the invocations never reach the add, so the sum is over those that do
     if id.x % 3 != 0:
         bwd_diff(mark_loss, (id.x / 64) % 2, 1.0)
+
+// a texture with a @gradient: a linear sample's adjoint goes to the two texels it weighs, at their weights, and its
+// coordinate's to the slope between them
+binding painted:
+    @gradient(painting.gradients) canvas: texture_2d[float]
+    sampler linear:
+        filter = .linear
+        address = .clamp_edge
+
+binding painting:
+    gradients: mut buffer[atomic[float]]
+    slopes: mut buffer[float]
+
+fun brightness(u: float){painted} -> float => 2.0 * painted.canvas.sample(float2(u, 0.5), painted.linear, level = 0.0)
+
+@compute(64) fun canvas_backward(@thread_id id: int3){painted, painting}:
+    let mut du = 0.0
+    bwd_diff(brightness, 0.5, mut du, 1.0)
+    painting.slopes[id.x] = du

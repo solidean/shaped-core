@@ -1,0 +1,71 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): what a derivative does with a texture's read.
+// A texture_2d's `load` and its `sample` at level 0 through a static sampler are differentiable: going backward the
+// adjoint goes to the texels the read weighs, into the @gradient buffer at (y * width + x) * channels, and going forward
+// the change is the @tangent texture's read; a linear sample changes with its coordinate too.
+// autodiff-texture-test.cc runs them on textures a driver binds; this file holds what every target writes, and refuses.
+
+binding scene:
+    @gradient(training.gradients) @tangent(training.tangents) albedo: texture_2d[float4]
+    @no_diff noise: texture_2d[float]
+    plain: texture_2d[float]
+    smp: sampler
+    sampler linear:
+        filter = .linear
+        address = .repeat
+    sampler point:
+        filter = .nearest
+        address = .mirror_repeat
+
+binding training:
+    gradients: mut buffer[atomic[float]]
+    tangents: texture_2d[float4]
+    results: mut buffer[float]
+
+fun shade(uv: float2){scene} -> float:
+    let c = scene.albedo.sample(uv, scene.linear, level = 0.0)
+    let n = scene.noise.sample(uv * 2.0, scene.linear, level = 0.0)
+    let p = scene.albedo.sample(uv, scene.point, level = 0.0)
+    return dot(c.rgb, float3(0.3, 0.6, 0.1)) * n + p.a
+
+fun texel(xy: int2){scene} -> float => scene.albedo.load(xy).g
+
+@compute(64) fun textures_backward(@thread_id id: int3){scene, training}:
+    let mut duv = float2(0.0)
+    bwd_diff(shade, float2(float(id.x) / 64.0, 0.5), mut duv, 1.0)
+    bwd_diff(texel, int2(id.x % 4, 0), 1.0)
+    training.results[id.x] = duv.x + duv.y
+
+@compute(64) fun textures_forward(@thread_id id: int3){scene, training}:
+    training.results[id.x] = fwd_diff(shade, float2(float(id.x) / 64.0, 0.5), float2(1.0, 0.0))
+
+// a sampler bound at run time does not say how it filters, which the derivative must know
+fun dynamic(u: float){scene} => scene.albedo.sample(float2(u, 0.5), scene.smp, level = 0.0).r
+
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_a_dynamic_sampler(@thread_id id: int3){scene, training}:
+    let mut du = 0.0
+    bwd_diff(dynamic, float(id.x), mut du, 1.0)
+    training.results[id.x] = du
+
+// a texture with neither a @gradient nor @no_diff has nowhere to put its texels' adjoint
+fun nowhere(u: float){scene} => scene.plain.sample(float2(u, 0.5), scene.linear, level = 0.0)
+
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_a_texture_with_no_gradient(@thread_id id: int3){scene, training}:
+    let mut du = 0.0
+    bwd_diff(nowhere, float(id.x), mut du, 1.0)
+    training.results[id.x] = du
+
+// a sample at another level reads a level whose texels the gradient does not hold yet
+fun blurred(u: float){scene} => scene.albedo.sample(float2(u, 0.5), scene.linear, level = 1.0).r
+
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_a_sample_at_another_level(@thread_id id: int3){scene, training}:
+    let mut du = 0.0
+    bwd_diff(blurred, float(id.x), mut du, 1.0)
+    training.results[id.x] = du
+
+// a texel's change is a texel of the texture's type, which a @tangent texture holds
+test:
+    let t: float4 = tangent[float4]()
+    t.a == 0.0

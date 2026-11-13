@@ -274,7 +274,8 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
     for (auto const a : arguments)
     {
         auto const d = derive(a);
-        primals.push_back(share(d.primal, "a"));
+        // a resource stands as itself, since no target holds one in a local
+        primals.push_back(is_resource(m().at(type_of(d.primal)).kind) ? d.primal : share(d.primal, "a"));
         tangents.push_back(d.tangent);
         any = any || is_valid(d.tangent);
     }
@@ -285,6 +286,14 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
             copies.push_back(use(p));
         return f.builtin_call(at, n.callee, copies);
     };
+    // a texture's texels change too, which no argument says
+    if (auto const* const record = m().builtin_function(n.intrinsic);
+        record != nullptr && record->is_texture_call && !primals.empty()
+        && m().at(type_of(primals[0])).kind == type_kind::texture)
+    {
+        auto const result = share(write_primal(), "r");
+        return {use(result), texture_tangent(n, primals, tangents, type)};
+    }
     if (!any)
         return {write_primal(), flat_expr_id::none};
     auto const name = rule_name(n.callee);
@@ -546,6 +555,173 @@ auto differentiator::forward_stmt(flat_stmt_id id) -> void
     f.block.push_back(id);
 }
 
+auto differentiator::texture_builtin(cc::string_view name, type_id texture, isize arity) const -> symbol_id
+{
+    auto const* const found = f.c.prelude_names.get_ptr(cc::string(name));
+    if (found == nullptr)
+        return symbol_id::none;
+    auto by_shape = symbol_id::none;
+    for (auto const candidate : *found)
+    {
+        auto const& s = m().at(candidate);
+        if (s.kind != symbol_kind::function || s.info < 0 || !is_valid(s.intrinsic))
+            continue;
+        auto const parameters = m().at(m().functions[s.info].parameters);
+        if (parameters.size() != arity)
+            continue;
+        if (parameters[0].type == texture)
+            return candidate;
+        // CHK-194: a bare `texture_2d` takes every texture of its shape
+        auto const& p = m().at(parameters[0].type);
+        if (p.kind == type_kind::texture && p.shape == m().at(texture).shape && !is_valid(p.element) && !p.is_depth)
+            by_shape = candidate;
+    }
+    return by_shape;
+}
+
+auto differentiator::prelude_call(cc::string_view name, cc::span<flat_expr_id const> arguments) -> flat_expr_id
+{
+    auto const* const found = f.c.prelude_names.get_ptr(cc::string(name));
+    if (found == nullptr || found->empty())
+        return failed(cc::format("the prelude's {}, which it cannot find", name));
+    auto const callee = found->front();
+    auto const inlined = f.inline_call(at, callee, arguments);
+    if (!is_valid(inlined.label))
+        return failed(cc::format("the prelude's {}, which did not inline", name));
+    return add(m().functions[m().at(callee).info].result, flat_block{.label = inlined.label, .body = inlined.body});
+}
+
+auto differentiator::texture_tangent(flat_call const& n,
+                                     cc::span<flat_expr_id const> primals,
+                                     cc::span<flat_expr_id const> tangents,
+                                     type_id type) -> flat_expr_id
+{
+    auto const& callee = m().at(n.callee);
+    auto const parameters = m().at(m().functions[callee.info].parameters);
+    auto const is_load = callee.name == "load" && primals.size() == 3;
+    auto const is_sample = callee.name == "sample" && primals.size() == 4 && parameters[2].name == "smp"
+                        && parameters[3].name == "level";
+    auto const texture_type = type_of(primals[0]);
+    auto const* const member = node(primals[0]).node.try_as<flat_binding_member>();
+    auto const* const info
+        = member != nullptr ? &m().at(m().bindings[m().at(member->binding).info].members)[member->member] : nullptr;
+    if ((!is_load && !is_sample) || info == nullptr || m().at(texture_type).shape != texture_shape::d2
+        || float_leaves(type) <= 0)
+        return failed("a texture read other than a texture_2d member's `load` or its `sample` at a level, which it "
+                      "cannot differentiate yet");
+    if (info->is_no_diff && info->gradient.empty() && info->tangent.empty() && !is_valid(tangents[1]))
+        return flat_expr_id::none;
+    if (!info->is_no_diff && info->gradient.empty() && info->tangent.empty())
+        return failed("a read of a texture, whose gradient it cannot write back; give the texture a @gradient, or "
+                      "mark it @no_diff to hold its texels constant");
+
+    // the sampler's filter and address, which a static sampler alone says at compile time
+    auto is_linear = false;
+    auto mode_u = 0;
+    auto mode_v = 0;
+    if (is_sample)
+    {
+        auto state = static_cast<sampler_state const*>(nullptr);
+        auto const& smp = node(primals[2]).node;
+        if (auto const* const m_ = smp.try_as<flat_binding_member>())
+        {
+            auto const& s = m().at(m().bindings[m().at(m_->binding).info].members)[m_->member];
+            if (s.static_sampler >= 0)
+                state = &m().samplers[s.static_sampler];
+        }
+        else if (auto const* const file = smp.try_as<flat_file_sampler>())
+            state = &m().samplers[m().at(file->sampler).info];
+        if (state == nullptr)
+            return failed("a sample through a sampler whose filter the compile cannot see; a static sampler says it");
+        auto const* const level = node(primals[3]).node.try_as<flat_literal>();
+        if (level == nullptr || level->value != 0.0 || state->max_anisotropy > 1 || state->mip_lod_bias != 0.0f
+            || state->min_lod > 0.0f)
+            return failed("a sample at a level other than a constant 0, or through a sampler that moves it");
+        is_linear = state->mag_filter == 1;
+        mode_u = state->address_u;
+        mode_v = state->address_v;
+    }
+    else if (auto const level = f.constant_int(primals[2]); is_reverse && (!level.has_value() || level.value() != 0))
+        return failed("a load at a level other than a constant 0, whose gradient has no texels to go to yet");
+
+    auto const load = texture_builtin("load", texture_type, 3);
+    auto const size_of = texture_builtin("size", texture_type, 2);
+    if (!is_valid(load) || !is_valid(size_of))
+        return failed(cc::format("a load of {}, which no builtin is", m().name_of(texture_type)));
+    auto const taps = is_sample && is_linear ? 4 : 1;
+    auto const size
+        = is_sample
+            ? share(f.builtin_call(at, size_of, cc::span<flat_expr_id const>({use(primals[0]), integer(0)})), "size")
+            : flat_expr_id::none;
+    auto const tap_texel = [&](i32 k)
+    {
+        if (is_load)
+            return use(primals[1]);
+        flat_expr_id const arguments[]
+            = {use(size), use(primals[1]), integer(k), boolean(is_linear), integer(mode_u), integer(mode_v)};
+        return prelude_call("sample_tap_texel", arguments);
+    };
+    auto const tap_weight = [&](i32 k)
+    {
+        flat_expr_id const arguments[] = {use(size), use(primals[1]), integer(k), boolean(is_linear)};
+        return prelude_call("sample_tap_weight", arguments);
+    };
+    auto const level = is_load ? use(primals[2]) : integer(0);
+
+    auto result = flat_expr_id::none;
+    // the coordinate's change moves each tap's weight, and with it how much of its texel the sample holds
+    if (is_sample && is_linear && is_valid(tangents[1]))
+    {
+        auto const dc = share_tangent(tangents[1]);
+        for (auto k = 0; k < taps; ++k)
+        {
+            flat_expr_id const slope_arguments[] = {use(size), use(primals[1]), integer(k), boolean(is_linear)};
+            auto const slope = prelude_call("sample_tap_slope", slope_arguments);
+            auto const texel
+                = f.builtin_call(at, load, cc::span<flat_expr_id const>({use(primals[0]), tap_texel(k), integer(0)}));
+            result = sum(result, mul(texel, call("dot", slope, use(dc))));
+        }
+    }
+    if (!is_reverse)
+    {
+        if (info->tangent.empty())
+            return result;
+        auto const tangents_texture = resolve_paired(info->tangent, "tangent", texture_type);
+        if (!tangents_texture.has_value())
+            return result;
+        auto const& t = tangents_texture.value();
+        for (auto k = 0; k < taps; ++k)
+        {
+            auto const changed = add(t.type, flat_binding_member{.binding = t.binding, .member = t.member});
+            auto const texel
+                = f.builtin_call(at, load, cc::span<flat_expr_id const>({changed, tap_texel(k), use(level)}));
+            result = sum(result, taps == 1 ? texel : mul(texel, tap_weight(k)));
+        }
+        return result;
+    }
+    if (info->gradient.empty())
+    {
+        if (info->is_no_diff)
+            return result;
+        return failed("a read of a texture with a @tangent and no @gradient, where a backward derivative adds the "
+                      "read's adjoint");
+    }
+    auto const gradients = resolve_paired(info->gradient, "gradient", named_type(builtins::k_float));
+    if (!gradients.has_value())
+        return result;
+    auto const placeholder = f.add_local(local_kind::temporary, "t_texels", tangent(type));
+    linear_locals.insert(i32(placeholder));
+    texture_reads.push_back({.placeholder = placeholder,
+                             .gradients = gradients.value(),
+                             .texture = primals[0],
+                             .at = primals[1],
+                             .is_load = is_load,
+                             .is_linear = is_linear,
+                             .mode_u = mode_u,
+                             .mode_v = mode_v});
+    return sum(result, ref(placeholder));
+}
+
 auto differentiator::resolve_paired(cc::string_view text, cc::string_view which, type_id element)
     -> cc::optional<paired_buffer>
 {
@@ -567,7 +743,8 @@ auto differentiator::resolve_paired(cc::string_view text, cc::string_view which,
             auto const& held = t.kind == type_kind::buffer ? m().at(t.element) : t;
             auto const fits = which == "gradient" ? t.kind == type_kind::buffer && t.is_mut
                                                         && held.kind == type_kind::atomic && held.element == element
-                                                  : t.kind == type_kind::buffer && t.element == element;
+                            : t.kind == type_kind::buffer ? t.element == element
+                                                          : members[k].type == element;
             if (!fits)
             {
                 failed(cc::format("@{}({}) names a {}, where it takes a {} of {}", which, text,
