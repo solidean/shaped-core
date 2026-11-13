@@ -215,6 +215,34 @@ sg_diff::interpreter_half texels_for_interpreter()
     return half;
 }
 
+/// diff_raster.varyings at a pixel's center, as fullscreen.sgl writes them and a rasterizer interpolates them:
+/// the position, then `uv`, which runs 0 to 1 across the target, then `weight`, linear in `uv`.
+void raster_varyings(f32 x, f32 y, cc::span<f32> leaves)
+{
+    auto const u = x / f32(k_extent);
+    auto const v = y / f32(k_extent);
+    f32 const values[] = {x, y, 0.0f, 1.0f, u, v, u * 3.0f - v * 0.5f + 0.25f};
+    for (auto i = isize(0); i < leaves.size() && i < isize(sizeof(values) / sizeof(f32)); ++i)
+        leaves[i] = values[i];
+}
+
+/// The raster setup's half: the floats input and the texels texture, and a 16 by 16 target of interpolated varyings.
+sg_diff::interpreter_half raster_for_interpreter()
+{
+    auto half = texels_for_interpreter();
+    auto& io = half.bindings.groups[0];
+    io.members.remove_back(); // the texels setup's output, which a pixel stage writes as its target instead
+    auto const inputs = float_inputs();
+    io.members.push_back(
+        {.name = "input", .bytes = cc::pinned_data<f32>::create_copy_of(cc::span<f32 const>(inputs)).as_bytes()});
+    half.output = "color";
+    half.output_bytes = {};
+    half.threads = 0;
+    half.extent = k_extent;
+    half.pixel_varyings = &raster_varyings;
+    return half;
+}
+
 bool const words_registered = sg_diff::register_setup({
     .name = "words",
     .run = [](sg::context* ctx, sg_diff::shaders_on_route on)
@@ -248,5 +276,6 @@ bool const raster_registered = sg_diff::register_setup({
     .run = &run_raster,
     .routes = {.kind = sg_diff::tolerance::measure::ulps, .amount = 2},
     .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
+    .interpreted = &raster_for_interpreter,
 });
 } // namespace

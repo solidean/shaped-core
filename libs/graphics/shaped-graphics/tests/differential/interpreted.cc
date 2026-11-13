@@ -57,6 +57,58 @@ void fill(sgl::check::value& v, cc::span<i64 const> parts)
                         ? sgl::check::scalar::of_uint(u32(parts[i]))
                         : sgl::check::scalar::of(i32(parts[i]));
 }
+
+/// A pixel stage run over the half's square target, one 2 by 2 quad at a time, so its derivatives are a quad's (EVAL-144).
+/// Each pixel's result is its scalars' bits, rows top to bottom and tightly packed, as a target reads back.
+cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
+                                                   sgl::check::checked_module const& m,
+                                                   sgl::check::flat_entry_point const& e,
+                                                   sg_diff::interpreter_half const& half)
+{
+    using namespace sgl::check;
+    if (half.pixel_varyings == nullptr || half.extent <= 0 || half.extent % 2 != 0)
+        return sg_diff::run_result{.skipped = "its setup's interpreter half gives no target of whole quads"};
+
+    auto const leaves_per_pixel = leaf_count_of(m, e.result);
+    auto texels = cc::vector<u32>::create_filled(half.extent * half.extent * leaves_per_pixel, 0u);
+    auto scalars = cc::vector<f32>::create_filled(leaf_count_of(m, e.input), 0.0f);
+    for (auto qy = isize(0); qy < half.extent; qy += 2)
+        for (auto qx = isize(0); qx < half.extent; qx += 2)
+        {
+            auto inputs = resolve_inputs(m, e, half.bindings);
+            if (inputs.has_error())
+                return cc::error(cc::format("{} {}: {}", w.file, w.entry, inputs.error().to_string()));
+            inputs.value().lane_count = 4;
+            // EVAL-141: lane x + 2y of the quad stands at (x, y)
+            for (auto lane = 0; lane < 4; ++lane)
+            {
+                half.pixel_varyings(f32(qx + lane % 2) + 0.5f, f32(qy + lane / 2) + 0.5f, scalars);
+                auto v = zero_value(m, e.input);
+                for (auto k = isize(0); k < v.leaves.size(); ++k)
+                    v.leaves[k] = scalar::of(scalars[k]);
+                inputs.value().lane_parameters.push_back(cc::move(v));
+            }
+
+            auto const o = interpret(m, e, inputs.value());
+            if (o.status != run_status::ok)
+                return cc::error(cc::format("{} {}: the quad at ({}, {}) ends {}: {}", w.file, w.entry, qx, qy,
+                                            to_string(o.status), o.detail));
+            if (!o.failures.empty())
+                return cc::error(cc::format("{} {}: a check fails in the quad at ({}, {})", w.file, w.entry, qx, qy));
+            for (auto lane = 0; lane < 4; ++lane)
+            {
+                auto const pixel = (qy + lane / 2) * half.extent + qx + lane % 2;
+                auto const& leaves = o.lane_results[lane].leaves;
+                for (auto k = isize(0); k < leaves_per_pixel && k < leaves.size(); ++k)
+                    texels[pixel * leaves_per_pixel + k] = leaves[k].bits;
+            }
+        }
+
+    auto result = sg_diff::run_result();
+    result.outputs.push_back(
+        {.name = half.output, .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes())});
+    return result;
+}
 } // namespace
 
 cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
@@ -87,6 +139,8 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
                                          "time"};
 
     auto half = w.setup->interpreted();
+    if (e->entry_stage == stage::pixel)
+        return pixels_interpreted(w, m, *e, half);
     auto const width = i64(e->workgroup[0] > 0 ? e->workgroup[0] : 1);
     for (auto i = i64(0); i < i64(half.threads); ++i)
     {

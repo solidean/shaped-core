@@ -127,6 +127,10 @@ struct sg_diff::interpreter_half
     cc::pinned_data<byte> output_bytes;
     /// The dispatch's threads along x, each one invocation with its `@thread_id`.
     isize threads = 0;
+    /// For a pixel stage, in place of `threads` and `output_bytes`: a square target this many pixels wide, run as 2 by 2 quads.
+    isize extent = 0;
+    /// Each pixel's stage struct as the rasterizer interpolates it at the pixel's center `(x, y)`, every scalar a float.
+    void (*pixel_varyings)(f32 x, f32 y, cc::span<f32> leaves) = nullptr;
 };
 
 namespace sg_diff

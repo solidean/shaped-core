@@ -280,3 +280,43 @@ TEST("sgl core - the first violation says why a tree is not core")
     });
     CHECK(reason_of(h) == "core");
 }
+
+TEST("sgl interpret - each lane of a quad takes its own stage struct, and every lane's result comes back")
+{
+    auto const checked = check_sources(read_prelude(), "struct quad_in:\n"
+                                                       "    @position position: hpos4\n"
+                                                       "    v: float\n"
+                                                       "@pixel struct quad_out:\n"
+                                                       "    color: float4\n"
+                                                       "@pixel fun slope(p: quad_in) -> quad_out:\n"
+                                                       "    return {color = float4(p.v, ddx(p.v), ddy(p.v), 0.0)}\n");
+    REQUIRE(reports_of(checked) == "");
+    auto const& m = checked.module;
+    REQUIRE(m.entry_points.size() == 1);
+    auto const& ps = m.entry_points[0];
+
+    // EVAL-148: lanes 0 to 2 take their own, laid out as a quad is, and lane 3, given none, takes the run's
+    auto inputs = run_inputs{.parameter = zero_value(m, ps.input), .lane_count = 4};
+    inputs.parameter.leaves[4] = scalar::of(100.0f);
+    for (auto const v : {1.0f, 3.0f, 7.0f})
+    {
+        auto lane = zero_value(m, ps.input);
+        lane.leaves[4] = scalar::of(v);
+        inputs.lane_parameters.push_back(cc::move(lane));
+    }
+    auto const o = interpret(m, ps, inputs);
+    REQUIRE(o.status == run_status::ok);
+    REQUIRE(o.lane_results.size() == 4);
+    CHECK(o.result == o.lane_results[0]);
+
+    // the coarse derivatives of EVAL-144, the same in every lane: (1, 0) minus (0, 0), and (0, 1) minus (0, 0)
+    f32 const vs[] = {1.0f, 3.0f, 7.0f, 100.0f};
+    for (auto lane = 0; lane < 4; ++lane)
+    {
+        auto const& color = o.lane_results[lane].leaves;
+        REQUIRE(color.size() == 4);
+        CHECK(color[0].as_float() == vs[lane]);
+        CHECK(color[1].as_float() == 2.0f);
+        CHECK(color[2].as_float() == 6.0f);
+    }
+}

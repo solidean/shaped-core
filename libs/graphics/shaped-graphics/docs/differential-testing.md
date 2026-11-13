@@ -57,7 +57,7 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 | `words` | compute | 256 32-bit words, the edges first, then hashed bits | four words a thread | exact | exact | yes |
 | `floats` | compute | 256 ordinary floats, -64 to 64, no zero | four floats a thread | 2 ulps | 16 ulps | yes |
 | `texels` | compute | a 16 by 16 rgba8 texture with its mip chain, a nearest and a trilinear sampler | four float4 a thread | exact | relative 0.005 | yes |
-| `raster` | pixel | one triangle over a 16 by 16 rgba32_float target, interpolated `uv` and `weight`, the `floats` input and the `texels` texture | the target | 2 ulps | relative 0.005 | not yet |
+| `raster` | pixel | one triangle over a 16 by 16 rgba32_float target, interpolated `uv` and `weight`, the `floats` input and the `texels` texture | the target | 2 ulps | relative 0.005 | yes |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
@@ -87,11 +87,12 @@ Agreeing with each other, two routes might share a bug; agreeing with the interp
 
 A setup's interpreter half binds the same inputs by the names its module gives them, the way an `sgl test` driver does.
 The engine checks the corpus file against the setups' modules and runs the dispatch one invocation after another, each invocation's stores written back before the next.
+A pixel stage runs as 2 by 2 quads, each pixel a lane with its own interpolated varyings (EVAL-148), so its derivatives and the level a sample picks are a quad's.
+The raster setup's half gives the varyings at each pixel's center, as its vertex stage writes them; the vertex stage itself is not interpreted.
 Every configuration is held to the result at the file's `across` bound, since the interpreter rounds as plain `f32` and models no target.
 
-It cannot run everything, and says so at info rather than failing:
-- **Workgroup memory** spans the invocations of a workgroup, which the interpreter runs one at a time, so `workgroup_reduction.sgl` is left out.
-- **The raster setup** has no interpreter half yet: it would interpolate the vertex stage's outputs and run each pixel quad as four lanes.
+It cannot run everything, and says so at info rather than failing.
+**Workgroup memory** spans the invocations of a workgroup, which the interpreter runs one at a time, so `workgroup_reduction.sgl` is left out.
 
 The interpreter has already paid for itself in the corpus.
 Its first run found two lines that tested an optimizer rather than SGL: a cancellation that drivers fold to zero, and one whose `across` bound was too tight for any second vendor.
@@ -123,6 +124,6 @@ A machine whose GPU disagrees beyond `across` is a finding: who is right is a qu
 ## Not yet
 
 - **More setups:** a trace over a fixed scene, render targets of other formats, and a depth test.
-- **More of the corpus on the interpreter:** the raster setup, and a workgroup run as one interleaved run of its invocations.
+- **Workgroups on the interpreter:** a workgroup's invocations run together up to each barrier, a change to the interpreter itself.
 
 [feat-sg-differential-references-and-setups](issues/feat-sg-differential-references-and-setups.md) tracks them.
