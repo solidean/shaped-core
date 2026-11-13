@@ -177,6 +177,46 @@ void main(uint3 tid : SV_DispatchThreadID)
     }
 }
 
+TEST("ssc::dxc compile - a raygen library reflects NVAPI's shader extension slot as the reserved slot a compute does")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    // where an nvapi fill of reordering lives: a ray-tracing stage, whose bindings reflect from its library function
+    constexpr char const* raygen_hlsl = R"(
+struct record { uint opcode; uint words[63]; };
+RWStructuredBuffer<record> g_NvidiaExt : register(u0, space13);
+RaytracingAccelerationStructure World : register(t0);
+RWStructuredBuffer<float> Output : register(u0);
+struct ray_payload { float value; };
+
+[shader("raygeneration")]
+void main_rg()
+{
+    uint index = g_NvidiaExt.IncrementCounter();
+    g_NvidiaExt[index].opcode = 1;
+    uint handle = g_NvidiaExt.IncrementCounter();
+    ray_payload p = { 0.0f };
+    RayDesc ray = (RayDesc)0;
+    TraceRay(World, 0, 0, 0, 0, handle, ray, p);
+    Output[DispatchRaysIndex().x] = p.value;
+}
+)";
+    auto const result = comp.value().compile({.source = raygen_hlsl,
+                                              .entry_point = "main_rg",
+                                              .stage = sg::shader_stage::raygen,
+                                              .model = ssc::dxc::shader_model::sm_6_6});
+    REQUIRE(result.has_value()).dump("dxc", result.has_error() ? result.error().to_string() : cc::string());
+    // the structure and the output are bindings, and the extension slot is no binding of theirs
+    CHECK(result.value().bindings.size() == 2);
+    for (auto const& b : result.value().bindings)
+        CHECK(b.name != cc::string_view("g_NvidiaExt"));
+    REQUIRE(result.value().reserved_slots.size() == 1);
+    auto const expected
+        = sg::reserved_slot{.name = "g_NvidiaExt", .space = 13, .index = 0, .stride = 256, .has_counter = true};
+    CHECK(result.value().reserved_slots[0] == expected);
+}
+
 #endif // CC_OS_WINDOWS
 
 TEST("ssc::dxc compile - the SPIR-V flag set applies to every stage")

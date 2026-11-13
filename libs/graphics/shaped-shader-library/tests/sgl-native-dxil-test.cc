@@ -874,3 +874,83 @@ TEST("slib - SGL's DXIL of an nvapi fill hands each record and each TraceRay the
     CHECK(!expected.empty());
     CHECK(listing(written) == listing(expected)).dump("theirs", listing(expected)).dump("ours", listing(written));
 }
+
+TEST("slib - SGL's DXIL of an nvapi invocation says to the driver what DXC's compile of NvInvokeHitObject says "
+     "(EMIT-263)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    // a hit object invoked through the structure its trace took, once alone and once from an array by a pinned index
+    auto const source
+        = cc::string("require raytracing_pipeline\n"
+                     "require binding_arrays\n"
+                     "binding frame:\n"
+                     "    world: acceleration_structure[.triangles]\n"
+                     "    worlds: acceleration_structure[.triangles][4]\n"
+                     "    seen: mut buffer[float]\n"
+                     "struct radiance:\n"
+                     "    color: float3\n"
+                     "rays path_rays:\n"
+                     "    surface: radiance\n"
+                     "@raygen fun shoot(@launch_id id: int3){frame}:\n"
+                     "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+                     "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                     "    const if has(.shader_execution_reordering):\n"
+                     "        let h = trace_hit(frame.world, r, path_rays.surface, mut p)\n"
+                     "        h.reorder()\n"
+                     "        h.invoke(mut p)\n"
+                     "        let k = id.x % 4\n"
+                     "        let g = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
+                     "        g.invoke(mut p)\n"
+                     "    frame.seen[id.x] = p.color.x\n"
+                     "@miss fun on_miss(p: mut radiance):\n"
+                     "    p.color = float3(1.0, 0.0, 0.0)\n"
+                     "@closest_hit fun on_hit(h: triangle_hit, p: mut radiance):\n"
+                     "    p.color = float3(0.0, 1.0, 0.0)\n"
+                     "hit_group hits for path_rays:\n"
+                     "    surface = (closest_hit = on_hit)\n"
+                     "@raytracing pipeline path:\n"
+                     "    rays = path_rays\n"
+                     "    raygen = shoot\n"
+                     "    miss.surface = on_miss\n"
+                     "    hit_groups = (hits)\n");
+    sgl::check::feature_fill const fills[]
+        = {{.f = sgl::check::feature::shader_execution_reordering, .how = sgl::check::fill::nvapi}};
+    auto const of = [&](sgl::emit::native_route route)
+    {
+        return sgl::compile_to_text({.source = source,
+                                     .entry_point = "shoot",
+                                     .target = sgl::emit::target::hlsl_dx12,
+                                     .device_features = sgl::check::feature::shader_execution_reordering,
+                                     .fills = fills,
+                                     .native = route});
+    };
+    auto const native = of(sgl::emit::native_route::require);
+    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    auto const refused = compiler.value().validate(native.value().dxil);
+    CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+    auto const ours = compiler.value().disassemble(native.value().dxil);
+    REQUIRE(ours.has_value());
+
+    auto const headers = nvapi_headers();
+    if (headers.empty())
+        SKIP("the pinned NVAPI headers are not fetched: uv run extern/nvapi/fetch-nvapi.py");
+    auto const text = of(sgl::emit::native_route::text);
+    REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
+    REQUIRE(text.value().text.contains("NvInvokeHitObject(")).dump("text", text.value().text);
+    auto const theirs = dxc_of(compiler.value(), text.value(), headers);
+    REQUIRE(theirs.has_value()).dump("dxc", theirs.has_error() ? theirs.error() : cc::string());
+    auto const listing = [](cc::span<cc::string const> calls)
+    {
+        auto out = cc::string();
+        for (auto const& c : calls)
+            out.appendf("{}\n", c);
+        return out;
+    };
+    // two traces that make hit objects and two that invoke them, each record and TraceRay with DXC's values
+    auto const expected = protocol_flow_of(theirs.value());
+    auto const written = protocol_flow_of(ours.value());
+    CHECK(listing(expected).contains("@dx.op.traceRay")).dump("theirs", listing(expected));
+    CHECK(listing(written) == listing(expected)).dump("theirs", listing(expected)).dump("ours", listing(written));
+}

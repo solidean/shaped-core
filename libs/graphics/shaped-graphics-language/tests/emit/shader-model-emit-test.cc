@@ -715,6 +715,115 @@ TEST("sgl emit - the nvapi fill refuses a hit object that may be of more than on
     REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
 }
 
+namespace
+{
+/// The arguments of each call of `function` in `text`, split at their top-level commas.
+[[nodiscard]] cc::vector<cc::vector<cc::string>> calls_of(cc::string_view text, cc::string_view function)
+{
+    auto result = cc::vector<cc::vector<cc::string>>();
+    auto const opening = cc::format("{}(", function);
+    for (auto at = text.find(opening); at >= 0; at = text.find(opening, at + 1))
+    {
+        auto arguments = cc::vector<cc::string>();
+        arguments.emplace_back();
+        auto depth = 0;
+        for (auto i = at + opening.size(); i < text.size(); ++i)
+        {
+            auto const ch = text[i];
+            if (depth == 0 && ch == ')')
+                break;
+            if (ch == '(' || ch == '[')
+                ++depth;
+            if (ch == ')' || ch == ']')
+                --depth;
+            if (depth == 0 && ch == ',')
+            {
+                arguments.emplace_back();
+                continue;
+            }
+            if (!(ch == ' ' && arguments.back().empty()))
+                arguments.back() += ch;
+        }
+        result.push_back(cc::move(arguments));
+    }
+    return result;
+}
+
+/// The hit object `NvTraceRayHitObject` gave on the line it is called at in `text`, in order of the calls.
+[[nodiscard]] cc::vector<cc::string> traced_hit_objects(cc::string_view text)
+{
+    auto result = cc::vector<cc::string>();
+    auto const marker = cc::string_view("const NvHitObject ");
+    for (auto at = text.find(marker); at >= 0; at = text.find(marker, at + 1))
+    {
+        auto const start = at + marker.size();
+        auto const end = text.find(' ', start);
+        result.push_back(cc::string(text.subview({.offset = start, .size = end - start})));
+    }
+    return result;
+}
+} // namespace
+
+TEST("sgl emit - the nvapi fill invokes each hit object through the very structure its trace took, where values move "
+     "(EMIT-263)")
+{
+    // a hit object is invoked through what its own trace was handed, however the source reaches that structure
+    struct invoked_case
+    {
+        cc::string_view what;
+        cc::string_view declarations;
+        cc::string_view body;
+    };
+    invoked_case const cases[] = {
+        {"a callee's mut parameter assigning the variable its structure's index came from",
+         "fun go(s: acceleration_structure[.triangles], i: mut int, q: mut radiance, w: ray):\n"
+         "    let h = trace_hit(s, w, path_rays.surface, mut q)\n"
+         "    i = i + 1\n"
+         "    h.invoke(mut q)\n",
+         "let mut k = id.x % 4\ngo(frame.worlds[nonuniform k], mut k, mut p, r)\n"},
+        {"two hit objects of two structures, one after the other", "",
+         "let h = trace_hit(frame.world, r, path_rays.surface, mut p)\nh.invoke(mut p)\n"
+         "let g = trace_hit(frame.worlds[1], r, path_rays.surface, mut p)\ng.invoke(mut p)\n"},
+        {"one callee inlined twice, each with its own structure",
+         "fun run(q: mut radiance, s: ray, j: int){frame}:\n"
+         "    let h = trace_hit(frame.worlds[j], s, path_rays.surface, mut q)\n"
+         "    h.invoke(mut q)\n",
+         "run(mut p, r, 0)\nrun(mut p, r, 1)\n"},
+        {"two hit objects alive at once, invoked in the other order", "",
+         "let h = trace_hit(frame.world, r, path_rays.surface, mut p)\n"
+         "let g = trace_hit(frame.worlds[2], r, path_rays.surface, mut p)\ng.invoke(mut p)\nh.invoke(mut p)\n"},
+    };
+    for (auto const& c : cases)
+    {
+        auto const source = invoking(c.declarations, c.body);
+        auto const e = filled(source, "shoot", feature::shader_execution_reordering, fill::nvapi, native_route::text);
+        REQUIRE(e.has_value()).dump("case", c.what).dump("error", e.has_error() ? e.error() : cc::string());
+        auto const& text = e.value().text;
+        auto const traces = calls_of(text, "NvTraceRayHitObject");
+        auto const hits = traced_hit_objects(text);
+        auto const invokes = calls_of(text, "NvInvokeHitObject");
+        REQUIRE(traces.size() == hits.size()).dump("case", c.what).dump("text", text);
+        REQUIRE(!invokes.empty()).dump("case", c.what).dump("text", text);
+        for (auto const& invoke : invokes)
+        {
+            REQUIRE(invoke.size() == 3).dump("case", c.what).dump("text", text);
+            auto found = false;
+            for (auto i = isize(0); i < hits.size(); ++i)
+                if (hits[i] == invoke[1])
+                {
+                    found = true;
+                    CHECK(invoke[0] == traces[i][0]).dump("case", c.what).dump("hit object", invoke[1]).dump("text", text);
+                }
+            CHECK(found).dump("case", c.what).dump("hit object", invoke[1]).dump("text", text);
+        }
+        // SGL's DXIL takes it too
+        auto const native
+            = filled(source, "shoot", feature::shader_execution_reordering, fill::nvapi, native_route::require);
+        REQUIRE(native.has_value()).dump("case", c.what).dump("error", native.has_error() ? native.error() : cc::string());
+        CHECK(!native.value().dxil.empty()).dump("case", c.what);
+    }
+}
+
 TEST("sgl emit - the nvapi fill of opacity micromaps writes nothing, at 6.6 (EMIT-263, EMIT-184)")
 {
     for (auto const route : k_routes)
