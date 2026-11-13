@@ -448,9 +448,9 @@ auto differentiator::run_again(cc::span<flat_stmt_id const> statements) -> cc::v
                     auto const else_body = f.add_list(run_again(copy_of(n->else_body)));
                     emit(flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
                 }
-                else if (auto const* const n = s.node.try_as<flat_block>();
-                         n != nullptr && !f.custom_calls.contains(i32(n->label)))
-                    emit(flat_block{.label = f.add_label("again"), .body = f.add_list(run_again(copy_of(n->body)))});
+                else if (auto const* const b = s.node.try_as<flat_block>();
+                         b != nullptr && !f.custom_calls.contains(i32(b->label)))
+                    emit(flat_block{.label = f.add_label("again"), .body = f.add_list(run_again(copy_of(b->body)))});
                 else if (auto const* const n = s.node.try_as<flat_for>())
                 {
                     auto const index = f.add_local(local_kind::index, f.entry.at(n->index).name, f.int_type());
