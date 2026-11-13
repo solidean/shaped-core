@@ -33,6 +33,17 @@ It no longer does on main, but only because `merge_buffer_loads` runs: the hang 
   With the merging skipped, `SC_GPU=amd SC_SG_COLD=all uv run dev.py test "sv - a frame mesh traces in the frame it is placed"` passed on its dx12 context in 7.8 s.
   The same module hangs Intel's, which makes Intel's compiler the likelier culprit; a reduction is still what would settle it.
 
+## Back on main, 2026-11-13
+
+The hang is back with the merging in place: `shaped-viewer-test` loses the device on the Arc B580, driver 32.0.101.9150, on every run.
+The 7 s reproducer hangs too, with `SC_SG_COLD=all` as well, so no cached pipeline is involved.
+DRED names the same spot: the G-buffer's draws, then a `Dispatch`, then an operation that never completes.
+Ruled out, measured:
+- the DXBC checksum of `4c65364c1`: the retail bypass digest stamped again still hangs;
+- the orthographic camera's changes to `light_thin` in `97fe397fe`: `cam.position` restored still hangs;
+- the à-trous and SVGF edge-stop change of `eae3f55a4`: the shaders without it still hang.
+Not known: the commit it returned with, since the viewer binary crashed earlier in each run on Intel's Vulkan compiler all day (bug-sv-vulkan-denoiser-modes-crash-intel-compiler), which hid it.
+
 ## The risk left open
 
 A shader whose loads `merge_buffer_loads` cannot gather, and that grows like `light_thin`, may hang the device the same way, now that native is the default.
