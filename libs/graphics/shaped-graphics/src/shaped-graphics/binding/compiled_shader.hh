@@ -154,7 +154,8 @@ struct sg::compiled_shader
     cc::vector<shader_source_line> source_map;
 
     /// The slots the code declares that no binding group fills: NVAPI's shader extension slot, which DXIL reflects.
-    /// A host laying the pipeline out from reflection covers each, and sg's own backends lay out none yet.
+    /// A host laying the pipeline out from reflection covers each; sg lays out none, and refuses a pipeline of a shader
+    /// that has any, naming the slot, where its backend's own pipeline creation would fail.
     cc::vector<reserved_slot> reserved_slots;
 
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.

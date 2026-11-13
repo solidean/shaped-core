@@ -100,6 +100,20 @@ cc::optional<cc::string> impl::find_missing_feature(feature_set supported, cc::s
     return {};
 }
 
+cc::optional<cc::string> impl::find_reserved_slot(cc::span<compiled_shader const* const> stages)
+{
+    for (auto const* const stage : stages)
+        if (stage != nullptr && !stage->reserved_slots.empty())
+        {
+            auto const& slot = stage->reserved_slots.front();
+            return cc::format(
+                "the shader '{}' declares '{}' at u{}, space{}, a reserved slot of NVAPI's that sg lays out "
+                "no pipeline for: its host builds the pipeline, covering the slot as a UAV with a counter",
+                stage->entry_point, slot.name, slot.index, slot.space);
+        }
+    return {};
+}
+
 cc::optional<cc::string> impl::find_unsupported_view(bool float32_filtering,
                                                      cc::span<binding const> bindings,
                                                      cc::span<slotted_view const> views)

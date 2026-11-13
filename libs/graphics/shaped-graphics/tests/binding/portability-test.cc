@@ -125,6 +125,20 @@ TEST("sg - a stage needing a feature the device lacks is refused by that feature
     CHECK(!sg::impl::find_missing_feature(tracing, stages).has_value());
 }
 
+TEST("sg - a stage that declares a reserved slot is refused by the slot's name, since sg lays out none")
+{
+    auto plain = sg::compiled_shader{.entry_point = "plain"};
+    auto reordering = sg::compiled_shader{.entry_point = "shoot"};
+    reordering.reserved_slots.push_back(
+        {.name = "g_NvidiaExt", .space = 13, .index = 0, .stride = 256, .has_counter = true});
+    sg::compiled_shader const* const without[] = {&plain, nullptr};
+    CHECK(!sg::impl::find_reserved_slot(without).has_value());
+    sg::compiled_shader const* const with[] = {&plain, &reordering};
+    auto const refused = sg::impl::find_reserved_slot(with);
+    REQUIRE(refused.has_value());
+    CHECK(refused.value().contains("the shader 'shoot' declares 'g_NvidiaExt' at u0, space13, a reserved slot"));
+}
+
 TEST("sg - every feature has a name, and the name finds it")
 {
     for (auto const f : sg::k_all_features)
