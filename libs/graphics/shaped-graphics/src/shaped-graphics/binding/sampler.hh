@@ -57,10 +57,12 @@ struct sg::sampler
     sampler_address_mode address_v = sampler_address_mode::repeat;
     sampler_address_mode address_w = sampler_address_mode::repeat;
 
-    float mip_lod_bias = 0.0f; ///< added to the computed mip level
-    u32 max_anisotropy = 1;    ///< 1 = anisotropy off; > 1 enables anisotropic filtering (capped per backend)
-    float min_lod = 0.0f;      ///< lower mip-level clamp
-    float max_lod = lod_max;   ///< upper mip-level clamp (lod_max = unclamped)
+    /// Added to the computed mip level, which is the level dx12 picks on every backend, anisotropic or not.
+    /// A backend whose driver blends mips elsewhere biases that away; see libs/graphics/shaped-graphics/docs/concepts/anisotropic-lod.md.
+    float mip_lod_bias = 0.0f;
+    u32 max_anisotropy = 1;  ///< 1 = anisotropy off; > 1 enables anisotropic filtering (capped per backend)
+    float min_lod = 0.0f;    ///< lower mip-level clamp
+    float max_lod = lod_max; ///< upper mip-level clamp (lod_max = unclamped)
 
     /// Set for a comparison ("shadow") sampler — the filters then apply to the comparison result.
     cc::optional<compare_op> compare = {};

@@ -1,0 +1,58 @@
+// A textured floor running to the horizon: the footprint grows more anisotropic with distance, which is where a gap
+// in level selection between two APIs becomes something one can see.
+//
+// Two pipelines over one floor: `floor_lod` writes the level a sampler picks (the probe's pyramid, mip m holds m),
+// and `floor_color` the detail texture through the same sampler, which is what a renderer would show.
+
+@inline binding floor_constants:
+    view_projection: mat4
+
+@vertex struct floor_vertex:
+    position: pos3
+    uv: float2
+
+@pixel struct lod_out:
+    lod: float
+
+@pixel struct color_out:
+    color: float4
+
+struct floor_pixel:
+    @position position: hpos4
+    uv: float2
+
+binding lod_source:
+    pyramid: texture_2d[float]
+    smp: sampler
+
+binding color_source:
+    detail: texture_2d[float4]
+    smp: sampler
+
+@vertex fun floor_vs(v: floor_vertex){floor_constants} -> floor_pixel:
+    return {
+        position = floor_constants.view_projection * v.position
+        uv = v.uv
+    }
+
+@pixel fun floor_lod_ps(p: floor_pixel){lod_source} -> lod_out:
+    return {lod = lod_source.pyramid.sample(p.uv, lod_source.smp)}
+
+@pixel fun floor_color_ps(p: floor_pixel){color_source} -> color_out:
+    return {color = color_source.detail.sample(p.uv, color_source.smp)}
+
+pipeline floor_lod:
+    vertex = floor_vs
+    pixel = floor_lod_ps
+    cull = .none
+    depth_test = false
+    depth_write = false
+    format = .host
+
+pipeline floor_color:
+    vertex = floor_vs
+    pixel = floor_color_ps
+    cull = .none
+    depth_test = false
+    depth_write = false
+    format = .host
