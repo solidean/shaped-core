@@ -13,6 +13,7 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/cache_owner.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
+#include <shaped-viewer/resources/impl/range_allocator.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
@@ -301,6 +302,10 @@ public:
     /// How many distinct parameter blocks have been resolved.
     [[nodiscard]] isize instance_count() const { return _instances.size(); }
 
+    /// The pool every parameter block lives in, each at its record's `param_offset`, empty until the first block.
+    /// Replaced by a larger one when it fills, so read it per frame rather than keeping it.
+    [[nodiscard]] sg::buffer<byte> const& parameter_pool() const { return _param_pool; }
+
     /// The bytes of `r`'s parameter block, for THIS epoch — what `describe_instance` uploads.
     ///
     /// Public because the layout is a contract rather than an internal detail: a caller packing several blocks into one buffer
@@ -308,6 +313,10 @@ public:
     /// Every descriptor and texture index it writes is acquired here, so calling it is what puts those elements into this
     /// epoch's access declaration.
     [[nodiscard]] cc::vector<byte> build_instance_parameters(instance_record const& r);
+
+    /// The textures `id`'s texture slots name this epoch, in slot order: what the bound raster mode binds as a material's `sv_textures`.
+    /// A texture still arriving, or one that failed, is its placeholder, as in the parameter block.
+    [[nodiscard]] cc::vector<sg::texture_2d> instance_textures(instance_id id);
 
     /// The GPU record for one scene item: where its material parameters live, and where its geometry does.
     ///
@@ -413,6 +422,10 @@ public:
     /// manager's contract a schema rather than a set of names a shader has to rediscover.
     [[nodiscard]] sg::binding_group_layout_handle const& bindless_layout() const;
 
+    /// Whether this manager has bindless tables at all: false on a device without `sg::feature::binding_arrays`.
+    /// Without them every acquire answers 0, and only the bound raster mode, which binds the pools themselves, can draw.
+    [[nodiscard]] bool has_bindless_tables() const { return !_tables.empty(); }
+
     /// How many elements `table` holds.
     [[nodiscard]] u32 table_capacity(bindless_table table) const;
 
@@ -486,7 +499,7 @@ private:
                          texture_policy texture_policy,
                          work_budget work_budget);
 
-    /// Rebuilds `r`'s parameter block for THIS epoch and uploads it if it changed, creating its buffer on first use.
+    /// Rebuilds `r`'s parameter block for THIS epoch and uploads it if it changed, allocating its range on first use.
     ///
     /// Shared by both `describe_instance` overloads, because the block is the material's and has nothing to do with which
     /// geometry reads it.
@@ -494,6 +507,9 @@ private:
 
     /// The bindless index a descriptor or texture slot names this epoch, acquired: a texture still arriving names its placeholder.
     [[nodiscard]] u32 _slot_index(instance_slot const& slot);
+
+    /// The texture a texture slot names this epoch: its placeholder while it arrives, magenta once it failed.
+    [[nodiscard]] sg::texture_2d const& _slot_texture(instance_slot const& slot);
 
     /// Whether every id `set` names still resolves, and whether all of it has landed — the quadric counterparts of the
     /// mesh forms, and the same reason they exist: a cached slot is verified rather than believed.
@@ -545,6 +561,17 @@ private:
     /// Every resolved parameter block, indexed by `instance_id`, plus the `parameter_key` index onto it.
     cc::vector<instance_record> _instances;
     cc::map<cc::hash128, instance_id> _instances_by_key;
+
+    /// Every parameter block, each a range at its record's `param_offset`, read as `bytes` through one bindless slot or one bound buffer.
+    /// Records are never evicted, so ranges are never freed.
+    /// A full pool is replaced by a larger one and its generation bumped; each block uploads again from its `uploaded` bytes.
+    /// No GPU copy carries the old one over, since blocks this list already uploaded would land in it after the copy.
+    sg::buffer<byte> _param_pool;
+    impl::range_allocator _param_ranges;
+    u64 _param_pool_generation = 1;
+
+    /// A range of `bytes` in the parameter pool, growing it when none fits.
+    [[nodiscard]] isize _allocate_parameters(isize bytes);
 
     texture_policy _texture_policy;
     work_budget _work_budget;

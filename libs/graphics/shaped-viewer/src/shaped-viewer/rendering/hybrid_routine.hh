@@ -61,6 +61,10 @@ struct sv::hybrid_frame_desc
     /// The raster pass's depth buffer and pyramid, shared by a pack as `thin` is; empty creates them.
     raster_scratch scratch;
 
+    /// Where set, receives this frame's own guides on a frame whose `frame.guide_frame` blends them into `targets`, and nothing otherwise.
+    /// A temporal denoiser of this frame's samples reads them, since the blended ones describe other offsets than its samples'.
+    raster_gbuffer* frame_guides = nullptr;
+
     /// What `raster_frame_desc` says of each.
     stand_in_report* stand_ins = nullptr;
     sg::buffer<u32>* visibility = nullptr;
@@ -91,7 +95,7 @@ protected:
     /// Creates the stand-ins, which outlive every shader reload.
     cc::shared_async<cc::unit> init_once(sg::routine_init_scope scope) override;
 
-    /// Builds the deferred lighting kernel.
+    /// Builds the deferred lighting kernel and the guide blend.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
@@ -102,4 +106,7 @@ private:
 
     /// `light_thin` of hybrid_pass.sgl; null where it did not build, which declines a deferred frame.
     sg::compute_pipeline_handle _light_thin;
+
+    /// `blend_guides` of hybrid_pass.sgl; null where it did not build, which declines a frame that blends its guides.
+    sg::compute_pipeline_handle _blend_guides;
 };

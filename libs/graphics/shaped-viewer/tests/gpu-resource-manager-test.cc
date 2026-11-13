@@ -628,15 +628,83 @@ ASYNC_INVOCABLE_TEST("sv - an attribute is uploaded once and content-keyed", (sg
     CHECK(record.format == sv::attribute_format_of<f32>);
     CHECK(record.frequency == sv::attribute_frequency::per_vertex);
 
-    // The record owns the buffer and nothing else; the index a block carries is acquired per epoch, and an unchanged view
-    // acquires back onto the element it already had.
-    REQUIRE(record.data.raw() != nullptr);
-    auto const index = u32(m.acquire_buffer(record.data.as_readonly_buffer()));
+    // Pending and rangeless until it lands; then a range of the one pool, holding exactly its bytes.
+    CHECK(record.state == sv::residency::pending);
+    CHECK(record.offset == -1);
+    m.wait_for_pending_uploads();
+    auto const& landed = m.attributes.get(id);
+    REQUIRE(landed.state == sv::residency::complete);
+    REQUIRE(landed.offset >= 0);
 
+    auto cmd = ctx.create_command_list();
+    auto const pool_back = cmd->download.data_from_buffer(m.attributes.pool());
+    ctx.submit_command_list(cc::move(cmd));
+    auto const pool = co_await pool_back.data();
+    auto const expected = normals.data.span();
+    REQUIRE(landed.offset + expected.size() <= pool.size());
+    CHECK(cc::memcmp(pool.data() + landed.offset, expected.data(), size_t(expected.size())) == 0);
+
+    // The index a block carries is the pool's, acquired per epoch; an unchanged view acquires back onto the element it had.
+    auto const index = u32(m.acquire_buffer(m.attributes.pool().as_readonly_buffer()));
     ctx.advance_epoch();
     co_await ctx.idle_completion();
     m.advance_to(ctx.current_epoch());
-    CHECK(u32(m.acquire_buffer(m.attributes.get(id).data.as_readonly_buffer())) == index);
+    CHECK(u32(m.acquire_buffer(m.attributes.pool().as_readonly_buffer())) == index);
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+// Every attribute lives in one pool, which grows by copying itself into a larger one, on the list about to write the new ranges.
+// Streamed attributes land through that path at collect time, inline ones when their bytes are written; both have to survive it.
+ASYNC_INVOCABLE_TEST("sv - attributes share one pool, and every one survives the pool growing",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    // 24 attributes of 128 KiB, so the pool's first megabyte is outgrown on both paths, each element telling them apart.
+    constexpr auto elements = 32 * 1024;
+    auto const make = [&](int k)
+    {
+        auto values = cc::vector<f32>::create_defaulted(elements);
+        for (auto i = 0; i < elements; ++i)
+            values[i] = float(k * elements + i);
+        return sv::mesh_attribute::create(cc::format("a{}", k), sv::attribute_frequency::per_vertex, values);
+    };
+    auto attributes = cc::vector<sv::mesh_attribute>();
+    auto ids = cc::vector<sv::attribute_id>();
+    for (auto k = 0; k < 12; ++k)
+    {
+        attributes.push_back(make(k));
+        ids.push_back(m.attributes.acquire(attributes.back()));
+    }
+    m.wait_for_pending_uploads();
+
+    auto cmd = ctx.create_command_list();
+    for (auto k = 12; k < 24; ++k)
+    {
+        attributes.push_back(make(k));
+        ids.push_back(m.attributes.acquire_inline(attributes.back()));
+    }
+    m.attributes.record_inline_uploads(*cmd);
+    auto const pool_back = cmd->download.data_from_buffer(m.attributes.pool());
+    ctx.submit_command_list(cc::move(cmd));
+    auto const pool = co_await pool_back.data();
+    CHECK(pool.size() > 2 * 1024 * 1024);
+
+    auto wrong = 0;
+    for (auto k = 0; k < ids.size(); ++k)
+    {
+        auto const& record = m.attributes.get(ids[k]);
+        auto const expected = attributes[k].data.span();
+        if (record.state != sv::residency::complete || record.offset < 0 || record.offset + expected.size() > pool.size()
+            || cc::memcmp(pool.data() + record.offset, expected.data(), size_t(expected.size())) != 0)
+            ++wrong;
+    }
+    CHECK(wrong == 0);
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -675,6 +743,7 @@ ASYNC_INVOCABLE_TEST("sv - a parameter block is filled at the offsets the genera
     // The texture the mesh carries hashes to the id acquired above, so uploading it here is the same lookup.
     auto const mesh = m.create_mesh(data);
     CHECK(mesh.textures[0].source.texture == texture);
+    m.wait_for_pending_uploads(); // a block names an attribute only once it is in the pool
 
     auto const resolved = sv::resolve_material(lib, gold, mesh);
     auto const generated = sv::generate_material_shader(resolved);
@@ -699,12 +768,11 @@ ASYNC_INVOCABLE_TEST("sv - a parameter block is filled at the offsets the genera
     REQUIRE(rough.has_value());
     CHECK(rough.value()[0] == 0.25f);
 
-    // The mesh-sourced attribute enters as a descriptor: its buffer's bindless index, offset 0, its element stride.
+    // The mesh-sourced attribute enters as a descriptor: the attribute pool's bindless index, its offset there, its element stride.
     auto const& metallic = slot_of("metallic");
     CHECK(metallic.kind == sv::material_slot_kind::attribute_descriptor);
-    auto const metallic_buffer = m.attributes.get(mesh.attributes[0].attribute).data.as_readonly_buffer();
-    CHECK(u32_at(block, metallic.offset) == u32(m.acquire_buffer(metallic_buffer)));
-    CHECK(u32_at(block, metallic.offset + 4) == 0u);
+    CHECK(u32_at(block, metallic.offset) == u32(m.acquire_buffer(m.attributes.pool().as_readonly_buffer())));
+    CHECK(u32_at(block, metallic.offset + 4) == u32(m.attributes.get(mesh.attributes[0].attribute).offset));
     CHECK(u32_at(block, metallic.offset + 8) == u32(sizeof(f32)));
 
     // The sampled attribute enters as this epoch's texture index, plus a descriptor for the uv set it samples through.
@@ -717,6 +785,81 @@ ASYNC_INVOCABLE_TEST("sv - a parameter block is filled at the offsets the genera
 
     // Building it again mints nothing new: every index it writes is one this epoch already handed out.
     CHECK(cc::memcmp(m.build_instance_parameters(m.get_instance(instance)).data(), bytes.data(), bytes.size()) == 0);
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+// Every block lives in one parameter pool, which grows by replacement: a block uploaded before the growth is in the old
+// pool alone, and has to arrive in the new one the next time its record is described.
+ASYNC_INVOCABLE_TEST("sv - parameter blocks share one pool, and every block reaches a pool that grew",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto const mesh = m.create_mesh({.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)});
+    m.wait_for_pending_uploads();
+
+    // One permutation, so one layout; each material's roughness alone tells its block apart.
+    auto materials = cc::vector<sv::instance_id>();
+    auto generated = cc::optional<sv::generated_material_shader>();
+    auto const describe_all = [&](sg::command_list& cmd)
+    {
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
+        for (auto const instance : materials)
+            records.push_back(m.describe_instance(cmd, mesh.geometry, instance));
+        return records;
+    };
+
+    // Enough materials that the blocks outgrow the pool's first 64 KiB, whatever one block's size.
+    auto first_cmd = ctx.create_command_list();
+    auto last_offset = u32(0);
+    for (auto i = 0; i < 20000 && last_offset < 64 * 1024; ++i)
+    {
+        auto overrides = cc::vector<sv::material_attribute_binding>();
+        overrides.push_back(sv::material_attribute_binding::of("roughness", float(i) / 20000.0f));
+        auto const material = lib.acquire(sv::material::create(cc::format("m{}", i), pbr, overrides));
+        auto const resolved = sv::resolve_material(lib, material, mesh);
+        if (!generated.has_value())
+            generated = sv::generate_material_shader(resolved);
+        materials.push_back(m.acquire_instance(resolved, generated.value().layout));
+        last_offset = m.describe_instance(*first_cmd, mesh.geometry, materials.back()).param_offset;
+    }
+    REQUIRE(last_offset >= 64 * 1024u);
+    ctx.submit_command_list(cc::move(first_cmd));
+
+    // The next frame names the grown pool for every record, and every block has uploaded into it again.
+    ctx.advance_epoch();
+    m.advance_to(ctx.current_epoch());
+    auto cmd = ctx.create_command_list();
+    auto const records = describe_all(*cmd);
+    auto const pool_back = cmd->download.data_from_buffer(m.parameter_pool());
+    ctx.submit_command_list(cc::move(cmd));
+    auto const pool = co_await pool_back.data();
+
+    auto const pool_slot = u32(m.acquire_buffer(m.parameter_pool().as_readonly_buffer()));
+    auto wrong_slot = 0;
+    auto wrong_bytes = 0;
+    for (auto i = 0; i < materials.size(); ++i)
+    {
+        if (records[i].param_buffer != pool_slot)
+            ++wrong_slot;
+        auto const expected = m.build_instance_parameters(m.get_instance(materials[i]));
+        auto const at = isize(records[i].param_offset);
+        if (at + expected.size() > pool.size()
+            || cc::memcmp(pool.data() + at, expected.data(), size_t(expected.size())) != 0)
+            ++wrong_bytes;
+    }
+    CHECK(wrong_slot == 0);
+    CHECK(wrong_bytes == 0);
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -951,6 +1094,9 @@ ASYNC_INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seede
         sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
                                    cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
     auto const mesh_gpu = m.create_mesh(data);
+
+    // The uv lands, since a block names an attribute only once it is in the pool; the texture may still stream.
+    m.attributes.wait_for_settled();
 
     auto textured = mesh_gpu;
     textured.textures.push_back({.name = "base_color", .source = {.texture = texture, .uv_attribute = "uv"}});

@@ -24,7 +24,8 @@
 /// Every texture is at one extent and created with `render_target` usage; `module raster`'s `targets` is the same set in SGL.
 struct sv::raster_gbuffer
 {
-    /// The lit radiance, alpha 1, rgba32_float: the layer's accumulation slot.
+    /// The lit radiance, rgba32_float: the layer's accumulation slot.
+    /// Its alpha is the radiance's luminance squared, `pt.moment_of`, which the mean blends into its second moment.
     sg::texture_2d color;
 
     /// The geometric normal turned toward the viewer, world space, rgba16_float.

@@ -36,7 +36,7 @@ target_compile_features(shaped-shader-compiler-msl PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-shader-compiler-msl/...>' works for consumers.
 target_include_directories(shaped-shader-compiler-msl
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # shaped-graphics provides sg::compiled_shader, which is this library's whole output type.

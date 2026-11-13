@@ -353,6 +353,7 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
         b.add_pod(p.task_meshes);
         b.add_pod(p.launch_budget);
     }
+    b.add_pod(desc.geometry_mesh_corners);
     b.add_bool(desc.tessellation_polyfill.has_value());
     if (desc.tessellation_polyfill.has_value())
     {

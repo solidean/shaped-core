@@ -390,6 +390,7 @@ struct color_target_state;          // {format, blend, write_mask} — one color
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
 enum class mesh_polyfill_slots : u8;
 enum class polyfill_use : u8;
+enum class geometry_polyfill_route : u8;
 struct mesh_polyfill_description; // {compute_shader, corners, primitives_per_group, words_per_group} — a mesh stage as compute + draw
 struct tessellation_polyfill_description; // the tessellation stages as compute passes + draw
 struct raster_target_formats;             // {color formats, depth format, sample count} a pipeline is compiled for
@@ -411,6 +412,7 @@ struct geometry_polyfill_draw;
 struct tessellation_polyfill_state;
 void set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_state state);
 void set_tessellation_polyfill(raster_pipeline const& pipeline, tessellation_polyfill_state state);
+void set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.

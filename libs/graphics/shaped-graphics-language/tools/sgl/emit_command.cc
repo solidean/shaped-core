@@ -144,9 +144,11 @@ COMMAND("emit")
         mesh = sgl::emit::mesh_form::scan;
     else if (mesh_name == "launched")
         mesh = sgl::emit::mesh_form::launched;
+    else if (mesh_name == "mesh")
+        mesh = sgl::emit::mesh_form::mesh;
     else if (mesh_name != "native")
     {
-        cc::eprintln("sgl emit: unknown --mesh '{}' (one of native, compute, scan, launched, vertex)", mesh_name);
+        cc::eprintln("sgl emit: unknown --mesh '{}' (one of native, compute, scan, launched, vertex, mesh)", mesh_name);
         return exit_usage;
     }
 

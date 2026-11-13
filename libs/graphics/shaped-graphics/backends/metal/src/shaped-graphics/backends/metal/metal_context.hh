@@ -128,6 +128,7 @@ public:
     /// A geometry stage is polyfilled here, since metal has none; every mesh stage is native.
     [[nodiscard]] bool draws_geometry_polyfill() const override { return true; }
     [[nodiscard]] bool draws_tessellation_polyfill() const override { return true; }
+    [[nodiscard]] bool draws_geometry_mesh_route() const override { return true; }
 
     /// The backend-typed buffer create, which the sg::context virtual forwards to.
     [[nodiscard]] cc::result<metal_buffer_handle> create_metal_buffer(isize size_in_bytes,

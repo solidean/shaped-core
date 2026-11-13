@@ -302,6 +302,12 @@ client->send_streaming(cc::move(request),                   // the sink is hande
                        {}, token);
 req.body = cc::make_pinned_data(cc::move(bytes));           // the body carries its OWNER, so it outlives this call
 client->level();                                            // cnet::http_level::client for this backend
+
+#include <clean-net/http/fetch_http_client.hh>
+auto browser = cnet::fetch_http_client(io);                 // wasm: the browser's fetch; elsewhere every request is `unsupported`
+cnet::fetch_http_client::is_supported();                    // true on wasm only
+cnet::fetch_http_client::document_url();                    // the page's URL, to resolve a relative reference against
+cnet::http_get(browser, url);                               // same calls; level() is http_level::fetch
 ```
 
 Five things worth knowing.
@@ -311,6 +317,9 @@ Five things worth knowing.
 It runs on the reactor thread: hand the bytes on, do no work there.
 **One budget covers the whole request** — resolve, connect, handshake and every read — because a per-phase timeout lets a four-address host take four times what the caller asked for.
 **Connections are pooled** per origin, and a request that fails on a pooled connection before any byte arrived is retried once on a fresh one — which is what makes reuse safe.
+
+**The fetch backend refuses `follow_redirects = false`** with `level_not_supported`, since a browser follows redirects itself.
+Its JavaScript runs on the main runtime thread, whichever thread sent the request.
 
 Redirects are followed by default, up to `max_redirects`; a 301, 302 or 303 turns anything but HEAD into a bodyless GET, and `Authorization` and `Cookie` are dropped when the origin changes.
 

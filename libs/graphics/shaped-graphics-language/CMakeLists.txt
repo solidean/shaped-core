@@ -130,6 +130,10 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flatten_call.cc
     src/shaped-graphics-language/check/flatten_stmt.cc
     src/shaped-graphics-language/check/flatten_diff.cc
+    src/shaped-graphics-language/check/flatten_diff_lower.cc
+    src/shaped-graphics-language/check/flatten_diff_forward.cc
+    src/shaped-graphics-language/check/flatten_diff_straighten.cc
+    src/shaped-graphics-language/check/flatten_diff_backward.cc
     src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
@@ -361,7 +365,7 @@ target_sources(shaped-graphics-language
 target_compile_features(shaped-graphics-language PUBLIC cxx_std_23)
 
 # Expose "src" so '#include <shaped-graphics-language/...>' works for consumers.
-target_include_directories(shaped-graphics-language PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(shaped-graphics-language PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 
 target_link_libraries(shaped-graphics-language PUBLIC clean-core)
 
@@ -467,6 +471,7 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/check/autodiff-fuzz-test.cc
         tests/corpus/corpus-test.cc
         tests/check/array-check-test.cc
         tests/check/module-check-test.cc

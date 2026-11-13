@@ -286,6 +286,11 @@ bool is_temporal(denoise_method m)
         || m == denoise_method::nrd || m == denoise_method::metalfx_rr;
 }
 
+bool reconstructs_from_jitter(denoise_method m)
+{
+    return is_temporal(m) && m != denoise_method::svgf;
+}
+
 reconstruct_guide_set required_guides(denoise_method m)
 {
     using g = reconstruct_guide;

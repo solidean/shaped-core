@@ -114,15 +114,21 @@ constexpr sr::key_modifiers zoom_modifiers = sr::key_modifiers::ctrl;
 
 /// Blocks the calling thread until `node` settles, and hands back how it settled.
 ///
-/// **A workaround, and marked as one:** the viewer is a synchronous pull loop, so it blocks where an async frame loop would await.
-/// It goes once `sv::viewer` grows an async frame loop, and until then it refuses a context that cannot block.
+/// The synchronous loops' wait: `end_frame`, a `frame_scope` and the destructor block where `end_frame_async` and `finish` are awaited.
+/// It refuses a context that cannot block, whose caller drives the awaited forms instead.
 /// An error is left to the caller, and a device lost mid-wait surfaces again as the next device call's throw.
 template <class T>
-[[nodiscard]] cc::result<T, cc::async_error> block_on(sg::context& ctx, cc::shared_async<T> const& node)
+[[nodiscard]] auto block_on(sg::context& ctx, cc::shared_async<T> const& node)
 {
     auto const may_block = ctx.execution() == sg::execution_model::may_block;
     CC_ASSERT(may_block, "sv::viewer blocks its caller's thread every frame, and this context cannot block");
     return cc::try_async_blocking_get(node);
+}
+
+/// Settles once `node` settles, whatever it settled to: the throttle a guest takes from one of its submissions.
+[[nodiscard]] cc::shared_async<cc::unit> settled_of(cc::shared_async<cc::unit const> node)
+{
+    co_await cc::async_settled(node);
 }
 
 /// Why a capture write failed, or empty when it succeeded — its result is move-only, so it is read where it settled.
@@ -142,6 +148,10 @@ constexpr isize max_capture_writes_in_flight = 16;
 /// How many samples a capture's still hybrid frame packs.
 /// A sample of a 1080p frame costs about 2 ms on a laptop RTX 5070, so 16 keep a frame near a few dozen milliseconds of GPU work.
 constexpr u32 capture_samples_per_frame = 16;
+
+/// How many frames a capture of a `raster_bound` layer waits once nothing is owed, where the request names no
+/// iteration count: enough for its shadow and antialiasing histories to settle.
+constexpr i32 raster_capture_frames = 128;
 
 /// Waits for one capture write and logs why it failed, if it did.
 /// The longest a capture waits for one image's readback and encode before it gives the image up.
@@ -219,15 +229,39 @@ struct viewer::impl
     sg::render_target_view current_backbuffer;
     std::unique_ptr<sg::command_list> current_cmd; // sg command lists are std::unique_ptr, not cc
 
+    // The GPU timestamps around each frame's command list that have not come back yet, oldest first, and the latest duration that did.
+    struct frame_timing
+    {
+        sg::gpu_timestamp begin;
+        sg::gpu_timestamp end;
+    };
+    cc::vector<frame_timing> pending_timings;
+    sg::gpu_timestamp frame_begin;
+    cc::optional<double> gpu_frame_ms;
+
     // The frame begin_frame handed out, live until end_frame presents it — so the caller holds a reference rather
     // than a frame whose destructor they then have to reason about.
     // Closed between the two, and unused by frames(), whose frame belongs to the loop variable.
     frame current_frame;
 
+    // Whether frames are the record spans `sv.frame` and `sr.imgui.frame`: not for `async_frames`, whose caller
+    // authors a frame across a `co_await`, which a span may not cross.
+    bool records_frames = true;
+
     // Whether begin_frame opened the `sv.frame` scope that end_frame closes.
     // A frames() loop and a destructor with no frame open must close nothing: an unmatched end would pop whatever scope
     // the caller has open on this thread.
     bool frame_scope_open = false;
+
+    // What the last submitted frame leaves to wait on: the epochs in flight falling back to the swapchain's depth.
+    // end_frame and a frame_scope block on it before returning; end_frame_async hands it to its caller to await.
+    cc::shared_async<cc::unit> throttle;
+
+    // A guest's recent submissions, oldest first: its throttle and its finish wait on these rather than on epochs.
+    cc::vector<sg::submission_token> guest_submissions;
+
+    // Whether finish() drained the viewer, so its destructor owes nothing more.
+    bool finished = false;
 
     // Everything this viewer's views keep across frames: cameras, controllers, placements and textures alike.
     // Handed to the renderers rather than reached out of them — see view/view_store.hh.
@@ -235,6 +269,10 @@ struct viewer::impl
 
     // Where the cursor was at the last event that reported one, so a key event still routes somewhere.
     tg::pos2f last_cursor_pos = tg::pos2f(0, 0);
+
+    // A windowless viewer's input: what `feed_input` queued since the last frame, and what this frame routes.
+    cc::vector<sr::input_event> fed_events;
+    cc::vector<sr::input_event> frame_events;
 
     // A wheel event carries no modifiers, unlike key and button events, so they are remembered from those.
     sr::key_modifiers last_modifiers = sr::key_modifiers::none;
@@ -256,6 +294,9 @@ struct viewer::impl
 
     /// What reconstruction this device runs, asked once by the first frame of a final render.
     cc::optional<sr::reconstruct_support> reconstruct_support;
+
+    /// Whether the frame being finished draws a `raster_bound` layer, whose histories a capture waits out.
+    bool frame_has_raster_bound = false;
 
     /// A double-click waiting for its view's next trace, at a point of that view's image in [0, 1).
     struct pick_request
@@ -392,10 +433,24 @@ cc::result<viewer> viewer::try_create(cc::string_view id_str, viewer_config conf
 
 cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, viewer_config config)
 {
+    if (config.guest && !config.headless)
+        return cc::error("a guest viewer renders inside its host's frames, so it has no window: make it headless");
+
     // Headless brings up neither, so it needs no display and no window backend at all.
     auto ws = cc::unique_ptr<sr::window_system>();
     auto win = cc::unique_ptr<sr::window>();
-    if (!config.headless)
+    if (config.surface.has_value() && !config.headless)
+    {
+        auto const& surface = config.surface.value();
+        auto const size = surface.headless_extent.value_or(surface.window.client_size);
+        if (size[0] <= 0 || size[1] <= 0)
+            return cc::error("shaped-viewer: a surface needs a positive size");
+
+        // The surface's size is the viewer's, so everything sized off the config sees it.
+        config.width = size[0];
+        config.height = size[1];
+    }
+    else if (!config.headless)
     {
         auto ws_r = sr::window_system::try_create();
         if (ws_r.has_error())
@@ -427,11 +482,14 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     }
     else
     {
-        auto sc_r = ctx.try_create_swapchain({.window = win->native_window(),
-                                              .buffer_count = config.buffer_count,
-                                              .format = sg::pixel_format::bgra8_unorm});
+        auto description
+            = win != nullptr ? sg::swapchain_description{.window = win->native_window()} : config.surface.value();
+        description.buffer_count = config.buffer_count;
+        description.format = sg::pixel_format::bgra8_unorm;
+        auto sc_r = ctx.try_create_swapchain(description);
         if (sc_r.has_error())
-            return cc::error("shaped-viewer: could not create a swapchain for the window");
+            return cc::error(cc::format("shaped-viewer: could not create a swapchain for the window or surface: {}",
+                                        sc_r.error().to_string()));
         sc = sc_r.value();
     }
 
@@ -475,8 +533,15 @@ viewer& viewer::operator=(viewer&&) noexcept = default;
 
 viewer::~viewer()
 {
-    if (_impl == nullptr)
+    if (_impl == nullptr || _impl->finished)
         return;
+    if (_impl->ctx->execution() == sg::execution_model::never_block)
+    {
+        // Nothing here may wait, so what the viewer still owes is left to the context's own shutdown.
+        CC_LOG_ERROR("a viewer on a context that never blocks was destroyed without awaiting finish(); its last "
+                     "frames and background work were not drained");
+        return;
+    }
     try
     {
         // A loop that left through a break still holds a frame here, and its backbuffer and command list have to be
@@ -486,8 +551,16 @@ viewer::~viewer()
         // A loop that left before its capture finished still owes the images it submitted.
         drain_capture_writes();
 
-        _impl->ctx->advance_epoch();
-        (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
+        if (_impl->config.guest)
+        {
+            if (!_impl->guest_submissions.empty())
+                (void)block_on(*_impl->ctx, _impl->ctx->submission_completion(_impl->guest_submissions.back()));
+        }
+        else
+        {
+            _impl->ctx->advance_epoch();
+            (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
+        }
 
         // What the viewer started and nobody awaits still carries its caller's context.
         (void)block_on(*_impl->ctx, sv::background_work(*_impl->ctx));
@@ -513,11 +586,10 @@ bool viewer::is_running() const
 
     // Headless: nothing polls, nothing can be quit, so `request_close` is the only way out and the loop body is what
     // decides when that is.
-    if (im.config.headless)
+    // A caller's surface has no window to close either.
+    if (im.config.headless || im.window == nullptr)
         return !im.close_requested;
 
-    if (im.window == nullptr)
-        return false;
     return !im.window->is_close_requested() && !im.window_system->is_quit_requested();
 }
 
@@ -536,11 +608,23 @@ isize viewer::streaming_resources() const
     return _impl->resources.settling_count();
 }
 
+cc::optional<double> viewer::gpu_frame_ms() const
+{
+    return _impl->gpu_frame_ms;
+}
+
 cc::span<sr::input_event const> viewer::input_events() const
 {
     if (_impl->window_system == nullptr)
-        return {};
+        return _impl->frame_events;
     return _impl->window_system->events();
+}
+
+void viewer::feed_input(sr::input_event event)
+{
+    CC_ASSERT(event.window == nullptr, "a fed event names no window: the viewer it is fed to has none");
+    if (_impl->window_system == nullptr)
+        _impl->fed_events.push_back(cc::move(event));
 }
 
 cc::shared_async<cc::unit> viewer::background_work()
@@ -621,10 +705,12 @@ void viewer::begin_imgui_frame(double delta)
 
     // imgui divides by the step, and the first frame and a converging capture frame have none.
     auto const dt = float(delta > 0.0 ? delta : 1.0 / 60.0);
-    if (im.config.headless)
-        im.imgui->begin_frame({.display_size = tg::vec2i(im.config.width, im.config.height), .delta_time = dt});
+    if (im.window == nullptr)
+        im.imgui->begin_frame({.display_size = tg::vec2i(im.config.width, im.config.height),
+                               .delta_time = dt,
+                               .recorded = im.records_frames});
     else
-        im.imgui->begin_frame(*im.window, dt);
+        im.imgui->begin_frame(*im.window, dt, im.records_frames);
     im.imgui_frame_open = true;
 }
 
@@ -664,8 +750,11 @@ void viewer::begin_move(tg::pos2f window_point)
         return;
 
     // Lifting keeps the size the view already had, so the pane does not jump on the first motion.
-    auto const w = f32(im.window->width() > 0 ? im.window->width() : 1);
-    auto const h = f32(im.window->height() > 0 ? im.window->height() : 1);
+    // The window's size where there is one, the configured size on a caller's surface.
+    auto const size = im.window != nullptr ? tg::vec2i(im.window->width(), im.window->height())
+                                           : tg::vec2i(im.config.width, im.config.height);
+    auto const w = f32(size[0] > 0 ? size[0] : 1);
+    auto const h = f32(size[1] > 0 ? size[1] : 1);
 
     st->placement.size = tg::vec2f(f32(region.leaf_rect.max[0] - region.leaf_rect.min[0]) / w,
                                    f32(region.leaf_rect.max[1] - region.leaf_rect.min[1]) / h);
@@ -687,8 +776,11 @@ void viewer::move_to(tg::pos2f window_point)
     if (st == nullptr)
         return;
 
-    auto const w = f32(im.window->width() > 0 ? im.window->width() : 1);
-    auto const h = f32(im.window->height() > 0 ? im.window->height() : 1);
+    // The window's size where there is one, the configured size on a caller's surface.
+    auto const size = im.window != nullptr ? tg::vec2i(im.window->width(), im.window->height())
+                                           : tg::vec2i(im.config.width, im.config.height);
+    auto const w = f32(size[0] > 0 ? size[0] : 1);
+    auto const h = f32(size[1] > 0 ? size[1] : 1);
 
     // A fraction of the window, not a pixel rect: the caller's tree is rebuilt every frame, so the only thing that can
     // survive it is a placement the layout re-resolves from scratch.
@@ -825,10 +917,7 @@ void viewer::apply_pick()
 void viewer::route_input()
 {
     auto& im = *_impl;
-    if (im.window_system == nullptr)
-        return; // headless: no events, and no cursor to route them by
-
-    for (auto const& e : im.window_system->events())
+    for (auto const& e : input_events())
     {
         if (e.window != im.window.get())
             continue;
@@ -929,8 +1018,14 @@ void viewer::route_input()
 frame viewer::acquire_frame()
 {
     auto& im = *_impl;
-    if (!im.config.headless)
+    if (im.window_system != nullptr)
         im.window_system->poll_events();
+    else
+    {
+        // Without a window, this frame's events are the ones fed since the last.
+        im.frame_events = cc::move(im.fed_events);
+        im.fed_events = {};
+    }
 
     // Nothing else brings a render routine up, so a viewer that never ticked renders nothing at all and says nothing
     // about it: every execute declines, every frame is a clear, and a capture writes a blank image.
@@ -954,32 +1049,54 @@ frame viewer::acquire_frame()
     // imgui sees this poll's input before its frame opens below; routing reads the last frame's wants, the only answer there is yet.
     if (im.imgui != nullptr && im.window_system != nullptr)
         im.imgui->process_events(*im.window_system);
+    else if (im.imgui != nullptr)
+        for (auto const& e : im.frame_events)
+            im.imgui->process_event(e);
     route_input();
 
-    if (im.config.headless)
-    {
-        if (im.close_requested)
-            return frame{}; // closed — the loop stops on is_running()
-    }
-    else
+    if (im.window == nullptr && im.close_requested)
+        return frame{}; // closed — the loop stops on is_running()
+    if (im.window != nullptr)
     {
         if (im.window->is_close_requested() || im.window_system->is_quit_requested())
             return frame{}; // closed — the loop stops on is_running()
 
         if (im.window->is_minimized())
             return frame{}; // closed — skip this frame, the window is still open
-
+    }
+    if (!im.config.headless)
+    {
         try
         {
             im.current_backbuffer = im.swapchain->acquire_backbuffer();
         }
-        catch (sg::device_lost_exception const&)
+        catch (sg::device_lost_exception const& e)
         {
+            CC_LOG_ERROR("the device was lost, so this viewer stops rendering: {}", e.reason());
             im.stopped = true;
             return frame{};
         }
+
+        // A caller's surface can change size, and what is laid out against the config must follow what is drawn into.
+        if (im.window == nullptr)
+        {
+            im.config.width = im.current_backbuffer.size()[0];
+            im.config.height = im.current_backbuffer.size()[1];
+        }
     }
     im.current_cmd = im.ctx->create_command_list();
+
+    // Polled, never waited for: what has landed since the last frame updates the reading, oldest first.
+    while (!im.pending_timings.empty() && im.pending_timings[0].end.is_ready())
+    {
+        auto const begin = im.pending_timings[0].begin.try_get_seconds();
+        auto const end = im.pending_timings[0].end.try_get_seconds();
+        if (begin.has_value() && end.has_value())
+            im.gpu_frame_ms = (end.value() - begin.value()) * 1000.0;
+        im.pending_timings.remove_at(0);
+    }
+    if (im.current_cmd->query.is_supported() && im.pending_timings.size() < 8)
+        im.frame_begin = im.current_cmd->query.record_gpu_timestamp();
 
     // Sampled once, here, so every view in the frame sees the same instant.
     // The first drawn frame has no predecessor, so its delta is 0 rather than the loop's start-up cost, and it is also
@@ -1016,9 +1133,9 @@ frame viewer::acquire_frame()
         if (st->style_last_frame != camera_style::fly)
             continue;
 
-        // Headless counts as focused: there is no window to lose focus, and a hand-driven loop stepping `delta` forward
+        // No window counts as focused: there is none to lose focus, and a hand-driven loop stepping `delta` forward
         // is a legitimate way to script a fly-through, which releasing here would silently break.
-        if (!im.config.headless && !im.window->is_focused())
+        if (im.window != nullptr && !im.window->is_focused())
         {
             st->fly.release_input();
             continue;
@@ -1058,6 +1175,15 @@ frame& viewer::begin_frame()
     return im.current_frame;
 }
 
+frame& viewer::begin_frame_unrecorded()
+{
+    auto& im = *_impl;
+    CC_ASSERT(!im.current_frame._open, "the previous frame was never ended");
+    im.records_frames = false;
+    im.current_frame = acquire_frame();
+    return im.current_frame;
+}
+
 void viewer::end_frame()
 {
     // present() already no-ops on a frame that is closed or was never begun, so the minimized path needs no second rule.
@@ -1073,10 +1199,84 @@ void viewer::end_frame()
     }
 }
 
+cc::shared_async<cc::unit> viewer::end_frame_async()
+{
+    _impl->current_frame.submit();
+    _impl->current_frame = frame{};
+    if (_impl->frame_scope_open)
+    {
+        CC_RECORD_SCOPE_END("sv.frame");
+        _impl->frame_scope_open = false;
+    }
+    return take_throttle();
+}
+
+cc::shared_async<cc::unit> viewer::finish()
+{
+    if (_impl == nullptr || _impl->finished)
+        co_return;
+    try
+    {
+        // A frame begin_frame opened and nothing ended is submitted first, so its backbuffer and list are handed back.
+        co_await end_frame_async();
+
+        // A loop that left before its capture finished still owes the images it submitted.
+        for (auto const& writing : _impl->capture_writes)
+        {
+            co_await cc::async_settled(writing);
+            auto const* const failure = writing->try_value();
+            if (failure == nullptr)
+                CC_LOG_ERROR("capture: {}", writing->try_error()->underlying().to_string());
+            else if (!failure->empty())
+                CC_LOG_ERROR("capture: {}", *failure);
+        }
+        _impl->capture_writes.clear();
+
+        if (_impl->config.guest)
+        {
+            // a guest waits for its own work only; the epochs are its host's to advance
+            if (!_impl->guest_submissions.empty())
+                co_await _impl->ctx->submission_completion(_impl->guest_submissions.back());
+        }
+        else
+        {
+            _impl->ctx->advance_epoch();
+            co_await _impl->ctx->idle_completion();
+        }
+        co_await sv::background_work(*_impl->ctx);
+    }
+    catch (sg::device_lost_exception const&)
+    {
+        // tearing down after a device loss: nothing left to drain
+    }
+    _impl->finished = true;
+}
+
+cc::shared_async<cc::unit> viewer::take_throttle()
+{
+    auto throttle = cc::move(_impl->throttle);
+    _impl->throttle = nullptr;
+    if (throttle == nullptr)
+        return cc::make_async_from_value(cc::unit{});
+    return throttle;
+}
+
+void viewer::wait_for_throttle()
+{
+    auto const throttle = take_throttle();
+    (void)block_on(*_impl->ctx, throttle);
+}
+
 frame_range viewer::frames()
 {
     begin_frames();
     return frame_range(this);
+}
+
+void viewer::set_surface_size(tg::vec2i size)
+{
+    if (_impl != nullptr && _impl->config.surface.has_value() && _impl->swapchain != nullptr)
+        _impl->swapchain->set_window_size(size);
 }
 
 void viewer::request_close()
@@ -1084,14 +1284,11 @@ void viewer::request_close()
     if (_impl == nullptr)
         return;
 
-    if (_impl->config.headless)
+    if (_impl->config.headless || _impl->window == nullptr)
     {
         _impl->close_requested = true;
         return;
     }
-
-    if (_impl->window == nullptr)
-        return;
 
     // Routed through the window so it is the same signal the close button raises, and is_running() needs no second condition.
     _impl->window->request_close();
@@ -1306,14 +1503,21 @@ void viewer::finish_frame(frame& f)
             // A hybrid frame is one sample per pixel, too noisy to show undenoised while the camera moves.
             if (l.settings.mode == render_mode::hybrid && l.settings.reconstruct.denoiser == sr::denoise_method::none)
                 l.settings.reconstruct.denoiser = sr::denoise_method::automatic;
-            if (l.settings.mode == render_mode::raster && !im.raster_fallback_reported)
+            if (is_rasterized(l.settings.mode) && !im.ctx->supports(sg::feature::raytracing_pipeline)
+                && !im.raster_fallback_reported)
             {
-                CC_LOG_WARNING("the device has no ray tracing, so every layer left render_mode::automatic is "
-                               "rasterized: "
-                               "lit directly, unshadowed and without bounces");
+                CC_LOG_INFO("the device has no ray-tracing pipeline, so every layer left render_mode::automatic draws "
+                            "in "
+                            "render_mode::{}",
+                            l.settings.mode == render_mode::raster ? "raster" : "raster_bound");
                 im.raster_fallback_reported = true;
             }
         }
+
+    im.frame_has_raster_bound = false;
+    for (auto const& v : def.views)
+        for (auto const& l : v.layers)
+            im.frame_has_raster_bound |= l.kind == layer_kind::scene_3d && l.settings.mode == render_mode::raster_bound;
 
     // What the store already holds for each view, so the plan can decide what refreshes.
     // Read off the composite texture rather than a field stamped beside it, so "the plan believes this can be
@@ -1380,17 +1584,32 @@ void viewer::finish_frame(frame& f)
         if (im.imgui_frame_open)
             record_imgui(output);
 
-        if (im.config.headless)
+        if (im.frame_begin.is_valid())
+        {
+            im.pending_timings.push_back({.begin = im.frame_begin, .end = im.current_cmd->query.record_gpu_timestamp()});
+            im.frame_begin = {};
+        }
+
+        if (im.config.guest)
+        {
+            // a guest leaves the epochs to its host: it keeps `buffer_count` of its own frames in flight, waiting on the oldest
+            im.guest_submissions.push_back(im.ctx->submit_command_list(cc::move(im.current_cmd)));
+            if (im.guest_submissions.size() > im.config.buffer_count)
+                im.guest_submissions.remove_at(0);
+            if (im.guest_submissions.size() == im.config.buffer_count)
+                im.throttle = settled_of(im.ctx->submission_completion(im.guest_submissions[0]));
+        }
+        else if (im.config.headless)
         {
             im.ctx->submit_command_list(cc::move(im.current_cmd));
             im.ctx->advance_epoch();
-            (void)block_on(*im.ctx, im.ctx->epochs_in_flight_completion(im.config.buffer_count));
+            im.throttle = im.ctx->epochs_in_flight_completion(im.config.buffer_count);
         }
         else
         {
             im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
             im.ctx->advance_epoch();
-            (void)block_on(*im.ctx, im.ctx->epochs_in_flight_completion(im.swapchain->buffer_count()));
+            im.throttle = im.ctx->epochs_in_flight_completion(im.swapchain->buffer_count());
         }
     }
     catch (sg::device_lost_exception const& e)
@@ -1496,7 +1715,12 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         return;
     }
 
-    auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
+    // A `raster_bound` layer counts as converged once drawn, but what it keeps across frames -- its shadows' and its
+    // antialiasing's histories -- still converges, so a capture of one waits a frame count once nothing is owed.
+    auto const quiet_frames = session.note_quiet_frame(owed == 0);
+    auto const iterations = session.request().iterations;
+    auto const frame_floor = !im.frame_has_raster_bound ? 0 : (iterations > 0 ? iterations : raster_capture_frames);
+    auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran) && quiet_frames >= frame_floor;
     if (!settled && !session.is_out_of_time())
         return;
 

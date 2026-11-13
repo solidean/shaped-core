@@ -1,0 +1,11 @@
+# The shaped-core package: find_package(shaped-core), then link shaped-core::<library>.
+# Generated from tools/cmake/shaped-coreConfig.cmake.in by tools/cmake/Install.cmake.
+#
+# Installed here: @SC_INSTALL_LIBRARIES@.
+# Nothing is to be defined and no flag is to be passed: clean-core/build_config.hh carries the configuration they were built in.
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+@SC_INSTALL_FIND_DEPENDENCIES@
+include("${CMAKE_CURRENT_LIST_DIR}/shaped-core-targets.cmake")

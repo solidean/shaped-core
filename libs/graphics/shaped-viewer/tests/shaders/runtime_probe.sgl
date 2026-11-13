@@ -47,12 +47,12 @@ binding runtime_probe_io:
 
     let c = runtime_probe_io.cases[id.x]
 
-    let prim = quadric.load_primitive(runtime_probe_io.quadrics, c.quadric)
+    let prim = quadric.load_primitive(runtime_probe_io.quadrics, 0u, c.quadric)
     let hit = quadric.intersect(prim, c.origin, c.dir, c.t_min, c.t_max)
     let roots = quadric.roots_of(prim.surface, c.origin - prim.origin, c.dir)
 
     let none = scene.no_offset
-    let inst = scene.instance(7u, 64u, 0u, 0u, 0u, c.first_index, 0xffffffffu, scene.value_none, none, none, 0u, 0u, 0u, none, none, 0u, 0u, scene.value_none, none, none, 0u, 0u, 0u, none, scene.value_none, none, none, 0u, 0u, 0u, none, scene.value_none, none, none, 0u, 0u, 0u, none, scene.value_none, none, none, 0u, 0u, 0u, none, none, 0u, 0u, float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0))
+    let inst = scene.instance(7u, 64u, 0u, 0u, 0u, c.first_index, 0xffffffffu, scene.value_none, none, none, 0u, 0u, 0u, none, none, 0u, 0u, scene.value_none, none, none, 0u, 0u, 0u, none, scene.value_none, none, none, 0u, 0u, 0u, none, scene.value_none, none, none, 0u, 0u, 0u, none, scene.value_none, none, none, 0u, 0u, 0u, none, none, 0u, 0u, float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0))
 
     let ctx = material.make_context(inst, runtime_probe_io.indices, c.primitive, c.bary)
     let qctx = quadric.make_context(inst, c.quadric)

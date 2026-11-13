@@ -15,9 +15,31 @@ add_subdirectory(extern/shaped-core EXCLUDE_FROM_ALL)
 - `SC_BUILD_TESTS`, `SC_BUILD_TOOLS` and `SC_BUILD_EXAMPLES` default to OFF here.
   Set `SC_BUILD_TOOLS` ON before the call to build shaped-linter into your tree for `dev.py lint shaped`.
 - **The repo-wide build flags reach you through clean-core.**
-  The x86-64 level (`CC_X64_LEVEL`), floating-point contraction, sanitizers, coverage, PGO and the wasm flags are recorded on `shaped-core::build-config`, which clean-core links `PUBLIC`.
-  Some of them are ABI, so a target that uses shaped-core headers must link clean-core, directly or not — never only include its headers.
+  The x86-64 level's flag, floating-point contraction, sanitizers, coverage, PGO and the wasm flags are recorded on `shaped-core::build-config`, which clean-core links `PUBLIC`.
   [tools/cmake/BuildConfig.cmake](../../tools/cmake/BuildConfig.cmake) is the mechanism.
+- **What is ABI is clean-core's generated `clean-core/build_config.hh`**, not a compile definition: the configuration, `CC_X64_LEVEL`, threading, source sites.
+  `macros.hh` includes it, so a target using shaped-core headers still links clean-core, directly or not, for its include directory.
+- `SC_LIBRARIES` names the libraries you need; only they and their shaped-core dependencies are added.
+
+## An installed shaped-core
+
+`-DSC_INSTALL=ON` adds install rules for every built library, and `cmake --install` lays out a CMake package:
+
+```cmake
+find_package(shaped-core REQUIRED)
+target_link_libraries(app PRIVATE shaped-core::shaped-graphics-language)
+```
+
+- **The consumer defines nothing and passes no flag**: the exported targets carry no compile definition and no code-generation option.
+  `clean-core/build_config.hh` holds the configuration they were built in.
+  A consumer must still be compiled for at least the build's `SC_X64_LEVEL`, since inline functions of the headers are compiled in its TUs.
+  The one option the targets carry is MSVC's `/Zc:preprocessor`, since clean-core's headers use `__VA_OPT__`.
+- **Externals come from your package manager when `SC_USE_VENDORED_<X>=OFF`.**
+  clean-core's six are then found by `find_package` (`mimalloc`, `xxHash`, `BLAKE3`, `zstd`, `lz4`, `ZLIB`), and `shaped-coreConfig.cmake` finds them again.
+  Vendored ones are installed as archives beside the libraries, under `shaped-core::` names, their licenses in `share/shaped-core/licenses/`.
+- A library whose externals cannot be installed yet, the graphics stack's fetched SDKs among them, fails configure by name.
+- `SC_PACKAGE_VERSION` (default `0.0.0`) is the version the package reports, for a recipe to set.
+- `uv run tools/install-test/install-test.py` is the test: it installs `SC_LIBRARIES=shaped-graphics-language` and builds a consumer against it.
 - **The end-of-configure registries run at the end of your top-level CMakeLists**, not of shaped-core's.
   The nexus binary manifest, shader packages and the wasm test pages therefore see your targets too, and you call none of the finalizers yourself.
   Register your test binaries with `sc_nexus_binary` and `dev.py test` finds them.

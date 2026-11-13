@@ -210,6 +210,10 @@ struct sg::raster_pipeline_description
     /// It takes no vertex input, the compute passes reading the bound buffers, and `topology` must be the list its
     /// `output` draws as.
     cc::optional<tessellation_polyfill_description> tessellation_polyfill;
+    /// A geometry stage's mesh route (SGL's CHK-525): `mesh_shader` is the vertex and geometry stages as one, and the
+    /// pipeline draws with `draw` or `draw_indexed` over primitives of this many corners, as its geometry stage would.
+    /// 0 for every other pipeline; the stage appends triangles alone so far, so `topology` must be the triangle list.
+    int geometry_mesh_corners = 0;
 
     vertex_input_layout vertex_input;
     primitive_topology topology = primitive_topology::triangle_list;
@@ -312,6 +316,9 @@ public:
         return _tessellation_polyfill.has_value() ? &_tessellation_polyfill.value() : nullptr;
     }
 
+    /// The corners of the primitives a geometry stage's mesh route assembles, or 0 where the pipeline is none.
+    [[nodiscard]] int geometry_mesh_corners() const { return _geometry_mesh_corners; }
+
     /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
     /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
     [[nodiscard]] impl::pipeline_footprint const& footprint() const { return _footprint; }
@@ -331,6 +338,7 @@ private:
     friend void impl::set_footprint(raster_pipeline const& pipeline, impl::pipeline_footprint footprint);
     friend void impl::set_mesh_polyfill(raster_pipeline const& pipeline, impl::mesh_polyfill_state state);
     friend void impl::set_tessellation_polyfill(raster_pipeline const& pipeline, impl::tessellation_polyfill_state state);
+    friend void impl::set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners);
 
     cc::string _target_set;
     cc::optional<raster_target_formats> _target_formats;
@@ -338,4 +346,5 @@ private:
     bool _is_mesh_shaded = false;
     cc::optional<impl::mesh_polyfill_state> _mesh_polyfill;
     cc::optional<impl::tessellation_polyfill_state> _tessellation_polyfill;
+    int _geometry_mesh_corners = 0;
 };

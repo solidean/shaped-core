@@ -24,7 +24,7 @@ use display
     display: float4
     /// view only: the grade's temperature, tint and vignette
     grade_balance: float4
-    /// view only: the grade's contrast and saturation
+    /// view only: the grade's contrast and saturation, and z 1 where the source is opaque
     grade_tone: float4
 
 /// The sampler is dynamic rather than static: a draw picks nearest or linear, so its state is the caller's.
@@ -61,8 +61,10 @@ struct layout_varyings:
     return {color = layout_constants.tint}
 
 // One view across its rect, through its display transform.
+// An opaque source's alpha is no coverage: a scene layer's image carries its samples' second moment there, which à-trous reads.
 @pixel fun view_ps(v: layout_varyings){layout_sources, layout_constants} -> layout_target:
-    let sample = layout_sources.source_0.sample(v.uv0, layout_sources.source_sampler, level = 0.0)
+    let sampled = layout_sources.source_0.sample(v.uv0, layout_sources.source_sampler, level = 0.0)
+    let sample = if layout_constants.grade_tone.z > 0.5 => float4(..sampled.xyz, 1.0) else sampled
     let graded = layout_constants.display.z > 0.0
     let shown = if graded => display.transform_graded(sample, layout_constants.display.x, layout_constants.display.y as uint, layout_constants.grade_balance.xyz, layout_constants.grade_tone.xy, v.local) else display.transform_premultiplied(sample, layout_constants.display.x, layout_constants.display.y as uint)
     if layout_constants.display.w > 0.0:

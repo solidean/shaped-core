@@ -155,6 +155,24 @@ public:
     /// Only a persistent one may be the target of ctx.upload, ctx.download or ctx.stream; a transient texture transfers inline, through a command list.
     [[nodiscard]] lifetime_scope scope() const { return _scope; }
 
+    // Cached views — an escape hatch for a backend that keeps the views it makes (webgpu, where a browser frees a view
+    // only when its garbage collector runs).
+    // The next request makes a fresh view, and a binding group made already keeps the one it was made with.
+    // A backend that caches nothing ignores both.
+
+    /// Drop the cached view over `range` read as `dimension` in `format`; undefined means the texture's own format.
+    virtual void release_cached_view(texture_view_dimension dimension,
+                                     pixel_format format,
+                                     subresource_range const& range) const
+    {
+        (void)dimension;
+        (void)format;
+        (void)range;
+    }
+
+    /// Drop every view cached for this texture, the whole-texture one included.
+    virtual void release_cached_views() const {}
+
     // Expiry — a texture may be marked expired, its storage reclaimed, while handles to it still exist.
     // Naming an expired texture is invalid.
 

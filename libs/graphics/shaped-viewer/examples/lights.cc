@@ -1,5 +1,5 @@
 #include <clean-core/container/vector.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 
 // Every kind of light the viewer has, one per panel, over the same small stage — so what differs between two panels is
@@ -22,6 +22,7 @@
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/lights
+// On the web, build the emscripten-webgpu preset and open web/lights.html, served over https or from localhost.
 //   uv run dev.py example shaped-viewer/lights --capture    # headless, writes an image
 
 namespace
@@ -71,7 +72,7 @@ sv::mesh make_stage()
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/lights")
+ASYNC_EXAMPLE("shaped-viewer/lights")
 {
     using namespace tg::literals;
 
@@ -85,9 +86,10 @@ EXAMPLE("shaped-viewer/lights")
     // widens with the distance from the object casting it.
     auto const slant = tg::vec3f(0.85f, -0.55f, 0.45f);
 
-    for (auto f : sv::interactive("shaped-viewer/lights"))
+    auto frames = sv::interactive_async("shaped-viewer/lights");
+    while (auto* f = co_await frames.next())
     {
-        auto grid = f.window().view().layout_grid(3, 2, {.padding = 6, .spacing = 6});
+        auto grid = f->window().view().layout_grid(3, 2, {.padding = 6, .spacing = 6});
 
         // The same stage in every panel; only its light differs.
         auto const panel = [&](cc::string_view id)

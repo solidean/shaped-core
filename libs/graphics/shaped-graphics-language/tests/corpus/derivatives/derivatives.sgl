@@ -37,7 +37,7 @@ test:
     above == 18.0
     below == 0.0
 
-// a local overwritten in a loop: backward unrolls the loop and restores each value it overwrote
+// a local overwritten in a loop: backward walks the loop back and restores each value it overwrote
 fun energy(v: float3) -> float:
     let mut e = 0.0
     for i in 0 ..< 3:

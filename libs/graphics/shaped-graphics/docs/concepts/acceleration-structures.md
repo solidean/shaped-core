@@ -247,10 +247,10 @@ The layout is a contract with SGL, and [raytracing-polyfill.md](../../../shaped-
 
 - **Every BLAS and TLAS is a region of one storage buffer per context**, the acceleration pool, suballocated in 16-byte units.
   A structure's handle is its offset there, so `size_in_bytes()` is its region's size.
-- **The tree follows the primitive order, with no spatial sort.**
-  Leaves are consecutive runs of up to four primitives and each level pairs consecutive nodes, so the CPU writes the topology and compute kernels fill in the boxes.
-  A mesh in a coherent triangle order traces well, and a triangle soup traces slowly.
-- **The build flags are checked and otherwise change nothing**: one build path serves them all, with no refit or compaction behind it.
+- **The records are sorted by the Morton code of their centers, on the GPU, and the tree follows that order.**
+  Leaves are consecutive runs of up to four records and each level pairs consecutive nodes, so the CPU writes the topology and compute kernels fill in the boxes.
+  So a mesh traces about as fast in any triangle order; unsorted, a shuffled one traced up to 2500 times slower.
+- **`fast_build` skips the sort**, which leaves the caller's order; every other flag is checked and changes nothing, with no refit or compaction behind it.
 - **A pipeline layout binds at most 16 acceleration structures**, the size of the roots block the pool is traced from.
 - **All structures together fit in 128 MiB**, WebGPU's default largest storage binding, since the pool is bound whole.
   A build past it throws `sg::allocation_exception`.

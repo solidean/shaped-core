@@ -274,7 +274,7 @@ struct differ
         {
             if (same(a, b))
                 return false;
-            if constexpr (is_layered_v<T> || is_vector_v<T>)
+            if constexpr (is_layered_v<T> || is_vector_v<T> || is_fixed_array_v<T>)
             {
                 if (a.size() != b.size())
                 {

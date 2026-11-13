@@ -169,10 +169,21 @@ The MSVC, GCC, iOS, Android and wasm presets stay at `FULL`: wasm has no address
 
 ## x86-64 feature level (`SC_X64_LEVEL`)
 
-`SC_X64_LEVEL` (default `v3`) is the x86-64 feature level every function in the build may assume: `v1` (SSE2), `v2` (SSE4.2, POPCNT), `v3` (AVX2, FMA, F16C, BMI) or `v4` (AVX-512 F/BW/CD/DQ/VL).
-It reaches the compiler as `-march=x86-64-vN`, as `/clang:-march=…` under clang-cl, or as MSVC's `/arch:` spelling, and as `CC_X64_LEVEL=N`.
+`SC_X64_LEVEL` (default `v3`) is the x86-64 feature level every function in the build may assume.
+It is `v1` (SSE2), `v2` (SSE4.2, POPCNT), `v2-avx`, `v3` (AVX2, FMA, F16C, BMI) or `v4` (AVX-512 F/BW/CD/DQ/VL).
+It reaches the compiler as `-march=x86-64-vN`, as `/clang:-march=…` under clang-cl, or as MSVC's `/arch:` spelling.
+It reaches the code as `CC_X64_LEVEL=N` in clean-core's generated `build_config.hh`, which every consumer of clean-core includes, installed or not.
 The define exists because cl.exe reports `__AVX2__` but none of the SSE levels, so a header cannot recover `v2` from the predefined macros alone.
 It is a no-op on targets that are not x86-64.
+
+**`v2-avx` is `v2` plus AVX, without AVX2, FMA or BMI** — the level of a consumer built for AVX alone, as MSVC's `/arch:AVX` builds.
+It is no psABI level, so it is spelled beside `v2` rather than numbered: `-march=x86-64-v2 -mavx`, `/clang:-march=x86-64-v2 /clang:-mavx` under clang-cl, and `/arch:AVX` under cl.exe.
+The code reads it as `CC_X64_LEVEL=2` with `CC_X64_AVX=1` beside it, so every `CC_X64_LEVEL >= n` treats it as `v2`.
+clean-simd's floor kernel is `v2`'s, `sse42`, since no kernel is written for AVX without AVX2; `avx2` and `avx512` stay dispatched above it.
+The `v2-avx-msvc` preset builds and tests it with cl.exe, and CI runs it on Windows MSVC.
+Microsoft's `/arch` documentation names no POPCNT, CX16 or LAHF-SAHF under `/arch:SSE4.2` or `/arch:AVX`.
+A compile test with cl 19.44 shows both emitting POPCNT unconditionally for `std::popcount` and SSE4.1's `roundss` for `std::floor`.
+Neither emits CMPXCHG16B, so a 16-byte `std::atomic` stays a lock: that part of `v2` is what the CPU has, not what cl.exe spends.
 
 **It is a floor, not a ceiling.**
 The compiler spends the flag in every function it emits, `cc` and user loops included: at `v4` a plain AABB loop compiles to AVX-512 scatters with k-register masks.

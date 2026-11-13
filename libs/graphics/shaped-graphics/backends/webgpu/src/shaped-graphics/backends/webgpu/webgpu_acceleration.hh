@@ -26,9 +26,12 @@ inline constexpr isize acceleration_roots_bytes = 64;
 /// The grid of a dispatch by threads, `uint4`, which group 3 holds where a layout asks for it.
 inline constexpr isize dispatch_grid_bytes = 16;
 inline constexpr isize max_acceleration_members = acceleration_roots_bytes / 4;
+
+/// The spatial sort's scratch is bound whole, so it is no larger than the default maxStorageBufferBindingSize.
+inline constexpr isize max_sort_scratch_bytes = isize(128) * 1024 * 1024;
 } // namespace sg::backend::webgpu
 
-/// The internal compute kernels a build records, all in one WGSL module.
+/// The internal compute kernels a build records, all in one WGSL module, in `k_kernel_entry_points` order.
 enum class sg::backend::webgpu::acceleration_kernel
 {
     write_triangles,
@@ -36,6 +39,14 @@ enum class sg::backend::webgpu::acceleration_kernel
     write_boxes,
     write_leaves,
     write_levels,
+    sort_clear,
+    sort_bounds,
+    sort_keys,
+    sort_count,
+    sort_scan_rows,
+    sort_scan_bases,
+    sort_scatter,
+    sort_gather,
 };
 
 /// A pool region one command list wrote, and the pool buffer it wrote it into.
@@ -85,6 +96,11 @@ public:
     /// A tiny storage buffer bound where a kernel reads no input, since a writable pool excludes binding it there too.
     [[nodiscard]] WGPUBuffer unused_input();
 
+    /// The spatial sort's working buffer, bound at binding 5 of every build kernel, holding at least `min_words` u32s.
+    /// Grown and never shrunk; **a growth replaces the buffer**, so a list that bound the old one keeps it alive itself.
+    /// `min_words` must fit `max_sort_scratch_bytes`.
+    [[nodiscard]] wgpu_buffer const& sort_scratch(isize min_words = 0);
+
 private:
     void grow(isize min_units);
     void free_now(u32 unit, u32 units);
@@ -108,6 +124,8 @@ private:
     wgpu_shader_module _kernel_module;
     cc::vector<wgpu_compute_pipeline> _kernels;
     wgpu_buffer _unused_input;
+    wgpu_buffer _sort_scratch;
+    isize _sort_scratch_words = 0;
 };
 
 /// WebGPU bottom-level acceleration structure: a region of the context's acceleration pool.

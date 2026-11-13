@@ -10,6 +10,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/rendering/hybrid_routine.hh>
+#include <shaped-viewer/scene/studio.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
 // The hybrid: rasterized primary hits, lit by the tracer's next-event estimate with inline shadow rays.
@@ -65,7 +66,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
                                               sv::hybrid_lighting lighting,
                                               int frames,
                                               sv::background const& background = {},
-                                              int bounces = 1)
+                                              int bounces = 1,
+                                              int samples = 1)
 {
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
@@ -116,6 +118,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         fc.rng_seed = u32(f) + 1u;
         // what a hybrid frame reads as its bounce count, `render_settings::hybrid_bounces`
         fc.max_bounces = bounces;
+        // and its samples per pixel, `render_settings::hybrid_moving_samples`
+        fc.hybrid_samples = samples;
 
         auto const background_buffer = ctx.transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(background),
                                                                             sg::buffer_usage::readonly_buffer);
@@ -187,32 +191,6 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         out.color.push_back(s / f32(frames));
     co_return out;
 }
-/// An indexed UV sphere of `radius` around `center`, faceted, wound so every face points outward.
-///
-/// TEMPORARY(debt-sv-examples-hand-rolled-primitive-meshes): one more hand-rolled sphere; a `tg::` sphere tessellation replaces it.
-[[nodiscard]] sv::triangle_geometry sphere_geometry(f32 radius, int rings, int segments, tg::vec3f center = {})
-{
-    auto positions = cc::vector<tg::pos3f>();
-    for (auto r = 0; r <= rings; ++r)
-    {
-        auto const theta = tg::angle_f::make_from_radians(f32(r) / f32(rings) * tg::pi<f32>);
-        for (auto s = 0; s <= segments; ++s)
-        {
-            auto const phi = tg::angle_f::make_from_radians(f32(s) / f32(segments) * 2.0f * tg::pi<f32>);
-            positions.push_back(tg::pos3f(radius * tg::sin(theta) * tg::cos(phi), radius * tg::cos(theta),
-                                          radius * tg::sin(theta) * tg::sin(phi))
-                                + center);
-        }
-    }
-    auto indices = cc::vector<u32>();
-    auto const index_of = [segments](int r, int s) { return u32(r * (segments + 1) + s); };
-    for (auto r = 0; r < rings; ++r)
-        for (auto s = 0; s < segments; ++s)
-            for (auto const i : {index_of(r, s), index_of(r + 1, s + 1), index_of(r + 1, s), index_of(r, s),
-                                 index_of(r, s + 1), index_of(r + 1, s + 1)})
-                indices.push_back(i);
-    return sv::triangle_geometry::create_from_indexed_triangles(positions, indices);
-}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornell box as the tracer's first bounce "
@@ -239,8 +217,9 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
     constexpr int block = 8;
     // The tracer's path length counts the primary hit, so a hybrid of n bounces is held to the tracer's n + 1.
     // The box is matte throughout, so the secondary material the bounces light is the material itself, and only noise is left between them.
-    auto const traced_one = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 2);
-    auto const traced_two = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 3);
+    // That noise is what the tolerance below holds: at a quarter of these samples the worst block sat at 0.10, at the limit itself.
+    auto const traced_one = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 64, 2);
+    auto const traced_two = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 64, 3);
 
     struct contender
     {
@@ -256,7 +235,7 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
     for (auto const& c : contenders)
     {
         auto const& traced = c.bounces == 2 ? traced_two : traced_one;
-        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 128, {}, c.bounces);
+        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 512, {}, c.bounces);
         REQUIRE(hybrid.color.size() == traced.size());
 
         // Every block, every channel, over the pixels inside one face, since an edge is antialiased in the tracer's image and not here.
@@ -293,6 +272,44 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
 // Glass under a uniform sky is the furnace the tracer's own tests hold their refraction to: lossless, it is invisible.
 // The hybrid's bounce crosses the sphere once and loses what its far side reflects back inside: 0.96 of the sky at the center, 0.88 over the disc.
 // Without the crossing a glass primary hit showed its reflection alone, a tenth of the sky.
+// A deferred frame of four samples per pixel is the mean of four: 16 such frames hold what 64 frames of one do, which only noise separates.
+// A moving image lights this many to give its temporal denoiser a steadier frame, so a bias here would show as a moving image brighter or darker than a still one.
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a deferred frame of four samples per pixel is the mean of four frames of "
+                     "one",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(shadowed_cornell_box());
+    resources.wait_for_pending_uploads();
+    auto const cam = sv_test::cornell_camera();
+    auto const lights = sv_test::light_table_of(sv_test::make_cornell_box().light);
+
+    constexpr auto size = tg::vec2i(48, 48);
+    auto const ones = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::deferred, 64);
+    auto const fours
+        = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::deferred, 16, {}, 1, 4);
+    auto const mean = [](cc::span<tg::vec4f const> image)
+    {
+        auto sum = 0.0;
+        for (auto const& c : image)
+            sum += 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        return sum / f64(image.size());
+    };
+    auto const one = mean(ones.color);
+    auto const four = mean(fours.color);
+    CC_LOG_INFO("the Cornell box, deferred: {} from 64 frames of one sample, {} from 16 frames of four", one, four);
+    CHECK(tg::abs(four - one) < 0.02 * one).dump("one", one).dump("four", four);
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass sphere under a uniform sky shows the sky through it",
                      (sg::context_handle const& ctx_h))
 {
@@ -317,7 +334,7 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass sphere under a uniform sky sh
     constexpr auto size = tg::vec2i(48, 48);
 
     auto const item = resources.acquire_scene_item(
-        sv::mesh{.name = "hybrid glass sphere", .geometry = sphere_geometry(0.6f, 24, 32), .material = material});
+        sv::mesh{.name = "hybrid glass sphere", .geometry = sv_test::sphere_geometry(0.6f, 24, 32), .material = material});
     resources.wait_for_pending_uploads();
     // a light that adds nothing, since the sky is the whole of the lighting
     auto const lights = sv_test::light_table_of(
@@ -516,6 +533,106 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a mirror floor near the origin, seen 
                 floor, worst);
     REQUIRE(floor > size[0] * size[1] / 4);
     CHECK(off == 0).dump("floor pixels", floor).dump("worst relative miss", worst);
+
+    // The megakernel finds its hit along the ray as well, and continues from it the same way.
+    // A sample leaving from under the floor meets its back, which darkens a quarter of the floor by 5 to 20%.
+    // Its samples differ from the hybrid's, which leaves a few pixels 5% off either way, so only darker ones count.
+    // It antialiases the floor's outline where the hybrid does not, so the pixels next to the sky are left out.
+    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 4, 2, sky);
+    auto const on_floor = [&](int x, int y)
+    {
+        if (x < 0 || y < 0 || x >= size[0] || y >= size[1])
+            return false;
+        auto const n = forward.normal[y * size[0] + x];
+        return f32(n.r) != 0.0f || f32(n.g) != 0.0f || f32(n.b) != 0.0f;
+    };
+    auto inside = 0;
+    auto traced_off = 0;
+    for (auto y = 0; y < size[1]; ++y)
+        for (auto x = 0; x < size[0]; ++x)
+        {
+            if (!on_floor(x, y) || !on_floor(x - 1, y) || !on_floor(x + 1, y) || !on_floor(x, y - 1)
+                || !on_floor(x, y + 1))
+                continue;
+            ++inside;
+            auto const lum = [](tg::vec4f c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+            auto const i = y * size[0] + x;
+            if (lum(traced[i]) < 0.95f * lum(forward.color[i]))
+                ++traced_off;
+        }
+    CC_LOG_INFO("a mirror floor near the origin: {} of {} inner pixels traced more than 5% darker", traced_off, inside);
+    REQUIRE(inside > floor / 2);
+    CHECK(traced_off < inside / 50).dump("inner floor pixels", inside).dump("darker", traced_off);
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// The studio floor, two triangles a thousand units across, seen from a camera a unit above it, is its albedo times a uniform sky everywhere.
+// A traversal's `t` is rounded to the triangle's corners' distance from the ray's origin, far more than the short ray's own length.
+// Lifted only by the ray's rounding, a share of each bounce started under the floor, and the floor shadowed itself in streaks.
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a short ray onto the thousand-unit studio floor leaves it from above, "
+                     "traced, "
+                     "forward and deferred",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    sv_test::shared_material_library();
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv::studio_floor());
+    resources.wait_for_pending_uploads();
+
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 1, 0), tg::pos3d(0, 0, 4));
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
+    auto const lights = sv_test::light_table_of(
+        {.center = tg::vec3f(0, 50, 0), .half_x = 0.1f, .half_z = 0.1f, .emission = tg::vec3f(0, 0, 0)});
+    auto const sky = 0.5f;
+    auto const background = sv::background::uniform(tg::vec3f(sky, sky, sky));
+    auto const expected = sv::studio_floor_albedo * sky;
+
+    constexpr auto size = tg::vec2i(96, 96);
+    // The bottom third is floor wherever the camera looks, well short of the horizon.
+    auto const first_row = size[1] * 2 / 3;
+    auto const pixels = size[0] * (size[1] - first_row);
+    auto const lum = [](tg::vec4f c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+
+    // The megakernel's four frames leave a pixel within a few percent, so every pixel is held to 10% as well as the mean.
+    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 4, 2, background);
+    auto darker = 0;
+    auto traced_sum = 0.0f;
+    for (auto y = first_row; y < size[1]; ++y)
+        for (auto x = 0; x < size[0]; ++x)
+        {
+            auto const l = lum(traced[y * size[0] + x]);
+            traced_sum += l;
+            if (l < 0.9f * expected)
+                ++darker;
+        }
+    auto const traced_mean = traced_sum / f32(pixels);
+    CC_LOG_INFO("a short ray onto the studio floor: traced {} against {}, {} of {} pixels more than 10% darker",
+                traced_mean, expected, darker, pixels);
+    CHECK(darker == 0);
+    CHECK(traced_mean > 0.98f * expected).dump("mean", traced_mean);
+
+    // The hybrid's one light sample a frame leaves its pixels noisy, so it is held to its mean, which the streaks took 8% off.
+    for (auto const lighting : {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred})
+    {
+        auto const name = lighting == sv::hybrid_lighting::forward ? "forward" : "deferred";
+        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, 4, background);
+        auto sum = 0.0f;
+        for (auto y = first_row; y < size[1]; ++y)
+            for (auto x = 0; x < size[0]; ++x)
+                sum += lum(hybrid.color[y * size[0] + x]);
+        auto const mean = sum / f32(pixels);
+        CC_LOG_INFO("a short ray onto the studio floor: {} {} against {}", name, mean, expected);
+        CHECK(mean > 0.98f * expected).context(name).dump("mean", mean);
+        CHECK(mean < 1.02f * expected).context(name).dump("mean", mean);
+    }
     co_await cc::async_settled(sv::background_work(ctx));
 }
 

@@ -58,6 +58,15 @@ struct sv::material_permutation
     /// The hybrid's forward pixel stage, `generated_material_shader::hybrid_source`, compiled and cached like `raster_source`.
     cc::string hybrid_source;
 
+    /// The bound raster mode's pixel stage, `generated_material_shader::bound_source`, compiled and cached like `raster_source`.
+    cc::string bound_source;
+
+    /// Its twin for a device without `primitive_index`, `generated_material_shader::bound_pulled_source`.
+    cc::string bound_pulled_source;
+
+    /// The samplers the bound stages' `sv_textures` binds, `generated_material_shader::bound_samplers`.
+    cc::vector<sg::sampler> bound_samplers;
+
     /// Where this permutation's base color lives, which every instance shading with it copies into its record for a secondary hit to read.
     material_secondary secondary;
 

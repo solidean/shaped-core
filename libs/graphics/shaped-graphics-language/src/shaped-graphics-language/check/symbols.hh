@@ -83,6 +83,9 @@ namespace sgl::check
 inline constexpr u16 k_every_stage = 0xFFFF;
 /// The largest factor D3D's tessellator and every native one take, which `max_factor` states at most (CHK-304).
 inline constexpr i32 k_max_tessellation_factor = 64;
+/// The most vertices and the most triangles a mesh workgroup writes: what D3D allows, and vulkan's VK_EXT_mesh_shader
+/// guarantees (CHK-480).
+inline constexpr i32 k_max_mesh_outputs = 256;
 } // namespace sgl::check
 
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").

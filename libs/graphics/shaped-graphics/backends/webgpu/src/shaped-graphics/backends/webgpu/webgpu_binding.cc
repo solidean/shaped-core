@@ -585,6 +585,11 @@ struct resolved_view
     auto entries = cc::vector<WGPUBindGroupEntry>();
     auto texture_views = cc::vector<wgpu_texture_view>();
     auto filled = cc::vector<char>::create_filled(bindings.size(), char(0));
+
+    // What a transient group binds, by the serials of the WebGPU objects rather than by handle: a reused transient
+    // texture comes back under a new handle, and the same key finds last epoch's group (webgpu_context::claim_binding_group).
+    auto reusable = group->transient;
+    auto key = cc::vector<u64>();
     group->acceleration_roots = cc::vector<u32>::create_filled(layout->acceleration_slots().size(), u32(0));
 
     // A static sampler binds the layout's own sampler; the caller never supplies one.
@@ -628,6 +633,7 @@ struct resolved_view
                 root = tlas->unit();
                 group->referenced_tlases.push_back(av->tlas);
             }
+            // The root lives on this group rather than in the WebGPU one, so a reused WebGPU group still binds this TLAS.
             auto const slots = layout->acceleration_slots();
             for (isize k = 0; k < slots.size(); ++k)
                 if (slots[k] == rv.slot)
@@ -654,6 +660,11 @@ struct resolved_view
             entry.buffer = buffer->raw();
             entry.offset = u64(bv->offset_in_bytes);
             entry.size = u64(size);
+            key.push_back(1);
+            key.push_back(u64(b.index));
+            key.push_back(buffer->serial());
+            key.push_back(entry.offset);
+            key.push_back(entry.size);
             group->referenced_buffers.push_back(bv->buffer);
             group->bound.push_back({.resource = bv->buffer.get(), .binding = isize(rv.slot), .bound_as = bv->bound_as});
         }
@@ -666,6 +677,14 @@ struct resolved_view
             CC_ASSERT(!texture->is_expired(), "binding_group names an expired texture");
             texture_views.push_back(texture->create_view(tv->view_dimension, tv->format, tv->range));
             entry.textureView = texture_views.back().get();
+            key.push_back(2);
+            key.push_back(u64(b.index));
+            key.push_back(texture->serial());
+            key.push_back(u64(tv->view_dimension));
+            key.push_back(u64(tv->format));
+            key.push_back(u64(tv->range.mip_range.start) | (u64(tv->range.mip_range.end) << 32));
+            key.push_back(u64(tv->range.array_range.start) | (u64(tv->range.array_range.end) << 32));
+            key.push_back(u64(tv->range.aspect_range.start) | (u64(tv->range.aspect_range.end) << 32));
             group->referenced_textures.push_back(tv->texture);
             group->bound.push_back({.resource = tv->texture.get(), .binding = isize(rv.slot), .bound_as = tv->bound_as});
         }
@@ -696,12 +715,23 @@ struct resolved_view
         entry.binding = bindings[slot].index;
         entry.sampler = ctx._samplers.acquire(ns.sampler);
         entries.push_back(entry);
+        // The sampler cache keeps every sampler for the context's lifetime, so its pointer is an identity.
+        key.push_back(3);
+        key.push_back(u64(entry.binding));
+        key.push_back(reinterpret_cast<u64>(entry.sampler));
     }
 
     for (isize i = 0; i < bindings.size(); ++i)
         if (filled[i] == char(0))
             return cc::error(cc::format("binding_group: {} '{}' was not provided",
                                         sg::is_sampler(bindings[i].type) ? "sampler" : "binding", bindings[i].name));
+
+    if (reusable)
+        if (auto reused = ctx.claim_binding_group(layout, key); reused)
+        {
+            group->_group = cc::move(reused);
+            return webgpu_binding_group_handle(cc::move(group));
+        }
 
     auto const desc = WGPUBindGroupDescriptor{
         .nextInChain = nullptr,
@@ -713,6 +743,9 @@ struct resolved_view
     group->_group = wgpu_bind_group(wgpuDeviceCreateBindGroup(ctx.device(), &desc));
     if (!group->_group)
         return cc::error("wgpuDeviceCreateBindGroup returned no group");
+    ctx.count_created_bind_group();
+    if (reusable)
+        ctx.keep_binding_group(layout, cc::move(key), group->_group);
     return webgpu_binding_group_handle(cc::move(group));
 }
 } // namespace

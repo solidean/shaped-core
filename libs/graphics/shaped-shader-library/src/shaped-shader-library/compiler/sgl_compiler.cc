@@ -359,6 +359,7 @@ private:
                      : o.value == "vertex"   ? sgl::emit::mesh_form::vertex_fetch
                      : o.value == "scan"     ? sgl::emit::mesh_form::scan
                      : o.value == "launched" ? sgl::emit::mesh_form::launched
+                     : o.value == "mesh"     ? sgl::emit::mesh_form::mesh
                                              : sgl::emit::mesh_form::native;
                 continue;
             }
@@ -430,8 +431,8 @@ private:
              .native_line_table = native_line_table,
              .mesh = mesh,
              .polyfill_vertex = polyfill_vertex,
-             .polyfill_task = polyfill_task,
-             .polyfill_control = polyfill_control});
+             .polyfill_control = polyfill_control,
+             .polyfill_task = polyfill_task});
         // what the front end checked rather than loaded, kept for the next process
         if (auto* const store = _keeps_module_artifacts ? slib::impl::sgl_emit_store(_persistent_cache) : nullptr;
             store != nullptr)
@@ -451,6 +452,7 @@ private:
                               : mesh == sgl::emit::mesh_form::scan         ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::launched     ? sg::shader_stage::compute
                               : mesh == sgl::emit::mesh_form::vertex_fetch ? sg::shader_stage::vertex
+                              : mesh == sgl::emit::mesh_form::mesh         ? sg::shader_stage::mesh
                                                                            : desc.stage;
         auto shader = sg::compiled_shader{.stage = form_stage, .format = _format, .entry_point = emitted.entry_point};
         if (emitted.mesh_layout.has_value())
@@ -504,7 +506,7 @@ private:
         }
         // a mesh and a task stage's workgroup too, which Metal's mesh draw states and no MSL text does; and a polyfilled
         // stage's compute form's, whatever stage it was declared as
-        if (form_stage == sg::shader_stage::compute
+        if (form_stage == sg::shader_stage::compute || form_stage == sg::shader_stage::mesh
             || ((stage == sgl::check::stage::mesh || stage == sgl::check::stage::task)
                 && form_stage != sg::shader_stage::vertex))
             shader.workgroup_size

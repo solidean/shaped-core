@@ -82,6 +82,7 @@ cimd_check_link_map(my-executable)            # on EACH final executable: fails 
 ```
 
 - Kernels above `SC_X64_LEVEL` (`SC_SIMD_KERNELS`, default every one) are compiled in their own TUs, `<name>-<kernel>.cc`, with their own `-march`.
+- `SC_X64_LEVEL=v2-avx` (AVX without AVX2) has `sse42` as its floor kernel, like `v2`.
 - A dispatched header must not define a non-template inline function that only kernel code reaches.
   Floor code always has its own copy of a helper it reaches, and that copy wins; one reached only from kernel code is harmless at run time, but the link-map check fails it.
 - On COFF the floor's copy of shared inline code always wins; on ELF it usually does, and the link-map check is what makes sure.

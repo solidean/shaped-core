@@ -90,15 +90,36 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::geometry_polyfill_layou
     return layout;
 }
 
-cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked_module const& m,
-                                                                         flat_entry_point const& v,
-                                                                         flat_entry_point const& g)
+namespace
+{
+/// A builtin method's call on a stage's output, `o.name(arguments…)`, whose overload the builtin's own check picks.
+[[nodiscard]] flat_expr_id method_call(flat_builder& out, cc::string_view name, cc::span<flat_expr_id const> arguments)
+{
+    for (auto i = isize(0); i < out.m.symbols.size(); ++i)
+    {
+        auto const& s = out.m.symbols[i];
+        if (s.kind != symbol_kind::function || !is_valid(s.intrinsic) || s.info < 0 || s.name != name)
+            continue;
+        return out.add_expr(out.m.functions[s.info].result, flat_call{.callee = symbol_id(i),
+                                                                      .intrinsic = s.intrinsic,
+                                                                      .is_pure = false,
+                                                                      .arguments = out.expr_list(arguments)});
+    }
+    return out.add_expr(checked_module::error_type, flat_invalid{});
+}
+
+/// CHK-525's two routes: with no `output`, the compute entry point that writes each primitive's slots of `sg_mesh_output`;
+/// with one, the mesh entry point that writes them to `output`, a `mesh_output[T]` of `m`, a workgroup's lanes' slots each.
+cc::result<flat_entry_point, cc::string> geometry_as(checked_module const& m,
+                                                     flat_entry_point const& v,
+                                                     flat_entry_point const& g,
+                                                     mesh_polyfill_layout const& layout,
+                                                     type_id output)
 {
     CC_ASSERT(v.entry_stage == stage::vertex, "the stage before a polyfilled geometry stage is a vertex stage");
-    auto const layout_or = geometry_polyfill_layout_of(m, g);
-    if (layout_or.has_error())
-        return cc::error(layout_or.error());
-    auto const layout = layout_or.value();
+    auto const is_mesh = is_valid(output);
+    if (is_mesh && layout.corners != 3)
+        return cc::error(cc::format("{} appends lines, which the mesh route does not draw yet", g.name));
     auto const primitive = primitive_of(m, g);
     auto const stream = stream_of(m, g);
     if (!is_valid(primitive))
@@ -124,7 +145,7 @@ cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked
         out.from = g.at(g.at(g.body)[0]).from;
     out.inlined_through = {};
     auto const from = out.from;
-    auto w = words{.out = out, .binding = listed(out, "sg_mesh_output")};
+    auto w = words{.out = out, .binding = is_mesh ? symbol_id::none : listed(out, "sg_mesh_output")};
     auto const draw = listed(out, "sg_geometry_draw");
     auto const draw_value = [&](i32 row, i32 lane)
     { return out.member(out.buffer_element(out.binding_member(draw, 0), w.word(u32(row))), lane); };
@@ -144,10 +165,44 @@ cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked
     auto const instance = w.bound("geometry_instance", w.binary("divide_uint", t, primitives), body);
     auto const p = w.bound("geometry_primitive",
                            w.binary("subtract_uint", t, w.binary("multiply_uint", instance, primitives)), body);
-    auto const base = w.bound("mesh_base", w.binary("multiply_uint", t, w.word(u32(layout.group_words))), body);
-    // the counts start at nothing, so a geometry stage that returns before it appends leaves its slots empty
-    body.push_back(out.assign(w.at(base, 0), w.word(0)));
-    body.push_back(out.assign(w.at(base, 1), w.word(0)));
+    auto const lanes = geometry_mesh_workgroup(layout);
+    auto base = flat_expr_id::none;
+    auto lane = local_id::none;
+    auto first_vertex = flat_expr_id::none;
+    auto first_primitive = flat_expr_id::none;
+    if (!is_mesh)
+    {
+        base = w.bound("mesh_base", w.binary("multiply_uint", t, w.word(u32(layout.group_words))), body);
+        // the counts start at nothing, so a geometry stage that returns before it appends leaves its slots empty
+        body.push_back(out.assign(w.at(base, 0), w.word(0)));
+        body.push_back(out.assign(w.at(base, 1), w.word(0)));
+    }
+    else
+    {
+        // Every lane owns `max_vertices` vertices and `max_primitives` triangles of the workgroup's, in lane order, so
+        // the draw keeps the native order; a triangle a lane does not write is its first vertex thrice, which covers nothing.
+        lane = out.add_local(local_kind::parameter, "lane", out.type_named("int"));
+        auto const l = w.bound("geometry_lane", w.unary("convert_int_to_uint", out.local(lane)), body);
+        first_vertex
+            = w.bound("geometry_first_vertex", w.binary("multiply_uint", l, w.word(u32(layout.max_vertices))), body);
+        first_primitive
+            = w.bound("geometry_first_triangle", w.binary("multiply_uint", l, w.word(u32(layout.max_primitives))), body);
+        flat_expr_id const counts[]
+            = {out.local(stream), w.word(u32(lanes * layout.max_vertices)), w.word(u32(lanes * layout.max_primitives))};
+        body.push_back(out.eval(method_call(out, "set_counts", counts)));
+        auto const uint3_type = out.type_named("uint3");
+        for (auto j = 0; j < layout.max_primitives; ++j)
+        {
+            flat_expr_id const corners_of[] = {first_vertex, first_vertex, first_vertex};
+            flat_expr_id const written[] = {out.local(stream), w.binary("add_uint", first_primitive, w.word(u32(j))),
+                                            out.construct(uint3_type, corners_of)};
+            body.push_back(out.eval(method_call(out, "triangle", written)));
+        }
+        // the lanes past the draw's last primitive write nothing more
+        auto const total = w.binary("multiply_uint", primitives, draw_value(1, 2));
+        flat_stmt_id const ends[] = {out.return_(flat_expr_id::none)};
+        body.push_back(out.if_(w.binary("greater_equal_uint", t, total), ends));
+    }
 
     // Each corner: its vertex from the index buffer or the draw's range, then the vertex stage on it.
     auto results = cc::vector<flat_expr_id>();
@@ -176,7 +231,10 @@ cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked
             return cc::error(cc::format("{} reads a stage input the polyfill does not carry yet", g.name));
         body.push_back(out.let(si.local, as_int(p)));
     }
-    out.e.locals[index_of(stream)].kind = local_kind::temporary;
+    if (!is_mesh)
+        out.e.locals[index_of(stream)].kind = local_kind::temporary;
+    else
+        out.e.locals[index_of(stream)].type = output;
 
     // What the stage appends: vertices in order, cut into primitives where a strip holds enough of them.
     auto const appended = var_of("geometry_vertices", w.uint_type(), w.word(0), body);
@@ -203,22 +261,32 @@ cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked
         auto const value = w.bound("geometry_appended", arguments[1], into);
         auto const n = out.local(appended);
         auto room = stmt_list();
-        auto const at = w.bound("mesh_at",
-                                w.binary("add_uint", base,
-                                         w.binary("add_uint", w.word(u32(layout.first_vertex_word())),
-                                                  w.binary("multiply_uint", n, w.word(u32(layout.vertex_words))))),
-                                room);
-        for (auto i = isize(0); i < leaves.size(); ++i)
-            room.push_back(out.assign(w.at(at, u32(i)), w.encode(w.leaf_of(value, leaves[i]), leaves[i].kind)));
+        if (is_mesh)
+        {
+            flat_expr_id const written[] = {out.local(stream), w.binary("add_uint", first_vertex, n), value};
+            room.push_back(out.eval(method_call(out, "vertex", written)));
+        }
+        else
+        {
+            auto const at = w.bound("mesh_at",
+                                    w.binary("add_uint", base,
+                                             w.binary("add_uint", w.word(u32(layout.first_vertex_word())),
+                                                      w.binary("multiply_uint", n, w.word(u32(layout.vertex_words))))),
+                                    room);
+            for (auto i = isize(0); i < leaves.size(); ++i)
+                room.push_back(out.assign(w.at(at, u32(i)), w.encode(w.leaf_of(value, leaves[i]), leaves[i].kind)));
+        }
 
         // a strip's primitive `j` is its corners `j` on; an odd triangle swaps its first two, so every one winds alike
         auto cut = stmt_list();
         auto const indices_at
-            = w.bound("mesh_indices_at",
-                      w.binary("add_uint", base,
-                               w.binary("add_uint", w.word(u32(layout.first_index_word())),
-                                        w.binary("multiply_uint", out.local(made), w.word(u32(layout.corners))))),
-                      cut);
+            = is_mesh
+                ? flat_expr_id::none
+                : w.bound("mesh_indices_at",
+                          w.binary("add_uint", base,
+                                   w.binary("add_uint", w.word(u32(layout.first_index_word())),
+                                            w.binary("multiply_uint", out.local(made), w.word(u32(layout.corners))))),
+                          cut);
         auto const corner = [&](u32 back) { return w.binary("subtract_uint", out.local(appended), w.word(back)); };
         if (layout.corners == 3)
         {
@@ -232,9 +300,21 @@ cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked
             };
             auto const first = w.bound("geometry_first", select(corner(1), corner(2)), cut);
             auto const second = w.bound("geometry_second", select(corner(2), corner(1)), cut);
-            cut.push_back(out.assign(w.at(indices_at, 0), first));
-            cut.push_back(out.assign(w.at(indices_at, 1), second));
-            cut.push_back(out.assign(w.at(indices_at, 2), out.local(appended)));
+            if (is_mesh)
+            {
+                flat_expr_id const corners_of[]
+                    = {w.binary("add_uint", first_vertex, first), w.binary("add_uint", first_vertex, second),
+                       w.binary("add_uint", first_vertex, out.local(appended))};
+                flat_expr_id const written[] = {out.local(stream), w.binary("add_uint", first_primitive, out.local(made)),
+                                                out.construct(out.type_named("uint3"), corners_of)};
+                cut.push_back(out.eval(method_call(out, "triangle", written)));
+            }
+            else
+            {
+                cut.push_back(out.assign(w.at(indices_at, 0), first));
+                cut.push_back(out.assign(w.at(indices_at, 1), second));
+                cut.push_back(out.assign(w.at(indices_at, 2), out.local(appended)));
+            }
         }
         else
         {
@@ -242,13 +322,15 @@ cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked
             cut.push_back(out.assign(w.at(indices_at, 1), out.local(appended)));
         }
         cut.push_back(out.assign(out.local(made), w.binary("add_uint", out.local(made), w.word(1))));
-        cut.push_back(out.assign(w.at(base, 1), out.local(made)));
+        if (!is_mesh)
+            cut.push_back(out.assign(w.at(base, 1), out.local(made)));
         room.push_back(out.if_(out.and_(w.binary("greater_equal_uint", out.local(strip), w.word(u32(layout.corners - 1))),
                                         w.binary("less_uint", out.local(made), w.word(u32(layout.max_primitives)))),
                                cut));
 
         room.push_back(out.assign(out.local(appended), w.binary("add_uint", out.local(appended), w.word(1))));
-        room.push_back(out.assign(w.at(base, 0), out.local(appended)));
+        if (!is_mesh)
+            room.push_back(out.assign(w.at(base, 0), out.local(appended)));
         room.push_back(out.assign(out.local(strip), w.binary("add_uint", out.local(strip), w.word(1))));
         // what a stage appends past `max_vertices` is dropped, as the native stage drops it
         into.push_back(out.if_(w.binary("less_uint", n, w.word(u32(layout.max_vertices))), room));
@@ -260,17 +342,78 @@ cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked
 
     // the header of a compute entry point dispatched by threads, whose threads past the grid return (CHK-520)
     auto& e = out.e;
-    e.entry_stage = stage::compute;
+    e.entry_stage = is_mesh ? stage::mesh : stage::compute;
     e.input = type_id::none;
     e.result = type_id::none;
     e.stage_inputs = {{.input = stage_input::thread_id, .local = thread}};
-    e.workgroup = {k_geometry_polyfill_workgroup, 1, 1};
-    e.is_auto_workgroup = true;
+    if (is_mesh)
+        e.stage_inputs.push_back({.input = stage_input::local_thread_index, .local = lane});
+    e.workgroup = {is_mesh ? lanes : k_geometry_polyfill_workgroup, 1, 1};
+    // the compute route's threads past the grid return (CHK-520); the mesh route's lanes write their slots first
+    e.is_auto_workgroup = !is_mesh;
     e.legalized = nullptr;
     merge_stage_into(e, v);
     e.features.remove(feature::geometry_shader);
+    if (is_mesh)
+        e.features.set(feature::mesh_shader);
     return compacted(m, e, body);
 }
+} // namespace
+
+cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_compute(checked_module const& m,
+                                                                         flat_entry_point const& v,
+                                                                         flat_entry_point const& g)
+{
+    auto const layout = geometry_polyfill_layout_of(m, g);
+    if (layout.has_error())
+        return cc::error(layout.error());
+    return geometry_as(m, v, g, layout.value(), type_id::none);
+}
+
+i32 sgl::check::geometry_mesh_workgroup(mesh_polyfill_layout const& layout)
+{
+    return cc::max(1, cc::min(k_geometry_polyfill_workgroup, cc::min(k_max_mesh_outputs / layout.max_vertices,
+                                                                     k_max_mesh_outputs / layout.max_primitives)));
+}
+
+geometry_mesh_parts sgl::check::add_geometry_mesh_output(checked_module& m,
+                                                         flat_entry_point const& g,
+                                                         mesh_polyfill_layout const& layout)
+{
+    auto const stream = stream_of(m, g);
+    CC_ASSERT(is_valid(stream), "a geometry entry point takes a stream");
+    auto output = m.at(g.at(stream).type);
+    output.count = 0;
+    output.spelled = cc::format("mesh_output[{}]", m.name_of(output.element));
+    auto const type = type_id(m.types.size());
+    m.types.push_back(cc::move(output));
+    // the bounds a mesh entry point writes at most, which a target declares from its function's: a copy of the
+    // geometry function's, since a lower layer's entries are shared
+    auto info = m.functions[m.at(g.function).info];
+    auto const lanes = geometry_mesh_workgroup(layout);
+    info.max_vertices = lanes * layout.max_vertices;
+    info.max_primitives = lanes * layout.max_primitives;
+    info.is_line_mesh = false;
+    auto symbol = m.at(g.function);
+    symbol.info = i32(m.functions.size());
+    m.functions.push_back(cc::move(info));
+    auto const function = symbol_id(m.symbols.size());
+    m.symbols.push_back(cc::move(symbol));
+    return {.output = type, .function = function};
+}
+
+cc::result<flat_entry_point, cc::string> sgl::check::geometry_as_mesh(checked_module const& m,
+                                                                      flat_entry_point const& v,
+                                                                      flat_entry_point const& g,
+                                                                      mesh_polyfill_layout const& layout,
+                                                                      geometry_mesh_parts parts)
+{
+    auto made = geometry_as(m, v, g, layout, parts.output);
+    if (made.has_value())
+        made.value().function = parts.function;
+    return made;
+}
+
 
 flat_entry_point sgl::check::geometry_as_vertex_fetch(checked_module const& m, flat_entry_point const& g)
 {

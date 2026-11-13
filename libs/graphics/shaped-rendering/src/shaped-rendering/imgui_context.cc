@@ -487,7 +487,7 @@ bool imgui_context::wants_mouse() const
     return ImGui::GetIO().WantCaptureMouse;
 }
 
-void imgui_context::begin_frame(window& win, float delta_time)
+void imgui_context::begin_frame(window& win, float delta_time, bool recorded)
 {
     CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
 
@@ -526,7 +526,10 @@ void imgui_context::begin_frame(window& win, float delta_time)
     // Substitute a 1x1 display so imgui still gets a well-formed frame — the caller skips rendering it anyway.
     auto const size = win.is_minimized() ? tg::vec2i(1, 1) : win.logical_size();
     auto const density = win.pixel_density();
-    begin_frame({.display_size = size, .delta_time = delta_time, .framebuffer_scale = tg::vec2f(density, density)});
+    begin_frame({.display_size = size,
+                 .delta_time = delta_time,
+                 .framebuffer_scale = tg::vec2f(density, density),
+                 .recorded = recorded});
 }
 
 void imgui_context::begin_frame(frame_info const& info)
@@ -550,7 +553,9 @@ void imgui_context::begin_frame(frame_info const& info)
     // ImGui's frame IS a bracket across user code, and there is no block to wrap.
     // Opened here, the one begin every frame reaches and past every assert, so the close in end_frame always has a match:
     // an assert caught by a test would otherwise leave the scope open on its thread.
-    CC_RECORD_SCOPE_BEGIN("sr.imgui.frame");
+    if (info.recorded)
+        CC_RECORD_SCOPE_BEGIN("sr.imgui.frame");
+    _frame_recorded = info.recorded;
 
     _frame_started = true; // NewFrame is the point past which load_settings can no longer reach every window
     ImGui::NewFrame();
@@ -561,7 +566,9 @@ void imgui_context::end_frame()
     CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
     ImGui::Render(); // builds the draw data ImGui::GetDrawData() returns
 
-    CC_RECORD_SCOPE_END("sr.imgui.frame");
+    if (_frame_recorded)
+        CC_RECORD_SCOPE_END("sr.imgui.frame");
+    _frame_recorded = false;
 
     _viewport_update_pending = (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0;
 }

@@ -51,11 +51,15 @@ namespace
     return bind(sv::mesh_attribute::create("uv", f, uvs));
 }
 
-/// One entry point of generated `source`, compiled; fails the test with the compiler's message and the source.
-void check_entry_compiles(cc::string_view source, sg::shader_stage stage, cc::string_view entry)
+/// One entry point of generated `source`, compiled to `format`, by default the backend's own; fails the test with the
+/// compiler's message and the source.
+void check_entry_compiles(cc::string_view source,
+                          sg::shader_stage stage,
+                          cc::string_view entry,
+                          cc::optional<sg::shader_format> format = {})
 {
     auto const& lib = *sv_test::shared_env().lib;
-    auto const shader = lib.compile_source(source, stage, entry, sv_test::shared_env().format,
+    auto const shader = lib.compile_source(source, stage, entry, format.value_or(sv_test::shared_env().format),
                                            {.language = slib::shader_language::sgl, .label = "<generated material>"});
     REQUIRE(shader != nullptr);
     (void)cc::try_async_blocking_get(shader);
@@ -82,7 +86,16 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
 
     check_entry_compiles(g.shade_source, sg::shader_stage::compute, "sv_shade");
     if (kind == sv::geometry_kind::triangles)
+    {
         check_entry_compiles(g.raster_source, sg::shader_stage::fragment, "sv_raster");
+
+        // Both bound stages are compiled to WGSL as well as to this backend's format; the pulled one is what WebGPU draws today.
+        check_entry_compiles(g.bound_source, sg::shader_stage::fragment, "sv_raster_bound");
+        check_entry_compiles(g.bound_source, sg::shader_stage::fragment, "sv_raster_bound", sg::shader_format::wgsl);
+        check_entry_compiles(g.bound_pulled_source, sg::shader_stage::fragment, "sv_raster_bound_pulled");
+        check_entry_compiles(g.bound_pulled_source, sg::shader_stage::fragment, "sv_raster_bound_pulled",
+                             sg::shader_format::wgsl);
+    }
 }
 } // namespace
 

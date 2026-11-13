@@ -19,6 +19,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [Dear ImGui](https://github.com/ocornut/imgui) | v1.92.8-docking | `MIT` | shaped-rendering — sr::imgui_context and sr::imgui_routine | [dear-imgui.txt](dear-imgui.txt) |
 | [ImPlot](https://github.com/epezent/implot) | d65a2bef53d3 | `MIT` | shaped-rendering — plotting inside the imgui bundle | [implot.txt](implot.txt) |
 | [ImGuizmo](https://github.com/cedricguillemet/ImGuizmo) | dc25afb98bc3 | `MIT` | shaped-rendering — manipulation gizmos inside the imgui bundle | [imguizmo.txt](imguizmo.txt) |
+| [Inter](https://rsms.me/inter) | v4.1 | `OFL-1.1` | shaped-rendering — the UI font a web build draws text in, where no system font file can be opened | [inter.txt](inter.txt) |
 | [libspng](https://libspng.org) | v0.7.4 | `BSD-2-Clause AND libpng-2.0` | babel-serializer — the PNG codec behind babel::png | [libspng.txt](libspng.txt), [libspng-libpng.txt](libspng-libpng.txt) |
 | [libwebp](https://chromium.googlesource.com/webm/libwebp) | v1.6.0 | `BSD-3-Clause` | babel-serializer — the WebP codec behind babel::image's webp format | [libwebp-copying.txt](libwebp-copying.txt), [libwebp-patents.txt](libwebp-patents.txt) |
 | [LZ4](https://github.com/lz4/lz4) | v1.10.0 | `BSD-2-Clause` | clean-core — cc::compress / cc::decompress, the LZ4 algorithm | [lz4.txt](lz4.txt) |

@@ -75,6 +75,18 @@ struct svgf_inputs
     return tg::dot(n, n) > 0.0 && depth > 0.0;
 }
 
+/// svgf.sgl's three kinds of pixel: the sky, an emitter's own radiance, and a surface that reflects.
+constexpr int k_kind_missed = 0;
+constexpr int k_kind_emitter = 1;
+constexpr int k_kind_surface = 2;
+
+[[nodiscard]] int kind_of(vec3 n, f64 depth)
+{
+    if (depth <= 0.0)
+        return k_kind_missed;
+    return tg::dot(n, n) <= 0.0 ? k_kind_emitter : k_kind_surface;
+}
+
 [[nodiscard]] f64 geometry_weight(tg::vec4f nd_p, tg::vec4f nd_q, f64 offset_length, f64 normal_power, f64 depth_sigma)
 {
     auto const surface_p = is_surface(xyz(nd_p), nd_p[3]);
@@ -121,33 +133,55 @@ struct temporal_result
             auto const n = xyz(in.normal[p]);
             auto const d = f64(in.depth[p][0]);
             auto const lum = luminance(c);
-            auto const qx = int(tg::floor(f64(f32(f32(x) + 0.5f - in.motion[p][0]))));
-            auto const qy = int(tg::floor(f64(f32(f32(y) + 0.5f - in.motion[p][1]))));
-            auto valid = (flags & k_reset) == 0 && inside(qx, qy);
-            auto const q = valid ? qy * k_w + qx : 0;
-            if (valid)
-            {
-                auto const prev = in.normal_depth[q];
-                auto const surface = is_surface(n, d);
-                if (surface != is_surface(xyz(prev), prev[3]))
-                    valid = false;
-                else if (surface)
-                    valid = tg::dot(tg::normalize(n), tg::normalize(xyz(prev))) >= k_normal_similarity
-                         && tg::abs(f64(prev[3]) - d) / cc::max(d, 1e-4) <= k_depth_similarity;
-            }
+            // The four pixels around where the surface was, each weighted bilinearly where it shows the same kind of pixel.
+            auto const px = f64(f32(f32(x) - in.motion[p][0]));
+            auto const py = f64(f32(f32(y) - in.motion[p][1]));
+            auto const bx = int(tg::floor(px));
+            auto const by = int(tg::floor(py));
+            auto const fx = px - f64(bx);
+            auto const fy = py - f64(by);
+            auto sum_history = tg::vec4d(0, 0, 0, 0);
+            auto sum_m0 = 0.0;
+            auto sum_m1 = 0.0;
+            auto sum_weight = 0.0;
+            if ((flags & k_reset) == 0)
+                for (auto ty = 0; ty < 2; ++ty)
+                    for (auto tx = 0; tx < 2; ++tx)
+                    {
+                        auto const qx = bx + tx;
+                        auto const qy = by + ty;
+                        if (!inside(qx, qy))
+                            continue;
+                        auto const q = qy * k_w + qx;
+                        auto const prev = in.normal_depth[q];
+                        if (kind_of(xyz(prev), prev[3]) != kind_of(n, d))
+                            continue;
+                        if (kind_of(n, d) == k_kind_surface
+                            && (tg::dot(tg::normalize(n), tg::normalize(xyz(prev))) < k_normal_similarity
+                                || tg::abs(f64(prev[3]) - d) / cc::max(d, 1e-4) > k_depth_similarity))
+                            continue;
+                        auto const w = (tx == 0 ? 1.0 - fx : fx) * (ty == 0 ? 1.0 - fy : fy);
+                        auto const h = in.history[q];
+                        sum_history += tg::vec4d(f64(h[0]), f64(h[1]), f64(h[2]), f64(h[3])) * w;
+                        sum_m0 += f64(in.moments[q][0]) * w;
+                        sum_m1 += f64(in.moments[q][1]) * w;
+                        sum_weight += w;
+                    }
             auto out_color = c;
             auto out_m0 = lum;
             auto out_m1 = lum * lum;
             auto length = 1.0;
-            if (valid)
+            if (sum_weight > 0.01)
             {
                 ++out.taken;
-                length = cc::min(f64(in.history[q][3]) + 1.0, k_max_history);
+                auto const h = sum_history / sum_weight;
+                auto const history_color = vec3(h[0], h[1], h[2]);
+                length = cc::min(h[3] + 1.0, k_max_history);
                 auto const ca = cc::max(1.0 / length, k_color_alpha_min);
                 auto const ma = cc::max(1.0 / length, k_moments_alpha_min);
-                out_color = xyz(in.history[q]) + (c - xyz(in.history[q])) * ca;
-                out_m0 = in.moments[q][0] + (lum - in.moments[q][0]) * ma;
-                out_m1 = in.moments[q][1] + (lum * lum - in.moments[q][1]) * ma;
+                out_color = history_color + (c - history_color) * ca;
+                out_m0 = sum_m0 / sum_weight + (lum - sum_m0 / sum_weight) * ma;
+                out_m1 = sum_m1 / sum_weight + (lum * lum - sum_m1 / sum_weight) * ma;
             }
             out.history.push_back(tg::vec4f(f32(out_color[0]), f32(out_color[1]), f32(out_color[2]), f32(length)));
             out.moments.push_back(tg::vec4f(f32(out_m0), f32(out_m1), 0, 0));
@@ -291,7 +325,8 @@ cc::shared_async<cc::vector<tg::vec4f>> run_filter(sg::context& ctx, svgf_inputs
                                                                                    .flags = flags,
                                                                                    .luminance_sigma = k_luminance_sigma,
                                                                                    .normal_power = k_normal_power,
-                                                                                   .depth_sigma = k_depth_sigma}
+                                                                                   .depth_sigma = k_depth_sigma,
+                                                                                   .ceiling = 3.4028234e38f}
                                           .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));

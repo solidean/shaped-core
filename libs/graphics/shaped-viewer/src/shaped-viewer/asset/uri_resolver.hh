@@ -41,6 +41,12 @@ void set_resolve_uri(uri_resolver_provider provider);
 
 /// The bytes behind `uri`: the caller's hook if they set one, otherwise the filesystem default.
 [[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri);
+
+namespace impl
+{
+/// Whether `set_resolve_uri` installed a hook, so `resolve_uri` is the caller's rather than the filesystem's.
+[[nodiscard]] bool resolve_uri_is_set();
+} // namespace impl
 } // namespace sv
 
 /// How the filesystem resolver reads.

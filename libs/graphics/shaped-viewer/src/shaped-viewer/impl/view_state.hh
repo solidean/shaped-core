@@ -136,6 +136,15 @@ struct temporal_slot
     shaders::tracer::camera_record last_camera = {};
     bool has_last_camera = false;
 
+    /// What a `temporal_id::raster_bound_camera` slot remembers of its layer's last frame besides the camera and
+    /// `last_jitter`: each instance's placement, the three rows of its transform, by instance id.
+    cc::map<u32, cc::fixed_array<tg::vec4f, 3>> last_placements;
+
+    /// How many frames a `temporal_id::raster_bound_camera` slot's layer was drawn: its parity picks which of each
+    /// history's two slots a frame writes.
+    /// The layer's own count rather than the context's epoch, which a frame may advance more than once.
+    u32 raster_bound_frames = 0;
+
     /// The wavefront tracer's paths, held only by a `temporal_id::accumulation` slot whose layer it traces.
     ///
     /// Here because `texture` is the mean of exactly these paths' tallies: the two restart together, and one without the other is a mean of nothing.
@@ -164,7 +173,8 @@ struct temporal_slot
     /// When the image last changed, on the steady clock; a move lasts `render_settings::motion_hold_ms` past it.
     f64 last_change_seconds = -1e30;
 
-    /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's.
+    /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's; a
+    /// `temporal_id::raster_bound_camera` slot's, the one its layer was last drawn at.
     tg::vec2f last_jitter = tg::vec2f(0, 0);
 
     /// What a round of those paths costs, as the frames' own timestamps measured it; a frame budget picks rounds from it.
