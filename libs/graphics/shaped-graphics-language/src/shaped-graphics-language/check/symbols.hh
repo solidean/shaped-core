@@ -81,6 +81,11 @@ namespace sgl::check
     return u16(1u << u8(s));
 }
 inline constexpr u16 k_every_stage = 0xFFFF;
+/// The largest factor D3D's tessellator and every native one take, which `max_factor` states at most (CHK-304).
+inline constexpr i32 k_max_tessellation_factor = 64;
+/// The most vertices and the most triangles a mesh workgroup writes: what D3D allows, and vulkan's VK_EXT_mesh_shader
+/// guarantees (CHK-480).
+inline constexpr i32 k_max_mesh_outputs = 256;
 } // namespace sgl::check
 
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
@@ -669,6 +674,9 @@ struct sgl::check::function_info
     /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
     tessellation_partitioning partitioning = tessellation_partitioning::integer;
     bool is_clockwise = true;
+    /// `@tessellation_control(…, max_factor = N)`'s `N`, `k_max_tessellation_factor` where it states none, and for
+    /// every other stage (CHK-304).
+    i32 max_factor = k_max_tessellation_factor;
     /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
     u16 stages = k_every_stage;
     /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-263).

@@ -34,7 +34,8 @@ namespace impl
 /// Creates the context viewers use when no provider was set: dx12 on Windows, hardware first and then WARP, and metal on Apple platforms.
 ///
 /// It creates unconditionally — `acquire_viewer_context` is what makes that happen only once.
-/// Fails, rather than asserting, when sv was built with no backend to fall back on.
+/// Fails, rather than asserting, when sv was built with no backend to fall back on, and on the web, whose device only
+/// `acquire_viewer_context_async` can request.
 [[nodiscard]] cc::result<sg::context_handle> acquire_default_context();
 } // namespace impl
 
@@ -44,7 +45,14 @@ namespace impl
 /// device rather than one each.
 /// The ACQUISITION is thread-safe — two threads asking at once get one device, not two.
 /// What it hands back keeps sg's own rules, and the window system it feeds is main-thread bound anyway.
+/// On the web it answers only once `acquire_viewer_context_async` has: a WebGPU device cannot be created synchronously.
 [[nodiscard]] cc::result<sg::context_handle> acquire_viewer_context();
+
+/// The same context, awaited rather than created on the spot: on the web, the WebGPU device the page requests.
+///
+/// Elsewhere, and wherever a provider was set, it is `acquire_viewer_context` already settled.
+/// Once it has answered, `acquire_viewer_context` hands back the same handle, so a viewer created after it needs no context passed in.
+[[nodiscard]] cc::shared_async<cc::result<sg::context_handle>> acquire_viewer_context_async();
 
 /// Completes once the background work started so far against `ctx` has settled, whether it succeeded or failed.
 ///

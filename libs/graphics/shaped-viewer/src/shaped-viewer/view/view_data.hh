@@ -137,6 +137,53 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(14) << kind_shift) | u64(layer);
 }
 
+/// A `raster_bound` layer's ambient occlusion accumulated over frames, at half its size: two slots, which frames
+/// alternate between reading and writing.
+/// The first also remembers the camera the last frame was drawn from, which the accumulation reprojects through.
+[[nodiscard]] constexpr u64 ambient_occlusion_history(u8 layer, int parity)
+{
+    return (u64(15 + (parity & 1)) << kind_shift) | u64(layer);
+}
+
+/// A `raster_bound` layer's shadow share accumulated over frames, at half its size, in two alternating slots.
+[[nodiscard]] constexpr u64 shadow_history(u8 layer, int parity)
+{
+    return (u64(17 + (parity & 1)) << kind_shift) | u64(layer);
+}
+
+/// A `raster_bound` layer's last camera, which its accumulations reproject through; a slot with no texture.
+[[nodiscard]] constexpr u64 raster_bound_camera(u8 layer)
+{
+    return (u64(19) << kind_shift) | u64(layer);
+}
+
+/// A `raster_bound` layer's antialiased image, the history temporal antialiasing blends into, in two alternating slots.
+[[nodiscard]] constexpr u64 antialiasing_history(u8 layer, int parity)
+{
+    return (u64(20 + (parity & 1)) << kind_shift) | u64(layer);
+}
+
+/// A `raster_bound` layer's traced indirect light accumulated over frames, at its traced size, in two alternating slots:
+/// the radiance and its frame count, and its view depth apart.
+[[nodiscard]] constexpr u64 indirect_history(u8 layer, int parity)
+{
+    return (u64(22 + (parity & 1)) << kind_shift) | u64(layer);
+}
+[[nodiscard]] constexpr u64 indirect_history_depth(u8 layer, int parity)
+{
+    return (u64(24 + (parity & 1)) << kind_shift) | u64(layer);
+}
+
+/// A `raster_bound` layer's reflections accumulated over frames, at half its size, as `indirect_history` keeps its light.
+[[nodiscard]] constexpr u64 reflection_history(u8 layer, int parity)
+{
+    return (u64(26 + (parity & 1)) << kind_shift) | u64(layer);
+}
+[[nodiscard]] constexpr u64 reflection_history_depth(u8 layer, int parity)
+{
+    return (u64(28 + (parity & 1)) << kind_shift) | u64(layer);
+}
+
 /// Whether `id` is an accumulation slot, whatever layer it belongs to.
 ///
 /// For a caller folding over every traced layer of a view rather than naming one.

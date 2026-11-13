@@ -18,8 +18,9 @@ a compute entry point writes the vertices the stage would have produced into a b
 
 * **The geometry stage** becomes a compute entry point per input primitive, which appends up to `max_vertices` vertices to its own slots of the buffer.
   Strips are cut into lists where `end_strip` is called, and unused slots are degenerate.
-* **The geometry stage on metal could become a mesh stage instead.**
+* **The geometry stage on metal becomes a mesh stage instead**, CHK-525's mesh route.
   Metal has mesh shaders, a geometry stage's per-primitive output with a bound is what a mesh workgroup writes, and it stays one draw with no buffer between passes.
+  It measured faster than the compute route in every scene, and many times faster over many draws, each of which splits the compute route's pass.
 * **The tessellation stages on webgpu and metal** become compute passes: the control stage's factors, then a prefix sum of each patch's points and primitives.
   Then D3D's tessellator per patch, and the evaluation stage at each point.
 * **The mesh and task stages on webgpu** become a compute pass that runs the task stage, then each mesh workgroup it launches.

@@ -62,6 +62,9 @@ struct atrous_inputs
     in.normal[5] = tg::vec4f(0, 0, 0, 0); // a missed pixel among the normals
     in.depth[7] = tg::vec4f(-1, 0, 0, 0); // and two among the depths
     in.depth[40] = tg::vec4f(0, 0, 0, 0);
+    // and an emitter, which reflects next to nothing and is filtered apart from its neighbors
+    in.albedo[9] = tg::vec4f(0, 0, 0, 0);
+    in.specular[9] = tg::vec4f(0.01f, 0.01f, 0.01f, 0);
     return in;
 }
 
@@ -69,11 +72,23 @@ struct atrous_inputs
 [[nodiscard]] cc::vector<tg::vec4f> atrous_reference(atrous_case const& k, atrous_inputs const& in)
 {
     auto const is = [&](u32 bit) { return (k.flags & bit) != 0; };
-    auto const albedo_at = [&](int i)
+    auto const total_at = [&](int i)
     {
         auto a = xyz(in.albedo[i]);
         if (is(32u))
             a += xyz(in.specular[i]);
+        return a;
+    };
+    auto const reflects_nothing_at = [&](int i)
+    {
+        auto const a = total_at(i);
+        return is(1u) && a[0] < 0.06 && a[1] < 0.06 && a[2] < 0.06;
+    };
+    auto const albedo_at = [&](int i)
+    {
+        if (reflects_nothing_at(i))
+            return vec3(1, 1, 1);
+        auto const a = total_at(i);
         return vec3(cc::max(a[0], 1e-3), cc::max(a[1], 1e-3), cc::max(a[2], 1e-3));
     };
     auto const source_at = [&](int i)
@@ -101,6 +116,7 @@ struct atrous_inputs
             if (is(64u))
                 scale /= tg::sqrt(cc::max(f64(in.counts[p][0]), 1.0));
             auto const lum_width = scale * (tg::abs(center_lum) + 1e-2) + 1e-6;
+            auto const center_emits = reflects_nothing_at(p);
 
             auto sum = vec3(0, 0, 0);
             auto weight_sum = 0.0;
@@ -115,6 +131,8 @@ struct atrous_inputs
                     auto const c = source_at(q);
                     auto const ratio = (luminance(c) - center_lum) / lum_width;
                     auto w = k_kernel[dx + 2] * k_kernel[dy + 2] * tg::exp(-ratio * ratio);
+                    if (reflects_nothing_at(q) != center_emits)
+                        w = 0.0;
                     if (is(2u))
                     {
                         auto const n_q = xyz(in.normal[q]);
@@ -172,6 +190,7 @@ cc::shared_async<cc::vector<tg::vec4f>> run_atrous(sg::context& ctx,
                                                        .normal = gpu.texture(in.normal).as_texture_view(),
                                                        .depth = gpu.texture(in.depth).as_texture_view(),
                                                        .sample_counts = gpu.texture(in.counts).as_texture_view(),
+                                                       .input = gpu.texture(in.source).as_texture_view(),
                                                        .target = target.as_any_image_view()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
@@ -180,7 +199,8 @@ cc::shared_async<cc::vector<tg::vec4f>> run_atrous(sg::context& ctx,
                                                           .flags = k.flags,
                                                           .luminance_scale = f32(k.luminance_scale),
                                                           .normal_power = f32(k.normal_power),
-                                                          .depth_sigma = f32(k.depth_sigma)}
+                                                          .depth_sigma = f32(k.depth_sigma),
+                                                          .ceiling = 3.4028234e38f}
             .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));

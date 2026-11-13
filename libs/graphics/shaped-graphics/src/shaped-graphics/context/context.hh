@@ -121,6 +121,24 @@ public:
     /// Whether this backend draws a pipeline whose `mesh_polyfill` stands for a geometry stage.
     [[nodiscard]] virtual bool draws_geometry_polyfill() const { return false; }
 
+    /// How a polyfilled geometry stage is drawn where `geometry_polyfill` asks for it.
+    /// `mesh` is taken where the device has `feature::mesh_shader` and the backend `draws_geometry_mesh_route`, and
+    /// `compute` otherwise.
+    /// **`mesh` by default**: on an Apple M4 it drew a third faster in one draw, and many times faster over many draws,
+    /// each of which splits the compute route's pass (`sg geometry polyfill - a frame through a geometry stage …`).
+    /// Set it before acquiring the pipelines it should cover.
+    [[nodiscard]] geometry_polyfill_route geometry_polyfill_route() const
+    {
+        return _geometry_polyfill_route.load(cc::memory_order_relaxed);
+    }
+    void set_geometry_polyfill_route(sg::geometry_polyfill_route route)
+    {
+        _geometry_polyfill_route.store(route, cc::memory_order_relaxed);
+    }
+
+    /// Whether this backend draws a mesh pipeline that stands for a geometry stage, `geometry_mesh_corners`.
+    [[nodiscard]] virtual bool draws_geometry_mesh_route() const { return false; }
+
     /// Whether a pipeline with tessellation stages that shaped-shader-library describes is drawn as their polyfill:
     /// compute passes over D3D's tessellator and a draw of the points (SGL's CHK-527).
     /// **`never` by default**, opt-in until its benchmark against the native stages has run.
@@ -917,6 +935,7 @@ protected:
     cc::atomic<polyfill_use> _mesh_polyfill = polyfill_use::where_missing;
     cc::atomic<polyfill_use> _geometry_polyfill = polyfill_use::never;
     cc::atomic<polyfill_use> _tessellation_polyfill = polyfill_use::never;
+    cc::atomic<sg::geometry_polyfill_route> _geometry_polyfill_route = sg::geometry_polyfill_route::mesh;
     cc::atomic<bool> _hit_record_checks = CC_ASSERT_ENABLED != 0;
     cc::atomic<bool> _render_pass_split_warnings = true;
 

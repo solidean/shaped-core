@@ -78,4 +78,8 @@ There the two images must be identical, equal depths and blending included, and 
   The task grid moved into the record buffer's header, which sg writes on a direct draw and copies from the arguments on an indirect one; the scan now counts launches from each record's grid.
   With no task stage, an indirect draw is one record of no payload, launching SGL's new `launched` form, which slib acquires for every polyfilled mesh stage.
   `split` and `culled` drawn indirectly match the native images on webgpu (Dawn and wgpu), dx12, dx12 native-DXIL, vulkan and vulkan native-SPIR-V.
-  Still open of it: the WGSL uniformity item now reaches a mesh stage with no task stage too, since its `launched` form is built beside it.
+- **2026-11-12: the WGSL uniformity item was a false alarm.**
+  A launched mesh stage reads its workgroup id from `sg_task_input`, which is `var<storage, read>`, and WGSL counts a load of read-only storage at a uniform index as uniform.
+  Dawn's Tint compiles a barrier under a branch on it, and refuses the same branch on a `read_write` load; wgpu's validator accepts both, so it could not have told.
+  A barrier under a branch on the payload is SGL's own `non-uniform-control-flow` on every target, so it never reaches WGSL.
+  `halves` and `culled_column` now hold a barrier under such a branch, which every webgpu run compiles.

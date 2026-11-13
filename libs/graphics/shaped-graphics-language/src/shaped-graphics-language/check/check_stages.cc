@@ -15,8 +15,6 @@ constexpr auto error_type = checked_module::error_type;
 // vulkan's guaranteed maxGeometryTotalOutputComponents too
 constexpr auto k_max_geometry_vertices = 256;
 constexpr auto k_max_geometry_scalars = 1024;
-// CHK-480: what D3D allows a mesh stage, and vulkan's VK_EXT_mesh_shader guarantees
-constexpr auto k_max_mesh_outputs = 256;
 constexpr auto k_max_mesh_workgroup = 128;
 /// What one task workgroup launches at most on dx12, `DispatchMesh`'s 2^22 workgroups.
 constexpr auto k_max_task_meshes = 1 << 22;
@@ -139,9 +137,26 @@ checker::tessellation_mode checker::tessellation_of(i32 file, ast::attribute con
     auto result = tessellation_mode();
     auto has_partitioning = false;
     auto has_winding = false;
+    auto has_max_factor = false;
     for (auto const& argument : ast_of(file).at(a.arguments))
     {
         auto const key = text_of(file, argument.name);
+        if (key == "max_factor")
+        {
+            // CHK-304: the largest factor the stage hands the tessellator, which D3D's own caps at 64
+            auto const count = ast::is_valid(argument.value) && !argument.is_splat ? constant_count(file, argument.value)
+                                                                                   : cc::optional<i32>();
+            if (has_max_factor || !count.has_value() || count.value() < 1 || count.value() > k_max_tessellation_factor)
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, argument.name,
+                       cc::format("@tessellation_control names `max_factor` once, as an integer from 1 to {}",
+                                  k_max_tessellation_factor));
+                return result;
+            }
+            result.max_factor = count.value();
+            has_max_factor = true;
+            continue;
+        }
         // the leading-dot case the argument names, or nothing
         auto const* const dot
             = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
@@ -174,7 +189,7 @@ checker::tessellation_mode checker::tessellation_of(i32 file, ast::attribute con
     if (!has_partitioning || !has_winding)
         report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
                "@tessellation_control takes `partitioning = .integer`, `.fractional_even` or `.fractional_odd`, and "
-               "`winding = .clockwise` or `.counter_clockwise`");
+               "`winding = .clockwise` or `.counter_clockwise`, and may take `max_factor = N`");
     return result;
 }
 

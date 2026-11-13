@@ -61,6 +61,7 @@ private:
 namespace sr
 {
 /// Where a sans-serif TrueType font the operating system ships lives, if any of the usual places holds one.
+/// Under Emscripten the vendored Inter comes first, where a web page's link embedded it.
 /// The first of the places `slug_font::load_system_ui_font` tries that opens, for a caller that wants the file itself.
 /// It may still fail to load, where `load_system_ui_font` would go on to the next.
 [[nodiscard]] cc::optional<cc::string_view> system_ui_font_path();

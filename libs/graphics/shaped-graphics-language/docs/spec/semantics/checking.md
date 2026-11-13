@@ -1379,9 +1379,12 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   A triangle patch evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z` of counter-clockwise corners is `.counter_clockwise`.
   So is a quad patch of corners counter-clockwise from its first, blended by `uv.x` from the first to the second and by `uv.y` from that edge to the opposite one.
   Power-of-two partitioning is none of them, since vulkan lacks it.
+  `max_factor = N` may follow, an integer from 1 to 64, and 64 where it is absent: every factor the stage returns above `N` is `N`, on every target.
+  A NaN factor is no factor above `N`, and reaches the tessellator as it is.
+  A polyfilled draw holds room for each patch cut at `N` (CHK-527), so a smaller `N` is less scratch memory.
   Its first parameter is the patch: an array of from 1 to 32 of the struct the vertex stage returns.
   Stage inputs follow it, and it returns a **factors struct**; no other parameter stands.
-  A repeated argument is `invalid-attribute-arguments`.
+  A repeated argument, and a `max_factor` that is no such integer, is `invalid-attribute-arguments`.
 * **CHK-305** A factors struct has exactly one `@edge_factors` member, `float[2]`, `float[3]` or `float[4]`, which makes its domain isolines, triangles or quads.
   It has one `@inside_factors` member, `float` for triangles and `float[2]` for quads, and none for isolines; any other member reaches the evaluation stage as it is.
 * **CHK-306** `@tessellation_evaluation` makes an entry point of the tessellation evaluation stage, which needs `tessellation_shader`.
@@ -1447,6 +1450,9 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   A strip is cut into primitives as it grows, an odd triangle's first two corners swapped so every one winds alike; what is appended past `max_vertices` is dropped.
   `vertex_index` counts from the draw's first vertex, or is the index an indexed draw read; `instance_index` counts from the draw's first instance, and `primitive_id` within the instance.
   A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
+  Where the target has mesh shaders, the same body can be a mesh entry point instead, a primitive a lane of a workgroup.
+  Each lane writes its slots of the mesh output in lane order, so the draw is one mesh draw.
+  A slot a lane leaves unwritten is a triangle of one vertex thrice, which covers nothing; one that appends lines has no such filler, and is `unsupported-yet` by this route.
 * **CHK-527** Where a device has no tessellator, D3D's own stands in: `prelude/tessellation.sgl` cuts a patch into the domain points and primitives D3D's reference tessellator makes, in its order.
   Every location is 16.16 fixed point, as D3D computes it, so no target's float rounding moves a point.
   The factors are clamped and rounded as D3D does, and a patch with an edge factor that is zero, negative or NaN is culled; a NaN inside factor is the partitioning's least.

@@ -167,13 +167,42 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
             corner_module = front.module;
             corner = check::add_mesh_corner(corner_module.value(), parts);
         }
+    // CHK-525: a geometry stage's mesh route writes to a `mesh_output` of its stream's vertex, which a copy of the
+    // module holds, with the bounds of a workgroup's slots on the geometry function
+    auto mesh_route_layout = cc::optional<check::mesh_polyfill_layout>();
+    auto mesh_parts = check::geometry_mesh_parts();
+    if (mesh == emit::mesh_form::mesh && e.entry_stage == check::stage::geometry)
+    {
+        auto const layout = check::geometry_polyfill_layout_of(front.module, e);
+        if (layout.has_error())
+            return cc::error(cc::format("{}: error: unsupported: {}\n", front.source_name, layout.error()));
+        mesh_route_layout = layout.value();
+        corner_module = front.module;
+        mesh_parts = check::add_geometry_mesh_output(corner_module.value(), e, layout.value());
+    }
     auto const& m = corner_module.has_value() ? corner_module.value() : front.module;
     auto const source_name = front.source_name;
     // CHK-525: a polyfilled geometry stage's compute half is its pipeline's vertex stage and itself as one compute
     // entry point; each is legalized to be grafted, and what they make is legalized below as any entry point is
     auto polyfill_layout = cc::optional<check::mesh_polyfill_layout>();
     auto fused = cc::optional<check::flat_entry_point>();
-    if (mesh != emit::mesh_form::native && e.entry_stage == check::stage::geometry)
+    if (mesh_route_layout.has_value())
+    {
+        if (polyfill_vertex == nullptr)
+            return cc::error(cc::format("{}: error: the mesh route of geometry entry point '{}' runs its pipeline's "
+                                        "vertex stage, and none was named\n",
+                                        source_name, e.name));
+        auto const graft = check::legalize_options{.is_emulated = target == emit::target::wgsl || asks_software_trace,
+                                                   .lowers_asserts = diagnostics};
+        auto made = check::geometry_as_mesh(m, check::legalize(m, *polyfill_vertex, graft),
+                                            check::legalize(m, e, graft), mesh_route_layout.value(), mesh_parts);
+        if (made.has_error())
+            return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
+        fused = cc::move(made.value());
+        // what comes back is a mesh entry point, which every target with mesh shaders writes as it is
+        mesh = emit::mesh_form::native;
+    }
+    else if (mesh != emit::mesh_form::native && e.entry_stage == check::stage::geometry)
     {
         auto const layout = check::geometry_polyfill_layout_of(m, e);
         if (layout.has_error())
@@ -232,8 +261,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                 return cc::error(cc::format("{}: error: the compute half of tessellation control entry point '{}' "
                                             "runs its pipeline's vertex stage, and none was named\n",
                                             source_name, e.name));
+            // CHK-304: the factors the evaluation stage reads back are capped, as a native tessellator's are
             auto made = check::tessellation_as_compute(m, check::legalize(m, *polyfill_vertex, graft),
-                                                       check::legalize(m, e, graft));
+                                                       check::with_capped_factors(m, check::legalize(m, e, graft)));
             if (made.has_error())
                 return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
             fused = cc::move(made.value());
@@ -296,6 +326,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     // CHK-524: a polyfilled mesh entry point is written, reflected and described as the form it becomes
     auto mesh_layout = polyfill_layout;
     auto form = legal;
+    // CHK-304: a native tessellator takes factors up to 64, so a control stage's `max_factor` caps what it returns
+    if (legal.entry_stage == check::stage::tessellation_control)
+        form = check::with_capped_factors(m, legal);
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::geometry)
         form = check::geometry_as_vertex_fetch(m, legal);
     if (mesh == emit::mesh_form::vertex_fetch && legal.entry_stage == check::stage::tessellation_evaluation)

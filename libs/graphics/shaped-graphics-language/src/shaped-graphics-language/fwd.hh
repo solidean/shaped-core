@@ -386,6 +386,7 @@ struct source_lines;
 enum class reserved_use : u8;
 struct reserved_target;
 struct reserved_binding;
+struct geometry_mesh_parts;
 } // namespace sgl::check
 
 namespace sgl::test

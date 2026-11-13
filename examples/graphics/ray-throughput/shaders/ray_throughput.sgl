@@ -1,0 +1,158 @@
+// How fast inline traces run: natively on hardware, or through webgpu's ray-query polyfill.
+// Three kinds of rays over one scene, one ray per thread, each storing what it met so nothing is optimized away.
+// A preview kernel shades the camera's view, and a fullscreen pass shows it.
+require ray_query
+
+@inline binding params:
+    // the scene's box; w of the minimum is the length of its diagonal
+    bounds_min: float4
+    bounds_max: float4
+    // xyz the eye, w tan(vertical fov / 2)
+    eye: float4
+    // xyz, w the aspect ratio
+    forward: float4
+    right: float4
+    up: float4
+    // probes along x, y and z, and rays per probe
+    probe_grid: int4
+    // rays in this dispatch, and the width of the camera's grid of rays
+    ray_count: uint
+    width: uint
+    seed: uint
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    results: mut buffer[uint]
+
+binding preview_scene:
+    world: acceleration_structure[.triangles]
+    image: out image_2d[.rgba8_unorm]
+
+fun hash_u32(v: uint) -> uint:
+    let mut x = v
+    x ^= x >> 16u
+    x *= 0x7feb352du
+    x ^= x >> 15u
+    x *= 0x846ca68bu
+    x ^= x >> 16u
+    return x
+
+fun rand01(state: mut uint) -> float:
+    state = state * 1664525u + 1013904223u
+    return ((hash_u32(state) >> 8u) as float) * (1.0 / 16777216.0)
+
+// The camera's ray through pixel (x, y) of a grid `w` wide and `h` high, row 0 at the top.
+fun camera_ray(x: uint, y: uint, w: uint, h: uint){params} -> ray:
+    let ndc_x = ((x as float) + 0.5) / (w as float) * 2.0 - 1.0
+    let ndc_y = ((y as float) + 0.5) / (h as float) * 2.0 - 1.0
+    let tan_half = params.eye.w
+    let aspect = params.forward.w
+    let d = normalize(params.forward.xyz + params.right.xyz * (ndc_x * tan_half * aspect) - params.up.xyz * (ndc_y * tan_half))
+    return ray(origin = pos3(params.eye.x, params.eye.y, params.eye.z), direction = vec3(d.x, d.y, d.z))
+
+// The center of probe `p` of a grid filling the middle 80% of the scene's box.
+fun probe_origin(p: uint){params} -> float3:
+    let gx = params.probe_grid.x as uint
+    let gy = params.probe_grid.y as uint
+    let cx = p % gx
+    let cy = (p / gx) % gy
+    let cz = p / (gx * gy)
+    let cell = float3(cx as float, cy as float, cz as float) + 0.5
+    let f = cell / float3(params.probe_grid.x as float, params.probe_grid.y as float, params.probe_grid.z as float)
+    let lo = params.bounds_min.xyz
+    let hi = params.bounds_max.xyz
+    return lo + (hi - lo) * (0.1 + 0.8 * f)
+
+// A direction uniform over the sphere.
+fun sphere_direction(rng: mut uint) -> float3:
+    let z = 1.0 - 2.0 * rand01(mut rng)
+    let r = sqrt(max(0.0, 1.0 - z * z))
+    let phi = 6.2831853 * rand01(mut rng)
+    return float3(r * cos(phi), r * sin(phi), z)
+
+fun store_hit(i: uint, h: triangle_hit){scene}:
+    let mut v = 0xffffffffu
+    if h.is_hit => v = ((h.t * 1024.0) as uint) ^ (h.primitive_index as uint)
+    scene.results[i] = v
+
+// Primary rays: coherent, one per pixel of a `width`-wide grid.
+@compute(64) fun trace_camera(@thread_id id: int3){scene, params}:
+    let i = id.x as uint
+    if i >= params.ray_count => return
+    let h = params.ray_count / params.width
+    store_hit(i, scene.world.trace(camera_ray(i % params.width, i / params.width, params.width, h), flags = ray_flags.force_opaque))
+
+// Probe rays: every ray of one probe starts at its center and leaves in a random direction, so neighbors diverge at once.
+@compute(64) fun trace_probe(@thread_id id: int3){scene, params}:
+    let i = id.x as uint
+    if i >= params.ray_count => return
+    let per_probe = params.probe_grid.w as uint
+    let o = probe_origin(i / per_probe)
+    let mut rng = hash_u32(i ^ (params.seed * 0x9e3779b9u))
+    let d = sphere_direction(mut rng)
+    let r = ray(origin = pos3(o.x, o.y, o.z), direction = vec3(d.x, d.y, d.z))
+    store_hit(i, scene.world.trace(r, flags = ray_flags.force_opaque))
+
+// Occlusion rays: short, from the probe centers, ending at the first hit, as an ambient-occlusion or shadow ray does.
+@compute(64) fun trace_occlusion(@thread_id id: int3){scene, params}:
+    let i = id.x as uint
+    if i >= params.ray_count => return
+    let per_probe = params.probe_grid.w as uint
+    let o = probe_origin(i / per_probe)
+    let mut rng = hash_u32(i ^ (params.seed * 0x9e3779b9u) ^ 0x5bd1e995u)
+    let d = sphere_direction(mut rng)
+    let reach = 0.05 * params.bounds_min.w
+    let r = ray(origin = pos3(o.x, o.y, o.z), direction = vec3(d.x, d.y, d.z), t_max = reach)
+    let mut v = 0u
+    if is_occluded(scene.world, r) => v = 1u
+    scene.results[i] = v
+
+// The camera's view, shaded by depth and tinted per instance, into the preview image.
+@compute(8, 8) fun render_preview(@thread_id id: int3){preview_scene, params}:
+    let size = preview_scene.image.size()
+    if id.x >= size.x or id.y >= size.y => return
+    let r = camera_ray(id.x as uint, id.y as uint, size.x as uint, size.y as uint)
+    let h = preview_scene.world.trace(r, flags = ray_flags.force_opaque)
+    let mut color = float3(0.08, 0.09, 0.12)
+    if h.is_hit:
+        let tint_bits = hash_u32((h.instance_index as uint) * 7919u + 17u)
+        let tint = float3((tint_bits & 255u) as float, ((tint_bits >> 8u) & 255u) as float, ((tint_bits >> 16u) & 255u) as float) / 255.0
+        let shade = saturate(1.0 - h.t / params.bounds_min.w)
+        let stripe = if (h.primitive_index & 1) == 0 => 1.0 else 0.85
+        color = mix(float3(0.85), tint, 0.35) * (0.15 + 0.85 * shade * shade) * stripe
+    preview_scene.image[id.xy] = float4(..color, 1.0)
+
+// ---- showing the preview ---------------------------------------------------------------------------------------------
+
+binding shown:
+    texture: texture_2d[float4]
+    sampler linear_clamp:
+        filter = .linear
+        address = .clamp_edge
+
+struct blit_varyings:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct blit_target:
+    color: float4
+
+// Vertices 0, 1 and 2 land at uv (0,0), (2,0) and (0,2): one triangle covering the screen.
+@vertex fun blit_vs(@vertex_index vertex: int) -> blit_varyings:
+    let uv = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = uv * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return {
+        position = hpos4(clip.x, clip.y, 0.0, 1.0)
+        uv = uv
+    }
+
+@pixel fun blit_ps(v: blit_varyings){shown} -> blit_target:
+    return {
+        color = shown.texture.sample(v.uv, shown.linear_clamp, level = 0.0)
+    }
+
+pipeline blit:
+    vertex = blit_vs
+    pixel = blit_ps
+    cull = .none
+    format = .host

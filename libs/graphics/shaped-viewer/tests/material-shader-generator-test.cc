@@ -138,6 +138,29 @@ TEST("sv::generate_material_shader - an attribute-less type reads no parameter b
     CHECK(g.source.contains("hit_group sv_material for tracer.path_rays:"));
 }
 
+// A display material reflects nothing in the tracers, so a hybrid's bounce meeting one must read it black, not as the
+// mid-gray a type naming no base color is read as; the tracers absorb a bounce there, and the two must agree.
+TEST("sv::generate_material_shader - a display type's secondary hit reads black, a declared base color its attribute")
+{
+    auto const display
+        = sv::material_type::create({.name = "display",
+                                     .signature = {sv::material_signature_entry::of("color", tg::vec3f(1, 1, 1))},
+                                     .shader = "surface.base_weight = 0.0\n",
+                                     .display_only = true});
+    auto const shown = sv::generate_material_shader(sv::resolve_material(display, bare_material(), make_mesh()));
+    CHECK(shown.secondary.base_color.kind == sv::material_value_kind::zero);
+    CHECK(shown.secondary.specular_weight.kind == sv::material_value_kind::zero);
+
+    auto const plain
+        = sv::material_type::create({.name = "plain",
+                                     .signature = {sv::material_signature_entry::of("tint", tg::vec3f(1, 1, 1))},
+                                     .shader = "surface.base_color = tint\n",
+                                     .base_color_attribute = "tint"});
+    auto const lit = sv::generate_material_shader(sv::resolve_material(plain, bare_material(), make_mesh()));
+    CHECK(lit.secondary.base_color.kind == sv::material_value_kind::constant);
+    CHECK(lit.secondary.specular_weight.kind == sv::material_value_kind::none);
+}
+
 TEST("sv::generate_material_shader - a mesh attribute is loaded through its descriptor")
 {
     auto const type = make_type();

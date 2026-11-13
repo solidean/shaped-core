@@ -168,7 +168,7 @@ target_compile_features(shaped-graphics PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-graphics/...>' works for consumers.
 target_include_directories(shaped-graphics
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # clean-core provides the vocabulary types + assertions; typed-geometry the math types sg's
@@ -475,6 +475,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/sgl-mesh-test.cc
             tests/pipeline/mesh-polyfill-test.cc
             tests/pipeline/mesh-polyfill-benchmark.cc
+            tests/pipeline/geometry-polyfill-benchmark.cc
             tests/pipeline/software-trace-test.cc
             tests/pipeline/raytracing-pipeline-test.cc
             # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
@@ -523,6 +524,7 @@ if(SC_BUILD_TESTS)
                 sampling.sgl:*
                 shapes.sgl:*
                 stages.sgl:*
+                geometry_bench.sgl:*
                 subgroups.sgl:*
                 coherence.sgl:*
                 float_specials.sgl:*

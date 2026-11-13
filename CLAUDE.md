@@ -200,7 +200,7 @@ One-liner per library:
   SPIR-V and DXIL alike; `uv run dev.py run shan -- diff native.dxil dxc.dxil` is the command line.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`.
-  Depends on shaped-rendering, plus babel-serializer for the asset importer.
+  Depends on shaped-rendering, plus babel-serializer for the asset importer, and clean-net on the web, where `load_async` fetches.
   A first vertical slice today: path-traced views blitted into a window.
   Every shader is SGL, so the trace runs on dx12, vulkan and metal; the default context and the examples are dx12's on Windows and metal's on Apple.
   **A material type is an SGL fragment** (`sv::material_type::shader`), generated into one hit group per permutation.
@@ -332,6 +332,13 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   See [docs/platforms.md](docs/platforms.md#threading-sc_threads).
 * `SC_X64_LEVEL` (default `v3`; `v2` on Android) is the x86-64 feature level **every** function may assume → `-march=x86-64-vN` / `/arch:` and `CC_X64_LEVEL`.
   A floor, not a ceiling: anything above it is clean-simd's dispatched kernels, never this switch.
+  `v2-avx` is `v2` plus AVX without AVX2, matching a consumer built for AVX alone → `CC_X64_LEVEL` 2 and `CC_X64_AVX`; the `v2-avx-msvc` preset builds it.
+* The build-wide ABI settings (`CC_DEBUG`, `CC_SINGLE_THREADED`, `CC_X64_LEVEL`, …) are no compile definitions.
+  They are clean-core's generated `clean-core/build_config.hh`, which `macros.hh` includes first.
+* `SC_LIBRARIES` (default empty, every library) builds a subset: the named libraries, their shaped-core dependencies, and nexus only where tests, tools or examples are built.
+  The dependency table is [tools/cmake/Libraries.cmake](tools/cmake/Libraries.cmake), and configure fails where a library links what its row does not name.
+* `SC_INSTALL` (default OFF) adds install rules and the `shaped-core` CMake package (`find_package(shaped-core)`, `shaped-core::<library>`) — [tools/cmake/Install.cmake](tools/cmake/Install.cmake).
+  `uv run tools/install-test/install-test.py` installs a subset and builds a consumer against it.
   `SC_WASM_SIMD` (default ON) is the wasm counterpart, `-msimd128`.
   See [docs/platforms.md](docs/platforms.md#x86-64-feature-level-sc_x64_level).
 * **Floating-point contraction is off on every compiler, and there is no switch for it** — like fast-math, shaped-core does not support it.

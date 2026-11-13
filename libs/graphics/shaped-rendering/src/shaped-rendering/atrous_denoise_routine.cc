@@ -24,6 +24,9 @@ constexpr u32 k_demodulate_in = 1u << 3;
 constexpr u32 k_remodulate_out = 1u << 4;
 constexpr u32 k_has_specular_albedo = 1u << 5;
 constexpr u32 k_has_sample_counts = 1u << 6;
+constexpr u32 k_moment_in = 1u << 7;
+constexpr u32 k_variance_in = 1u << 8;
+constexpr u32 k_keeps_input_alpha = 1u << 9;
 
 // Where this member's images live in the history's state slots.
 // à-trous keeps no history, so the two scratch slots are all it ever touches — the rest stay empty under it.
@@ -61,6 +64,8 @@ atrous_options atrous_denoise_routine::options_for(reconstruct_settings const& s
     // Sharpness 0 averages across luminance differences of four noise widths, 1 across half of one.
     auto const sharpness = cc::clamp(settings.sharpness, 0.0f, 1.0f);
     options.luminance_sigma = 4.0f + (0.5f - 4.0f) * sharpness;
+    // Measured, as SVGF maps it: eight measured noise widths at sharpness 0, two at 1.
+    options.measured_luminance_sigma = 8.0f + (2.0f - 8.0f) * sharpness;
     return options;
 }
 
@@ -173,6 +178,14 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
             flags |= k_demodulate_in;
         if (demodulate && i == last)
             flags |= k_remodulate_out;
+        // A measured variance: the first pass reads it off the moment, every later one off the pass before, and the
+        // last hands the caller's alpha back rather than the variance it carried.
+        if (in.moment_in_alpha)
+        {
+            flags |= i == 0 ? k_moment_in : k_variance_in;
+            if (i == last)
+                flags |= k_keeps_input_alpha;
+        }
 
         auto const& pass = i == last ? self->_output : self->_scratch;
         auto const group = ctx.transient.create_binding_group(cmd, pass.group_layout,
@@ -183,6 +196,7 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
                                                                   .normal = normal,
                                                                   .depth = depth,
                                                                   .sample_counts = sample_counts,
+                                                                  .input = in.color.as_texture_view(),
                                                                   .target = target.as_any_image_view(),
                                                               });
 
@@ -194,6 +208,9 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
             .luminance_scale = luminance_scale,
             .normal_power = options.normal_power,
             .depth_sigma = options.depth_sigma,
+            .ceiling = impl::ceiling_of(target.format()),
+            .luminance_sigma = options.measured_luminance_sigma,
+            .sample_count = f32(sample_count),
         }
                                              .to_block());
         cmd.compute.dispatch_threads(extent[0], extent[1], 1);

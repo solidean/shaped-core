@@ -114,6 +114,9 @@ Either is cut to the 65535 one dispatch dimension holds, and a launch past the s
 | scan | `sg_task_output` | `sg_dispatch_grid` |
 | mesh stage's compute half | `sg_mesh_output` | the pipeline's groups, `sg_task_input` |
 
+`sg_task_input` is read-only, which keeps a launched mesh stage's workgroup id uniform in WGSL, as `@builtin(workgroup_id)` is: a load of read-only storage at a uniform index is.
+So a barrier under a branch on it compiles on webgpu as it does natively, which `halves` and `culled_column` of the tests' `meshes.sgl` hold.
+
 The first two take a layout of `mesh_polyfill_slots::task`, the third one of `launched`.
 
 ## An indirect draw
@@ -138,7 +141,7 @@ The compute half assembles each primitive from the draw's own buffers, which sg 
 | entry | holds |
 |---|---|
 | `sg_geometry_draw[0]` | first vertex, or first index of an indexed draw; primitives an instance; index kind, 0 none, 1 16-bit, 2 32-bit; the vertex offset added to each index |
-| `sg_geometry_draw[1]` | first instance; the index buffer's offset, in indices; two words unused |
+| `sg_geometry_draw[1]` | first instance; the index buffer's offset, in indices; the instances, which the mesh route reads; one word unused |
 | `sg_geometry_draw[2]` | each vertex buffer's offset, in words, in slot order |
 | `sg_geometry_indices` | the index buffer bound for the draw; a 16-bit index is half a word, the low half first |
 | `sg_geometry_vertices0` to `3` | the vertex buffers bound, in slot order |
@@ -161,6 +164,20 @@ metal draws it, `draws_geometry_polyfill`, with the draw's buffers bound past ev
 A slot the draw has no buffer for, the index buffer of a draw that is not indexed, takes the draw's own values, since Metal's validation wants every declared buffer bound.
 dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage that decides `where_missing` has not run.
 
+**The mesh route**, where the device has mesh shaders: SGL writes the vertex and geometry stages as one mesh entry point, a primitive a lane.
+slib builds a mesh pipeline of it and the pixel stage, marked by `geometry_mesh_corners`.
+`draw` and `draw_indexed` of it bind the same `sg_geometry_*` entries to the mesh stage and draw `ceil(primitives * instances / lanes)` mesh workgroups, inside the pass.
+Each lane owns `max_vertices` vertices and `max_primitives` triangles of its workgroup's output, in lane order, so the order is the native one, and a triangle a lane leaves is its first vertex thrice.
+`ctx.geometry_polyfill_route()` picks it, `mesh` by default; the compute route stands where the device has no mesh shaders, or the backend no `draws_geometry_mesh_route`.
+Measured on an Apple M4 by `tests/pipeline/geometry-polyfill-benchmark.cc`, 10 frames into 1024 x 1024:
+
+| scene | compute route | mesh route |
+|---|---|---|
+| 262 144 triangles passed on, one draw | 11.5 ms | 7.6 ms |
+| the same in 256 draws | 215 ms | 7.9 ms |
+| 262 144 points grown into quads, one draw | 20.5 ms | 12.2 ms |
+| the same in 256 draws | 219 ms | 12.9 ms |
+
 ## The tessellation stages, by D3D's tessellator
 
 **A device without tessellation draws it by compute passes** (CHK-527): metal, whose Metal 4 has none, and webgpu.
@@ -179,7 +196,7 @@ A draw's vertices are its patches' control points, `control_points` a patch, and
 
 `draw` and `draw_indexed` of such a pipeline then:
 
-1. take scratch buffers sized for every patch at the largest factor, `max_factor`, 64 by default;
+1. take scratch buffers sized for every patch at the largest factor, the control stage's `max_factor`, 64 where it states none;
 2. leave the rendering scope's pass;
 3. dispatch the control pass over `patches * instances` threads, which runs the vertex stage on each control point and the control stage on the patch;
 4. count each patch's points and indices, scan them in patch order in one invocation, then tessellate each patch, a thread a patch;
@@ -194,8 +211,6 @@ metal draws it, `draws_tessellation_polyfill`; dx12, vulkan and webgpu draw none
 
 - A launch dropped past the slots is silent; the decision is that the `report` profile logs it at the `.sgl` line.
 - The scan is one invocation, a loop over the task workgroups, which a parallel scan replaces once a benchmark of many task workgroups says it matters.
-- On webgpu a launched mesh stage's workgroup id and payload come from a storage read, so WGSL takes control flow on either for non-uniform.
-  A barrier under such a branch, which the native stage takes, fails WGSL's uniformity analysis there.
-  Since every polyfilled mesh stage has a `launched` form, such a mesh stage fails its pipeline's build on webgpu with no task stage too.
-  `workgroupUniformLoad` of what the first invocation read is the fix.
+>>>
+
 - The task stage is drawn this way wherever the mesh stage is, `where_missing` by default, with no benchmark of its own yet.

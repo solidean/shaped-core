@@ -872,8 +872,9 @@ struct checker
     {
         tessellation_partitioning partitioning = tessellation_partitioning::integer;
         bool is_clockwise = true;
+        i32 max_factor = k_max_tessellation_factor;
     };
-    /// `@tessellation_control(partitioning = …, winding = …)`, both named (CHK-304).
+    /// `@tessellation_control(partitioning = …, winding = …, max_factor = N)`, the first two named (CHK-304).
     [[nodiscard]] tessellation_mode tessellation_of(i32 file, ast::attribute const& a);
     /// `point_stream[T]`, `line_stream[T]` and `triangle_stream[T]` in a type position (CHK-302).
     [[nodiscard]] type_id resolve_stream(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);

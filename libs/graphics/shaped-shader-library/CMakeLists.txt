@@ -106,7 +106,7 @@ target_compile_features(shaped-shader-library PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-shader-library/...>' works for consumers.
 target_include_directories(shaped-shader-library
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # shaped-graphics provides sg::compiled_shader / sg::shader_stage / sg::context (public API surface).

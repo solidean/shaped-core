@@ -509,6 +509,7 @@ auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct
      .output = image,                                      // OUTPUT extent, image usage, never the same texture as color
      .sample_count = samples_per_pixel},                   // the mean's fewest samples a pixel; spatial members back off as it grows; 0 means 1
                                                             //   .sample_counts = a float texture of the count per pixel, which wins where set
+                                                            //   .moment_in_alpha = true: color.a holds the mean of each sample's luminance squared; à-trous measures its variance from it
     history, settings);
 out.status                                                 // denoised | pending | unsupported | failed — output untouched unless denoised
 out.denoiser / out.upscaler / out.restarted                // what ran; whether it started from no history

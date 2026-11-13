@@ -1211,6 +1211,8 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
     }
     catch (std::exception const& e)
     {
+        if (is_outermost_execution())
+            CC_LOG_ERROR("uncaught exception: {} at {}", e.what(), nx::impl::site_text(decl.location));
         ctx.errors.push_back(test_error{
             .expr = cc::format("uncaught exception: {}", e.what()),
             .location = decl.location,
@@ -1220,6 +1222,8 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
     }
     catch (cc::exception const& e)
     {
+        if (is_outermost_execution())
+            CC_LOG_ERROR("uncaught exception: {} at {}", e.message(), nx::impl::site_text(decl.location));
         ctx.errors.push_back(test_error{
             .expr = cc::format("uncaught exception: {}", e.message()),
             .location = decl.location,
@@ -1351,13 +1355,18 @@ void start_async_finish(async_test_state& state)
         if (auto const* const code = state.command_root->try_value(); code != nullptr)
             state.execution->exit_code = *code;
         else if (auto const* const err = state.command_root->try_error(); err != nullptr && !aborted)
+        {
+            auto const what = err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string();
+            // Logged as a failed check is, since the summary names only the test, and a page has no results file.
+            if (is_outermost_execution())
+                CC_LOG_ERROR("the command's async graph failed: {} at {}", what, nx::impl::site_text(decl.location));
             ctx.errors.push_back(test_error{
-                .expr = cc::format("the command's async graph failed: {}",
-                                   err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string()),
+                .expr = cc::format("the command's async graph failed: {}", what),
                 .location = decl.location,
                 .extra_lines = {},
                 .expanded = "the command resolved to an error instead of an exit status",
             });
+        }
     }
 
     if (state.root != nullptr && !aborted)
@@ -1365,6 +1374,8 @@ void start_async_finish(async_test_state& state)
         if (auto const* const err = state.root->try_error(); err != nullptr)
         {
             auto const what = err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string();
+            if (is_outermost_execution())
+                CC_LOG_ERROR("the test's async graph failed: {} at {}", what, nx::impl::site_text(decl.location));
             ctx.errors.push_back(test_error{
                 .expr = cc::format("the test's async graph failed: {}", what),
                 .location = decl.location,

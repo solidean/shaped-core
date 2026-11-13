@@ -182,6 +182,7 @@ The kernel tables live beside it in `tools/gen_simd/`, one module per instructio
 ## Build floors
 
 `SC_X64_LEVEL` (default `v3`) is what every function may assume, and `SC_WASM_SIMD` (default on) turns on SIMD128.
+Its `v2-avx` level, `v2` plus AVX without AVX2, has `v2`'s floor kernel, `sse42`, with `avx2` and `avx512` dispatched above it.
 [docs/platforms.md](../../../../docs/platforms.md#x86-64-feature-level-sc_x64_level) has both.
 A floor, never a ceiling: compiled at `v4`, a plain AABB loop with no intrinsics in it became AVX-512 scatters.
 Anything above the floor is a dispatched kernel.

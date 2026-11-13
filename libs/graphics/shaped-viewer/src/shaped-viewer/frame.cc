@@ -140,6 +140,11 @@ void frame::hold_capture(cc::string_view reason)
         _viewer->hold_capture(reason);
 }
 
+cc::optional<double> frame::gpu_frame_ms() const
+{
+    return _viewer == nullptr ? cc::optional<double>() : _viewer->gpu_frame_ms();
+}
+
 isize frame::pending_resource_work() const
 {
     return _viewer == nullptr ? 0 : _viewer->pending_resource_work();
@@ -332,6 +337,14 @@ void frame::_flush_immediate_shapes()
 }
 
 void frame::present()
+{
+    if (_viewer == nullptr || !_open || _presented)
+        return;
+    submit();
+    _viewer->wait_for_throttle();
+}
+
+void frame::submit()
 {
     if (_viewer == nullptr || !_open || _presented)
         return;

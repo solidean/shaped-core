@@ -96,6 +96,9 @@ struct instance_record:
     to_world_x: float4
     to_world_y: float4
     to_world_z: float4
+    previous_to_world_x: float4
+    previous_to_world_y: float4
+    previous_to_world_z: float4
 
 /// What next-event estimation reads of one emissive instance beyond its light record, as `traced.emitters` holds it, 80 bytes.
 /// The host fills it in `sv::view_renderer` through `sv::emitter_record_of`, one per record of path `scene.light_path_mesh`, in the order those records stand.
@@ -151,7 +154,9 @@ struct frame_constants:
     light_count: uint
     /// Where the emissive instances' records start in `traced.lights`: they follow every analytic light, and `traced.emitters` is indexed from here.
     emitter_offset: uint
-    pad0: uint2
+    /// `environment_estimate_exact` where the environment's light is estimated against its exact unshadowed part, `sv::render_settings::environment_estimate`
+    environment_estimate: uint
+    pad0: uint
     path_offset: uint4
     path_count: uint4
 
@@ -168,6 +173,9 @@ struct frame_constants:
 
     /// whether the hybrid's deferred kernel writes `guide_hit_distance` for a temporal member that reads it, without the split
     write_hit_distance: uint
+
+    /// how many samples per pixel a hybrid frame lights, `render_settings::hybrid_moving_samples` while the image moves; 0 is 1
+    hybrid_samples: int
     /// whether to write `primary_depth`, at the camera's `near_plane`
     write_primary_depth: uint
     near_plane: float
@@ -318,6 +326,8 @@ struct pixel_tally:
     hit_specular: float2
     /// every path's first secondary ray that escaped since the restart, per lobe
     escaped: float2
+    /// x: the samples' luminance squared since the restart, summed as `sum` is, `pt.moment_of`; y: unused, for the packing
+    moment_sum: float2
 
 /// The workgroup counts an indirect dispatch reads, `sg::dispatch_args`.
 struct dispatch_args:
@@ -336,6 +346,7 @@ binding traced:
     world: acceleration_structure[.mixed]
 
     /// The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into at the dispatch's own pixel.
+    /// Its alpha is the mean of those samples' luminance squared, `pt.moment_of`, which à-trous measures each pixel's variance from.
     output: mut image_2d[.rgba32_float]
 
     /// One element, the frame constants.
@@ -534,8 +545,8 @@ struct surface_payload:
     /// which wavelength the path has been collapsed onto, or 3 while it still carries all three
     channel: uint
 
-    /// whether this is the path's last surface hit, so no bounce ray follows it — written by the caller only
-    last_bounce: uint
+    /// whether the path has spent its bounces, so this hit only adds the emission the last one reached and samples no light — written by the caller only
+    emission_only: uint
     /// whether the ray is a pixel's guide ray: only a full coverage stops it, and its hit is shaded for the guides alone, without visibility tests — written by the caller only
     guide: uint
 
@@ -564,6 +575,8 @@ struct surface_payload:
     bsdf_pdf: float
     /// below 0 where the ray escaped
     hit_t: float
+    /// how far the point `origin + direction * hit_t` may lie off the surface, `pt.hit_rounding`, which a continuation is lifted by; 0 on an escape
+    rounding: float
     /// 1 where `direction` lies above the shading frame's horizon, the only directions next-event estimation samples.
     /// Where it is 0, a light or the sky the continuation reaches is the BSDF's alone, at full weight.
     nee_reachable: uint
@@ -606,9 +619,9 @@ rays path_rays:
     occlusion: shadow_payload
 
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
-fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
+fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, emission_only: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0, 0.0, 0.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, emission_only, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0.0, 0u, -1.0, 0.0, 0.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:

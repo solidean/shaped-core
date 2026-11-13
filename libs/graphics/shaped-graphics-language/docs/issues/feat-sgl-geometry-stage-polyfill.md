@@ -32,12 +32,18 @@ Each route is measured against dx12's native geometry stage on the same scene, w
 - **2026-11-11: drawn on metal.**
   `ctx.set_geometry_polyfill(...)` opts in, slib acquires both halves, and sg's metal backend dispatches the compute half outside the pass and draws the slots back.
   `tests/pipeline/stages-test.cc`'s geometry tests pass on an Apple M4 through it: ended strips, primitive ids, and indexed draws of 16-bit and 32-bit indices with a vertex offset.
+- **2026-11-12: the mesh route on metal.**
+  `sgl emit --mesh mesh --vertex <vs>` writes the vertex and geometry stages as one mesh entry point, a primitive a lane.
+  slib builds a mesh pipeline of it where `ctx.geometry_polyfill_route()` is `mesh`.
+  sg draws it in the pass as one mesh draw; the geometry tests draw the same images by both routes on an M4.
+  `geometry-polyfill-benchmark.cc` measured it faster in every scene: a third in one draw, and 17 to 27 times over 256 draws, each splitting the compute route's pass.
+  So `mesh` is the default route; triangles out only, since a line has no filler for a slot a lane leaves.
 
 ## Still open
 
 - **dx12 and vulkan draw it**, beside their native stage, so the two images can be compared and the benchmark run: a Windows machine's work.
   The compute half's layout twin needs the `sg_geometry_*` slots there, as the mesh polyfill's holds `sg_mesh_output`.
 - **webgpu draws it**, which needs `buffer_usage::readonly_buffer` on a vertex and an index buffer a polyfilled pipeline reads, since WebGPU binds no other as storage.
-- **The mesh route on metal**, measured against the compute route on the same scene.
 - **Strip topologies in**, whose primitives share corners, and points in and out.
+- **Lines out by the mesh route**, which needs a filler a rasterizer surely drops, or lanes that compact their slots.
 - Whether `vertex_index` on an indexed draw matches D3D's and vulkan's, which differ on the vertex offset.

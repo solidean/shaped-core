@@ -105,6 +105,7 @@ cc::result<tessellation_polyfill_layout, cc::string> sgl::check::tessellation_po
         .output = domain == 2       ? 2
                 : info.is_clockwise ? 1
                                     : 0,
+        .max_factor = info.max_factor,
     };
     if (te != nullptr)
     {
@@ -386,4 +387,56 @@ flat_entry_point sgl::check::tessellation_as_vertex_fetch(checked_module const& 
     body.push_back(out.var(result, w.read_value(te.result, first, next)));
     body.push_back(out.return_(out.local(result)));
     return compacted(m, out.e, body);
+}
+
+flat_entry_point sgl::check::with_capped_factors(checked_module const& m, flat_entry_point const& tc)
+{
+    CC_ASSERT(tc.entry_stage == stage::tessellation_control, "only a control stage returns factors");
+    auto const cap = m.functions[m.at(tc.function).info].max_factor;
+    if (cap >= k_max_tessellation_factor)
+        return tc;
+    auto out = flat_builder::extend(m, tc);
+    auto const& members = m.at(m.at(tc.result).members);
+    // factor `k` of member `i`, -1 for a scalar, of `result`: built anew for each use, since an expression has one parent
+    auto const factor = [&](local_id result, i32 i, i32 k)
+    {
+        auto const whole = out.member(out.local(result), i);
+        if (k < 0)
+            return whole;
+        return out.add_expr(m.at(members[i].type).element, flat_element{.object = whole, .index = out.int_literal(k)});
+    };
+    auto const cap_into = [&](local_id result, i32 i, i32 k, stmt_list& into)
+    {
+        // `>` is false for a NaN, which reaches the tessellator as it is and culls the patch
+        flat_expr_id const compared[] = {factor(result, i, k), out.literal(f64(cap))};
+        flat_stmt_id const lowered[] = {out.assign(factor(result, i, k), out.literal(f64(cap)))};
+        into.push_back(out.if_(out.call("greater", compared), lowered));
+    };
+    auto const replace = [&](flat_stmt_id id, stmt_list& into)
+    {
+        auto const* const r = out.e.at(id).node.try_as<flat_return>();
+        if (r == nullptr || !is_valid(r->value))
+            return false;
+        auto const value = r->value;
+        // the replaced return stays in the tree's storage, and must not hold the value as a second parent
+        out.e.stmts[index_of(id)].node = flat_return{};
+        auto const result = out.add_local(local_kind::temporary, "factors", tc.result);
+        out.e.locals[index_of(result)].is_mut = true;
+        into.push_back(out.var(result, value));
+        for (auto i = 0; i < i32(members.size()); ++i)
+        {
+            if (members[i].factor == tessellation_factor::none)
+                continue;
+            auto const& t = m.at(members[i].type);
+            if (t.kind != type_kind::array)
+                cap_into(result, i, -1, into);
+            else
+                for (auto k = 0; k < t.count; ++k)
+                    cap_into(result, i, k, into);
+        }
+        into.push_back(out.return_(out.local(result)));
+        return true;
+    };
+    out.e.body = rewritten(out, out.e.body, replace);
+    return cc::move(out.e);
 }

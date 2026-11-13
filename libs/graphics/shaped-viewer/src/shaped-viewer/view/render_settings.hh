@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-rendering/display.hh>
 #include <shaped-rendering/reconstruct.hh>
@@ -28,6 +29,15 @@ inline constexpr u32 accumulation_sample_cap = 16384;
 
 /// The mode a layer asking for `mode` is drawn in on `ctx`: `mode` itself, unless it is `automatic`.
 [[nodiscard]] render_mode resolve_render_mode(sg::context const& ctx, render_mode mode);
+
+/// Names the mode every layer left `automatic` draws in, whatever the device: `raster_bound`, `raster`, `hybrid`,
+/// `wavefront` or `megakernel`.
+/// A developer's knob, read once per process: `SV_AUTOMATIC_MODE=raster_bound` shows any example natively as a
+/// browser draws it, with the device's own ray queries standing in for WebGPU's emulated ones.
+inline constexpr cc::string_view automatic_mode_env_var = "SV_AUTOMATIC_MODE";
+
+/// Whether `mode` draws its layer without tracing a ray: `raster` or `raster_bound`.
+[[nodiscard]] constexpr bool is_rasterized(render_mode mode);
 } // namespace sv
 
 /// How a layer's image is produced from its scene: traced by one of two path tracers, or rasterized.
@@ -37,11 +47,13 @@ inline constexpr u32 accumulation_sample_cap = 16384;
 /// On a Radeon 780M the wavefront wins the shallow scene too; libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
 enum class sv::render_mode : sv::u8
 {
-    /// The hybrid where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, and `raster` where it has not, which the viewer warns of once.
+    /// The hybrid where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, which the viewer warns of once where it has not.
+    /// Without them, `raster` where the device has `binding_arrays`, and `raster_bound` where it lacks those too, as WebGPU does.
     /// A layer left here that names no denoiser is denoised by `automatic`'s, since a hybrid frame is one sample per pixel.
     ///
     /// The hybrid rather than a path tracer because it holds a frame rate: about 8 to 16 ms a moving frame at 1920x1200 where the wavefront takes 15 to 39, on Bistro and Sponza.
     /// It lights one bounce, though, so a room lit only indirectly is darker and noisier than the wavefront converges to; a caller who wants that names `wavefront`.
+    /// `automatic_mode_env_var` overrides all of this, for a developer looking at another mode.
     /// Resolved where the viewer builds the frame's plan, so the plan declares what the mode it resolved to writes.
     /// A plan built by hand from a layer still `automatic` traces it with the wavefront.
     automatic,
@@ -64,6 +76,13 @@ enum class sv::render_mode : sv::u8
     /// Quadric batches are not drawn yet.
     /// libs/graphics/shaped-viewer/docs/raster.md is the design.
     raster,
+
+    /// `raster`'s image without `binding_arrays`: the central pools bound as buffers of their own, so it draws on WebGPU's core.
+    ///
+    /// It writes the lit image and the primary depth, and no G-buffer: WebGPU's color targets hold 32 bytes a pixel.
+    /// Not drawn yet: frame meshes over their own index buffers.
+    /// libs/graphics/shaped-viewer/docs/plans/raster-bound.md is the design and the checkpoints that fill those in.
+    raster_bound,
 
     /// Rasterized primary hits, lit by the tracer's next-event estimate with shadow rays traced inline, and one bounce.
     ///
@@ -99,6 +118,20 @@ enum class sv::still_denoise : sv::u8
     temporal_on_mean,
 };
 
+/// How a traced layer estimates the light its environment sends, which every mode but `raster` reads.
+enum class sv::environment_estimate : sv::u8
+{
+    /// Each hit's environment sample and bounce carry it as they carry any other light.
+    /// Unbiased, and noisy on a face nothing shadows: one direction a hit stands in for the whole sky.
+    sampled,
+
+    /// The unshadowed light is taken whole, and the samples carry only what they find blocked.
+    /// The diffuse half is the environment's exact irradiance, and the specular half the closure's own lobe integrated over the sky with no ray traced.
+    /// A face open to the sky keeps only the noise of that integral, which a smooth sky makes small; a shadow keeps the noise of the rays it blocks.
+    /// Unbiased; a closure that transmits keeps its specular half sampled, and a dome is sampled whole.
+    exact,
+};
+
 /// A quantity a wavefront layer averages at its pixels' primary hits beside its image: a bit of `render_settings::channels`.
 ///
 /// Each is one float4 a pixel, the mean over the pixel's samples since the restart; a sample whose primary ray escaped adds 0.
@@ -126,6 +159,109 @@ enum class sv::render_channel : sv::u32
 /// How the layer is drawn, traced or rasterized, and the controls of each; a field says which mode reads it.
 /// Lighting and the environment live elsewhere on the layer (its lights and its background).
 /// This is the home for the post-process sequence, the display transform, ... as they land.
+/// Screen-space ambient occlusion, from the depth a frame's prepass laid down: a visibility bitmask, then a blur.
+/// Only a `raster_bound` layer reads it so far, and only where it traces no indirect light, which meets its occluders
+/// already.
+struct sv::screen_ambient_occlusion
+{
+    bool enabled = true;
+
+    /// How far an occluder reaches, in world units.
+    f32 radius = 1.2f;
+
+    /// How thick a surface the depth shows is taken to be, in world units: light passes behind it, so a thin object in
+    /// front of a wall does not darken the wall around it.
+    f32 thickness = 0.5f;
+
+    /// The exponent the visibility is raised to: the occlusion's contrast, 1 for the estimate as it is.
+    f32 intensity = 2.0f;
+
+    /// How much of the direct light it darkens, 0 to 1; the environment's light it darkens fully.
+    /// Physically none, since direct light is a shadow's to occlude; a device without ray queries draws no shadows, and
+    /// contact shading then reads far better with some.
+    f32 direct_share = 0.0f;
+};
+
+/// How a `raster_bound` layer finds the share of its direct light that is visible.
+enum class sv::shadow_technique : sv::u8
+{
+    /// Unshadowed.
+    none,
+
+    /// A depth map per rect light, up to 16, softened by percentage-closer soft shadows; what `traced` falls back to on a
+    /// device without ray queries.
+    /// Redrawn only when the instances or the lights change, so a still scene pays for its maps once.
+    /// Other lights are unshadowed.
+    maps,
+
+    /// One occlusion ray a pixel at half its size, toward a light chosen in proportion to its light there, accumulated
+    /// over frames: every light, at the cost of noise while the camera moves.
+    /// Only where the device has `sg::feature::ray_query` (on webgpu, sg's emulation); elsewhere the maps stand in.
+    traced,
+};
+
+/// Screen-space reflections in a `raster_bound` layer: each half-size pixel's mirror ray marched across the depth, and
+/// last frame's image where it meets something, in place of the environment's reflection on smooth surfaces.
+/// What lies off the screen or behind something the depth shows is reflected by the environment, as without them.
+struct sv::screen_space_reflections
+{
+    bool enabled = true;
+
+    /// The farthest a ray reaches, in world units.
+    f32 max_distance = 20.0f;
+
+    /// How thick a surface the depth shows is taken to be, as a share of its distance.
+    /// A ray passing less far behind it goes on behind the object; one further is lost, and reflects nothing on screen.
+    f32 thickness = 0.05f;
+
+    /// A factor on the reflected light, 1 for what the image shows.
+    f32 intensity = 1.0f;
+
+    /// Whether a mirror ray is traced where the screen lost or missed its own, on a surface smooth enough to show it:
+    /// what lies behind an object or off the screen is then reflected too.
+    /// Only where the device has `sg::feature::ray_query`.
+    bool traced = true;
+
+    /// Shows each traced reflection's history length in its place, white for 64 frames: a debugging view.
+    bool debug_history = false;
+};
+
+/// Temporal antialiasing in a `raster_bound` layer: each frame drawn at another sub-pixel offset, and blended into the
+/// frames before it, reprojected through per-pixel motion, `sr::taa_routine`.
+/// Where it is on, the layer's image is the antialiased one, which its reflections then read.
+struct sv::temporal_antialiasing
+{
+    bool enabled = true;
+
+    /// The share of the history a pixel keeps each frame: higher is smoother and slower to follow a change.
+    f32 feedback = 0.9f;
+
+    /// How far the history may stray from the colors around a pixel this frame, in their standard deviations:
+    /// smaller ghosts less, larger flickers less on fine detail.
+    f32 clip_width = 1.25f;
+};
+
+/// Traced indirect light in a `raster_bound` layer: one ray a pixel at a reduced size, cosine-weighted off the surface,
+/// whose hit is lit as its secondary material by one light through a shadow ray; in place of the environment's diffuse
+/// light.
+/// Only where the device has `sg::feature::ray_query` (on webgpu, sg's emulation); elsewhere the environment stays.
+struct sv::traced_indirect
+{
+    bool enabled = true;
+
+    /// How many full-size pixels one side of a traced pixel spans: 2 traces a quarter of the pixels, 4 a sixteenth.
+    i32 scale = 4;
+};
+
+/// Shadows in a `raster_bound` layer.
+struct sv::shadow_settings
+{
+    shadow_technique technique = shadow_technique::traced;
+
+    /// How soft the maps' penumbrae are, 1 for what each rect's extent casts; `maps` alone reads it.
+    f32 softness = 1.0f;
+};
+
 struct sv::render_settings
 {
     /// Primary rays integrated per pixel, all in the one path-trace dispatch: the megakernel's alone, which no other mode reads or restarts on.
@@ -133,6 +269,10 @@ struct sv::render_settings
     /// This is what one frame costs, not what the image converges to — a view left alone accumulates without limit,
     /// so this trades how fast a moving camera settles against how smooth it stays while it moves.
     i32 samples_per_pixel = 4;
+
+    /// Which random sequence a traced image draws, 0 the default.
+    /// An image draws one sequence however often it restarts, so two estimates of it are independent only under two of these.
+    u32 sequence = 0;
 
     /// How many jittered samples per pixel a still image of a traced layer is expected to average; 0 for unknown.
     /// That average already filters a pixel, so each primary ray reads its textures through a footprint narrowed by
@@ -161,6 +301,15 @@ struct sv::render_settings
     /// The second lights the surface the first met as a primary hit is lit, by direct light weighed against a bounce of its own,
     /// which reaches indirect light a room lit through a door or a window otherwise misses.
     i32 hybrid_bounces = 1;
+
+    /// How many samples per pixel a deferred `hybrid` frame lights while the image moves, 1 to 4; a still image accumulates one a frame.
+    /// Forward lights one regardless: a loop around its per-material lighting nests deeper than SGL's inlining limit.
+    /// A moving frame restarts the mean, so its temporal denoiser works from that frame's samples alone,
+    /// and more of them are a steadier input to it at that many times the lighting's cost.
+    i32 hybrid_moving_samples = 1;
+
+    /// How the environment's light is estimated, `exact` unless named; switching restarts the image.
+    sv::environment_estimate environment_estimate = sv::environment_estimate::exact;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///
@@ -225,4 +374,24 @@ struct sv::render_settings
     /// The default curve `none` shows the radiance as it is, so a unorm8 target clips and does not encode it.
     /// Drawings and annotations are drawn after it and see none of it.
     sr::display_transform display = {};
+
+    /// A `raster_bound` layer's screen-space ambient occlusion; never restarts accumulation.
+    screen_ambient_occlusion ambient_occlusion = {};
+
+    /// A `raster_bound` layer's shadows; never restarts accumulation.
+    shadow_settings shadows = {};
+
+    /// A `raster_bound` layer's screen-space reflections; never restarts accumulation.
+    screen_space_reflections reflections = {};
+
+    /// A `raster_bound` layer's temporal antialiasing; never restarts accumulation.
+    temporal_antialiasing antialiasing = {};
+
+    /// A `raster_bound` layer's traced indirect light; never restarts accumulation.
+    traced_indirect indirect = {};
 };
+
+constexpr bool sv::is_rasterized(render_mode mode)
+{
+    return mode == render_mode::raster || mode == render_mode::raster_bound;
+}

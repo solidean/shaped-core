@@ -1,0 +1,12 @@
+// The sample's one view, as the bound raster mode draws it: final on its first drawn frame, so one sample is the image.
+{
+    "graphics/web-viewer": {
+        "mechanism": "sv",
+        "size": "1280x720",
+        "format": "jpg",
+        "accumulate": 1,
+        "captures": [
+            {}
+        ]
+    }
+}

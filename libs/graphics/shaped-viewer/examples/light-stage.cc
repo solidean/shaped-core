@@ -1,5 +1,5 @@
 #include <clean-core/container/vector.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 
 // One scene under many colored lights at once — every kind the viewer has, in the roles they are for.
@@ -19,6 +19,7 @@
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/light-stage
+// On the web, build the emscripten-webgpu preset and open web/light-stage.html, served over https or from localhost.
 //   uv run dev.py example shaped-viewer/light-stage --capture    # headless, writes an image
 
 namespace
@@ -56,7 +57,7 @@ sv::mesh mesh_of(cc::string_view name, cc::vector<tg::pos3f> const& positions, s
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/light-stage")
+ASYNC_EXAMPLE("shaped-viewer/light-stage")
 {
     using namespace tg::literals;
 
@@ -103,9 +104,10 @@ EXAMPLE("shaped-viewer/light-stage")
     // The white sphere the three spots meet on.
     auto const center = tg::pos3f(-0.2f, 0.75f, 0.4f);
 
-    for (auto f : sv::interactive("shaped-viewer/light-stage"))
+    auto frames = sv::interactive_async("shaped-viewer/light-stage");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
         view.initial_orbit({.target = tg::pos3d(0.2, 0.9, 0.6),
                             .distance = 9.5,
                             .azimuth = tg::angle_d::make_from_degree(12.0),

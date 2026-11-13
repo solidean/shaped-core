@@ -47,8 +47,7 @@ void render_routine_base::cancel_init_for_reload_if_stale(u64 generation)
 
 bool render_routine_base::needs_init(u64 generation)
 {
-    return _init.lock([&](init_state& s)
-                      { return s.in_flight != nullptr || (!_failed && s.ready_generation != generation); });
+    return _init.lock([&](init_state& s) { return s.in_flight != nullptr || s.ready_generation != generation; });
 }
 
 bool render_routine_base::advance_init(routine_registry& registry, context& ctx, u64 generation)
@@ -63,23 +62,26 @@ bool render_routine_base::advance_init(routine_registry& registry, context& ctx,
 
                 auto const settled_once = s.in_flight_is_once;
                 auto const* const value = s.in_flight->try_value();
-                auto const was_cancelled
-                    = s.in_flight->try_error() != nullptr && s.in_flight->try_error()->is_cancelled();
+                auto const run_generation = s.run->generation;
                 s.in_flight = {};
                 s.run = {};
 
                 if (value == nullptr)
                 {
-                    // A CANCELLED phase is not a failed one: the reload that cancelled it starts a fresh run, and
-                    // treating the two alike would make every reload look like a broken shader.
-                    if (!was_cancelled)
-                        _failed = true;
+                    // Every error is a failure, a cancellation included: a reload drops the phase it cancels before it is collected.
+                    // It is the verdict of the generation the phase ran at; a later one runs it again rather than restarting it forever at this one.
+                    _failed = true;
+                    s.ready_generation = run_generation;
                     return false;
                 }
 
                 if (settled_once)
                 {
-                    s.once_done = true;
+                    // fail_init leaves the phase with a value, and a reload then tries init_once again.
+                    if (_failed)
+                        s.ready_generation = run_generation;
+                    else
+                        s.once_done = true;
                     return false; // init is next, and the tick comes back for it
                 }
 
@@ -89,14 +91,11 @@ bool render_routine_base::advance_init(routine_registry& registry, context& ctx,
                 return true;
             }
 
-            if (s.ready_generation == generation && !_failed)
-                return false; // up to date
+            if (s.ready_generation == generation)
+                return false; // up to date, or failed at THIS generation, which only a reload clears
 
             // A fresh generation is a fresh verdict, including for a routine that failed at the last one.
-            if (s.ready_generation != generation)
-                _failed = false;
-            if (_failed)
-                return false; // failed at THIS generation; only a reload clears it
+            _failed = false;
 
             s.run = std::make_shared<impl::routine_run>(
                 impl::routine_run{.ctx = &ctx, .registry = &registry, .generation = generation});
@@ -110,9 +109,10 @@ bool render_routine_base::advance_init(routine_registry& registry, context& ctx,
 
 routine_readiness render_routine_base::own_readiness_locked(init_state const& s)
 {
-    if (_failed)
-        return routine_readiness::failed;
-    return s.ready_generation == current_generation() ? routine_readiness::ready : routine_readiness::pending;
+    // A verdict of an earlier generation, failed or not, is a phase still owed at this one.
+    if (s.ready_generation != current_generation())
+        return routine_readiness::pending;
+    return _failed ? routine_readiness::failed : routine_readiness::ready;
 }
 
 routine_readiness render_routine_base::own_readiness()

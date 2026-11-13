@@ -126,11 +126,12 @@ public:
     /// How many refractions through smooth glass a path takes without spending a bounce: `free_refraction_cap` in shaders/sgl/tracer_shade.sgl.
     static constexpr i32 free_refractions = 8;
 
-    /// The rounds a draining frame runs under `max_bounces`: the primary segment, one per surface bounce and free refraction, then a medium walk up to where its roulette starts.
+    /// The rounds a draining frame runs under `max_bounces`: the primary segment, one per surface bounce and free refraction,
+    /// the segment past the last bounce that gathers the lights it reaches, then a medium walk up to where its roulette starts.
     /// A walk deeper than that is still alive when the frame ends.
     [[nodiscard]] static constexpr i32 drain_rounds(i32 max_bounces)
     {
-        return (max_bounces > 0 ? max_bounces : 0) + free_refractions + 1 + medium_roulette_after;
+        return (max_bounces > 0 ? max_bounces : 0) + free_refractions + 2 + medium_roulette_after;
     }
 
 protected:

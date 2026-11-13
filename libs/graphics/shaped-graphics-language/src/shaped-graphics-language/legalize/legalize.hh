@@ -4,6 +4,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/flat.hh>
+#include <shaped-graphics-language/fwd.hh>
 
 /// What a text does where an operation of the program would have no value: the robustness profile of LEGAL-65.
 enum class sgl::check::undefined_guard : sgl::u8
@@ -94,6 +95,8 @@ struct sgl::check::tessellation_polyfill_layout
     i32 partitioning = 0;
     /// As D3D's output topologies, which the tessellator writes: 0 `triangle_cw`, 1 `triangle_ccw`, 2 lines.
     i32 output = 0;
+    /// The control stage's `max_factor`, which a patch's factors are capped at and sg sizes the scratch for.
+    i32 max_factor = k_max_tessellation_factor;
 
     [[nodiscard]] i32 patch_words() const { return control_points * control_words + factor_words; }
 
@@ -218,6 +221,39 @@ inline constexpr i32 k_geometry_polyfill_workgroup = 64;
                                                                            flat_entry_point const& v,
                                                                            flat_entry_point const& g);
 
+/// The lanes of the mesh route's workgroup, one a primitive: at most 64, and as many as the mesh bounds hold slots for.
+[[nodiscard]] i32 geometry_mesh_workgroup(mesh_polyfill_layout const& layout);
+
+} // namespace sgl::check
+
+/// What `add_geometry_mesh_output` adds: the output's type, and a copy of the geometry function bounded as the mesh
+/// entry point is.
+struct sgl::check::geometry_mesh_parts
+{
+    type_id output = type_id::none;
+    symbol_id function = symbol_id::none;
+};
+
+namespace sgl::check
+{
+
+/// Readies a copy `m` of the module for `geometry_as_mesh`: adds the `mesh_output[T]` of `g`'s stream, and a copy of
+/// `g`'s function with the bounds of a workgroup's slots.
+/// `layout` is `g`'s.
+[[nodiscard]] geometry_mesh_parts add_geometry_mesh_output(checked_module& m,
+                                                           flat_entry_point const& g,
+                                                           mesh_polyfill_layout const& layout);
+
+/// The vertex stage `v` and the geometry stage `g`, both legalized, as one mesh entry point that writes to `parts.output`
+/// (CHK-525's mesh route): `geometry_as_compute`'s, its slots a workgroup's lanes' in a mesh stage's output, so the
+/// draw is one mesh draw of `ceil(primitives * instances / lanes)` workgroups with no buffer of its own.
+/// Triangles only; an error names lines, and what `geometry_as_compute` refuses.
+[[nodiscard]] cc::result<flat_entry_point, cc::string> geometry_as_mesh(checked_module const& m,
+                                                                        flat_entry_point const& v,
+                                                                        flat_entry_point const& g,
+                                                                        mesh_polyfill_layout const& layout,
+                                                                        geometry_mesh_parts parts);
+
 /// The vertex entry point that draws what `geometry_as_compute` wrote: `mesh_as_vertex_fetch`'s, over `g`'s layout.
 /// `g` must have a layout.
 [[nodiscard]] flat_entry_point geometry_as_vertex_fetch(checked_module const& m, flat_entry_point const& g);
@@ -243,6 +279,10 @@ tessellation_polyfill_layout_of(checked_module const& m, flat_entry_point const&
 [[nodiscard]] cc::result<flat_entry_point, cc::string> tessellation_evaluation_as_compute(checked_module const& m,
                                                                                           flat_entry_point const& tc,
                                                                                           flat_entry_point const& te);
+
+/// A native control stage `tc`, a core tree, whose every return caps each factor at its `max_factor`, so a tessellator
+/// that takes factors up to 64 cuts a patch as the polyfill does (CHK-304); `tc` itself where it states none.
+[[nodiscard]] flat_entry_point with_capped_factors(checked_module const& m, flat_entry_point const& tc);
 
 /// The vertex entry point a polyfilled tessellation draws with: vertex `i` is point `i`, as `te`'s compute form wrote it.
 [[nodiscard]] flat_entry_point tessellation_as_vertex_fetch(checked_module const& m, flat_entry_point const& te);

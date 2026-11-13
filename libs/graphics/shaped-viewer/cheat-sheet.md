@@ -55,17 +55,22 @@ sv::camera_projection            // { kind; angle_d vertical_fov; f64 view_heigh
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; sr::display_transform display; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
+                                 //   environment_estimate (exact): the sky's unshadowed light taken whole, samples only for what is blocked
+sv::environment_estimate         // sampled | exact (default) — exact takes a face open to the sky's noise away; under a probe only, a dome is sampled
 sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
                                  //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
-sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + free_refractions (8) + 1 + medium_roulette_after (16, pt.roulette_after)
-sv::render_mode              // automatic (default) | megakernel | wavefront | raster | hybrid — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + free_refractions (8) + 2 + medium_roulette_after (16, pt.roulette_after)
+sv::render_mode              // automatic (default) | megakernel | wavefront | raster | raster_bound | hybrid — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
                                  //   automatic: the hybrid (deferred) where the device has raytracing_pipeline and ray_query, raster with one warning where not;
+                                 //   raster_bound where the device lacks binding_arrays too, as WebGPU does (docs/plans/raster-bound.md)
                                  //   a layer left automatic that names no denoiser gets automatic's; name `wavefront` for full global illumination
                                  //   the viewer resolves it before planning, and a plan built by hand traces it with the wavefront
 sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
+sv::is_rasterized(m)             // -> bool: raster or raster_bound, which trace no ray
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
-                                 //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
+                                 //   sv owns reconstruct.fresh_samples and reconstruct.upscaler, and overwrites whatever a caller set: each half of the hand-off runs with its own value
+                                 //   a NAMED upscaler (fsr) at scale native still follows a hybrid layer's temporal member, as anti-aliasing; everywhere else at native the upscaler is none
                                  //   display: exposure (stops) and curve, applied where the parent composites the layer; never restarts; the default curve none passes radiance through unencoded
                                  //   display.automatic: the viewer meters the layer's image and adapts toward middle gray, a fifth per reading; exposure is then the compensation
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
@@ -649,6 +654,7 @@ loader.load(babel::gltf::data)   // an ALREADY-PARSED document — no re-read fo
 loader.load(babel::obj::data) / loader.load(babel::stl::data)
 loader.load(babel::fbx::data, name, base_uri)   // read it with {.triangulate = true}; base_uri is what texture file names join against
 loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
+                                 //   on the web, with no resolver installed: fetched over the page's fetch, relative to the page
 sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl | fbx
 
 sv::asset                        // a load in flight; move-only; dropping it mid-load WAITS for the worker to leave the loader
@@ -932,6 +938,11 @@ sv::shader_package()                                 // the one SGL package: tra
 The light is picked half by power and half uniformly.
 Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
+The environment's light is a control variate under `environment_estimate::exact`, its integral added and what the environment sample and the bounce would carry of it unshadowed subtracted.
+Its diffuse half is the SH irradiance through the diffuse lobe; its specular half is the closure's own lobe, integrated over the SH sky from two draws that trace no ray.
+Where nothing blocks the sky the samples cancel, and a shadow keeps what its blocked rays subtract.
+`sample_environment` in `tracer_shade.sgl` forms it, and its caller adds `environment_specular_variate` beside it, which nests too deep to inline inside.
+Where most of the sky is blocked, as inside a room seen through its window, it is noisier than the sampled estimate: issue `feat-sv-environment-variate-indoors`.
 What a caller supplies is a view.
 The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `traced.lights`, and writes its table into the frame constants.
 Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).
@@ -1042,14 +1053,25 @@ sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_functi
                                  //   sv::set_acquire_context([] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::warp}); }); pass {} to clear
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
+                                 //   the default is dx12 on Windows, metal on Apple, webgpu on the web, where only the async form reaches it
+sv::acquire_viewer_context_async()  // -> cc::shared_async<cc::result<sg::context_handle>>; the same, awaited: on the web the page's WebGPU device
 
-sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count, headless }
+sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = viewer_config { title, width, height, buffer_count, headless, surface }
                                  //   title is optional: unset takes the id, up to its ## — so naming a viewer usually titles it too
                                  //   headless: no window system, no window, no swapchain, nothing presented — composites into an offscreen texture
+                                 //   surface: an sg::swapchain_description to present into without a window system — the page's canvas on the web;
+                                 //     its client_size or headless_extent is the first size, nothing polls input, request_close ends the loop
+                                 //     viewer.set_surface_size(size) asks a canvas for a new size from the next frame on
                                  //   SC_CAPTURE turns this on by itself and installs a capture, but only for an example its .capture.json declares
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
 sv::interactive([ctx,] "id", cfg, req)  // takes this sr::capture_request instead of the environment; req must be active with an output path
                                  //   how a test reaches req.clock_seconds, so a capture timeout is advanced rather than waited out
+sv::interactive_async([ctx,] "id", cfg)  // -> sv::async_frames owning its viewer: THE LOOP THAT RUNS IN A BROWSER, natively the same loop
+                                 //   auto frames = sv::interactive_async("id");  while (auto* f = co_await frames.next()) { ... }  // in an ASYNC_EXAMPLE
+                                 //   in a page: draws into #canvas, takes its input, follows its size, paces to the browser's frames,
+                                 //     clears the shell's loading overlay; under node: headless, 300 frames, as a smoke run
+                                 //   the frame is good until the next next(); a loop left by break finishes its viewer in the background
+                                 //     on a context that never blocks (sv::background_work covers it), in the destructor elsewhere
 sv::render_settled([ctx,] "id", {.size, .samples, .timeout_seconds}, [&](sv::frame& f) { ... })
                                  // -> cc::result<sv::settled_image>: the loop inside one call, the capture handed back as rgba bytes
                                  //   the same body draws the same image here and in a window; .settled is false where time ran out
@@ -1063,7 +1085,11 @@ viewer.frames() -> frame_range;  viewer.request_close()
 // the manual loop, for an application whose own loop must stay in charge — same frame, same authoring calls
 viewer.is_running()             // -> bool; not close-requested, not quit, not device-lost
 auto& f = viewer.begin_frame()  // -> frame&, owned by the viewer; `!f.is_open()` means it cannot draw right now, so `continue`
-viewer.end_frame()              // presents it — a bare frame ends nothing itself, so every open one needs this
+viewer.end_frame()              // presents it — a bare frame ends nothing itself, so every open one needs this; blocks on the frames in flight
+
+// the same loop on a context that never blocks (WebGPU): awaited, never waited for
+co_await viewer.end_frame_async()  // presents and hands back the frames-in-flight wait; awaiting it returns a page's thread to the browser
+co_await viewer.finish()           // drains what the destructor would; REQUIRED there, since a never-block destructor cannot wait
 
 // on a frame — plus everything a window and a view offer, inherited
 frame.window() / frame.window("name")  -> window_ref           // the default window, created on first use

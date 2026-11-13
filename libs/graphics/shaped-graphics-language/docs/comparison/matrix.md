@@ -7,7 +7,7 @@ Every row is judged for a renderer that targets all four, WebGPU in a browser in
 Its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F4 as of 2026-11-06, and its B6, D8, F3, F8 and G6 as of 2026-11-08.
 Its B5 and B10 as of 2026-11-09.
 Its E4 as of 2026-11-10, run on a Mac.
-Its D6 as of 2026-11-11.
+Its D6 as of 2026-11-11, and its D6 and D9 as of 2026-11-12.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
@@ -87,13 +87,17 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **D3** Bindless | ✅ / ✅ / ✅ (MSC) / — | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / — native extension only | ✅ / ✅ / ⚠️ / — | ✅ / ✅ / ⚠️ / — fixed-size and unbounded binding arrays, checked `nonuniform`, an unbounded one sized per group, on metal through a table its group sizes |
 | **D4** GPU pointers | ⚠️ Vulkan only | ⚠️ SPIR-V; Metal partly | ❌ | ⚠️ Vulkan, and Metal through SPIRV-Cross | ❌ whether to have them is an open design question 🗺️ [epic](../issues/epic-sgl-gpu-pointers.md) |
 | **D5** half, f64, int64, int16 | ⚠️ f64 on DX12 and Vulkan, which alone have it, but DXC narrows a double handed to `sqrt`, `floor`, `lerp` or `sin` to a float without a word; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ✅ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses a stage link on every target with its type, as its words where DXIL and MSL carry none; a double's sqrt, rounding and vector geometry on dx12 and vulkan, written once in SGL's prelude since DXC narrows a double handed to them, and lowered from it by the text and both native routes alike; `fma` of halves, floats and doubles, rounded once on the interpreter and for a double on DXIL; a double's bits as a `uint2`; no transcendental of a double, which no target has |
-| **D6** Mesh, geometry, tessellation | ⚠️ mesh on DX12, Vulkan and MSC | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; mesh and task stages with a payload, per-primitive attributes, triangles or lines and an indirect draw on dx12, vulkan and metal; on webgpu a mesh stage is polyfilled by default, a compute pass and a draw in the native primitive order, at +17% to +41% over the native stage where both run; webgpu's task stage, values per primitive and indirect mesh draw not yet, nor metal's own tessellation or any geometry or tessellation polyfill 🗺️ [epic](../issues/epic-sgl-every-stage-everywhere.md) |
+| **D6** Mesh, geometry, tessellation | ⚠️ mesh on DX12, Vulkan and MSC | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; mesh and task stages with a payload, per-primitive attributes, triangles or lines and an indirect draw on dx12, vulkan and metal, and on webgpu polyfilled by default, a compute pass and a draw in the native primitive order, the mesh stage at +17% to +41% over the native one where both run; no geometry or tessellation on metal, which Metal 4 dropped, or on webgpu, until their polyfills land 🗺️ [epic](../issues/epic-sgl-every-stage-everywhere.md) |
 | **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ⚠️ a prototype outside the normative spec: `fwd_diff` and `bwd_diff` over floats, vectors, matrices and geometry types, loops of constant bounds over a tape, derivatives written by hand, each mode held to central differences on the interpreter; a differentiable buffer is written by hand 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
 | **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums with computed case values, type aliases, inference, arrow lambdas |
+| **D9** Work lists: a shader picks each draw's or dispatch's pipeline | ❓ D3D12 work lists are announced and not shipped; a shader writes records as plain data, and the engine writes the program table | ❓ as HLSL | — / — / — / — WebGPU switches no pipeline from the GPU | ❓ vulkan's device-generated commands switch a pipeline per sequence; the records are plain data the engine lays out | ❌ not started: a program table the host code generator emits, typed records and a check of the pipelines a record may name, native on vulkan and metal and polyfilled elsewhere 🗺️ [feat](../issues/feat-sgl-work-lists.md) |
+
+**D9 is apart from D6: work lists are new and niche, and mesh, task, geometry and tessellation are stages every renderer may meet.**
+None of D9's cells was read from a primary source yet, which is why the others are ❓.
 
 **Work graphs are not a row, and SGL will not add them: D3D12 has deprecated them.**
 They are reported as supported in SM 6.8 and 6.9 and not in SM 6.10, for lack of adoption, and their only Vulkan counterpart is AMD's provisional `VK_AMDX_shader_enqueue`.
-Work lists, which D3D12 named as the direction after them, are on the roadmap in the D6 [epic](../issues/epic-sgl-every-stage-everywhere.md).
+Work lists, which D3D12 named as the direction after them, are row D9.
 
 ## E. Testing and debugging
 
@@ -352,6 +356,9 @@ Per row and column:
   - WGSL: WGSL
   - GLSL + chain: GLSL
   - SGL: CHK-14, CHK-36, CHK-68, CHK-142 to CHK-151, CHK-416
+- **D9**
+  - every column: secondary reports of D3D12 work lists and `VK_EXT_device_generated_commands`, not yet a primary source
+  - SGL: [feat-sgl-work-lists](../issues/feat-sgl-work-lists.md), [gpu-driven-work.md](../spec/incubator/gpu-driven-work.md) (2026-11-12)
 - **E1**
   - HLSL + chain: DXC
   - Slang: SLANG `slangc` targets (`slangvm`, `llvm`, `cpp`)
