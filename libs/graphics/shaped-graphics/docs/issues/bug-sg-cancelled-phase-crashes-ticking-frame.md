@@ -24,5 +24,5 @@ The test above ticks inside its own node as a workaround; ticking from its body 
   Twice in `dev.py ship` runs on an Arc B580 it failed with "left async work running: 1 async item(s) still carry its context", on dx12 native-DXIL and on vulkan.
   Alone it passed ten runs in a row.
 - **2026-11-13: that flake was another test's routine, not this one's.**
-  A routine a test left pending had its phase started by the next test's first tick, and billed to it; [bug-sg-routine-tests-leave-async-work](bug-sg-routine-tests-leave-async-work.md) has the fix.
+  A routine a test left pending had its phase started by the next test's first tick, and billed to it; [bug-sg-routine-tests-leave-async-work](.closed/2026/11/bug-sg-routine-tests-leave-async-work.md) has the fix.
   The crash this issue is about is untouched by it.

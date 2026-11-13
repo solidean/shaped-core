@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/routine/render_routine.cc
   - test: sg - a routine cancelled at its own generation is not restarted
   - test: sg - a routine whose init ends in an error runs once, and only a reload runs it again
+closed: 2026-11-13
+resolution: fixed
 ---
 
 # Routine tests leave async work running in a full run, since the reworked routine verdicts
@@ -23,4 +25,4 @@ The first of them alone, `--repeat 30`, never failed, so it needs the full mix.
 It is not the drivers' new `finish_each` step: with it switched off the same tests fail the same way.
 
 The hypothesis, not traced: a phase the reload drops before it is collected still runs, carrying the test's context.
-That is the case the rework now calls a failure; [bug-sg-cancelled-phase-crashes-ticking-frame](bug-sg-cancelled-phase-crashes-ticking-frame.md) suspects the same inheritance of the caller's context.
+That is the case the rework now calls a failure; [bug-sg-cancelled-phase-crashes-ticking-frame](../../../bug-sg-cancelled-phase-crashes-ticking-frame.md) suspects the same inheritance of the caller's context.
