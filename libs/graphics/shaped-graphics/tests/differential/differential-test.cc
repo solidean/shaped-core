@@ -12,7 +12,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/metrics.hh>
 
-// The corpus run every way one context runs it, and every way this machine runs it: docs/differential-testing.md.
+// The corpus run every way one context runs it, and every way this machine runs it: ../../docs/differential-testing.md.
 
 namespace
 {

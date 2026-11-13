@@ -12,7 +12,7 @@
 // Differential testing: one shader run every way this machine can run it, every result held to every other.
 // A corpus entry point is an SGL file under tests/differential/corpus naming a setup in its comment block.
 // A setup is C++ under tests/differential/setups: it fills the bindings its SGL module declares, dispatches, and reads back.
-// docs/differential-testing.md is the design.
+// ../../docs/differential-testing.md is the design.
 
 namespace sg_diff
 {
