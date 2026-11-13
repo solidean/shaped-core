@@ -68,3 +68,10 @@ That costs a module a few bytes and nothing else, so it stays when AMD fixes the
 
 On a driver update, run `run.py` on an AMD GPU.
 Exit 0 retires this entry; the identifier SGL writes stays either way.
+
+## Log
+
+- **2026-11-13: these crashes may be the driver's shader cache, not `!llvm.ident`.**
+  [amd-d3d12-inline-ray-query-crashes-compiler](../amd-d3d12-inline-ray-query-crashes-compiler/readme.md) found that AMD's cache crashes on unsigned containers depending on what it holds.
+  Every variant here that crashed was unsigned, and the cache's state then was not recorded.
+  Re-running `run.py` after AMD Software's "Reset Shader Cache" would tell whether `!llvm.ident` matters at all.
