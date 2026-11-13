@@ -7,6 +7,7 @@
 #include <sgl_modules/diff_floats.hh>
 #include <sgl_modules/diff_raster.hh>
 #include <sgl_modules/diff_scene.hh>
+#include <sgl_modules/diff_targets.hh>
 #include <sgl_modules/diff_texels.hh>
 #include <sgl_modules/diff_words.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -173,6 +174,101 @@ cc::shared_async<cc::vector<sg_diff::output>> run_raster(sg::context* ctx, sg_di
             scope.draw({.vertex_range = {.offset = 0, .size = 3}});
         });
     co_return one_output("color", pixels.colors[0].bytes);
+}
+
+/// A float of `mantissa_bits` and a 5-bit exponent, unsigned unless `has_sign`, as half and packed small floats store them.
+[[nodiscard]] f32 small_float(u32 bits, int mantissa_bits, bool has_sign)
+{
+    auto const mantissa = bits & ((1u << mantissa_bits) - 1);
+    auto const exponent = int((bits >> mantissa_bits) & 31u);
+    auto const sign = has_sign && ((bits >> (mantissa_bits + 5)) & 1u) != 0 ? -1.0f : 1.0f;
+    auto const scale = f32(1u << mantissa_bits);
+    if (exponent == 0)
+        return sign * f32(mantissa) / scale * (1.0f / 16384.0f);
+    if (exponent == 31)
+        return mantissa == 0 ? sign * cc::bit_cast<f32>(0x7f80'0000u) : cc::bit_cast<f32>(0x7fc0'0000u);
+    auto const magnitude = (1.0f + f32(mantissa) / scale) * f32(1u << exponent) / 32768.0f;
+    return sign * magnitude;
+}
+
+/// One target as floats, a channel each, decoded from its format; an integer target keeps its bits and compares exactly.
+[[nodiscard]] sg_diff::output decoded(cc::string_view name, sg_test::target_pixels const& pixels)
+{
+    auto floats = cc::vector<f32>();
+    auto const* const words = reinterpret_cast<u32 const*>(pixels.bytes.data());
+    auto const texels = isize(pixels.width) * pixels.height;
+    for (auto i = isize(0); i < texels; ++i)
+        switch (pixels.format)
+        {
+        case sg::pixel_format::rgba8_unorm_srgb:
+            for (auto c = 0; c < 4; ++c)
+                floats.push_back(f32((words[i] >> (8 * c)) & 0xffu) / 255.0f);
+            break;
+        case sg::pixel_format::rgba16_float:
+            for (auto c = 0; c < 4; ++c)
+                floats.push_back(small_float((words[2 * i + c / 2] >> (16 * (c % 2))) & 0xffffu, 10, true));
+            break;
+        case sg::pixel_format::rgb10a2_unorm:
+            for (auto c = 0; c < 3; ++c)
+                floats.push_back(f32((words[i] >> (10 * c)) & 0x3ffu) / 1023.0f);
+            floats.push_back(f32(words[i] >> 30) / 3.0f);
+            break;
+        case sg::pixel_format::rg11b10_float:
+            floats.push_back(small_float(words[i] & 0x7ffu, 6, false));
+            floats.push_back(small_float((words[i] >> 11) & 0x7ffu, 6, false));
+            floats.push_back(small_float(words[i] >> 22, 5, false));
+            break;
+        default:
+            break;
+        }
+    if (pixels.format == sg::pixel_format::r32_uint)
+        return {.name = cc::string(name), .bytes = cc::vector<byte>::create_copy_of(pixels.bytes), .is_exact = true};
+    return {.name = cc::string(name), .bytes = cc::vector<byte>::create_copy_of(cc::span<f32 const>(floats).as_bytes())};
+}
+
+cc::shared_async<cc::vector<sg_diff::output>> run_targets(sg::context* ctx, sg_diff::shaders_on_route on)
+{
+    using io = sgl_modules::diff_targets::io;
+    using target = sgl_modules::diff_targets::target;
+    auto const vertex
+        = co_await sg_diff::compiled_on(*ctx, on.route, *sg::test::differential_setups::layered::layered.asset);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
+        .layout = ctx->cached.acquire_pipeline_layout<io>(),
+        .vertex_shader = vertex,
+        .fragment_shader = on.entry,
+        .rasterization = {.cull = sg::cull_mode::none},
+        .depth_stencil = {.depth_test = true, .depth_write = true, .depth_compare = sg::compare_op::less},
+        .color_targets = target::states{.srgb = {.format = sg::pixel_format::rgba8_unorm_srgb},
+                                        .hdr = {.format = sg::pixel_format::rgba16_float},
+                                        .packed = {.format = sg::pixel_format::rgb10a2_unorm},
+                                        .small = {.format = sg::pixel_format::rg11b10_float},
+                                        .word = {.format = sg::pixel_format::r32_uint}},
+        .depth_stencil_format = sg::pixel_format::depth32_float,
+        .target_set = target::name,
+    });
+    auto const input = ctx->persistent.create_buffer_from_data(float_inputs(), sg::buffer_usage::readonly_buffer);
+    auto const group = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<io>(),
+                                                            io{.input = input.as_readonly_buffer()});
+
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = k_extent,
+         .height = k_extent,
+         .colors = {sg::pixel_format::rgba8_unorm_srgb, sg::pixel_format::rgba16_float, sg::pixel_format::rgb10a2_unorm,
+                    sg::pixel_format::rg11b10_float, sg::pixel_format::r32_uint},
+         .depth_stencil = sg::pixel_format::depth32_float,
+         .target_set = target::name},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.bind_group(0, *group);
+            scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+        });
+    auto result = cc::vector<sg_diff::output>();
+    cc::string_view const names[] = {"srgb", "hdr", "packed", "small", "word"};
+    for (auto i = 0; i < 5; ++i)
+        result.push_back(decoded(names[i], pixels[i]));
+    co_return result;
 }
 
 /// The `scene` setup's world, as diff_scene.sgl describes it.
@@ -455,6 +551,15 @@ bool const scene_registered = sg_diff::register_setup({
     .routes = {},
     .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.0001},
     .interpreted = &scene_for_interpreter,
+});
+
+// One driver encodes both routes' writes alike; two implementations round a float into a format each their own way, by a step of it.
+bool const targets_registered = sg_diff::register_setup({
+    .name = "targets",
+    .stage = sg::shader_stage::fragment,
+    .run = &run_targets,
+    .routes = {},
+    .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
 });
 
 bool const raster_registered = sg_diff::register_setup({

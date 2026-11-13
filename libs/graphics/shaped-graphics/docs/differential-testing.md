@@ -60,8 +60,11 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 | `texels` | compute | a 16 by 16 rgba8 texture with its mip chain, a nearest and a trilinear sampler | four float4 a thread | exact | relative 0.005 | yes |
 | `raster` | pixel | one triangle over a 16 by 16 rgba32_float target, interpolated `uv` and `weight`, the `floats` input and the `texels` texture | the target | 2 ulps | relative 0.005 | yes |
 | `scene` | compute | a TLAS of a two-geometry terrain and four placed octahedra, one mirrored | two float4 a thread, `hits` and `ids` | exact | relative 0.0001 | yes |
+| `targets` | pixel | two depth-tested triangles over a 16 by 16 set of rgba8 sRGB, rgba16_float, rgb10a2, rg11b10_float and r32_uint targets | each target, decoded to a float a channel; `word` as its integers | exact | relative 0.005 | not yet |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
+The `targets` bound allows a step of the coarsest format, since an implementation may round a float into one either way.
+An output a setup marks `is_exact`, as `targets` marks its integer target, is compared byte for byte and committed as a hash, whatever its file's bound.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
 
 A comment block naming no known setup, or a tolerance that does not parse, fails both tests, naming the file.
@@ -127,7 +130,7 @@ A machine whose GPU disagrees beyond `across` is a finding: who is right is a qu
 
 ## Not yet
 
-- **More setups:** render targets of other formats, and a depth test.
+- **More setups:** blending into those formats, and multisampled targets resolved.
 - **Workgroups on the interpreter:** a workgroup's invocations run together up to each barrier, a change to the interpreter itself.
 
 [feat-sg-differential-references-and-setups](issues/feat-sg-differential-references-and-setups.md) tracks them.

@@ -56,6 +56,8 @@ struct sg_diff::output
 {
     cc::string name;
     cc::vector<byte> bytes;
+    /// Compared byte for byte whatever the file's tolerance, as an integer output must be, and committed as a hash.
+    bool is_exact = false;
 };
 
 /// What a setup does with a corpus entry point: build its pipeline over the setup's module, fill the inputs, run it, read back.

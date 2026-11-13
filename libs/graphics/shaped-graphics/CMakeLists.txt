@@ -657,6 +657,7 @@ if(SC_BUILD_TESTS)
                 module:diff_texels
                 module:diff_raster
                 module:diff_scene
+                module:diff_targets
                 ${_sg_differential_corpus}
         )
         # The stages a setup brings itself, such as the raster setup's vertex stage, compiled on each run's route.
@@ -669,6 +670,7 @@ if(SC_BUILD_TESTS)
             MODULE_DIRS tests/differential/setups
             SHADERS
                 fullscreen.sgl:*
+                layered.sgl:*
         )
     endif()
 
