@@ -36,10 +36,10 @@ binding color_source:
     }
 
 @pixel fun floor_lod_ps(p: floor_pixel){lod_source} -> lod_out:
-    return { lod = lod_source.pyramid.sample(p.uv, lod_source.smp) }
+    return {lod = lod_source.pyramid.sample(p.uv, lod_source.smp)}
 
 @pixel fun floor_color_ps(p: floor_pixel){color_source} -> color_out:
-    return { color = color_source.detail.sample(p.uv, color_source.smp) }
+    return {color = color_source.detail.sample(p.uv, color_source.smp)}
 
 pipeline floor_lod:
     vertex = floor_vs

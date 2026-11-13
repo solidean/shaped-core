@@ -49,10 +49,10 @@ binding source:
     let biased = source.pyramid.sample(p.uv, source.smp, bias = probe_constants.shader_bias)
     let explicit = source.pyramid.sample(p.uv, source.smp, grad_x = p.grad_x, grad_y = p.grad_y)
     let fixed = source.pyramid.sample(p.uv, source.smp, level = p.level)
-    if probe_constants.mode == 1 => return { lod = biased }
-    if probe_constants.mode == 2 => return { lod = explicit }
-    if probe_constants.mode == 3 => return { lod = fixed }
-    return { lod = implicit }
+    if probe_constants.mode == 1 => return {lod = biased}
+    if probe_constants.mode == 2 => return {lod = explicit}
+    if probe_constants.mode == 3 => return {lod = fixed}
+    return {lod = implicit}
 
 pipeline probe:
     vertex = probe_vs
