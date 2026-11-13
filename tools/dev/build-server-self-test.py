@@ -569,9 +569,10 @@ def test_a_red_run_at_the_change_s_base_decides_whether_it_blocks() -> None:
     assert "the build is not green" in blockers and not passed
 
 
-def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]], *, crashes=(), unbuilt=()):
+def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]], *, crashes=(), partial=(), unbuilt=()):
     """`ship._red_at_base` over a fake worktree: `cases[at][binary]` is each case red or not at `base` and `head`,
-    a binary in `crashes` ends non-zero without a report there (`(at, binary)`), one in `unbuilt` fails to build at the base.
+    a binary in `crashes` ends non-zero without a report there (`(at, binary)`), one in `partial` ends non-zero after reporting the cases it reached,
+    and one in `unbuilt` fails to build at the base.
     Returns the dev.py commands it ran, as (at, verb, binary, the case it named or None), and its answer."""
     from tools.dev.cmd import ship
     from tools.dev.lib.project import base_worktree
@@ -605,7 +606,7 @@ def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]]
             mine = {t: red for t, red in cases[at][binary].items() if not only or t.rsplit(" / ", 1)[-1] in only}
             body = "".join(f'<testcase name="{t}">{"<failure/>" if red else ""}</testcase>' for t, red in mine.items())
             (wt / "build" / "bin" / f"{binary}.exe.results.xml").write_text(f"<testsuites><testsuite>{body}</testsuite></testsuites>")
-            return types.SimpleNamespace(returncode=1 if any(mine.values()) else 0)
+            return types.SimpleNamespace(returncode=3 if (at, binary) in partial else 1 if any(mine.values()) else 0)
 
         saved = base_worktree.ensure, ship.subprocess, ship._say
         base_worktree.ensure, ship.subprocess, ship._say = ensure, types.SimpleNamespace(run=run, DEVNULL=-3), lambda *_: None
@@ -648,6 +649,17 @@ def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> N
     assert ("base", "test", "d", None) in runs and not any(r[0] == "head" for r in runs), "a crashed binary runs whole, at the base alone"
     assert ("base", "test", "e", None) in runs and not any(r[2] == "f" for r in runs), runs
     assert out == {("d", "p"): True, ("d", "q"): True, ("e", "p"): False, ("e", "q"): False, ("f", "p"): None, ("g", "p"): None}, out
+
+
+def test_a_binary_that_dies_at_the_base_after_reporting_some_cases_is_red_there() -> None:
+    # h crashed in the checkout; at the base it dies too, after reporting p and before reaching q.
+    # p's green there is the base binary's partial report, not a run that ended well, so both are the base's.
+    # k's base run reports every case and fails one of its own, so the crash with the change is the change's.
+    cases = {"base": {"h": {"p": False}, "k": {"p": False, "q": True}}, "head": {}}
+    crashed = lambda b, t: {"binary": b, "test": t, "outcome": "failed"}  # noqa: E731
+    reds = [crashed("h", "p"), crashed("h", "q"), crashed("k", "p"), crashed("k", "q")]
+    _, out = _reds_at_base(reds, cases, partial={("base", "h")})
+    assert out == {("h", "p"): True, ("h", "q"): True, ("k", "p"): False, ("k", "q"): True}, out
 
 
 def test_a_child_green_at_the_base_beside_a_red_one_is_flaky_there() -> None:
