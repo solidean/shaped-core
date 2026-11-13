@@ -51,7 +51,7 @@ A derivative is never silently zero where the function changes.
   * **zero**: constant between the points where it jumps, so its change is zero everywhere: `floor`, `ceil`, `round`, `trunc`, `sign` and `step`;
   * **none**: its value is no function of its arguments a derivative follows, such as an atomic's update;
   * **forward only**: a rule going forward, whose transpose needs which lane of the quad or the subgroup each invocation is,
-    as for `ddx`, `ddy`, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and every shuffle but `subgroup_shuffle_xor`;
+    as for `ddx` and `ddy` in each of their forms, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and every shuffle but `subgroup_shuffle_xor`;
   * **not yet**: differentiable, with no rule written, which no builtin is today and one added later may be.
 * **DIFF-14** A call of a builtin stated none or not yet, inside a function a derivative is taken of, is `unsupported-yet` and names the builtin.
   So is one stated forward only, in a function reverse mode is taken of.

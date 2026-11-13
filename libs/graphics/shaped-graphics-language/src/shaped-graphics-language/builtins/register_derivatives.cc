@@ -119,6 +119,10 @@ constexpr stated k_stated[] = {
     // going forward alone: the transpose needs which lane each invocation is
     {"ddx", forward_only},
     {"ddy", forward_only},
+    {"ddx_coarse", forward_only},
+    {"ddy_coarse", forward_only},
+    {"ddx_fine", forward_only},
+    {"ddy_fine", forward_only},
     {"fwidth", forward_only},
     {"quad_broadcast", forward_only},
     {"subgroup_broadcast", forward_only},
