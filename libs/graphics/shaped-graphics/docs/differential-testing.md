@@ -59,7 +59,7 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 | `floats` | compute | 256 ordinary floats, -64 to 64, no zero | four floats a thread | 2 ulps | 16 ulps | yes |
 | `texels` | compute | a 16 by 16 rgba8 texture with its mip chain, a nearest and a trilinear sampler | four float4 a thread | exact | relative 0.005 | yes |
 | `raster` | pixel | one triangle over a 16 by 16 rgba32_float target, interpolated `uv` and `weight`, the `floats` input and the `texels` texture | the target | 2 ulps | relative 0.005 | yes |
-| `scene` | compute | a TLAS of a two-geometry terrain and four placed octahedra, one mirrored | two float4 a thread, `hits` and `ids` | exact | relative 0.0001 | not yet |
+| `scene` | compute | a TLAS of a two-geometry terrain and four placed octahedra, one mirrored | two float4 a thread, `hits` and `ids` | exact | relative 0.0001 | yes |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
@@ -91,6 +91,7 @@ A setup's interpreter half binds the same inputs by the names its module gives t
 The engine checks the corpus file against the setups' modules and runs the dispatch one invocation after another, each invocation's stores written back before the next.
 A pixel stage runs as 2 by 2 quads, each pixel a lane with its own interpolated varyings (EVAL-148), so its derivatives and the level a sample picks are a quad's.
 The raster setup's half gives the varyings at each pixel's center, as its vertex stage writes them; the vertex stage itself is not interpreted.
+The scene's half builds the world with `accel_build_flag::software_trace` too and binds the context's software pool, so the interpreter traces it as sg's software walk does.
 Every configuration is held to the result at the file's `across` bound, since the interpreter rounds as plain `f32` and models no target.
 
 It cannot run everything, and says so at info rather than failing.
@@ -98,6 +99,7 @@ It cannot run everything, and says so at info rather than failing.
 
 The interpreter has already paid for itself in the corpus.
 Its first run found two lines that tested an optimizer rather than SGL: a cancellation that drivers fold to zero, and one whose `across` bound was too tight for any second vendor.
+The scene found a bug: the software walk, which webgpu's ray queries run, reported every triangle's facing the other way round from dx12 and vulkan hardware.
 
 ## References across machines
 
@@ -126,7 +128,6 @@ A machine whose GPU disagrees beyond `across` is a finding: who is right is a qu
 ## Not yet
 
 - **More setups:** render targets of other formats, and a depth test.
-- **The scene on the interpreter:** sg's software trace builds the pool the interpreter reads, which an interpreter half would bind.
 - **Workgroups on the interpreter:** a workgroup's invocations run together up to each barrier, a change to the interpreter itself.
 
 [feat-sg-differential-references-and-setups](issues/feat-sg-differential-references-and-setups.md) tracks them.

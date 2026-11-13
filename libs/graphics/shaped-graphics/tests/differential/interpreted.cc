@@ -105,13 +105,13 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
         }
 
     auto result = sg_diff::run_result();
-    result.outputs.push_back(
-        {.name = half.output, .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes())});
+    result.outputs.push_back({.name = half.outputs.empty() ? cc::string("color") : half.outputs[0].name,
+                              .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes())});
     return result;
 }
 } // namespace
 
-cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
+cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::context& ctx)
 {
     using namespace sgl::check;
     if (w.setup->interpreted == nullptr)
@@ -138,7 +138,9 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
             return run_result{.skipped = "its workgroup memory is shared by invocations the interpreter runs one at a "
                                          "time"};
 
-    auto half = w.setup->interpreted();
+    auto half = w.setup->interpreted(ctx);
+    if (half.skipped.has_value())
+        return run_result{.skipped = half.skipped};
     if (e->entry_stage == stage::pixel)
         return pixels_interpreted(w, m, *e, half);
     auto const width = i64(e->workgroup[0] > 0 ? e->workgroup[0] : 1);
@@ -181,6 +183,7 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
     }
 
     auto result = run_result();
-    result.outputs.push_back({.name = half.output, .bytes = cc::vector<byte>::create_copy_of(half.output_bytes)});
+    for (auto const& out : half.outputs)
+        result.outputs.push_back({.name = out.name, .bytes = cc::vector<byte>::create_copy_of(out.bytes)});
     return result;
 }
