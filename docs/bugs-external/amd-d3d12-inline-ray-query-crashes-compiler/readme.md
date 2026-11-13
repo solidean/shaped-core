@@ -1,6 +1,6 @@
 # AMD: an unsigned ray query crashes the driver's compiler once an unsigned plain shader is in its cache
 
-**Status:** open, reproduced standalone, not yet filed upstream; measured on 2026-11-13.
+**Status:** open, reproduced standalone, not yet filed upstream, worked around in SGL's DXIL writer; measured on 2026-11-13.
 **Affects:** AMD D3D12 driver 32.0.21042.62 (`amdxc64.dll`), the Radeon iGPU of a Ryzen 9 9950X3D2 (RDNA 2), Windows 11, the system runtime.
 **Found by:** the differential corpus under `SC_GPU=amd`: every inline trace of SGL's native DXIL ended the process, sg's own trace test included.
 
@@ -56,9 +56,10 @@ A run whose first control crashes says so: the cache already held a plain shader
 
 ## In shaped-core
 
-SGL's native DXIL writer is the one producer here that ships unsigned containers, so every native shader on that driver shares one cache entry.
-Signing them would give each its own: the digest is DXBC's checksum, which SGL can compute itself rather than leave at the unsigned value.
-[bug-sg-amd-dx12-inline-trace-crashes-driver-compiler](../../../libs/graphics/shaped-graphics/docs/issues/bug-sg-amd-dx12-inline-trace-crashes-driver-compiler.md) tracks it.
+SGL's native DXIL writer was the one producer here that shipped unsigned containers, so every native shader on that driver shared one cache entry.
+It now signs them: the digest is DXBC's checksum, which `sgl::ir::dxbc_digest` computes as dxil.dll does, so each container has its own.
+With that, an inline trace of native DXIL creates on that driver whatever the cache holds.
+To retire this entry, run `run.py` after a driver update; once it reports nothing, the signing stays anyway, since it costs nothing.
 
 [amd-d3d12-dxil-without-llvm-ident-crashes](../amd-d3d12-dxil-without-llvm-ident-crashes/readme.md) used unsigned containers too, on this same driver.
 Its finding may be this one: its variants that crashed were unsigned, and the cache's state then is not known.
