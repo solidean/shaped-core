@@ -34,7 +34,7 @@ sc_library(versioned-document-file libs/data/versioned-document-file DEPENDS ver
 sc_library(blob-cache libs/data/blob-cache DEPENDS clean-core babel-serializer)
 sc_library(shaped-graphics libs/graphics/shaped-graphics
     DEPENDS clean-core typed-geometry blob-cache
-    TEST_DEPENDS shaped-shader-library)
+    TEST_DEPENDS shaped-shader-library shaped-graphics-language)
 sc_library(shaped-rendering libs/graphics/shaped-rendering
     DEPENDS shaped-graphics shaped-shader-library babel-serializer
     TEST_DEPENDS shaped-graphics-language)

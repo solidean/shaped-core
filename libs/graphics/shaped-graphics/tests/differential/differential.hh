@@ -3,12 +3,14 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics-language/interpret/interpret.hh>
 #include <shaped-shader-library/fwd.hh>
 
 // Differential testing: one shader run every way this machine can run it, every result held to every other.
@@ -28,6 +30,7 @@ struct corpus;
 struct route;
 struct shaders_on_route;
 struct run_result;
+struct interpreter_half;
 } // namespace sg_diff
 
 /// How far one output of two runs may stray apart, element by element.
@@ -67,6 +70,8 @@ struct sg_diff::setup
     tolerance routes;
     /// Two contexts, unless an entry point's comment block says otherwise.
     tolerance across;
+    /// The same run for SGL's interpreter, the same inputs bound by name; null for a setup it cannot run yet.
+    interpreter_half (*interpreted)() = nullptr;
 };
 
 /// One corpus entry point, under the setup and tolerances its file's comment block states.
@@ -111,6 +116,19 @@ struct sg_diff::run_result
     cc::optional<cc::string> skipped;
 };
 
+/// What a setup binds for SGL's interpreter, which runs a dispatch one invocation after another.
+/// Every value is laid out as the interpreter reads it, unpadded, and a texture's texels are the floats a shader reads.
+struct sg_diff::interpreter_half
+{
+    /// The groups the setup's module declares, by the names the module gives them; the output bound through `mutable_bytes`.
+    sgl::check::driver_bindings bindings;
+    /// The output's name and the bytes the runs store into, which `bindings` holds too.
+    cc::string output;
+    cc::pinned_data<byte> output_bytes;
+    /// The dispatch's threads along x, each one invocation with its `@thread_id`.
+    isize threads = 0;
+};
+
 namespace sg_diff
 {
 /// The registered setups; a function-local static, so the order the setup files initialize in does not matter.
@@ -134,6 +152,10 @@ bool register_setup(setup s);
 
 /// Where `b` strays from `a` beyond `t`: one line per output that differs, naming the first elements that do.
 [[nodiscard]] cc::vector<cc::string> differences(run_result const& a, run_result const& b, tolerance t);
+
+/// `w` run on SGL's interpreter: the outputs, `skipped` where it cannot model the run, an error where the run fails.
+/// The interpreter takes no target's rounding, so it is a third opinion beside the GPUs and held to them at `across`.
+[[nodiscard]] cc::result<run_result> interpreted(workload const& w);
 
 /// The name of `w`'s file's committed reference, `integer_bits.ref` for `integer_bits.sgl`.
 [[nodiscard]] cc::string reference_name(workload const& w);

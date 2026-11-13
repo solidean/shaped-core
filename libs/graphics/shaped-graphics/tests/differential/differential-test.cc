@@ -214,3 +214,39 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
         }
     }
 }
+
+ASYNC_TEST("sg differential - every corpus entry point computes on the GPU what SGL's interpreter says")
+{
+    auto const configurations = machine_configurations();
+    if (configurations.empty())
+        SKIP("this machine runs SGL on no hardware adapter");
+    auto const corpus = sg_diff::read_corpus();
+    check_corpus(corpus);
+    REQUIRE(!corpus.workloads.empty());
+
+    auto interpreted = isize(0);
+    for (auto const& w : corpus.workloads)
+    {
+        auto const oracle = sg_diff::interpreted(w);
+        if (oracle.has_error())
+        {
+            CHECK(false).context(cc::format("{} {} on the interpreter: {}", w.file, w.entry, oracle.error().to_string()));
+            continue;
+        }
+        if (oracle.value().skipped.has_value())
+        {
+            CC_LOG_INFO("differential: {} {} is not interpreted: {}", w.file, w.entry, oracle.value().skipped.value());
+            continue;
+        }
+        ++interpreted;
+        for (auto const& c : configurations)
+        {
+            auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
+            if (result.skipped.has_value())
+                continue;
+            for (auto const& line : sg_diff::differences(oracle.value(), result, w.across))
+                CHECK(false).context(cc::format("{} {}: {} against the interpreter: {}", w.file, w.entry, c.label, line));
+        }
+    }
+    CC_LOG_INFO("differential: {} of {} entry points interpreted", interpreted, corpus.workloads.size());
+}

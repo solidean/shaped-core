@@ -7,5 +7,5 @@ use diff_floats
     let a = abs(diff_floats.io.input[i])
     diff_floats.io.output[4 * i] = sqrt(a)
     diff_floats.io.output[4 * i + 1] = inverse_sqrt(a)
-    diff_floats.io.output[4 * i + 2] = sqrt(a) * sqrt(a) - a
+    diff_floats.io.output[4 * i + 2] = sqrt(a * 0.5 + 0.25)
     diff_floats.io.output[4 * i + 3] = 1.0 / a
