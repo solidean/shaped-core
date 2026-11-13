@@ -35,10 +35,10 @@ Here is how each target would keep each level:
 
 | level | dx12 | vulkan | metal | webgpu |
 |---|---|---|---|---|
-| `fast` | DXC's default | DXC's default | fast math | the default |
-| `specials` | `-Gis` | `SignedZeroInfNanPreserve`, with `shaderSignedZeroInfNanPreserveFloat32` | safe math | refused |
-| `precise` | `-Gis` | the same, and `NoContraction` on each operation | safe math | refused |
-| `ieee` | `-Gis -denorm preserve`, Shader Model 6.2 on | the same, and `DenormPreserve` with `shaderDenormPreserveFloat32` | unknown | refused |
+| `fast` | DXC's default | DXC's default | fast math, which the text states (EMIT-262) | the default |
+| `specials` | `-Gis` | `SignedZeroInfNanPreserve`, with `shaderSignedZeroInfNanPreserveFloat32` | safe math, which the text states | refused |
+| `precise` | `-Gis` | the same, and `NoContraction` on each operation | safe math, which the text states | refused |
+| `ieee` | `-Gis -denorm preserve`, Shader Model 6.2 on | the same, and `DenormPreserve` with `shaderDenormPreserveFloat32` | refused: safe math flushes denormals | refused |
 
 **WebGPU refuses every level above `fast` by default, since nothing a shader says reaches Tint's or Naga's float handling.**
 A context or a pipeline may opt in to weaker semantics there, and its entry points then compile at `fast` whatever they state, with a warning that names what was dropped.
@@ -46,13 +46,14 @@ The opt-in is the host's, never the shader's: the shader states what it needs, a
 
 **Finer than the entry point comes later.**
 `precise` in HLSL and `NoContraction` in SPIR-V are per operation, so a level could hold for one function's code alone, once the emitters write it per operation.
-dx12's `-Gis` and Metal's math mode are per compile, which is why the entry point is the unit until then.
+dx12's `-Gis` is per compile and Metal's math mode is per text, which is why the entry point is the unit until then.
 
 ## What it touches
 
 * The checker: `@float(...)` on a function and an entry point, the maximum over what an entry point reaches, and the refusal where a target cannot keep it.
 * The spec: EVAL-6 becomes the exact meaning, and each level a license against it, stated as an as-if rule.
-* slib's SGL edge: the flags each target's compile is handed, `-Gis` and `-denorm` for DXC, and the math mode for Metal, which sg sets today for every compile.
+* slib's SGL edge: the flags each target's compile is handed, `-Gis` and `-denorm` for DXC.
+* The MSL emitter: the math mode, which the text states as a pragma the Metal compiler takes over its own options (EMIT-262).
 * The emitters: the SPIR-V execution modes through `[[vk::ext_execution_mode]]`, and `NoContraction` or `precise` per operation for a scope later.
 * sg: the vulkan device features each level needs, reported as features are, and the WebGPU opt-in on a context or a pipeline.
 * `describe`: an entry point's level and what raised it.
@@ -73,4 +74,3 @@ dx12's `-Gis` and Metal's math mode are per compile, which is why the entry poin
   Whether a test that asserts on a NaN or an infinity in a function below `specials` should warn is open.
 * **A driver that miscompiles the strict text** is outside the promise, which is what the toolchain is asked for.
   Intel's dx12 driver returned 0 for a strict `0 * inf` under `-Gis`, and such a finding belongs in docs/bugs-external once reproduced standalone.
-* Metal's mapping for `ieee`, which hangs on whether its safe math preserves denormals.

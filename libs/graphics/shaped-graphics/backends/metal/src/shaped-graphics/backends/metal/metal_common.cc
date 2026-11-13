@@ -78,6 +78,7 @@ cc::result<MTL::Library*> sg::backend::metal::library_from_shader(MTL::Device* d
 
         auto* const options = MTL::CompileOptions::alloc()->init();
         // Metal defaults to fast math, which folds NaNs, infinities and signed zeros away and reassociates sums.
+        // SGL's text states its entry point's own mode in a pragma, which wins over this (EMIT-262).
         options->setMathMode(MTL::MathModeSafe);
         library = device->newLibrary(ns_string(source), options, &error);
         options->release();
