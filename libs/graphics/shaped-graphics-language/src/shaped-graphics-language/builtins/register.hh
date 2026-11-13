@@ -41,6 +41,11 @@ void register_subgroups(registry& r);
 void register_raytracing(registry& r);
 /// What a compile writes for, which a `const if` branches on: `target_api`, `target_language` and `has` (CHK-426).
 void register_target(registry& r);
+
+/// PROTOTYPE (autodiff): each record's `derivative`, by its name or its operator; after `finalize`, which reads names.
+void state_derivatives(registry& r);
+/// Whether a call of `f` can carry a derivative: it gives a float, and takes one.
+[[nodiscard]] bool carries_derivative(registry const& r, function_record const& f);
 } // namespace sgl::builtins
 
 /// What the topic files share.

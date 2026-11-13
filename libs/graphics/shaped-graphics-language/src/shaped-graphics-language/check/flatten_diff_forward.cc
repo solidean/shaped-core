@@ -110,18 +110,10 @@ auto differentiator::rule_name(symbol_id callee) const -> cc::string_view
     return s.operator_spelling.empty() ? cc::string_view(s.name) : cc::string_view(s.operator_spelling);
 }
 
-auto differentiator::is_linear_function(cc::string_view name, isize arity) -> bool
+auto differentiator::derivative_of(symbol_id callee) const -> builtins::derivative_kind
 {
-    if ((name == "+" || name == "-") && arity <= 2)
-        return true;
-    cc::string_view const linear[]
-        = {"transpose", "matrix_column", "matrix_row", "select",          "float",      "half", "float2",
-           "float3",    "float4",        "half2",      "half3",           "half4",      "vec3", "pos3",
-           "mat2",      "mat3",          "mat4",       "affine3_of_rows", "affine3_row"};
-    for (auto const l : linear)
-        if (name == l)
-            return true;
-    return false;
+    auto const* const record = m().builtin_function(m().at(callee).intrinsic);
+    return record != nullptr ? record->derivative : builtins::derivative_kind::unstated;
 }
 
 auto differentiator::componentwise_factors(cc::string_view name,
@@ -198,6 +190,12 @@ auto differentiator::componentwise_factors(cc::string_view name,
         factors[0] = call("*", use(above_low), use(below_high));
         factors[1] = one_minus(use(above_low));
         factors[2] = one_minus(use(below_high));
+    }
+    else if (name == "fma")
+    {
+        factors[0] = use(a[1]);
+        factors[1] = use(a[0]);
+        factors[2] = one(t);
     }
     else if (name == "mix")
     {
@@ -307,7 +305,21 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
                                                     || callee == "transform_float4_affine")
         return {use(result), affine_tangent(primals, tangents, type, callee == "transform_position_affine" ? 1.0 : 0.0)};
 
-    if (is_linear_function(name, arguments.size()))
+    // what the registry states of the builtin (builtins/register_derivatives.cc)
+    auto const kind = derivative_of(n.callee);
+    if (kind == builtins::derivative_kind::zero)
+        return {use(result), flat_expr_id::none};
+    if (kind == builtins::derivative_kind::none)
+    {
+        failed(cc::format("{}, whose value is no function of its arguments a derivative follows", name));
+        return {use(result), flat_expr_id::none};
+    }
+    if (kind != builtins::derivative_kind::linear && kind != builtins::derivative_kind::rule)
+    {
+        failed(cc::format("no derivative of {} yet", name));
+        return {use(result), flat_expr_id::none};
+    }
+    if (kind == builtins::derivative_kind::linear)
     {
         // `x + dx` alone where the other side is zero and of the result's type
         if (name == "+" && arguments.size() == 2 && (!is_valid(tangents[0]) || !is_valid(tangents[1])))
