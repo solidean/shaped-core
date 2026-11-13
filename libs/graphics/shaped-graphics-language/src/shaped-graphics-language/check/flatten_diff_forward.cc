@@ -191,6 +191,22 @@ auto differentiator::componentwise_factors(cc::string_view name,
         factors[1] = one_minus(use(above_low));
         factors[2] = one_minus(use(below_high));
     }
+    else if (name == "%")
+    {
+        // a - b * trunc(a / b), whose truncation is constant between the points where it jumps
+        factors[0] = one(t);
+        factors[1] = negate(call("trunc", call("/", use(a[0]), use(a[1]))));
+    }
+    else if (name == "smoothstep")
+    {
+        // s = t * t * (3 - 2 t) for t = clamp((x - low) / (high - low), 0, 1), whose slope 6 t (1 - t) is zero where it clamps
+        auto const span = share(call("-", use(a[1]), use(a[0])));
+        auto const along = share(call("clamp", call("/", call("-", use(a[2]), use(a[0])), use(span)), zero(t), one(t)));
+        auto const k = share(call("/", mul(number(6.0), call("*", use(along), one_minus(use(along)))), use(span)));
+        factors[2] = use(k);
+        factors[0] = negate(call("*", use(k), one_minus(use(along))));
+        factors[1] = negate(call("*", use(k), use(along)));
+    }
     else if (name == "fma")
     {
         factors[0] = use(a[1]);
@@ -367,6 +383,20 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
     else if (name == "dot" || name == "cross")
         tangent = sum(is_valid(tangents[0]) ? call(name, tangent_of_argument(0), use(primals[1])) : flat_expr_id::none,
                       is_valid(tangents[1]) ? call(name, use(primals[0]), tangent_of_argument(1)) : flat_expr_id::none);
+    else if (name == "reflect")
+    {
+        // v - 2 dot(n, v) n
+        auto const along = share(call("dot", use(primals[1]), use(primals[0])));
+        auto change = is_valid(tangents[0]) ? tangent_of_argument(0) : flat_expr_id::none;
+        auto d_along = is_valid(tangents[0]) ? call("dot", use(primals[1]), tangent_of_argument(0)) : flat_expr_id::none;
+        if (is_valid(tangents[1]))
+            d_along = sum(d_along, call("dot", tangent_of_argument(1), use(primals[0])));
+        change = difference(change, mul(mul(d_along, add(scalar_of(type), flat_literal{.value = 2.0})), use(primals[1])));
+        if (is_valid(tangents[1]))
+            change = difference(
+                change, mul(mul(use(along), add(scalar_of(type), flat_literal{.value = 2.0})), tangent_of_argument(1)));
+        tangent = change;
+    }
     else if (name == "length")
         tangent = call("/", call("dot", use(primals[0]), tangent_of_argument(0)), use(result));
     else if (name == "distance")
