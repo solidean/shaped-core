@@ -6,6 +6,7 @@
 #include <shaped-rendering/slug_path.hh>
 #include <shaped-rendering/slug_shape.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/cache_owner.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 // 2D vector content, built once and instanced like a mesh.
@@ -102,13 +103,13 @@ private:
 
 namespace sv::impl
 {
-/// What acquiring a set last produced: the manager it was acquired by, compared and never followed, the content it was
-/// acquired with, and the id it got.
+/// What acquiring a set last produced: the manager it was acquired by, as a token its successor cannot share, the content
+/// it was acquired with, and the id it got.
 /// A cache, never an identity — a set acquired by a manager that has not seen it, or changed since, gets the id its
 /// content hash earns.
 struct drawing_set_gpu_slot
 {
-    drawing_manager const* manager = nullptr;
+    cache_owner manager = cache_owner::none;
     cc::hash128 content;
     drawing_set_id id = drawing_set_id::invalid;
 };

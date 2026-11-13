@@ -11,6 +11,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/cache_owner.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
@@ -567,4 +568,7 @@ private:
     /// stamp must not read as "already recorded" — so live values start at 1.
     u64 _record_stamp = 1;
     bool _locked = false;
+
+    /// What a placed mesh or quadric set records as its manager, and compares on its next placement.
+    impl::cache_owner _owner = impl::next_cache_owner();
 };

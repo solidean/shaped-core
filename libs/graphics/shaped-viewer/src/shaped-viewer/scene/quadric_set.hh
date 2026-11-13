@@ -6,6 +6,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/cache_owner.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/quadric.hh>
 #include <shaped-viewer/scene/resident_mesh.hh> // mesh_attribute_binding, which the resident form reuses
@@ -50,8 +51,8 @@ struct sv::resident_quadric_set
 /// answerable from the set alone.
 struct sv::impl::quadric_set_gpu_slot
 {
-    /// Identity ONLY, and never dereferenced — a set may outlive the manager it was placed against.
-    void const* manager = nullptr;
+    /// The manager these resources were minted by — a token, since a set may outlive it and the next can reuse its address.
+    impl::cache_owner manager = impl::cache_owner::none;
 
     /// The resources minted for this set against that manager.
     sv::resident_quadric_set resources;
