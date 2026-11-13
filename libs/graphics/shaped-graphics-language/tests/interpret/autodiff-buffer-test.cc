@@ -22,7 +22,8 @@ constexpr cc::string_view k_fit
       "        total += d * d\n"
       "    return total\n";
 
-sgl::check::driver_bindings fit_bindings(cc::pinned_data<byte> const& gradients, cc::pinned_data<byte const> tangents)
+sgl::check::driver_bindings fit_bindings(cc::pinned_data<byte> const& gradients,
+                                         cc::pinned_data<byte const> const& tangents)
 {
     return {.groups = {
                 {.name = "params", .members = {{.name = "weights", .bytes = floats(1.0f, 2.0f, 3.0f, 4.0f)}}},
