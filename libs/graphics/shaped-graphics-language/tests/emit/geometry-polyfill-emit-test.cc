@@ -143,7 +143,9 @@ TEST("sgl emit - a geometry stage's mesh route is one mesh entry point of a work
         REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
         CHECK(e.value().stage == sgl::check::stage::mesh);
         CHECK(e.value().workgroup[0] == 42);
-        CHECK(!e.value().mesh_layout.has_value());
+        // reported as a polyfill's layout, so a host draws the kind of list the stage writes
+        REQUIRE(e.value().mesh_layout.has_value());
+        CHECK(e.value().mesh_layout.value().corners == 3);
         CHECK(e.value().features.has(sgl::check::feature::mesh_shader));
         CHECK(!e.value().features.has(sgl::check::feature::geometry_shader));
     }
@@ -155,10 +157,20 @@ TEST("sgl emit - a geometry stage's mesh route is one mesh entry point of a work
     CHECK(text.contains("sg_geometry_draw [[buffer(22)]]")).dump("text", text);
     CHECK(!text.contains("sg_mesh_output")).dump("text", text);
 
-    // lines and points have no zero-area primitive to fill a slot a lane leaves, and are refused by name
+    // lines keep a filler vertex outside the clip volume, which an unwritten line joins to itself: 63 lanes of 4 vertices
+    // and 3 lines, and the filler, 253 vertices
     auto const lines = half_of("edges_gs", target::msl, mesh_form::mesh);
-    REQUIRE(lines.has_error());
-    CHECK(lines.error().contains("appends lines, which the mesh route does not draw yet")).dump("error", lines.error());
+    REQUIRE(lines.has_value()).dump("error", lines.has_error() ? lines.error() : cc::string());
+    CHECK(lines.value().workgroup[0] == 63);
+    REQUIRE(lines.value().mesh_layout.has_value());
+    CHECK(lines.value().mesh_layout.value().corners == 2);
+    auto const& line_text = lines.value().text;
+    CHECK(line_text.contains(", 253, 189, metal::topology::line>")).dump("text", line_text);
+    CHECK(line_text.contains("2.0, 2.0, 2.0, 1.0")).dump("text", line_text);
+    // points the polyfill draws on neither route yet, and refuses by name
+    auto const points = half_of("points_gs", target::msl, mesh_form::mesh);
+    REQUIRE(points.has_error());
+    CHECK(points.error().contains("appends points, which the polyfill does not draw yet")).dump("error", points.error());
     auto const unnamed = half_of("twice_gs", target::msl, mesh_form::mesh, "");
     REQUIRE(unnamed.has_error());
     CHECK(unnamed.error().contains("none was named")).dump("error", unnamed.error());
