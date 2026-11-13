@@ -112,46 +112,46 @@ struct module_library
     return files;
 }
 
-/// What the sweeps cannot hand DXC as it is, each with why; anything else that fails fails the test.
+/// The entries whose text DXC refuses at every profile, each by its file and its name, with the error DXC gives and
+/// the issue that tracks it; any other failure, of SGL or of DXC, fails the sweep.
 struct listed
 {
-    /// The end of the file's path, and the entry point; an empty entry lists the file as a whole, and an empty file
-    /// lists that entry of every file.
+    /// The end of the file's path, from a directory the sweep reads.
     cc::string_view file;
     cc::string_view entry;
-    cc::string_view why;
-    /// The entry's stage, and the start of its name, where it is listed by those rather than by its name.
-    sgl::check::stage stage = sgl::check::stage::none;
-    cc::string_view prefix;
+    /// What DXC's error says of it, at 6.6 and at 6.8 alike.
+    cc::string_view refusal;
+    cc::string_view issue;
 };
+constexpr auto k_fused = cc::string_view("bug-sgl-dx12-fused-intersection-takes-parameters");
+constexpr auto k_empty = cc::string_view("bug-sgl-dx12-empty-closest-hit-malformed");
+constexpr auto k_no_parameters = cc::string_view("expected no parameters");
+constexpr auto k_no_declarator = cc::string_view("expected parameter declarator");
 constexpr listed k_not_compiled[] = {
-    {"", "", "an intersection fused with its any hit, which only metal writes: DXC takes no parameter of an intersection",
-     sgl::check::stage::intersection, "sgl_"},
-    {"corpus/control/discard.sgl", "every_other_ps",
-     "a pixel stage whose text ends past a discard with no return, which DXC refuses at every profile (-Wreturn-type)"},
-    {"", "sgl_empty_closest_hit", "a hit stage that takes no payload, which only metal builds"},
-    {"tests/shaders/micromap_trace.sgl", "rejecting_2_state_cs",
-     "forces 2 states on a ray query of a device without opacity micromaps, which DXC refuses at every profile"},
-    {"tests/shaders/micromap_trace.sgl", "accepting_2_state_cs",
-     "forces 2 states on a ray query of a device without opacity micromaps, which DXC refuses at every profile"},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_end_search.sgl", "sgl_layered_slabs_through", k_no_parameters, k_fused},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_pipeline.sgl", "sgl_spheres_surface", k_no_parameters, k_fused},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_pipeline.sgl", "sgl_spheres_occlusion", k_no_parameters, k_fused},
+    {"shaped-graphics/tests/shaders/sgl_mixed/ray_stages.sgl", "sgl_balls_primary", k_no_parameters, k_fused},
+    {"shaped-graphics/tests/shaders/sgl_mixed/ray_stages.sgl", "sgl_balls_shadow", k_no_parameters, k_fused},
+    {"shaped-graphics/backends/metal/tests/shaders/tracing.sgl", "sgl_boxed_marker", k_no_parameters, k_fused},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_end_search.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_transforms.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-rendering/tests/shaders/slug_traced_pipeline.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_callables.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_open.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_pipeline.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/tests/shaders/sgl/raytracing_scenes.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/tests/shaders/sgl/sticky_arrays_traced.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/tests/shaders/sgl_mixed/ray_stages.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-graphics/backends/metal/tests/shaders/tracing.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
+    {"shaped-viewer/shaders/tracer_pipeline.sgl", "sgl_empty_closest_hit", k_no_declarator, k_empty},
 };
 
-[[nodiscard]] listed const* listed_as(cc::string_view file,
-                                      cc::string_view entry,
-                                      sgl::check::stage stage = sgl::check::stage::none)
+[[nodiscard]] listed const* listed_as(cc::string_view file, cc::string_view entry)
 {
     for (auto const& l : k_not_compiled)
-    {
-        if (l.stage != sgl::check::stage::none)
-        {
-            if (l.stage == stage && entry.starts_with(l.prefix))
-                return &l;
-            continue;
-        }
-        if ((l.file.empty() || file.ends_with(l.file)) && (l.entry.empty() || l.entry == entry)
-            && !(l.file.empty() && l.entry.empty()))
+        if (file.ends_with(l.file) && entry == l.entry)
             return &l;
-    }
     return nullptr;
 }
 
@@ -219,6 +219,7 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
     auto const stride = nx::is_thorough() ? 1 : 4;
     auto stages = cc::vector<sgl::check::stage>();
     auto compiled = 0;
+    auto listed_seen = isize(0);
     auto const has = [](cc::span<sgl::check::stage const> stages, sgl::check::stage s)
     {
         for (auto const t : stages)
@@ -247,7 +248,7 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
              .core = {.draw_start = sgl::check::fill::root_constant, .wave_size = sgl::check::fill::none}});
         if (all.has_error())
         {
-            CHECK(listed_as(file, "") != nullptr).dump("file", file).dump("error", all.error());
+            CHECK(false).dump("file", file).dump("error", all.error());
             continue;
         }
         for (auto const& entry : all.value())
@@ -256,9 +257,8 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
             // tests hold; any other error is the sweep's to report
             if (!entry.text.has_value())
             {
-                CHECK((entry.text.error().contains("asks the root-constant fill of draw_start, which is not written "
-                                                   "yet")
-                       || listed_as(file, entry.entry_point) != nullptr))
+                CHECK(entry.text.error().contains("asks the root-constant fill of draw_start, which is not written "
+                                                  "yet"))
                     .dump("file", file)
                     .dump("entry", entry.entry_point)
                     .dump("error", entry.text.error());
@@ -285,13 +285,20 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
                     {.source = e.text, .entry_point = e.entry_point, .stage = stage_of(e.stage), .model = model},
                     options);
             };
-            // a text DXC takes alone at no profile is listed with why, and no question of the floor
-            if (auto const* const l = listed_as(file, entry.entry_point, e.stage); l != nullptr)
+            // a text DXC refuses at every profile is listed with its refusal and its issue, and no question of the
+            // floor; it is refused as listed at 6.6 and at 6.8, or the list is wrong
+            if (auto const* const l = listed_as(file, entry.entry_point); l != nullptr)
             {
-                CHECK(at(ssc::dxc::shader_model::sm_6_8).has_error())
-                    .dump("file", file)
-                    .dump("entry", entry.entry_point)
-                    .dump("listed as", l->why);
+                for (auto const model : {ssc::dxc::shader_model::sm_6_6, ssc::dxc::shader_model::sm_6_8})
+                {
+                    auto const refused = at(model);
+                    CHECK((refused.has_error() && refused.error().to_string().contains(l->refusal)))
+                        .dump("file", file)
+                        .dump("entry", entry.entry_point)
+                        .dump("issue", l->issue)
+                        .dump("dxc", refused.has_error() ? refused.error().to_string() : cc::string("compiled"));
+                }
+                ++listed_seen;
                 continue;
             }
             auto const built = at(ssc::dxc::shader_model::sm_6_6);
@@ -312,6 +319,9 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
     for (auto const s : stages)
         stage_names.appendf("{}{}", stage_names.empty() ? "" : ", ", sgl::check::stage_name(s));
     CC_LOG_INFO("{} dx12 texts compiled at Shader Model 6.6, of {}", compiled, stage_names);
+    // the whole sweep meets every entry the list names, so none stands there that no longer fails
+    if (nx::is_thorough())
+        CHECK(listed_seen == isize(sizeof(k_not_compiled) / sizeof(k_not_compiled[0])));
     for (auto const s :
          {sgl::check::stage::vertex, sgl::check::stage::pixel, sgl::check::stage::compute, sgl::check::stage::geometry,
           sgl::check::stage::tessellation_control, sgl::check::stage::tessellation_evaluation,
