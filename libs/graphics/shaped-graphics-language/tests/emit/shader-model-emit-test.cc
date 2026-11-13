@@ -115,6 +115,17 @@ constexpr auto k_micromap_query
       "    let flags = ray_flags.force_omm_2_state\n"
       "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags = flags).t\n";
 
+/// The same query forcing nothing, which sees whatever micromaps its structure has.
+constexpr auto k_micromap_seen = "require ray_query\n"
+                                 "\n"
+                                 "binding work:\n"
+                                 "    world: acceleration_structure[.triangles]\n"
+                                 "    values: mut buffer[float]\n"
+                                 "\n"
+                                 "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                                 "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                                 "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore).t\n";
+
 /// `source`'s `entry` on dx12, for a device with `f`, which the compile fills as `how`.
 [[nodiscard]] cc::result<sgl::emitted_source, cc::string> filled(cc::string_view source,
                                                                  cc::string_view entry,
@@ -575,6 +586,83 @@ TEST("sgl emit - a side no grant can take on this target is no axis, and one a g
     CHECK(!axes_of(by_grant, target::hlsl_vulkan).has(feature::shader_int64));
 }
 
+TEST("sgl emit - a has() a constant decision folded away inside a condition still makes its side an axis (EMIT-264)")
+{
+    // each condition consults subgroups through a decision of its own, which leaves no has() in the condition itself
+    struct folded_case
+    {
+        cc::string_view what;
+        cc::string_view declarations;
+        cc::string_view condition;
+        /// `const if`, or a plain `if` where the condition is a call that only a plain `if` takes, once inlined, as
+        /// a constant: a body of a `const if` and two returns is no constant a `const if` takes (CHK-425).
+        cc::string_view keyword = "const if";
+    };
+    folded_case const cases[] = {
+        {"a value if", "", "(if has(.subgroups) => true else false)"},
+        {"a callee's value if", "fun can() -> bool:\n    return if has(.subgroups) => true else false\n", "can()"},
+        {"a callee's const if",
+         "fun can() -> bool:\n    const if has(.subgroups):\n        return true\n    return false\n", "can()", "if"},
+    };
+    for (auto const& c : cases)
+    {
+        auto const source = cc::format("binding work:\n"
+                                       "    values: mut buffer[float]\n"
+                                       "\n"
+                                       "{}"
+                                       "@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                                       "    {} {}:\n"
+                                       "        const if has(.shader_int64):\n"
+                                       "            work.values[id.x] = 1.0\n"
+                                       "    work.values[id.x] += 2.0\n",
+                                       c.declarations, c.keyword, c.condition);
+        // a device without subgroups takes neither side's inside, and both are variants
+        for (auto const device : {feature_set(), feature_set(feature::subgroups)})
+        {
+            auto const e = sgl::compile_to_text(
+                {.source = source, .entry_point = "cs", .target = target::hlsl_dx12, .device_features = device});
+            REQUIRE(e.has_value()).dump("case", c.what).dump("error", e.has_error() ? e.error() : cc::string());
+            auto axes = feature_set();
+            for (auto const& a : e.value().axes)
+                axes.set(a.f);
+            CHECK(axes == (feature::subgroups | feature::shader_int64)).dump("case", c.what);
+        }
+    }
+}
+
+TEST("sgl emit - the nvapi fill of opacity micromaps refuses a trace that forces 2 states, which NVAPI cannot "
+     "(EMIT-184)")
+{
+    constexpr auto forced = "require ray_query\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.triangles]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    let flags = ray_flags.force_omm_2_state\n"
+                            "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags = flags).t\n";
+    for (auto const route : k_routes)
+    {
+        auto const refused = filled(forced, "cs", feature::opacity_micromap, fill::nvapi, route);
+        REQUIRE(refused.has_error());
+        CHECK(refused.error().contains("cs forces a ray query's trace to 2 opacity micromap states, which the nvapi "
+                                       "fill of opacity_micromap cannot"))
+            .dump("error", refused.error());
+        // natively it forces them, with the query's own flag
+        auto const native = filled(forced, "cs", feature::opacity_micromap, fill::native, route);
+        REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    }
+    // on a device without micromaps there is nothing to force, and the flag is left out as before
+    auto const without = sgl::compile_to_text({.source = forced, .entry_point = "cs", .target = target::hlsl_dx12});
+    REQUIRE(without.has_value());
+    CHECK(without.value().text.contains("& ~1024u)"));
+    // and a query that forces nothing traces under the nvapi fill as it did
+    auto const plain = filled(k_micromap_seen, "cs", feature::opacity_micromap, fill::nvapi, native_route::text);
+    REQUIRE(plain.has_value()).dump("error", plain.has_error() ? plain.error() : cc::string());
+}
+
 TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through nvHLSLExtns.h at 6.6 (EMIT-263)")
 {
     auto const e = filled(k_reordering, "shoot", feature::shader_execution_reordering, fill::nvapi, native_route::text);
@@ -923,18 +1011,17 @@ TEST("sgl emit - the nvapi fill of opacity micromaps writes nothing, at 6.6 (EMI
 {
     for (auto const route : k_routes)
     {
-        auto const nvapi = filled(k_micromap_query, "cs", feature::opacity_micromap, fill::nvapi, route);
+        auto const nvapi = filled(k_micromap_seen, "cs", feature::opacity_micromap, fill::nvapi, route);
         REQUIRE(nvapi.has_value()).dump("error", nvapi.has_error() ? nvapi.error() : cc::string());
         CHECK(nvapi.value().dxil_shader_model == k_six_six);
         CHECK(nvapi.value().features.has(feature::opacity_micromap));
         CHECK(!nvapi.value().needs_nvapi_header);
-        auto const native = filled(k_micromap_query, "cs", feature::opacity_micromap, fill::native, route);
+        auto const native = filled(k_micromap_seen, "cs", feature::opacity_micromap, fill::native, route);
         REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
         CHECK(native.value().dxil_shader_model == dxil_shader_model{.minor = 9});
         if (route == native_route::text)
         {
             CHECK(!nvapi.value().text.contains("OPACITY_MICROMAPS"));
-            CHECK(!nvapi.value().text.contains("FORCE_OMM_2_STATE"));
             CHECK(native.value().text.contains(", RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>"));
         }
         else

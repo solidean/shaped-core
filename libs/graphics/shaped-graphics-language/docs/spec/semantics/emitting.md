@@ -643,6 +643,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A native route states the same: `SPV_EXT_opacity_micromap`'s capability on SPIR-V, whose traces see micromaps with no flag of their own.
   On DXIL `dx.op.allocateRayQuery2` with the flag that allows them, at Shader Model 6.9, a library's function row included.
   dx12's `nvapi` fill of the feature states none of it, at 6.6: NVIDIA's driver applies a structure's micromaps to every trace itself (EMIT-263).
+  NVAPI has no flag that forces a query's trace to 2 states, so under that fill a trace whose flags force them, or are no constant, is `unsupported`, naming that.
 * **EMIT-262** A `hlsl-dx12` compile reports the DXIL shader model its output needs, `emitted_source::dxil_shader_model`, on both routes.
   It is the highest that `check::dxil_shader_model_of` gives of each feature the entry point needs in its fill, and of each core construct written natively; 6.6 where none needs more.
   Natively `shader_execution_reordering` and `opacity_micromap` need 6.9 and `clustered_geometry` 6.10, and the `draw_start` and `wave_size` core constructs 6.8; every other fill needs 6.6.

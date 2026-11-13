@@ -524,6 +524,35 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                && nvapi(check::feature::shader_execution_reordering);
     plan.states_micromaps = e.features.has(check::feature::opacity_micromap) && !nvapi(check::feature::opacity_micromap);
     result.writes_nvapi = plan.reorders_through_nvapi;
+    // EMIT-184: NVAPI applies a structure's micromaps itself, and has no flag that forces a query's trace to 2 states,
+    // so a trace that may force them on a device that has micromaps is refused rather than its force dropped
+    if (e.features.has(check::feature::opacity_micromap) && nvapi(check::feature::opacity_micromap))
+        for (auto const& x : e.exprs)
+        {
+            auto const* const call = x.node.try_as<check::flat_call>();
+            auto const* const record = call != nullptr ? m.builtin_function(call->intrinsic) : nullptr;
+            if (record == nullptr || record->flags_argument < 0)
+                continue;
+            auto const* const query = e.at(e.at(call->arguments)[0]).node.try_as<check::flat_local_ref>();
+            if (query == nullptr)
+                continue;
+            auto const& flags = plan.local_flags[index_of(query->local)];
+            constexpr auto k_force_2_state = 1024u;
+            if (flags.has_value() && (flags.value() & k_force_2_state) == 0)
+                continue;
+            result.errors.push_back(
+                {.kind = error_kind::unsupported,
+                 .symbol = e.function,
+                 .detail = flags.has_value()
+                             ? cc::format("{} forces a ray query's trace to 2 opacity micromap states, which the nvapi "
+                                          "fill of opacity_micromap cannot: NVAPI has no flag that forces them",
+                                          e.name)
+                             : cc::format("{} traces a ray query with flags that are no constant, so they may force 2 "
+                                          "opacity micromap states, which the nvapi fill of opacity_micromap cannot: "
+                                          "NVAPI has no flag that forces them",
+                                          e.name)});
+            return result;
+        }
     // NVAPI invokes a hit object by tracing through it again, which takes the structure its trace took: each
     // invocation names the one its hit object's `trace_hit` traced, and one that more than one may be is refused
     if (plan.reorders_through_nvapi)
