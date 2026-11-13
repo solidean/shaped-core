@@ -30,7 +30,17 @@ struct sg_test::backend_entry
 struct sg_test::context_factory
 {
     cc::string backend; ///< e.g. "dx12"
+    /// A context as a benchmark wants it, with no validation slowing it down.
     cc::unique_function<cc::result<sg::context_handle>()> create;
+    /// A context as a test running beside the drivers needs it: validated as theirs are.
+    /// The dx12 debug layer is process-wide and must be on before the first device, so a test that created one without it
+    /// first would fail every dx12 driver after it; empty where `create` already serves.
+    cc::unique_function<cc::result<sg::context_handle>()> create_validated;
+
+    [[nodiscard]] cc::result<sg::context_handle> create_for_test() const
+    {
+        return create_validated.is_valid() ? create_validated() : create();
+    }
 };
 
 namespace sg_test
@@ -51,9 +61,13 @@ inline bool register_backend(cc::string driver, cc::string invoke)
 cc::vector<context_factory>& context_factories();
 
 // Appends a factory; returns true so it can seed a static-init bool.
-inline bool register_context_factory(cc::string backend, cc::unique_function<cc::result<sg::context_handle>()> create)
+inline bool register_context_factory(cc::string backend,
+                                     cc::unique_function<cc::result<sg::context_handle>()> create,
+                                     cc::unique_function<cc::result<sg::context_handle>()> create_validated = {})
 {
-    context_factories().push_back(context_factory{.backend = cc::move(backend), .create = cc::move(create)});
+    context_factories().push_back(context_factory{.backend = cc::move(backend),
+                                                  .create = cc::move(create),
+                                                  .create_validated = cc::move(create_validated)});
     return true;
 }
 

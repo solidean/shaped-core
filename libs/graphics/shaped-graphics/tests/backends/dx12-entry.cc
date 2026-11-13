@@ -163,4 +163,9 @@ static bool const sg_dx12_never_block_registered
     = sg_test::register_backend("sg dx12 never-block backend", "dx12-never-block");
 static bool const sg_dx12_factory_registered = sg_test::register_context_factory(
     "dx12",
-    [] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); });
+    [] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); },
+    []
+    {
+        return sg::create_dx12_context(
+            {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+    });

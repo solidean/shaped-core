@@ -90,7 +90,7 @@ TEST("sg - a shader's undeclared failed assert fails the test that dispatched it
 
     for (auto& factory : sg_test::context_factories())
     {
-        auto created = factory.create();
+        auto created = factory.create_for_test();
         if (created.has_error())
             continue;
         auto const ctx = created.value();
