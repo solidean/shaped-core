@@ -2371,21 +2371,62 @@
 @builtin @pure fun is_inf(x: half4) -> bool4
 
 // derivatives across the 2x2 quad of pixels, which only a pixel stage has;
+// `ddx`, `ddy` and `fwidth` are coarse, one value for the whole quad, on every target (EVAL-144);
 // a run of one invocation has no neighbours, and reads 0; WGSL takes the derivative of no half
+/// How much `x` changes from the quad's left column to its right, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddx(x: float) -> float
+/// How much `x` changes from the quad's top row to its bottom, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddy(x: float) -> float
+/// `ddx(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddx_coarse(x: float) -> float
+/// `ddy(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddy_coarse(x: float) -> float
+/// How much `x` changes along this pixel's own row of the quad.
+@builtin @pure @stages(.pixel) fun ddx_fine(x: float) -> float
+/// How much `x` changes down this pixel's own column of the quad.
+@builtin @pure @stages(.pixel) fun ddy_fine(x: float) -> float
 /// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
 @builtin @pure @stages(.pixel) fun fwidth(x: float) -> float
+/// How much `x` changes from the quad's left column to its right, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddx(x: float2) -> float2
+/// How much `x` changes from the quad's top row to its bottom, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddy(x: float2) -> float2
+/// `ddx(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddx_coarse(x: float2) -> float2
+/// `ddy(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddy_coarse(x: float2) -> float2
+/// How much `x` changes along this pixel's own row of the quad.
+@builtin @pure @stages(.pixel) fun ddx_fine(x: float2) -> float2
+/// How much `x` changes down this pixel's own column of the quad.
+@builtin @pure @stages(.pixel) fun ddy_fine(x: float2) -> float2
 /// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
 @builtin @pure @stages(.pixel) fun fwidth(x: float2) -> float2
+/// How much `x` changes from the quad's left column to its right, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddx(x: float3) -> float3
+/// How much `x` changes from the quad's top row to its bottom, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddy(x: float3) -> float3
+/// `ddx(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddx_coarse(x: float3) -> float3
+/// `ddy(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddy_coarse(x: float3) -> float3
+/// How much `x` changes along this pixel's own row of the quad.
+@builtin @pure @stages(.pixel) fun ddx_fine(x: float3) -> float3
+/// How much `x` changes down this pixel's own column of the quad.
+@builtin @pure @stages(.pixel) fun ddy_fine(x: float3) -> float3
 /// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
 @builtin @pure @stages(.pixel) fun fwidth(x: float3) -> float3
+/// How much `x` changes from the quad's left column to its right, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddx(x: float4) -> float4
+/// How much `x` changes from the quad's top row to its bottom, the same in all four pixels.
 @builtin @pure @stages(.pixel) fun ddy(x: float4) -> float4
+/// `ddx(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddx_coarse(x: float4) -> float4
+/// `ddy(x)`, spelled out.
+@builtin @pure @stages(.pixel) fun ddy_coarse(x: float4) -> float4
+/// How much `x` changes along this pixel's own row of the quad.
+@builtin @pure @stages(.pixel) fun ddx_fine(x: float4) -> float4
+/// How much `x` changes down this pixel's own column of the quad.
+@builtin @pure @stages(.pixel) fun ddy_fine(x: float4) -> float4
 /// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
 @builtin @pure @stages(.pixel) fun fwidth(x: float4) -> float4
 

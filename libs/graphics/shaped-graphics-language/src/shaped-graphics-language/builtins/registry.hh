@@ -190,6 +190,9 @@ struct sgl::builtins::spelling
     /// How the result of an `infix` binds.
     precedence binds = precedence::primary;
     custom_writer custom = nullptr;
+    /// How HLSL for vulkan writes the call instead, whatever `kind` says, where DXC's SPIR-V of the usual spelling would
+    /// not mean what SGL's call does; it is given each argument's type.
+    custom_writer hlsl_vulkan = nullptr;
     helper_writer helper = nullptr;
     /// True in every language where `custom` may hand back `written::lines`; a writer that ever does must set it.
     /// Such a call cannot stand where it is evaluated more than once, such as a `while` condition.

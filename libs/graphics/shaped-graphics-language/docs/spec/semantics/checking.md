@@ -1255,7 +1255,7 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
 * **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
   A note names the branch or the exit that made the flow so, and what the branch tested.
   A branch of the prelude is no line of the program, so the note names the program's call that reached it instead.
-  `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy` and `fwidth` take derivatives.
+  `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy`, their `_coarse` and `_fine` forms and `fwidth` take derivatives.
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
 * **CHK-283** A value is **non-uniform** where it comes from what the stage is handed, from a `mut` buffer or a `mut` image,
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.

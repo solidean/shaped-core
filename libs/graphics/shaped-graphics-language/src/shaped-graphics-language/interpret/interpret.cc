@@ -879,7 +879,8 @@ struct machine
         return {};
     }
 
-    /// EVAL-144: a derivative across the quad, the coarse one: along its top row and down its left column.
+    /// EVAL-144: a derivative across the quad; the coarse one along its top row and down its left column, the fine one
+    /// along the lane's own row and down its own column.
     flow derivative_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
     {
         auto args = cc::vector<value>();
@@ -893,13 +894,20 @@ struct machine
         if (before == nullptr || quad + 3 >= lane_count)
             return {};
         auto const& o = before->offers;
+        auto const name = cc::string_view(record.name);
+        auto const is_fine = name.ends_with("_fine");
+        // the lanes of a quad are (0, 0), (1, 0), (0, 1), (1, 1)
+        auto const row = is_fine ? quad + (lane & 2) : quad;
+        auto const column = is_fine ? quad + (lane & 1) : quad;
+        auto const is_x = name.starts_with("ddx");
+        auto const is_y = name.starts_with("ddy");
         result.leaves.clear();
         for (auto k = isize(0); k < o[quad].size(); ++k)
         {
-            auto const dx = o[quad + 1][k].as_float() - o[quad][k].as_float();
-            auto const dy = o[quad + 2][k].as_float() - o[quad][k].as_float();
+            auto const dx = o[row + 1][k].as_float() - o[row][k].as_float();
+            auto const dy = o[column + 2][k].as_float() - o[column][k].as_float();
             auto const fw = (dx < 0.0f ? -dx : dx) + (dy < 0.0f ? -dy : dy);
-            result.leaves.push_back(scalar::of(record.name == "ddx" ? dx : record.name == "ddy" ? dy : fw));
+            result.leaves.push_back(scalar::of(is_x ? dx : is_y ? dy : fw));
         }
         if (result.leaves.size() != leaf_count_of(m, x.type))
             return type_error(cc::format("a call of '{}' with a result of the wrong type", record.name));
