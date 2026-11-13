@@ -65,10 +65,13 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 | `blended` | pixel | the same two triangles blended over a cleared rgba8 sRGB, two rgba16_float and an rgb10a2 target: alpha over, added, subtracted and min | each target, decoded to a float a channel | exact | relative 0.005 | not yet |
 | `samples` | pixel | the same two triangles over a cleared 4-sample rgba16_float target | every sample of every pixel, read back by a compute stage on the same route | exact | relative 0.005 | not yet |
 | `tallies` | compute | the `words` input, and 64 atomic totals starting at 0 or all ones | the totals, which no thread order may change | exact | exact | yes |
+| `records` | compute | 256 records of mixed members, a nested struct and a fixed array among them, written through SGL's generated struct | the rearranged records, and each member as the GPU read it | exact | exact | not yet |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 The `targets` bound allows a step of the coarsest format, since an implementation may round a float into one either way.
 An output a setup marks `is_exact`, as `targets` marks its integer target, is compared byte for byte and committed as a hash, whatever its file's bound.
+`records` also holds what the GPU read to what the host wrote, member by member, and logs the first member read from elsewhere as an error.
+Agreement between configurations cannot see a layout every backend gets wrong alike; that check can.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
 
 A comment block naming no known setup, or a tolerance that does not parse, fails both tests, naming the file.

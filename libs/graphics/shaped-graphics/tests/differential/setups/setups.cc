@@ -2,10 +2,13 @@
 #include "../differential.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/log.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <sg_test_differential_setups.hh>
 #include <sgl_modules/diff_floats.hh>
 #include <sgl_modules/diff_raster.hh>
+#include <sgl_modules/diff_records.hh>
 #include <sgl_modules/diff_scene.hh>
 #include <sgl_modules/diff_tallies.hh>
 #include <sgl_modules/diff_targets.hh>
@@ -464,6 +467,117 @@ sg_diff::interpreter_half tallies_for_interpreter(sg::context&)
     return half;
 }
 
+constexpr isize k_echo_words = 20;
+
+/// The `records` setup's records, every member its own hashed value: floats from the `floats` input, so none is a NaN, and ints of either sign.
+[[nodiscard]] cc::vector<sgl_modules::diff_records::record> records_written()
+{
+    auto const floats = float_inputs();
+    auto const f = [&](isize i, int k) { return floats[(i * 7 + k * 13) & 255]; };
+    auto const word = [](isize i, int k) { return hashed(u32(i * 19 + k) + 0x2545'f491u); };
+    auto records = cc::vector<sgl_modules::diff_records::record>();
+    for (auto i = isize(0); i < k_threads; ++i)
+        records.push_back({
+            .id = word(i, 0),
+            .position = tg::vec3f(f(i, 1), f(i, 2), f(i, 3)),
+            .scale = tg::vec2f(f(i, 4), f(i, 5)),
+            .surface = {.albedo = tg::vec3f(f(i, 6), f(i, 7), f(i, 8)),
+                        .roughness = f(i, 9),
+                        .layers = tg::vec<2, u32>(word(i, 10), word(i, 11))},
+            .weights = {f(i, 12), f(i, 13), f(i, 14)},
+            .visible = (word(i, 15) & 1u) != 0,
+            .offset = tg::vec3i(i32(word(i, 16) >> 8) - (1 << 23), i32(word(i, 17) >> 8) - (1 << 23),
+                                i32(word(i, 18) >> 8) - (1 << 23)),
+        });
+    return records;
+}
+
+/// A record's members as `echo` holds them, a word each in declaration order.
+[[nodiscard]] cc::fixed_array<u32, 19> echoed(sgl_modules::diff_records::record const& r)
+{
+    return {r.id,
+            cc::bit_cast<u32>(r.position[0]),
+            cc::bit_cast<u32>(r.position[1]),
+            cc::bit_cast<u32>(r.position[2]),
+            cc::bit_cast<u32>(r.scale[0]),
+            cc::bit_cast<u32>(r.scale[1]),
+            cc::bit_cast<u32>(r.surface.albedo[0]),
+            cc::bit_cast<u32>(r.surface.albedo[1]),
+            cc::bit_cast<u32>(r.surface.albedo[2]),
+            cc::bit_cast<u32>(r.surface.roughness),
+            r.surface.layers[0],
+            r.surface.layers[1],
+            cc::bit_cast<u32>(r.weights[0]),
+            cc::bit_cast<u32>(r.weights[1]),
+            cc::bit_cast<u32>(r.weights[2]),
+            r.visible.value != 0 ? 1u : 0u,
+            u32(r.offset[0]),
+            u32(r.offset[1]),
+            u32(r.offset[2])};
+}
+
+cc::shared_async<cc::vector<sg_diff::output>> run_records(sg::context* ctx, sg_diff::shaders_on_route on)
+{
+    using io = sgl_modules::diff_records::io;
+    using record = sgl_modules::diff_records::record;
+    auto const pipeline = co_await ctx->cached.acquire_compute_pipeline(
+        {.shader = on.entry, .layout = ctx->cached.acquire_pipeline_layout<io>()});
+    auto const written = records_written();
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const records = ctx->persistent.create_buffer_from_data(written, sg::buffer_usage::readonly_buffer);
+    auto const results = ctx->persistent.create_buffer_from_data(cc::vector<record>::create_defaulted(k_threads), usage);
+    auto const echo
+        = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_filled(k_threads * k_echo_words, 0u), usage);
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<io>(),
+                                                           io{.records = records.as_readonly_buffer(),
+                                                              .results = results.as_readwrite_buffer(),
+                                                              .echo = echo.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(int(k_threads));
+    auto const results_back = cmd->download.data_from_buffer(results);
+    auto const echo_back = cmd->download.data_from_buffer(echo);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_results = co_await results_back.data();
+    auto const got_echo = co_await echo_back.data();
+
+    // what the GPU read against what the host wrote, which no comparison between configurations sees where all agree
+    cc::string_view const members[] = {"id",
+                                       "position.x",
+                                       "position.y",
+                                       "position.z",
+                                       "scale.x",
+                                       "scale.y",
+                                       "surface.albedo.x",
+                                       "surface.albedo.y",
+                                       "surface.albedo.z",
+                                       "surface.roughness",
+                                       "surface.layers.x",
+                                       "surface.layers.y",
+                                       "weights[0]",
+                                       "weights[1]",
+                                       "weights[2]",
+                                       "visible",
+                                       "offset.x",
+                                       "offset.y",
+                                       "offset.z"};
+    for (auto m = 0; m < 19; ++m)
+        for (auto i = isize(0); i < k_threads; ++i)
+            if (got_echo[i * k_echo_words + m] != echoed(written[i])[m])
+            {
+                CC_LOG_ERROR("records: the GPU read member {} of record {} as 0x{:08x}, where the host wrote 0x{:08x}",
+                             members[m], i, got_echo[i * k_echo_words + m], echoed(written[i])[m]);
+                break;
+            }
+
+    auto result = one_output("results", cc::span<record const>(got_results).as_bytes());
+    result.push_back(
+        {.name = "echo", .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(got_echo).as_bytes())});
+    co_return result;
+}
+
 /// The interpreter's half of a buffer setup: `inputs` as `io.input`, and a zeroed `io.output` the runs store into.
 template <class T>
 sg_diff::interpreter_half buffers_for_interpreter(cc::vector<T> const& inputs)
@@ -743,6 +857,14 @@ bool const tallies_registered = sg_diff::register_setup({
     .routes = {},
     .across = {},
     .interpreted = &tallies_for_interpreter,
+});
+
+// Exact operations on exactly placed members, so every route and API must agree to the bit.
+bool const records_registered = sg_diff::register_setup({
+    .name = "records",
+    .run = &run_records,
+    .routes = {},
+    .across = {},
 });
 
 bool const raster_registered = sg_diff::register_setup({
