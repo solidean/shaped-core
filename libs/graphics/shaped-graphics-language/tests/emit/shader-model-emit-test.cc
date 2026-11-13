@@ -169,6 +169,16 @@ constexpr auto k_six_six_fills = sgl::check::core_fills{.draw_start = fill::root
             return false;
     return true;
 }
+
+[[nodiscard]] bool ast_equal_axes(cc::span<sgl::variant_axis const> a, cc::span<sgl::variant_axis const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < a.size(); ++i)
+        if (!(a[i] == b[i]))
+            return false;
+    return true;
+}
 } // namespace
 
 TEST("sgl emit - each feature and core construct names the DXIL shader model its fill needs (EMIT-262)")
@@ -314,6 +324,47 @@ TEST("sgl emit - an entry's axes are the features it consults, granted or not, w
     auto const plain = dx12(k_plain, "cs", native_route::text);
     REQUIRE(plain.has_value());
     CHECK(plain.value().axes.empty());
+}
+
+TEST("sgl emit - an entry's axes reach through calls and generics, in feature order, and only from that entry "
+     "(EMIT-264)")
+{
+    // `has` in a function the entry calls, in a generic one, and in one only another entry calls, written out of order
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun with_int64() -> float:\n"
+                            "    const if has(.shader_int64):\n"
+                            "        return 1.0\n"
+                            "    return 2.0\n"
+                            "fun scaled[T](x: T) -> T:\n"
+                            "    const if has(.subgroups):\n"
+                            "        return x\n"
+                            "    return x + x\n"
+                            "fun with_f16() -> float:\n"
+                            "    const if has(.shader_f16):\n"
+                            "        return 1.0\n"
+                            "    return 3.0\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    work.values[id.x] = with_int64() + scaled(1.0)\n"
+                            "@compute(64) fun other(@thread_id id: int3){work}:\n"
+                            "    work.values[id.x] = with_f16()\n";
+    for (auto const device : {feature_set(), feature_set(feature::subgroups) | feature::shader_int64})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = target::hlsl_dx12, .device_features = device});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        REQUIRE(e.value().axes.size() == 2);
+        // feature order, not the order the source asks in
+        CHECK(e.value().axes[0].f == feature::subgroups);
+        CHECK(e.value().axes[1].f == feature::shader_int64);
+        // and the same list on a second compile
+        auto const again = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = target::hlsl_dx12, .device_features = device});
+        REQUIRE(again.has_value());
+        CHECK(ast_equal_axes(again.value().axes, e.value().axes));
+    }
 }
 
 TEST("sgl emit - a variant's key names its granted features with their fills, then the core fills that are not native")

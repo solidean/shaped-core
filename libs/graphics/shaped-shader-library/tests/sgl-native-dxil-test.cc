@@ -777,3 +777,100 @@ TEST("slib - SGL's DXIL of an nvapi fill passes the validator, and says to the d
     CHECK(!expected.empty());
     CHECK(listing(written) == listing(expected)).dump("theirs", listing(expected)).dump("ours", listing(written));
 }
+
+namespace
+{
+/// The protocol's calls in a disassembled module as `protocol_of` finds them, but with each SSA name renamed by where
+/// it first appears among them, so two writers' modules compare by which value each call takes as well as its shape.
+[[nodiscard]] cc::vector<cc::string> protocol_flow_of(cc::string_view disassembly)
+{
+    auto const is_name = [](char c)
+    { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'; };
+    auto seen = cc::vector<cc::string>();
+    auto result = cc::vector<cc::string>();
+    auto at = isize(0);
+    while (at < disassembly.size())
+    {
+        auto end = disassembly.find('\n', at);
+        if (end < 0)
+            end = disassembly.size();
+        auto line = disassembly.subview({.offset = at, .size = end - at});
+        at = end + 1;
+        if (!line.contains("@dx.op.bufferUpdateCounter") && !line.contains("@dx.op.rawBufferStore")
+            && !line.contains("@dx.op.traceRay"))
+            continue;
+        if (line.starts_with("declare"))
+            continue;
+        if (auto const comment = line.find(';'); comment >= 0)
+            line = line.subview({.offset = 0, .size = comment});
+        auto plain = cc::string();
+        for (auto i = isize(0); i < line.size(); ++i)
+        {
+            if (line[i] != '%')
+            {
+                plain += line[i];
+                continue;
+            }
+            auto j = i + 1;
+            while (j < line.size() && is_name(line[j]))
+                ++j;
+            auto const name = cc::string(line.subview({.offset = i + 1, .size = j - i - 1}));
+            // a type's name, `%dx.types.Handle`, stays what it is, and a handle is any one of the resource's: DXC makes
+            // one per access, and SGL's writer one per resource; so is a trace's payload, which DXC copies per trace
+            if (name.starts_with("dx.") || name.starts_with("struct."))
+                plain.appendf("%{}", name);
+            else if (plain.ends_with("%dx.types.Handle "))
+                plain += "%handle";
+            else if (plain.ends_with("* ") || plain.ends_with("* nonnull "))
+                plain += "%payload";
+            else
+            {
+                auto index = isize(-1);
+                for (auto k = isize(0); k < seen.size(); ++k)
+                    if (seen[k] == name)
+                        index = k;
+                if (index < 0)
+                {
+                    index = seen.size();
+                    seen.push_back(name);
+                }
+                plain.appendf("%v{}", index);
+            }
+            i = j - 1;
+        }
+        plain.replace_all(" nonnull", "");
+        result.push_back(cc::move(plain));
+    }
+    return result;
+}
+} // namespace
+
+TEST("slib - SGL's DXIL of an nvapi fill hands each record and each TraceRay the values DXC's compile of its text does")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const headers = nvapi_headers();
+    if (headers.empty())
+        SKIP("the pinned NVAPI headers are not fetched: uv run extern/nvapi/fetch-nvapi.py");
+    auto const native = through_nvapi(sgl::emit::native_route::require);
+    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    auto const ours = compiler.value().disassemble(native.value().dxil);
+    REQUIRE(ours.has_value());
+    auto const text = through_nvapi(sgl::emit::native_route::text);
+    REQUIRE(text.has_value());
+    auto const theirs = dxc_of(compiler.value(), text.value(), headers);
+    REQUIRE(theirs.has_value()).dump("dxc", theirs.has_error() ? theirs.error() : cc::string());
+    auto const listing = [](cc::span<cc::string const> calls)
+    {
+        auto out = cc::string();
+        for (auto const& c : calls)
+            out.appendf("{}\n", c);
+        return out;
+    };
+    // the hit object a record names, and the handle a TraceRay takes, is the counter value the protocol handed back
+    auto const expected = protocol_flow_of(theirs.value());
+    auto const written = protocol_flow_of(ours.value());
+    CHECK(!expected.empty());
+    CHECK(listing(written) == listing(expected)).dump("theirs", listing(expected)).dump("ours", listing(written));
+}
