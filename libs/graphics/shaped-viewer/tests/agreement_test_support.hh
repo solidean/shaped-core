@@ -326,26 +326,48 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
     for (auto r = 0; r < restarts_before; ++r)
         co_await restart();
 
-    // A count rather than a time, since what a frame takes is the GPU's and the load's.
-    // Compiles come first, and a frame declined while one runs is cheap: a forward hybrid's cold compile is some 9000 of them.
+    // Frames that add samples are bounded by a count rather than a time, since what a frame takes is the GPU's and the load's.
     auto const max_frames = i32(samples) * 4 + 16384;
+    // A frame that adds none, with stand-ins or declined while a pipeline compiles, is cheap and says nothing about
+    // convergence, so time bounds a stretch of those instead.
+    // A cold compile takes what the platform's compiler takes: Metal spends 15 s on each hybrid fragment variant.
+    // It builds them one at a time, so a cold mode adds no samples for minutes.
+    // Below the 300 s watchdog sv's declared timeout gives, so a compile that never ends fails here, naming the mode.
+    auto constexpr max_idle_secs = 240.0;
     auto const start = cc::current_time_steady_secs();
     auto compiled = false;
     auto out = converged{};
     for (auto half = 0; half < 2; ++half)
     {
         auto frames = 0;
+        auto idle = 0; // frames in the current unbroken stretch that added no samples
+        auto idle_since = 0.0;
         auto r = reading{};
         while (r.stand_ins || r.samples < samples || r.mean.empty())
         {
+            auto const before = r.samples;
             r = co_await frame();
-            if (!compiled && !r.stand_ins)
+            if (!r.stand_ins && r.samples > before)
             {
-                compiled = true;
-                CC_LOG_INFO("{}: drawn without stand-ins {:.1f} s and {} frames in", config.name,
-                            cc::current_time_steady_secs() - start, frames);
+                if (!compiled)
+                {
+                    compiled = true;
+                    CC_LOG_INFO("{}: first samples without stand-ins {:.1f} s and {} idle frames in", config.name,
+                                cc::current_time_steady_secs() - start, idle);
+                }
+                idle = 0;
+                REQUIRE(++frames < max_frames).dump("mode", config.name).dump("samples", r.samples);
             }
-            REQUIRE(++frames < max_frames).dump("mode", config.name).dump("samples", r.samples);
+            else
+            {
+                if (idle++ == 0)
+                    idle_since = cc::current_time_steady_secs();
+                REQUIRE(cc::current_time_steady_secs() - idle_since < max_idle_secs)
+                    .dump("mode", config.name)
+                    .dump("idle", idle)
+                    .dump("samples", r.samples)
+                    .dump("stand_ins", r.stand_ins);
+            }
         }
         (half == 0 ? out.first : out.second) = cc::move(r.mean);
         out.samples = r.samples;
