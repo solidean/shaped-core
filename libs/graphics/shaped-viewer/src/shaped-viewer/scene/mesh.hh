@@ -4,6 +4,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/cache_owner.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/mesh_flags.hh>
 #include <shaped-viewer/scene/mesh_texture.hh>
@@ -25,12 +26,11 @@
 /// from the mesh's own bytes when one does not.
 struct sv::impl::mesh_gpu_slot
 {
-    /// Identity ONLY, and never dereferenced.
+    /// The manager these resources were minted by.
     ///
-    /// A mesh may outlive the manager it was placed against — it owns its bytes and needs no device to exist — so a stale
-    /// pointer here is possible.
-    /// Comparing one is sound where following one is not, which is why nothing ever does the latter.
-    void const* manager = nullptr;
+    /// A mesh may outlive that manager — it owns its bytes and needs no device to exist — and the next manager can sit at
+    /// the same address, which is why this is a never-recycled token rather than a pointer.
+    impl::cache_owner manager = impl::cache_owner::none;
 
     /// The resources minted for this mesh against that manager.
     sv::resident_mesh resources;

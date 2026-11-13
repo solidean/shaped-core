@@ -34,6 +34,7 @@
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <typed-geometry/transform/compose.hh>
 
+
 namespace sv
 {
 namespace
@@ -681,26 +682,13 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
 /// drawn through the same eye, so the mean it converges to is the image this frame is asking for and no other.
 /// Moving the eye therefore restarts it, and that is the trade — no reprojection to salvage the old samples, and in
 /// exchange no smearing, no per-pixel rejection heuristic, and an uncapped mean that converges to ground truth.
-///
-/// `scope` picks what restarts: the mean's `image`, or a temporal denoiser's `history`.
-/// A history reprojects across motion and rejects per pixel what it cannot follow, so what moves or deforms is left out of it:
-/// every instance's transform, and of a frame mesh everything but its permutation — geometry, attributes, parameter block.
-/// A frame mesh is new content every frame by design, a simulation's body with its normals, and a history exists to follow that.
-/// What the scene is stays in it: how many instances and which shaders, a managed mesh's record, the lights, the background.
-enum class trace_hash_scope : u8
-{
-    image,
-    history,
-};
-
 [[nodiscard]] u64 trace_hash(shaders::tracer::frame_constants fc,
                              background_gpu const& bg,
                              pt_light_table const& lights,
                              traced_decals const& decals,
                              resolved_view const& r,
                              tg::vec2i resolution,
-                             u64 shader_generation,
-                             trace_hash_scope scope = trace_hash_scope::image)
+                             u64 shader_generation)
 {
     // The two fields that legitimately differ every frame; hashing either would restart the estimator forever.
     fc.rng_seed = 0;
@@ -726,13 +714,6 @@ enum class trace_hash_scope : u8
     {
         auto const& inst = r.instances[i];
         auto const content = r.frame_contents[i];
-        if (scope == trace_hash_scope::history)
-        {
-            h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset));
-            if (content == cc::hash128())
-                h = cc::combine_hash(h, cc::make_hash(inst.blas.get())); // a managed mesh's BLAS is its geometry's identity
-            continue;
-        }
         h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<float const>(inst.transform, 12).as_bytes()));
         if (content == cc::hash128())
             h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
@@ -752,27 +733,16 @@ enum class trace_hash_scope : u8
     {
         auto anonymized = r.records[i];
         anonymized.param_buffer = 0;
-        auto const frame_row = r.frame_contents[i] != cc::hash128();
-        if (frame_row && scope == trace_hash_scope::history)
-            continue; // its permutation, hashed with the instances above, is all of it a history keeps
-        if (frame_row)
+        if (r.frame_contents[i] != cc::hash128())
         {
             anonymized.vertices = 0;
             anonymized.indices = 0;
         }
-        // the record carries the instance's transform too, which a history leaves out as it does the TLAS instance's
-        if (scope == trace_hash_scope::history)
-        {
-            anonymized.to_world_x = {};
-            anonymized.to_world_y = {};
-            anonymized.to_world_z = {};
-        }
         h = cc::combine_hash(
             h, cc::make_hash_of_bytes(cc::span<shaders::tracer::instance_record const>(&anonymized, 1).as_bytes()));
     }
-    for (auto i = isize(0); i < r.parameter_blocks.size(); ++i)
-        if (scope == trace_hash_scope::image || r.frame_contents[i] == cc::hash128())
-            h = cc::combine_hash(h, cc::make_hash(u32(r.parameter_blocks[i])));
+    for (auto const block : r.parameter_blocks)
+        h = cc::combine_hash(h, cc::make_hash(u32(block)));
 
     // Which shader reads those records is not in them, and a different permutation is a different image.
     for (auto const& key : r.permutations)
@@ -813,13 +783,19 @@ enum class trace_hash_scope : u8
     return h;
 }
 
-/// The random seed of the frame `slot` traces next: its image's `seed_key_of`, mixed with the frame within the run.
+/// The random seed of frame `frame` of `slot`'s run: its image's `seed_key_of`, mixed with the frame within the run.
 /// Mixed rather than spaced apart, since a run counts frames up to `frame_count_cap`, far past what a u32 could hold between two keys.
 /// Never 0, which the tracer reads as no seed.
+[[nodiscard]] u32 seed_at(impl::temporal_slot const& slot, u32 frame)
+{
+    auto const seed = u32(cc::make_hash(slot.seed_key, frame));
+    return seed != 0 ? seed : 1;
+}
+
+/// The random seed of the frame `slot` traces next.
 [[nodiscard]] u32 seed_of(impl::temporal_slot const& slot)
 {
-    auto const seed = u32(cc::make_hash(slot.seed_key, slot.accum_frame));
-    return seed != 0 ? seed : 1;
+    return seed_at(slot, slot.accum_frame);
 }
 
 /// Element `index` of the Halton sequence in `base`, in [0, 1).
@@ -916,6 +892,16 @@ struct ensured_slot
 /// The bounce after which the wavefront's Russian roulette may end a path, which leaves `max_bounces` a cap.
 constexpr u32 wavefront_roulette_after = 3;
 
+/// The megakernel's noise counters: laid out as the wavefront's, so the sample floor and its shortfall sit at `counter_sample_floor`
+/// (shaders/sgl/tracer_wavefront.sgl) and read back as a sample floor does.
+constexpr isize noise_counter_count = 7;
+constexpr isize noise_counter_floor = 5;
+
+/// The frames every pixel under a noise target takes before its noise is judged: a variance over fewer is too noisy itself.
+/// 16 frames are 64 samples at the default `samples_per_pixel`; at 4, a smooth wall stopped at 16 samples, where the noise
+/// still had visible structure, and a variance over four frame means let pixels stop on an unlucky estimate.
+constexpr u32 noise_min_frames = 16;
+
 /// Where a traced layer's frame counter stops: far past any denoiser's hand-off, since it seeds each frame rather than saying how far the image has got.
 constexpr u32 frame_count_cap = u32(1) << 30;
 
@@ -964,6 +950,9 @@ void land_sample_floors(impl::temporal_slot& slot)
         {
             slot.samples = cc::max(slot.samples, floor.value()[0]);
             slot.pixels_short = floor.value()[1];
+            // A megakernel frame under a noise target in which no pixel was left tracing: the image is down to the target.
+            if (slot.noise_adaptive && floor.value()[1] == 0)
+                slot.noise_settled = true;
         }
         slot.sample_floors.remove_at(0);
     }
@@ -1567,30 +1556,47 @@ struct raster_batch
             .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d()};
 }
 
-/// Draws one frame of hybrid layer `l` of `v` at `extent`, its G-buffer into `guides`, and blends it into `slot`'s mean where `into_mean`.
-///
-/// A frame is one light sample per pixel and one bounce, so the layer accumulates while its image holds still, as a traced layer does.
-/// `fc` is the frame block a trace of the layer would upload, its seed and jitter set, and `slot` must already have restarted on its hash.
-/// A frame drawn for an upscaler is at the upscaler's input extent, into scratch `guides`, and is no sample of the mean.
-/// Where `frame_output` is set, it receives this frame alone, which a temporal denoiser reads.
-/// `frame_guides` receives this frame's own guides where it blends them into `guides`, as `hybrid_frame_desc::frame_guides` says.
-/// Counts nothing: the caller counts a frame that executed, as a trace counts its own.
-[[nodiscard]] sg::routine_outcome hybrid_frame(sg::command_list& cmd,
-                                               view_data const& v,
-                                               layer const& l,
-                                               u8 layer,
-                                               tg::vec2i extent,
-                                               raster_scene const& scene,
-                                               shaders::tracer::frame_constants fc,
-                                               impl::view_state& rec,
-                                               impl::temporal_slot& slot,
-                                               gpu_resource_manager& resources,
-                                               raster_gbuffer const& guides,
-                                               bool into_mean,
-                                               sg::texture_2d const& frame_output,
-                                               raster_gbuffer& frame_guides,
-                                               stand_in_report& stand_ins)
+/// What `hybrid_frame` drew: whether it did, and how many samples of a pack it blended, the last at `jitter`.
+struct hybrid_pack
 {
+    sg::routine_outcome outcome = sg::routine_outcome::declined;
+    i32 samples = 0;
+    tg::vec2f jitter = tg::vec2f(0, 0);
+};
+
+/// Draws `samples` samples of hybrid layer `l` of `v` at `extent`, its G-buffer into `guides`, and blends each into `slot`'s mean where `into_mean`.
+///
+/// A sample is one light sample per pixel and one bounce, so the layer accumulates while its image holds still, as a traced layer does.
+/// `fc` is the frame block a trace of the layer would upload, its seed and jitter set, and `slot` must already have restarted on its hash.
+/// **Sample `i` of a pack is the one frame `slot.accum_frame + i` would draw**: its seed, its jitter where `fc` fixes one, and its blend weight.
+/// So a pack changes how fast the mean climbs, never its image; it shares one upload of the scene and one TLAS, which is what it saves.
+/// `samples` above 1 needs `into_mean`, and `jitter` the first sample's offset where `fc` fixes one.
+/// A frame drawn for an upscaler is at the upscaler's input extent, into scratch `guides`, and is no sample of the mean.
+/// Where `frame_output` is set, it receives the last sample alone, which a temporal denoiser reads.
+/// `frame_guides` receives the last sample's own guides where they blend into `guides`, as `hybrid_frame_desc::frame_guides` says.
+/// Where `pacing` is set, the pack's GPU time is queued on it.
+/// Counts nothing: the caller counts the samples blended, as a trace counts its own frame.
+[[nodiscard]] hybrid_pack hybrid_frame(sg::command_list& cmd,
+                                       view_data const& v,
+                                       layer const& l,
+                                       u8 layer,
+                                       tg::vec2i extent,
+                                       raster_scene const& scene,
+                                       shaders::tracer::frame_constants fc,
+                                       impl::view_state& rec,
+                                       impl::temporal_slot& slot,
+                                       gpu_resource_manager& resources,
+                                       raster_gbuffer const& guides,
+                                       bool into_mean,
+                                       sg::texture_2d const& frame_output,
+                                       raster_gbuffer& frame_guides,
+                                       stand_in_report& stand_ins,
+                                       i32 samples = 1,
+                                       tg::vec2f jitter = tg::vec2f(0, 0),
+                                       impl::hybrid_pacing* pacing = nullptr)
+{
+    CC_ASSERT(samples >= 1 && (samples == 1 || into_mean), "only samples of the mean pack");
+    auto declined = hybrid_pack{};
     auto& ctx = cmd.context();
     auto const& resolved = *scene.resolved;
     auto const slot_of = [&](u64 id)
@@ -1617,11 +1623,11 @@ struct raster_batch
     if (frozen.has_error())
     {
         CC_LOG_ERROR("the bindless tables could not be snapshot for a hybrid layer: {}", frozen.error().to_string());
-        return sg::routine_outcome::declined;
+        return declined;
     }
     auto const& bindless = frozen.value();
 
-    // This frame alone, which the mean then takes in by its weight.
+    // One sample alone, which the mean then takes in by its weight.
     auto const color = ctx.transient.create_texture_2d(
         {.format = sg::pixel_format::rgba32_float,
          .width = extent[0],
@@ -1629,39 +1635,85 @@ struct raster_batch
          .usage = sg::texture_usage::render_target | sg::texture_usage::texture | sg::texture_usage::image});
     auto targets = guides;
     targets.color = color;
+    // Created once for the pack, as the color is: a sample's targets are rewritten whole by the next.
+    if (targets.primary_depth.raw() == nullptr)
+        targets.primary_depth
+            = ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                               .width = extent[0],
+                                               .height = extent[1],
+                                               .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
+    auto const thin = l.settings.hybrid_lighting == hybrid_lighting::deferred
+                        ? hybrid_routine::create_thin_targets(ctx, extent)
+                        : raster_thin_targets{};
+    auto const scratch = raster_routine::create_scratch(ctx, extent);
 
-    auto const outcome = hybrid_routine::execute(cmd, {.lighting = l.settings.hybrid_lighting,
-                                                       .frame = fc,
-                                                       .background = background,
-                                                       .instances = resolved.instances,
-                                                       .instance_table = instance_table,
-                                                       .lights = light_buffer,
-                                                       .emitters = emitter_buffer,
-                                                       .decals = decal_buffers.decals,
-                                                       .decal_shapes = decal_buffers.shapes,
-                                                       .decal_atlas = decal_buffers.atlas,
-                                                       .draws = batch.draws,
-                                                       .index_pool = resources.meshes.index_pool(),
-                                                       .permutations = batch.permutations,
-                                                       .fallback = &resources.shaders.acquire_fallback(),
-                                                       .bindless = &bindless,
-                                                       .targets = targets,
-                                                       .frame_guides = &frame_guides,
-                                                       .stand_ins = &stand_ins,
-                                                       .visibility = &slot.raster_visibility});
-    if (outcome == sg::routine_outcome::declined)
-        return outcome;
+    // Built here rather than by each sample: the scene holds still across a pack, and on a scene of many instances the build is a fifth of the CPU's frame.
+    auto const tlas = cmd.raytracing.build_tlas(resolved.instances);
 
-    // A frame the blends could not take in yet is drawn for nothing, and declines so that it counts nothing.
-    if (into_mean && !sr::mix_routine::execute(cmd, slot.texture, color, 1.0f / f32(slot.accum_frame + 1)))
-        return sg::routine_outcome::declined;
-    if (frame_output.raw() != nullptr && !sr::mix_routine::execute(cmd, frame_output, color, 1.0f))
-        return sg::routine_outcome::declined;
+    auto const begin = pacing != nullptr ? cmd.query.record_gpu_timestamp() : sg::gpu_timestamp();
+    auto drawn = hybrid_pack{.outcome = sg::routine_outcome::executed, .jitter = jitter};
+    for (auto i = 0; i < samples; ++i)
+    {
+        auto sample = fc;
+        if (i > 0)
+        {
+            auto const frame = slot.accum_frame + u32(i);
+            sample.rng_seed = seed_at(slot, frame);
+            // its guides blend at its own weight, as its color does
+            sample.guide_frame = fc.guide_frame + u32(i);
+            if (fc.fixed_jitter != 0)
+            {
+                drawn.jitter = still_jitter(u32(slot.seed_key & 0xffffu) + frame);
+                sample.jitter = drawn.jitter + tg::vec2f(0.5f, 0.5f);
+            }
+        }
+
+        auto const outcome = hybrid_routine::execute(cmd, {.lighting = l.settings.hybrid_lighting,
+                                                           .frame = sample,
+                                                           .background = background,
+                                                           .instances = resolved.instances,
+                                                           .tlas = tlas,
+                                                           .instance_table = instance_table,
+                                                           .lights = light_buffer,
+                                                           .emitters = emitter_buffer,
+                                                           .decals = decal_buffers.decals,
+                                                           .decal_shapes = decal_buffers.shapes,
+                                                           .decal_atlas = decal_buffers.atlas,
+                                                           .draws = batch.draws,
+                                                           .index_pool = resources.meshes.index_pool(),
+                                                           .permutations = batch.permutations,
+                                                           .fallback = &resources.shaders.acquire_fallback(),
+                                                           .bindless = &bindless,
+                                                           .targets = targets,
+                                                           .thin = thin,
+                                                           .scratch = scratch,
+                                                           .frame_guides = &frame_guides,
+                                                           .stand_ins = &stand_ins,
+                                                           .visibility = &slot.raster_visibility});
+
+        // A sample the blends could not take in yet is drawn for nothing, so it counts nothing.
+        // One that declines past the first ends the pack on the samples already blended.
+        auto const blended
+            = outcome != sg::routine_outcome::declined
+           && (!into_mean
+               || sr::mix_routine::execute(cmd, slot.texture, color, 1.0f / f32(slot.accum_frame + u32(i) + 1)))
+           && (i + 1 < samples || frame_output.raw() == nullptr
+               || sr::mix_routine::execute(cmd, frame_output, color, 1.0f));
+        if (!blended)
+        {
+            if (i == 0)
+                return declined;
+            break;
+        }
+        drawn.samples = i + 1;
+    }
     impl::gpu_mark(cmd, "mix");
+    if (pacing != nullptr)
+        pacing->in_flight.push_back({.begin = begin, .end = cmd.query.record_gpu_timestamp(), .samples = drawn.samples});
 
     motion->last_camera = fc.camera;
     motion->has_last_camera = true;
-    return outcome;
+    return drawn;
 }
 
 /// `hybrid_frame` for the single-view path, which denoises nothing: draws nothing once `slot` holds `target`, and counts what it draws.
@@ -1686,7 +1738,8 @@ struct raster_batch
     // Nothing denoises this frame's samples alone, so its own guides are read by nobody.
     auto frame_guides = raster_gbuffer{};
     auto const outcome = hybrid_frame(cmd, v, l, layer, resolution, scene, seeded, rec, slot, resources,
-                                      gbuffer_slots_of(rec, layer), true, {}, frame_guides, stand_ins);
+                                      gbuffer_slots_of(rec, layer), true, {}, frame_guides, stand_ins)
+                             .outcome;
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 
@@ -1947,26 +2000,20 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Only the megakernel reads it, so no other mode restarts on it.
     if (mode != render_mode::megakernel)
         fc.samples_per_pixel = 0;
-    // A following dome turns with the camera, so the trace sees it turned and the camera-free hash below sees it unturned:
-    // a temporal history survives a move, as it does for a dome that stays.
     auto const bg = background_gpu::from(l.background.seen_from(v.camera));
-    auto const bg_unturned = background_gpu::from(l.background);
     // The integrator is folded in too: both converge to the same image, but a mean must not hold samples of both.
     // So is what the last frame stood in for a permutation not compiled, which only the routine decides.
     auto const hash
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
                            cc::make_hash(u32(mode), u32(l.settings.hybrid_lighting), slot->stand_in_hash));
 
-    // What a temporal denoiser's history restarts on: the camera left out, and where the geometry sits (trace_hash_scope).
-    // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
-    auto scene_fc = fc;
-    scene_fc.camera = {};
-    auto const scene_hash = trace_hash(scene_fc, bg_unturned, lights, decals, resolved, tr.resolution,
-                                       self->_shader_generation, trace_hash_scope::history);
-
     // A cut teleports the camera, so nothing from the last frame reprojects: the temporal history describes another
     // part of the scene, and the motion guide would reproject into a camera nothing connects it to.
     // Every slot of the view at once rather than this layer's, so a view carrying two traced layers cuts as one.
+    //
+    // **A cut is the only thing that restarts a temporal history**, where the mean restarts on any change of the image.
+    // A history follows content per pixel — motion, deformation, meshes and lights coming and going — which is what it exists for.
+    // The denoiser itself rebuilds it on a new extent or member.
     if (rec.camera_cut_pending)
     {
         for (auto&& [slot_id, s] : rec.temporal)
@@ -2020,6 +2067,38 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         impl::restart_accumulation(*slot);
     slot->reset_hash = hash;
     slot->seed_key = seed_key_of(fc, bg, lights, resolved, tr.resolution, l.settings.sequence);
+
+    // A megakernel layer under a noise target keeps per-pixel statistics at its extent.
+    // Statistics made now describe no earlier frame, so a mean that was already climbing starts over with them.
+    auto const noise = mode == render_mode::megakernel && l.settings.noise_target > 0.0f;
+    if (noise
+        && (!slot->noise_adaptive || slot->pixel_stats.raw() == nullptr || slot->pixel_stats.width() != tr.resolution[0]
+            || slot->pixel_stats.height() != tr.resolution[1]))
+    {
+        // copy_src too, so a test or a tool reads back where the samples went.
+        slot->pixel_stats
+            = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rg32_float,
+                                                .width = tr.resolution[0],
+                                                .height = tr.resolution[1],
+                                                .usage = sg::texture_usage::image | sg::texture_usage::copy_src});
+        slot->noise_counts = ctx.persistent.create_texture_2d(
+            {.format = sg::pixel_format::r32_float,
+             .width = tr.resolution[0],
+             .height = tr.resolution[1],
+             .usage = sg::texture_usage::image | sg::texture_usage::texture | sg::texture_usage::copy_src});
+        if (slot->noise_counters.raw() == nullptr)
+            slot->noise_counters = ctx.persistent.create_buffer<u32>(
+                noise_counter_count,
+                sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+        if (slot->accum_frame > 0)
+            impl::restart_accumulation(*slot);
+    }
+    if (!noise)
+    {
+        slot->pixel_stats = {};
+        slot->noise_counts = {};
+    }
+    slot->noise_adaptive = noise;
 
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
@@ -2097,7 +2176,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // At the target no frame traces, so the mean starts over instead: a denoiser would read blank guides, and a drawing test or a pick blank depth.
     auto const target = effective_sample_target(def.sample_target);
     slot->sample_target = target;
-    slot->frame_target = def.frame_target;
+    // The last frame of an image traces once more and reaches its target, so it also takes the denoise kept for the target.
+    slot->frame_target = def.last_frame_of_image ? slot->accum_frame + 1 : def.frame_target;
     auto const guides_unwritten = has_guides && slot->accum_frame > 0 && ds.normal->accum_frame == 0;
     auto const depth_unwritten = depth_slot != nullptr && slot->accum_frame > 0 && depth_slot->accum_frame == 0;
     auto const at_target = !frame_samples(*slot, false);
@@ -2149,18 +2229,6 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         = writes_temporal && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr && ds.hit_distance != nullptr;
     // The hit distance alone, which a deferred hybrid frame writes for a member that reads it beside the whole radiance.
     auto const has_hit_distance = writes_temporal && hybrid_hit_distance && ds.hit_distance != nullptr;
-
-    if (has_temporal)
-    {
-        // The temporal member's history restarts on a different SCENE, never on camera or object motion: carrying history
-        // across motion is what it exists for, while the mean restarts on every move.
-        if (ds.frame->reset_hash != scene_hash)
-        {
-            ds.frame->denoise.reset();
-            ds.frame->scaled_denoise.reset();
-        }
-        ds.frame->reset_hash = scene_hash;
-    }
 
     if (writes_temporal)
     {
@@ -2285,13 +2353,44 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The scene's resolve and the hash above run on every frame: the hash is what notices a change that restarts the mean,
     // and the resolve is what keeps the scene's working set resident.
     auto stand_ins = stand_in_report{};
+
+    // This layer's share of the frame's budget for still layers, which a wavefront frame fills with rounds and a hybrid one with samples.
+    auto const budget_ms = impl::still_budget_share(def.still_budget_ms, impl::still_budgeted_traces(def, plan, store));
+
+    // How many samples a hybrid frame packs: one, unless it is still and no temporal member reads this frame's samples alone.
+    // A frame whose mean restarted is a move's, and the temporal member reading fresh samples must see one frame's.
+    // Never past a target, so a capture stops on the sample it would have stopped on a frame at a time.
+    auto pack = 1;
+    auto* pacing = static_cast<impl::hybrid_pacing*>(nullptr);
+    if (mode == render_mode::hybrid && traces && !scaled && slot->accum_frame > 0
+        && (!writes_temporal || schedule.temporal_on_mean))
+    {
+        if (budget_ms > 0.0f)
+        {
+            pack = slot->sample_pacing.next(f64(budget_ms) * 1e-3);
+            pacing = &slot->sample_pacing;
+        }
+        else
+        {
+            slot->sample_pacing.reset();
+            pack = i32(cc::max(1u, def.still_samples_per_frame));
+        }
+        auto remaining = target > slot->samples ? target - slot->samples : 1u;
+        if (slot->frame_target > 0)
+            remaining = cc::min(remaining,
+                                slot->frame_target > slot->accum_frame ? slot->frame_target - slot->accum_frame : 1u);
+        pack = i32(cc::clamp(u32(pack), 1u, remaining));
+    }
+    auto packed = 1;
+
     auto hybrid_guides = raster_gbuffer{};
     auto const dispatch = [&]
     {
         // A hybrid frame draws its primary hits and lights them inline, then blends into the mean the trace would have.
         // A scaled one draws at the upscaler's input extent into the scratch guides the upscale reads, and is no sample of the mean.
         if (mode == render_mode::hybrid)
-            return hybrid_frame(
+        {
+            auto const drawn = hybrid_frame(
                 cmd, v, l, tr.layer, input_extent,
                 {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, fc, rec,
                 *slot, resources,
@@ -2308,7 +2407,27 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                     slots.hit_distance = guide_hit_distance;
                     return slots;
                 }(),
-                !scaled, frame_output, hybrid_guides, stand_ins);
+                !scaled, frame_output, hybrid_guides, stand_ins, pack, jitter, pacing);
+            packed = cc::max(1, drawn.samples);
+            // The last sample's offset is what the next frame's upscaler reads as the previous one.
+            if (!scaled && fc.fixed_jitter != 0)
+            {
+                jitter = drawn.jitter;
+                slot->last_jitter = jitter;
+            }
+            return drawn.outcome;
+        }
+
+        // Under a noise target the megakernel judges every pixel against it after the display's scale, and counts the ones still tracing.
+        // A scaled frame is no sample of the mean, so it keeps no statistics.
+        auto const noise_on = noise && !scaled;
+        if (noise_on)
+        {
+            fc.noise_target = l.settings.noise_target;
+            fc.noise_scale = display_scale;
+            fc.noise_min_frames = noise_min_frames;
+            cmd.upload.data_to_buffer(slot->noise_counters, cc::vector<u32>::create_defaulted(noise_counter_count));
+        }
 
         auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
             1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
@@ -2341,7 +2460,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         auto const* const quadric_fallback
             = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
-        return trace_layer(
+        auto const outcome = trace_layer(
             cmd, l.settings,
             {.frame = frame,
              .background = background,
@@ -2359,7 +2478,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
              .guide_hit_distance = guide_hit_distance,
              // A scaled frame writes no depth, and its targets are at the input extent, which the slot is not.
              .primary_depth = depth_slot != nullptr && !scaled ? depth_slot->texture : sg::texture_2d(),
-             .sample_counts = sample_counts,
+             .sample_counts = noise_on ? slot->noise_counts : sample_counts,
+             .pixel_stats = noise_on ? slot->pixel_stats : sg::texture_2d(),
+             .counters = noise_on ? slot->noise_counters : sg::buffer<u32>(),
              .instance_table = instance_table,
              .lights = light_buffer,
              .emitters = emitter_buffer,
@@ -2377,9 +2498,19 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
              .decal_shapes = decal_buffers.shapes,
              .decal_atlas = decal_buffers.atlas,
              .stand_ins = &stand_ins},
-            fc, *slot, scaled,
-            impl::wavefront_budget_share(def.wavefront_budget_ms, impl::still_wavefront_traces(def, plan, store)),
-            target);
+            fc, *slot, scaled, budget_ms, target);
+
+        // The count of pixels still tracing reads back as a sample floor's shortfall does; `land_sample_floors` takes it in.
+        // One at a time: a frame waits for the last count to land before it asks for another, so none is ever dropped in flight.
+        if (noise_on && outcome == sg::routine_outcome::executed && slot->sample_floors.empty())
+        {
+            auto const counts
+                = ctx.transient.create_buffer<u32>(2, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+            cmd.copy.buffer_data_region<u32>(
+                {.src = slot->noise_counters.raw(), .dst = counts.raw(), .count = 2, .src_offset = noise_counter_floor});
+            slot->sample_floors.push_back(cmd.download.data_from_buffer(counts));
+        }
+        return outcome;
     };
 
     // A frame that traces nothing stands as executed: the mean already is the image.
@@ -2402,8 +2533,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     }
 
     // A scaled frame is no sample of the mean, which the next still frame restarts at full size.
+    // A hybrid pack counts each sample it blended, as that many frames would have.
     if (traces && !scaled)
-        count_traced_frame(*slot, l.settings, stand_ins.pending || resolved.emitters_pending);
+        for (auto i = 0; i < packed; ++i)
+            count_traced_frame(*slot, l.settings, stand_ins.pending || resolved.emitters_pending);
     slot->traced_scaled = scaled;
 
     // Every frame that traces writes the whole primary depth, the wavefront's from what its tallies kept since the restart.
@@ -2438,8 +2571,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     if (has_guides)
     {
-        if (traces && !scaled && ds.normal->accum_frame < frame_count_cap)
-            ++ds.normal->accum_frame;
+        // a pack blended each of its samples' guides, so they count as the mean's do
+        if (traces && !scaled)
+            ds.normal->accum_frame = cc::min(ds.normal->accum_frame + u32(packed), frame_count_cap);
         // A denoiser still compiling declines the frame, as a tracer still compiling does: a capture that saved it
         // would hold the raw mean where the caller asked for a denoised image.
         // The trace itself landed, so the accumulation above stands.
@@ -2514,8 +2648,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         if (incomplete && slot->samples == 0)
             return sg::routine_outcome::declined;
 
-        auto const denoised
-            = _denoise(cmd, schedule, *slot, ds, hybrid_guides, cameras, sample_counts, res.traces[trace_index]);
+        // Under a noise target each pixel holds its own count, which the denoiser judges it by.
+        auto const& counts = noise && slot->noise_counts.raw() != nullptr ? slot->noise_counts : sample_counts;
+        auto const denoised = _denoise(cmd, schedule, *slot, ds, hybrid_guides, cameras, counts, res.traces[trace_index]);
         impl::gpu_mark(cmd, "denoise");
         if (ds.denoised->accum_frame > 0)
             mark_denoised(*ds.denoised, fc.camera);

@@ -27,6 +27,28 @@ namespace tracer = sv::shaders::tracer;
 /// It is reversed — `near / depth`, cleared to 0 at infinity — so a float resolves a far surface as finely as a near one.
 constexpr auto depth_format = sg::pixel_format::depth32_float;
 
+/// A frame's depth buffer at `extent`, sampled too where a prepass's depth seeds the pyramid.
+[[nodiscard]] sg::texture_2d depth_target(sg::context& ctx, tg::vec2i extent)
+{
+    return ctx.transient.create_texture_2d({.format = depth_format,
+                                            .width = extent[0],
+                                            .height = extent[1],
+                                            .usage = sg::texture_usage::depth_stencil | sg::texture_usage::texture});
+}
+
+/// A frame's depth pyramid at `extent`: every level down to one texel, which occlusion culling builds and tests against.
+[[nodiscard]] sg::texture_2d depth_pyramid(sg::context& ctx, tg::vec2i extent)
+{
+    auto levels = 1;
+    while ((extent[0] >> levels) > 0 || (extent[1] >> levels) > 0)
+        ++levels;
+    return ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                            .width = extent[0],
+                                            .height = extent[1],
+                                            .mip_levels = levels,
+                                            .usage = sg::texture_usage::texture | sg::texture_usage::image});
+}
+
 /// The faces of a quadric's box that are not drawn: the near ones, wound counter-clockwise from outside as `raster.box_face` winds them.
 /// A camera inside the box sees only far faces, which is what the hybrid test placing one there holds this to.
 constexpr auto quadric_box_cull = sg::cull_mode::front;
@@ -421,6 +443,11 @@ raster_routine::depth_pipeline const& raster_routine::_depth_pipeline_of(sg::con
     return s;
 }
 
+raster_scratch raster_routine::create_scratch(sg::context& ctx, tg::vec2i extent)
+{
+    return {.depth = depth_target(ctx, extent), .pyramid = depth_pyramid(ctx, extent)};
+}
+
 sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_desc const& d)
 {
     CC_RECORD_SCOPE("sv.raster");
@@ -608,12 +635,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
                                                .width = extent[0],
                                                .height = extent[1],
                                                .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
-    // Sampled where a prepass's depth seeds the pyramid.
-    auto const depth
-        = ctx.transient.create_texture_2d({.format = depth_format,
-                                           .width = extent[0],
-                                           .height = extent[1],
-                                           .usage = sg::texture_usage::depth_stencil | sg::texture_usage::texture});
+    auto const depth = d.scratch.depth.raw() != nullptr ? d.scratch.depth : depth_target(ctx, extent);
 
     auto const item_buffer = total > 0
                                ? ctx.transient.create_buffer_from_data(cmd, items, sg::buffer_usage::readonly_buffer)
@@ -876,15 +898,8 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         impl::gpu_mark(cmd, "raster: first cull and draw");
 
         // The pyramid: the farthest primary depth under each texel, level by level.
-        auto levels = 1;
-        while ((extent[0] >> levels) > 0 || (extent[1] >> levels) > 0)
-            ++levels;
-        auto const pyramid
-            = ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
-                                               .width = extent[0],
-                                               .height = extent[1],
-                                               .mip_levels = levels,
-                                               .usage = sg::texture_usage::texture | sg::texture_usage::image});
+        auto const pyramid = d.scratch.pyramid.raw() != nullptr ? d.scratch.pyramid : depth_pyramid(ctx, extent);
+        auto const levels = pyramid.mip_levels();
         auto const pyramid_layout = ctx.cached.acquire_binding_group_layout<shaders::raster_cull::pyramid_io>();
         auto const level_group = [&](sg::raw_view const& source, int level)
         {

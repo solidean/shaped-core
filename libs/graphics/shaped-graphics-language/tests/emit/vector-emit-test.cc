@@ -51,7 +51,11 @@ TEST("sgl emit - a vector's == and != are the whole value on every target, and e
             .dump("target", sgl::emit::to_string(t))
             .dump("text", text);
         CHECK(text.contains(" = v == w;\n")).dump("target", sgl::emit::to_string(t));
-        CHECK(text.contains(" = fwidth(v);\n")).dump("target", sgl::emit::to_string(t));
+        // EVAL-144: coarse, which HLSL's and WGSL's own `fwidth` leave to the implementation
+        auto const width = is_hlsl           ? " = sgl_fwidth_coarse(v);\n"
+                         : t == target::wgsl ? " = fwidthCoarse(v);\n"
+                                             : " = fwidth(v);\n";
+        CHECK(text.contains(width)).dump("target", sgl::emit::to_string(t));
     }
 }
 

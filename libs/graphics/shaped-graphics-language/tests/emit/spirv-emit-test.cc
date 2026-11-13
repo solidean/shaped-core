@@ -222,9 +222,12 @@ TEST("sgl spirv - a pixel stage's surface is SPIR-V's own, and a discard goes on
     auto const& words = e.value().spirv;
     CHECK(counted(words, 5380) == 1); // OpDemoteToHelperInvocation
     CHECK(counted(words, 252) == 0);  // never OpKill, which would take the neighbour's derivatives with it
-    CHECK(counted(words, 207) == 1);  // OpDPdx
-    CHECK(counted(words, 208) == 1);  // OpDPdy
-    CHECK(counted(words, 209) == 1);  // OpFwidth
+    // EVAL-144: coarse, where OpDPdx and its siblings would leave it to the implementation
+    CHECK(counted(words, 213) == 1); // OpDPdxCoarse
+    CHECK(counted(words, 214) == 1); // OpDPdyCoarse
+    CHECK(counted(words, 215) == 1); // OpFwidthCoarse
+    CHECK(counted(words, 207) + counted(words, 208) + counted(words, 209) == 0);
+    CHECK(has_capability(words, 51)); // DerivativeControl
     CHECK(has_capability(words, 5379));
     CHECK(with_mode(words, 12) == 1); // DepthReplacing
     CHECK(with_mode(words, 14) == 1); // DepthGreater

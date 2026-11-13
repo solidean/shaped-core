@@ -608,3 +608,9 @@ fun keep_view(view: int) -> float:
     let sx = if k % 2 == 0 => -1.0 else 1.0
     let sy = if k / 2 == 0 => -1.0 else 1.0
     return float2(sx * wy * float(size.x), sy * wx * float(size.y))
+
+// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/semantics/differentiation.md): column `j` of a mat4's
+// cofactors, from its other three columns in order and the sign of `j`, which a determinant's change is the inner
+// product of with the matrix's
+@internal fun cofactor_column4(a: float4, b: float4, c: float4, sign: float) -> float4:
+    return sign * float4(dot(a.yzw, cross(b.yzw, c.yzw)), -dot(a.xzw, cross(b.xzw, c.xzw)), dot(a.xyw, cross(b.xyw, c.xyw)), -dot(a.xyz, cross(b.xyz, c.xyz)))

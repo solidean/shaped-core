@@ -181,6 +181,9 @@ enum class sgl::builtins::derivative_kind : sgl::u8
     linear,
     /// A rule of the differentiator's own, written once for both modes.
     rule,
+    /// A rule going forward; reverse mode refuses it, since its transpose needs which lane of the quad or the subgroup
+    /// each invocation is, which no function is told.
+    forward_only,
     /// Differentiable, with no rule written yet, which a derivative refuses as `unsupported-yet`.
     not_yet,
 };
@@ -208,6 +211,9 @@ struct sgl::builtins::spelling
     /// How the result of an `infix` binds.
     precedence binds = precedence::primary;
     custom_writer custom = nullptr;
+    /// How HLSL for vulkan writes the call instead, whatever `kind` says, where DXC's SPIR-V of the usual spelling would
+    /// not mean what SGL's call does; it is given each argument's type.
+    custom_writer hlsl_vulkan = nullptr;
     helper_writer helper = nullptr;
     /// True in every language where `custom` may hand back `written::lines`; a writer that ever does must set it.
     /// Such a call cannot stand where it is evaluated more than once, such as a `while` condition.

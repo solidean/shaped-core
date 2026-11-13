@@ -86,7 +86,8 @@ enum class sv::render_mode : sv::u8
 
     /// Rasterized primary hits, lit by the tracer's next-event estimate with shadow rays traced inline, and one bounce.
     ///
-    /// One light sample and one bounce per pixel and frame, so a still image accumulates, as a traced layer accumulates its paths.
+    /// One light sample and one bounce per pixel and sample, so a still image accumulates, as a traced layer accumulates its paths.
+    /// A moving frame is one sample; a still one packs as many as its share of `viewer_definition::still_budget_ms` holds, or `still_samples_per_frame` without one.
     /// Glass spends no bounce: a bounce refracts through it, and what it meets beyond is lit as a primary hit is.
     /// It writes the primary hit's G-buffer every frame, as `raster` does; `render_settings::hybrid_lighting` says where the lighting runs.
     /// It needs `ray_query` and `raytracing_pipeline` both.
@@ -283,6 +284,14 @@ struct sv::render_settings
     /// The channels a wavefront layer averages at its pixels' primary hits beside its image: `sv::render_channel` values OR'd, 0 for none.
     /// `sv::render_settled` hands them back with the image; no other mode writes them.
     u32 channels = 0;
+
+    /// The megakernel's noise target, 0 for none: the standard error a pixel's mean may keep before it stops tracing.
+    ///
+    /// Measured on the display's scale after a Reinhard curve, so 0.004 is about one step of an 8-bit image, and a bright pixel's noise counts for what it looks like.
+    /// Each pixel then keeps its own count and the variance of its frames, so samples go where the image is still noisy: shadows, caustics, glossy reflections.
+    /// A layer whose every pixel is down to it counts as at its target, so a capture moves on.
+    /// Never restarts accumulation, except turning it on mid-estimate, where no pixel has statistics yet.
+    f32 noise_target = 0.0f;
 
     /// Path length: the primary hit plus this many bounces.
     /// Up to eight refractions through smooth glass spend none, so a hollow glass vessel still leaves the path its bounces for what lies behind.

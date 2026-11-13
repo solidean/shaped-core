@@ -209,6 +209,14 @@ struct frame_constants:
     /// The wavefront tracer's alone: `sv::render_settings::channels`.
     channel_mask: uint
 
+    /// The megakernel's noise target, `sv::render_settings::noise_target`: the standard error a pixel's mean may keep, on the display's
+    /// scale after a Reinhard curve, before the pixel stops tracing; 0 traces every pixel every frame.
+    noise_target: float
+    /// What the display multiplies radiance by, which the error is judged after.
+    noise_scale: float
+    /// The frames every pixel takes before its noise is judged, so a variance rests on more than one or two of them.
+    noise_min_frames: uint
+
 /// One decal as `traced.decals` holds it, 96 bytes; the host fills it through `sv::impl::decal_record_of`.
 ///
 /// The rows take a world point (x, y, z, 1) to the drawing's own units and to the projection's depth.
@@ -385,8 +393,14 @@ binding traced:
     /// The clip-space depth of the first primary hit per pixel, 1 where it escaped, written while `frame.write_primary_depth` is set.
     primary_depth: out image_2d[.r32_float]
 
-    /// How many samples each pixel of `output` averages, written by the wavefront tracer while `frame.write_guides` is set; the megakernel's count is one for the image.
+    /// How many samples each pixel of `output` averages, written by the wavefront tracer while `frame.write_guides` is set,
+    /// and by the megakernel for every pixel while `frame.noise_target` is set; otherwise the megakernel's count is one for the image.
     sample_counts: out image_2d[.r32_float]
+
+    /// The megakernel's noise statistics while `frame.noise_target` is set: per pixel, the frames its mean holds in .x and the sum of
+    /// squared deviations of those frames' luminances (Welford's M2) in .y.
+    /// A pixel whose noise is down to the target stops tracing, so it holds its own count rather than `frame.accum_frame`.
+    pixel_stats: mut image_2d[.rg32_float]
 
     /// The decals every hit is painted with, `frame.decal_count` of them, and the shapes they cover in the atlas bound as `slug.tables`.
     decals: buffer[decal_record]

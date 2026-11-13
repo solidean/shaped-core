@@ -50,14 +50,22 @@ A derivative is never silently zero where the function changes.
   * **a rule**: the chain rule through it, as for `*`, `/`, `dot`, `cross`, `length`, `normalize` and the transcendentals;
   * **zero**: constant between the points where it jumps, so its change is zero everywhere: `floor`, `ceil`, `round`, `trunc`, `sign` and `step`;
   * **none**: its value is no function of its arguments a derivative follows, such as an atomic's update;
-  * **not yet**: differentiable, with no rule written: `determinant`, `refract`, the gathers, screen-space derivatives, and the subgroup and quad operations.
+  * **forward only**: a rule going forward, whose transpose needs which lane of the quad or the subgroup each invocation is,
+    as for `ddx` and `ddy` in each of their forms, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and every shuffle but `subgroup_shuffle_xor`;
+  * **not yet**: differentiable, with no rule written, which no builtin is today and one added later may be.
 * **DIFF-14** A call of a builtin stated none or not yet, inside a function a derivative is taken of, is `unsupported-yet` and names the builtin.
+  So is one stated forward only, in a function reverse mode is taken of.
 * **DIFF-15** Where a builtin has a kink, its change is the side the builtin states:
   * `min` and `max` follow the argument they give, the first at a tie;
   * `clamp` follows `x` from its low bound to its high one, both included, and the bound it gives outside;
   * `abs` follows `sign(x)`, so its change at 0 is zero;
   * `saturate` follows `x` from 0 to 1, both included.
 * **DIFF-16** Where a rule's formula has no finite value, as `sqrt` at 0 and `pow` at a base of 0 do, the change is what the formula gives.
+* **DIFF-36** A subgroup or quad operation's change crosses the invocations that reach it.
+  Going forward an invocation's change is what its result takes of every invocation's change, and going backward its adjoint is what every invocation's result took of its argument.
+  So the two modes meet in their sums over the subgroup, which a test states with `subgroup_add`, and not invocation by invocation.
+  `subgroup_min` and `subgroup_max` follow the invocations that hold the extreme, shared evenly where several do.
+  The transposes stand wherever the operation does, over the invocations that reach it, as DIFF-34's do.
 * **DIFF-17** A position's change moves through a transform as a direction: `m * p` changes by `dm * (p, 1) + m * (dp, 0)`, for a `mat4` and an `affine3` alike.
 
 ## Control flow
@@ -93,7 +101,10 @@ A derivative is never silently zero where the function changes.
 * **DIFF-30** A `load` of a `texture_2d` at level 0 adds its adjoint to the texel it read, and a `sample` at level 0 to the texels it weighs, at their weights.
   Texel `(x, y)`'s channel `c` is element `(y * width + x) * channels + c` of the gradient.
   A linear sample's change follows its coordinate too, by the slope between those texels; a nearest sample's does not.
-* **DIFF-31** A sample's filter and address modes are those of a static sampler, which says them at compile time.
+  A `gather` adds each component's adjoint to the one channel of its texel it read, and its coordinate moves none of them between texels.
+  A comparison sample at level 0 changes with its coordinate alone under a linear filter, by the slopes of the four comparisons `gather_compare` gives.
+  Its texels and its reference move it nowhere but where it jumps.
+* **DIFF-31** A sample's and a gather's filter and address modes are those of a static sampler, which says them at compile time.
   A sample through a sampler bound at run time is `unsupported-yet`, and so is one at another level, with a bias, an offset or explicit gradients, or through an anisotropic sampler.
 * **DIFF-32** The adds are atomic, and their order is unspecified: a sum of floats may round differently from one run to the next.
 * **DIFF-33** `@no_diff` on a texture member holds its texels constant, and its sample's change still follows its coordinate.

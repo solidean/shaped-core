@@ -405,6 +405,10 @@ public:
     /// Equal to `extent()` for every member that does not upscale, which is every member but `dlss_rr` and `metalfx_rr`.
     [[nodiscard]] tg::vec2i output_extent() const { return _output_extent; }
 
+    /// How many calls started from no history: the first, and each after a `reset` or a change of member or extent.
+    /// A caller that means to carry a history across a stream reads it to see that nothing threw it away.
+    [[nodiscard]] u32 restarts() const { return _restarts; }
+
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
@@ -441,6 +445,7 @@ private:
     tg::vec2i _extent = tg::vec2i(0, 0);
     tg::vec2i _output_extent = tg::vec2i(0, 0);
     bool _reset_requested = false;
+    u32 _restarts = 0;
 
     /// How many calls this history has seen since it was last built, which is what a temporal member ping-pongs on.
     u32 _frame = 0;

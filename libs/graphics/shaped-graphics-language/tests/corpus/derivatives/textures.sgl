@@ -15,6 +15,11 @@ binding scene:
     sampler point:
         filter = .nearest
         address = .mirror_repeat
+    depth: texture_2d_depth
+    sampler shadow:
+        filter = .linear
+        address = .clamp_edge
+        compare = .less
 
 binding training:
     gradients: mut buffer[atomic[float]]
@@ -37,6 +42,16 @@ fun texel(xy: int2){scene} -> float => scene.albedo.load(xy).g
 
 @compute(64) fun textures_forward(@thread_id id: int3){scene, training}:
     training.results[id.x] = fwd_diff(shade, float2(float(id.x) / 64.0, 0.5), float2(1.0, 0.0))
+
+// a gather adds each component's adjoint to its texel, and a comparison sample moves with its coordinate alone
+fun gathered(uv: float2){scene} -> float => dot(scene.albedo.gather(uv, scene.linear, component = .y), float4(1.0, 2.0, 3.0, 4.0))
+fun shadowed(uv: float2){scene} -> float => scene.depth.sample_compare(uv, scene.shadow, reference = 0.5, level = 0.0)
+
+@compute(64) fun gathers_backward(@thread_id id: int3){scene, training}:
+    let mut duv = float2(0.0)
+    bwd_diff(gathered, float2(float(id.x) / 64.0, 0.5), mut duv, 1.0)
+    bwd_diff(shadowed, float2(float(id.x) / 64.0, 0.5), mut duv, 1.0)
+    training.results[id.x] = duv.x
 
 // a sampler bound at run time does not say how it filters, which the derivative must know
 fun dynamic(u: float){scene} => scene.albedo.sample(float2(u, 0.5), scene.smp, level = 0.0).r

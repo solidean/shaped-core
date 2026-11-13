@@ -71,6 +71,20 @@ test:
     ddy(v) == 5.0
     fwidth(v) == 8.0
 
+// `ddx` and `ddy` are coarse, one value for the quad; the fine ones follow the lane's own row and column
+test:
+    let lane = test_lane()
+    let x = (lane % 2) as float
+    let y = ((lane / 2) % 2) as float
+    let v = 2.0 * x * y + x + 4.0 * y
+    ddx(v) == 1.0
+    ddy(v) == 4.0
+    ddx_coarse(v) == 1.0
+    ddy_coarse(v) == 4.0
+    fwidth(v) == 5.0
+    ddx_fine(v) == 1.0 + 2.0 * y
+    ddy_fine(v) == 4.0 + 2.0 * x
+
 // a sample that picks its own level takes it from its coordinate's derivatives
 binding scene:
     pyramid: texture_2d[float]

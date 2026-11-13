@@ -123,6 +123,40 @@ TEST("sv::studio - the derived exposure shows a 0.19 card square to the key at s
           < 1e-3f);
 }
 
+// A hit on a triangle is only as precise as its corners' coordinates: one pair a kilometer across put every hit's height off by
+// more than a continuation's offset, and the floor struck itself in square rings around the origin.
+// So the floor reaches as far as asked, and the cells around the asset are small.
+TEST("sv::studio - the floor reaches its extent in a grid whose cells shrink toward the origin")
+{
+    auto const floor = sv::studio_floor(0.25f, 1000.0f);
+    auto const& g = floor.geometry;
+    REQUIRE(g.is_indexed());
+
+    auto reach = 0.0f;
+    for (auto const p : g.positions)
+    {
+        CHECK(p[1] == 0.25f);
+        reach = cc::max(reach, cc::max(tg::abs(p[0]), tg::abs(p[2])));
+    }
+    CHECK(reach == 1000.0f);
+
+    // the smallest cell at the origin, the corner whose other coordinates are the least positive line
+    auto nearest = 1000.0f;
+    for (auto const p : g.positions)
+        if (p[0] > 0.0f)
+            nearest = cc::min(nearest, p[0]);
+    CHECK(nearest < 0.01f);
+
+    // every triangle faces up, so the floor is lit and casts its shadows from above
+    for (auto t = isize(0); t < g.triangle_count(); ++t)
+    {
+        auto const a = g.positions[g.indices[3 * t]];
+        auto const b = g.positions[g.indices[3 * t + 1]];
+        auto const c = g.positions[g.indices[3 * t + 2]];
+        CHECK(tg::cross(b - a, c - a)[1] > 0.0f).context(cc::format("triangle {}", t));
+    }
+}
+
 TEST("sv::studio - the camera frames the bounds at 50 mm on a 36 mm-wide sensor")
 {
     // Long in x like a car, so the horizontal edge is the one the box reaches.

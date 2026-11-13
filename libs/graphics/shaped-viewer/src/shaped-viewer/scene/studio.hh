@@ -78,7 +78,8 @@ inline constexpr f32 studio_card_albedo = 0.19f;
 /// Derived from the dome alone, as if nothing but the dome surrounded the card: a floor below brightens that half of its view, and is not counted.
 [[nodiscard]] f32 studio_exposure(dome const& d);
 
-/// The floor: a two-triangle square at `height`, `half_extent` from the origin in x and z, facing up.
+/// The floor: a square at `height`, `half_extent` from the origin in x and z, facing up.
+/// A grid whose lines halve toward the origin, so the triangles under an asset are small: a hit is only as precise as its triangle's corners.
 /// Openpbr, `base_color` `studio_floor_albedo` and `specular_weight` 0, so fully diffuse.
 [[nodiscard]] mesh studio_floor(f32 height = 0.0f, f32 half_extent = 1000.0f);
 

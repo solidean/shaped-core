@@ -174,18 +174,18 @@ TEST("sv::impl::wavefront_pacing - a budget far past any round runs the most rou
 
 TEST("sv::impl - the frame's budget is split among its still wavefront layers")
 {
-    CHECK(sv::impl::wavefront_budget_share(16.0f, 4) == 4.0f);
-    CHECK(sv::impl::wavefront_budget_share(16.0f, 1) == 16.0f);
+    CHECK(sv::impl::still_budget_share(16.0f, 4) == 4.0f);
+    CHECK(sv::impl::still_budget_share(16.0f, 1) == 16.0f);
     // No still layer yet takes the whole, which the first still frame is.
-    CHECK(sv::impl::wavefront_budget_share(16.0f, 0) == 16.0f);
-    CHECK(sv::impl::wavefront_budget_share(0.0f, 3) == 0.0f);
+    CHECK(sv::impl::still_budget_share(16.0f, 0) == 16.0f);
+    CHECK(sv::impl::still_budget_share(0.0f, 3) == 0.0f);
 }
 
 TEST("sv::impl - a headless viewer gives its wavefront layers no budget")
 {
-    CHECK(sv::impl::wavefront_budget_of({.frame_budget_ms = 16.0f}) == 16.0f);
-    CHECK(sv::impl::wavefront_budget_of({.headless = true, .frame_budget_ms = 16.0f}) == 0.0f);
-    CHECK(sv::impl::wavefront_budget_of({.frame_budget_ms = -1.0f}) == 0.0f);
+    CHECK(sv::impl::still_budget_of({.frame_budget_ms = 16.0f}) == 16.0f);
+    CHECK(sv::impl::still_budget_of({.headless = true, .frame_budget_ms = 16.0f}) == 0.0f);
+    CHECK(sv::impl::still_budget_of({.frame_budget_ms = -1.0f}) == 0.0f);
 }
 
 TEST("sv::wavefront_routine - a draining frame runs every bounce, every free refraction, the segment past the last "
@@ -214,10 +214,10 @@ TEST("sv::impl - a view at its sample target takes no share of the frame budget"
         slot.sample_target = 256;
         def.views.push_back(cc::move(v));
     }
-    CHECK(sv::impl::still_wavefront_traces(def, plan, store) == 2);
-    CHECK(sv::impl::wavefront_budget_share(16.0f, sv::impl::still_wavefront_traces(def, plan, store)) == 8.0f);
+    CHECK(sv::impl::still_budgeted_traces(def, plan, store) == 2);
+    CHECK(sv::impl::still_budget_share(16.0f, sv::impl::still_budgeted_traces(def, plan, store)) == 8.0f);
 
     store.get_or_create(def.views[0].id).temporal[sv::temporal_id::accumulation(0)].samples = 256;
-    CHECK(sv::impl::still_wavefront_traces(def, plan, store) == 1);
-    CHECK(sv::impl::wavefront_budget_share(16.0f, sv::impl::still_wavefront_traces(def, plan, store)) == 16.0f);
+    CHECK(sv::impl::still_budgeted_traces(def, plan, store) == 1);
+    CHECK(sv::impl::still_budget_share(16.0f, sv::impl::still_budgeted_traces(def, plan, store)) == 16.0f);
 }

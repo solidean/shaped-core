@@ -160,8 +160,8 @@
   "dxil": 423
  },
  "libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl::path_trace": {
-  "spirv": 1742,
-  "dxil": 2135
+  "spirv": 1882,
+  "dxil": 2235
  },
  "libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl::shadow_miss": {
   "spirv": 6,

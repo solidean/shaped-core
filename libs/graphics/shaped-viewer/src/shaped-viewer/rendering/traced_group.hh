@@ -74,6 +74,7 @@ struct traced_stand_ins
     sg::texture_2d guide_motion;
     sg::texture_2d primary_depth;
     sg::texture_2d sample_counts;
+    sg::texture_2d pixel_stats;
 
     /// What a trace without decals binds as the atlas's two tables and the two decal buffers.
     sg::texture_2d decal_curves;

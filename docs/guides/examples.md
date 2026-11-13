@@ -206,6 +206,20 @@ Each frame finishes by the same `accumulate` rule a still does before the clock 
 `SC_CAPTURE_OUT` is then a pattern, `%05d` as ffmpeg reads it, and `SC_CAPTURE_STRIDE` writes only every n-th frame while still rendering all of them.
 `dev.py example` does not drive sequences yet; a consumer's own tool sets the variables and encodes the frames.
 
+### A final render under a time budget
+
+**`SC_CAPTURE_BUDGET` is the seconds the whole capture may take**, and it replaces the `accumulate` bar.
+Each frame gets what is left of the budget over the frames still to come, so a frame that finishes early leaves its time to the later ones.
+A frame ends when its image is done or its share runs out; either way its last denoise runs on what the share bought, and it is written.
+A shaped-viewer capture under a budget is a final render, and picks the rest itself:
+- a layer left `render_mode::automatic` is path traced by the megakernel, with at least 8 bounces;
+- one sample a frame where a frame's share is under 0.15 s, since an image takes at least one frame and four samples could not fit;
+- a noise target (`render_settings::noise_target`), so a pixel stops once its noise is down to it and the time goes to the pixels still noisy;
+- DLSS or MetalFX ray reconstruction on the mean where the device has one, its history carried from frame to frame; else the spatial denoiser, which judges each pixel by its own sample count.
+
+A layer naming a mode or a denoiser keeps it.
+`SC_CAPTURE_TIMEOUT` still caps each frame, as a failure rather than the plan.
+
 ### Refreshing the reference images
 
 ```bash

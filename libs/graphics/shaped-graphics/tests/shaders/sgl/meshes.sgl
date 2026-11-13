@@ -95,7 +95,8 @@ fun culled_column(@workgroup_id group: int3, handed: column, output: mut mesh_ou
     if group.x == 1:
         workgroup_barrier()
     let left = ((handed.first + (group.x as uint)) as float) / 4.0 - 1.0
-    let color = float4((handed.first as float) / 8.0, group.x as float, 1.0, 1.0)
+    // red is an exact unorm8 code: a fraction like 0.5 lands on a half, which a device may round either way
+    let color = float4((handed.first as float) * 32.0 / 255.0, group.x as float, 1.0, 1.0)
     output.vertex(0u, {position = hpos4(left, -1.0, 0.0, 1.0), color = color})
     output.vertex(1u, {position = hpos4(left + 0.25, -1.0, 0.0, 1.0), color = color})
     output.vertex(2u, {position = hpos4(left + 0.25, 1.0, 0.0, 1.0), color = color})

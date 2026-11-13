@@ -76,6 +76,14 @@ struct sv::raster_thin_targets
     sg::texture_2d extra;
 };
 
+/// What a raster frame renders through and nobody reads after it: its depth buffer, and the depth pyramid occlusion culling builds.
+/// Both at the frame's extent; `raster_routine::create_scratch` makes them.
+struct sv::raster_scratch
+{
+    sg::texture_2d depth;
+    sg::texture_2d pyramid;
+};
+
 /// What a raster frame's shading draws are: which pixel stage of each permutation they run, through which vertex stage, into which targets.
 enum class sv::raster_shading : sv::u8
 {
@@ -194,6 +202,10 @@ struct sv::raster_frame_desc
     /// With `thin` shading, where the thin G-buffer is written; unread otherwise.
     raster_thin_targets thin;
 
+    /// The frame's depth buffer and depth pyramid, from `raster_routine::create_scratch` at the frame's extent; empty creates them.
+    /// A caller drawing several frames of one extent in one command list passes one, so they share it rather than each allocating its own.
+    raster_scratch scratch;
+
     /// With `traced` shading, `tracer.traced` for this frame, which every stage reads as group 0; unread otherwise.
     /// Its images must not be any of `targets`, which the frame renders to while the group is bound.
     sg::binding_group_handle traced;
@@ -223,6 +235,9 @@ public:
     ///
     /// Must be called with no rendering scope open: it opens its own over `d.targets`.
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, raster_frame_desc const& d);
+
+    /// A frame's depth buffer and depth pyramid at `extent`, transient, for `raster_frame_desc::scratch`.
+    [[nodiscard]] static raster_scratch create_scratch(sg::context& ctx, tg::vec2i extent);
 
 protected:
     /// Creates the stand-ins, which outlive every shader reload.

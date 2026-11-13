@@ -47,6 +47,22 @@ cc::shared_async<cc::unit> hybrid_routine::init(sg::routine_init_scope scope)
     co_return;
 }
 
+raster_thin_targets hybrid_routine::create_thin_targets(sg::context& ctx, tg::vec2i extent)
+{
+    auto const target = [&](sg::pixel_format format)
+    {
+        return ctx.transient.create_texture_2d({.format = format,
+                                                .width = extent[0],
+                                                .height = extent[1],
+                                                .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
+    };
+    return {.emission = target(sg::pixel_format::rgba16_float),
+            .normals = target(sg::pixel_format::rgba16_float),
+            .base = target(sg::pixel_format::rgba8_unorm),
+            .specular = target(sg::pixel_format::rgba8_unorm),
+            .extra = target(sg::pixel_format::rgba8_unorm)};
+}
+
 sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_desc const& d)
 {
     CC_RECORD_SCOPE("sv.hybrid");
@@ -113,27 +129,20 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
             *d.frame_guides = t;
     };
 
-    // The thin G-buffer is the frame's own: nothing outside it reads the reduced closure.
-    auto const thin_target = [&](sg::pixel_format format)
-    {
-        return ctx.transient.create_texture_2d({.format = format,
-                                                .width = extent[0],
-                                                .height = extent[1],
-                                                .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
-    };
     // A frame with no primary depth of its own, as one drawn for an upscaler, still writes one: the deferred kernel tells escapes by it.
     if (t.primary_depth.raw() == nullptr)
-        t.primary_depth = thin_target(sg::pixel_format::r32_float);
-    auto thin = raster_thin_targets{};
-    if (deferred)
-        thin = {.emission = thin_target(sg::pixel_format::rgba16_float),
-                .normals = thin_target(sg::pixel_format::rgba16_float),
-                .base = thin_target(sg::pixel_format::rgba8_unorm),
-                .specular = thin_target(sg::pixel_format::rgba8_unorm),
-                .extra = thin_target(sg::pixel_format::rgba8_unorm)};
+        t.primary_depth
+            = ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                               .width = extent[0],
+                                               .height = extent[1],
+                                               .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
+    // The thin G-buffer is the frame's own: nothing outside it reads the reduced closure.
+    auto thin = d.thin;
+    if (deferred && thin.emission.raw() == nullptr)
+        thin = create_thin_targets(ctx, extent);
 
     impl::gpu_mark(cmd, "before the hybrid");
-    auto const tlas = cmd.raytracing.build_tlas(d.instances);
+    auto const tlas = d.tlas != nullptr ? d.tlas : cmd.raytracing.build_tlas(d.instances);
     impl::gpu_mark(cmd, "tlas");
 
     // A binding cannot be empty, so a frame with no lights binds one zeroed record that `light_count == 0` never reads.
@@ -199,6 +208,7 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
               .culling = d.culling,
               .shading = deferred ? raster_shading::thin : raster_shading::traced,
               .thin = thin,
+              .scratch = d.scratch,
               .traced = deferred ? sg::binding_group_handle() : traced});
     impl::gpu_mark(cmd, "raster");
     if (outcome != sg::routine_outcome::executed)

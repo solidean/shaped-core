@@ -19,7 +19,7 @@ constexpr derivative_kind linear = derivative_kind::linear;
 constexpr derivative_kind rule = derivative_kind::rule;
 constexpr derivative_kind zero = derivative_kind::zero;
 constexpr derivative_kind none = derivative_kind::none;
-constexpr derivative_kind not_yet = derivative_kind::not_yet;
+constexpr derivative_kind forward_only = derivative_kind::forward_only;
 
 // an operator by its spelling, every other builtin by its name
 constexpr stated k_stated[] = {
@@ -95,36 +95,40 @@ constexpr stated k_stated[] = {
     {"add", none},
     {"exchange", none},
     {"workgroup_uniform_load", none},
-    // differentiable, with no rule yet
-
-    {"determinant", not_yet},
-
-    {"refract", not_yet},
-
-    {"gather", not_yet},
-    {"gather_compare", not_yet},
-    {"sample_compare", not_yet},
-    {"ddx", not_yet},
-    {"ddy", not_yet},
-    {"fwidth", not_yet},
-    {"quad_broadcast", not_yet},
-    {"quad_swap_x", not_yet},
-    {"quad_swap_y", not_yet},
-    {"quad_swap_diagonal", not_yet},
-    {"subgroup_add", not_yet},
-    {"subgroup_mul", not_yet},
-    {"subgroup_min", not_yet},
-    {"subgroup_max", not_yet},
-    {"subgroup_inclusive_add", not_yet},
-    {"subgroup_exclusive_add", not_yet},
-    {"subgroup_inclusive_mul", not_yet},
-    {"subgroup_exclusive_mul", not_yet},
-    {"subgroup_broadcast", not_yet},
-    {"subgroup_broadcast_first", not_yet},
-    {"subgroup_shuffle", not_yet},
-    {"subgroup_shuffle_up", not_yet},
-    {"subgroup_shuffle_down", not_yet},
-    {"subgroup_shuffle_xor", not_yet},
+    // a rule of the differentiator's own, past the arithmetic
+    {"determinant", rule},
+    {"refract", rule},
+    {"gather", rule},
+    {"sample_compare", rule},
+    {"subgroup_min", rule},
+    {"subgroup_max", rule},
+    {"subgroup_mul", rule},
+    {"subgroup_inclusive_mul", rule},
+    {"subgroup_exclusive_mul", rule},
+    // linear across the subgroup, each with a transpose of its own
+    {"subgroup_add", linear},
+    {"subgroup_inclusive_add", linear},
+    {"subgroup_exclusive_add", linear},
+    {"subgroup_broadcast_first", linear},
+    {"subgroup_shuffle_xor", linear},
+    {"quad_swap_x", linear},
+    {"quad_swap_y", linear},
+    {"quad_swap_diagonal", linear},
+    // a comparison's result is constant between the points where it jumps
+    {"gather_compare", zero},
+    // going forward alone: the transpose needs which lane each invocation is
+    {"ddx", forward_only},
+    {"ddy", forward_only},
+    {"ddx_coarse", forward_only},
+    {"ddy_coarse", forward_only},
+    {"ddx_fine", forward_only},
+    {"ddy_fine", forward_only},
+    {"fwidth", forward_only},
+    {"quad_broadcast", forward_only},
+    {"subgroup_broadcast", forward_only},
+    {"subgroup_shuffle", forward_only},
+    {"subgroup_shuffle_up", forward_only},
+    {"subgroup_shuffle_down", forward_only},
 };
 
 /// `@operator("+")`'s spelling, or empty.

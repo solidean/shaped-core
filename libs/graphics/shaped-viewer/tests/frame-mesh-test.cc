@@ -202,7 +202,7 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh traces in the frame it is placed, and ke
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean but keeps the temporal history",
+ASYNC_INVOCABLE_TEST("sv - a changing scene restarts the mean, and only a cut restarts the temporal history",
                      (sg::context_handle const& ctx_h))
 {
     // A simulation draws its body anew every frame, and the temporal denoiser is what keeps that image stable.
@@ -235,7 +235,7 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean 
                                                           .height = output_size[1],
                                                           .usage = sg::texture_usage::render_target});
     // down the plan path, which declares the temporal slots a layer's denoiser needs
-    auto const definition_with = [&](cc::span<sv::mesh const> meshes, tg::vec3f offset)
+    auto const definition_with = [&](cc::span<sv::mesh const> meshes, tg::vec3f offset, f32 lamp_nits = 0.0f)
     {
         auto def = sv::viewer_definition{};
         auto v = sv::view_data{};
@@ -250,6 +250,11 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean 
             item.transform = tg::affine_transform3f::make_trs(offset, tg::quat_f::identity, tg::vec3f(1, 1, 1));
             scene.items.push_back(item);
         }
+        if (lamp_nits > 0.0f)
+            scene.lights.push_back(
+                {.id = sv::light_id::from_string("lamp"),
+                 .light
+                 = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(lamp_nits)});
         def.views.push_back(cc::move(v));
 
         auto const root_node = def.nodes.add_container(sv::invalid_node);
@@ -306,11 +311,13 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean 
                                                return progress().second >= 2 ? sg::routine_outcome::executed
                                                                              : sg::routine_outcome::declined;
                                            }));
-    auto const* const frame = slot(sv::temporal_id::frame_samples(0));
-    REQUIRE(frame != nullptr); // a layer that may denoise temporally declares its frame samples
-    auto const history = frame->reset_hash;
+    REQUIRE(slot(sv::temporal_id::frame_samples(0))
+            != nullptr); // a layer that may denoise temporally declares its frame samples
+    auto const restarts = [&] { return slot(sv::temporal_id::frame_samples(0))->denoise.restarts(); };
+    auto const built = restarts();
+    REQUIRE(built >= 1); // the temporal member ran, so the checks below watch a history that exists
 
-    // deformed, recolored and moved every frame: the mean restarts each time, the history's rule holds
+    // deformed, recolored and moved every frame: the mean restarts each time, the history never does
     for (auto i = 1; i <= 8; ++i)
     {
         auto const image = progress().first;
@@ -318,13 +325,22 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean 
         REQUIRE(trace(definition_with(deformed, tg::vec3f(0.02f * f32(i), 0, 0))));
         CHECK(progress().first != image);
         CHECK(progress().second == 1);
-        CHECK(slot(sv::temporal_id::frame_samples(0))->reset_hash == history).context(cc::format("frame {}", i));
+        CHECK(restarts() == built).context(cc::format("frame {}", i));
     }
 
-    // another object is another scene, which the history restarts on
+    // an object or a light coming, and a light changing, are content too: a video's history must survive them
     auto const two = cc::vector<sv::mesh>{body(0, 0), body(1, 0)};
     REQUIRE(trace(definition_with(two, tg::vec3f(0, 0, 0))));
-    CHECK(slot(sv::temporal_id::frame_samples(0))->reset_hash != history);
+    CHECK(restarts() == built);
+    REQUIRE(trace(definition_with(two, tg::vec3f(0, 0, 0), 12.0f)));
+    CHECK(restarts() == built);
+    REQUIRE(trace(definition_with(two, tg::vec3f(0, 0, 0), 30.0f)));
+    CHECK(restarts() == built);
+
+    // only a cut restarts it, which is how a caller replacing the scene outright says so
+    store.get_or_create(id).camera_cut_pending = true;
+    REQUIRE(trace(definition_with(two, tg::vec3f(0.1f, 0, 0), 30.0f)));
+    CHECK(restarts() == built + 1);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
