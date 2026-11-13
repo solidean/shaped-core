@@ -1,0 +1,101 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): a `case`, an assignment through a swizzle, and an affine3's products.
+// Going backward a `case` is the chain of `if` it means, a swizzle assignment writes each field it names, and an
+// affine3 times a position is a dot of each row with (p, 1), which reverse mode transposes as it does any dot.
+
+enum shape:
+    round
+    flat
+    spiky
+
+fun shaped(k: shape, x: float2) -> float:
+    let mut y = x.x
+    case k:
+        .round =>:
+            y = sin(y) * x.y
+        .flat or .spiky =>:
+            let t = y * y
+            y = t * x.y + y
+    return y * y
+
+fun stepped(n: int, x: float2) -> float:
+    let r = case n:
+        0 => x.x * x.y
+        1 => exp(x.x)
+        _ => x.y * x.y
+    return r + x.x
+
+fun case_agrees(k: shape, n: int, x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let f = shaped(k, x) + stepped(n, x)
+    let numeric = (shaped(k, x + axis * h) + stepped(n, x + axis * h) - shaped(k, x - axis * h) - stepped(n, x - axis * h)) / (2.0 * h)
+    let mut g1 = float2(0.0)
+    bwd_diff(shaped, k, x, mut g1, 1.0)
+    let mut g2 = float2(0.0)
+    bwd_diff(stepped, n, x, mut g2, 1.0)
+    let forward = fwd_diff(shaped, k, x, axis) + fwd_diff(stepped, n, x, axis)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return f == f and nearly_equal(forward, numeric, within = tolerance)
+        and nearly_equal(dot(g1 + g2, axis), numeric, within = tolerance)
+
+test case_agrees(shape.round, 0, float2(0.7, 0.4), float2(1.0, 0.0))
+test case_agrees(shape.round, 1, float2(0.7, 0.4), float2(0.0, 1.0))
+test case_agrees(shape.spiky, 2, float2(0.7, 0.4), float2(1.0, 0.0))
+test case_agrees(shape.flat, 2, float2(0.7, 0.4), float2(0.0, 1.0))
+
+// `v.xz = e` writes two fields, and the third keeps what it held
+fun swizzled(x: float3) -> float:
+    let mut v = x * 2.0
+    v.xz = float2(sin(x.y), x.x * x.z)
+    v.y = v.y + v.x
+    return dot(v, v)
+
+fun swizzle_agrees(x: float3, axis: float3) -> bool:
+    let h = 1e-3
+    let numeric = (swizzled(x + axis * h) - swizzled(x - axis * h)) / (2.0 * h)
+    let mut g = float3(0.0)
+    bwd_diff(swizzled, x, mut g, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(swizzled, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(g, axis), numeric, within = tolerance)
+
+test swizzle_agrees(float3(0.5, -0.3, 0.8), float3(1.0, 0.0, 0.0))
+test swizzle_agrees(float3(0.5, -0.3, 0.8), float3(0.0, 1.0, 0.0))
+test swizzle_agrees(float3(0.5, -0.3, 0.8), float3(0.0, 0.0, 1.0))
+
+// an affine3 moves a position by its translation and a direction without it, both differentiable in the matrix too
+fun placed(r: float4, p: pos3) -> float:
+    let m = affine3.from_rows(r, float4(0.0, 1.0, 0.5, 2.0), float4(r.y, 0.0, 1.0, -1.0))
+    let q = m * p
+    let d = m * vec3(p.z, 1.0, 0.0)
+    return distance(q, pos3(0.0)) + dot(d, d)
+
+fun affine_agrees(r: float4, p: pos3, dr: float4, dp: vec3) -> bool:
+    let h = 1e-3
+    let numeric = (placed(r + dr * h, p + dp * h) - placed(r - dr * h, p - dp * h)) / (2.0 * h)
+    let mut gr = float4(0.0)
+    let mut gp = vec3(0.0)
+    bwd_diff(placed, r, mut gr, p, mut gp, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(placed, r, dr, p, dp), numeric, within = tolerance)
+        and nearly_equal(dot(gr, dr) + dot(gp, dp), numeric, within = tolerance)
+
+test affine_agrees(float4(1.0, 0.3, -0.2, 0.5), pos3(0.4, -0.7, 1.2), float4(1.0, 0.0, 0.0, 0.0), vec3(0.0))
+test affine_agrees(float4(1.0, 0.3, -0.2, 0.5), pos3(0.4, -0.7, 1.2), float4(0.0, 1.0, 0.0, 0.0), vec3(0.0))
+test affine_agrees(float4(1.0, 0.3, -0.2, 0.5), pos3(0.4, -0.7, 1.2), float4(0.0, 0.0, 0.0, 1.0), vec3(0.0))
+test affine_agrees(float4(1.0, 0.3, -0.2, 0.5), pos3(0.4, -0.7, 1.2), float4(0.0), vec3(1.0, 0.0, 0.0))
+test affine_agrees(float4(1.0, 0.3, -0.2, 0.5), pos3(0.4, -0.7, 1.2), float4(0.0), vec3(0.0, 0.0, 1.0))
+
+// each kernel writes the transposed forms on every target
+binding results:
+    values: mut buffer[float]
+
+@compute(64) fun forms_backward(@thread_id id: int3){results}:
+    let x = float(id.x) * 0.01
+    let mut g1 = float2(0.0)
+    bwd_diff(shaped, shape.flat, float2(x, 0.4), mut g1, 1.0)
+    let mut g2 = float3(0.0)
+    bwd_diff(swizzled, float3(x, 0.2, 0.3), mut g2, 1.0)
+    let mut gr = float4(0.0)
+    let mut gp = vec3(0.0)
+    bwd_diff(placed, float4(1.0, x, 0.0, 0.5), mut gr, pos3(x, 0.0, 1.0), mut gp, 1.0)
+    results.values[id.x] = g1.x + g2.y + gr.x + gp.z

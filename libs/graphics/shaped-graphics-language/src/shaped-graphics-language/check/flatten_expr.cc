@@ -265,6 +265,17 @@ auto sgl::check::impl::flattener::value_of(type_id type, ast::expr_id from, cc::
                 arguments.push_back(value_of(field_type(type, i), from, leaves, at));
             return add_expr(type, from, flat_construct{.arguments = add_list(arguments)});
         }
+        // an affine3 is its rows, as `affine3_of_rows` holds them one after another
+        if (c.out.name_of(type) == "affine3")
+        {
+            auto const* const of_rows = c.prelude_names.get_ptr(cc::string("affine3_of_rows"));
+            if (of_rows == nullptr || of_rows->empty())
+                return fail();
+            auto rows = cc::vector<flat_expr_id>();
+            for (auto i = 0; i < 3; ++i)
+                rows.push_back(value_of(c.prelude_type("float4"), from, leaves, at));
+            return builtin_call(from, of_rows->front(), rows);
+        }
         // a matrix is its constructor of columns, `mat4(c0, c1, c2, c3)`, which every target writes as it must
         auto const* const overloads = c.prelude_names.get_ptr(c.out.name_of(type));
         if (overloads == nullptr)

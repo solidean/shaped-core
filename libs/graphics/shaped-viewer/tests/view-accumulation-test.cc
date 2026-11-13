@@ -987,7 +987,7 @@ ASYNC_INVOCABLE_TEST("sv - a wavefront layer carries its paths across still fram
         def.views.push_back(cc::move(root));
 
         // What a viewer sets from its config, so a still frame is paced by the GPU's own timing.
-        def.wavefront_budget_ms = 16.0f;
+        def.still_budget_ms = 16.0f;
         return def;
     };
 
@@ -1047,7 +1047,7 @@ ASYNC_INVOCABLE_TEST("sv - a wavefront layer carries its paths across still fram
     if (timed)
     {
         auto starved = definition(tg::pos3d(2.4, 1.8, -3.2), sv::render_mode::wavefront);
-        starved.wavefront_budget_ms = 0.001f;
+        starved.still_budget_ms = 0.001f;
         CHECK(until(starved, [&] { return slot().pacing.fill < 0.5f; }));
     }
 

@@ -183,6 +183,12 @@ struct sv::pt_trace_desc
     /// Only the wavefront tracer writes it, and only while the guides are written: its pixels average different counts, which the megakernel's never do.
     sg::texture_2d sample_counts;
 
+    /// The megakernel's per-pixel noise statistics (rg32_float) at `output`'s extent, kept across frames, or null; read and written while the frame block's `noise_target` is set.
+    sg::texture_2d pixel_stats;
+
+    /// What `traced.counters` binds where set, in place of the path state's: the megakernel counts its unsettled pixels at `counter_samples_short`.
+    sg::buffer<u32> counters;
+
     /// One `sv::shaders::tracer::instance_record` per entry of `instances`, in that same order — `traced.instances`, read by a hit's instance id.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
     sg::buffer<shaders::tracer::instance_record> instance_table;

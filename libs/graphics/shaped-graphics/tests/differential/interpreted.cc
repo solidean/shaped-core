@@ -12,7 +12,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// Every setup's module, `diff_<setup>.sgl`, as the library a corpus file is checked against.
+/// Every setup's module, once each, as the library a corpus file is checked against.
 struct setup_library
 {
     cc::vector<cc::string> names;
@@ -28,7 +28,12 @@ struct setup_library
         auto result = setup_library();
         for (auto const& s : sg_diff::setups())
         {
-            auto const name = cc::format("diff_{}.sgl", s.name);
+            auto const name = s.module.empty() ? cc::format("diff_{}.sgl", s.name) : cc::format("{}.sgl", s.module);
+            auto is_read = false;
+            for (auto const& known : result.names)
+                is_read = is_read || known == name;
+            if (is_read)
+                continue;
             auto const path = cc::format("{}/{}", nx::source_path(SG_DIFFERENTIAL_SETUPS_DIR), name);
             auto file = cc::file_read_stream_adapter::open(path);
             auto bytes = file.has_value() ? file.value().stream().read_all() : cc::error("cannot open it");
@@ -105,13 +110,13 @@ cc::result<sg_diff::run_result> pixels_interpreted(sg_diff::workload const& w,
         }
 
     auto result = sg_diff::run_result();
-    result.outputs.push_back(
-        {.name = half.output, .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes())});
+    result.outputs.push_back({.name = half.outputs.empty() ? cc::string("color") : half.outputs[0].name,
+                              .bytes = cc::vector<byte>::create_copy_of(cc::span<u32 const>(texels).as_bytes())});
     return result;
 }
 } // namespace
 
-cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
+cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::context& ctx)
 {
     using namespace sgl::check;
     if (w.setup->interpreted == nullptr)
@@ -138,7 +143,9 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
             return run_result{.skipped = "its workgroup memory is shared by invocations the interpreter runs one at a "
                                          "time"};
 
-    auto half = w.setup->interpreted();
+    auto half = w.setup->interpreted(ctx);
+    if (half.skipped.has_value())
+        return run_result{.skipped = half.skipped};
     if (e->entry_stage == stage::pixel)
         return pixels_interpreted(w, m, *e, half);
     auto const width = i64(e->workgroup[0] > 0 ? e->workgroup[0] : 1);
@@ -181,6 +188,7 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
     }
 
     auto result = run_result();
-    result.outputs.push_back({.name = half.output, .bytes = cc::vector<byte>::create_copy_of(half.output_bytes)});
+    for (auto const& out : half.outputs)
+        result.outputs.push_back({.name = out.name, .bytes = cc::vector<byte>::create_copy_of(out.bytes)});
     return result;
 }

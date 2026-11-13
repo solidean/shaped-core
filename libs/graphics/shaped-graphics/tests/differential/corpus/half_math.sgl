@@ -1,0 +1,20 @@
+// differential: setup floats
+// differential: routes relative 0.002
+// differential: across relative 0.004
+// The routes' bound is EMIT-254's: a half's fma may round the product first, and on vulkan here the native route's does while DXC's does not.
+// A half carries 11 bits, so one step of it is about a thousandth of its value, and an implementation may round one operation either way.
+// A dot product of halves may also sum in more bits or fewer, as the GPUs and the interpreter here do; its terms are all positive, so no cancellation magnifies that.
+// Half-precision math as a bandwidth-bound or mobile shader writes it: conversions, the four operations, fma and a dot product.
+require shader_f16
+use diff_floats
+
+@compute(64) fun halves(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let a = diff_floats.io.input[i] as half
+    let b = diff_floats.io.input[(i + 29) & 255] as half
+    let one = half(1.0)
+    let v = half4(a, b, a * b, a - b)
+    diff_floats.io.output[4 * i] = a as float
+    diff_floats.io.output[4 * i + 1] = ((a * b + a) / (abs(b) + one)) as float
+    diff_floats.io.output[4 * i + 2] = fma(a, b, -a) as float
+    diff_floats.io.output[4 * i + 3] = dot(abs(v), half4(one, half(0.5), half(0.25), half(0.125))) as float

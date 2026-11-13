@@ -400,6 +400,7 @@ ASYNC_INVOCABLE_TEST("sg - a cluster pool is built in place from records a compu
     again->raytracing.build_clusters_indirect(
         *pool, {.clusters = {.records = records.raw(), .max_count = 4, .count = counts.raw()}, .tables = tables});
     ctx->submit_command_list(cc::move(again));
+    co_await ctx->idle_completion();
     CHECK(pool->generation() == 2);
     CHECK(blases[0]->is_stale());
 
@@ -421,4 +422,5 @@ ASYNC_INVOCABLE_TEST("sg - a cluster pool is built in place from records a compu
     stale->compute.bind_group(0, *scene);
     CHECK_ASSERTS(stale->compute.dispatch_threads(grid, grid));
     ctx->submit_command_list(cc::move(stale));
+    co_await ctx->idle_completion();
 }

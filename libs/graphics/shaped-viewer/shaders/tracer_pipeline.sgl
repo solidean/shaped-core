@@ -14,6 +14,19 @@ use scene
 use slug
 use tracer
 
+/// The standard error of a mean over `frames` frames whose luminances deviate by `m2` in squares, as the display shows it:
+/// scaled by `scale`, then through a Reinhard curve around the mean, whose slope there is 1 / (1 + mean)^2.
+/// So a bright pixel's noise counts for what it looks like rather than for its radiance; infinite below two frames.
+fun display_error(frames: float, m2: float, mean: float, scale: float) -> float:
+    if frames < 2.0 => return 1e30
+    let error = sqrt(max(m2, 0.0) / ((frames - 1.0) * frames)) * scale
+    let m = 1.0 + max(mean, 0.0) * scale
+    return error / (m * m)
+
+/// Whether a pixel whose mean holds `frames` frames of luminance `mean` and deviations `m2` is down to the frame's noise target.
+fun noise_settled(f: tracer.frame_constants, frames: float, m2: float, mean: float) -> bool:
+    return frames >= (f.noise_min_frames as float) and display_error(frames, m2, mean, f.noise_scale) <= f.noise_target
+
 /// One sample's path, walked until it escapes, runs out of bounces or is absorbed — what `path_trace` does per sample.
 @raygen fun path_trace(@launch_id id: int3, @launch_size size: int3){tracer.traced, tracer.bindless, slug.tables}:
     let f = tracer.traced.frame[0]
@@ -22,6 +35,22 @@ use tracer
     let px_f = float2(px.x as float, px.y as float)
     let dim_f = float2(dim.x as float, dim.y as float)
     let xy = int2(id.x, id.y)
+
+    // Under a noise target a pixel keeps its own count, and one already down to the target traces nothing this frame.
+    // Its mean, its guides and its depth stay as they are, which is what they would converge to anyway.
+    let adaptive = f.noise_target > 0.0
+    let mut pixel_frames = f.accum_frame as float
+    let mut pixel_m2 = 0.0
+    if adaptive:
+        pixel_frames = 0.0
+        if f.accum_frame > 0u:
+            let stats = tracer.traced.pixel_stats[xy]
+            pixel_frames = stats.x
+            pixel_m2 = stats.y
+            if noise_settled(f, pixel_frames, pixel_m2, openpbr.luminance(tracer.traced.output[xy].xyz)):
+                // A denoiser judges each pixel by its own count, so a settled one still says how many samples it holds.
+                tracer.traced.sample_counts[xy] = pixel_frames * (max(1, f.samples_per_pixel) as float)
+                return
 
     let mut rng = pt.hash(px.x + px.y * dim.x + f.rng_seed * 9781u)
 
@@ -384,14 +413,26 @@ use tracer
         tracer.traced.guide_hit_distance[xy] = float2(guide_diffuse, guide_specular)
 
     // Progressive accumulation: this frame's estimate folded into the running mean already in the target, every frame at the same weight.
+    // Under a noise target the weight is the pixel's own count, and Welford's update tracks how its frames scatter.
+    let frame_luminance = openpbr.luminance(color)
+    let previous_mean = if pixel_frames > 0.0 => openpbr.luminance(tracer.traced.output[xy].xyz) else 0.0
     let mut moment = accum_moment / spp_f
-    if f.accum_frame > 0u:
-        let frames = f.accum_frame as float
+    if pixel_frames > 0.0:
         let held = tracer.traced.output[xy]
-        color = (held.xyz * frames + color) / (frames + 1.0)
-        moment = (held.w * frames + moment) / (frames + 1.0)
+        color = (held.xyz * pixel_frames + color) / (pixel_frames + 1.0)
+        moment = (held.w * pixel_frames + moment) / (pixel_frames + 1.0)
 
     tracer.traced.output[xy] = float4(..color, moment)
+
+    if adaptive:
+        let frames = pixel_frames + 1.0
+        let delta = frame_luminance - previous_mean
+        let mean = previous_mean + delta / frames
+        let m2 = pixel_m2 + delta * (frame_luminance - mean)
+        tracer.traced.pixel_stats[xy] = float2(frames, m2)
+        tracer.traced.sample_counts[xy] = frames * spp_f
+        // What the host reads back: how many pixels still trace, so a frame where none does is a finished image.
+        if not noise_settled(f, frames, m2, mean) => tracer.traced.counters[tracer.counter_samples_short].add(1u)
 
     if f.write_primary_depth != 0u => tracer.traced.primary_depth[xy] = primary_depth
 

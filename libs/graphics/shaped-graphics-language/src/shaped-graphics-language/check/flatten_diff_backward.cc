@@ -248,6 +248,22 @@ auto differentiator::transpose(flat_expr_id t, flat_expr_id g) -> void
             transpose(arguments[2], share(call("select", use(condition), zero(r), use(g))));
         return;
     }
+    // an affine3 is read and built by its rows, each the other's transpose
+    if (name == "affine3_row" && arguments.size() == 2)
+    {
+        auto const i = share(arguments[1]);
+        flat_expr_id rows[3] = {};
+        for (auto row = 0; row < 3; ++row)
+            rows[row] = call("select", call("==", use(i), integer(row)), use(g), zero(r));
+        return transpose(arguments[0], share(call("affine3_of_rows", rows[0], rows[1], rows[2])));
+    }
+    if (name == "affine3_of_rows" && arguments.size() == 3)
+    {
+        for (auto row = 0; row < 3; ++row)
+            if (linear_at(row))
+                transpose(arguments[row], share(call("affine3_row", use(g), integer(row))));
+        return;
+    }
     if (name == "matrix_column" && arguments.size() == 2)
     {
         // the matrix whose column `i` is `g`, and every other column zero
@@ -264,7 +280,7 @@ auto differentiator::transpose(flat_expr_id t, flat_expr_id g) -> void
         }
         return transpose(arguments[0], share(assemble(ut, parts)));
     }
-    if (is_linear_function(name, arguments.size()) && leaf_count(r) > 0)
+    if (derivative_of(n->callee) == builtins::derivative_kind::linear && leaf_count(r) > 0)
     {
         // a construction or a conversion: each argument's adjoint is the components of `g` it filled
         auto total = 0;
@@ -325,6 +341,7 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
         emit(flat_assign{.place = tangent_place_of(ref(adjoint), steps), .value = zero(tangent(type_of(n->place)))});
         linear_lets.clear();
         gradient_reads.clear();
+        texture_reads.clear();
         auto const t = tangent_of_value(n->value);
         transpose(t, g);
         // a tangent read twice was bound once; its adjoint is complete only once every read is transposed
@@ -340,6 +357,7 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
             }
         }
         add_gradient_reads();
+        add_texture_reads();
         return;
     }
     if (auto const* const n = s.node.try_as<flat_if>())
@@ -484,6 +502,68 @@ auto differentiator::backward_custom(flattener::custom_call const& custom, label
     auto const call = inline_derivative(custom, custom.derivatives.backward, arguments);
     if (is_valid(call))
         emit(flat_block{.label = node(call).node.as<flat_block>().label, .body = node(call).node.as<flat_block>().body});
+}
+
+auto differentiator::add_texture_reads() -> void
+{
+    for (auto const& r : texture_reads)
+    {
+        auto const* const a = adjoint_of.get_ptr(i32(r.placeholder));
+        if (a == nullptr)
+            continue;
+        auto const adjoint = *a;
+        auto const atomic = m().at(r.gradients.type).element;
+        auto const callee = atomic_add_of(m().at(atomic).element);
+        auto const size_of = texture_builtin("size", type_of(r.texture), 2);
+        if (!is_valid(callee) || !is_valid(size_of))
+            return (void)failed("an atomic add of a texel's gradient, which no builtin is");
+        auto leaves = cc::vector<flat_expr_id>();
+        leaves_into(share(ref(adjoint), "g"), leaves);
+        for (auto& l : leaves)
+            l = share(l, "leaf");
+        auto const channels = i32(leaves.size());
+        auto const size
+            = share(f.builtin_call(at, size_of, cc::span<flat_expr_id const>({use(r.texture), integer(0)})), "size");
+        auto const taps = !r.is_load && r.is_linear ? 4 : 1;
+        for (auto k = 0; k < taps; ++k)
+        {
+            auto texel = use(r.at);
+            auto weight = flat_expr_id::none;
+            if (!r.is_load)
+            {
+                flat_expr_id const texel_arguments[]
+                    = {use(size), use(r.at), integer(k), boolean(r.is_linear), integer(r.mode_u), integer(r.mode_v)};
+                texel = prelude_call("sample_tap_texel", texel_arguments);
+                if (r.is_linear)
+                {
+                    flat_expr_id const weight_arguments[] = {use(size), use(r.at), integer(k), boolean(r.is_linear)};
+                    weight = share(prelude_call("sample_tap_weight", weight_arguments), "weight");
+                }
+            }
+            texel = share(texel, "texel");
+            // texel (x, y) of level 0 holds its channels at (y * width + x) * channels
+            auto const first = call("*",
+                                    call("+",
+                                         call("*", add(f.int_type(), flat_member{.object = use(texel), .member = 1}),
+                                              add(f.int_type(), flat_member{.object = use(size), .member = 0})),
+                                         add(f.int_type(), flat_member{.object = use(texel), .member = 0})),
+                                    integer(channels));
+            auto const base = share(first, "at");
+            for (auto c = 0; c < channels; ++c)
+            {
+                auto const buffer = add(
+                    r.gradients.type, flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
+                auto const place
+                    = add(atomic, flat_buffer_element{.buffer = buffer,
+                                                      .index = c == 0 ? use(base) : call("+", use(base), integer(c))});
+                flat_expr_id const arguments[]
+                    = {place, is_valid(weight) ? mul(use(leaves[c]), use(weight)) : use(leaves[c])};
+                emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+            }
+        }
+        emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
+    }
+    texture_reads.clear();
 }
 
 auto differentiator::reduces_gradients() const -> bool

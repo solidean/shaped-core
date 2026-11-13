@@ -296,6 +296,7 @@ struct raster_frame_desc;       // one raster frame (rendering/raster_routine.hh
 enum class raster_culling : u8; // how far a raster frame culls (rendering/raster_routine.hh)
 enum class raster_shading : u8; // which pixel stage a raster frame's shading draws run (rendering/raster_routine.hh)
 struct raster_thin_targets;     // the hybrid's thin G-buffer (rendering/raster_routine.hh)
+struct raster_scratch;          // a raster frame's depth buffer and depth pyramid (rendering/raster_routine.hh)
 class raster_routine;
 struct raster_bound_frame_desc; // one bound raster frame (rendering/raster_bound_routine.hh)
 class raster_bound_routine;

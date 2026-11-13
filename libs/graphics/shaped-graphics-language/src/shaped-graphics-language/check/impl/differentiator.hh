@@ -97,6 +97,21 @@ struct differentiator
         i32 stride = 1;
     };
     cc::vector<gradient_read> gradient_reads;
+    /// Reverse: a read of a texture with a `@gradient`, in the statement being transposed; its taps are read again
+    /// where its adjoint is added, at their weights.
+    struct texture_read
+    {
+        local_id placeholder = local_id::none;
+        paired_buffer gradients;
+        /// The texture member, which a read names again, and the coordinate or the texel, shared.
+        flat_expr_id texture = flat_expr_id::none;
+        flat_expr_id at = flat_expr_id::none;
+        bool is_load = false;
+        bool is_linear = false;
+        i32 mode_u = 0;
+        i32 mode_v = 0;
+    };
+    cc::vector<texture_read> texture_reads;
 
     [[nodiscard]] checked_module const& m() const { return f.c.out; }
     [[nodiscard]] flat_expr const& node(flat_expr_id id) const { return f.entry.at(id); }
@@ -250,9 +265,30 @@ struct differentiator
     [[nodiscard]] i32 float_leaves(type_id t) const;
     /// Each float leaf of the shared value `g`, in that order.
     void leaves_into(flat_expr_id g, cc::vector<flat_expr_id>& out);
+    /// A texture_2d member's `load` at a level or its `sample` at level 0 through a static sampler: going forward the
+    /// texels' change from the `@tangent` texture and the coordinate's through the taps' slopes, and going backward a
+    /// placeholder whose adjoint goes to the `@gradient` at the taps' weights.
+    flat_expr_id texture_tangent(flat_call const& n,
+                                 cc::span<flat_expr_id const> primals,
+                                 cc::span<flat_expr_id const> tangents,
+                                 type_id type);
+    /// The builtin `name` that takes `texture` first and `arity` arguments: one of its exact type, or of its shape.
+    [[nodiscard]] symbol_id texture_builtin(cc::string_view name, type_id texture, isize arity) const;
+    /// A call of the prelude's SGL function `name`, inlined where it stands.
+    flat_expr_id prelude_call(cc::string_view name, cc::span<flat_expr_id const> arguments);
+    /// Reverse: each texture read of the statement just transposed, its adjoint added to its gradient at each tap.
+    void add_texture_reads();
     /// Whether a gradient's atomics are shared through the subgroup first: where the entry point declares `subgroups`,
     /// outside a test, whose run has no device.
     [[nodiscard]] bool reduces_gradients() const;
+    /// The tangent of an affine3's product with a position (`w` 1) or a direction or a float4 (`w` 0), one dot of a
+    /// row per component.
+    flat_expr_id affine_tangent(cc::span<flat_expr_id const> primals,
+                                cc::span<flat_expr_id const> tangents,
+                                type_id type,
+                                f64 w);
+    /// A `case` as the chain of `if` it means, its scrutinee held in a `let` (LEGAL-46).
+    cc::vector<flat_stmt_id> case_as_ifs(flat_case const& n);
     /// `call(name, a)` over the invocations that reach it (`flat_call::is_active_lanes`).
     flat_expr_id active_call(cc::string_view name, flat_expr_id a);
     /// The prelude's `add` of an atomic of `element`s; none where there is none.
@@ -261,7 +297,8 @@ struct differentiator
     /// The name a call's rule is chosen by: an operator's spelling, a function's name.
     [[nodiscard]] cc::string_view rule_name(symbol_id callee) const;
 
-    [[nodiscard]] static bool is_linear_function(cc::string_view name, isize arity);
+    /// What the registry states of a builtin's derivative; `unstated` for anything else.
+    [[nodiscard]] builtins::derivative_kind derivative_of(symbol_id callee) const;
 
     /// The factor each argument's tangent is multiplied by, for a builtin that acts on each component on its own.
     /// `a` holds the arguments and `r` the result, each shared; none where a rule has no factor for that argument.
@@ -308,6 +345,16 @@ struct differentiator
         {
             auto const read = place_of(root(), steps);
             return emit(flat_assign{.place = place_of(root(), steps), .value = call("+", read, use(g))});
+        }
+        // an affine3 has no `+`, and is added row by row
+        if (place_type == type_of(g) && m().name_of(place_type) == "affine3")
+        {
+            flat_expr_id rows[3] = {};
+            for (auto i = 0; i < 3; ++i)
+                rows[i] = call("+", call("affine3_row", place_of(root(), steps), integer(i)),
+                               call("affine3_row", use(g), integer(i)));
+            return emit(flat_assign{.place = place_of(root(), steps),
+                                    .value = call("affine3_of_rows", rows[0], rows[1], rows[2])});
         }
         auto const& info = m().at(place_type);
         auto const has_parts = info.kind == type_kind::array ? info.count > 0 : info.members.count > 0;

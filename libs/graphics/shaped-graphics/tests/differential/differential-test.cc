@@ -227,7 +227,11 @@ ASYNC_TEST("sg differential - every corpus entry point computes on the GPU what 
     auto interpreted = isize(0);
     for (auto const& w : corpus.workloads)
     {
-        auto const oracle = sg_diff::interpreted(w);
+        // a half that builds on the device does so on its home
+        auto& host = *configurations[0].ctx;
+        if (auto* const home = host.device_home())
+            co_await cc::async_resume_on(*home);
+        auto const oracle = sg_diff::interpreted(w, host);
         if (oracle.has_error())
         {
             CHECK(false).context(cc::format("{} {} on the interpreter: {}", w.file, w.entry, oracle.error().to_string()));

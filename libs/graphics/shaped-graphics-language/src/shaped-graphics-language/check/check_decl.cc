@@ -737,8 +737,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
-        cc::string_view const known_on_member[]
-            = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic", "padding", "gradient", "tangent"};
+        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic",
+                                                   "padding",      "gradient",      "tangent", "no_diff"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -1076,14 +1076,25 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                        cc::format("@{0} takes the buffer it pairs with: `@{0}(training.{0}s)`", which));
                 continue;
             }
-            if (auto const& r = out.at(innermost); type != checked_module::error_type && r.kind != type_kind::buffer)
+            if (auto const& r = out.at(innermost);
+                type != checked_module::error_type && r.kind != type_kind::buffer && r.kind != type_kind::texture)
             {
-                report(diagnostic_kind::wrong_kind_of_name, file, a->name,
-                       cc::format("only a buffer's read is differentiated, so only a buffer takes a @{}", which));
+                report(
+                    diagnostic_kind::wrong_kind_of_name, file, a->name,
+                    cc::format("only a buffer's or a texture's read is differentiated, so only they take a @{}", which));
                 continue;
             }
             (which == "gradient" ? collected.back().gradient : collected.back().tangent)
                 = cc::string(text_of(file, span_of(file, arguments[0].value)));
+        }
+        // PROTOTYPE (autodiff): a texture whose texels a derivative holds constant, its sample changing with its coordinate
+        if (auto const* const held = is_struct ? nullptr : find_attribute(file, f.attributes, "no_diff"))
+        {
+            if (type != checked_module::error_type && out.at(innermost).kind != type_kind::texture)
+                report(diagnostic_kind::wrong_kind_of_name, file, held->name,
+                       "@no_diff on a binding member holds a texture's texels constant, so only a texture takes it");
+            else
+                collected.back().is_no_diff = true;
         }
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(

@@ -27,6 +27,18 @@ cc::string capture_session::take_hold()
 void capture_session::begin()
 {
     _start_seconds = _request.clock_seconds();
+    if (_run_start_seconds < 0.0)
+        _run_start_seconds = _start_seconds;
+    if (has_budget())
+    {
+        auto const frames_left = _request.is_sequence() ? cc::max(1, _request.frames - _frame) : 1;
+        _frame_share = cc::max(0.0, _request.budget_seconds - run_elapsed_seconds()) / double(frames_left);
+    }
+}
+
+double capture_session::run_elapsed_seconds() const
+{
+    return _run_start_seconds < 0.0 ? 0.0 : _request.clock_seconds() - _run_start_seconds;
 }
 
 void capture_session::advance_frame()
@@ -43,7 +55,26 @@ double capture_session::elapsed_seconds() const
 
 bool capture_session::is_out_of_time() const
 {
-    return elapsed_seconds() >= _request.timeout_seconds;
+    // Under a budget a frame's share is the plan, so the failure point sits past it, with room for the frame that finishes it.
+    auto const limit = has_budget() ? cc::max(_request.timeout_seconds, _frame_share + budget_grace_seconds)
+                                    : _request.timeout_seconds;
+    return elapsed_seconds() >= limit;
+}
+
+bool capture_session::is_share_spent() const
+{
+    return has_budget() && elapsed_seconds() + _viewer_frame_seconds >= _frame_share;
+}
+
+void capture_session::note_viewer_frame()
+{
+    auto const now = _request.clock_seconds();
+    if (_last_viewer_frame >= 0.0)
+    {
+        auto const took = now - _last_viewer_frame;
+        _viewer_frame_seconds = _viewer_frame_seconds <= 0.0 ? took : 0.8 * _viewer_frame_seconds + 0.2 * took;
+    }
+    _last_viewer_frame = now;
 }
 
 cc::string partial_capture_path(cc::string_view path)

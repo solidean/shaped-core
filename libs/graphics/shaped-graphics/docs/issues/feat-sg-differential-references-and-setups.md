@@ -16,11 +16,14 @@ What they do not do yet, in the order it pays off:
 - **More setups.**
   `texels` and `raster` exist since 2026-11-13; per-texel `relative` turned out to be enough for both at 16 by 16.
   `scene` exists since 2026-11-13: inline traces over a fixed TLAS, ids exact by value and hits within relative 0.0001 across APIs.
-  Render targets of other formats and a depth test are next.
-  The scene's interpreter half would build with `accel_build_flag::software_trace` and bind the pool that writes, which the interpreter reads.
+  `targets` exists since 2026-11-13: five formats at once behind a depth test, decoded to floats, the integer one exact.
+  `blended` blends into them over a clear, sRGB in linear space included.
+  `samples` draws into a 4-sample target and reads every sample back; a resolve waits on sg having one.
+  Its interpreter half binds the software pool a `software_trace` build writes, so the scene runs on the interpreter too.
   Each is one C++ setup and one SGL module, and every corpus file naming it is free after that.
 - **The interpreter as a third opinion.**
-  Since 2026-11-13 a fourth test holds every configuration to SGL's interpreter: 11 of the 12 entry points run there, and all agree.
+  Since 2026-11-13 a fourth test holds every configuration to SGL's interpreter, and every entry point that runs there agrees.
+  Those that do not are the workgroup reduction and the three raster setups that write formats, blend or multisample, which the interpreter does not model.
   The pixel stages run as quads, each lane its own pixel (EVAL-148), so derivatives and implicit-level samples are checked too.
   Left out is `workgroup_reduction`, whose workgroup memory spans invocations the interpreter runs one at a time.
   A workgroup would need the interpreter to run a workgroup's invocations together, up to each barrier, which is a change to the interpreter itself.

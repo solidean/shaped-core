@@ -40,6 +40,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_bytes.cc
     src/shaped-graphics-language/builtins/register_math.cc
     src/shaped-graphics-language/builtins/register_sync.cc
+    src/shaped-graphics-language/builtins/register_derivatives.cc
     src/shaped-graphics-language/builtins/register_subgroups.cc
     src/shaped-graphics-language/builtins/register_raytracing.cc
     src/shaped-graphics-language/builtins/register_target.cc
@@ -472,6 +473,7 @@ if(SC_BUILD_TESTS)
 
         tests/check/check-test-support.hh
         tests/check/autodiff-fuzz-test.cc
+        tests/check/autodiff-rules-test.cc
         tests/corpus/corpus-test.cc
         tests/check/array-check-test.cc
         tests/check/module-check-test.cc
@@ -499,6 +501,7 @@ if(SC_BUILD_TESTS)
         tests/check/source-flat-test-support.hh
 
         tests/interpret/autodiff-buffer-test.cc
+        tests/interpret/autodiff-texture-test.cc
         tests/interpret/check-run-test.cc
         tests/interpret/driver-bindings-test.cc
         tests/interpret/driver-test-support.hh

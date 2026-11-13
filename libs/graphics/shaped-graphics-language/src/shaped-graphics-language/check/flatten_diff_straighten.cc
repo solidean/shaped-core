@@ -74,14 +74,59 @@ auto differentiator::hoist_declarations(cc::span<flat_stmt_id const> statements)
                 else if (s.node.is<flat_loop>() || s.node.is<flat_while>() || s.node.is<flat_for>())
                     failed("a loop whose bounds are no constants and that states no @max_iterations(n), which only a "
                            "@backward can walk back");
-                else if (s.node.is<flat_case>())
-                    failed("a case");
+                else if (auto const* const n = s.node.try_as<flat_case>())
+                {
+                    for (auto const x : hoist_declarations(case_as_ifs(*n)))
+                        f.block.push_back(x);
+                }
                 else if (s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_discard>())
                     failed("a jump it cannot follow yet");
                 else
                     f.block.push_back(id);
             }
         });
+}
+
+auto differentiator::case_as_ifs(flat_case const& n) -> cc::vector<flat_stmt_id>
+{
+    if (!is_valid(n.equality))
+    {
+        failed("a case whose arms it cannot compare");
+        return {};
+    }
+    auto const scrutinee = f.add_local(local_kind::let, "scrutinee", type_of(n.scrutinee));
+    auto const arms = cc::vector<flat_arm>::create_copy_of(cc::span<flat_arm const>(f.entry.at(n.arms)));
+    auto rest = copy_of(n.default_body);
+    for (auto i = arms.size(); i-- > 0;)
+    {
+        // a pattern is evaluated only where it is reached (EVAL-68), which `or` keeps
+        auto const patterns
+            = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(f.entry.at(arms[i].patterns)));
+        auto condition = flat_expr_id::none;
+        for (auto const p : patterns)
+        {
+            auto match = flat_expr_id::none;
+            if (auto const* const b = node(p).node.try_as<flat_bool_literal>())
+                match = b->value ? ref(scrutinee) : add(f.bool_type(), flat_not{.operand = ref(scrutinee)});
+            else
+            {
+                flat_expr_id const arguments[] = {ref(scrutinee), p};
+                match = add(f.bool_type(), flat_call{.callee = n.equality,
+                                                     .intrinsic = n.equality_intrinsic,
+                                                     .is_pure = true,
+                                                     .arguments = f.add_list(arguments)});
+            }
+            condition = is_valid(condition) ? add(f.bool_type(), flat_or{.lhs = condition, .rhs = match}) : match;
+        }
+        if (!is_valid(condition))
+            continue;
+        auto const branch = f.make_stmt(where, flat_if{.condition = condition,
+                                                       .then_body = f.add_list(copy_of(arms[i].body)),
+                                                       .else_body = f.add_list(rest)});
+        rest = {branch};
+    }
+    rest.insert_at(0, f.make_stmt(where, flat_let{.local = scrutinee, .value = n.scrutinee}));
+    return rest;
 }
 
 auto differentiator::continues_as_leaves(cc::span<flat_stmt_id const> statements, label_id loop, label_id iteration)
@@ -113,6 +158,16 @@ auto differentiator::continues_as_leaves(cc::span<flat_stmt_id const> statements
                                          .first = n->first,
                                          .end = n->end,
                                          .body = inside(n->body)});
+                else if (auto const* const n = s.node.try_as<flat_case>())
+                {
+                    auto result = *n;
+                    auto arms = cc::vector<flat_arm>::create_copy_of(cc::span<flat_arm const>(f.entry.at(n->arms)));
+                    for (auto& arm : arms)
+                        arm.body = inside(arm.body);
+                    result.arms = f.add_arms(arms);
+                    result.default_body = inside(n->default_body);
+                    restate(id, result);
+                }
                 else
                     f.block.push_back(id);
             }
