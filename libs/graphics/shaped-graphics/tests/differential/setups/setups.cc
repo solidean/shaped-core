@@ -197,7 +197,8 @@ sg_diff::interpreter_half texels_for_interpreter()
                 texels.push_back(f32((packed >> (8 * channel)) & 0xffu) / 255.0f);
         }
     }
-    auto const output = cc::pinned_data<f32>::create_filled(k_threads * k_outputs_per_thread * 4, 0.0f).as_mutable_bytes();
+    auto const output
+        = cc::pinned_data<f32>::create_filled(k_threads * k_outputs_per_thread * 4, 0.0f).as_mutable_bytes();
     auto half = sg_diff::interpreter_half{.output = "output", .output_bytes = output, .threads = k_threads};
     auto source = sgl::check::texture_data{
         .width = k_extent,

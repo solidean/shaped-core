@@ -7,10 +7,10 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
+#include <shaped-graphics-language/interpret/interpret.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics-language/interpret/interpret.hh>
 #include <shaped-shader-library/fwd.hh>
 
 // Differential testing: one shader run every way this machine can run it, every result held to every other.

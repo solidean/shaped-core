@@ -53,8 +53,9 @@ struct setup_library
 void fill(sgl::check::value& v, cc::span<i64 const> parts)
 {
     for (auto i = isize(0); i < parts.size() && i < v.leaves.size(); ++i)
-        v.leaves[i] = v.leaves[i].kind == sgl::check::value_kind::scalar_uint ? sgl::check::scalar::of_uint(u32(parts[i]))
-                                                                             : sgl::check::scalar::of(i32(parts[i]));
+        v.leaves[i] = v.leaves[i].kind == sgl::check::value_kind::scalar_uint
+                        ? sgl::check::scalar::of_uint(u32(parts[i]))
+                        : sgl::check::scalar::of(i32(parts[i]));
 }
 } // namespace
 
@@ -82,7 +83,8 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
         return cc::error(cc::format("{} has no entry point {}", w.file, w.entry));
     for (auto const b : e->bindings)
         if (m.bindings[m.at(b).info].is_workgroup)
-            return run_result{.skipped = "its workgroup memory is shared by invocations the interpreter runs one at a time"};
+            return run_result{.skipped = "its workgroup memory is shared by invocations the interpreter runs one at a "
+                                         "time"};
 
     auto half = w.setup->interpreted();
     auto const width = i64(e->workgroup[0] > 0 ? e->workgroup[0] : 1);
@@ -117,7 +119,8 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w)
 
         auto const o = interpret(m, *e, inputs.value());
         if (o.status != run_status::ok)
-            return cc::error(cc::format("{} {}: invocation {} ends {}: {}", w.file, w.entry, i, to_string(o.status), o.detail));
+            return cc::error(
+                cc::format("{} {}: invocation {} ends {}: {}", w.file, w.entry, i, to_string(o.status), o.detail));
         if (!o.failures.empty())
             return cc::error(cc::format("{} {}: a check fails in invocation {}", w.file, w.entry, i));
         write_back(m, o, half.bindings);
