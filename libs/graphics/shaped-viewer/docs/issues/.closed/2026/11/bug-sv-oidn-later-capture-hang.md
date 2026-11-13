@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/impl/cache_owner.hh
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc
   - symbol: sv::impl::mesh_gpu_slot
+closed: 2026-11-13
+resolution: fixed
 ---
 
 # A later viewer on the same dx12 context can hang the GPU drawing meshes an earlier viewer placed
