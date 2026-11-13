@@ -12,7 +12,8 @@ resolution: fixed
 
 On AMD's Radeon iGPU (RDNA 2, dx12 driver 32.0.21042.62), creating a compute pipeline that traces inline ends the process with an access violation inside `amdxc64.dll`.
 It is SGL's native DXIL that crashes, not DXC's: a native container is unsigned, and AMD's shader cache crashes on an unsigned ray query once an unsigned plain shader is in it.
-[amd-d3d12-inline-ray-query-crashes-compiler](../../../../../../../../docs/bugs-external/amd-d3d12-inline-ray-query-crashes-compiler/readme.md) reproduces it standalone, with DXC's modules stamped unsigned.
+[amd-d3d12-inline-ray-query-crashes-compiler](../../../../../../../../docs/bugs-external/amd-d3d12-inline-ray-query-crashes-compiler/readme.md) reproduces it standalone.
+It does so with DXC's modules stamped unsigned.
 
 A full `shaped-graphics-test` run on that GPU compiles plain native shaders first, so it ends at its first inline trace.
 Resetting the driver's shader cache helps until the next plain shader.
