@@ -249,9 +249,15 @@ def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bo
     if settle and base:
         at_base = _red_at_base(ctx, preset, base, settle)
     filed, blockers = [], list(others)
+    # An invocable test's children are one test: red at the base on any child, it is red there, and a child that passed
+    # there passed by chance, as a flaky test does.
+    red_leaves = {(b, t.rsplit(" / ", 1)[-1]) for (b, t), v in at_base.items() if v is True}
     for r in red:
         key, desc = (r["binary"], r["test"]), f"{r['binary']}: {r['test']}: {r['outcome']}"
         verdict = at_base.get(key)
+        if verdict is False and (r["binary"], r["test"].rsplit(" / ", 1)[-1]) in red_leaves:
+            filed.append((*key, r["outcome"], f"its test is red at the change's base {base[:12]} on another child, so flaky there"))
+            continue
         if verdict is True and _binary_red(r):
             filed.append((*key, r["outcome"], f"its binary ends without a report at the change's base {base[:12]} too, so the case is unproven"))
         elif verdict is True:

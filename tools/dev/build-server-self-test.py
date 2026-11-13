@@ -650,6 +650,25 @@ def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> N
     assert out == {("d", "p"): True, ("d", "q"): True, ("e", "p"): False, ("e", "q"): False, ("f", "p"): None, ("g", "p"): None}, out
 
 
+def test_a_child_green_at_the_base_beside_a_red_one_is_flaky_there() -> None:
+    # t's two children are red with the change; at the base one is red and one passed, so t is red there, and neither blocks
+    # u passed at the base and has no red child there, so it blocks
+    from tools.dev.cmd import ship
+    ran = [{"binary": "g", "test": n, "outcome": "fail", "why": "ran alongside", "judged": "green_before"}
+           for n in ("drv / one / t", "drv / two / t", "drv / one / u")]
+    proof = bs.Proof(passed=False, reasons=[f"g: {r['test']}: fail (ran alongside)" for r in ran],
+                     report={"ran": ran, "delta": {"base": "abc123"}})
+    saved = ship._red_at_base
+    ship._red_at_base = lambda ctx, preset, base, reds: {("g", "drv / one / t"): True, ("g", "drv / two / t"): False,
+                                                         ("g", "drv / one / u"): False}
+    try:
+        passed, filed, blockers = ship._settle_at_base(types.SimpleNamespace(), None, proof)
+    finally:
+        ship._red_at_base = saved
+    assert not passed and len(blockers) == 1 and "drv / one / u" in blockers[0], blockers
+    assert sorted(f[1] for f in filed) == ["drv / one / t", "drv / two / t"], filed
+
+
 def test_a_crash_at_the_base_too_is_filed_as_unproven_and_listed_once() -> None:
     from tools.dev.cmd import ship
     ran = [{"binary": "d", "test": f"t{i}", "outcome": "failed", "why": "must run", "judged": "unknown"} for i in range(30)]
