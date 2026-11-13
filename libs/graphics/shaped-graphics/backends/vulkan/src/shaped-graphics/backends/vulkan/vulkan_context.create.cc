@@ -1151,12 +1151,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
     // `drawIndirectFirstInstance` too, without which an indirect record's `first_instance` must be 0.
+    // `independentBlend` too, without which every color target of a pipeline must blend alike, as dx12, metal and webgpu never ask.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .pNext = &vk11_features,
         .features = {.imageCubeArray = supported.imageCubeArray,
+                     .independentBlend = supported.independentBlend,
                      .geometryShader = supported.geometryShader,
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,
