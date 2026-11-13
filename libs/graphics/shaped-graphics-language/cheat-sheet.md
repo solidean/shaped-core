@@ -471,6 +471,8 @@ sgl::check::driver_bindings{.groups = {{.name = "frame", .members = {{.name = "e
                                            // filtering is exact f32 (EVAL-122): compare between texel centres to ~8 bits
 {.lane_count = 32}                         // run_inputs: the run is 32 lanes of one subgroup, run one after another;
                                            // subgroup ops and derivatives exchange between them (EVAL-140 to EVAL-145)
+{.lane_parameters = {p0, p1, p2, p3}}      // run_inputs: each lane's own stage struct, a quad's four pixels; o.lane_results
+                                           // holds every lane's result, lane order (EVAL-148)
 sgl::check::resolve_inputs(m, e, bound)    // -> cc::result<run_inputs>; left out: zero, empty, root 0 (the empty TLAS)
 sgl::check::write_back(m, o, bound)        // what the run stored, into each .mutable_bytes and image .mutable_texels
 

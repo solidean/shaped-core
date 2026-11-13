@@ -18,8 +18,9 @@ What they do not do yet, in the order it pays off:
   A trace over a fixed scene is the next, then render targets of other formats and a depth test.
   Each is one C++ setup and one SGL module, and every corpus file naming it is free after that.
 - **The interpreter as a third opinion.**
-  For compute work SGL's interpreter gives the answer the language means, deterministic and with no device.
-  Two routes agreeing with each other and with the interpreter is a stronger statement than two routes agreeing.
-  Which corpus files the interpreter can run is the first thing to measure.
+  Since 2026-11-13 a fourth test holds every configuration to SGL's interpreter: 11 of the 12 entry points run there, and all agree.
+  The pixel stages run as quads, each lane its own pixel (EVAL-148), so derivatives and implicit-level samples are checked too.
+  Left out is `workgroup_reduction`, whose workgroup memory spans invocations the interpreter runs one at a time.
+  A workgroup would need the interpreter to run a workgroup's invocations together, up to each barrier, which is a change to the interpreter itself.
 
 webgpu and metal take part already, where the binary has them: each is one more route of its own.

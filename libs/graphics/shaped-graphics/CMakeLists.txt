@@ -633,8 +633,12 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-graphics-test PRIVATE
             tests/differential/differential.cc
             tests/differential/differential-test.cc
+            tests/differential/interpreted.cc
             tests/differential/setups/setups.cc
         )
+        # SGL's interpreter is the corpus's third opinion, checking each file against the setups' modules as the package does.
+        target_link_libraries(shaped-graphics-test PRIVATE shaped-graphics-language)
+        sc_target_source_paths(shaped-graphics-test PRIVATE SG_DIFFERENTIAL_SETUPS_DIR tests/differential/setups)
         # What another machine computed, which this one is held to; a refresh rewrites them in the source tree.
         sc_target_source_paths(shaped-graphics-test PRIVATE SG_DIFFERENTIAL_REFERENCES_DIR tests/differential/references)
         file(GLOB _sg_differential_corpus CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/corpus

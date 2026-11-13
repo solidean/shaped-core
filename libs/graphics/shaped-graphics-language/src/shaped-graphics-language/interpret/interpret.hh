@@ -112,6 +112,9 @@ struct sgl::check::run_inputs
 {
     /// The value of the stage struct, `locals[0]`; unread for an entry point without one.
     value parameter;
+    /// Each lane's own stage struct in place of `parameter`, as a pixel quad's four pixels each have theirs (EVAL-148).
+    /// A lane past its end takes `parameter`.
+    cc::vector<value> lane_parameters;
     /// Parallel to `flat_entry_point::stage_inputs`; a missing one is zero.
     cc::vector<value> stage_inputs;
     /// Parallel to `flat_entry_point::bindings`: the members of each binding as one value, in member order.
@@ -247,8 +250,10 @@ struct sgl::check::site_tally
 struct sgl::check::outcome
 {
     run_status status = run_status::ok;
-    /// What the entry point returned; empty unless `status` is `ok`.
+    /// What the entry point returned in lane 0; empty unless `status` is `ok`.
     value result;
+    /// What it returned in each lane, in lane order, lane 0's included (EVAL-148).
+    cc::vector<value> lane_results;
     /// Every printed value, in the order the prints ran; kept up to the point a failed run stopped.
     cc::vector<value> trace;
     /// Every `print` that ran, in order; its values are in `trace` too.
@@ -270,11 +275,12 @@ struct sgl::check::outcome
     /// Parallel to the tree's `check_sites`, and counted past `max_failures`, since it holds no values.
     cc::vector<site_tally> sites;
 
-    /// Same status, same result, same trace, same buffers.
+    /// Same status, same result in every lane, same trace, same buffers.
     [[nodiscard]] bool operator==(outcome const& rhs) const
     {
-        return status == rhs.status && result == rhs.result && ast::impl::is_equal(trace, rhs.trace)
-            && ast::impl::is_equal(buffers, rhs.buffers) && ast::impl::is_equal(images, rhs.images);
+        return status == rhs.status && result == rhs.result && ast::impl::is_equal(lane_results, rhs.lane_results)
+            && ast::impl::is_equal(trace, rhs.trace) && ast::impl::is_equal(buffers, rhs.buffers)
+            && ast::impl::is_equal(images, rhs.images);
     }
 };
 
