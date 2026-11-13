@@ -552,6 +552,7 @@ if(SC_BUILD_TESTS)
         tests/emit/double-maths-emit-test.cc
         tests/emit/native-line-table-test.cc
         tests/emit/spirv-emit-test.cc
+        tests/ir/container-ir-test.cc
         tests/ir/debug-ir-test.cc
         tests/ir/ir-test-support.hh
         tests/ir/optimize-ir-test.cc

@@ -18,3 +18,9 @@ Resetting the driver's shader cache helps until the next plain shader.
 The fix in our hands is to sign SGL's containers: the digest is DXBC's checksum, which the writer can compute itself.
 Each native container then has its own digest, so no two share the driver's cache entry, and the crash has no unsigned container to meet.
 It would also retire whatever of [amd-d3d12-dxil-without-llvm-ident-crashes](../../../../../docs/bugs-external/amd-d3d12-dxil-without-llvm-ident-crashes/readme.md) was this cache.
+
+## Log
+
+- **2026-11-13: fixed by signing SGL's containers.**
+  The DXIL writer stamps each container with DXBC's checksum, so no two native shaders share the driver's cache entry.
+  sg's inline trace test and the whole differential corpus run on that GPU now, with the cache that crashed them still in place.

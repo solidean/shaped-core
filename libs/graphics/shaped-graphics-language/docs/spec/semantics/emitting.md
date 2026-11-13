@@ -449,7 +449,9 @@ fn main_ps(p: pixel_input) -> target_ {
   This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
 * **EMIT-234** Where a compile asks, `hlsl-dx12` is written as a DXIL container by SGL itself: `text_request::native`, `sgl emit --target dxil`.
   It takes what EMIT-232 says of a plan, of `require` and `prefer`, and of what a program may do.
-  The container states shader model 6.6, or 6.8 where EMIT-128 reads a start location, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
+  The container states shader model 6.6, or 6.8 where EMIT-128 reads a start location.
+  Its digest is DXBC's checksum of it, as a validator writes one when it signs, so D3D12 loads it although no validator ran.
+  The retail bypass digest would load too, but every container would share it, and AMD's shader cache crashes a ray query on that.
   A `fast` float operation carries LLVM's fast flags, and one past it carries none, which is what `-Gis` writes; only a `fast` addition may reorder.
   `ieee` states `fp32-denorm-mode` on the entry point, as `-denorm preserve` does.
 * **EMIT-236** A vertex or pixel entry point of a native route reads each element of its edge ahead of its body, and each `return` stores each output element.
