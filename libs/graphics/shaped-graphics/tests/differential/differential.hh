@@ -56,6 +56,8 @@ struct sg_diff::output
 {
     cc::string name;
     cc::vector<byte> bytes;
+    /// Compared byte for byte whatever the file's tolerance, as an integer output must be, and committed as a hash.
+    bool is_exact = false;
 };
 
 /// What a setup does with a corpus entry point: build its pipeline over the setup's module, fill the inputs, run it, read back.
@@ -64,6 +66,8 @@ struct sg_diff::setup
     cc::string name;
     /// The stage of the entry points it runs; a corpus file's entry points of another stage are not its.
     sg::shader_stage stage = sg::shader_stage::compute;
+    /// The SGL module that is its contract, `diff_<name>` where empty; setups may share one.
+    cc::string module = {};
     /// What a context must support to run it at all; a run on one without is skipped, not failed.
     cc::optional<sg::feature> required = {};
     /// Runs on the context's device home, where it has one.
