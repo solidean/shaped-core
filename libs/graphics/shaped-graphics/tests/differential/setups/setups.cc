@@ -7,6 +7,7 @@
 #include <sgl_modules/diff_floats.hh>
 #include <sgl_modules/diff_raster.hh>
 #include <sgl_modules/diff_scene.hh>
+#include <sgl_modules/diff_tallies.hh>
 #include <sgl_modules/diff_targets.hh>
 #include <sgl_modules/diff_texels.hh>
 #include <sgl_modules/diff_words.hh>
@@ -417,6 +418,52 @@ cc::shared_async<cc::vector<sg_diff::output>> run_scene(sg::context* ctx, sg_dif
     co_return result;
 }
 
+/// The `tallies` setup's 64 totals as they start: the first 48 at 0, for add, max, or and xor, and the last 16 at all ones, for min and and.
+[[nodiscard]] cc::vector<u32> starting_totals()
+{
+    auto totals = cc::vector<u32>::create_filled(64, 0u);
+    for (auto i = 48; i < 64; ++i)
+        totals[i] = 0xffff'ffffu;
+    return totals;
+}
+
+cc::shared_async<cc::vector<sg_diff::output>> run_tallies(sg::context* ctx, sg_diff::shaders_on_route on)
+{
+    using io = sgl_modules::diff_tallies::io;
+    auto const pipeline = co_await ctx->cached.acquire_compute_pipeline(
+        {.shader = on.entry, .layout = ctx->cached.acquire_pipeline_layout<io>()});
+    auto const input = ctx->persistent.create_buffer_from_data(word_inputs(), sg::buffer_usage::readonly_buffer);
+    auto const totals = ctx->persistent.create_buffer_from_data(
+        starting_totals(), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<io>(),
+        io{.input = input.as_readonly_buffer(), .totals = totals.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(int(k_threads));
+    auto const back = cmd->download.data_from_buffer(totals);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await back.data();
+    co_return one_output("totals", cc::span<u32 const>(data).as_bytes());
+}
+
+/// The tallies' half: the interpreter runs the threads one after another, which is one of the orders every total must be the same under.
+sg_diff::interpreter_half tallies_for_interpreter(sg::context&)
+{
+    auto const start = starting_totals();
+    auto const totals = cc::pinned_data<u32>::create_copy_of(cc::span<u32 const>(start)).as_mutable_bytes();
+    auto const inputs = word_inputs();
+    auto half = sg_diff::interpreter_half{.outputs = {{.name = "totals", .bytes = totals}}, .threads = k_threads};
+    half.bindings.groups.push_back(
+        {.name = "io",
+         .members
+         = {{.name = "input", .bytes = cc::pinned_data<u32>::create_copy_of(cc::span<u32 const>(inputs)).as_bytes()},
+            {.name = "totals", .mutable_bytes = totals}}});
+    return half;
+}
+
 /// The interpreter's half of a buffer setup: `inputs` as `io.input`, and a zeroed `io.output` the runs store into.
 template <class T>
 sg_diff::interpreter_half buffers_for_interpreter(cc::vector<T> const& inputs)
@@ -604,6 +651,63 @@ cc::shared_async<cc::vector<sg_diff::output>> run_blended(sg::context* ctx, sg_d
     co_return result;
 }
 
+cc::shared_async<cc::vector<sg_diff::output>> run_samples(sg::context* ctx, sg_diff::shaders_on_route on)
+{
+    using io = sgl_modules::diff_targets::io;
+    using samples = sgl_modules::diff_targets::samples;
+    using target = sgl_modules::diff_targets::sampled_target;
+    constexpr int sample_count = 4;
+    auto const vertex
+        = co_await sg_diff::compiled_on(*ctx, on.route, *sg::test::differential_setups::layered::layered.asset);
+    auto const read_stage = co_await sg_diff::compiled_on(
+        *ctx, on.route, *sg::test::differential_setups::read_samples::read_samples.asset);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
+        .layout = ctx->cached.acquire_pipeline_layout<io>(),
+        .vertex_shader = vertex,
+        .fragment_shader = on.entry,
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets = target::states{.color = {.format = sg::pixel_format::rgba16_float}},
+        .sample_count = sample_count,
+        .target_set = target::name,
+    });
+    auto const read = co_await ctx->cached.acquire_compute_pipeline(
+        {.shader = read_stage, .layout = ctx->cached.acquire_pipeline_layout<samples>()});
+
+    auto const input = ctx->persistent.create_buffer_from_data(float_inputs(), sg::buffer_usage::readonly_buffer);
+    auto const group = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<io>(),
+                                                            io{.input = input.as_readonly_buffer()});
+    auto const drawn
+        = ctx->persistent.create_texture_2d_ms({.format = sg::pixel_format::rgba16_float,
+                                                .width = k_extent,
+                                                .height = k_extent,
+                                                .sample_count = sample_count,
+                                                .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<tg::vec4f>::create_defaulted(k_extent * k_extent * sample_count),
+        sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto scope = cmd->raster.render_to(
+            {.color_targets = {drawn.as_render_target_view().cleared(tg::vec4f(0.2f, 0.4f, 0.6f, 0.5f))},
+             .target_set = target::name});
+        scope.bind_pipeline(*pipeline);
+        scope.bind_group(0, *group);
+        scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+    }
+    auto const read_group = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<samples>(),
+        samples{.target = drawn.as_texture_view(), .values = values.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*read);
+    cmd->compute.bind_group(0, *read_group);
+    cmd->compute.dispatch_threads(k_extent * k_extent);
+    auto const back = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    co_return one_output("samples", cc::span<tg::vec4f const>(got).as_bytes());
+}
+
 // One driver encodes both routes' writes alike; two implementations round a float into a format each their own way, by a step of it.
 bool const targets_registered = sg_diff::register_setup({
     .name = "targets",
@@ -621,6 +725,24 @@ bool const blended_registered = sg_diff::register_setup({
     .run = &run_blended,
     .routes = {},
     .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
+});
+
+// Coverage at the standard sample positions is the same on every device; a sample's value is a half float, written alike everywhere.
+bool const samples_registered = sg_diff::register_setup({
+    .name = "samples",
+    .stage = sg::shader_stage::fragment,
+    .module = "diff_targets",
+    .run = &run_samples,
+    .routes = {},
+    .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
+});
+
+bool const tallies_registered = sg_diff::register_setup({
+    .name = "tallies",
+    .run = &run_tallies,
+    .routes = {},
+    .across = {},
+    .interpreted = &tallies_for_interpreter,
 });
 
 bool const raster_registered = sg_diff::register_setup({

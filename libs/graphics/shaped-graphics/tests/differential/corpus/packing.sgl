@@ -1,0 +1,17 @@
+// differential: setup words
+// Packing as a G-buffer or a vertex compressor writes it: unorm and snorm bytes, and half floats.
+// No value packed is a tie between two encodings, and every half is exactly representable, so every target must agree to the bit.
+use diff_words
+
+/// Ten bits of x from `shift`, as a unit float in [0, 1]; no one of them lands halfway between two bytes.
+fun unit_of(x: uint, shift: uint) -> float => (((x >> shift) & 0x3ffu) as float) / 1023.0
+
+@compute(64) fun packed(@thread_id id: int3){diff_words.io}:
+    let i = id.x
+    let x = diff_words.io.input[i]
+    let v = float4(unit_of(x, 0u), unit_of(x, 10u), unit_of(x, 20u), unit_of(x, 22u))
+    diff_words.io.output[4 * i] = pack_unorm4x8(v)
+    diff_words.io.output[4 * i + 1] = pack_snorm4x8(v * 2.0 - float4(1.0, 1.0, 1.0, 1.0))
+    let h = float2(((x & 0xffu) as float) / 64.0, -(((x >> 8u) & 0xffu) as float) / 64.0)
+    diff_words.io.output[4 * i + 2] = pack_half2x16(h)
+    diff_words.io.output[4 * i + 3] = pack_unorm4x8(clamp(v * 1.5 - float4(0.25, 0.25, 0.25, 0.25), float4(0.0, 0.0, 0.0, 0.0), float4(1.0, 1.0, 1.0, 1.0)))
