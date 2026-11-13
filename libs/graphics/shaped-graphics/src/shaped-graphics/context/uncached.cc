@@ -256,9 +256,9 @@ cc::optional<cc::string> geometry_mesh_refusal_of(sg::raster_pipeline_descriptio
         return cc::string("the pipeline draws its geometry stage as a mesh stage, and this backend draws no such "
                           "pipeline yet");
     if (desc.geometry_mesh_corners < 1 || desc.geometry_mesh_corners > 3
-        || desc.topology != sg::primitive_topology::triangle_list)
+        || (desc.topology != sg::primitive_topology::triangle_list && desc.topology != sg::primitive_topology::line_list))
         return cc::string("the pipeline's geometry mesh route assembles points, lines or triangles, and draws a "
-                          "triangle list");
+                          "triangle or a line list");
     if (!desc.mesh_shader.has_value() || desc.task_shader.has_value() || desc.mesh_polyfill.has_value()
         || desc.tessellation_polyfill.has_value())
         return cc::string("the pipeline's geometry mesh route is its mesh stage alone, with no task stage or other "

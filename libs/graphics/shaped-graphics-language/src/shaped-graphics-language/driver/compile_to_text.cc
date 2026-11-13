@@ -199,6 +199,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         if (made.has_error())
             return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
         fused = cc::move(made.value());
+        // reported as a polyfill's layout is, so a host draws the list of the kind the stage writes
+        polyfill_layout = mesh_route_layout.value();
         // what comes back is a mesh entry point, which every target with mesh shaders writes as it is
         mesh = emit::mesh_form::native;
     }

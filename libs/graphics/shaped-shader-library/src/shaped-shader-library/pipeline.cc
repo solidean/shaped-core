@@ -607,8 +607,11 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                                            d.file, d.name)));
         if (meshes_geometry)
         {
+            // the mesh stage draws the list of the kind the geometry stage writes, which its compile states
             desc.geometry_mesh_corners = corners;
-            desc.topology = sg::primitive_topology::triangle_list;
+            desc.topology = desc.mesh_shader.has_value() && desc.mesh_shader.value().mesh_polyfill_corners == 2
+                              ? sg::primitive_topology::line_list
+                              : sg::primitive_topology::triangle_list;
         }
         else
             desc.mesh_polyfill.value().input_corners = corners;
