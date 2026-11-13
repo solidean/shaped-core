@@ -4,8 +4,10 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/metrics.hh>
+#include <shaped-graphics/routine/routine_registry.hh>
 
 namespace sr_test
 {
@@ -51,10 +53,19 @@ inline cc::unique_function<cc::shared_async<cc::unit>()> sweep_after_each(sg::co
     };
 }
 
-/// What a driver awaits as each test's last step, inside that test: the shader print and assert records it left in flight, decoded and logged.
-/// A shader's failed assert is then the error of the test that dispatched it, rather than of whichever test or driver next retires its epoch.
+/// What a driver awaits as each test's last step, inside that test, so what the test left behind is its own work.
+/// The routines it asked for and left pending come up first.
+/// Otherwise the next test's first tick starts their phases, and one still running when that test ends is billed to it as work it left.
+/// Then the shader print and assert records it left in flight are decoded and logged.
+/// A shader's failed assert is so the error of the test that dispatched it, rather than of whichever test or driver next retires its epoch.
+inline cc::shared_async<cc::unit> settled(sg::context_handle ctx)
+{
+    (void)co_await ctx->routines.idle_completion();
+    co_await ctx->diagnostics_settled();
+}
+
 inline cc::unique_function<cc::shared_async<cc::unit>()> settle_each(sg::context_handle ctx)
 {
-    return [ctx = cc::move(ctx)] { return ctx->diagnostics_settled(); };
+    return [ctx = cc::move(ctx)] { return settled(ctx); };
 }
 } // namespace sr_test
