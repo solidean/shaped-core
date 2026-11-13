@@ -18,7 +18,7 @@ The design and its reasons are [incubator/autodiff.md](../spec/incubator/autodif
 
 What is left, each a child issue when it is taken up:
 
-- **Builtins stated not yet**: `determinant`, `refract`, the gathers, `ddx` and `ddy`, and the subgroup and quad operations.
+- **The forward-only builtins going backward**: `ddx`, `ddy`, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and the shuffles, whose transposes need which lane each invocation is.
 - **A texture's levels past 0**, and a sample through a sampler bound at run time.
 - **`tangent[S](…)` built from its fields**, user-declared tangent types, and `tangent[T]` of a type parameter.
 - **A tape past 1024 slots**, which would spill to memory or ask for a `@backward`.

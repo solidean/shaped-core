@@ -1,0 +1,78 @@
+// DIFF-13: a subgroup's operations carry a change across its invocations.
+// A test runs as the lanes of a subgroup (EVAL-140), each with its own value, change and adjoint.
+// Going forward each invocation's change meets its own central difference; going backward an invocation's adjoint
+// holds what every invocation's result took of it, so the two modes meet in their sums over the subgroup:
+// the sum of dr * forward equals the sum of g * dx.
+
+fun spread(x: float) -> float:
+    let a = subgroup_add(x * x)
+    let b = subgroup_inclusive_add(sin(x))
+    let c = subgroup_exclusive_add(x)
+    let d = subgroup_broadcast_first(x * 2.0)
+    let e = subgroup_shuffle_xor(x, 1)
+    let m = subgroup_min(x) + subgroup_max(x * x)
+    let p = subgroup_mul(x) + subgroup_inclusive_mul(x) + subgroup_exclusive_mul(x)
+    return a + b * x + c + d + e * x + m + p
+
+fun agrees(x: float, dx: float, dr: float) -> bool:
+    let h = 1e-3
+    let numeric = (spread(x + dx * h) - spread(x - dx * h)) / (2.0 * h)
+    let forward = fwd_diff(spread, x, dx)
+    let mut g = 0.0
+    bwd_diff(spread, x, mut g, dr)
+    let sum_forward = subgroup_add(dr * forward)
+    let sum_backward = subgroup_add(g * dx)
+    return nearly_equal(forward, numeric, within = 1e-2 * (1.0 + abs(numeric)))
+        and nearly_equal(sum_forward, sum_backward, within = 1e-3 * (1.0 + abs(sum_forward)))
+
+test:
+    let lane = float(test_lane())
+    agrees(0.95 + 0.001 * lane, 1.0 - 0.003 * lane, 0.5 + 0.01 * lane)
+
+// a quad's swaps are their own transposes
+fun swapped(x: float) -> float => quad_swap_x(x * x) + quad_swap_y(x) * x + quad_swap_diagonal(sin(x))
+
+fun swaps_agree(x: float, dx: float, dr: float) -> bool:
+    let h = 1e-3
+    let numeric = (swapped(x + dx * h) - swapped(x - dx * h)) / (2.0 * h)
+    let forward = fwd_diff(swapped, x, dx)
+    let mut g = 0.0
+    bwd_diff(swapped, x, mut g, dr)
+    return nearly_equal(forward, numeric, within = 1e-2 * (1.0 + abs(numeric)))
+        and nearly_equal(subgroup_add(dr * forward), subgroup_add(g * dx), within = 1e-3 * (1.0 + abs(subgroup_add(dr * forward))))
+
+test:
+    let lane = float(test_lane())
+    swaps_agree(0.4 + 0.01 * lane, 0.6 - 0.005 * lane, 1.0 + 0.02 * lane)
+
+// a screen-space derivative goes forward: its change is the derivative of the change
+fun sloped(x: float) -> float => ddx(x * x) + fwidth(sin(x))
+
+fun slopes_agree(x: float, dx: float) -> bool:
+    let h = 1e-3
+    let numeric = (sloped(x + dx * h) - sloped(x - dx * h)) / (2.0 * h)
+    return nearly_equal(fwd_diff(sloped, x, dx), numeric, within = 1e-2 * (1.0 + abs(numeric)))
+
+test:
+    let lane = float(test_lane())
+    slopes_agree(0.3 + 0.01 * lane, 1.0 + 0.02 * lane)
+
+// going backward it is refused: its transpose needs which lane of the quad each invocation is
+binding results:
+    values: mut buffer[float]
+
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_a_shuffle_backward(@thread_id id: int3){results}:
+    require subgroups
+    let mut g = 0.0
+    bwd_diff(shuffled, float(id.x), mut g, 1.0)
+    results.values[id.x] = g
+
+fun shuffled(x: float) -> float => subgroup_shuffle_down(x * x, 1)
+
+// a kernel holds the transposes on every target
+@compute(64) fun spread_backward(@thread_id id: int3){results}:
+    require subgroups
+    let mut g = 0.0
+    bwd_diff(spread, float(id.x) * 0.01, mut g, 1.0)
+    results.values[id.x] = g

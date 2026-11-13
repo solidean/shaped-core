@@ -181,6 +181,9 @@ enum class sgl::builtins::derivative_kind : sgl::u8
     linear,
     /// A rule of the differentiator's own, written once for both modes.
     rule,
+    /// A rule going forward; reverse mode refuses it, since its transpose needs which lane of the quad or the subgroup
+    /// each invocation is, which no function is told.
+    forward_only,
     /// Differentiable, with no rule written yet, which a derivative refuses as `unsupported-yet`.
     not_yet,
 };
