@@ -3,7 +3,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/record/log.hh> // CC_LOG_ERROR, CC_LOG_WARNING
 #include <clean-core/string/format.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -30,6 +30,7 @@ using namespace cc::primitive_defines;
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/load-asset
+// On the web, build the emscripten-webgpu preset and open web/load-asset.html, served over https or from localhost.
 
 namespace
 {
@@ -125,7 +126,7 @@ void push_le_f32(cc::vector<byte>& out, f32 value)
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/load-asset")
+ASYNC_EXAMPLE("shaped-viewer/load-asset")
 {
     // The whole filesystem this example has.
     // A host with a real virtual filesystem replaces the hook exactly here, process-wide, rather than threading a
@@ -150,7 +151,7 @@ EXAMPLE("shaped-viewer/load-asset")
     if (asset.has_error())
     {
         CC_LOG_ERROR("load-asset: could not load the asset: {}", asset.error().to_string());
-        return;
+        co_return;
     }
 
     // A successful load with issues is the normal case for a real asset, so this is worth printing rather than
@@ -168,9 +169,10 @@ EXAMPLE("shaped-viewer/load-asset")
     // to make the subject small.
     auto const target = tg::pos3d(double(center[0]), 1.6, double(center[2]));
 
-    for (auto f : sv::interactive("shaped-viewer/load-asset"))
+    auto frames = sv::interactive_async("shaped-viewer/load-asset");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
         view.initial_orbit({.target = target,
                             .distance = 9.5,
                             .azimuth = tg::angle_d::make_from_degree(38.0),

@@ -15,8 +15,6 @@ constexpr auto error_type = checked_module::error_type;
 // vulkan's guaranteed maxGeometryTotalOutputComponents too
 constexpr auto k_max_geometry_vertices = 256;
 constexpr auto k_max_geometry_scalars = 1024;
-// CHK-480: what D3D allows a mesh stage, and vulkan's VK_EXT_mesh_shader guarantees
-constexpr auto k_max_mesh_outputs = 256;
 constexpr auto k_max_mesh_workgroup = 128;
 /// What one task workgroup launches at most on dx12, `DispatchMesh`'s 2^22 workgroups.
 constexpr auto k_max_task_meshes = 1 << 22;

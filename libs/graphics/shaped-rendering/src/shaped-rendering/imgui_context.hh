@@ -106,6 +106,10 @@ public:
         /// Framebuffer pixels per display unit — 2 on a Retina display.
         /// imgui rasterizes its fonts at this density, so leaving it 1 there draws blurry text.
         tg::vec2f framebuffer_scale = tg::vec2f(1.0f, 1.0f);
+
+        /// Whether the frame is the `sr.imgui.frame` record span, open until `end_frame`.
+        /// False for a frame its caller authors across a `co_await`, which a span may not cross.
+        bool recorded = true;
     };
 
     /// Starts a frame: publishes the display size and timestep, then ImGui::NewFrame().
@@ -116,7 +120,8 @@ public:
     ///
     /// Skips the frame's text-input handover while the window is minimized (it has no drawable area then);
     /// the caller should skip rendering too — see window::is_minimized.
-    void begin_frame(window& win, float delta_time);
+    /// `recorded` is `frame_info::recorded`.
+    void begin_frame(window& win, float delta_time, bool recorded = true);
 
     /// Ends the frame and builds the draw data, which ImGui::GetDrawData() then returns.
     void end_frame();
@@ -198,4 +203,7 @@ private:
 
     /// Whether a frame has begun, which is what lets load_settings assert on being too late.
     bool _frame_started = false;
+
+    /// Whether the open frame opened the `sr.imgui.frame` span `end_frame` closes.
+    bool _frame_recorded = false;
 };

@@ -1,7 +1,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/log.hh> // CC_LOG_INFO
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual
@@ -41,6 +41,7 @@ using namespace cc::primitive_defines;
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/mesh-structure-dense
+// On the web, build the emscripten-webgpu preset and open web/mesh-structure-dense.html, served over https or from localhost.
 //   uv run dev.py example shaped-viewer/mesh-structure-dense --capture
 
 namespace
@@ -184,7 +185,7 @@ tg::vec3f ramp(float t)
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/mesh-structure-dense")
+ASYNC_EXAMPLE("shaped-viewer/mesh-structure-dense")
 {
     auto mesh = icosahedron();
     for (auto i = 0; i < subdivisions; ++i)
@@ -250,9 +251,10 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
     structure.attributes.push_back(
         sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
 
-    for (auto f : sv::interactive("shaped-viewer/mesh-structure-dense"))
+    auto frames = sv::interactive_async("shaped-viewer/mesh-structure-dense");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0, 0),
                             .distance = 3.9,
                             .azimuth = tg::angle_d::make_from_degree(25.0),

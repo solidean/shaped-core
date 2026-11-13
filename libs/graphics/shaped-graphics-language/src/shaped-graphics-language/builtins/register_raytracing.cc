@@ -1023,8 +1023,8 @@ void sgl::builtins::register_raytracing(registry& r)
                       .msl_names = k_trace_ray_msl},
             .writes_through = written_argument::element,
             .takes_element = true,
-            .takes_ray_time = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
+            .takes_ray_time = true,
         });
 
     r.add_comment("// A trace of a ray type with `reorder` where the device has shader execution reordering "
@@ -1049,9 +1049,9 @@ void sgl::builtins::register_raytracing(registry& r)
                           .hlsl_names = k_trace_ray_reordered_hlsl},
                 .writes_through = written_argument::element,
                 .takes_element = true,
-                .takes_ray_time = true,
                 // shader execution reordering too, which the trace that chose it records as the device's grant
                 .features = check::feature_set(check::feature::raytracing_pipeline),
+                .takes_ray_time = true,
             });
 
     r.add_comment("// A hit object: a trace whose shaders have not run, which only a device with shader execution "
@@ -1081,8 +1081,8 @@ void sgl::builtins::register_raytracing(registry& r)
                       .hlsl_names = k_hit_object_hlsl},
             .writes_through = written_argument::element,
             .takes_element = true,
-            .takes_ray_time = true,
             .features = ser,
+            .takes_ray_time = true,
         });
     for (auto i = u32(0); i < u32(sizeof(k_hit_object_reads) / sizeof(k_hit_object_reads[0])); ++i)
         r.add(function_record{

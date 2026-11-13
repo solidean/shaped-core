@@ -27,7 +27,7 @@ target_sources(shaped-xr
     src/shaped-xr/impl/actions.hh
 )
 target_sources(shaped-xr PRIVATE src/shaped-xr/impl/openxr.hh)
-target_include_directories(shaped-xr PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(shaped-xr PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 target_link_libraries(shaped-xr PUBLIC shaped-rendering)
 
 sc_add_shader_package(

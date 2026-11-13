@@ -38,6 +38,11 @@ template <class T>
 inline constexpr bool is_vector_v<cc::vector<T>> = true;
 
 template <class T>
+inline constexpr bool is_fixed_array_v = false;
+template <class T, isize N>
+inline constexpr bool is_fixed_array_v<cc::fixed_array<T, N>> = true;
+
+template <class T>
 inline constexpr bool is_layered_v = false;
 template <class T>
 inline constexpr bool is_layered_v<layered<T>> = true;

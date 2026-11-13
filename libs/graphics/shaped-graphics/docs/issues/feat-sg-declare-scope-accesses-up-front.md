@@ -26,3 +26,7 @@ It is safe only for a consumer after the submit, which is every use it has.
 Not every transition is even legal inside a scope, so the declaration has to reach the barrier before the scope opens, not just avoid the split.
 
 Tests and examples that touch a resource once before a scope, to keep its barrier out of the scope, carry an `issue:` marker naming this.
+
+**sv's raster path splits every frame on vulkan.**
+`raster_routine` declares its bindless tables after its shading scope opens, and their barriers land at the first draw inside it.
+So every frame of the forward hybrid on vulkan pays a store and a reload of every target, which `backend-agreement-test` allows under this issue.

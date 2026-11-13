@@ -140,6 +140,11 @@ public:
     /// A frame the window could not draw is not a previous frame, so resuming from a minimized window reports the whole idle gap here — clamp it before integrating anything.
     [[nodiscard]] double delta_seconds() const { return _delta_seconds; }
 
+    /// What the GPU spent on the latest frame whose timing has come back, in milliseconds, from its frame command list's first command to its last.
+    /// Usually two or three frames old, since it is read back rather than waited for.
+    /// Empty without `sg::feature::timestamp_query`, and until the first timing lands.
+    [[nodiscard]] cc::optional<double> gpu_frame_ms() const;
+
     /// The default window, created on first use.
     [[nodiscard]] window_ref window();
 
@@ -217,9 +222,13 @@ public:
 
     /// Flattens the frame into a render plan, records it and presents.
     /// Idempotent, and a no-op on a closed frame.
+    /// Blocks until the frames in flight fall back to the swapchain's depth; `viewer::end_frame_async` is the form that does not.
     void present();
 
 private:
+    /// present without the wait: the frame is submitted, and its throttle left with the viewer.
+    void submit();
+
     friend class viewer;
     friend class frame_scope;
     friend class frame_iterator;

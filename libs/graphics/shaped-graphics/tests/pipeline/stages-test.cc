@@ -73,6 +73,40 @@ cc::optional<cc::string_view> no_geometry_stage(sg::context const& ctx)
     return {};
 }
 
+/// The routes a polyfilled geometry stage takes on `ctx`, each drawn to the same images: one pass, the native stage's,
+/// where the device has a geometry stage; the compute route, and the mesh route where the device has mesh shaders.
+cc::vector<sg::geometry_polyfill_route> geometry_routes_of(sg::context const& ctx)
+{
+    auto routes = cc::vector<sg::geometry_polyfill_route>{sg::geometry_polyfill_route::compute};
+    if (!ctx.supports(sg::feature::geometry_shader) && ctx.supports(sg::feature::mesh_shader)
+        && ctx.draws_geometry_mesh_route())
+        routes.push_back(sg::geometry_polyfill_route::mesh);
+    return routes;
+}
+
+/// Draws a polyfilled geometry stage by `route` while it lives, and restores the route the context took before.
+struct geometry_routing
+{
+    sg::context& ctx;
+    sg::geometry_polyfill_route before;
+
+    geometry_routing(sg::context& c, sg::geometry_polyfill_route route) : ctx(c), before(c.geometry_polyfill_route())
+    {
+        ctx.set_geometry_polyfill_route(route);
+    }
+    ~geometry_routing() { ctx.set_geometry_polyfill_route(before); }
+    geometry_routing(geometry_routing const&) = delete;
+    geometry_routing& operator=(geometry_routing const&) = delete;
+};
+
+/// Whether `pipeline` was built by `route` on `ctx`, which a test checks so a cached pipeline of the other route is caught.
+bool is_built_by(sg::context const& ctx, sg::raster_pipeline const& pipeline, sg::geometry_polyfill_route route)
+{
+    if (ctx.supports(sg::feature::geometry_shader))
+        return true;
+    return (pipeline.geometry_mesh_corners() > 0) == (route == sg::geometry_polyfill_route::mesh);
+}
+
 /// Polyfills a geometry stage the device lacks while it lives, and restores what the context did before.
 struct geometry_polyfilling
 {
@@ -281,40 +315,46 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage's ended strips draw each copy and no
     if (auto const why = no_geometry_stage(*ctx); why.has_value())
         SKIP(why.value());
     auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
 
-    // One triangle in the left half, which the geometry stage emits again one unit to the right.
-    // Without the strip ended between them, the strip's middle triangle would bridge the two across the bottom.
-    auto const a = tg::vec2f(-1, -1);
-    auto const b = tg::vec2f(0, -1);
-    auto const c = tg::vec2f(-1, 1);
-    auto const shift = tg::vec2f(1, 0);
-    shaders::stages::stage_corner const corners[] = {{.position = a}, {.position = b}, {.position = c}};
-    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::doubled);
+        // One triangle in the left half, which the geometry stage emits again one unit to the right.
+        // Without the strip ended between them, the strip's middle triangle would bridge the two across the bottom.
+        auto const a = tg::vec2f(-1, -1);
+        auto const b = tg::vec2f(0, -1);
+        auto const c = tg::vec2f(-1, 1);
+        auto const shift = tg::vec2f(1, 0);
+        shaders::stages::stage_corner const corners[] = {{.position = a}, {.position = b}, {.position = c}};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::doubled);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
 
-    auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
-                                                         [&](sg::rendering_scope& scope)
-                                                         {
-                                                             scope.bind_pipeline(*pipeline);
-                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
-                                                             scope.draw({.vertex_range = {.offset = 0, .size = 3}});
-                                                         });
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                             [&](sg::rendering_scope& scope)
+                                                             {
+                                                                 scope.bind_pipeline(*pipeline);
+                                                                 scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                                 scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+                                                             });
 
-    auto bridged = 0;
-    for (auto y = 0; y < size; ++y)
-        for (auto x = 0; x < size; ++x)
-        {
-            auto const p = centre_of(x, y);
-            auto const first = side_of(p, a, b, c);
-            auto const second = side_of(p, a + shift, b + shift, c + shift);
-            auto const bridge = side_of(p, c, a + shift, b + shift);
-            if (first == 0 || second == 0 || bridge == 0)
-                continue;
-            auto const inside = first > 0 || second > 0;
-            bridged += !inside && bridge > 0 ? 1 : 0;
-            CHECK(drawn(pixels, x, y) == inside).context(cc::format("pixel ({}, {})", x, y));
-        }
-    CHECK(bridged > 0); // the probes include pixels only a bridging triangle would reach
+        auto bridged = 0;
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+            {
+                auto const p = centre_of(x, y);
+                auto const first = side_of(p, a, b, c);
+                auto const second = side_of(p, a + shift, b + shift, c + shift);
+                auto const bridge = side_of(p, c, a + shift, b + shift);
+                if (first == 0 || second == 0 || bridge == 0)
+                    continue;
+                auto const inside = first > 0 || second > 0;
+                bridged += !inside && bridge > 0 ? 1 : 0;
+                CHECK(drawn(pixels, x, y) == inside).context(cc::format("{}: pixel ({}, {})", by, x, y));
+            }
+        CHECK(bridged > 0); // the probes include pixels only a bridging triangle would reach
+    }
 }
 
 ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id and passes it on flat",
@@ -324,71 +364,30 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id a
     if (auto const why = no_geometry_stage(*ctx); why.has_value())
         SKIP(why.value());
     auto const polyfill = geometry_polyfilling(*ctx);
-
-    // Two triangles over the whole target: the lower-right is primitive 0 and the upper-left primitive 1.
-    auto const bl = tg::vec2f(-1, -1);
-    auto const br = tg::vec2f(1, -1);
-    auto const tr = tg::vec2f(1, 1);
-    auto const tl = tg::vec2f(-1, 1);
-    shaders::stages::stage_corner const corners[]
-        = {{.position = bl}, {.position = br}, {.position = tr}, {.position = bl}, {.position = tr}, {.position = tl}};
-    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::primitive_ids);
-
-    auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
-                                                         [&](sg::rendering_scope& scope)
-                                                         {
-                                                             scope.bind_pipeline(*pipeline);
-                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
-                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
-                                                         });
-
-    for (auto y = 0; y < size; ++y)
-        for (auto x = 0; x < size; ++x)
-        {
-            auto const p = centre_of(x, y);
-            auto const lower = side_of(p, bl, br, tr);
-            auto const upper = side_of(p, bl, tr, tl);
-            if (lower == 0 || upper == 0)
-                continue;
-            CHECK(pixels[0].rgba_float(x, y)[0] == (lower > 0 ? 0.0f : 1.0f)).context(cc::format("pixel ({}, {})", x, y));
-        }
-}
-
-ASYNC_INVOCABLE_TEST("sg - an indexed draw through a geometry stage assembles each triangle from its indices",
-                     (sg::context_handle const& ctx))
-{
-    REQUIRE(ctx != nullptr);
-    if (auto const why = no_geometry_stage(*ctx); why.has_value())
-        SKIP(why.value());
-    auto const polyfill = geometry_polyfilling(*ctx);
-
-    // The two triangles of the primitive-id test from four corners: 16-bit indices first, then 32-bit ones offset by a
-    // decoy corner, each past an unused leading pair.
-    auto const bl = tg::vec2f(-1, -1);
-    auto const br = tg::vec2f(1, -1);
-    auto const tr = tg::vec2f(1, 1);
-    auto const tl = tg::vec2f(-1, 1);
-    shaders::stages::stage_corner const corners[]
-        = {{.position = tg::vec2f(5, 5)}, {.position = bl}, {.position = br}, {.position = tr}, {.position = tl}};
-    u16 const short_indices[] = {0, 0, 1, 2, 3, 1, 3, 4};
-    u32 const long_indices[] = {9, 9, 0, 1, 2, 0, 2, 3};
-    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
-    auto const shorts = ctx->persistent.create_buffer_from_data(short_indices, sg::buffer_usage::index_buffer);
-    auto const longs = ctx->persistent.create_buffer_from_data(long_indices, sg::buffer_usage::index_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::primitive_ids);
-
-    for (auto const is_short : {true, false})
+    for (auto const route : geometry_routes_of(*ctx))
     {
-        auto const pixels = co_await sg_test::draw_offscreen(
-            *ctx, stage_target(),
-            [&](sg::rendering_scope& scope)
-            {
-                scope.bind_pipeline(*pipeline);
-                scope.bind_vertex_buffer(buffer.as_vertex_buffer());
-                scope.bind_index_buffer(is_short ? shorts.as_index_buffer() : longs.as_index_buffer());
-                scope.draw_indexed({.index_range = {.offset = 2, .size = 6}, .vertex_offset = is_short ? 0 : 1});
-            });
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+
+        // Two triangles over the whole target: the lower-right is primitive 0 and the upper-left primitive 1.
+        auto const bl = tg::vec2f(-1, -1);
+        auto const br = tg::vec2f(1, -1);
+        auto const tr = tg::vec2f(1, 1);
+        auto const tl = tg::vec2f(-1, 1);
+        shaders::stages::stage_corner const corners[] = {{.position = bl}, {.position = br}, {.position = tr},
+                                                         {.position = bl}, {.position = tr}, {.position = tl}};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::primitive_ids);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                             [&](sg::rendering_scope& scope)
+                                                             {
+                                                                 scope.bind_pipeline(*pipeline);
+                                                                 scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                                 scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                             });
+
         for (auto y = 0; y < size; ++y)
             for (auto x = 0; x < size; ++x)
             {
@@ -398,8 +397,62 @@ ASYNC_INVOCABLE_TEST("sg - an indexed draw through a geometry stage assembles ea
                 if (lower == 0 || upper == 0)
                     continue;
                 CHECK(pixels[0].rgba_float(x, y)[0] == (lower > 0 ? 0.0f : 1.0f))
-                    .context(cc::format("{} indices, pixel ({}, {})", is_short ? "16-bit" : "32-bit", x, y));
+                    .context(cc::format("{}: pixel ({}, {})", by, x, y));
             }
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an indexed draw through a geometry stage assembles each triangle from its indices",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+
+        // The two triangles of the primitive-id test from four corners: 16-bit indices first, then 32-bit ones offset by a
+        // decoy corner, each past an unused leading pair.
+        auto const bl = tg::vec2f(-1, -1);
+        auto const br = tg::vec2f(1, -1);
+        auto const tr = tg::vec2f(1, 1);
+        auto const tl = tg::vec2f(-1, 1);
+        shaders::stages::stage_corner const corners[]
+            = {{.position = tg::vec2f(5, 5)}, {.position = bl}, {.position = br}, {.position = tr}, {.position = tl}};
+        u16 const short_indices[] = {0, 0, 1, 2, 3, 1, 3, 4};
+        u32 const long_indices[] = {9, 9, 0, 1, 2, 0, 2, 3};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const shorts = ctx->persistent.create_buffer_from_data(short_indices, sg::buffer_usage::index_buffer);
+        auto const longs = ctx->persistent.create_buffer_from_data(long_indices, sg::buffer_usage::index_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::primitive_ids);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+
+        for (auto const is_short : {true, false})
+        {
+            auto const pixels = co_await sg_test::draw_offscreen(
+                *ctx, stage_target(),
+                [&](sg::rendering_scope& scope)
+                {
+                    scope.bind_pipeline(*pipeline);
+                    scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                    scope.bind_index_buffer(is_short ? shorts.as_index_buffer() : longs.as_index_buffer());
+                    scope.draw_indexed({.index_range = {.offset = 2, .size = 6}, .vertex_offset = is_short ? 0 : 1});
+                });
+            for (auto y = 0; y < size; ++y)
+                for (auto x = 0; x < size; ++x)
+                {
+                    auto const p = centre_of(x, y);
+                    auto const lower = side_of(p, bl, br, tr);
+                    auto const upper = side_of(p, bl, tr, tl);
+                    if (lower == 0 || upper == 0)
+                        continue;
+                    CHECK(pixels[0].rgba_float(x, y)[0] == (lower > 0 ? 0.0f : 1.0f))
+                        .context(cc::format("{}, {} indices, pixel ({}, {})", by, is_short ? "16-bit" : "32-bit", x, y));
+                }
+        }
     }
 }
 

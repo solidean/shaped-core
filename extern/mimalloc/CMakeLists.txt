@@ -14,7 +14,8 @@ add_library(mimalloc STATIC ${MIMALLOC_DIR}/src/static.c)
 set_source_files_properties(${MIMALLOC_DIR}/src/static.c PROPERTIES LANGUAGE CXX)
 
 # SYSTEM so mimalloc.h does not trip our warnings in consumers (incl. tests).
-target_include_directories(mimalloc SYSTEM PUBLIC ${MIMALLOC_DIR}/include)
+# The build tree's only: every library links it PRIVATE, so an installed copy is an archive to link, never a header to include.
+target_include_directories(mimalloc SYSTEM PUBLIC $<BUILD_INTERFACE:${MIMALLOC_DIR}/include>)
 
 target_compile_definitions(mimalloc PRIVATE
     MI_STATIC_LIB

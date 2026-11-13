@@ -175,6 +175,15 @@ void webgpu_context::shutdown()
             finalizers.push_back(cc::move(f));
     _epochs.staged = {};
 
+    // The reuse sides hold WebGPU objects nothing will claim again; each goes with its last reference.
+    _claimable_textures = {};
+    _incoming_textures = {};
+    _claimable_buffers = {};
+    _incoming_buffers = {};
+    _current_groups = {};
+    _previous_groups = {};
+    _view_sweep = {};
+
     _queries.shutdown();
     _acceleration.shutdown();
     _mesh_scratch = {};

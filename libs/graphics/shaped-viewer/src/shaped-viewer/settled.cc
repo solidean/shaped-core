@@ -1,7 +1,9 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async.hh> // cc::try_async_blocking_get
+#include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh> // cc::async_resume_on
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/capture.hh> // sr::capture_request
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
@@ -12,17 +14,25 @@
 
 namespace sv
 {
-cc::result<settled_image> render_settled(sg::context& ctx,
-                                         cc::string_view id,
-                                         settled_options const& options,
-                                         cc::function_ref<void(frame&)> author)
+cc::shared_async<settled_image> render_settled(sg::context& ctx,
+                                               cc::string id,
+                                               settled_options options,
+                                               cc::unique_function<void(frame&)> author)
 {
     if (options.size[0] <= 0 || options.size[1] <= 0)
-        return cc::error(cc::format("a settled render of {} by {} pixels has none", options.size[0], options.size[1]));
+        co_return cc::error(cc::format("a settled render of {} by {} pixels has none", options.size[0], options.size[1]));
 
-    auto created = viewer::try_create(ctx, id, {.width = options.size[0], .height = options.size[1], .headless = true});
+    // a guest runs on its host's home, between the host's frames; an app of its own on the device's home, if any
+    if (options.host != nullptr)
+        co_await cc::async_resume_on(*options.host);
+    else if (auto* const home = ctx.device_home())
+        co_await cc::async_resume_on(*home);
+
+    auto created = viewer::try_create(
+        ctx, id,
+        {.width = options.size[0], .height = options.size[1], .headless = true, .guest = options.host != nullptr});
     if (created.has_error())
-        return cc::error(cc::move(created.error()));
+        co_return cc::error(cc::move(created.error()));
     auto& v = created.value();
 
     // The capture's own settling decides when the image is finished; its readback lands here rather than in a file.
@@ -31,21 +41,30 @@ cc::result<settled_image> render_settled(sg::context& ctx,
         {.active = true, .size = options.size, .accumulate = options.samples, .timeout_seconds = options.timeout_seconds},
         &landing);
     v.begin_frames();
-    for (auto f : v.frames())
-        author(f);
+    while (v.is_running())
+    {
+        auto& f = v.begin_frame();
+        if (f.is_open())
+            author(f);
+        auto const pacing = v.end_frame_async();
+        co_await cc::async_settled(pacing);
+    }
+    auto const finished = v.finish();
+    co_await cc::async_settled(finished);
 
     if (!landing.readback.has_value())
-        return cc::error(cc::format("the settled render {} ended before its image was finished", id));
+        co_return cc::error(cc::format("the settled render {} ended before its image was finished", id));
     auto const landed = landing.readback.value().bytes();
-    auto const bytes = cc::try_async_blocking_get(landed);
-    if (bytes.has_error())
-        return cc::error(cc::format("reading the settled render {} back failed", id));
+    co_await cc::async_settled(landed);
+    auto const* const bytes = landed->try_value();
+    if (bytes == nullptr)
+        co_return cc::error(cc::format("reading the settled render {} back failed", id));
 
     // The offscreen target is blue, green, red and alpha; a caller gets red first.
-    auto const span = bytes.value().span();
+    auto const span = bytes->span();
     auto const count = isize(options.size[0]) * options.size[1] * 4;
     if (span.size() < count)
-        return cc::error(cc::format("the settled render {} read back {} bytes of {}", id, span.size(), count));
+        co_return cc::error(cc::format("the settled render {} read back {} bytes of {}", id, span.size(), count));
     auto out = settled_image{.size = options.size,
                              .rgba = cc::vector<u8>::create_uninitialized(count),
                              .settled = landing.settled};
@@ -61,14 +80,15 @@ cc::result<settled_image> render_settled(sg::context& ctx,
     if (landing.channel_sums.has_value())
     {
         auto const sums_landing = landing.channel_sums.value().data();
-        auto const sums = cc::try_async_blocking_get(sums_landing);
-        if (sums.has_error())
-            return cc::error(cc::format("reading the settled render {}'s channels back failed", id));
+        co_await cc::async_settled(sums_landing);
+        auto const* const sums = sums_landing->try_value();
+        if (sums == nullptr)
+            co_return cc::error(cc::format("reading the settled render {}'s channels back failed", id));
         auto const pixels = isize(landing.extent[0]) * landing.extent[1];
         auto const slots = isize(cc::popcount(landing.channel_mask)) + 1;
-        if (landing.extent != options.size || sums.value().span().size() < pixels * slots)
-            return cc::error(cc::format("the settled render {}'s channels are laid out over {} by {}, not its image",
-                                        id, landing.extent[0], landing.extent[1]));
+        if (landing.extent != options.size || sums->span().size() < pixels * slots)
+            co_return cc::error(cc::format("the settled render {}'s channels are laid out over {} by {}, not its image",
+                                           id, landing.extent[0], landing.extent[1]));
         auto k = isize(1);
         for (auto bit = u32(1); bit != 0 && bit <= landing.channel_mask; bit <<= 1)
         {
@@ -78,24 +98,25 @@ cc::result<settled_image> render_settled(sg::context& ctx,
                                            .values = cc::vector<tg::vec4f>::create_uninitialized(pixels)};
             for (auto s = isize(0); s < pixels; ++s)
             {
-                auto const n = sums.value().span()[s * slots][0];
-                channel.values[s] = sums.value().span()[s * slots + k] / cc::max(n, 1.0f);
+                auto const n = sums->span()[s * slots][0];
+                channel.values[s] = sums->span()[s * slots + k] / cc::max(n, 1.0f);
             }
             out.channels.push_back(cc::move(channel));
             ++k;
         }
     }
-    return out;
+    co_return out;
 }
 
-cc::result<settled_image> render_settled(cc::string_view id,
-                                         settled_options const& options,
-                                         cc::function_ref<void(frame&)> author)
+cc::shared_async<settled_image> render_settled(cc::string id,
+                                               settled_options options,
+                                               cc::unique_function<void(frame&)> author)
 {
-    // Held for the call, so the context outlives the viewer that renders on it.
+    // Held for the async, so the context outlives the viewer that renders on it.
     auto handle = acquire_viewer_context();
     if (handle.has_error())
-        return cc::error(cc::move(handle.error()));
-    return render_settled(*handle.value(), id, options, author);
+        co_return cc::error(cc::move(handle.error()));
+    auto const rendered = render_settled(*handle.value(), cc::move(id), options, cc::move(author));
+    co_return co_await cc::async_take(rendered);
 }
 } // namespace sv

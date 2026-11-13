@@ -80,7 +80,13 @@ struct dome_lobe;             // one von Mises-Fisher lobe of a dome
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
-enum class render_channel : u32; // a quantity a traced layer averages beside its image (render_settings.hh)
+struct screen_ambient_occlusion;  // a raster_bound layer's screen-space ambient occlusion (view/render_settings.hh)
+enum class shadow_technique : u8; // how a raster_bound layer finds its shadows (view/render_settings.hh)
+struct shadow_settings;           // a raster_bound layer's shadows (view/render_settings.hh)
+struct screen_space_reflections;  // a raster_bound layer's mirror reflections (view/render_settings.hh)
+struct temporal_antialiasing;     // a raster_bound layer's temporal antialiasing (view/render_settings.hh)
+struct traced_indirect;           // a raster_bound layer's traced indirect light (view/render_settings.hh)
+enum class render_channel : u32;  // a quantity a traced layer averages beside its image (render_settings.hh)
 enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
@@ -291,9 +297,12 @@ enum class raster_culling : u8; // how far a raster frame culls (rendering/raste
 enum class raster_shading : u8; // which pixel stage a raster frame's shading draws run (rendering/raster_routine.hh)
 struct raster_thin_targets;     // the hybrid's thin G-buffer (rendering/raster_routine.hh)
 class raster_routine;
+struct raster_bound_frame_desc; // one bound raster frame (rendering/raster_bound_routine.hh)
+class raster_bound_routine;
 enum class hybrid_lighting : u8; // where a hybrid frame lights its primary hits (view/render_settings.hh)
 enum class still_denoise : u8; // what denoises a still image once the temporal member hands over (view/render_settings.hh)
-struct hybrid_frame_desc;      // one hybrid frame (rendering/hybrid_routine.hh)
+enum class environment_estimate : u8; // how a traced layer estimates its environment's diffuse light (view/render_settings.hh)
+struct hybrid_frame_desc;             // one hybrid frame (rendering/hybrid_routine.hh)
 class hybrid_routine;
 class view_renderer;
 class viewer_renderer;
@@ -307,6 +316,7 @@ class id_scope;
 class frame_range;
 class frame_iterator;
 struct frame_sentinel;
+class async_frames; // interactive_async's awaited frame loop, the one a browser page runs (interactive.hh)
 
 // capturing a run to an image (see capture.hh); the protocol itself is sr::capture_request
 struct capture_context;

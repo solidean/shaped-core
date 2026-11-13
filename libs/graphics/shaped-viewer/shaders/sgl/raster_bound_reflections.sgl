@@ -1,0 +1,149 @@
+// The bound raster mode's screen-space reflections: each half-size pixel's mirror ray marched across the prepass's depth,
+// and where it meets a surface, last frame's lit image there, reprojected through the previous camera.
+//
+// The march steps evenly across the screen and interpolates the reciprocal of view depth along it, so its steps are as
+// dense in pixels near the camera as far from it (McGuire and Mara, "Efficient GPU Screen-Space Ray Tracing", JCGT 2014).
+// The mirror ray leaves the surface the depth shows, so a normal map does not bend it; the shading fades what it found
+// out with roughness, toward the environment's reflection.
+// Last frame's image is the layer's color target before this frame's shading overwrites it, so nothing is copied.
+module raster_bound_reflections
+
+use raster
+use raster_bound
+use raster_bound_shadow_maps
+use scene
+
+/// The most steps one ray takes across the screen.
+const reflection_steps = 48
+
+/// The reflection pass's group, besides `raster_bound.bound`.
+binding reflection_source:
+    /// The depth the prepass laid down, reversed, `near / view depth`.
+    depth: texture_2d_depth
+
+    /// The prepass's flat normal of each full-size pixel's triangle, turned toward the camera; zero where none was drawn.
+    normals: texture_2d[float4]
+
+    /// Last frame's lit image, the layer's color target as the shading left it; radiance in rgb.
+    @unfilterable previous: texture_2d[float4]
+
+    /// `sv::screen_space_reflections`: the farthest a ray reaches, in world units; how thick a surface the depth shows is
+    /// taken to be, as a share of its distance, behind which a ray is lost; and an intensity; w unused.
+    settings: float4
+
+/// What the reflection pass writes at half the image's size: the reflected radiance and how far to trust it, and the view
+/// depth of the surface it belongs to, which the shading's upsample weighs by.
+@pixel struct reflection_target:
+    @format(.rgba16_float) reflection: float4
+    @format(.r32_float) depth: float
+
+/// The view depth `world` lies at from camera `cam`.
+fun view_depth(cam: scene.camera, world: float3) -> float => dot(world - cam.position, normalize(cam.forward))
+
+/// 1 inside the image, falling to 0 over the outer tenth of its smaller side: a reflection cut off by the screen's edge fades.
+fun edge_fade(pixel: float2, size: float2) -> float:
+    let margin = 0.1 * min(size.x, size.y)
+    let d = min(min(pixel.x, size.x - pixel.x), min(pixel.y, size.y - pixel.y))
+    return saturate(d / margin)
+
+/// No reflection, at a surface lying at view depth `depth`; 0 for none, at the far plane.
+fun no_reflection(depth: float) -> reflection_target:
+    return {reflection = float4(0.0), depth = depth}
+
+/// The reflection at half-size pixel `h`: radiance, and a confidence from 0 for none to 1, then the surface's view depth.
+fun reflection(h: int2){raster_bound.bound, reflection_source} -> reflection_target:
+    let f = raster_bound.bound.frame[0]
+    let pixel = h * 2
+    let center = raster_bound_shadow_maps.world_from(reflection_source.depth, f, pixel)
+    if center.w == 0.0 => return no_reflection(0.0)
+    let p = center.xyz
+    let cam = scene.camera(..f.camera)
+    let n = raster_bound_shadow_maps.normal_from(reflection_source.normals, reflection_source.depth, f, pixel, p, cam.position)
+    let v = normalize(cam.position - p)
+    let r = normalize(reflect(vec3(..(-v)), vec3(..n)).xyz)
+    let depth_here = view_depth(cam, p)
+
+    // The ray from just off the surface, cut where it would cross the near plane: a point behind the camera has no pixel.
+    let start = p + n * (0.002 * depth_here)
+    let mut reach = reflection_source.settings.x
+    let toward = dot(r, normalize(cam.forward))
+    let near = f.near_plane * 1.5
+    if toward < 0.0:
+        reach = min(reach, (view_depth(cam, start) - near) / -toward)
+    if reach <= 0.0 => return no_reflection(depth_here)
+    let end = start + r * reach
+
+    let s0 = scene.camera_project(cam, start - cam.position, f.size)
+    let s1 = scene.camera_project(cam, end - cam.position, f.size)
+    let k0 = 1.0 / view_depth(cam, start)
+    let k1 = 1.0 / view_depth(cam, end)
+    let span = length(s1 - s0)
+    if span < 1.0 => return no_reflection(depth_here)
+    let steps = min(reflection_steps as float, max(span / 2.0, 1.0))
+
+    // Each pixel starts at its own fraction of a step, through a 4x4 pattern, so the steps' banding breaks up.
+    let x = h.x & 3
+    let y = h.y & 3
+    let e = x ^ y
+    let bayer = ((e & 1) << 3) | ((y & 1) << 2) | (((e >> 1) & 1) << 1) | ((y >> 1) & 1)
+    let jitter = ((bayer as float) + 0.5) / 16.0
+
+    // A hit is the ray crossing the surface the depth shows between two steps: behind it by no more than the ray
+    // travelled in depth over the step.
+    // A ray further behind than the surface's assumed thickness has gone behind an object whose far side the depth
+    // cannot show, and what it reflects there is unknown: the march stops with no reflection rather than guessing.
+    // Between the two the object is taken as thin, a chair's leg, and the ray goes on behind it.
+    let mut previous_t = 0.0
+    let mut previous_depth = 1.0 / k0
+    let mut hit_t = -1.0
+    for i in 0 ..< reflection_steps:
+        if hit_t < 0.0 and (i as float) < steps:
+            let t = ((i as float) + jitter) / steps
+            let s = mix(s0, s1, t)
+            if s.x < 0.0 or s.y < 0.0 or s.x >= f.size.x or s.y >= f.size.y:
+                break
+            let ray_depth = 1.0 / mix(k0, k1, t)
+            let d = reflection_source.depth.load(int2(s))
+            if d > 0.0:
+                let scene_depth = f.near_plane / d
+                let behind = ray_depth - scene_depth
+                let crossing = max(1.5 * abs(ray_depth - previous_depth), 0.002 * scene_depth)
+                if behind > 0.0 and behind <= crossing:
+                    hit_t = t
+                else if behind > reflection_source.settings.y * scene_depth:
+                    break
+            if hit_t < 0.0:
+                previous_t = t
+                previous_depth = ray_depth
+    if hit_t < 0.0 => return no_reflection(depth_here)
+
+    // Halved toward the crossing, between the last step in front of the surface and the first behind it.
+    let mut lo = previous_t
+    let mut hi = hit_t
+    for i in 0 ..< 5:
+        let mid = 0.5 * (lo + hi)
+        let s = mix(s0, s1, mid)
+        let d = reflection_source.depth.load(clamp(int2(s), int2(0), int2(f.size) - int2(1)))
+        let behind = d > 0.0 and 1.0 / mix(k0, k1, mid) > f.near_plane / d
+        if behind:
+            hi = mid
+        else:
+            lo = mid
+    let s_hit = mix(s0, s1, hi)
+    let hit = raster_bound_shadow_maps.world_from(reflection_source.depth, f, int2(s_hit))
+    if hit.w == 0.0 => return no_reflection(depth_here)
+
+    // A surface facing away from the ray is its back, which the depth never shows; the ray passed behind something.
+    let hit_n = raster_bound_shadow_maps.normal_from(reflection_source.normals, reflection_source.depth, f, int2(s_hit), hit.xyz, cam.position)
+    if dot(hit_n, r) > 0.0 => return no_reflection(depth_here)
+
+    // Where last frame's camera saw that point.
+    let previous = scene.camera(..f.previous_camera)
+    let at = scene.camera_project(previous, hit.xyz - previous.position, f.size)
+    if at.x < 0.0 or at.y < 0.0 or at.x >= f.size.x or at.y >= f.size.y => return no_reflection(depth_here)
+    let radiance = reflection_source.previous.load(int2(at)).xyz * reflection_source.settings.z
+    // A target never drawn into may hold anything, and a NaN kept here would come back in every later frame's image.
+    if not (dot(radiance, float3(1.0)) < 1e30) => return no_reflection(depth_here)
+
+    let confidence = edge_fade(s_hit, f.size) * edge_fade(at, f.size) * (1.0 - smoothstep(0.7, 1.0, hi))
+    return {reflection = float4(..radiance, confidence), depth = depth_here}

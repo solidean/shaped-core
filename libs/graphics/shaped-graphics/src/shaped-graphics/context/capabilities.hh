@@ -23,6 +23,17 @@ enum class sg::polyfill_use : sg::u8
     always,
 };
 
+/// How a polyfilled geometry stage draws (SGL's CHK-525).
+enum class sg::geometry_polyfill_route : sg::u8
+{
+    /// A compute pass ahead of the draw writes each primitive's slots, and the draw reads them back; on every backend that
+    /// draws the polyfill.
+    compute,
+    /// One mesh draw: the vertex and geometry stages as a mesh stage, a workgroup's lanes writing their slots of its
+    /// output, with no buffer of the draw's own and no pass split; where the device has mesh shaders.
+    mesh,
+};
+
 /// A capability a context either has or does not.
 /// Absent means the code path does not exist on this backend or device — not that it is slow.
 enum class sg::feature

@@ -27,15 +27,23 @@ cc::shared_async<cc::unit> hybrid_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
     _light_thin = nullptr;
+    _blend_guides = nullptr;
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         co_return;
     auto const light_thin = shaders::hybrid_pass::light_thin.acquire_pipeline(ctx);
+    auto const blend_guides = shaders::hybrid_pass::blend_guides.acquire_pipeline(ctx);
     co_await cc::async_settled(light_thin);
-    auto const* const built = light_thin->try_value();
-    if (built != nullptr)
+    co_await cc::async_settled(blend_guides);
+    if (auto const* const built = light_thin->try_value(); built != nullptr)
         _light_thin = *built;
     else
-        CC_LOG_ERROR("the hybrid's deferred lighting kernel did not build, so a deferred hybrid frame is declined");
+        CC_LOG_ERROR("the hybrid's deferred lighting kernel did not build, so a deferred hybrid frame is declined: {}",
+                     light_thin->try_error()->underlying().to_string());
+    if (auto const* const built = blend_guides->try_value(); built != nullptr)
+        _blend_guides = *built;
+    else
+        CC_LOG_ERROR("the hybrid's guide blend did not build, so a still hybrid frame is declined: {}",
+                     blend_guides->try_error()->underlying().to_string());
     co_return;
 }
 
@@ -55,6 +63,55 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
     CC_ASSERT(t.color.raw() != nullptr, "hybrid_routine: no color target bound");
     CC_ASSERT(d.bindless != nullptr, "hybrid_routine: a frame binds the manager's bindless tables");
     auto const extent = tg::vec2i(t.color.width(), t.color.height());
+
+    // Every frame draws its pixels at another sub-pixel offset, so that the mean antialiases.
+    // A still frame's guides written in place would describe that one offset, a different surface behind every edge each frame,
+    // and a filter steered by them flickers there however converged the mean; so they blend as the tracer's do, on `guide_frame`.
+    auto const blends = d.frame.guide_frame > 0;
+    if (blends && self->_blend_guides == nullptr)
+        return sg::routine_outcome::declined;
+    auto const layer_guides = d.targets;
+    auto const frame_guide = [&](sg::texture_2d const& like)
+    {
+        return ctx.transient.create_texture_2d(
+            {.format = like.format(),
+             .width = extent[0],
+             .height = extent[1],
+             .usage = sg::texture_usage::render_target | sg::texture_usage::image | sg::texture_usage::texture});
+    };
+    if (blends)
+    {
+        t.normal = frame_guide(layer_guides.normal);
+        t.depth = frame_guide(layer_guides.depth);
+        t.albedo = frame_guide(layer_guides.albedo);
+        t.specular_albedo = frame_guide(layer_guides.specular_albedo);
+        t.roughness = frame_guide(layer_guides.roughness);
+    }
+    auto const blend = [&]
+    {
+        if (!blends)
+            return;
+        auto const io = ctx.transient.create_binding_group(
+            cmd, ctx.cached.acquire_binding_group_layout<shaders::hybrid_pass::guide_io>(),
+            shaders::hybrid_pass::guide_io{
+                .normal = t.normal.as_texture_view(),
+                .depth = t.depth.as_texture_view(),
+                .albedo = t.albedo.as_texture_view(),
+                .specular_albedo = t.specular_albedo.as_texture_view(),
+                .roughness = t.roughness.as_texture_view(),
+                .blended_normal = layer_guides.normal.as_image_view<sg::pixel_format::rgba16_float>(),
+                .blended_depth = layer_guides.depth.as_image_view<sg::pixel_format::r32_float>(),
+                .blended_albedo = layer_guides.albedo.as_image_view<sg::pixel_format::rgba16_float>(),
+                .blended_specular_albedo = layer_guides.specular_albedo.as_image_view<sg::pixel_format::rgba16_float>(),
+                .blended_roughness = layer_guides.roughness.as_image_view<sg::pixel_format::r16_float>()});
+        cmd.compute.bind_pipeline(*self->_blend_guides);
+        cmd.compute.bind_group(0, *io);
+        cmd.compute.set_inline_constants(shaders::hybrid_pass::guide_blend{.frames = d.frame.guide_frame}.to_block());
+        cmd.compute.dispatch_threads(extent[0], extent[1]);
+        impl::gpu_mark(cmd, "guide blend");
+        if (d.frame_guides != nullptr)
+            *d.frame_guides = t;
+    };
 
     // The thin G-buffer is the frame's own: nothing outside it reads the reduced closure.
     auto const thin_target = [&](sg::pixel_format format)
@@ -144,8 +201,13 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
               .thin = thin,
               .traced = deferred ? sg::binding_group_handle() : traced});
     impl::gpu_mark(cmd, "raster");
-    if (outcome != sg::routine_outcome::executed || !deferred)
+    if (outcome != sg::routine_outcome::executed)
         return outcome;
+    if (!deferred)
+    {
+        blend();
+        return outcome;
+    }
 
     auto const thin_io = ctx.transient.create_binding_group(
         cmd, ctx.cached.acquire_binding_group_layout<shaders::hybrid_pass::thin_io>(),
@@ -165,6 +227,7 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
         shaders::hybrid::pass{.size = tg::vec2f(f32(extent[0]), f32(extent[1])), .pad = tg::vec2f(0, 0)}.to_block());
     cmd.compute.dispatch_threads(extent[0], extent[1]);
     impl::gpu_mark(cmd, "deferred lighting");
+    blend();
     return outcome;
 }
 } // namespace sv

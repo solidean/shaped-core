@@ -242,9 +242,6 @@ surface.emission_color = color
          .signature = cc::move(signature),
          .shader = cc::string(openpbr_shader) + "surface.micro_occlusion = saturate(occlusion)\n"
                  + "surface.horizon_lo = saturate(horizon_lo)\n" + "surface.horizon_hi = saturate(horizon_hi)\n",
-         .height_attribute = "height",
-         .height_top_attribute = "height_top",
-         .height_bottom_attribute = "height_bottom",
          .opacity_attribute = "opacity",
          .opacity_cutoff_attribute = "alpha_cutoff",
          .occlusion_attribute = "occlusion",
@@ -256,7 +253,10 @@ surface.emission_color = color
          .specular_weight_attribute = "specular_weight",
          .transmission_attribute = "transmission_weight",
          .thin_walled_attribute = "thin_walled",
-         .tangent_frame_attribute = "tangent_frame"});
+         .tangent_frame_attribute = "tangent_frame",
+         .height_attribute = "height",
+         .height_top_attribute = "height_top",
+         .height_bottom_attribute = "height_bottom"});
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -294,7 +294,8 @@ surface.emission_color = color
     return material_type::create({.name = cc::string(builtin_material::unlit),
                                   .signature = cc::move(signature),
                                   .shader = cc::string(unlit_shader),
-                                  .opacity_attribute = "opacity"});
+                                  .opacity_attribute = "opacity",
+                                  .display_only = true});
 }
 } // namespace
 

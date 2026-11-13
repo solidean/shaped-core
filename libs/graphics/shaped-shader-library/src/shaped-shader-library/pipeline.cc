@@ -405,11 +405,16 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                          "lacks sg::feature::geometry_shader",
                                                          d.file, d.name)));
 
+    // A polyfilled geometry stage's mesh route, where the context asks for it and the device has mesh shaders.
+    auto const meshes_geometry = polyfills_geometry && ctx->geometry_polyfill_route() == sg::geometry_polyfill_route::mesh
+                              && ctx->supports(sg::feature::mesh_shader) && ctx->draws_geometry_mesh_route();
+
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);
-    // a polyfilled tessellation's vertex stage runs inside its control pass alone, and need not draw on its own
-    if (d.vertex != nullptr && !polyfills_tessellation)
+    // a polyfilled tessellation's vertex stage runs inside its control pass alone, and need not draw on its own; nor
+    // does a geometry stage's mesh route's, inside its mesh stage
+    if (d.vertex != nullptr && !polyfills_tessellation && !meshes_geometry)
         desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
     if (d.mesh != nullptr && polyfills)
     {
@@ -461,7 +466,16 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     }
     else if (d.pixel != nullptr)
         desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx, options);
-    if (d.geometry != nullptr && polyfills_geometry)
+    if (d.geometry != nullptr && meshes_geometry)
+    {
+        // one mesh stage runs the pipeline's vertex stage and the geometry stage, so it names the vertex stage
+        auto with_form = options;
+        with_form.push_back({.name = cc::string(slib::k_mesh_form_option), .value = cc::string("mesh")});
+        with_form.push_back(
+            {.name = cc::string(slib::k_polyfill_vertex_option), .value = cc::string((*d.vertex)->entry_point())});
+        desc.mesh_shader = co_await (*d.geometry)->acquire(*ctx, with_form);
+    }
+    else if (d.geometry != nullptr && polyfills_geometry)
     {
         // the compute half runs the pipeline's vertex stage, so it names it; the vertex half draws the slots back
         auto with_form = options;
@@ -591,7 +605,13 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                                            "geometry stage over a strip, and the "
                                                                            "polyfill assembles lists alone so far",
                                                                            d.file, d.name)));
-        desc.mesh_polyfill.value().input_corners = corners;
+        if (meshes_geometry)
+        {
+            desc.geometry_mesh_corners = corners;
+            desc.topology = sg::primitive_topology::triangle_list;
+        }
+        else
+            desc.mesh_polyfill.value().input_corners = corners;
     }
     // a polyfilled stage draws its primitives as a list of the kind it writes
     if (desc.mesh_polyfill.has_value())

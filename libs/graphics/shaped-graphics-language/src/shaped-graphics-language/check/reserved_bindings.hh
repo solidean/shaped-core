@@ -156,15 +156,16 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
      }},
     // what a polyfilled geometry stage's draw was (CHK-525): `[0]` first vertex or index, primitives an instance, index
     // kind (0 none, 1 16-bit, 2 32-bit), vertex offset; `[1]` first instance, the index buffer's offset in indices;
-    // `[2]` each vertex buffer's offset in words; a buffer rather than a block, since metal has no reserved block
+    // `[2]` each vertex buffer's offset in words; the mesh route reads the instances at `[1].z`; a buffer rather than a
+    // block, since metal has no reserved block
     {.name = "sg_geometry_draw",
      .declaration = "@internal binding sg_geometry_draw:\n    values: buffer[uint4]\n",
      .enabled_by = reserved_use::geometry_polyfill,
      .targets = {
-         {.group = 11, .slot = 8, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 25, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 25, .stages = stage_bit(stage::compute)},
-         {.group = -1, .slot = 22, .stages = stage_bit(stage::compute)},
+         {.group = 11, .slot = 8, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 25, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 25, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = -1, .slot = 22, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
      }},
     // the draw's index buffer and vertex buffers as words, which a polyfilled geometry stage assembles its primitives
     // from (CHK-525)
@@ -172,46 +173,46 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
      .declaration = "@internal binding sg_geometry_indices:\n    words: buffer[uint]\n",
      .enabled_by = reserved_use::geometry_polyfill,
      .targets = {
-         {.group = 11, .slot = 3, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 26, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 26, .stages = stage_bit(stage::compute)},
-         {.group = -1, .slot = 23, .stages = stage_bit(stage::compute)},
+         {.group = 11, .slot = 3, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 26, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 26, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = -1, .slot = 23, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
      }},
     {.name = "sg_geometry_vertices0",
      .declaration = "@internal binding sg_geometry_vertices0:\n    words: buffer[uint]\n",
      .enabled_by = reserved_use::geometry_polyfill,
      .targets = {
-         {.group = 11, .slot = 4, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 27, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 27, .stages = stage_bit(stage::compute)},
-         {.group = -1, .slot = 24, .stages = stage_bit(stage::compute)},
+         {.group = 11, .slot = 4, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 27, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 27, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = -1, .slot = 24, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
      }},
     {.name = "sg_geometry_vertices1",
      .declaration = "@internal binding sg_geometry_vertices1:\n    words: buffer[uint]\n",
      .enabled_by = reserved_use::geometry_polyfill,
      .targets = {
-         {.group = 11, .slot = 5, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 28, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 28, .stages = stage_bit(stage::compute)},
-         {.group = -1, .slot = 25, .stages = stage_bit(stage::compute)},
+         {.group = 11, .slot = 5, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 28, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 28, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = -1, .slot = 25, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
      }},
     {.name = "sg_geometry_vertices2",
      .declaration = "@internal binding sg_geometry_vertices2:\n    words: buffer[uint]\n",
      .enabled_by = reserved_use::geometry_polyfill,
      .targets = {
-         {.group = 11, .slot = 6, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 29, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 29, .stages = stage_bit(stage::compute)},
-         {.group = -1, .slot = 26, .stages = stage_bit(stage::compute)},
+         {.group = 11, .slot = 6, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 29, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 29, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = -1, .slot = 26, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
      }},
     {.name = "sg_geometry_vertices3",
      .declaration = "@internal binding sg_geometry_vertices3:\n    words: buffer[uint]\n",
      .enabled_by = reserved_use::geometry_polyfill,
      .targets = {
-         {.group = 11, .slot = 7, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 30, .stages = stage_bit(stage::compute)},
-         {.group = 3, .slot = 30, .stages = stage_bit(stage::compute)},
-         {.group = -1, .slot = 27, .stages = stage_bit(stage::compute)},
+         {.group = 11, .slot = 7, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 30, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = 3, .slot = 30, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
+         {.group = -1, .slot = 27, .stages = u16(stage_bit(stage::compute) | stage_bit(stage::mesh))},
      }},
     // what a polyfilled tessellation draw is (CHK-527): `[0]` patches an instance, instances, partitioning, output;
     // `[1]` domain, control points a patch, words a control point, the most points a patch makes; metal binds the

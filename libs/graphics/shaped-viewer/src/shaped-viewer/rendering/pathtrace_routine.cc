@@ -179,6 +179,9 @@ void place_instance_record(shaders::tracer::instance_record& record,
     record.to_world_x = row(0);
     record.to_world_y = row(1);
     record.to_world_z = row(2);
+    record.previous_to_world_x = record.to_world_x;
+    record.previous_to_world_y = record.to_world_y;
+    record.previous_to_world_z = record.to_world_z;
 
     record.opacity_kind = u32(opacity.kind);
     record.opacity_offset = opacity.offset;

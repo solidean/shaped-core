@@ -1,0 +1,88 @@
+<!doctype html>
+<!--
+  The page the standalone web build is wrapped in: the adapter it runs on, the scene being measured, and the table as it fills.
+  emcc substitutes the module's script at the placeholder near the end; the canvas id is what the example's swapchain selector names.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sg — ray throughput (WebGPU)</title>
+<style>
+    :root { color-scheme: dark; }
+    body {
+        margin: 0;
+        padding: 16px;
+        background: #14151c;
+        color: #c9ccd6;
+        font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+    }
+    canvas { width: min(100%, 960px); height: auto; aspect-ratio: 16 / 9; display: block; }
+    #adapter { color: #8f94a3; }
+    #log {
+        width: min(100%, 1100px);
+        overflow-x: auto;
+        background: #1b1d26;
+        padding: 12px;
+        border-radius: 6px;
+        font: 12px/1.45 ui-monospace, Consolas, monospace;
+        white-space: pre;
+        margin: 0;
+    }
+    .error { color: #e2705f; }
+    button { font: inherit; padding: 4px 12px; }
+</style>
+</head>
+<body>
+<div id="adapter">asking for an adapter …</div>
+<canvas id="canvas" width="1280" height="720" tabindex="-1"></canvas>
+<button id="copy">copy the table</button>
+<pre id="log"></pre>
+
+<script>
+    var logElement = document.getElementById('log');
+    function appendLine(text, isError)
+    {
+        var line = document.createElement('span');
+        line.textContent = text + '\n';
+        if (isError)
+            line.className = 'error';
+        logElement.appendChild(line);
+    }
+    var Module = {
+        canvas: document.getElementById('canvas'),
+        print: function (text) { appendLine(text, false); },
+        printErr: function (text) { appendLine(text, true); console.error(text); },
+    };
+    document.getElementById('copy').onclick = function ()
+    {
+        navigator.clipboard.writeText(document.getElementById('adapter').textContent + '\n' + logElement.textContent);
+    };
+    var adapterElement = document.getElementById('adapter');
+    if (!navigator.gpu)
+    {
+        adapterElement.className = 'error';
+        adapterElement.textContent = 'this browser has no WebGPU here — it needs Chrome or Edge 113+, or Safari 26+, over https or localhost';
+    }
+    else
+    {
+        navigator.gpu.requestAdapter().then(function (adapter)
+        {
+            if (!adapter)
+            {
+                adapterElement.textContent = 'no WebGPU adapter';
+                return;
+            }
+            var info = adapter.info || {};
+            adapterElement.textContent = 'adapter: ' + [info.vendor, info.architecture, info.device, info.description].filter(Boolean).join(' · ')
+                + ' — ' + navigator.userAgent;
+        });
+    }
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

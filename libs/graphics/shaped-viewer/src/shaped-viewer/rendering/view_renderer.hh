@@ -180,11 +180,13 @@ private:
 
     /// The schedule for a layer whose mean will hold `accum_frame` frames once this frame's trace lands.
     /// `display_scale` is what the layer's display multiplies its image by, which a denoiser judging noise on screen is told.
+    /// `jittered` says each frame draws every pixel at one shared offset, as a hybrid frame does, so a named upscaler may follow the temporal member as anti-aliasing.
     [[nodiscard]] static denoise_schedule _schedule_denoise(sg::context const& ctx,
                                                             render_settings const& settings,
                                                             denoise_slots const& ds,
                                                             u32 accum_frame,
-                                                            f32 display_scale);
+                                                            f32 display_scale,
+                                                            bool jittered);
 
     /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
     /// at once across the hand-off — and points `presented` at what its parent should sample.
@@ -192,10 +194,13 @@ private:
     /// `cameras` is this frame's view and projection and the previous frame's, which a member reprojecting in world
     /// space reads instead of the motion guide alone.
     /// `sample_counts` is the mean's count per pixel where its pixels differ, and null where one count holds for the image.
+    /// `frame_guides` are this frame's own guides where `ds`'s blend over the mean's frames, which a temporal member of
+    /// this frame's samples reads instead; a null normal says the two are one.
     [[nodiscard]] static sr::reconstruct_status _denoise(sg::command_list& cmd,
                                                          denoise_schedule const& schedule,
                                                          impl::temporal_slot const& accumulator,
                                                          denoise_slots const& ds,
+                                                         raster_gbuffer const& frame_guides,
                                                          denoise_cameras const& cameras,
                                                          sg::texture_2d const& sample_counts,
                                                          sg::texture_2d& presented);

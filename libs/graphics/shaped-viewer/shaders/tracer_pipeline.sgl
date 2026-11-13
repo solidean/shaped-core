@@ -27,6 +27,8 @@ use tracer
 
     let spp = max(1, f.samples_per_pixel)
     let mut accum = float3(0.0)
+    // The samples' luminance squared, summed as `accum` is: the mean's alpha is their mean, `pt.moment_of`.
+    let mut accum_moment = 0.0
 
     // The denoiser guides, summed over this frame's samples like `accum` is.
     let mut guide_normal = float3(0.0)
@@ -105,11 +107,12 @@ use tracer
         let mut scatters = 0
 
         // `b` counts every surface the path continued from, and `free` those that were free refractions, which `max_bounces` does not count.
+        // Past the last bounce the path traces one segment more, which only gathers the lights it reaches: the BSDF half of the last hit's light sample.
         let mut b = 0
         let mut free = 0
-        while b - free < f.max_bounces:
-            let last_bounce = if b - free + 1 >= f.max_bounces => 1u else 0u
-            let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
+        while b - free <= f.max_bounces:
+            let emission_only = b - free == f.max_bounces
+            let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, if emission_only => 1u else 0u)
             p.cone_width = cone_width
             p.cone_spread = cone_spread
             let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
@@ -322,6 +325,8 @@ use tracer
                 radiance += c
                 if path_is_specular => radiance_specular += c
 
+            if emission_only => break
+
             // What the hit already estimated toward its picked light and the environment, through its own BSDF.
             radiance += throughput * (direct_diffuse + direct_specular)
             if b == 0:
@@ -338,7 +343,7 @@ use tracer
             prev_nee_reachable = reachable
 
             // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
-            origin = pt.offset_ray(origin + dir * hit_t, if dot(next_dir, n) < 0.0 => -n else n)
+            origin = pt.offset_hit(origin + dir * hit_t, if dot(next_dir, n) < 0.0 => -n else n, p.rounding)
             dir = next_dir
             medium_sigma_t = next_sigma_t
             medium_albedo = next_albedo
@@ -351,6 +356,7 @@ use tracer
         // It counts as a sample of zero instead: the sum is still divided by `spp`, as the wavefront counts one.
         if pt.is_finite(radiance):
             accum += radiance
+            accum_moment += pt.moment_of(radiance)
 
             // Clamped to the total, because the two are summed back together downstream.
             accum_specular += clamp(radiance_specular, float3(0.0), max(radiance, float3(0.0)))
@@ -359,15 +365,15 @@ use tracer
     let mut color = accum / spp_f
 
     if f.write_temporal != 0u:
-        tracer.traced.frame_output[xy] = float4(..color, 1.0)
+        tracer.traced.frame_output[xy] = float4(..tracer.half_safe(color), 1.0)
         tracer.traced.guide_motion[xy] = motion / spp_f
 
     if f.write_split != 0u:
         // The specular share was clamped to the total per sample, so the difference is never negative.
         let specular = accum_specular / spp_f
         let diffuse = color - specular
-        tracer.traced.frame_specular[xy] = float4(..specular, 1.0)
-        tracer.traced.frame_diffuse[xy] = float4(..diffuse, 1.0)
+        tracer.traced.frame_specular[xy] = float4(..tracer.half_safe(specular), 1.0)
+        tracer.traced.frame_diffuse[xy] = float4(..tracer.half_safe(diffuse), 1.0)
 
         // A mean over the paths of each kind: some path hit, every path escaped (the ray's own `t_max`), or no path of this lobe (0).
         let escaped_distance = 1e4
@@ -378,11 +384,14 @@ use tracer
         tracer.traced.guide_hit_distance[xy] = float2(guide_diffuse, guide_specular)
 
     // Progressive accumulation: this frame's estimate folded into the running mean already in the target, every frame at the same weight.
+    let mut moment = accum_moment / spp_f
     if f.accum_frame > 0u:
         let frames = f.accum_frame as float
-        color = (tracer.traced.output[xy].xyz * frames + color) / (frames + 1.0)
+        let held = tracer.traced.output[xy]
+        color = (held.xyz * frames + color) / (frames + 1.0)
+        moment = (held.w * frames + moment) / (frames + 1.0)
 
-    tracer.traced.output[xy] = float4(..color, 1.0)
+    tracer.traced.output[xy] = float4(..color, moment)
 
     if f.write_primary_depth != 0u => tracer.traced.primary_depth[xy] = primary_depth
 
@@ -432,6 +441,7 @@ fun component_of(v: float3, i: uint) -> float:
     p.lobe = openpbr.bsdf_lobe_diffuse
     p.bsdf_pdf = 0.0
     p.hit_t = -1.0
+    p.rounding = 0.0
     p.nee_reachable = 0u
     p.light_pdf = -1.0
 

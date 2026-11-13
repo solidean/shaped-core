@@ -39,6 +39,9 @@ enum class sgl::emit::mesh_form : sgl::u8
     /// A pixel entry point is then its polyfilled pipeline's, which takes what the mesh stage wrote per primitive from
     /// the vertex half.
     vertex_fetch,
+    /// A geometry entry point's mesh route on a target with mesh shaders: its pipeline's vertex stage and itself as one
+    /// mesh entry point, which the pipeline draws with no buffer of its own (CHK-525).
+    mesh,
 };
 
 /// What keeps an entry point from being written, as a closed set with stable kebab-case names.

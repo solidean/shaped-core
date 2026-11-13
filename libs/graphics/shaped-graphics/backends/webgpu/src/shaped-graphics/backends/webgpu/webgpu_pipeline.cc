@@ -293,6 +293,7 @@ struct compute_pipeline_build
     wgpu_shader_module module;
     pending_messages messages;
     cc::string entry_point;
+    cc::string label;
     sg::compute_dimensions workgroup_size;
     WGPUComputePipelineDescriptor descriptor = {};
 };
@@ -308,7 +309,8 @@ cc::result<std::unique_ptr<compute_pipeline_build>> prepare_compute_pipeline(web
     build->entry_point = desc.shader.entry_point;
     build->workgroup_size = desc.shader.workgroup_size.value_or(sg::compute_dimensions{});
 
-    build->descriptor.label = to_wgpu("sg compute pipeline");
+    build->label = cc::format("sg compute pipeline {}", build->entry_point);
+    build->descriptor.label = to_wgpu(build->label);
     build->descriptor.layout = build->layout->raw();
     build->descriptor.compute.module = build->module.get();
     build->descriptor.compute.entryPoint = to_wgpu(build->entry_point);
@@ -348,6 +350,7 @@ struct raster_pipeline_build
     pending_messages messages;
     cc::string vertex_entry;
     cc::string fragment_entry;
+    cc::string label;
     cc::vector<cc::vector<WGPUVertexAttribute>> attributes;
     cc::vector<WGPUVertexBufferLayout> vertex_buffers;
     cc::vector<WGPUBlendState> blends;
@@ -404,7 +407,8 @@ cc::result<std::unique_ptr<raster_pipeline_build>> prepare_raster_pipeline(webgp
         });
 
     auto& d = build->descriptor;
-    d.label = to_wgpu("sg raster pipeline");
+    build->label = cc::format("sg raster pipeline {} / {}", build->vertex_entry, build->fragment_entry);
+    d.label = to_wgpu(build->label);
     d.layout = build->layout->raw();
     d.vertex.module = build->vertex_module.get();
     d.vertex.entryPoint = to_wgpu(build->vertex_entry);

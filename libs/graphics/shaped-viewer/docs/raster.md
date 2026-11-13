@@ -136,7 +136,7 @@ Every frame writes, beside the image, the primary hit's G-buffer into the `tempo
 
 | target | slot | format | holds |
 |---|---|---|---|
-| `color` | `accumulation` | rgba32_float | radiance, alpha 1 |
+| `color` | `accumulation` | rgba32_float | radiance, and its luminance squared in alpha, `pt.moment_of` |
 | `normal` | `normal_guide` | rgba16_float | the geometric normal turned toward the viewer, world space |
 | `depth` | `depth_guide` | r32_float | linear view depth along the camera's forward axis |
 | `albedo` | `albedo_guide` | rgba16_float | `openpbr.pt_diffuse_albedo` |

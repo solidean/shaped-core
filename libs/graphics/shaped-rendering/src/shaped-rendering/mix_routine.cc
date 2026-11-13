@@ -9,6 +9,7 @@
 
 namespace sr
 {
+using impl::ceiling_of;
 using impl::extent_of;
 using impl::is_set;
 
@@ -64,7 +65,8 @@ bool mix_routine::execute(sg::command_list& cmd, sg::texture_2d const& destinati
 
     cmd.compute.bind_pipeline(**built);
     cmd.compute.bind_group(0, *group);
-    cmd.compute.set_inline_constants(sgl_shaders::mix::mix_constants{.weight = weight}.to_block());
+    cmd.compute.set_inline_constants(
+        sgl_shaders::mix::mix_constants{.weight = weight, .ceiling = ceiling_of(destination.format())}.to_block());
     cmd.compute.dispatch_threads(extent[0], extent[1], 1);
     return true;
 }

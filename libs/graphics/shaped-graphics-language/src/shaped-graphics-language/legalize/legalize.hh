@@ -4,6 +4,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/flat.hh>
+#include <shaped-graphics-language/fwd.hh>
 
 /// What a text does where an operation of the program would have no value: the robustness profile of LEGAL-65.
 enum class sgl::check::undefined_guard : sgl::u8
@@ -219,6 +220,39 @@ inline constexpr i32 k_geometry_polyfill_workgroup = 64;
 [[nodiscard]] cc::result<flat_entry_point, cc::string> geometry_as_compute(checked_module const& m,
                                                                            flat_entry_point const& v,
                                                                            flat_entry_point const& g);
+
+/// The lanes of the mesh route's workgroup, one a primitive: at most 64, and as many as the mesh bounds hold slots for.
+[[nodiscard]] i32 geometry_mesh_workgroup(mesh_polyfill_layout const& layout);
+
+} // namespace sgl::check
+
+/// What `add_geometry_mesh_output` adds: the output's type, and a copy of the geometry function bounded as the mesh
+/// entry point is.
+struct sgl::check::geometry_mesh_parts
+{
+    type_id output = type_id::none;
+    symbol_id function = symbol_id::none;
+};
+
+namespace sgl::check
+{
+
+/// Readies a copy `m` of the module for `geometry_as_mesh`: adds the `mesh_output[T]` of `g`'s stream, and a copy of
+/// `g`'s function with the bounds of a workgroup's slots.
+/// `layout` is `g`'s.
+[[nodiscard]] geometry_mesh_parts add_geometry_mesh_output(checked_module& m,
+                                                           flat_entry_point const& g,
+                                                           mesh_polyfill_layout const& layout);
+
+/// The vertex stage `v` and the geometry stage `g`, both legalized, as one mesh entry point that writes to `parts.output`
+/// (CHK-525's mesh route): `geometry_as_compute`'s, its slots a workgroup's lanes' in a mesh stage's output, so the
+/// draw is one mesh draw of `ceil(primitives * instances / lanes)` workgroups with no buffer of its own.
+/// Triangles only; an error names lines, and what `geometry_as_compute` refuses.
+[[nodiscard]] cc::result<flat_entry_point, cc::string> geometry_as_mesh(checked_module const& m,
+                                                                        flat_entry_point const& v,
+                                                                        flat_entry_point const& g,
+                                                                        mesh_polyfill_layout const& layout,
+                                                                        geometry_mesh_parts parts);
 
 /// The vertex entry point that draws what `geometry_as_compute` wrote: `mesh_as_vertex_fetch`'s, over `g`'s layout.
 /// `g` must have a layout.

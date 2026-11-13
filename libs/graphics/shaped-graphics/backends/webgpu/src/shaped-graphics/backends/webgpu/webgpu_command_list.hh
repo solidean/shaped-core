@@ -135,6 +135,13 @@ public:
                                     u32 item_count,
                                     cc::span<acceleration_kernel_input const> inputs = {});
 
+    /// Reorders a region's `record_count` records of `record_units` each by the Morton code of their box centers, so
+    /// the tree built over them next groups primitives that lie together.
+    /// `record_kind` is what write_leaves calls them: 0 triangles, 1 boxes, 2 instances.
+    /// Records carry their own indices, so a hit reports the same ones whatever order the sort leaves.
+    /// A count below a small threshold, or past what one scratch binding holds, keeps the caller's order.
+    void record_spatial_sort(u32 record_kind, u32 first_record_unit, u32 record_units, u32 record_count);
+
     /// The first unit of a new pool region of `units`, with this list's older writes already brought forward.
     [[nodiscard]] u32 allocate_acceleration_region(isize units);
 

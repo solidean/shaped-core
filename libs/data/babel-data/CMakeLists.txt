@@ -54,7 +54,7 @@ target_sources(babel-data
 target_compile_features(babel-data PUBLIC cxx_std_23)
 
 # Expose "src" so '#include <babel-data/...>' works for consumers.
-target_include_directories(babel-data PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(babel-data PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 
 # clean-core and nothing else, and that is the library's whole contract.
 # A format needing more does not go here.

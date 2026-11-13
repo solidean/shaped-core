@@ -1,6 +1,6 @@
 #include <clean-core/common/utility.hh> // cc::max
 #include <clean-core/container/vector.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 
@@ -45,6 +45,7 @@ using namespace cc::primitive_defines;
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/quadric-gallery
+// On the web, build the emscripten-webgpu preset and open web/quadric-gallery.html, served over https or from localhost.
 //   uv run dev.py example shaped-viewer/quadric-gallery --capture
 
 namespace
@@ -123,7 +124,7 @@ sv::quadric_primitive hemisphere(tg::pos3f const& at, float radius)
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/quadric-gallery")
+ASYNC_EXAMPLE("shaped-viewer/quadric-gallery")
 {
     auto gallery = sv::quadric_set();
     gallery.name = "quadric gallery";
@@ -183,9 +184,10 @@ EXAMPLE("shaped-viewer/quadric-gallery")
                                              tg::pos3f(-13, 0, -4), tg::pos3f(-13, 0, 9), tg::pos3f(13, 0, 9)}),
                    .attributes = {sv::mesh_attribute::create_value("base_color", tg::vec3f(0.22f, 0.23f, 0.25f))}};
 
-    for (auto f : sv::interactive("shaped-viewer/quadric-gallery"))
+    auto frames = sv::interactive_async("shaped-viewer/quadric-gallery");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
 
         // Where the walk starts, applied the first time this view id is seen; after that wherever it has been flown to wins.
         view.initial_fps({.position = tg::pos3d(-1.5, 3.2, -11.0),

@@ -25,6 +25,8 @@
 #include <shaped-viewer/shader_library.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/scalar/angle.hh>
+#include <typed-geometry/scalar/constants.hh>
 
 namespace sv_test
 {
@@ -196,7 +198,7 @@ inline sg::blas_handle blas_of(sv::gpu_resource_manager& resources, sv::quadric_
 {
     auto& ctx = resources.context();
     auto cmd = ctx.create_command_list();
-    auto blas = resources.quadrics.acquire_blas(*cmd, id);
+    auto blas = resources.quadrics.acquire_blas(*cmd, id, resources.meshes);
     ctx.submit_command_list(cc::move(cmd));
     return blas;
 }
@@ -350,6 +352,36 @@ inline sv::mesh as_indexed_mesh(cc::string name,
             .material = sv::default_material(shared_material_library())};
 }
 
+} // namespace sv_test
+
+namespace sv_test
+{
+/// An indexed UV sphere of `radius` around `center`, faceted, wound so every face points outward.
+///
+/// TEMPORARY(debt-sv-examples-hand-rolled-primitive-meshes): one more hand-rolled sphere; a `tg::` sphere tessellation replaces it.
+[[nodiscard]] inline sv::triangle_geometry sphere_geometry(f32 radius, int rings, int segments, tg::vec3f center = {})
+{
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto r = 0; r <= rings; ++r)
+    {
+        auto const theta = tg::angle_f::make_from_radians(f32(r) / f32(rings) * tg::pi<f32>);
+        for (auto s = 0; s <= segments; ++s)
+        {
+            auto const phi = tg::angle_f::make_from_radians(f32(s) / f32(segments) * 2.0f * tg::pi<f32>);
+            positions.push_back(tg::pos3f(radius * tg::sin(theta) * tg::cos(phi), radius * tg::cos(theta),
+                                          radius * tg::sin(theta) * tg::sin(phi))
+                                + center);
+        }
+    }
+    auto indices = cc::vector<u32>();
+    auto const index_of = [segments](int r, int s) { return u32(r * (segments + 1) + s); };
+    for (auto r = 0; r < rings; ++r)
+        for (auto s = 0; s < segments; ++s)
+            for (auto const i : {index_of(r, s), index_of(r + 1, s + 1), index_of(r + 1, s), index_of(r, s),
+                                 index_of(r, s + 1), index_of(r + 1, s + 1)})
+                indices.push_back(i);
+    return sv::triangle_geometry::create_from_indexed_triangles(positions, indices);
+}
 } // namespace sv_test
 
 /// A welded indexed triangle list: the same geometry as its source, with duplicate positions collapsed onto

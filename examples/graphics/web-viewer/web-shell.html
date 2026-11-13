@@ -1,0 +1,340 @@
+<!doctype html>
+<!--
+  The page the standalone web build is wrapped in: the adapter it runs on, the viewer's canvas, and what the module prints.
+  emcc substitutes the module's script at the placeholder near the end; the canvas id is what the viewer's surface selector names.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sv — raster_bound (WebGPU)</title>
+<style>
+    :root { color-scheme: dark; }
+    body {
+        margin: 0;
+        padding: 16px;
+        background: #14151c;
+        color: #c9ccd6;
+        font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+    }
+    #stage { position: relative; width: min(100%, 960px); }
+    canvas { width: 100%; height: auto; aspect-ratio: 16 / 9; display: block; outline: none; }
+    #loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        align-items: center;
+        justify-content: center;
+        background: #14151c;
+        color: #8f94a3;
+        font-size: 15px;
+        pointer-events: none;
+    }
+    .spinner {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 3px solid #2b2e3a;
+        border-top-color: #8fb4ff;
+        animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #fullscreen {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        width: 34px;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 6px;
+        background: rgba(20, 21, 28, 0.6);
+        color: #e6e8ef;
+        cursor: pointer;
+        opacity: 0.55;
+        transition: opacity 0.15s;
+    }
+    #stage:hover #fullscreen, #fullscreen:focus-visible { opacity: 1; }
+    #stage:fullscreen { width: 100vw; height: 100vh; background: #000; }
+    body.fill { padding: 0; }
+    body.fill #stage { width: 100vw; height: 100vh; }
+    body.fill canvas { width: 100%; height: 100%; aspect-ratio: auto; }
+    body.fill #controls, body.fill #adapter, body.fill #log { display: none; }
+    #stage:fullscreen canvas { width: 100%; height: 100%; aspect-ratio: auto; }
+    #controls { color: #8f94a3; font-size: 13px; display: flex; gap: 12px; align-items: center; }
+
+    #credit {
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(20, 21, 28, 0.6);
+        color: #c9ccd6;
+        font-size: 12px;
+    }
+    #credit:empty { display: none; }
+    #credit a { color: #9fb4ff; }
+
+    #adapter { color: #8f94a3; }
+    #log {
+        width: min(100%, 1100px);
+        overflow-x: auto;
+        background: #1b1d26;
+        padding: 12px;
+        border-radius: 6px;
+        font: 12px/1.45 ui-monospace, Consolas, monospace;
+        white-space: pre;
+        margin: 0;
+    }
+    .error { color: #e2705f; }
+</style>
+</head>
+<body>
+<div id="adapter">asking for an adapter …</div>
+<div id="stage">
+    <canvas id="canvas" width="1280" height="720" tabindex="-1"></canvas>
+    <div id="loading"><div class="spinner"></div><div id="loading-text">loading …</div></div>
+    <div id="credit"></div>
+    <button id="fullscreen" type="button" title="fullscreen (F)" aria-label="fullscreen">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M2 7V2h5M11 2h5v5M16 11v5h-5M7 16H2v-5"/>
+        </svg>
+    </button>
+</div>
+<div id="controls">
+    <span>click the view, then W/A/S/D to move, E/Q up and down, hold the right mouse button to look, the wheel for speed, F for fullscreen</span>
+</div>
+<pre id="log"></pre>
+
+<script>
+    // Dev-server hooks, both opt-in through the page's URL and both POSTing to the server that served the page
+    // (.tmp/serve-https.py): `?log=1` sends every line the page prints to /log, and `?snap=<seconds>` sends what the
+    // canvas shows to /snap that often. A static host without those endpoints just answers 404 and nothing else changes.
+    var pageParameters = new URLSearchParams(location.search);
+    // `?credit=<text>&license=<https url>`: the model's attribution, which a CC-BY scene requires wherever it is shown.
+    (function ()
+    {
+        var credit = pageParameters.get('credit');
+        if (!credit)
+            return;
+        var box = document.getElementById('credit');
+        box.textContent = credit;
+        var license = pageParameters.get('license');
+        if (license && license.indexOf('https://') === 0)
+        {
+            box.appendChild(document.createTextNode(' · '));
+            var link = document.createElement('a');
+            link.href = license;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = 'license';
+            box.appendChild(link);
+        }
+    })();
+    var relayLog = pageParameters.get('log') === '1';
+    var snapSeconds = parseFloat(pageParameters.get('snap') || '0');
+    // `?fill=1`: the view fills the window, as fullscreen does, for a run that needs no click to get there.
+    if (pageParameters.get('fill') === '1')
+        document.addEventListener('DOMContentLoaded', function () { document.body.classList.add('fill'); });
+
+    var pendingLines = [];
+    function flushLog()
+    {
+        if (pendingLines.length === 0)
+            return;
+        var body = pendingLines.join('\n');
+        pendingLines = [];
+        fetch('/log', { method: 'POST', body: body, keepalive: true }).catch(function () {});
+    }
+    if (relayLog)
+    {
+        pendingLines.push('--- ' + location.href + ' — ' + navigator.userAgent);
+        setInterval(flushLog, 500);
+        addEventListener('pagehide', flushLog);
+        addEventListener('error', function (e) { relay('uncaught: ' + e.message + ' at ' + e.filename + ':' + e.lineno, true); });
+        addEventListener('unhandledrejection', function (e) { relay('unhandled rejection: ' + e.reason, true); });
+    }
+    function relay(text, isError)
+    {
+        if (!relayLog)
+            return;
+        pendingLines.push((isError ? 'E ' : '  ') + text);
+        if (isError)
+            flushLog();
+    }
+
+    // A WebGPU canvas holds its frame only until the browser presents it at the end of the task that drew it.
+    // So a snapshot is taken right after a queue submit, in that task, and the last one taken in the task is sent.
+    if (snapSeconds > 0 && navigator.gpu && window.GPUQueue)
+    {
+        var snapDueAt = performance.now() + snapSeconds * 1000;
+        var snapIssued = 0;
+        var snapResetQueued = false;
+        var originalSubmit = GPUQueue.prototype.submit;
+        GPUQueue.prototype.submit = function (buffers)
+        {
+            var result = originalSubmit.call(this, buffers);
+            if (performance.now() >= snapDueAt)
+            {
+                var id = ++snapIssued;
+                if (!snapResetQueued)
+                {
+                    snapResetQueued = true;
+                    setTimeout(function ()
+                    {
+                        snapResetQueued = false;
+                        snapDueAt = performance.now() + snapSeconds * 1000;
+                    }, 0);
+                }
+                document.getElementById('canvas').toBlob(function (blob)
+                {
+                    if (blob && id === snapIssued)
+                        fetch('/snap', { method: 'POST', body: blob }).catch(function () {});
+                }, 'image/png');
+            }
+            return result;
+        };
+    }
+
+    // `?census=1`: how many WebGPU objects of each kind were created, and how many are still alive, every 5 s.
+    // An object is dead once it was destroyed or the garbage collector took it -- which, for a kind with no `destroy()`,
+    // is the only way a browser gets its memory back.
+    if (pageParameters.get('census') === '1' && navigator.gpu && window.GPUDevice)
+    {
+        var census = {};
+        var liveBytes = { buffer: 0, texture: 0 };
+        function entryOf(kind)
+        {
+            return census[kind] || (census[kind] = { created: 0, live: 0 });
+        }
+        var collected = new FinalizationRegistry(function (token)
+        {
+            if (token.dead)
+                return;
+            token.dead = true;
+            entryOf(token.kind).live--;
+            if (token.bytes)
+                liveBytes[token.kind] -= token.bytes;
+        });
+        function track(kind, object, bytes)
+        {
+            var entry = entryOf(kind);
+            entry.created++;
+            entry.live++;
+            var token = { kind: kind, bytes: bytes || 0, dead: false };
+            if (bytes)
+                liveBytes[kind] += bytes;
+            collected.register(object, token);
+            if (typeof object.destroy === 'function')
+            {
+                var destroy = object.destroy;
+                object.destroy = function ()
+                {
+                    if (!token.dead)
+                    {
+                        token.dead = true;
+                        entry.live--;
+                        if (token.bytes)
+                            liveBytes[kind] -= token.bytes;
+                    }
+                    return destroy.apply(this, arguments);
+                };
+            }
+            return object;
+        }
+        // A kind given `byLabel` is counted per label too, which names the code path that keeps making them.
+        function wrap(prototype, method, kind, sizeOf, byLabel)
+        {
+            var original = prototype[method];
+            if (!original)
+                return;
+            prototype[method] = function (descriptor)
+            {
+                var label = byLabel && descriptor && descriptor.label ? kind + ' "' + descriptor.label + '"' : kind;
+                return track(label, original.apply(this, arguments), sizeOf ? sizeOf(descriptor) : 0);
+            };
+        }
+        function textureBytes(d)
+        {
+            var size = Array.isArray(d.size) ? { width: d.size[0], height: d.size[1] || 1, depthOrArrayLayers: d.size[2] || 1 } : d.size;
+            // Four bytes a texel at every level, an upper bound for a compressed format: the census looks for growth, not totals.
+            return Math.round(size.width * (size.height || 1) * (size.depthOrArrayLayers || 1) * 4 * ((d.mipLevelCount || 1) > 1 ? 4 / 3 : 1));
+        }
+        wrap(GPUDevice.prototype, 'createBuffer', 'buffer', function (d) { return d.size; });
+        wrap(GPUDevice.prototype, 'createTexture', 'texture', textureBytes);
+        wrap(GPUDevice.prototype, 'createBindGroup', 'bind group', null, true);
+        wrap(GPUDevice.prototype, 'createSampler', 'sampler');
+        wrap(GPUDevice.prototype, 'createCommandEncoder', 'command encoder');
+        wrap(GPUDevice.prototype, 'createQuerySet', 'query set');
+        wrap(GPUDevice.prototype, 'createShaderModule', 'shader module');
+        wrap(GPUDevice.prototype, 'createComputePipeline', 'compute pipeline');
+        wrap(GPUDevice.prototype, 'createRenderPipeline', 'render pipeline');
+        wrap(GPUTexture.prototype, 'createView', 'texture view');
+        setInterval(function ()
+        {
+            var parts = Object.keys(census).sort().map(function (k) { return k + ' ' + census[k].live + '/' + census[k].created; });
+            appendLine('census (live/created): ' + parts.join(', ') + '; live buffer bytes ' + (liveBytes.buffer >> 20)
+                + ' MiB, texture bytes <= ' + (liveBytes.texture >> 20) + ' MiB', false);
+        }, 5000);
+    }
+
+    var logElement = document.getElementById('log');
+    function appendLine(text, isError)
+    {
+        var line = document.createElement('span');
+        line.textContent = text + '\n';
+        if (isError)
+            line.className = 'error';
+        logElement.appendChild(line);
+        relay(text, isError);
+    }
+    var Module = {
+        canvas: document.getElementById('canvas'),
+        print: function (text) { appendLine(text, false); },
+        printErr: function (text) { appendLine(text, true); console.error(text); },
+    };
+    var adapterElement = document.getElementById('adapter');
+    if (!navigator.gpu)
+    {
+        adapterElement.className = 'error';
+        adapterElement.textContent = 'this browser has no WebGPU here — it needs a browser with WebGPU, over https or localhost';
+    }
+    else
+    {
+        navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).then(function (adapter)
+        {
+            if (!adapter)
+            {
+                adapterElement.textContent = 'no WebGPU adapter';
+                return;
+            }
+            var info = adapter.info || {};
+            adapterElement.textContent = 'adapter: ' + [info.vendor, info.architecture, info.device, info.description].filter(Boolean).join(' · ')
+                + ' — ' + navigator.userAgent;
+            relay(adapterElement.textContent, false);
+
+            // WebGPU's adapter info is empty in Firefox; WebGL still names the GPU, which is what says whether a slow
+            // run was on the integrated one.
+            try
+            {
+                var gl = document.createElement('canvas').getContext('webgl');
+                var debug = gl && gl.getExtension('WEBGL_debug_renderer_info');
+                if (debug)
+                    relay('webgl renderer: ' + gl.getParameter(debug.UNMASKED_RENDERER_WEBGL), false);
+            }
+            catch (e) {}
+        });
+    }
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

@@ -39,7 +39,7 @@ target_compile_features(blob-cache
 # Expose "src" so '#include <blob-cache/...>' works for consumers.
 target_include_directories(blob-cache
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # babel-serializer is the storage engine, through babel::sqlite; it is linked PRIVATE so no sqlite type reaches a public header of ours.

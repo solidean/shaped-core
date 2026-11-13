@@ -71,7 +71,7 @@ target_compile_features(versioned-document
 # Expose "src" so '#include <versioned-document/...>' works for consumers.
 target_include_directories(versioned-document
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # clean-core only, and deliberately so: an in-memory document must not drag a database engine in.
