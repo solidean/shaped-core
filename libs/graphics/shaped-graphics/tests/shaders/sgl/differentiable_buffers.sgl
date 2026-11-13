@@ -66,3 +66,17 @@ fun brightness(u: float){painted} -> float => 2.0 * painted.canvas.sample(float2
     let mut du = 0.0
     bwd_diff(brightness, 0.5, mut du, 1.0)
     painting.slopes[id.x] = du
+
+// a subgroup's sum differentiated: every invocation's result took 2 x of its argument, so its adjoint is 2 x times
+// the invocations that reached the sum, whatever size the device's subgroup is
+binding lanes:
+    ratios: mut buffer[float]
+
+fun energy(x: float) -> float => subgroup_add(x * x)
+
+@compute(64) fun energy_backward(@thread_id id: int3){lanes}:
+    require subgroups
+    let x = 0.5 + float(id.x % 7)
+    let mut g = 0.0
+    bwd_diff(energy, x, mut g, 1.0)
+    lanes.ratios[id.x] = g / (2.0 * x * subgroup_add(1.0))

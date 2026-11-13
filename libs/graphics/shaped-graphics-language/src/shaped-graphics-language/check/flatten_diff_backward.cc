@@ -248,6 +248,30 @@ auto differentiator::transpose(flat_expr_id t, flat_expr_id g) -> void
             transpose(arguments[2], share(call("select", use(condition), zero(r), use(g))));
         return;
     }
+    // a subgroup's sums go back as sums, and a swap is its own transpose
+    if (name == "subgroup_add")
+        return transpose(arguments[0], share(active_call("subgroup_add", use(g))));
+    if (name == "subgroup_inclusive_add" || name == "subgroup_exclusive_add")
+    {
+        // what each later invocation's sum took of this one: the total less what came before, or up to, it
+        auto const before = active_call(
+            name == "subgroup_inclusive_add" ? "subgroup_exclusive_add" : "subgroup_inclusive_add", use(g));
+        return transpose(arguments[0], share(call("-", active_call("subgroup_add", use(g)), before)));
+    }
+    if (name == "subgroup_broadcast_first")
+    {
+        auto const first = call("==", active_call("subgroup_exclusive_add", integer(1)), integer(0));
+        return transpose(arguments[0],
+                         share(call("select", first, active_call("subgroup_add", use(g)), zero(type_of(arguments[0])))));
+    }
+    if (name == "subgroup_shuffle_xor" || name == "quad_swap_x" || name == "quad_swap_y" || name == "quad_swap_diagonal")
+    {
+        auto swapped = cc::vector<flat_expr_id>();
+        swapped.push_back(use(g));
+        for (auto i = isize(1); i < arguments.size(); ++i)
+            swapped.push_back(clone(arguments[i]));
+        return transpose(arguments[0], share(active_call(name, swapped)));
+    }
     // an affine3 is read and built by its rows, each the other's transpose
     if (name == "affine3_row" && arguments.size() == 2)
     {
@@ -521,12 +545,15 @@ auto differentiator::add_texture_reads() -> void
         leaves_into(share(ref(adjoint), "g"), leaves);
         for (auto& l : leaves)
             l = share(l, "leaf");
-        auto const channels = i32(leaves.size());
+        auto const channels = r.gather_channel >= 0 ? r.channels : i32(leaves.size());
         auto const size
             = share(f.builtin_call(at, size_of, cc::span<flat_expr_id const>({use(r.texture), integer(0)})), "size");
         auto const taps = !r.is_load && r.is_linear ? 4 : 1;
-        for (auto k = 0; k < taps; ++k)
+        // a gather's components are taps 2, 3, 1 and 0 of the footprint, each its texel's one channel
+        i32 const gathered[] = {2, 3, 1, 0};
+        for (auto j = 0; j < taps; ++j)
         {
+            auto const k = r.gather_channel >= 0 ? gathered[j] : j;
             auto texel = use(r.at);
             auto weight = flat_expr_id::none;
             if (!r.is_load)
@@ -534,7 +561,7 @@ auto differentiator::add_texture_reads() -> void
                 flat_expr_id const texel_arguments[]
                     = {use(size), use(r.at), integer(k), boolean(r.is_linear), integer(r.mode_u), integer(r.mode_v)};
                 texel = prelude_call("sample_tap_texel", texel_arguments);
-                if (r.is_linear)
+                if (r.is_linear && r.gather_channel < 0)
                 {
                     flat_expr_id const weight_arguments[] = {use(size), use(r.at), integer(k), boolean(r.is_linear)};
                     weight = share(prelude_call("sample_tap_weight", weight_arguments), "weight");
@@ -549,15 +576,17 @@ auto differentiator::add_texture_reads() -> void
                                          add(f.int_type(), flat_member{.object = use(texel), .member = 0})),
                                     integer(channels));
             auto const base = share(first, "at");
-            for (auto c = 0; c < channels; ++c)
+            for (auto c = 0; c < (r.gather_channel >= 0 ? 1 : channels); ++c)
             {
+                auto const channel = r.gather_channel >= 0 ? r.gather_channel : c;
+                auto const leaf = r.gather_channel >= 0 ? leaves[j] : leaves[c];
                 auto const buffer = add(
                     r.gradients.type, flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
-                auto const place
-                    = add(atomic, flat_buffer_element{.buffer = buffer,
-                                                      .index = c == 0 ? use(base) : call("+", use(base), integer(c))});
-                flat_expr_id const arguments[]
-                    = {place, is_valid(weight) ? mul(use(leaves[c]), use(weight)) : use(leaves[c])};
+                auto const place = add(
+                    atomic,
+                    flat_buffer_element{.buffer = buffer,
+                                        .index = channel == 0 ? use(base) : call("+", use(base), integer(channel))});
+                flat_expr_id const arguments[] = {place, is_valid(weight) ? mul(use(leaf), use(weight)) : use(leaf)};
                 emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
             }
         }
@@ -577,7 +606,13 @@ auto differentiator::reduces_gradients() const -> bool
 
 auto differentiator::active_call(cc::string_view name, flat_expr_id a) -> flat_expr_id
 {
-    auto const id = call(name, a);
+    flat_expr_id const arguments[] = {a};
+    return active_call(name, arguments);
+}
+
+auto differentiator::active_call(cc::string_view name, cc::span<flat_expr_id const> arguments) -> flat_expr_id
+{
+    auto const id = call(name, arguments);
     if (auto* const c = is_valid(id) ? f.entry.exprs[index_of(id)].node.try_as<flat_call>() : nullptr)
         c->is_active_lanes = true;
     return id;

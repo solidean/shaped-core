@@ -110,6 +110,10 @@ struct differentiator
         bool is_linear = false;
         i32 mode_u = 0;
         i32 mode_v = 0;
+        /// A gather's: the channel it reads of each of its four texels, whose adjoints are the placeholder's four; -1
+        /// for a load and a sample.
+        i32 gather_channel = -1;
+        i32 channels = 0;
     };
     cc::vector<texture_read> texture_reads;
 
@@ -272,6 +276,17 @@ struct differentiator
                                  cc::span<flat_expr_id const> primals,
                                  cc::span<flat_expr_id const> tangents,
                                  type_id type);
+    /// The state of a static sampler, a member's or the file's; null for one bound at run time.
+    [[nodiscard]] sampler_state const* static_sampler_of(flat_expr_id smp) const;
+    /// A texture member's `gather` through a static sampler: its texels' changes, and no coordinate's.
+    flat_expr_id gather_tangent(flat_call const& n,
+                                cc::span<flat_expr_id const> primals,
+                                member_info const& info,
+                                type_id texture_type);
+    /// A comparison sample at level 0 through a static sampler: its coordinate's change under a linear filter.
+    flat_expr_id compare_tangent(cc::span<flat_expr_id const> primals, cc::span<flat_expr_id const> tangents);
+    /// `call(name, arguments)` over the invocations that reach it (`flat_call::is_active_lanes`).
+    flat_expr_id active_call(cc::string_view name, cc::span<flat_expr_id const> arguments);
     /// The builtin `name` that takes `texture` first and `arity` arguments: one of its exact type, or of its shape.
     [[nodiscard]] symbol_id texture_builtin(cc::string_view name, type_id texture, isize arity) const;
     /// A call of the prelude's SGL function `name`, inlined where it stands.

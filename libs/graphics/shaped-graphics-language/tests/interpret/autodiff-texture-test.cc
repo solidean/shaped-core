@@ -12,6 +12,11 @@ constexpr cc::string_view k_ramp
     = "binding scene:\n"
       "    @gradient(training.gradients) @tangent(training.tangents) ramp: texture_2d[float]\n"
       "    @no_diff fixed: texture_2d[float]\n"
+      "    depth: texture_2d_depth\n"
+      "    sampler shadow:\n"
+      "        filter = .linear\n"
+      "        address = .clamp_edge\n"
+      "        compare = .less\n"
       "    sampler linear:\n"
       "        filter = .linear\n"
       "        address = .clamp_edge\n"
@@ -25,7 +30,11 @@ constexpr cc::string_view k_ramp
       "fun lit(u: float){scene} -> float => 2.0 * scene.ramp.sample(float2(u, 0.5), scene.linear, level = 0.0)\n"
       "fun stepped(u: float){scene} -> float => 2.0 * scene.ramp.sample(float2(u, 0.5), scene.nearest, level = 0.0)\n"
       "fun loaded(k: int){scene} -> float => 2.0 * scene.ramp.load(int2(k, 0))\n"
-      "fun held(u: float){scene} -> float => 2.0 * scene.fixed.sample(float2(u, 0.5), scene.linear, level = 0.0)\n";
+      "fun held(u: float){scene} -> float => 2.0 * scene.fixed.sample(float2(u, 0.5), scene.linear, level = 0.0)\n"
+      "fun gathered(u: float){scene} -> float => dot(scene.ramp.gather(float2(u, 0.5), scene.linear), float4(1.0, 2.0, "
+      "3.0, 4.0))\n"
+      "fun shadowed(u: float){scene} -> float => scene.depth.sample_compare(float2(u, 0.5), scene.shadow, reference = "
+      "0.5, level = 0.0)\n";
 
 sgl::check::texture_data row(f32 a, f32 b, f32 c, f32 d)
 {
@@ -39,7 +48,8 @@ sgl::check::driver_bindings ramp_bindings(cc::pinned_data<byte> const& gradients
     return {.groups = {
                 {.name = "scene",
                  .members = {{.name = "ramp", .textures = {row(0.0f, 10.0f, 20.0f, 30.0f)}},
-                             {.name = "fixed", .textures = {row(0.0f, 10.0f, 20.0f, 30.0f)}}}},
+                             {.name = "fixed", .textures = {row(0.0f, 10.0f, 20.0f, 30.0f)}},
+                             {.name = "depth", .textures = {row(0.1f, 0.3f, 0.6f, 0.9f)}}}},
                 {.name = "training",
                  .members = {{.name = "gradients", .mutable_bytes = gradients},
                              {.name = "tangents", .textures = {cc::move(tangents)}}}},
@@ -119,4 +129,43 @@ TEST("sgl autodiff textures - a @no_diff texture holds its texels, and its sampl
               "    du == 80.0\n";
     CHECK(driven_failures_of(source, ramp_bindings(gradients)) == "");
     CHECK(float_at(gradients, 1) == 0.0f);
+}
+
+TEST("sgl autodiff textures - a gather adds each component's adjoint to its texel's one channel, and moves no "
+     "coordinate")
+{
+    // at u = 0.5 the footprint is texels 1 and 2, its second row clamped onto the first: the gather gives (0, 1),
+    // (1, 1), (1, 0) and (0, 0) of it, so texel 1 takes weights 1 and 4, and texel 2 weights 2 and 3
+    auto const gradients = floats(0.0f, 0.0f, 0.0f, 0.0f);
+    auto source = cc::string(k_ramp);
+    source += "test {scene, training}:\n"
+              "    let mut du = 0.0\n"
+              "    bwd_diff(gathered, 0.5, mut du, 1.0)\n"
+              "    du == 0.0\n"
+              // at u = 0.25 the footprint is texels 0 and 1, and the tangent texture moves texel 0, weighed 1 and 4
+              "    fwd_diff(gathered, 0.25, 1.0) == 5.0\n";
+    CHECK(driven_failures_of(source, ramp_bindings(gradients)) == "");
+    CHECK(float_at(gradients, 0) == 0.0f);
+    CHECK(float_at(gradients, 1) == 5.0f);
+    CHECK(float_at(gradients, 2) == 5.0f);
+    CHECK(float_at(gradients, 3) == 0.0f);
+}
+
+TEST("sgl autodiff textures - a comparison sample under a linear filter changes with its coordinate, as a central "
+     "difference does")
+{
+    // texels 1 and 2 hold 0.3 and 0.6, on either side of the reference, so between their centres the result is linear
+    auto const gradients = floats(0.0f, 0.0f, 0.0f, 0.0f);
+    auto source = cc::string(k_ramp);
+    source += "fun compares(u: float){scene} -> bool:\n"
+              "    let h = 1e-3\n"
+              "    let numeric = (shadowed(u + h) - shadowed(u - h)) / (2.0 * h)\n"
+              "    let mut du = 0.0\n"
+              "    bwd_diff(shadowed, u, mut du, 1.0)\n"
+              "    return numeric != 0.0 and nearly_equal(du, numeric, within = 1e-2)\n"
+              "        and nearly_equal(fwd_diff(shadowed, u, 1.0), numeric, within = 1e-2)\n"
+              "test {scene, training}:\n"
+              "    compares(0.45)\n"
+              "    compares(0.55)\n";
+    CHECK(driven_failures_of(source, ramp_bindings(gradients)) == "");
 }
