@@ -486,6 +486,49 @@ auto differentiator::backward_custom(flattener::custom_call const& custom, label
         emit(flat_block{.label = node(call).node.as<flat_block>().label, .body = node(call).node.as<flat_block>().body});
 }
 
+auto differentiator::float_leaves(type_id t) const -> i32
+{
+    if (auto const* const r = record_of(t))
+        return r->leaf_kind == value_kind::scalar_float ? r->leaf_count : -1;
+    auto const& info = m().at(t);
+    if (info.kind == type_kind::array)
+    {
+        auto const each = float_leaves(info.element);
+        return each < 0 ? -1 : each * info.count;
+    }
+    if (info.kind != type_kind::structure)
+        return -1;
+    auto sum = 0;
+    for (auto const& member : m().at(info.members))
+    {
+        auto const each = float_leaves(member.type);
+        if (each < 0)
+            return -1;
+        sum += each;
+    }
+    return sum;
+}
+
+auto differentiator::leaves_into(flat_expr_id g, cc::vector<flat_expr_id>& out) -> void
+{
+    auto const t = type_of(g);
+    if (record_of(t) != nullptr)
+    {
+        for (auto k = 0; k < leaf_count(t); ++k)
+            out.push_back(component(g, k));
+        return;
+    }
+    auto const info = m().at(t);
+    auto const count = info.kind == type_kind::array ? info.count : i32(info.members.count);
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const part = info.kind == type_kind::array
+                            ? add(info.element, flat_element{.object = use(g), .index = integer(i)})
+                            : add(f.field_type(t, i), flat_member{.object = use(g), .member = i});
+        leaves_into(share(part), out);
+    }
+}
+
 auto differentiator::atomic_add_of(type_id element) const -> symbol_id
 {
     // the builtin's atomic is a `mut atomic[T]` of its own, so it is matched by what the atomic holds
@@ -513,15 +556,22 @@ auto differentiator::add_gradient_reads() -> void
         if (a == nullptr)
             continue;
         auto const adjoint = *a;
-        auto const buffer
-            = add(r.gradients.type, flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
         auto const atomic = m().at(r.gradients.type).element;
-        auto const place = add(atomic, flat_buffer_element{.buffer = buffer, .index = use(r.index)});
         auto const callee = atomic_add_of(m().at(atomic).element);
         if (!is_valid(callee))
             return (void)failed(cc::format("an atomic add of {}, which no builtin is", m().name_of(atomic)));
-        flat_expr_id const arguments[] = {place, ref(adjoint)};
-        emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+        auto leaves = cc::vector<flat_expr_id>();
+        leaves_into(share(ref(adjoint), "g"), leaves);
+        for (auto k = isize(0); k < leaves.size(); ++k)
+        {
+            auto const index
+                = r.stride == 1 ? use(r.index) : call("+", call("*", use(r.index), integer(r.stride)), integer(i32(k)));
+            auto const buffer = add(r.gradients.type,
+                                    flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
+            auto const place = add(atomic, flat_buffer_element{.buffer = buffer, .index = index});
+            flat_expr_id const arguments[] = {place, leaves[k]};
+            emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+        }
         // a read in a kept loop is transposed once per iteration, each adjoint its own
         emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
     }

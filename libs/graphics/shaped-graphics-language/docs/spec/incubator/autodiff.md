@@ -122,8 +122,12 @@ What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buff
   That includes both native routes, and webgpu on Dawn and on wgpu.
   Its [compute-splat-fitting-test.cc](../../../../shaped-graphics/tests/compute/compute-splat-fitting-test.cc) fits sixteen 2D Gaussians to an image with Adam, every gradient one `bwd_diff` a pixel.
   In 200 rounds the loss falls to a fortieth, the same on every backend to five digits.
+* **A buffer of vectors or structs takes an atomic per float of its element's tangent**, in order: element `i`'s `k`-th at `i * n + k`.
+  So a `buffer[mark]` of a `pos3` and a `float` adds four floats per element, and a struct's int field adds none.
+  Its `@tangent` is a `buffer[tangent[T]]`, read at the read's index.
+  sg runs a buffer of such structs on every backend, in the same test as the floats.
 * A read of any other buffer is `unsupported-yet`, and the diagnostic says what to do instead.
-  So is a read of a buffer of anything but floats, whose gradient needs an atomic per component.
+  So is a read of a buffer whose tangent holds a half, since an atomic holds a float or an integer alone.
 * `no_diff(x)` reads anything as a constant, which is the opt-out at an expression where `@no_diff` is the one at a parameter.
 * A function that reads an element can carry its own derivatives instead: `@forward` reads the tangent, and `@backward` adds the adjoint.
 * **An adjoint from many invocations is a float atomic add**: `atomic[float].add`, a compare-exchange loop on the bits on every target ([bindings.md](../bindings.md#atomics)).
@@ -132,7 +136,6 @@ What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buff
 What is left of a differentiable buffer:
 
 * **A pairing is matched by its text**, as `@forward(f)` is, until an attribute's argument is an expression the check pass resolves.
-* **A buffer of vectors or structs**, whose gradient is an atomic per float leaf.
 * **An index every invocation of a subgroup shares is reduced first**, one subgroup sum and one atomic in place of thirty-two.
   A tiled splat rasterizer is that case: every pixel of a tile walks the same splats at once, which is the optimization 3DGS's CUDA backward relies on.
 * **A texture's sample scatters its adjoint to the texels it filtered**, four atomic adds at the bilinear weights, one level for a sample at a level.
@@ -170,10 +173,10 @@ What it found in SGL itself:
 ## The order to build it in
 
 The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and `tangent[T]` for the geometry types and for structs.
-It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
+It has buffers of floats, vectors and structs differentiable by their `@gradient` and `@tangent` too.
 
 1. The rules as registry records.
-2. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
+2. A subgroup reduction ahead of a gradient's atomic where the index is uniform.
 
 ## Open
 
