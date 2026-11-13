@@ -231,6 +231,35 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
     CHECK(slot_named(g.layout, "base_color.uv").format == sv::attribute_format::of_vector(sv::scalar_type::f32, 2));
 }
 
+TEST("sv::generate_material_shader - a fragment resamples an attribute at a uv of its own")
+{
+    auto const type = make_type(); // roughness (f32) and base_color (vec3f)
+
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(make_uvs());
+    mesh.textures.push_back(
+        {.name = "base_color",
+         .source
+         = {.texture = sv::texture_id(3), .uv_attribute = "uv", .transform = sv::sample_transform::of_signed_normal()}});
+
+    auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
+
+    // A sampled attribute samples the same texture through the same transform, at the uv it is handed rather than the mesh's.
+    CHECK(g.source.contains(
+        "fun sv_base_color_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float3:\n"));
+    CHECK(g.source.contains("    let uv = at\n"));
+    CHECK(g.source.contains("return texel.xyz * scale.xyz + bias.xyz\n"));
+
+    // An attribute with no uv to move returns its value, so a fragment resampling it compiles whatever it resolved at.
+    CHECK(g.source.contains("fun sv_roughness_at(ctx: material.shading_context, at: float2){tracer.bindless} -> "
+                            "float:\n"
+                            "    return sv_attribute_roughness(ctx)\n"));
+
+    // The raster pixel stage lets its derivatives pick the level, here as in the attribute's own load.
+    CHECK(g.raster_source.contains("fun sv_base_color_at("));
+    CHECK(!g.raster_source.contains("level = 0.0"));
+}
+
 TEST("sv::generate_material_shader - a channel swizzle picks what each component reads")
 {
     auto const type = make_type(); // roughness (f32) and base_color (vec3f), so both widths are covered

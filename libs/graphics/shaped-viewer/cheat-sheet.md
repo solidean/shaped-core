@@ -391,7 +391,12 @@ sv::material_slot_kind           // constant | attribute_descriptor (an sv::attr
 
 The generated hit group joins modules `material`, `openpbr`, `tracer` and, for quadrics, `quadric`, then holds, in order:
 a `const sv_supplied_<name>` per attribute, a `fun sv_attribute_<name>(ctx)` per attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
-then `sv_evaluate_material(ctx)`, which binds each attribute to an immutable local and runs the type's fragment, and the stages over it.
+and beside it a `fun sv_<name>_at(ctx, at: float2)`,
+then `sv_parallax(ctx, g)`, then `sv_evaluate_material(ctx)`, which binds each attribute to an immutable local and runs the type's fragment, and the stages over it.
+**A fragment may resample an attribute at a uv of its own** through `sv_<name>_at`: same texture, swizzle and transform, at the uv it passes.
+An attribute that did not resolve to a texture returns its value from it, so the fragment compiles whatever the resolution was.
+That is how a type projects maps the mesh has no uvs for, such as a triplanar blend, and how a relief marches its height.
+Sample before branching on anything per-pixel: the raster pixel stage lets derivatives pick the level, and SGL rejects a sample in non-uniform control flow.
 `g.key` is `material_shader_key(resolved.permutation_key, opts)`: the resolution's shape AND the geometry it is spelled for.
 Two calls agreeing on that pair generate byte-identical source, and nothing else may share their cache entry.
 

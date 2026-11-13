@@ -1,0 +1,63 @@
+// What level of detail a sampler picks, read back as a number.
+//
+// The pyramid's mip m holds the value m everywhere, so a trilinear sample is m plus the weight of mip m + 1.
+// That weight is the level's fraction only where the blend is linear, which a driver may sharpen: lod_probe.cc reads a
+// level where the sample crosses a half, a point every symmetric blend keeps.
+// Each tile's uv is an exact affine function of the pixel, which makes its derivatives — and so the level the API
+// specifies — a known constant per tile; lod_probe.cc computes that level on the CPU.
+
+// How a tile samples: the same uv every way, so the modes differ only in where the level comes from.
+@inline binding probe_constants:
+    // 0 the derivatives, 1 the derivatives plus `shader_bias`, 2 the explicit gradients, 3 the tile's explicit level
+    mode: int
+    shader_bias: float
+
+// One corner of a tile, in clip space, with the gradients its tile was built from and the level an explicit sample takes.
+@vertex struct probe_vertex:
+    position: float2
+    uv: float2
+    grad_x: float2
+    grad_y: float2
+    level: float
+
+@pixel struct lod_target:
+    lod: float
+
+struct probe_pixel:
+    @position position: hpos4
+    uv: float2
+    @interpolate(.flat) grad_x: float2
+    @interpolate(.flat) grad_y: float2
+    @interpolate(.flat) level: float
+
+binding source:
+    pyramid: texture_2d[float]
+    smp: sampler
+
+@vertex fun probe_vs(v: probe_vertex) -> probe_pixel:
+    return {
+        position = hpos4(v.position.x, v.position.y, 0.0, 1.0)
+        uv = v.uv
+        grad_x = v.grad_x
+        grad_y = v.grad_y
+        level = v.level
+    }
+
+@pixel fun probe_ps(p: probe_pixel){source, probe_constants} -> lod_target:
+    // Every branch samples, so the implicit derivatives are taken in uniform control flow: `mode` is one value per draw.
+    let implicit = source.pyramid.sample(p.uv, source.smp)
+    let biased = source.pyramid.sample(p.uv, source.smp, bias = probe_constants.shader_bias)
+    let explicit = source.pyramid.sample(p.uv, source.smp, grad_x = p.grad_x, grad_y = p.grad_y)
+    let fixed = source.pyramid.sample(p.uv, source.smp, level = p.level)
+    if probe_constants.mode == 1 => return { lod = biased }
+    if probe_constants.mode == 2 => return { lod = explicit }
+    if probe_constants.mode == 3 => return { lod = fixed }
+    return { lod = implicit }
+
+pipeline probe:
+    vertex = probe_vs
+    pixel = probe_ps
+    cull = .none
+    depth_test = false
+    depth_write = false
+    format = .host

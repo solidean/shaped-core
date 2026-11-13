@@ -355,6 +355,25 @@ sg::adapter_info describe_adapter(VkPhysicalDevice device)
     return info;
 }
 
+// Every physical device of `instance`.
+cc::vector<VkPhysicalDevice> physical_devices(VkInstance instance)
+{
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
+    auto devices = cc::vector<VkPhysicalDevice>::create_uninitialized(device_count);
+    vkEnumeratePhysicalDevices(instance, &device_count, devices.data());
+    return devices;
+}
+
+// The device reporting `luid`, or VK_NULL_HANDLE.
+VkPhysicalDevice physical_device_with_luid(VkInstance instance, u64 luid)
+{
+    for (auto device : physical_devices(instance))
+        if (describe_adapter(device).luid == luid)
+            return device;
+    return VK_NULL_HANDLE;
+}
+
 void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger)
 {
     if (messenger == VK_NULL_HANDLE)
@@ -611,6 +630,36 @@ VkResult create_timeline_semaphore(VkDevice device, u64 initial_value, VkSemapho
 
 namespace sg
 {
+cc::vector<adapter_info> enumerate_vulkan_adapters()
+{
+    using namespace sg::backend::vulkan;
+
+    // Instance creation takes the same process-wide hold a context's does; see create_vulkan_context.
+    sg::impl::device_lifecycle_hold const lifecycle;
+
+    auto const app = VkApplicationInfo{
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "shaped-graphics",
+        .apiVersion = k_required_api_version,
+    };
+    auto const instance_info = VkInstanceCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &app,
+    };
+    VkInstance instance = VK_NULL_HANDLE;
+    auto out = cc::vector<adapter_info>();
+    if (vkCreateInstance(&instance_info, nullptr, &instance) != VK_SUCCESS)
+        return out;
+    for (auto device : physical_devices(instance))
+    {
+        u32 family = 0;
+        if (find_graphics_queue_family(device, family))
+            out.push_back(describe_adapter(device));
+    }
+    vkDestroyInstance(instance, nullptr);
+    return out;
+}
+
 cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config const& config)
 {
     using namespace sg::backend::vulkan;
@@ -733,15 +782,23 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
 
     // Physical device selection: rank every device that exposes a graphics queue, keep the best — or take the one the caller chose.
-    auto const selector = config.choose_physical_device ? cc::string() : sg::gpu_selector_from_environment();
-    auto const picked = config.choose_physical_device
-                          ? chosen_physical_device(config.choose_physical_device(instance))
-                          : pick_physical_device(instance, config.prefer_software_device, selector);
+    // An explicit choice, a callback or a LUID, wins over SC_GPU, which only steers sg's own ranking.
+    auto const explicit_choice = config.choose_physical_device || config.adapter_luid.has_value();
+    auto const selector = explicit_choice ? cc::string() : sg::gpu_selector_from_environment();
+    auto picked = cc::optional<selected_physical_device>();
+    if (config.choose_physical_device)
+        picked = chosen_physical_device(config.choose_physical_device(instance));
+    else if (config.adapter_luid.has_value())
+        picked = chosen_physical_device(physical_device_with_luid(instance, config.adapter_luid.value()));
+    else
+        picked = pick_physical_device(instance, config.prefer_software_device, selector);
     if (!picked.has_value())
     {
-        auto message = config.choose_physical_device ? cc::string("vulkan_config::choose_physical_device chose no "
-                                                                  "device, or one without a graphics "
-                                                                  "queue")
+        auto message = config.choose_physical_device
+                         ? cc::string("vulkan_config::choose_physical_device chose no device, or one without a graphics "
+                                      "queue")
+                     : config.adapter_luid.has_value()
+                         ? cc::format("no Vulkan device with a graphics queue has the LUID {:x}", config.adapter_luid.value())
                      : selector.empty()
                          ? cc::string("no Vulkan device with a graphics queue found")
                          : cc::format("SC_GPU='{}' matches no Vulkan device with a graphics queue; the devices are: {}",
@@ -1267,6 +1324,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         raytracing_supported = ctx->_raytracing_functions.load(device);
     }
     ctx->set_raytracing_supported(raytracing_supported);
+    ctx->set_correct_anisotropic_lod(config.correct_anisotropic_lod);
     if (raytracing_supported && micromap_supported && ctx->_raytracing_functions.load_micromaps(device))
     {
         auto micromap_props = VkPhysicalDeviceOpacityMicromapPropertiesEXT{
