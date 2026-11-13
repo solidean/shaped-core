@@ -12,6 +12,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh> // cc::this_thread_sleep_secs, the host's frame pacing
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <imgui/imgui.h>
 #include <nexus/async-test.hh>
@@ -1154,6 +1155,9 @@ ASYNC_INVOCABLE_TEST("sv - a guest settled render advances no epoch of its own, 
     };
 
     // the host: its home bound to its own thread and living there, pumped and then followed by an advance, round after round
+    // Paced like an app's frame loop, an advance every 4 ms.
+    // A host spinning its advances outruns the GPU by thousands of epochs a guest frame.
+    // On metal the guest's image then comes back empty: bug-sv-guest-settled-render-empty-on-metal.
     auto home = cc::atomic<cc::thread_bound_scheduler*>(nullptr);
     auto stop = cc::atomic<bool>(false);
     auto host_advances = cc::atomic<i64>(0);
@@ -1166,7 +1170,10 @@ ASYNC_INVOCABLE_TEST("sv - a guest settled render advances no epoch of its own, 
             home.store(&own, cc::memory_order_release);
             while (!stop.load(cc::memory_order_acquire))
             {
-                (void)own.pump_for(1.0);
+                auto const frame_end = cc::current_time_steady_secs() + 0.004;
+                while (cc::current_time_steady_secs() < frame_end && !stop.load(cc::memory_order_acquire))
+                    if (!own.pump_for(1.0))
+                        cc::this_thread_sleep_secs(0.0005);
                 ctx.advance_epoch();
                 host_advances.fetch_add(1, cc::memory_order_relaxed);
             }
