@@ -8,8 +8,8 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/metrics.hh>
-#include <shaped-graphics/routine/routine_registry.hh>
 #include <shaped-graphics/fwd.hh> // sg::context_handle
+#include <shaped-graphics/routine/routine_registry.hh>
 
 namespace sg_test
 {
