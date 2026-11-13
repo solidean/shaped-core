@@ -123,12 +123,12 @@ TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to
     CHECK(out->index == 0u);                     // u0
 }
 
-TEST("ssc::dxc compile - NVAPI's shader extension slot is the driver's, and reflects as no binding")
+TEST("ssc::dxc compile - NVAPI's shader extension slot reflects as a reserved slot, by its name and its address alone")
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    // the counter UAV `nvHLSLExtns.h` declares, which a host enables on its device; any other counter buffer is refused
+    // the counter UAV an nvapi fill declares, which a host covers and binds itself; any other counter buffer is refused
     constexpr char const* extension_hlsl = R"(
 struct record { uint opcode; uint words[63]; };
 RWStructuredBuffer<record> g_NvidiaExt : register(u0, space13);
@@ -151,11 +151,30 @@ void main(uint3 tid : SV_DispatchThreadID)
     REQUIRE(result.has_value()).dump("dxc", result.has_error() ? result.error().to_string() : cc::string());
     REQUIRE(result.value().bindings.size() == 1);
     CHECK(result.value().bindings[0].name == cc::string_view("Output"));
+    // what a host lays it out by: a structured buffer of 256-byte records with a counter at u0, space13
+    REQUIRE(result.value().reserved_slots.size() == 1);
+    auto const& slot = result.value().reserved_slots[0];
+    CHECK(slot.name == cc::string_view("g_NvidiaExt"));
+    CHECK(slot.space == 13u);
+    CHECK(slot.index == 0u);
+    CHECK(slot.stride == 256u);
+    CHECK(slot.has_counter);
 
-    auto other = cc::string(extension_hlsl);
-    other.replace_all("g_NvidiaExt", "counted");
-    desc.source = other;
-    CHECK(comp.value().compile(desc).has_error());
+    // another counter buffer, and that name at any other address, are refused as counter buffers are
+    for (auto const& [from, to] :
+         {cc::pair<cc::string_view, cc::string_view>{"g_NvidiaExt :", "counted :"},
+          cc::pair<cc::string_view, cc::string_view>{"register(u0, space13)", "register(u1, space13)"},
+          cc::pair<cc::string_view, cc::string_view>{"register(u0, space13)", "register(u0, space12)"}})
+    {
+        auto other = cc::string(extension_hlsl);
+        other.replace_all(from, to);
+        other.replace_all("g_NvidiaExt.", from == "g_NvidiaExt :" ? "counted." : "g_NvidiaExt.");
+        other.replace_all("g_NvidiaExt[", from == "g_NvidiaExt :" ? "counted[" : "g_NvidiaExt[");
+        desc.source = other;
+        auto const refused = comp.value().compile(desc);
+        REQUIRE(refused.has_error()).dump("source", other);
+        CHECK(refused.error().to_string().contains("counter buffers are not supported")).dump("source", other);
+    }
 }
 
 #endif // CC_OS_WINDOWS

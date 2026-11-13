@@ -58,6 +58,22 @@ struct sg::compute_dimensions
 /// A successfully compiled shader: the bytecode blob and its metadata, ready to build a pipeline from or cache.
 /// For HLSL and WGSL the metadata is the compiler's reflection; an SGL shader states all of it itself, and its compiler contributes only `bytecode` and `compiler`.
 /// A pure value; share it via compiled_shader_handle.
+/// A slot a shader declares that no binding group fills: NVAPI's shader extension slot, `g_NvidiaExt`, through which
+/// an `nvapi` fill of shaped-graphics-language talks to NVIDIA's driver (its EMIT-263).
+/// It is a structured buffer of `stride` bytes with a counter at register `index` of space `space`, so a root descriptor,
+/// which has no counter, cannot be it: the host covers it in a descriptor table of its root signature as a UAV.
+/// It binds a null descriptor or a valid buffer there, as `nvHLSLExtnsInternal.h` asks, and enables the slot on its device.
+struct sg::reserved_slot
+{
+    cc::string name;
+    u32 space = 0;
+    u32 index = 0;
+    u32 stride = 0;
+    bool has_counter = false;
+
+    [[nodiscard]] bool operator==(reserved_slot const&) const = default;
+};
+
 struct sg::compiled_shader
 {
     shader_stage stage = shader_stage::compute;
@@ -136,6 +152,10 @@ struct sg::compiled_shader
     /// Where each line of a text format's code came from, so a backend that compiles the text names the source's line.
     /// SGL states it; empty for every other compiler, and for bytecode, whose compiler already reported its lines.
     cc::vector<shader_source_line> source_map;
+
+    /// The slots the code declares that no binding group fills: NVAPI's shader extension slot, which DXIL reflects.
+    /// A host laying the pipeline out from reflection covers each, and sg's own backends lay out none yet.
+    cc::vector<reserved_slot> reserved_slots;
 
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };

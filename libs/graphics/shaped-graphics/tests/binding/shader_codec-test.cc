@@ -167,6 +167,17 @@ TEST("sg shader codec round-trips a shader's source map")
     CHECK(decoded.value().source_map[1] == original.source_map[1]);
 }
 
+TEST("sg shader codec round-trips a shader's reserved slots")
+{
+    auto original = make_shader();
+    original.reserved_slots.push_back(
+        {.name = "g_NvidiaExt", .space = 13, .index = 0, .stride = 256, .has_counter = true});
+    auto const decoded = sg::impl::decode_compiled_shader(sg::impl::encode_compiled_shader(original));
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded.value().reserved_slots.size() == 1);
+    CHECK(decoded.value().reserved_slots[0] == original.reserved_slots[0]);
+}
+
 TEST("sg shader codec round-trips the absent optionals")
 {
     auto original = make_shader();

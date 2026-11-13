@@ -15,6 +15,8 @@ namespace ssc::dxc::impl
 struct reflected_shader
 {
     cc::vector<sg::binding> bindings;
+    /// NVAPI's shader extension slot, where the shader declares it at `u0, space13` (`sg::reserved_slot`).
+    cc::vector<sg::reserved_slot> reserved_slots;
     cc::optional<sg::compute_dimensions> workgroup_size; ///< populated for the compute stage
     /// Populated for the fragment stage: one past the highest render target it writes, since targets may be sparse.
     cc::optional<i32> color_output_count;
@@ -30,6 +32,8 @@ struct reflected_shader
 /// each backend reinterprets it (see docs). Buffers, textures (SRV/UAV), samplers, and acceleration
 /// structures map to the matching sg::binding_type; it fails on a kind sg has no vocabulary for yet
 /// (texel/typed buffers, append/consume/counter buffers).
+/// The one counter buffer it takes is NVAPI's shader extension slot, `g_NvidiaExt` at `u0, space13`, which it reports as
+/// a reserved slot rather than a binding; that name anywhere else is refused as any counter buffer is.
 ///
 /// Ray-tracing stages (`is_raytracing_stage`) reflect a DXIL library: `entry_point` selects the function
 /// whose bindings are extracted (matched by its mangled name). For non-RT stages `entry_point` is ignored.

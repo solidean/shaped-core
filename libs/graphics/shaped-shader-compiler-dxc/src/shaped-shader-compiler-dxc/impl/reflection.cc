@@ -9,6 +9,10 @@ namespace ssc::dxc::impl
 {
 namespace
 {
+/// Where an `nvapi` fill's text puts NVAPI's shader extension slot: `NV_SHADER_EXTN_SLOT u0`, `space13`.
+constexpr UINT k_nvapi_register = 0;
+constexpr UINT k_nvapi_space = 13;
+
 /// Maps a reflected resource binding onto the sg binding_type with the matching (view_class, view_shape).
 /// nullopt for kinds sg has no vocabulary for yet — the caller turns that into an error naming the resource, so growing sg::binding_type is a deliberate, visible step.
 /// The `Dimension` distinguishes a texture from a typed/texel buffer: both a `Texture2D` and a `Buffer<T>` reflect as a TEXTURE / RWTYPED kind.
@@ -89,7 +93,9 @@ namespace
 /// The bound-resource loop, shared by the monolithic (ID3D12ShaderReflection) and library
 /// (ID3D12FunctionReflection) paths — both expose GetResourceBindingDesc / GetConstantBufferByName.
 template <class ReflectionT>
-[[nodiscard]] cc::result<cc::vector<sg::binding>> reflect_bindings(ReflectionT* reflection, UINT bound_resources)
+[[nodiscard]] cc::result<cc::vector<sg::binding>> reflect_bindings(ReflectionT* reflection,
+                                                                   UINT bound_resources,
+                                                                   cc::vector<sg::reserved_slot>& reserved)
 {
     cc::vector<sg::binding> bindings;
     bindings.reserve(isize(bound_resources));
@@ -99,10 +105,19 @@ template <class ReflectionT>
         if (HRESULT hr = reflection->GetResourceBindingDesc(i, &bd); FAILED(hr))
             return dxc_error(hr, "GetResourceBindingDesc");
 
-        // NVAPI's shader extension slot, which `nvHLSLExtns.h` declares: NVIDIA's driver takes its accesses as calls,
-        // and the host enables its slot on the device rather than binding anything there
-        if (bd.Type == D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER && cc::string_view(bd.Name) == "g_NvidiaExt")
+        // NVAPI's shader extension slot as an nvapi fill declares it, by name and address: NVIDIA's driver takes its
+        // accesses as calls, and the host covers it as a UAV with a counter and binds a null or valid buffer there
+        if (bd.Type == D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER && cc::string_view(bd.Name) == "g_NvidiaExt"
+            && bd.BindPoint == k_nvapi_register && bd.Space == k_nvapi_space && bd.BindCount == 1)
+        {
+            // a structured buffer's stride is what the bind description's sample count holds
+            reserved.push_back({.name = cc::string(bd.Name),
+                                .space = bd.Space,
+                                .index = bd.BindPoint,
+                                .stride = bd.NumSamples,
+                                .has_counter = true});
             continue;
+        }
 
         cc::optional<sg::binding_type> const type = map_binding_type(bd);
         if (!type.has_value())
@@ -145,7 +160,8 @@ template <class ReflectionT>
 /// (DXC mangles `main` to e.g. `?main@@YAXXZ` — the unmangled name sits between `?` and `@@`, so the
 /// `?entry@@` token avoids matching a prefix like `main2`), then extracts its bindings.
 [[nodiscard]] cc::result<cc::vector<sg::binding>> reflect_library_bindings(ID3D12LibraryReflection* library,
-                                                                           cc::string_view entry_point)
+                                                                           cc::string_view entry_point,
+                                                                           cc::vector<sg::reserved_slot>& reserved)
 {
     D3D12_LIBRARY_DESC library_desc = {};
     if (HRESULT hr = library->GetDesc(&library_desc); FAILED(hr))
@@ -163,7 +179,7 @@ template <class ReflectionT>
             return dxc_error(hr, "ID3D12FunctionReflection::GetDesc");
 
         if (cc::string_view(function_desc.Name).contains(search_token))
-            return reflect_bindings(function, function_desc.BoundResources);
+            return reflect_bindings(function, function_desc.BoundResources, reserved);
     }
 
     return cc::error(
@@ -188,7 +204,7 @@ cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::s
         if (HRESULT hr = utils->CreateReflection(&buffer, IID_PPV_ARGS(library.GetAddressOf())); FAILED(hr))
             return dxc_error(hr, "IDxcUtils::CreateReflection (library)");
 
-        auto bindings = reflect_library_bindings(library.Get(), entry_point);
+        auto bindings = reflect_library_bindings(library.Get(), entry_point, out.reserved_slots);
         CC_RETURN_IF_ERROR(bindings);
         out.bindings = cc::move(bindings.value());
         return out; // no workgroup size for ray-tracing stages
@@ -202,7 +218,7 @@ cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::s
     if (HRESULT hr = reflection->GetDesc(&shader_desc); FAILED(hr))
         return dxc_error(hr, "ID3D12ShaderReflection::GetDesc");
 
-    auto bindings = reflect_bindings(reflection.Get(), shader_desc.BoundResources);
+    auto bindings = reflect_bindings(reflection.Get(), shader_desc.BoundResources, out.reserved_slots);
     CC_RETURN_IF_ERROR(bindings);
     out.bindings = cc::move(bindings.value());
 
