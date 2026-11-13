@@ -1,0 +1,137 @@
+// CHK-528: `@max_iterations(n)` on a `while` or a `for` ends the loop after n iterations at the latest.
+// What runs is the same loop with a bound every compile keeps, so a derivative walking it back sees what the loop did.
+
+// a `while` that would run on is cut off at its bound
+test:
+    let mut count = 0
+    @max_iterations(5)
+    while true:
+        count += 1
+    count == 5
+
+// one that ends sooner ends there
+test:
+    let mut count = 0
+    @max_iterations(100)
+    while count < 7:
+        count += 1
+    count == 7
+
+// a `continue` reaches the condition again, and a `break` leaves as it would
+test:
+    let mut seen = 0
+    let mut odd = 0
+    @max_iterations(50)
+    while seen < 10:
+        seen += 1
+        if seen % 2 == 0 => continue
+        if seen == 9 => break
+        odd += 1
+    seen == 9 and odd == 4
+
+// the bound ends the loop before its condition would be evaluated an n+1-th time
+fun counted(tested: mut int) -> bool:
+    tested += 1
+    return true
+
+test:
+    let mut tested = 0
+    let mut ran = 0
+    @max_iterations(3)
+    while counted(mut tested):
+        ran += 1
+    tested == 3 and ran == 3
+
+// a `for` whose bounds a `let` holds runs its range, and at most n values of it
+fun sum_over(first: int, end: int) -> int:
+    let a = first
+    let b = end
+    let mut total = 0
+    @max_iterations(4)
+    for i in a ..< b:
+        total += i
+    return total
+
+test sum_over(3, 6) == 3 + 4 + 5
+test sum_over(3, 20) == 3 + 4 + 5 + 6
+test sum_over(5, 2) == 0
+test sum_over(-2, 0) == -2 + -1
+
+// `..=` takes its last value, and a range up to the largest int runs whole without a value past it
+fun count_through(first: int, last: int) -> int:
+    let a = first
+    let b = last
+    let mut count = 0
+    @max_iterations(10)
+    for i in a ..= b:
+        count += 1
+    return count
+
+test count_through(1, 3) == 3
+test count_through(3, 1) == 0
+test count_through(2147483645, 2147483647) == 3
+test count_through(0, 2147483647) == 10
+
+// a walk runs its values in its order, the first n of them
+fun last_of(end: int) -> int:
+    let b = end
+    let mut seen = -1
+    @max_iterations(3)
+    for i in (0 ..< b).reversed:
+        seen = i
+    return seen
+
+test last_of(10) == 7
+test last_of(2) == 0
+
+// constant bounds are lowered to the stated n, unrolled or not
+test:
+    let mut total = 0
+    @max_iterations(3)
+    for i in 0 ..< 10:
+        total += i
+    total == 0 + 1 + 2
+
+test:
+    let mut total = 0
+    @unroll
+    @max_iterations(2)
+    for i in 1 ..= 10:
+        total += i
+    total == 1 + 2
+
+// the bound is an int constant of at least 1
+@expect(error = "invalid-constant-argument")
+test:
+    let mut count = 0
+    @max_iterations(0)
+    while true:
+        count += 1
+    count == 0
+
+@expect(error = "invalid-constant-argument")
+test:
+    let n = 3
+    let mut count = 0
+    @max_iterations(n)
+    while true:
+        count += 1
+    count == 3
+
+const k_steps = 4
+
+test:
+    let mut count = 0
+    @max_iterations(k_steps)
+    while true:
+        count += 1
+    count == 4
+
+// only a loop takes it
+@expect(error = "unsupported-yet")
+test:
+    let mut count = 0
+    @max_iterations(2)
+    if count == 0:
+        count += 1
+    count == 1

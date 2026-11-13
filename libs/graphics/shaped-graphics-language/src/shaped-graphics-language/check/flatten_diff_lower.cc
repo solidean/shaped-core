@@ -42,55 +42,7 @@ auto differentiator::scalar_of(type_id t) const -> type_id
 
 auto differentiator::leaves_of(type_id t, f32 v, cc::vector<scalar>& out) const -> bool
 {
-    if (auto const* const r = record_of(t))
-    {
-        for (auto i = 0; i < r->leaf_count; ++i)
-        {
-            switch (r->leaf_kind)
-            {
-            case value_kind::scalar_float:
-                out.push_back(scalar::of(v));
-                break;
-            case value_kind::scalar_half:
-                out.push_back(scalar::of_half(f64(v)));
-                break;
-            case value_kind::scalar_uint:
-                out.push_back(scalar::of_uint(0));
-                break;
-            case value_kind::boolean:
-                out.push_back(scalar::of(false));
-                break;
-            case value_kind::none:
-                return false;
-            default:
-                out.push_back({.kind = r->leaf_kind, .bits = 0});
-                break;
-            }
-        }
-        return true;
-    }
-    auto const& info = m().at(t);
-    if (info.kind == type_kind::enumeration)
-    {
-        auto const cases = m().at(info.cases);
-        if (cases.empty())
-            return false;
-        out.push_back(scalar::of(cases[0].value));
-        return true;
-    }
-    if (info.kind == type_kind::array)
-    {
-        for (auto i = 0; i < info.count; ++i)
-            if (!leaves_of(info.element, v, out))
-                return false;
-        return info.count > 0;
-    }
-    if (info.kind != type_kind::structure)
-        return false;
-    for (auto const& member : m().at(info.members))
-        if (!leaves_of(member.type, v, out))
-            return false;
-    return true;
+    return f.leaves_of(t, v, out);
 }
 
 auto differentiator::constant(type_id t, f32 v) -> flat_expr_id

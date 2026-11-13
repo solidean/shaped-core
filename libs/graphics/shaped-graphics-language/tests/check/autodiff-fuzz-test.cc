@@ -378,12 +378,46 @@ struct program_writer
         {
             auto const index = name("i");
             auto const first = rng.uniform(0, 2);
-            line(indent, cc::format("for {} in {} ..< {}:", index, first, first + rng.uniform(1, 4)));
+            auto const count = rng.uniform(1, 4);
+            auto const variant = pick(4);
+            auto t = cc::string();
+            if (variant == 0)
+                line(indent, cc::format("for {} in {} ..< {}:", index, first, first + count));
+            else if (variant == 1)
+            {
+                // an end only a `let` knows, so the stated bound is what keeps it a loop with a tape
+                auto const end = name("e");
+                line(indent, cc::format("let {} = {}", end, first + count));
+                line(indent, cc::format("@max_iterations({})", rng.uniform(1, 5)));
+                line(indent, cc::format("for {} in {} ..< {}:", index, first, end));
+            }
+            else if (variant == 2)
+            {
+                // a counter a `continue` may skip, so the bound is what ends it then
+                line(indent, cc::format("let mut {} = {}", index, first));
+                line(indent, cc::format("@max_iterations({})", rng.uniform(1, 5)));
+                line(indent, cc::format("while {} < {}:", index, first + count));
+                line(indent + 1, cc::format("{} += 1", index));
+            }
+            else
+            {
+                // a march whose step count follows the input
+                t = name("t");
+                line(indent, cc::format("let mut {} = 0.0", t));
+                line(indent, cc::format("@max_iterations({})", rng.uniform(1, 6)));
+                line(indent, cc::format("while {} < 1.0:", t));
+                line(indent + 1, cc::format("{} += 0.3 + 0.1 * tanh({})", t, scalar(2)));
+            }
             indices.push_back(index);
+            if (!t.empty())
+                indices.remove_back();
             ++loop_depth;
             block(indent + 1, rng.uniform(1, 4), nesting + 1);
             --loop_depth;
-            indices.remove_back();
+            if (t.empty())
+                indices.remove_back();
+            else
+                scalars.push_back(t);
         }
         else if (kind == 9 && loop_depth > 0)
             line(indent, cc::format("if {} => {}", condition(1), chance(50) ? "break" : "continue"));

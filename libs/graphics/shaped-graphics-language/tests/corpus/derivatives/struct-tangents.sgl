@@ -1,0 +1,111 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): a type's tangent is `tangent[T]`.
+// A struct's is a struct of its differentiable fields' tangents, named as they are: a position's is its direction, a
+// float's a float, and an int has none, so `tangent[splat]` holds `at: vec3` and `weight: float`.
+// `tangent[T]()` is its zero, and a direction is that zero with its fields assigned.
+
+struct splat:
+    at: pos3
+    weight: float
+    count: int
+
+fun brightness(s: splat) -> float:
+    let eye = pos3(0.2, 0.1, 0.0)
+    let d = distance(s.at, eye)
+    return s.weight * exp(-d * d) * float(s.count)
+
+fun direction(at: vec3, weight: float) -> tangent[splat]:
+    let mut t = tangent[splat]()
+    t.at = at
+    t.weight = weight
+    return t
+
+fun moved(s: splat, along: tangent[splat], h: float) -> splat:
+    return splat(at = s.at + along.at * h, weight = s.weight + along.weight * h, count = s.count)
+
+fun agrees(s: splat, along: tangent[splat]) -> bool:
+    let h = 1e-3
+    let numeric = (brightness(moved(s, along, h)) - brightness(moved(s, along, -h))) / (2.0 * h)
+    let mut gradient = tangent[splat]()
+    bwd_diff(brightness, s, mut gradient, 1.0)
+    let backward = dot(gradient.at, along.at) + gradient.weight * along.weight
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(brightness, s, along), numeric, within = tolerance)
+        and nearly_equal(backward, numeric, within = tolerance)
+
+test agrees(splat(at = pos3(0.5, -0.2, 0.3), weight = 0.8, count = 2), direction(vec3(1.0, 0.0, 0.0), 0.0))
+test agrees(splat(at = pos3(0.5, -0.2, 0.3), weight = 0.8, count = 2), direction(vec3(0.0, 1.0, 0.0), 0.0))
+test agrees(splat(at = pos3(0.5, -0.2, 0.3), weight = 0.8, count = 2), direction(vec3(0.0, 0.0, 1.0), 0.0))
+test agrees(splat(at = pos3(0.5, -0.2, 0.3), weight = 0.8, count = 2), direction(vec3(0.0), 1.0))
+
+// a tangent's fields are its own: a direction where the struct holds a position
+test:
+    let t = tangent[splat]()
+    let v: vec3 = t.at
+    v.x == 0.0 and t.weight == 0.0
+
+// a struct whose fields are all their own tangents is its own tangent
+struct weights:
+    a: float
+    b: float2
+
+test:
+    let w: weights = tangent[weights]()
+    w.a == 0.0
+
+// so is a builtin type, a position's being its direction
+test:
+    let v: vec3 = tangent[pos3]()
+    v.y == 0.0
+
+// an array of structs and a struct around it: each element's tangent in an array of them
+struct scene:
+    splats: splat[2]
+    exposure: float
+
+fun lit(s: scene) -> float:
+    let mut sum = 0.0
+    for k in 0 ..< 2:
+        sum += brightness(s.splats[k])
+    return sum * s.exposure
+
+fun scene_agrees(along: vec3) -> bool:
+    let first = splat(at = pos3(0.5, -0.2, 0.3), weight = 0.8, count = 2)
+    let second = splat(at = pos3(-0.1, 0.4, 0.2), weight = 0.5, count = 1)
+    let s = scene(splats = [first, second], exposure = 1.5)
+    let mut d = tangent[scene]()
+    d.splats[1].at = along
+    let h = 1e-3
+    let mut plus = s
+    plus.splats[1].at = plus.splats[1].at + along * h
+    let mut minus = s
+    minus.splats[1].at = minus.splats[1].at - along * h
+    let numeric = (lit(plus) - lit(minus)) / (2.0 * h)
+    let mut gradient = tangent[scene]()
+    bwd_diff(lit, s, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(lit, s, d), numeric, within = tolerance)
+        and nearly_equal(dot(gradient.splats[1].at, along), numeric, within = tolerance)
+
+test scene_agrees(vec3(1.0, 0.0, 0.0))
+test scene_agrees(vec3(0.0, 0.0, 1.0))
+
+// a kernel declares the tangent struct on every target
+binding results:
+    values: mut buffer[float]
+
+@compute(64) fun splat_backward(@thread_id id: int3){results}:
+    let mut ds = tangent[splat]()
+    bwd_diff(brightness, splat(at = pos3(float(id.x) * 0.01, 0.0, 0.0), weight = 1.0, count = 1), mut ds, 1.0)
+    results.values[id.x] = ds.at.x + ds.weight
+
+// an int holds nothing that changes
+@expect(error = "wrong-kind-of-name")
+test:
+    let t = tangent[int]()
+    t == 0
+
+// a tangent is built as its zero, its fields assigned after
+@expect(error = "unsupported-yet")
+test:
+    let t = tangent[splat](at = vec3(1.0), weight = 0.0)
+    t.weight == 0.0

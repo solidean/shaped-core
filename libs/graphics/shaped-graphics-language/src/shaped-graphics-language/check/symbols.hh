@@ -331,6 +331,9 @@ struct sgl::check::type_info
     /// A template's parameters in order, and what each stands for in an instance of it; a range of
     /// `checked_module::type_lists` (CHK-339).
     ast::range_of<type_id> arguments;
+    /// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): the struct whose tangent
+    /// type this one is, `tangent[S]`, which holds a tangent per differentiable field of `S`; `none` for every other type.
+    type_id tangent_of = type_id::none;
 
     bool operator==(type_info const&) const = default;
 };
@@ -852,6 +855,8 @@ enum class sgl::check::target_kind : sgl::u8
     /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
     /// (CHK-341).
     undefined_value,
+    /// On a call: `tangent[T]()`, the zero of `T`'s tangent type, which every field is assigned from (PROTOTYPE, autodiff).
+    zero_value,
     /// On a cast: `x as texel[F]` to a texel of another width than `x`'s (CHK-391).
     texel_conversion,
     /// A value parameter's name in an instance: `index` is the constant it stands for, in `checked_module::types`

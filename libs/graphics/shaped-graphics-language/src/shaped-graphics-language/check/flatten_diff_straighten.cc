@@ -72,7 +72,8 @@ auto differentiator::hoist_declarations(cc::span<flat_stmt_id const> statements)
                                          .body = body});
                 }
                 else if (s.node.is<flat_loop>() || s.node.is<flat_while>() || s.node.is<flat_for>())
-                    failed("a loop whose bounds are no constants, which only a @backward can walk back");
+                    failed("a loop whose bounds are no constants and that states no @max_iterations(n), which only a "
+                           "@backward can walk back");
                 else if (s.node.is<flat_case>())
                     failed("a case");
                 else if (s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_discard>())

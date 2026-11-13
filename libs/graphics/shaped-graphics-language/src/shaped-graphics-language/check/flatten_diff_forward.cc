@@ -53,8 +53,15 @@ auto differentiator::derive(flat_expr_id id) -> dual
         auto const primal = add(x.type, flat_member{.object = object.primal, .member = n->member, .letters = n->letters});
         if (!is_valid(object.tangent))
             return {primal, flat_expr_id::none};
+        // a swizzle's letters name the fields, so only a struct that is its own tangent keeps their meaning
+        auto const object_type = type_of(object.primal);
+        if (n->is_swizzle() && tangent(object_type) != object_type && record_of(object_type) == nullptr)
+            return {primal, failed("a swizzle of a struct whose tangent is another struct")};
+        auto const member = n->is_swizzle() ? n->member : tangent_member(object_type, n->member);
+        if (!n->is_swizzle() && member < 0)
+            return {primal, flat_expr_id::none};
         return {primal,
-                add(tangent(x.type), flat_member{.object = object.tangent, .member = n->member, .letters = n->letters})};
+                add(tangent(x.type), flat_member{.object = object.tangent, .member = member, .letters = n->letters})};
     }
     if (auto const* const n = x.node.try_as<flat_element>())
     {
@@ -81,10 +88,15 @@ auto differentiator::derive(flat_expr_id id) -> dual
         auto const primal = add(x.type, flat_construct{.arguments = f.add_list(primals)});
         if (!any)
             return {primal, flat_expr_id::none};
+        // a struct's tangent holds its differentiable fields alone
+        auto kept = cc::vector<flat_expr_id>();
         for (auto i = isize(0); i < tangents.size(); ++i)
-            if (!is_valid(tangents[i]))
-                tangents[i] = zero(tangent(type_of(primals[i])));
-        return {primal, add(tangent(x.type), flat_construct{.arguments = f.add_list(tangents)})};
+        {
+            if (!is_part_kept(x.type, i))
+                continue;
+            kept.push_back(is_valid(tangents[i]) ? tangents[i] : zero(tangent(type_of(primals[i]))));
+        }
+        return {primal, add(tangent(x.type), flat_construct{.arguments = f.add_list(kept)})};
     }
     if (auto const* const n = x.node.try_as<flat_call>())
         return derive_call(x.type, *n);
@@ -386,6 +398,25 @@ auto differentiator::place_of(flat_expr_id root, cc::span<place_step const> step
     return x;
 }
 
+auto differentiator::tangent_place_of(flat_expr_id root, cc::span<place_step const> steps) -> flat_expr_id
+{
+    auto x = root;
+    for (auto const& s : steps)
+    {
+        if (is_valid(s.index))
+        {
+            x = add(element_type(type_of(x)), flat_element{.object = x, .index = use(s.index)});
+            continue;
+        }
+        auto const primal = m().at(type_of(x)).tangent_of;
+        auto const member = is_valid(primal) ? tangent_member(primal, s.member) : s.member;
+        if (member < 0)
+            return flat_expr_id::none;
+        x = add(f.field_type(type_of(x), member), flat_member{.object = x, .member = member});
+    }
+    return x;
+}
+
 auto differentiator::forward(cc::span<flat_stmt_id const> statements) -> cc::vector<flat_stmt_id>
 {
     auto const copy = cc::vector<flat_stmt_id>::create_copy_of(statements);
@@ -440,7 +471,10 @@ auto differentiator::forward_stmt(flat_stmt_id id) -> void
         auto const tangent = tangent_of_value(n->value);
         auto const value = share(is_valid(tangent) ? tangent : zero(this->tangent(type_of(n->place))), "dt");
         f.block.push_back(id);
-        return emit(flat_assign{.place = place_of(ref(tangent_local), steps), .value = use(value)});
+        auto const place = tangent_place_of(ref(tangent_local), steps);
+        if (is_valid(place))
+            emit(flat_assign{.place = place, .value = use(value)});
+        return;
     }
     if (auto const* const n = s.node.try_as<flat_if>())
     {

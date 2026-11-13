@@ -558,6 +558,8 @@ struct checker
     cc::map<i32, derivative_signature> derivative_signatures;
     /// The overload of each function and mode, by `2 * symbol + is_reverse`.
     cc::map<i64, symbol_id> derivative_overloads;
+    /// PROTOTYPE (autodiff): `tangent_type` of a struct, by the struct's type.
+    cc::map<i32, type_id> tangent_types;
     /// A `const` in a function body (CHK-413): a symbol no file scope sees, with the earlier ones of its body it reads.
     struct local_constant
     {
@@ -1539,8 +1541,14 @@ struct checker
     [[nodiscard]] bool is_differentiable_type(type_id type) const;
     /// Parameter `parameter` of `function` takes a tangent: it is of a differentiable type, no `mut`, and no `@no_diff`.
     [[nodiscard]] bool takes_tangent(symbol_id function, isize parameter) const;
-    /// The type of a change of a value of `type`: a position's is its direction, and any other type is its own.
-    [[nodiscard]] type_id tangent_type(type_id type) const;
+    /// The type of a change of a value of `type`, `tangent[T]`: a position's is its direction, an array's an array of
+    /// its element's, and a struct's a struct of its differentiable fields' tangents, minted once and named
+    /// `tangent[S]` where that differs from `S`; any other type is its own.
+    [[nodiscard]] type_id tangent_type(type_id type);
+    /// The field of `tangent_type(primal)` that field `member` of the struct `primal` changes, -1 where it has none.
+    [[nodiscard]] i32 tangent_member(type_id primal, i32 member);
+    /// `tangent[T]` written as a type: `tangent_type` of a differentiable `T` that is no type parameter.
+    [[nodiscard]] type_id resolve_tangent(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// For a call of the prelude's `fwd_diff` or `bwd_diff`: one overload per function the first argument names, each
     /// taking that function's parameters and their tangents; empty where the first argument names no function.
     [[nodiscard]] cc::vector<symbol_id> derivative_candidates(cc::span<symbol_id const> generic,

@@ -606,6 +606,8 @@ for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no tex
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
                                          // ...and so does an inner one whose bound reads its index, under the same warning
                                          // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
+@max_iterations(64)                      // on a `while` or a `for`: ends it after 64 iterations at the latest, in every compile
+while t < far: ...                       //   (CHK-528); a bound kept, not a promise, so bwd_diff walks it back over a tape
 
 @float(.specials) fun clean(v: float) -> float:   // the least float guarantee a body needs (CHK-435): .fast (default),
     return if v != v => 0.0 else v       //   .specials, .precise, .ieee; an entry point keeps the strictest it reaches
