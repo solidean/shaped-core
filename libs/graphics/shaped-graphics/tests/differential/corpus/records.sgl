@@ -1,0 +1,44 @@
+// differential: setup records
+// Structs in buffers as a scene or a particle system keeps them: a nested struct, a fixed array, integer vectors and a bool among floats.
+// Each record is echoed member by member, then rearranged by exact operations alone, so any route or API placing a member elsewhere differs.
+use diff_records
+
+fun bits(f: float) -> uint => reinterpret_as_uint(f)
+
+@compute(64) fun rearranged(@thread_id id: int3){diff_records.io}:
+    let i = id.x
+    let r = diff_records.io.records[i]
+    let n = diff_records.io.records[(i + 1) & 255]
+
+    let at = 20 * i
+    diff_records.io.echo[at] = r.id
+    diff_records.io.echo[at + 1] = bits(r.position.x)
+    diff_records.io.echo[at + 2] = bits(r.position.y)
+    diff_records.io.echo[at + 3] = bits(r.position.z)
+    diff_records.io.echo[at + 4] = bits(r.scale.x)
+    diff_records.io.echo[at + 5] = bits(r.scale.y)
+    diff_records.io.echo[at + 6] = bits(r.surface.albedo.x)
+    diff_records.io.echo[at + 7] = bits(r.surface.albedo.y)
+    diff_records.io.echo[at + 8] = bits(r.surface.albedo.z)
+    diff_records.io.echo[at + 9] = bits(r.surface.roughness)
+    diff_records.io.echo[at + 10] = r.surface.layers.x
+    diff_records.io.echo[at + 11] = r.surface.layers.y
+    diff_records.io.echo[at + 12] = bits(r.weights[0])
+    diff_records.io.echo[at + 13] = bits(r.weights[1])
+    diff_records.io.echo[at + 14] = bits(r.weights[2])
+    diff_records.io.echo[at + 15] = (r.visible as bool) as uint
+    diff_records.io.echo[at + 16] = r.offset.x as uint
+    diff_records.io.echo[at + 17] = r.offset.y as uint
+    diff_records.io.echo[at + 18] = r.offset.z as uint
+
+    // swizzles, negation, powers of two and integer arithmetic: exact on every target
+    let shade = diff_records.surface(n.surface.albedo, r.surface.roughness * 0.5, r.surface.layers.yx + uint2(1u, 2u))
+    diff_records.io.results[i] = diff_records.record(
+        r.id ^ n.id
+        r.position.zxy * 2.0
+        -n.scale.yx
+        shade
+        [r.weights[2], n.weights[0], r.weights[1]]
+        (not (r.visible as bool)) as bool32
+        r.offset - n.offset * 2
+    )
