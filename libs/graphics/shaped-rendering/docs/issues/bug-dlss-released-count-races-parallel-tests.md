@@ -16,3 +16,7 @@ The change under test then did not touch DLSS, only capture writes and the viewe
 
 Hypothesis, not verified: the shaped-viewer and shaped-rendering tests that run DLSS Ray Reconstruction overlap with this one in the shared phase.
 Either the test goes `nx::config::exclusive("dlss")` with the others that release streams, or the counter becomes per context.
+
+Seen again 2026-11-13 on a laptop RTX 5070 with DLSS 310.9.1 freshly fetched, now as `sr::impl::dlss_open_count(ctx) == 1` reading 2.
+It failed every full `shaped-rendering-test` run, on the hardware and native-dxil dx12 adapters, and passed 10 of 10 runs alone.
+It fails the same with the session's only shaped-rendering change reverted, so the count is moved by the suite's other DLSS tests, not by a change.
