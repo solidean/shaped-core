@@ -250,6 +250,11 @@ struct differentiator
     [[nodiscard]] i32 float_leaves(type_id t) const;
     /// Each float leaf of the shared value `g`, in that order.
     void leaves_into(flat_expr_id g, cc::vector<flat_expr_id>& out);
+    /// Whether a gradient's atomics are shared through the subgroup first: where the entry point declares `subgroups`,
+    /// outside a test, whose run has no device.
+    [[nodiscard]] bool reduces_gradients() const;
+    /// `call(name, a)` over the invocations that reach it (`flat_call::is_active_lanes`).
+    flat_expr_id active_call(cc::string_view name, flat_expr_id a);
     /// The prelude's `add` of an atomic of `element`s; none where there is none.
     [[nodiscard]] symbol_id atomic_add_of(type_id element) const;
 

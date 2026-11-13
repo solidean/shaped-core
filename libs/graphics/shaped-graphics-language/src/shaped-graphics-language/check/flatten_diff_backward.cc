@@ -486,6 +486,23 @@ auto differentiator::backward_custom(flattener::custom_call const& custom, label
         emit(flat_block{.label = node(call).node.as<flat_block>().label, .body = node(call).node.as<flat_block>().body});
 }
 
+auto differentiator::reduces_gradients() const -> bool
+{
+    if (f.is_test || !is_valid(f.entry.function))
+        return false;
+    auto const& s = m().at(f.entry.function);
+    return s.kind == symbol_kind::function && s.info >= 0 && s.info < f.c.notes.size()
+        && f.c.notes[s.info].declared_features.has(feature::subgroups);
+}
+
+auto differentiator::active_call(cc::string_view name, flat_expr_id a) -> flat_expr_id
+{
+    auto const id = call(name, a);
+    if (auto* const c = is_valid(id) ? f.entry.exprs[index_of(id)].node.try_as<flat_call>() : nullptr)
+        c->is_active_lanes = true;
+    return id;
+}
+
 auto differentiator::float_leaves(type_id t) const -> i32
 {
     if (auto const* const r = record_of(t))
@@ -560,17 +577,45 @@ auto differentiator::add_gradient_reads() -> void
         auto const callee = atomic_add_of(m().at(atomic).element);
         if (!is_valid(callee))
             return (void)failed(cc::format("an atomic add of {}, which no builtin is", m().name_of(atomic)));
+        auto const add_each = [&](cc::span<flat_expr_id const> leaves)
+        {
+            for (auto k = isize(0); k < leaves.size(); ++k)
+            {
+                auto const index = r.stride == 1
+                                     ? use(r.index)
+                                     : call("+", call("*", use(r.index), integer(r.stride)), integer(i32(k)));
+                auto const buffer = add(
+                    r.gradients.type, flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
+                auto const place = add(atomic, flat_buffer_element{.buffer = buffer, .index = index});
+                flat_expr_id const arguments[] = {place, use(leaves[k])};
+                emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+            }
+        };
         auto leaves = cc::vector<flat_expr_id>();
         leaves_into(share(ref(adjoint), "g"), leaves);
-        for (auto k = isize(0); k < leaves.size(); ++k)
+        for (auto& l : leaves)
+            l = share(l, "leaf");
+        if (!reduces_gradients())
+            add_each(leaves);
+        else
         {
-            auto const index
-                = r.stride == 1 ? use(r.index) : call("+", call("*", use(r.index), integer(r.stride)), integer(i32(k)));
-            auto const buffer = add(r.gradients.type,
-                                    flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
-            auto const place = add(atomic, flat_buffer_element{.buffer = buffer, .index = index});
-            flat_expr_id const arguments[] = {place, leaves[k]};
-            emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+            // where every invocation that reaches it adds to one element, as every pixel of a tile adds to one splat's,
+            // the subgroup sums its adjoints and its first invocation adds them: one atomic in place of many
+            auto const first = share(active_call("subgroup_broadcast_first", use(r.index)), "first");
+            auto const shared = active_call("subgroup_all", call("==", use(r.index), use(first)));
+            auto const none = cc::span<flat_stmt_id const>();
+            auto const reduced = collect(
+                [&]
+                {
+                    auto sums = cc::vector<flat_expr_id>();
+                    for (auto const l : leaves)
+                        sums.push_back(share(active_call("subgroup_add", use(l)), "sum"));
+                    auto const elected = call("==", active_call("subgroup_exclusive_add", integer(1)), integer(0));
+                    auto const adds = collect([&] { add_each(sums); });
+                    emit(flat_if{.condition = elected, .then_body = f.add_list(adds), .else_body = f.add_list(none)});
+                });
+            auto const each = collect([&] { add_each(leaves); });
+            emit(flat_if{.condition = shared, .then_body = f.add_list(reduced), .else_body = f.add_list(each)});
         }
         // a read in a kept loop is transposed once per iteration, each adjoint its own
         emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});

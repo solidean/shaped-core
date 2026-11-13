@@ -297,7 +297,7 @@ struct uniformity_pass
             return c.text >= 0 ? text_call(id, c, result, flow) : result;
         auto const is_judged
             = reconverges ? record->uses_derivatives || record->is_subgroup_operation : record->is_barrier;
-        if (is_judged && flow.is && is_reporting)
+        if (is_judged && flow.is && is_reporting && !c.is_active_lanes)
             violations.push_back({.call = id, .flow = flow});
         // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
         // CHK-399: so it is unproven however much its argument varied, and `uniform` may say it is the same

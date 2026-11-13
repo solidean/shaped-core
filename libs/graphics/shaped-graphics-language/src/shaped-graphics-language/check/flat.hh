@@ -363,6 +363,10 @@ struct sgl::check::flat_call
     /// of the call; -1 for a builtin's call (CHK-427).
     /// Its callee is the SGL function, its arguments that function's parameters in order, and it has no `intrinsic`.
     i32 text = -1;
+    /// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): a subgroup operation over the
+    /// invocations that reach it, which a derivative writes where its gradient's atomic may be shared; exempt from
+    /// CHK-377, since every target defines a subgroup operation over the invocations active at it.
+    bool is_active_lanes = false;
 
     constexpr bool operator==(flat_call const&) const = default;
 };
