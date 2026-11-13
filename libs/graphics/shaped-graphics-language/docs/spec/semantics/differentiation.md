@@ -92,6 +92,9 @@ A derivative is never silently zero where the function changes.
   A segmented loop whose body has an effect is `unsupported-yet`, since running a segment again would repeat it, and so is one a single iteration of which keeps more than a tape holds.
 * **DIFF-22** Any other loop is `unsupported-yet` in reverse mode, unless a function around it has a derivative written by hand (DIFF-24).
 * **DIFF-23** A `@unroll` loop is followed as its copies, in both modes.
+* **DIFF-38** A derivative of a function that takes a derivative is a second derivative, in every mode over every other.
+  The inner call is written into the function as any code is, and the outer differentiates that code, its tapes and its segments included.
+  So `fwd_diff` of a function that returns a `bwd_diff` gradient is a Hessian times a vector, and `bwd_diff` of one that dots it is a Hessian's row.
 
 ## Derivatives written by hand
 

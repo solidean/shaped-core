@@ -255,6 +255,26 @@ auto differentiator::lower_stmt(flat_stmt_id id) -> void
         return restate(id, flat_var{.local = n->local, .value = lift(n->value)});
     if (auto const* const n = s.node.try_as<flat_assign>())
     {
+        // an index the place computes, as a tape's slot of a checkpointed loop does, is held in a `let` ahead of the
+        // value, so the place is one both modes follow, an inner derivative's included
+        for (auto x = n->place; is_valid(x);)
+        {
+            auto& place = f.entry.exprs[index_of(x)];
+            if (auto* const e = place.node.try_as<flat_element>())
+            {
+                if (!f.is_substitutable(e->index) && !f.calls_impure(e->index, 0))
+                {
+                    auto const index = f.add_local(local_kind::let, "slot", type_of(e->index));
+                    emit(flat_let{.local = index, .value = lift(e->index)});
+                    f.entry.exprs[index_of(x)].node.as<flat_element>().index = ref(index);
+                }
+                x = f.entry.exprs[index_of(x)].node.as<flat_element>().object;
+            }
+            else if (auto const* const m = place.node.try_as<flat_member>())
+                x = m->object;
+            else
+                break;
+        }
         auto const value = lift(n->value);
         // `v.xz = e` writes each field it names, which both modes follow as any assignment to a field
         auto const* const m = node(n->place).node.try_as<flat_member>();
