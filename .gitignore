@@ -76,6 +76,9 @@ imgui.ini
 *.DS_Store
 # local scratch: handover notes, throwaway experiments
 .tmp/
+# per-machine settings: dev.py's, and the MCP servers an agent session starts
+/dev.toml
+/.mcp.json
 
 # ─── Explicitly committed binary tools ─────────────────────
 # Checked in on purpose; re-included despite the build/binary rules above.
