@@ -212,8 +212,13 @@ def _prove(ctx: Context, server: build_server.Session) -> bool | None:
     passed, filed, blockers = _settle_at_base(ctx, preset, proof)
     # Reds the change did not cause: flaky, red before it, or red at its base too.
     # The push goes on; each is the session's to file as an issue, after `issues known <test>`.
+    # Past a handful of one binary and reason (a binary that crashes has every case red), they are one line.
+    groups: dict[tuple[str, str, str], list[str]] = {}
     for binary, test, outcome, why in filed:
-        dev.ui.write_line(console.yellow(f"ship: not blocking, file an issue: {binary}: {test}: {outcome} ({why})"))
+        groups.setdefault((binary, outcome, why), []).append(test)
+    for (binary, outcome, why), tests in groups.items():
+        named = tests[0] if len(tests) == 1 else f"{len(tests)} tests" if len(tests) > 5 else ", ".join(tests)
+        dev.ui.write_line(console.yellow(f"ship: not blocking, file an issue: {binary}: {named}: {outcome} ({why})"))
     if filed:
         _say(f"{len(filed)} red test(s) above are not this change's; `uv run dev.py issues known <test>`, then file each that is not known")
     for reason in blockers:
@@ -247,7 +252,9 @@ def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bo
     for r in red:
         key, desc = (r["binary"], r["test"]), f"{r['binary']}: {r['test']}: {r['outcome']}"
         verdict = at_base.get(key)
-        if verdict is True:
+        if verdict is True and _binary_red(r):
+            filed.append((*key, r["outcome"], f"its binary ends without a report at the change's base {base[:12]} too, so the case is unproven"))
+        elif verdict is True:
             filed.append((*key, r["outcome"], f"red at the change's base {base[:12]} too"))
         elif verdict is False:
             blockers.append(f"{desc} (green at the change's base {base[:12]}, red with it)")
@@ -273,26 +280,35 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
     except ValueError:
         _say(f"{preset.build_dir} is outside the checkout, so the base worktree has no build dir to mirror it")
         return {}
+    def dev(*args: str) -> int:
+        return subprocess.run(["uv", "run", "dev.py", *args, "--preset", preset.name], cwd=str(wt),
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+
     def run(rs: list[dict]) -> dict[tuple[str, str], bool | None]:
-        # One run per binary: a lone red runs alone, several run as the whole binary and are read from its one report,
-        # since a binary that crashed reports every case red, and a run per case cost seconds each.
-        by_binary: dict[str, list[str]] = {}
+        # One run per binary: a lone red of its own runs alone, anything more runs the whole binary, read from its one report,
+        # since a run per case cost seconds each.
+        by_binary: dict[str, list[dict]] = {}
         for r in rs:
-            by_binary.setdefault(r["binary"], []).append(r["test"])
+            by_binary.setdefault(r["binary"], []).append(r)
         out: dict[tuple[str, str], bool | None] = {}
-        for binary, tests in by_binary.items():
+        for binary, mine in by_binary.items():
+            keys = [(binary, r["test"]) for r in mine]
             art = artifacts.get(binary)
-            if art is None:
-                out.update(((binary, t), None) for t in tests)
+            # Built on its own first, so a binary that cannot be built at the base reads as no result, never as a crash there.
+            if art is None or dev("build", "-t", binary) != 0:
+                out.update(dict.fromkeys(keys))
                 continue
             rel = Path(art).resolve().relative_to(preset.build_dir.resolve())
             xml = wt / build_rel / rel.parent / f"{rel.name}.results.xml"
             xml.unlink(missing_ok=True)
-            only = tests if len(tests) == 1 else []
-            subprocess.run(["uv", "run", "dev.py", "test", "--preset", preset.name, "-t", binary, *only], cwd=str(wt),
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # A binary that ended without a report (a crash, a timeout) has every case red by the binary's ending:
+            # it says nothing of a single case, only the whole binary run again can show whether it ends that way at the base too.
+            whole = len(mine) > 1 or any(_binary_red(r) for r in mine)
+            rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"]]))
             found = _cases_red(xml)
-            out.update(((binary, t), found.get(t)) for t in tests)
+            ended_without_report = rc != 0 and not found
+            for r, key in zip(mine, keys):
+                out[key] = True if _binary_red(r) and ended_without_report else found.get(r["test"])
         return out
 
     out = run(reds)
@@ -327,6 +343,11 @@ def _say_at_base(out: dict[tuple[str, str], bool | None], listed: int = 10) -> N
         else:
             counts = ", ".join(f"{sum(1 for _, r in rs if r is v)} {word[v]}" for v in (True, False, None))
             _say(f"  at the base: {b}: {len(rs)} red tests: {counts}")
+
+
+def _binary_red(r: dict) -> bool:
+    """Whether a red is its binary's ending (the server's `failed`, `timed out`) rather than the case's own `fail` in a report."""
+    return r.get("outcome") in ("failed", "timed out")
 
 
 def _cases_red(xml: Path) -> dict[str, bool]:

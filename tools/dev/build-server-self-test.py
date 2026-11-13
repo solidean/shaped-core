@@ -569,18 +569,20 @@ def test_a_red_run_at_the_change_s_base_decides_whether_it_blocks() -> None:
     assert "the build is not green" in blockers and not passed
 
 
-def test_reds_at_the_base_run_each_binary_once() -> None:
+def _reds_at_base(reds: list[dict], cases: dict[str, dict[str, dict[str, bool]]], *, crashes=(), unbuilt=()):
+    """`ship._red_at_base` over a fake worktree: `cases[at][binary]` is each case red or not at `base` and `head`,
+    a binary in `crashes` ends non-zero without a report there (`(at, binary)`), one in `unbuilt` fails to build at the base.
+    Returns the dev.py commands it ran, as (at, verb, binary, the case it named or None), and its answer."""
     from tools.dev.cmd import ship
     from tools.dev.lib.project import base_worktree
 
     with tempfile.TemporaryDirectory() as tmp:
         root, wt = Path(tmp) / "co", Path(tmp) / "wt"
+        binaries = sorted({r["binary"] for r in reds})
         art = lambda b: root / "build" / "bin" / f"{b}.exe"  # noqa: E731
-        ctx = types.SimpleNamespace(root=root, discover=lambda p: [types.SimpleNamespace(name=b, artifact=str(art(b))) for b in "bc"])
+        ctx = types.SimpleNamespace(root=root, discover=lambda p: [types.SimpleNamespace(name=b, artifact=str(art(b))) for b in binaries])
         preset = types.SimpleNamespace(name="p", build_dir=root / "build")
         (wt / "build" / "bin").mkdir(parents=True)
-        # The base has x and z red and y green; the commit being pushed has all three red, as the checkout did.
-        at = {"base": {"x": True, "y": False, "z": True, "w": False}, "head": {"x": True, "y": True, "z": True, "w": True}}
         state, runs = {"at": "base"}, []
 
         def ensure(_root, commit):
@@ -590,23 +592,66 @@ def test_reds_at_the_base_run_each_binary_once() -> None:
         def run(cmd, **_kw):
             if cmd[0] == "git":
                 return types.SimpleNamespace(stdout="h" * 40 + "\n", returncode=0)
-            binary, only = cmd[cmd.index("-t") + 1], cmd[cmd.index("-t") + 2:]
-            runs.append((state["at"], binary, tuple(only)))
-            cases = only or [t for t, b in (("x", "b"), ("y", "b"), ("z", "b"), ("w", "c")) if b == binary]
-            body = "".join(f'<testcase name="{t}">{"<failure/>" if at[state["at"]][t] else ""}</testcase>' for t in cases)
+            verb, rest = cmd[3], cmd[4:cmd.index("--preset")]
+            binary = rest[rest.index("-t") + 1]
+            only = [a for a in rest[rest.index("-t") + 2:] if a != "--no-build"]
+            at = state["at"]
+            runs.append((at, verb, binary, only[0] if only else None))
+            if verb == "build":
+                return types.SimpleNamespace(returncode=1 if (at, binary) in unbuilt else 0)
+            if (at, binary) in crashes:
+                return types.SimpleNamespace(returncode=3)
+            mine = {t: red for t, red in cases[at][binary].items() if not only or t in only}
+            body = "".join(f'<testcase name="{t}">{"<failure/>" if red else ""}</testcase>' for t, red in mine.items())
             (wt / "build" / "bin" / f"{binary}.exe.results.xml").write_text(f"<testsuites><testsuite>{body}</testsuite></testsuites>")
-            return types.SimpleNamespace(returncode=0)
+            return types.SimpleNamespace(returncode=1 if any(mine.values()) else 0)
 
-        reds = [{"binary": "b", "test": t} for t in "xyz"] + [{"binary": "c", "test": "w"}]
         saved = base_worktree.ensure, ship.subprocess, ship._say
         base_worktree.ensure, ship.subprocess, ship._say = ensure, types.SimpleNamespace(run=run, DEVNULL=-3), lambda *_: None
         try:
             out = ship._red_at_base(ctx, preset, "base", reds)
         finally:
             base_worktree.ensure, ship.subprocess, ship._say = saved
-    assert runs == [("base", "b", ()), ("base", "c", ("w",)), ("head", "b", ())], \
+    return [r for r in runs if r[1] == "test"], out
+
+
+def test_reds_at_the_base_run_each_binary_once() -> None:
+    # The base has x and z red and y green; the commit being pushed has all three red, as the checkout did.
+    cases = {"base": {"b": {"x": True, "y": False, "z": True}, "c": {"w": False}},
+             "head": {"b": {"x": True, "y": True, "z": True}, "c": {"w": True}}}
+    reds = [{"binary": "b", "test": t, "outcome": "fail"} for t in "xyz"] + [{"binary": "c", "test": "w", "outcome": "fail"}]
+    runs, out = _reds_at_base(reds, cases)
+    assert runs == [("base", "test", "b", None), ("base", "test", "c", "w"), ("head", "test", "b", None)], \
         f"several reds of a binary run it whole, once; a lone red runs alone: {runs}"
     assert out == {("b", "x"): True, ("b", "y"): False, ("b", "z"): True, ("c", "w"): False}, out
+
+
+def test_a_binary_that_ends_without_a_report_at_the_base_too_is_red_there() -> None:
+    # d crashed in the checkout, every case red by its ending; at the base it crashes too, and in the worktree at HEAD again.
+    # e crashed only with the change: its base run reports, and its cases are green there.
+    # f cannot be built at the base, which says nothing; g's own failing case at a crashing base is no result either.
+    cases = {"base": {"e": {"p": False, "q": False}, "g": {}}, "head": {}}
+    crashed = lambda b, t: {"binary": b, "test": t, "outcome": "failed"}  # noqa: E731
+    reds = [crashed("d", "p"), crashed("d", "q"), crashed("e", "p"), crashed("e", "q"), crashed("f", "p"),
+            {"binary": "g", "test": "p", "outcome": "fail"}]
+    runs, out = _reds_at_base(reds, cases, crashes={("base", "d"), ("head", "d"), ("base", "g")}, unbuilt={("base", "f")})
+    assert ("base", "test", "d", None) in runs and ("head", "test", "d", None) in runs, "a crashed binary runs whole, at the base and at HEAD"
+    assert ("base", "test", "e", None) in runs and not any(r[2] == "f" for r in runs), runs
+    assert out == {("d", "p"): True, ("d", "q"): True, ("e", "p"): False, ("e", "q"): False, ("f", "p"): None, ("g", "p"): None}, out
+
+
+def test_a_crash_at_the_base_too_is_filed_as_unproven_and_listed_once() -> None:
+    from tools.dev.cmd import ship
+    ran = [{"binary": "d", "test": f"t{i}", "outcome": "failed", "why": "must run", "judged": "unknown"} for i in range(30)]
+    proof = bs.Proof(passed=False, reasons=[f"d: t{i}: failed (must run)" for i in range(30)], report={"ran": ran, "delta": {"base": "abc123"}})
+    saved = ship._red_at_base
+    ship._red_at_base = lambda ctx, preset, base, reds: {(r["binary"], r["test"]): True for r in reds}
+    try:
+        passed, filed, blockers = ship._settle_at_base(types.SimpleNamespace(), None, proof)
+    finally:
+        ship._red_at_base = saved
+    assert passed and not blockers, blockers
+    assert len(filed) == 30 and all("ends without a report at the change's base" in f[3] for f in filed), filed[:2]
 
 
 def main() -> int:
