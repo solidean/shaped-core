@@ -1,5 +1,7 @@
 #include "driver-test-support.hh"
 
+#include <clean-core/container/vector.hh>
+#include <nexus/test.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 
 using namespace cc::primitive_defines;
@@ -442,5 +444,10 @@ cc::string failures_of(cc::span<tessellation_case const> cases)
 
 TEST("sgl tessellation - every domain, partitioning and winding places and orders points as D3D's tessellator does")
 {
-    CHECK(failures_of(k_cases) == "");
+    // A dense patch is thousands of points through the interpreter, so a default run keeps every third sparse one.
+    auto cases = cc::vector<tessellation_case>();
+    for (auto i = 0; auto const& c : k_cases)
+        if (nx::is_thorough() || (c.points < 1000 && i++ % 3 == 0))
+            cases.push_back(c);
+    CHECK(failures_of(cases) == "");
 }
