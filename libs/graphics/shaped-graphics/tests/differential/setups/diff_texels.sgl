@@ -1,0 +1,15 @@
+// The `texels` setup's contract, which setups.cc fills: 256 threads sample `source` and write `output`.
+// `source` is 16 by 16 rgba8_unorm with its whole mip chain, every texel of every level its own hashed color.
+// `output` holds four float4 a thread, all zero.
+module diff_texels
+
+binding io:
+    source: texture_2d[float4]
+    output: mut buffer[float4]
+    sampler nearest:
+        filter = .nearest
+        address = .mirror_repeat
+    sampler linear:
+        filter = .linear
+        mip_filter = .linear
+        address = .clamp_edge

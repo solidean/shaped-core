@@ -22,7 +22,9 @@ ASYNC_TEST("sr vulkan - native-spirv")
     {
         (void)sr_test::shader_fixtures();
         co_await nx::async_invoke_tests_in_sequence(
-            "vulkan-native-spirv", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())},
+            "vulkan-native-spirv",
+            nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sr_test::settle_each(ctx.value())},
             ctx.value());
         CHECK(!ctx.value()->is_device_lost())
             .context(cc::format("the device was lost while running this binary's GPU tests: {}",
@@ -41,7 +43,10 @@ ASYNC_TEST("sr vulkan")
     {
         (void)sr_test::shader_fixtures(); // alive before any child acquires through it
         co_await nx::async_invoke_tests_in_sequence(
-            "vulkan", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())}, ctx.value());
+            "vulkan",
+            nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sr_test::settle_each(ctx.value())},
+            ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.
         CHECK(!ctx.value()->is_device_lost())

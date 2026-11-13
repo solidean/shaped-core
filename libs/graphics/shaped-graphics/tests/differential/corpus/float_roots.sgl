@@ -1,0 +1,11 @@
+// differential: setup floats
+// Roots and a reciprocal, which every route of one driver rounds alike.
+use diff_floats
+
+@compute(64) fun roots(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let a = abs(diff_floats.io.input[i])
+    diff_floats.io.output[4 * i] = sqrt(a)
+    diff_floats.io.output[4 * i + 1] = inverse_sqrt(a)
+    diff_floats.io.output[4 * i + 2] = sqrt(a) * sqrt(a) - a
+    diff_floats.io.output[4 * i + 3] = 1.0 / a

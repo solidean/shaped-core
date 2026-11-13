@@ -1,0 +1,6 @@
+# The differential reference of integer_bits.sgl: what one machine computed, which every other is held to.
+# Rewritten by `SC_DIFFERENTIAL_REFRESH=1 uv run dev.py test "sg differential - every corpus entry point computes what its committed reference says"`; review the diff like code.
+# bit_operations written on dx12 (Intel(R) Arc(TM) B580 Graphics) dxc
+bit_operations output bytes 4096 fnv1a 0x1bb96654112a8b93
+# signed_arithmetic written on dx12 (Intel(R) Arc(TM) B580 Graphics) dxc
+signed_arithmetic output bytes 4096 fnv1a 0x8a43dde3ad17fdba

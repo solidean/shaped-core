@@ -1,0 +1,14 @@
+// differential: setup floats
+// differential: routes relative 0.00001
+// The routes' bound, until SGL's DXIL divides as DXC's does; issue: bug-sgl-dxil-division-and-normalize-round-unlike-dxc
+// Float arithmetic as shading math writes it: the four operations, roundings, and the clamps around them.
+use diff_floats
+
+@compute(64) fun rounded_operations(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let a = diff_floats.io.input[i]
+    let b = diff_floats.io.input[(i + 13) & 255]
+    diff_floats.io.output[4 * i] = a * b + a / b - (a - b)
+    diff_floats.io.output[4 * i + 1] = fma(a, b, -a)
+    diff_floats.io.output[4 * i + 2] = floor(a * 3.5) + ceil(b) + round(a) + fract(abs(b)) + trunc(a - b)
+    diff_floats.io.output[4 * i + 3] = clamp(a, -2.0, 2.0) * saturate(b) + min(a, b) - max(a, b) + mix(a, b, 0.25)

@@ -111,6 +111,8 @@ What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buff
   [autodiff-buffer-test.cc](../../../tests/interpret/autodiff-buffer-test.cc) runs both on buffers a driver binds.
   sg's [compute-differentiable-buffers-test.cc](../../../../shaped-graphics/tests/compute/compute-differentiable-buffers-test.cc) runs them on dx12, vulkan and webgpu.
   That includes both native routes, and webgpu on Dawn and on wgpu.
+  Its [compute-splat-fitting-test.cc](../../../../shaped-graphics/tests/compute/compute-splat-fitting-test.cc) fits sixteen 2D Gaussians to an image with Adam, every gradient one `bwd_diff` a pixel.
+  In 200 rounds the loss falls to a fortieth, the same on every backend to five digits.
 * A read of any other buffer is `unsupported-yet`, and the diagnostic says what to do instead.
   So is a read of a buffer of anything but floats, whose gradient needs an atomic per component.
 * `no_diff(x)` reads anything as a constant, which is the opt-out at an expression where `@no_diff` is the one at a parameter.
