@@ -37,3 +37,10 @@ The accumulator of a wavefront run under the spinning host is all zero in every 
 Also ruled out: the stream and off-frame transfer staging, which live until their own commit's feedback, and the overflow staging, which is made resident.
 The working hypothesis is a resource a frame reads or writes being released or recycled by an epoch's retirement before the GPU runs that frame, since Metal 4 retains nothing; which one is not found.
 A GPU capture in Xcode of a frame that executes and leaves nothing is the next step; it needs someone at the machine.
+
+2026-11-13, a GPU capture tried:
+Apple's capture layer hangs on `resolveCounterHeap`, sg's timestamp queries, so a capture needs them switched off; the bug does not need them.
+With them off, every run that captured passed, even one capturing only the frames after the first 18 submissions: starting a capture drains the GPU, which hides the bug.
+So an Xcode capture of the failing frame is not to be had either; the bug needs the GPU lagging behind the epochs.
+Also ruled out by switching it off under the spinning host: aliasing in the transient bump heap, which resets its head every epoch; dedicated transients still fail.
+And two guest frames in flight at once: one at a time still fails.
