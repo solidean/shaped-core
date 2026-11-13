@@ -37,6 +37,15 @@ struct shading_context:
     corner: uint3
     /// (1 - b.x - b.y, b.x, b.y), so the three weigh the three corners in order
     barycentrics: float3
+    /// The ray cone's footprint here, an ellipse on the face, as its two axes in the triangle's barycentrics (b.x, b.y):
+    /// across the ray as wide as the cone, along it stretched by one over the cosine it meets the face at.
+    /// Each texture maps them through its own uvs to the gradients it samples with, so a sampler filters anisotropically
+    /// (Akenine-Moller et al., "Improved Shader and Texture Level of Detail Using Ray Cones", 2021).
+    /// `no_footprint` where nothing traced a cone here, which samples level 0.
+    footprint_a: float2
+    footprint_b: float2
+    /// What every texture's uv is moved by: where a relief's parallax found the ray meets it; 0 elsewhere.
+    uv_offset: float2
 
 /// One attribute descriptor out of a parameter block.
 fun load_attribute_desc(params: bytes, offset: uint) -> attribute_desc:
@@ -60,6 +69,53 @@ fun load_element_f4(b: bytes, d: attribute_desc, element: uint) -> float4:
 // Barycentric interpolation of the three corners of the hit triangle.
 // `e` is the three element indices the generated code resolved from the frequency.
 // Those are vertex indices for per_vertex, and `primitive * 3 + k` for per_corner.
+
+/// A context's footprint axis where no cone reached it: no footprint, which samples the base level.
+const no_footprint = float2(0.0, 0.0)
+
+/// The uv edges of the triangle at corners `e`, from its first corner to the second (.xy) and to the third (.zw).
+fun uv_edges(b: bytes, d: attribute_desc, e: uint3) -> float4:
+    let u0 = load_element_f2(b, d, e.x)
+    let a = load_element_f2(b, d, e.y) - u0
+    let c = load_element_f2(b, d, e.z) - u0
+    return float4(a.x, a.y, c.x, c.y)
+
+/// The gradients a texture samples with under `ctx`'s cone, the footprint's two axes in uv, as `grad_x` (.xy) and
+/// `grad_y` (.zw); `edges` are the triangle's uv edges as `uv_edges` gives them.
+/// No cone, or a flat uv, gives zero gradients, which sample the base level.
+fun texture_gradients(ctx: shading_context, edges: float4) -> float4:
+    let a = edges.xy * ctx.footprint_a.x + edges.zw * ctx.footprint_a.y
+    let b = edges.xy * ctx.footprint_b.x + edges.zw * ctx.footprint_b.y
+    return float4(a.x, a.y, b.x, b.y)
+
+/// How a ray's uv moves per meter it sinks below a face: the face's world edges `e1` and `e2` from its first corner
+/// span the uv edges `du1` and `du2`, and `d` is the ray's unit direction.
+/// .xy is the uv per meter of depth, .z is 1 where the ray enters the face's front, and 0 where it does not, which marches nothing.
+/// A ray grazing the face is held at about 85 degrees, so its uv moves a finite way.
+fun parallax_velocity(du1: float2, du2: float2, e1: float3, e2: float3, d: float3) -> float3:
+    let det = du1.x * du2.y - du1.y * du2.x
+    let normal = cross(e1, e2)
+    let area = length(normal)
+    if abs(det) < 1e-20 or area <= 0.0 => return float3(0.0, 0.0, 0.0)
+    let n = normal / area
+    let into = -dot(d, n)
+    if into <= 0.0 => return float3(0.0, 0.0, 0.0)
+    // the world directions of +u and +v, meters per unit of uv
+    let tu = (e1 * du2.y - e2 * du1.y) / det
+    let tv = (e2 * du1.x - e1 * du2.x) / det
+    // the ray's step along the face, as uv: solved against the two, which need not be orthogonal
+    let along = d + n * into
+    let uu = dot(tu, tu)
+    let uv_ = dot(tu, tv)
+    let vv = dot(tv, tv)
+    let g = uu * vv - uv_ * uv_
+    if abs(g) < 1e-30 => return float3(0.0, 0.0, 0.0)
+    let pu = dot(along, tu)
+    let pv = dot(along, tv)
+    let a = (pu * vv - pv * uv_) / g
+    let b = (pv * uu - pu * uv_) / g
+    let sink = max(into, 0.087)
+    return float3(a / sink, b / sink, 1.0)
 
 fun interpolate_f1(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float:
     return load_element_f1(b, d, e.x) * w.x + load_element_f1(b, d, e.y) * w.y + load_element_f1(b, d, e.z) * w.z
@@ -164,4 +220,4 @@ fun position_of(inst: scene.instance, vertex_buffer: bytes, v: uint) -> float3:
 /// `bary` is the two barycentrics a hit attribute carries; the third is what is left of one.
 fun make_context(inst: scene.instance, index_buffer: bytes, primitive: uint, bary: float2) -> shading_context:
     let corner = triangle_corners(inst, index_buffer, primitive)
-    return shading_context(inst.param_buffer, inst.param_offset, primitive, corner, float3(1.0 - bary.x - bary.y, bary.x, bary.y))
+    return shading_context(inst.param_buffer, inst.param_offset, primitive, corner, float3(1.0 - bary.x - bary.y, bary.x, bary.y), no_footprint, no_footprint, float2(0.0, 0.0))

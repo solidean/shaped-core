@@ -2,6 +2,7 @@
 
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/emit/impl/layout.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
@@ -189,6 +190,8 @@ struct validator
                 auto is_listed = false;
                 for (auto const id : e.bindings)
                     is_listed = is_listed || id == b->binding;
+                for (auto const id : e.reserved)
+                    is_listed = is_listed || id == b->binding;
                 if (!is_listed)
                     report(error_kind::malformed_tree, e.function,
                            cc::format("a member of '{}', which the entry point does not list", m.at(b->binding).name));
@@ -214,7 +217,8 @@ struct validator
                 auto const* const record = m.builtin_function(c->intrinsic);
                 auto const expected = record == nullptr ? -1
                                                         : record->parameters.size() + (record->takes_element ? 1 : 0)
-                                                              + (record->takes_acceleration_index ? 1 : 0);
+                                                              + (record->takes_acceleration_index ? 1 : 0)
+                                                              + (record->takes_ray_time ? 1 : 0);
                 if (record == nullptr || expected != e.at(c->arguments).size())
                     report(
                         error_kind::malformed_tree, e.function,
@@ -589,6 +593,55 @@ struct planner
         }
     }
 
+    /// What legalize reached of the reserved table, at its fixed address, behind every group's own.
+    void reserved_resources()
+    {
+        for (auto const id : p.e.reserved)
+        {
+            auto const& s = p.m.at(id);
+            auto const* const entry = check::reserved_binding_named(s.name);
+            CC_ASSERT(entry != nullptr, "the tree reaches a binding the reserved table does not hold");
+            auto const& on = entry->targets[u8(p.which)];
+            auto const& b = p.m.bindings[s.info];
+            // an entry of plain members is a constant block of its own, sg's root constants or uniform
+            if (auto const plain = plain_members_of(p.m, b); !plain.empty())
+            {
+                auto planned = planned_constants{
+                    .symbol = id,
+                    .name = cc::string(s.name),
+                    .host_name = cc::string(s.name),
+                    .block_name = p.names.mint(cc::format("{}_data", s.name)),
+                    .members = members_of(plain, false),
+                    .group = on.group,
+                    .slot = on.slot,
+                    .is_reserved = true,
+                };
+                auto const placed = place_block(p.m, plain, block_space(b));
+                for (auto i = isize(0); i < planned.members.size(); ++i)
+                {
+                    planned.members[i].offset = placed.offsets[i];
+                    planned.members[i].size = placed.sizes[i];
+                }
+                for (auto i = isize(0); i < plain.size(); ++i)
+                    planned.block_member_of.push_back(i32(i));
+                p.group_blocks.push_back(cc::move(planned));
+                continue;
+            }
+            auto const& member = p.m.at(b.members)[0];
+            auto const& t = p.m.at(member.type);
+            p.resources.push_back({.binding = id,
+                                   .member = 0,
+                                   .name = s.name,
+                                   .type = member.type,
+                                   .element = t.element,
+                                   .space = address_space::storage,
+                                   .is_mut = t.is_mut,
+                                   .is_reserved = true,
+                                   .group = on.group,
+                                   .slot = on.slot});
+        }
+    }
+
     /// A group's plain members are a constant block the group owns, as its first resource.
     void group_blocks()
     {
@@ -842,9 +895,10 @@ sgl::i32 sgl::emit::impl::sampler_of(plan const& p, check::symbol_id symbol)
 
 sgl::i32 sgl::emit::impl::file_sampler_index(check::checked_module const& m, check::symbol_id symbol)
 {
+    // a sampler of a module the program does not use takes no index, as it would not exist beside its modules alone
     auto index = 0;
     for (auto i = isize(0); i < index_of(symbol); ++i)
-        index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+        index += m.symbols[i].kind == check::symbol_kind::sampler && m.is_reached_file(m.symbols[i].file) ? 1 : 0;
     return index;
 }
 
@@ -854,6 +908,25 @@ sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i
         if (p.resources[i].binding == binding && p.resources[i].member == member)
             return i32(i);
     return -1;
+}
+
+sgl::u32 sgl::emit::impl::acceleration_address_position(plan const& p, i32 index)
+{
+    auto const& r = p.resources[index];
+    auto position = u32(0);
+    for (auto const& other : p.resources)
+        if (!other.is_reserved && p.m.at(other.type).kind == check::type_kind::acceleration_structure
+            && (other.group < r.group || (other.group == r.group && other.slot < r.slot)))
+            ++position;
+    return position;
+}
+
+bool sgl::emit::impl::holds_acceleration_member(plan const& p)
+{
+    for (auto const& r : p.resources)
+        if (!r.is_reserved && p.m.at(r.type).kind == check::type_kind::acceleration_structure)
+            return true;
+    return false;
 }
 
 cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
@@ -1138,6 +1211,8 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
                     continue;
                 for (auto const& info : m.bindings)
                 {
+                    if (!m.is_reached_file(m.at(info.symbol).file))
+                        continue;
                     auto theirs = cc::vector<check::type_id>();
                     collect_placed_structs(m, info.symbol, other, theirs);
                     if (!contains(theirs, type))
@@ -1279,7 +1354,9 @@ void sgl::emit::impl::validate(check::checked_module const& m,
                                bool writes_prints)
 {
     auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints};
-    if (e.input == e.result && e.entry_stage != stage::compute && e.entry_stage != stage::task)
+    // a mesh stage made from a geometry stage takes no payload and returns nothing, as a compute stage does
+    if (e.input == e.result && e.entry_stage != stage::compute && e.entry_stage != stage::task
+        && !(e.entry_stage == stage::mesh && !check::is_valid(e.input)))
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
 
@@ -1392,8 +1469,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     // a tessellation stage's control points take the first locations, and its factors struct's members the next
     if (check::is_valid(e.input) && m.at(e.input).kind == type_kind::array
         && (e.entry_stage == stage::tessellation_control || e.entry_stage == stage::tessellation_evaluation))
-        for (auto const& member : m.at(m.at(m.at(e.input).element).members))
-            p.patch_location_base += member.is_position ? 0 : 1;
+        p.patch_location_base = p.locations_of(m.at(e.input).element);
     p.need(e.input, input_role(e));
     p.need(e.result, result_role(e));
     // the geometry stage's stream, and the evaluation stage's factors, are parameters after the first
@@ -1464,6 +1540,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     p.constants();
     p.group_blocks();
     p.resources();
+    p.reserved_resources();
     p.argument_buffers();
     p.workgroup_memory();
     p.file_samplers();
@@ -1485,14 +1562,40 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
             for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
                 if (e.stage_inputs[i].local == ref->local)
                     result.stage_input_read[i] = true;
-    // EMIT-229: the prologue that clears the shadow or zeroes workgroup memory strides by this index
-    if (e.written_words > 0 || e.zeroes_workgroup)
-        for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
-            if (e.stage_inputs[i].local == e.workgroup_index)
-                result.stage_input_read[i] = true;
 
     result.local_flags = cc::vector<cc::optional<u32>>::create_defaulted(e.locals.size());
     auto flags_known = cc::vector<bool>::create_filled(e.locals.size(), true);
+
+    // A trace hands its flags on through a local more often than as a literal: one given a literal and never assigned
+    // again holds that literal wherever it is read.
+    auto constant_locals = cc::vector<check::flat_int_literal const*>::create_filled(e.locals.size(), nullptr);
+    for (auto const& st : e.stmts)
+    {
+        auto local = check::local_id::none;
+        auto value = check::flat_expr_id::none;
+        if (auto const* const let = st.node.try_as<check::flat_let>())
+        {
+            local = let->local;
+            value = let->value;
+        }
+        else if (auto const* const var = st.node.try_as<check::flat_var>())
+        {
+            local = var->local;
+            value = var->value;
+        }
+        if (check::is_valid(value))
+            constant_locals[index_of(local)] = e.at(value).node.try_as<check::flat_int_literal>();
+    }
+    for (auto const& st : e.stmts)
+        if (auto const* const assign = st.node.try_as<check::flat_assign>())
+            if (auto const* const ref = e.at(assign->place).node.try_as<check::flat_local_ref>())
+                constant_locals[index_of(ref->local)] = nullptr;
+    auto const literal_of = [&](check::flat_expr_id x) -> check::flat_int_literal const*
+    {
+        if (auto const* const ref = e.at(x).node.try_as<check::flat_local_ref>())
+            return constant_locals[index_of(ref->local)];
+        return e.at(x).node.try_as<check::flat_int_literal>();
+    };
     for (auto const& x : e.exprs)
     {
         auto const* const call = x.node.try_as<check::flat_call>();
@@ -1504,7 +1607,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         if (target == nullptr)
             continue;
         auto const at = index_of(target->local);
-        auto const* const k = e.at(arguments[record->flags_argument]).node.try_as<check::flat_int_literal>();
+        auto const* const k = literal_of(arguments[record->flags_argument]);
         auto& flags = result.local_flags[at];
         if (k == nullptr || (flags.has_value() && flags.value() != u32(k->value)))
             flags_known[at] = false;
@@ -1543,6 +1646,56 @@ cc::vector<cc::string> sgl::emit::impl::vertex_semantics(check::checked_module c
         result.push_back(cc::move(semantic));
     }
     return result;
+}
+
+cc::string sgl::emit::impl::semantic_of(plan const& p, planned_struct const& s, planned_member const& member)
+{
+    if (member.is_position)
+        return "SV_Position";
+    if (member.is_layer)
+        return "SV_RenderTargetArrayIndex";
+    switch (s.role)
+    {
+    case struct_role::vertex_input:
+    {
+        // EMIT-174: a piece is its member's semantic at its own index, `FRAME0`, which is how dx12 reads one
+        auto const at = member.whole >= 0 ? member.whole : &member - s.members.data();
+        auto const semantics = vertex_semantics(p.m, p.m.at(s.type));
+        for (auto i = isize(0); i < s.member_of.size(); ++i)
+            if (s.member_of[i] == at)
+                return member.piece_index >= 0 ? cc::format("{}{}", semantics[i], member.piece_index) : semantics[i];
+        return "";
+    }
+    case struct_role::stage_link:
+    case struct_role::primitive_link:
+        return cc::format("SGL{}", member.location);
+    case struct_role::patch_constants:
+        // EMIT-123: the factors are the tessellator's, and any other member reaches the evaluation stage as a link
+        if (member.factor == check::tessellation_factor::edge)
+            return "SV_TessFactor";
+        if (member.factor == check::tessellation_factor::inside)
+            return "SV_InsideTessFactor";
+        return cc::format("SGL{}", member.location);
+    case struct_role::render_targets:
+        // EMIT-130: the depth and the sample mask are outputs of their own
+        switch (member.output)
+        {
+        case check::pixel_output::depth:
+            return "SV_Depth";
+        case check::pixel_output::depth_greater_equal:
+            return "SV_DepthGreaterEqual";
+        case check::pixel_output::depth_less_equal:
+            return "SV_DepthLessEqual";
+        case check::pixel_output::sample_mask:
+            return "SV_Coverage";
+        case check::pixel_output::color:
+            break;
+        }
+        return cc::format("SV_Target{}", member.location);
+    case struct_role::plain:
+        break;
+    }
+    return "";
 }
 
 bool sgl::emit::impl::has_base(plan const& p, check::stage_input input)
@@ -1702,10 +1855,11 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
     if (p.constants.has_value())
         block(p.constants.value());
     for (auto const& c : p.group_blocks)
-        block(c);
+        if (!c.is_reserved)
+            block(c);
     for (auto const& r : p.resources)
     {
-        if (p.m.at(r.type).kind != type_kind::buffer)
+        if (p.m.at(r.type).kind != type_kind::buffer || r.is_reserved)
             continue;
         auto layout = emitted_layout{.global = r.name, .stride = element_stride(p.m, r.element, r.space)};
         if (r.element_form.has_value())
@@ -1768,7 +1922,7 @@ sgl::check::symbol_id sgl::emit::impl::ray_set_of(check::checked_module const& m
         return check::symbol_id::none;
     for (auto const& p : m.pipelines)
     {
-        if (!check::is_valid(p.ray_set))
+        if (!check::is_valid(p.ray_set) || !m.is_reached_file(m.at(p.symbol).file))
             continue;
         for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
             if (ray.type == e.input)

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # ///
 
 """Self-test for tools/dev/lib/core/memory_guard.py — the caps over what dev.py starts, and the free-RAM floor.
@@ -44,6 +44,20 @@ elif mode == "grandchild":
     import subprocess
     out = subprocess.run([sys.executable, "-c", "b = bytearray(2 << 30); print('allocated')"], capture_output=True, text=True)
     print("refused" if out.returncode != 0 or "allocated" not in out.stdout else "allocated")
+elif mode == "breakaway":
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.WinDLL("kernel32")
+    k.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p]
+    def flags():
+        info = memory_guard._ExtendedLimits()
+        k.QueryInformationJobObject(memory_guard._job_state[0], 9, ctypes.byref(info), ctypes.sizeof(info), None)
+        return info.BasicLimitInformation.LimitFlags
+    before = bool(flags() & 0x800)
+    widened = memory_guard.allow_breakaway()
+    after = bool(flags() & 0x800)
+    keeps_cap = bool(flags() & 0x100)
+    print(before, widened, after, keeps_cap)
 elif mode == "wait":
     time.sleep(10)
     print("survived")
@@ -75,6 +89,9 @@ if platform.system() == "Windows":
     check("a 1 GB cap grants 256 MB", r.stdout.strip() == "allocated", r.stdout + r.stderr)
     r = child(caps, "grandchild")
     check("a process the guarded one starts inherits the cap", r.stdout.strip() == "refused", r.stdout + r.stderr)
+    r = child(caps, "breakaway")
+    check("the job refuses breaking away until allow_breakaway, then allows it and keeps the cap",
+          r.stdout.strip() == "False True True True", r.stdout + r.stderr)
     r = child({**caps, "SC_DEV_MEMORY_PROCESS_GB": "0"}, "allocate", "256")
     check("0 turns the cap off", r.stdout.strip() == "allocated", r.stdout + r.stderr)
 

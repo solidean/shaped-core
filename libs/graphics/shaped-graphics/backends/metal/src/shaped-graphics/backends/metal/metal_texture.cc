@@ -119,4 +119,42 @@ cc::result<metal_texture_handle> metal_context::create_metal_texture(sg::texture
 
     return handle;
 }
+
+cc::result<metal_texture_handle> metal_context::wrap_metal_texture(MTL::Texture* texture,
+                                                                   sg::texture_description const& desc)
+{
+    CC_ASSERT(texture != nullptr, "wrap_metal_texture: texture is null");
+    desc.assert_valid();
+
+    auto const type = texture_type_of(desc.dimension, desc.array_layers.has_value(), desc.is_cube, desc.sample_count > 1);
+    auto const width = NS::UInteger(desc.width);
+    auto const height = NS::UInteger(desc.dimension == sg::texture_dimension::d1 ? 1 : desc.height);
+    auto const depth = NS::UInteger(desc.dimension == sg::texture_dimension::d3 ? desc.depth : 1);
+    auto const layers = NS::UInteger(desc.array_layers.has_value() ? desc.array_layers.value() : 1);
+    if (texture->textureType() != type || texture->width() != width || texture->height() != height
+        || texture->depth() != depth || texture->arrayLength() != layers
+        || texture->mipmapLevelCount() != NS::UInteger(desc.mip_levels)
+        || texture->sampleCount() != NS::UInteger(desc.sample_count))
+        return cc::error(cc::format("wrap_metal_texture: the texture is {}x{}x{} of {} layers with {} mips and {} "
+                                    "samples, the description {}x{}x{} of {} layers with {} mips and {} samples",
+                                    texture->width(), texture->height(), texture->depth(), texture->arrayLength(),
+                                    texture->mipmapLevelCount(), texture->sampleCount(), width, height, depth, layers,
+                                    desc.mip_levels, desc.sample_count));
+
+    auto const format = pixel_format_of(desc.format);
+    if (format == MTL::PixelFormatInvalid)
+        return cc::error(cc::format("wrap_metal_texture: pixel format {} has no metal equivalent", int(desc.format)));
+    if (texture->pixelFormat() != format && (texture->usage() & MTL::TextureUsagePixelFormatView) == 0)
+        return cc::error("wrap_metal_texture: the description's format is not the texture's, which allows no "
+                         "pixel-format views");
+
+    auto const needed = texture_usage_of(desc.usage);
+    if ((texture->usage() & needed) != needed)
+        return cc::error(cc::format("wrap_metal_texture: the description's usage needs texture usage 0x{:x}, which the "
+                                    "texture was created without",
+                                    u64(needed & ~texture->usage())));
+
+    _residency.add(texture->retain());
+    return metal_texture_handle(std::make_shared<metal_texture const>(*this, desc, texture));
+}
 } // namespace sg::backend::metal

@@ -94,7 +94,7 @@ v.clear();  v.fill(x);  auto a = v.extract_allocation();
 // array factories mirror vector's create_* (no push/pop/resize); has fill / extract_allocation.
 
 #include <clean-core/container/fixed_array.hh>     // cc::fixed_array<T, N> — inline T[N] aggregate
-cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, data, begin/end, size()
+cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, data, begin/end, size(), element-wise ==
 auto& [a, b, c] = fa;                              // tuple protocol: get<I>(), structured bindings
 
 #include <clean-core/container/pair.hh>            // cc::pair<T, U> — aggregate .first/.second, ==/<=>/hash
@@ -1233,7 +1233,8 @@ hot.self_ratio_of("render_frame") > 0.3;             // the assertion form: a re
 
 #include <clean-core/platform/module_table.hh>   // which binaries were mapped where
 cc::enumerate_loaded_modules();              // -> cc::vector<cc::loaded_module>{base, size, path, identity}
-loaded_module::identity                      // the exact BUILD (PE TimeDateStamp+SizeOfImage), not just the path
+loaded_module::identity                      // the exact BUILD (PE TimeDateStamp+SizeOfImage, Mach-O LC_UUID), not just the path
+// Windows and macOS enumerate; empty elsewhere (cc::module_enumeration_available())
 loaded_module::contains(addr), .name()       // which module an address fell in; "app.exe", not its install dir
 // Serializing captures this for you; recording.modules() is empty when the recording is this process's own.
 
@@ -1391,6 +1392,7 @@ auto loaded = cc::rec::load_recording(path);  // -> cc::result<loaded_recording>
 loaded.value().events();                   // -> recording const&; algebra + queries work identically
 loaded.value().is_truncated(); loaded.value().cycles_per_second(); loaded.value().dumped_at_wall_secs();
 // gotcha: from_domain(domain const*) matches NOTHING on a loaded recording — use from_domain("name")
+// Python: libs/base/clean-core/tools/ccrec reads the same file (ccrec.load + ccrec.analyze); recording-formats.md
 
 #include <clean-core/record/crash_dump.hh>
 cc::install_crash_handler();                                  // the hook list this rides on
@@ -1471,6 +1473,8 @@ CC_HAS_THREAD_SANITIZER                             // 0/1 (common/macros.hh) �
                                                     // unwindable top. Not a way to skip a test that is merely slow.
 CC_HAS_ADDRESS_SANITIZER                            // 0/1 (common/macros.hh) — ASan's allocator ABORTS on a request it
                                                     // cannot grant, so an allocation failure never reaches its handler
+CC_NO_UNIQUE_ADDRESS T member;                      // (common/macros.hh) — ALWAYS this, never bare [[no_unique_address]]:
+                                                    // the MSVC ABI ignores that spelling, clang-cl included
 
 #include <clean-core/platform/leak_annotations.hh> // tell LeakSanitizer a leak is deliberate; no-op without it
 cc::leak_intentionally(p);                          // this object is never freed on purpose (state WHY at the site)

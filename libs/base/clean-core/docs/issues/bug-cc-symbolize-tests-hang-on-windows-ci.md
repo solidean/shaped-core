@@ -20,3 +20,9 @@ Both reports say another thread was inside DbgHelp, so the minidump and the othe
 Every DbgHelp call in clean-core takes `dbghelp_lock()`, so this reads as one call holding it past 30 s rather than a lock-order deadlock.
 A symbol load or a network lookup on the hosted runner is the likely long call; the VS2022 and clang Windows jobs have not shown it.
 Nothing reproduces it off Windows, and the next step needs a Windows machine: time each symbolize test's DbgHelp calls on the runner, or log `_NT_SYMBOL_PATH` there.
+
+**Likely the cause, found locally on 2026-11-07** ([bug-cc-symbolize-unreachable-path-flaky-locally](.closed/2026/11/bug-cc-symbolize-unreachable-path-flaky-locally.md)).
+`symbolize - a module table with no usable binaries still names the module` registered a local path with no file.
+Its first resolve made DbgHelp walk the working directory recursively for the image, holding the lock every symbolizer shares.
+CI runs from the repository root with its build tree, and that test ran beside each failure here.
+The symbolizer no longer registers such a module, but no CI run has shown the failures gone yet, so this stays open until one does.

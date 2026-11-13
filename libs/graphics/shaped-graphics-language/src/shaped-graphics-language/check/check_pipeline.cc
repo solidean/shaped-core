@@ -1066,6 +1066,21 @@ void checker::compile_pipeline(symbol_id id)
         settings.push_back_range(s.settings);
     settings.push_back_range(declared.settings);
 
+    // ---- CHK-515: a pixel stage that takes no view is what one driver draws nothing for
+    if (is_valid(pixel))
+    {
+        auto takes_view = false;
+        for (auto const& parameter : out.at(info_of_entry(pixel).parameters))
+            takes_view = takes_view || parameter.input == stage_input::view_index;
+        for (auto const& s : settings)
+            if (s.path == "view_count" && s.integer > 1 && !takes_view)
+                report(diagnostic_kind::pixel_stage_ignores_view, s.file, s.where,
+                       cc::format("{} takes no `@view_index`, and Intel's dx12 driver may draw nothing for it: "
+                                  "multiply "
+                                  "its color by `keep_view(view)`",
+                                  out.at(pixel).name));
+    }
+
     // ---- CHK-307: the tessellation stages draw patches, as long as the patch they take
     for (auto const& s : settings)
     {

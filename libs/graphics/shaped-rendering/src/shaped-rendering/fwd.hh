@@ -18,6 +18,8 @@ using namespace cc::primitive_defines;
 // Concrete render routines land here as they are implemented;
 // the routine framework itself lives in shaped-graphics (sg::render_routine / ctx.routines).
 class blit_routine; // fullscreen-triangle blit of a source texture across an open raster scope (see blit_routine.hh)
+class taa_routine;  // temporal antialiasing's resolve of a jittered frame into its history (see taa_routine.hh)
+struct taa_desc;    // one frame of it: the frame, its motion and depth, the history, the output
 class box_filter_mipmap_routine;        // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
 class bc_compress_routine;              // a texture to BC1/3/4/5/7 on the GPU, a mip level per call
 enum class bc1_alpha : u8;              // what BC1 does with alpha: opaque, or cut out under half
@@ -30,7 +32,10 @@ struct mipmap_program;                  // one mipmap key's group layout + compu
 
 // The display transform (see display.hh): exposure and curve, as SGL module `display` applies them.
 enum class display_curve : u8; // none, the clamped sRGB encode, or the neutral roll-off before it
+struct bloom_settings;         // how much light scatters, how wide, and from where
+struct grade_settings;         // a look as numbers: temperature, tint, vignette, contrast and saturation
 struct display_transform;      // an exposure in stops and a curve
+class bloom_routine;           // light scattered in a lens, on a linear image (bloom_routine.hh)
 class exposure_meter_routine;  // an image's mean log luminance, for an automatic exposure (exposure_meter_routine.hh)
 
 // Opacity micromaps baked from a texture (see micromap_bake_routine.hh).

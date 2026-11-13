@@ -192,6 +192,39 @@ TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
     CHECK(seen_beside_the_exclusive.load(cc::memory_order_acquire) == 0);
 }
 
+// What a runner counting per process needs, the runner report's coverage above all: no two tests at once, own_pool phases included.
+TEST("parallel - one_at_a_time runs every test alone under -jN", no_scheduler)
+{
+    cc::atomic<int> live = {0};
+    cc::atomic<int> most = {0};
+
+    nx::test_registry reg;
+    auto const busy = [&]
+    {
+        auto const now = live.fetch_add(1, cc::memory_order_acq_rel) + 1;
+        for (auto m = most.load(cc::memory_order_acquire); now > m && !most.compare_exchange_weak(m, now);)
+        {
+        }
+        for (auto spin = 0; spin < 20000; ++spin)
+            cc::spin_pause();
+        live.fetch_sub(1, cc::memory_order_acq_rel);
+        CHECK(true);
+    };
+    for (auto i = 0; i < 6; ++i)
+        reg.add_declaration(cc::format("shared{}", i), {}, busy);
+    for (auto i = 0; i < 6; ++i)
+        reg.add_declaration(cc::format("pooled{}", i), nx::impl::merge_config(nx::config::own_pool(3)), busy);
+
+    auto config = with_jobs(4);
+    config.one_at_a_time = true;
+    auto const schedule = nx::test_schedule::create({}, reg);
+    auto const exec = nx::execute_tests(schedule, config);
+
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(exec.count_total_tests() == 12);
+    CHECK(most.load(cc::memory_order_acquire) == 1);
+}
+
 // Interleaved in schedule order, each exclusive() would split the phase into waves no longer than its slowest test.
 TEST("parallel - exclusive tests run after every other test of their phase, wherever they are declared", no_scheduler)
 {

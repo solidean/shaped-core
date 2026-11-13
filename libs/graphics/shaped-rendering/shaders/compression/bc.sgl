@@ -478,6 +478,7 @@ fun bc4_weight(i: int) -> float:
 /// Each value's nearest index between `r0` and `r1`, written into `idx`; returns the squared error.
 fun bc4_assign(v: float[16], r0: float, r1: float, idx: mut int[16]) -> float:
     let mut error = 0.0
+    @unroll
     for i in 0 ..< 16:
         let mut best = 0
         let mut best_error = 1.0e30
@@ -512,6 +513,7 @@ fun bc4_signed(block: uint2) -> uint2:
 fun bc4_block(v: float[16], top: float) -> uint2:
     let mut lo = 255.0
     let mut hi = 0.0
+    @unroll
     for i in 0 ..< 16:
         lo = min(lo, v[i])
         hi = max(hi, v[i])
@@ -529,6 +531,7 @@ fun bc4_block(v: float[16], top: float) -> uint2:
         let mut bb = 0.0
         let mut ax = 0.0
         let mut bx = 0.0
+        @unroll
         for i in 0 ..< 16:
             let w = bc4_weight(idx[i])
             aa += (1.0 - w) * (1.0 - w)
@@ -551,6 +554,7 @@ fun bc4_block(v: float[16], top: float) -> uint2:
     // Three index bits per texel from bit 16 on: the first sixteen bits share a word with the endpoints.
     let mut bits_lo = 0u
     let mut bits_hi = 0u
+    @unroll
     for i in 0 ..< 16:
         let at = 16 + i * 3
         let value = idx[i] as uint
@@ -599,6 +603,7 @@ fun bc1_weight(i: int, four: bool) -> float:
 fun bc1_assign(px: float4[16], transparent: uint, c0: float3, c1: float3, four: bool, idx: mut int[16]) -> float:
     let mut error = 0.0
     let count = if four => 4 else 3
+    @unroll
     for i in 0 ..< 16:
         if ((transparent >> (i as uint)) & 1u) != 0u:
             idx[i] = 3
@@ -622,6 +627,7 @@ fun bc1_assign(px: float4[16], transparent: uint, c0: float3, c1: float3, four: 
 fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
     let mut transparent = 0u
     if allow_transparent:
+        @unroll
         for i in 0 ..< 16:
             if px[i].w < 128.0 => transparent = transparent | (1u << (i as uint))
     let four = transparent == 0u
@@ -629,6 +635,7 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
     // The principal axis of the opaque texels, by power iteration over their covariance.
     let mut n = 0.0
     let mut mean = float3(0.0)
+    @unroll
     for i in 0 ..< 16:
         if ((transparent >> (i as uint)) & 1u) != 0u => continue
         n += 1.0
@@ -637,6 +644,7 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
     let mut c0v = float3(0.0)
     let mut c1v = float3(0.0)
     let mut c2v = float3(0.0)
+    @unroll
     for i in 0 ..< 16:
         if ((transparent >> (i as uint)) & 1u) != 0u => continue
         let d = px[i].xyz - mean
@@ -654,6 +662,7 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
     if axis_len > 1.0e-12:
         tmin = 1.0e30
         tmax = -1.0e30
+        @unroll
         for i in 0 ..< 16:
             if ((transparent >> (i as uint)) & 1u) != 0u => continue
             let t = dot(px[i].xyz - mean, axis) / axis_len
@@ -671,6 +680,7 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
     let mut bb = 0.0
     let mut ax = float3(0.0)
     let mut bx = float3(0.0)
+    @unroll
     for i in 0 ..< 16:
         if ((transparent >> (i as uint)) & 1u) != 0u => continue
         let w = bc1_weight(idx[i], four)
@@ -697,6 +707,7 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
         let q = q0
         q0 = q1
         q1 = q
+        @unroll
         for i in 0 ..< 16:
             let k = idx[i]
             if k == 0 => idx[i] = 1
@@ -705,10 +716,12 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
             if four and k == 3 => idx[i] = 2
     // Equal endpoints read as the three-color mode, whose index 3 is transparent, so every texel takes index 0.
     if four and q0 == q1:
+        @unroll
         for i in 0 ..< 16:
             idx[i] = 0
 
     let mut bits = 0u
+    @unroll
     for i in 0 ..< 16:
         bits = bits | ((idx[i] as uint) << ((2 * i) as uint))
     return uint2(q0 | (q1 << 16u), bits)
@@ -722,6 +735,7 @@ fun in_level(bx: int, by: int){bc_constants} -> bool:
 @compute(8, 8) fun bc1_cs(@thread_id id: int3){bc_io8, bc_constants}:
     if not in_level(id.x, id.y) => return
     let mut px = float4[16].filled(float4(0.0))
+    @unroll
     for i in 0 ..< 16:
         px[i] = stored(bc_io8.source.load(texel_xy(id.x, id.y, i)))
     bc_io8.blocks[id.y * bc_constants.row_blocks + id.x] = bc1_block(px, bc_constants.bc1_cut_out != 0)
@@ -729,6 +743,7 @@ fun in_level(bx: int, by: int){bc_constants} -> bool:
 @compute(8, 8) fun bc4_cs(@thread_id id: int3){bc_io8, bc_constants}:
     if not in_level(id.x, id.y) => return
     let mut v = float[16].filled(0.0)
+    @unroll
     for i in 0 ..< 16:
         v[i] = bc4_value_of(bc_io8.source.load(texel_xy(id.x, id.y, i)).x)
     let signed = bc_constants.snorm != 0
@@ -739,6 +754,7 @@ fun in_level(bx: int, by: int){bc_constants} -> bool:
     if not in_level(id.x, id.y) => return
     let mut px = float4[16].filled(float4(0.0))
     let mut alpha = float[16].filled(0.0)
+    @unroll
     for i in 0 ..< 16:
         px[i] = stored(bc_io16.source.load(texel_xy(id.x, id.y, i)))
         alpha[i] = px[i].w
@@ -750,6 +766,7 @@ fun in_level(bx: int, by: int){bc_constants} -> bool:
     if not in_level(id.x, id.y) => return
     let mut red = float[16].filled(0.0)
     let mut green = float[16].filled(0.0)
+    @unroll
     for i in 0 ..< 16:
         let t = bc_io16.source.load(texel_xy(id.x, id.y, i))
         red[i] = bc4_value_of(t.x)

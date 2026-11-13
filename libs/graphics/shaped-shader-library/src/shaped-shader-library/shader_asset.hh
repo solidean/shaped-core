@@ -146,6 +146,10 @@ private:
 
 namespace slib
 {
+/// What every SGL compile for `ctx` owes it: what the device has, its float guarantees and its native route.
+/// A compile of a source the host wrote passes them through `compile_source_options::options`.
+void add_context_options(cc::vector<shader_option>& options, sg::context const& ctx);
+
 /// The compute pipeline of `asset` over `layout`, once the shader has compiled for `ctx`.
 ///
 /// What a generated compute entry point's `acquire_pipeline` is: the layout comes from its binding list, so nothing is

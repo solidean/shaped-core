@@ -1,0 +1,183 @@
+// Every stage of a ray-tracing pipeline, reading what each can read, so routes agree only if each read is the same read.
+//
+// A square of two triangles and two boxes of balls, a trace from a closest hit, and a callable the launch picks.
+// Nothing here pins a number: mixed-route-ray-test.cc holds each route, and each pairing of them, to DXC's.
+require raytracing_pipeline
+
+binding ray_scene:
+    world: acceleration_structure[.mixed]
+    cells: mut buffer[float4]
+
+struct surface:
+    colour: float3
+    t: float
+    ids: int4
+    is_front: bool
+    any_hits: int
+    from_object: float3
+    placed: float4
+    is_lit: bool
+
+struct occlusion:
+    is_lit: bool
+
+struct ball:
+    normal: vec3
+    size: float
+
+struct operand:
+    x: float
+    y: float3
+
+rays scene_rays:
+    primary: surface
+    shadow: occlusion
+
+@callable fun scaled(v: mut operand):
+    v.x = v.x * 2.0
+    v.y = v.y + float3(1.0, 2.0, 3.0)
+
+@callable fun flipped(v: mut operand):
+    v.x = -v.x
+
+callables ops = (scaled, flipped)
+
+fun scene_ray(id: int3) -> ray => ray(
+    origin = pos3((id.x as float) + 0.3, 0.5 * (id.y as float) + 0.25, -1.0)
+    direction = vec3(0.0, 0.0, 1.0)
+)
+
+@raygen fun launch(@launch_id id: int3, @launch_size size: int3){ray_scene}:
+    let zero = float3(0.0, 0.0, 0.0)
+    let mut p = surface(zero, -1.0, int4(0, 0, 0, 0), false, 0, zero, float4(0.0, 0.0, 0.0, 0.0), false)
+    trace(ray_scene.world, scene_ray(id), scene_rays.primary, mut p)
+    let mut v = operand(p.t, p.colour)
+    ops[id.y % 2](mut v)
+    let at = (id.x + id.y * size.x) * 8
+    let mut flags = float4(0.0, 0.0, 0.0, (p.any_hits as float))
+    if p.is_front => flags.x = 1.0
+    if p.is_lit => flags.y = 1.0
+    ray_scene.cells[at] = float4(p.colour.x, p.colour.y, p.colour.z, p.t)
+    ray_scene.cells[at + 1] = float4(p.ids.x as float, p.ids.y as float, p.ids.z as float, p.ids.w as float)
+    ray_scene.cells[at + 2] = flags
+    ray_scene.cells[at + 3] = float4(p.from_object.x, p.from_object.y, p.from_object.z, 0.0)
+    ray_scene.cells[at + 4] = p.placed
+    ray_scene.cells[at + 5] = float4(v.x, v.y.x, v.y.y, v.y.z)
+    ray_scene.cells[at + 6] = float4(size.x as float, size.y as float, size.z as float, 0.0)
+
+@miss fun sky(p: mut surface):
+    p.colour = float3(p.t, 0.25, 0.5)
+
+@miss fun open_sky(s: mut occlusion):
+    s.is_lit = true
+
+fun record_hit(p: mut surface, t: float, ids: int4, from_object: float3, placed: float4):
+    p.t = t
+    p.ids = ids
+    p.from_object = from_object
+    p.placed = placed
+
+@closest_hit fun shade_square(h: triangle_hit, p: mut surface){ray_scene}:
+    let ids = int4(h.instance_id, h.instance_index, h.geometry_index, h.primitive_index)
+    record_hit(mut p, h.t, ids, float3(h.ray.origin.x, h.ray.origin.y, h.ray.origin.z), h.object_to_world.row(1))
+    p.colour = h.barycentrics
+    p.is_front = h.is_front_face
+    let moved = h.world_to_object * float4(1.0, 2.0, 3.0, 1.0)
+    p.colour = p.colour + moved * 0.125
+    let mut s = occlusion(false)
+    let o = h.ray.origin + h.ray.direction * h.t
+    let r = ray(origin = o, direction = vec3(4.0, 0.0, 2.0), t_min = 0.001, t_max = 2.0)
+    let flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit
+    trace(ray_scene.world, r, scene_rays.shadow, mut s, flags = flags)
+    p.is_lit = s.is_lit
+
+@any_hit fun cut_square(c: triangle_candidate, p: mut surface) -> hit_decision:
+    p.any_hits += 1
+    if c.primitive_index == 1 => return hit_decision.ignore
+    if c.instance_id == 77 => return hit_decision.accept_and_end_search
+    return hit_decision.accept
+
+@any_hit fun shadow_square(c: triangle_candidate, s: mut occlusion) -> hit_decision:
+    if c.primitive_index == 1 => return hit_decision.ignore
+    return hit_decision.accept
+
+@intersection fun ball_report(b: procedural_box) -> report[ball]:
+    let centre = float3(2.0 * (b.primitive_index as float) + 1.0, 1.0, 1.0)
+    let o = float3(b.object_ray.origin.x, b.object_ray.origin.y, b.object_ray.origin.z)
+    let d = float3(b.object_ray.direction.x, b.object_ray.direction.y, b.object_ray.direction.z)
+    let oc = o - centre
+    let a = dot(d, d)
+    let half_b = dot(oc, d)
+    let disc = half_b * half_b - a * (dot(oc, oc) - 1.0)
+    if disc < 0.0 => return report.none()
+    let t = (-half_b - sqrt(disc)) / a
+    let q = o + d * t - centre
+    return report(t = t, attributes = ball(vec3(q.x, q.y, q.z), disc))
+
+@any_hit fun cut_ball(c: procedural_candidate[ball], p: mut surface) -> hit_decision:
+    p.any_hits += 1
+    if c.primitive_index == 1 and c.attributes.size < 0.5 => return hit_decision.ignore
+    return hit_decision.accept
+
+@closest_hit fun shade_ball(h: procedural_hit[ball], p: mut surface):
+    let ids = int4(h.instance_id, h.instance_index, h.geometry_index, h.primitive_index)
+    let along = float3(h.ray.direction.x, h.ray.direction.y, h.ray.direction.z)
+    record_hit(mut p, h.t, ids, along, h.world_to_object.row(2))
+    p.colour = float3(h.attributes.normal.x, h.attributes.normal.y, h.attributes.size)
+
+hit_group squares for scene_rays:
+    primary = (closest_hit = shade_square, any_hit = cut_square)
+    shadow = (any_hit = shadow_square)
+
+hit_group balls for scene_rays:
+    geometry = .procedural
+    intersection = ball_report
+    primary = (closest_hit = shade_ball, any_hit = cut_ball)
+    shadow = ()
+
+@raygen fun regrouped(@launch_id id: int3, @launch_size size: int3){ray_scene}:
+    let zero = float3(0.0, 0.0, 0.0)
+    let mut p = surface(zero, -1.0, int4(0, 0, 0, 0), false, 0, zero, float4(0.0, 0.0, 0.0, 0.0), false)
+    maybe_reorder(if id.x < 4 => 0u else 1u, 1)
+    trace(ray_scene.world, scene_ray(id), scene_rays.primary, mut p, reorder = id.y as uint, reorder_bits = 3)
+    ray_scene.cells[(id.x + id.y * size.x) * 8] = float4(p.colour.x, p.colour.y, p.colour.z, p.t)
+    ray_scene.cells[(id.x + id.y * size.x) * 8 + 1] = float4(p.ids.x as float, p.ids.y as float, p.ids.z as float, p.ids.w as float)
+
+@raygen fun inspected(@launch_id id: int3, @launch_size size: int3){ray_scene}:
+    let zero = float3(0.0, 0.0, 0.0)
+    let mut p = surface(zero, -1.0, int4(0, 0, 0, 0), false, 0, zero, float4(0.0, 0.0, 0.0, 0.0), false)
+    let at = (id.x + id.y * size.x) * 8
+    const if has(.shader_execution_reordering):
+        let h = trace_hit(ray_scene.world, scene_ray(id), scene_rays.primary, mut p)
+        let mut said = 0.0
+        if h.is_hit => said = 1.0
+        if h.is_miss => said = said + 2.0
+        let instance = h.instance_id
+        ray_scene.cells[at + 2] = float4(said, h.t, instance as float, h.instance_index as float)
+        ray_scene.cells[at + 3] = float4(h.geometry_index as float, h.primitive_index as float, 0.0, 0.0)
+        h.reorder(instance as uint, 2)
+        h.invoke(mut p)
+    else:
+        trace(ray_scene.world, scene_ray(id), scene_rays.primary, mut p)
+    ray_scene.cells[at] = float4(p.colour.x, p.colour.y, p.colour.z, p.t)
+
+@raytracing pipeline regrouped_stage:
+    rays = scene_rays
+    raygen = regrouped
+    miss.primary = sky
+    miss.shadow = open_sky
+    hit_groups = (squares, balls)
+
+@raytracing pipeline inspected_stage:
+    rays = scene_rays
+    raygen = inspected
+    miss.primary = sky
+    miss.shadow = open_sky
+    hit_groups = (squares, balls)
+
+@raytracing pipeline every_stage:
+    rays = scene_rays
+    raygen = launch
+    miss.primary = sky
+    miss.shadow = open_sky
+    hit_groups = (squares, balls)

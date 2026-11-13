@@ -39,6 +39,8 @@ struct bounds {
 @group(0) @binding(2) var<storage, read> input0: array<u32>;
 @group(0) @binding(3) var<storage, read> input1: array<u32>;
 @group(0) @binding(4) var<storage, read> input2: array<u32>;
+// The spatial sort's working words; atomic only because the bounds reduce into it, every other access a plain load or store.
+@group(0) @binding(5) var<storage, read_write> scratch: array<atomic<u32>>;
 
 const huge: f32 = 3.0e38;
 
@@ -229,10 +231,198 @@ fn write_levels(@builtin(global_invocation_id) id: vec3u) {
     pool[u] = vec4u(bitcast<vec3u>(lo), low.w);
     pool[u + 1u] = vec4u(bitcast<vec3u>(hi), high.w);
 }
+
+// ---- the spatial sort ----
+//
+// Reorders a region's records by the Morton code of their box centers before the tree is boxed, so a leaf and every
+// node above it hold primitives that lie together. A record carries its own primitive, geometry or instance index,
+// so a hit reports the caller's index whatever position the sort gave the record.
+// Scratch words 0 to 2 hold the centers' minimum as ordered bits, 3 to 5 their maximum; the rest are placed by the host.
+// Every kernel reads its records as write_leaves does: a.w what they are, b.y the first record's unit.
+
+// The bits of `f`, flipped so that unsigned order is float order.
+fn ordered_bits(f: f32) -> u32 {
+    let b = bitcast<u32>(f);
+    if ((b & 0x80000000u) != 0u) {
+        return ~b;
+    }
+    return b | 0x80000000u;
+}
+
+fn from_ordered_bits(o: u32) -> f32 {
+    if ((o & 0x80000000u) != 0u) {
+        return bitcast<f32>(o & 0x7fffffffu);
+    }
+    return bitcast<f32>(~o);
+}
+
+fn center_of(j: u32) -> vec3f {
+    let b = primitive_bounds(j);
+    return 0.5 * (b.lo + b.hi);
+}
+
+// The low 10 bits of `v`, moved to every third bit.
+fn spread_bits(v: u32) -> u32 {
+    var x = v & 0x3ffu;
+    x = (x | (x << 16u)) & 0x030000ffu;
+    x = (x | (x << 8u)) & 0x0300f00fu;
+    x = (x | (x << 4u)) & 0x030c30c3u;
+    x = (x | (x << 2u)) & 0x09249249u;
+    return x;
+}
+
+// sort_clear
+//   b: z the first word, w the value every word is set to
+@compute @workgroup_size(64)
+fn sort_clear(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    atomicStore(&scratch[args.b.z + args.a.x + id.x], args.b.w);
+}
+
+var<workgroup> group_lo: array<atomic<u32>, 3>;
+var<workgroup> group_hi: array<atomic<u32>, 3>;
+
+// sort_bounds: the centers' box, reduced in each workgroup before one atomic per group reaches the scratch.
+@compute @workgroup_size(64)
+fn sort_bounds(@builtin(global_invocation_id) id: vec3u, @builtin(local_invocation_index) local: u32) {
+    if (local < 3u) {
+        atomicStore(&group_lo[local], 0xffffffffu);
+        atomicStore(&group_hi[local], 0u);
+    }
+    workgroupBarrier();
+    if (id.x < args.a.y) {
+        let c = center_of(args.a.x + id.x);
+        for (var k = 0u; k < 3u; k++) {
+            atomicMin(&group_lo[k], ordered_bits(c[k]));
+            atomicMax(&group_hi[k], ordered_bits(c[k]));
+        }
+    }
+    workgroupBarrier();
+    if (local < 3u) {
+        atomicMin(&scratch[local], atomicLoad(&group_lo[local]));
+        atomicMax(&scratch[3u + local], atomicLoad(&group_hi[local]));
+    }
+}
+
+// sort_keys
+//   c: x the keys' first word, y the values' first word
+@compute @workgroup_size(64)
+fn sort_keys(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    let j = args.a.x + id.x;
+    let lo = vec3f(from_ordered_bits(atomicLoad(&scratch[0])), from_ordered_bits(atomicLoad(&scratch[1])),
+                   from_ordered_bits(atomicLoad(&scratch[2])));
+    let hi = vec3f(from_ordered_bits(atomicLoad(&scratch[3])), from_ordered_bits(atomicLoad(&scratch[4])),
+                   from_ordered_bits(atomicLoad(&scratch[5])));
+    let f = clamp((center_of(j) - lo) / max(hi - lo, vec3f(1.0e-30)), vec3f(0.0), vec3f(1.0));
+    let q = vec3u(f * 1023.0);
+    atomicStore(&scratch[args.c.x + j], spread_bits(q.x) | (spread_bits(q.y) << 1u) | (spread_bits(q.z) << 2u));
+    atomicStore(&scratch[args.c.y + j], j);
+}
+
+// One pass of a stable radix sort over 8 bits of the keys.
+// The keys are cut into blocks, one invocation walking each in order, which is what keeps it stable with no subgroups.
+// The counts are digit-major, a row of blocks per digit, so that each block's place is its row's base plus its prefix.
+//   b: z the keys out, w the values out
+//   c: x the keys in, y the values in, z the counts, w the row bases
+//   d: x the record count, y the block count, z the shift, w the records per block
+fn block_digit(i: u32) -> u32 {
+    return (atomicLoad(&scratch[args.c.x + i]) >> args.d.z) & 255u;
+}
+
+@compute @workgroup_size(64)
+fn sort_count(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    let block = args.a.x + id.x;
+    let end = min((block + 1u) * args.d.w, args.d.x);
+    for (var i = block * args.d.w; i < end; i++) {
+        let at = args.c.z + block_digit(i) * args.d.y + block;
+        atomicStore(&scratch[at], atomicLoad(&scratch[at]) + 1u);
+    }
+}
+
+// sort_scan_rows: one invocation per digit turns its row of counts into an exclusive prefix, and leaves the row's total as its base.
+@compute @workgroup_size(64)
+fn sort_scan_rows(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    let digit = args.a.x + id.x;
+    var running = 0u;
+    for (var block = 0u; block < args.d.y; block++) {
+        let at = args.c.z + digit * args.d.y + block;
+        let count = atomicLoad(&scratch[at]);
+        atomicStore(&scratch[at], running);
+        running += count;
+    }
+    atomicStore(&scratch[args.c.w + digit], running);
+}
+
+// sort_scan_bases: one invocation turns the 256 row totals into each row's first place.
+@compute @workgroup_size(64)
+fn sort_scan_bases(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    var running = 0u;
+    for (var digit = 0u; digit < 256u; digit++) {
+        let at = args.c.w + digit;
+        let total = atomicLoad(&scratch[at]);
+        atomicStore(&scratch[at], running);
+        running += total;
+    }
+}
+
+@compute @workgroup_size(64)
+fn sort_scatter(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    let block = args.a.x + id.x;
+    let end = min((block + 1u) * args.d.w, args.d.x);
+    for (var i = block * args.d.w; i < end; i++) {
+        let digit = block_digit(i);
+        let at = args.c.z + digit * args.d.y + block;
+        let offset = atomicLoad(&scratch[at]);
+        atomicStore(&scratch[at], offset + 1u);
+        let place = atomicLoad(&scratch[args.c.w + digit]) + offset;
+        atomicStore(&scratch[args.b.z + place], atomicLoad(&scratch[args.c.x + i]));
+        atomicStore(&scratch[args.b.w + place], atomicLoad(&scratch[args.c.y + i]));
+    }
+}
+
+// sort_gather: the records in sorted order, into the scratch, which the host then copies over the region's own.
+//   b: x units per record, y the first record's unit, z the first scratch word written
+//   c: y the sorted values
+@compute @workgroup_size(64)
+fn sort_gather(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    let i = args.a.x + id.x;
+    let source = args.b.y + args.b.x * atomicLoad(&scratch[args.c.y + i]);
+    for (var k = 0u; k < args.b.x; k++) {
+        let v = pool[source + k];
+        let to = args.b.z + 4u * (args.b.x * i + k);
+        atomicStore(&scratch[to], v.x);
+        atomicStore(&scratch[to + 1u], v.y);
+        atomicStore(&scratch[to + 2u], v.z);
+        atomicStore(&scratch[to + 3u], v.w);
+    }
+}
 )";
 
-constexpr char const* k_kernel_entry_points[]
-    = {"write_triangles", "write_triangle_ends", "write_boxes", "write_leaves", "write_levels"};
+constexpr char const* k_kernel_entry_points[] = {
+    "write_triangles", "write_triangle_ends", "write_boxes", "write_leaves", "write_levels",
+    "sort_clear",      "sort_bounds",         "sort_keys",   "sort_count",   "sort_scan_rows",
+    "sort_scan_bases", "sort_scatter",        "sort_gather",
+};
 
 [[nodiscard]] wgpu_buffer create_pool_buffer(WGPUDevice device, isize units, char const* label)
 {
@@ -260,6 +450,8 @@ void webgpu_acceleration_pool::shutdown()
     _kernel_pipeline_layout = {};
     _kernel_layout = {};
     _unused_input = {};
+    _sort_scratch = {};
+    _sort_scratch_words = 0;
     _buffer = {};
     _free.clear();
 }
@@ -388,14 +580,14 @@ void webgpu_acceleration_pool::create_kernels()
     auto const device = _ctx->device();
 
     auto entries = cc::vector<WGPUBindGroupLayoutEntry>();
-    for (auto binding = u32(0); binding < 5; ++binding)
+    for (auto binding = u32(0); binding < 6; ++binding)
     {
         auto entry = WGPUBindGroupLayoutEntry{};
         entry.binding = binding;
         entry.visibility = WGPUShaderStage_Compute;
-        entry.buffer.type = binding == 0 ? WGPUBufferBindingType_Uniform
-                          : binding == 1 ? WGPUBufferBindingType_Storage
-                                         : WGPUBufferBindingType_ReadOnlyStorage;
+        entry.buffer.type = binding == 0                 ? WGPUBufferBindingType_Uniform
+                          : binding == 1 || binding == 5 ? WGPUBufferBindingType_Storage
+                                                         : WGPUBufferBindingType_ReadOnlyStorage;
         entries.push_back(entry);
     }
     auto const layout_desc = WGPUBindGroupLayoutDescriptor{
@@ -445,6 +637,31 @@ void webgpu_acceleration_pool::create_kernels()
         .mappedAtCreation = WGPU_FALSE,
     };
     _unused_input = wgpu_buffer(wgpuDeviceCreateBuffer(device, &input_desc));
+}
+
+wgpu_buffer const& webgpu_acceleration_pool::sort_scratch(isize min_words)
+{
+    CC_ASSERT(!_shut_down, "the acceleration pool is used after its context shut down");
+    CC_ASSERT(min_words * 4 <= max_sort_scratch_bytes, "the sort scratch is bound whole, so it fits one storage "
+                                                       "binding");
+    if (!_sort_scratch || _sort_scratch_words < min_words)
+    {
+        // At least a little, so every build kernel has something to bind, and doubling, so a run of growing builds
+        // reallocates a few times rather than once each.
+        auto const words
+            = cc::min(cc::max(cc::max(min_words, isize(64)), 2 * _sort_scratch_words), max_sort_scratch_bytes / 4);
+        auto const desc = WGPUBufferDescriptor{
+            .nextInChain = nullptr,
+            .label = to_wgpu("sg acceleration sort scratch"),
+            .usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc, // the sorted records are copied over the region
+            .size = u64(words * 4),
+            .mappedAtCreation = WGPU_FALSE,
+        };
+        _sort_scratch = wgpu_buffer(wgpuDeviceCreateBuffer(_ctx->device(), &desc));
+        CC_ASSERT(bool(_sort_scratch), "wgpuDeviceCreateBuffer returned no sort scratch");
+        _sort_scratch_words = words;
+    }
+    return _sort_scratch;
 }
 
 WGPUComputePipeline webgpu_acceleration_pool::kernel(acceleration_kernel k)

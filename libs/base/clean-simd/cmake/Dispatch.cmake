@@ -17,8 +17,7 @@
 # ELF linkers pull a member as soon as one of its symbols is pending, so there it is the usual outcome rather than a
 # guarantee; cimd_check_link_map on each final executable is what checks it.
 #
-# A kernel TU holds nothing but the instantiation, takes no precompiled header (one built for the floor's flags would
-# not match), and is never part of an LTO unit.
+# A kernel TU holds nothing but the instantiation, and is never part of an LTO unit.
 #
 # Works from any directory: what Simd.cmake decided is read from GLOBAL properties, so it holds when shaped-core is
 # consumed with add_subdirectory and the caller sits outside its tree.

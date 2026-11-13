@@ -9,6 +9,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | Dependency | Version | License | Used by | Text |
 |---|---|---|---|---|
 | [Agility SDK](https://www.nuget.org/packages/Microsoft.Direct3D.D3D12) | 1.620.1 | `LicenseRef-Microsoft-DirectX` | shaped-graphics' dx12 backend, which creates its devices through this runtime where it was fetched | [agility-sdk.txt](agility-sdk.txt), [agility-sdk-code.txt](agility-sdk-code.txt) |
+| [Agility SDK preview](https://www.nuget.org/packages/Microsoft.Direct3D.D3D12) | 1.722.1-preview | `LicenseRef-Microsoft-DirectX-Preview` | shaped-graphics' dx12 backend in a build configured with SC_AGILITY_PREVIEW, for clustered geometry and partitioned TLAS | [agility-sdk-preview.txt](agility-sdk-preview.txt), [agility-sdk-preview-code.txt](agility-sdk-preview-code.txt) |
 | [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) | v5.2 | `CC-BY-4.0` | shaped-viewer — the bistro example; and tests that skip without it (babel's FBX reader and DDS / TGA decode, sv's FBX importer) | [amazon-lumberyard-bistro.txt](amazon-lumberyard-bistro.txt) |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.6 | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | clean-core — cc::blake3 / cc::hash256 (the cryptographic hash) | [blake3-cc0.txt](blake3-cc0.txt), [blake3-a2.txt](blake3-a2.txt), [blake3-a2llvm.txt](blake3-a2llvm.txt) |
 | [DLSS](https://github.com/NVIDIA/DLSS) | v310.9.1 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::dlss_rr_routine (the DLSS Ray Reconstruction denoise member) | [dlss.txt](dlss.txt) |
@@ -18,6 +19,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [Dear ImGui](https://github.com/ocornut/imgui) | v1.92.8-docking | `MIT` | shaped-rendering — sr::imgui_context and sr::imgui_routine | [dear-imgui.txt](dear-imgui.txt) |
 | [ImPlot](https://github.com/epezent/implot) | d65a2bef53d3 | `MIT` | shaped-rendering — plotting inside the imgui bundle | [implot.txt](implot.txt) |
 | [ImGuizmo](https://github.com/cedricguillemet/ImGuizmo) | dc25afb98bc3 | `MIT` | shaped-rendering — manipulation gizmos inside the imgui bundle | [imguizmo.txt](imguizmo.txt) |
+| [Inter](https://rsms.me/inter) | v4.1 | `OFL-1.1` | shaped-rendering — the UI font a web build draws text in, where no system font file can be opened | [inter.txt](inter.txt) |
 | [libspng](https://libspng.org) | v0.7.4 | `BSD-2-Clause AND libpng-2.0` | babel-serializer — the PNG codec behind babel::png | [libspng.txt](libspng.txt), [libspng-libpng.txt](libspng-libpng.txt) |
 | [libwebp](https://chromium.googlesource.com/webm/libwebp) | v1.6.0 | `BSD-3-Clause` | babel-serializer — the WebP codec behind babel::image's webp format | [libwebp-copying.txt](libwebp-copying.txt), [libwebp-patents.txt](libwebp-patents.txt) |
 | [LZ4](https://github.com/lz4/lz4) | v1.10.0 | `BSD-2-Clause` | clean-core — cc::compress / cc::decompress, the LZ4 algorithm | [lz4.txt](lz4.txt) |

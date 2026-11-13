@@ -143,6 +143,10 @@ Disabling it keeps a sweep out of the parts it has not reached yet.
 Those invocables are parked rather than unwired.
 An invocable with no alias and no invocation is still an orphan, which is the wiring mistake this exists for.
 
+**A disabled invocable is parked at every dispatch, as a disabled test is in a sweep.**
+Its driver skips it unless a scope names it exactly as its own segment, as `dev.py test "<its name>"` does, or the run asks for disabled tests too.
+So `nx::config::disabled` on one invocable takes it out of every driver's sweep, which is how a test that fails for a known issue waits for its fix.
+
 shaped-graphics' vulkan backend was the worked case, through the whole of its build-out.
 [`vulkan-entry.cc`](../../../graphics/shaped-graphics/tests/backends/vulkan-entry.cc) records what the toggle bought and when it came off.
 

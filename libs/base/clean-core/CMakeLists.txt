@@ -32,6 +32,7 @@ add_library(clean-core
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
     src/clean-core/platform/environment.cc
+    src/clean-core/platform/file_access.cc
     src/clean-core/platform/file_path.cc
     src/clean-core/platform/stack_capture.cc
     src/clean-core/platform/stacktrace.cc
@@ -51,6 +52,7 @@ add_library(clean-core
     src/clean-core/platform/network_devices.cc
     src/clean-core/platform/resource_snapshot.cc
     src/clean-core/memory/allocation.cc
+    src/clean-core/memory/large_allocations.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
     src/clean-core/record/domain.cc
@@ -178,6 +180,7 @@ target_sources(clean-core
     src/clean-core/math/wide_arith.hh
 
     src/clean-core/memory/allocation.hh
+    src/clean-core/memory/large_allocations.hh
     src/clean-core/memory/node_allocation.hh
     src/clean-core/memory/unique_ptr.hh
     src/clean-core/memory/impl/object_lifetime_util.hh
@@ -318,9 +321,13 @@ target_compile_features(clean-core
 )
 
 # Expose "src" so '#include <clean-core/dummy.hh>' works for consumers.
+# The generated build_config.hh sits beside it, one directory per configuration, since CC_DEBUG and its siblings differ by config.
+# Both are the build tree's: an installed clean-core has src/ and the header under one include/ (tools/cmake/Install.cmake).
+set(_cc_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
 target_include_directories(clean-core
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<BUILD_INTERFACE:${_cc_generated_dir}>"
 )
 
 # SC_MIMALLOC is the root CMakeLists' option, defaulted here for a standalone add_subdirectory() consumer that has no
@@ -348,17 +355,18 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(clean-core PUBLIC Threads::Threads)
 
-# The repo-wide build configuration — x86-64 level, floating-point contraction, sanitizers, coverage, PGO, wasm threads.
-# PUBLIC because some of it is ABI: CC_X64_LEVEL is read by our headers, so everything including them must agree on it.
-# tools/cmake/BuildConfig.cmake says why it is a target. The root CMakeLists defines it; a consumer adding clean-core alone gets none.
+# The repo-wide build flags — x86-64 level, floating-point contraction, sanitizers, coverage, PGO, wasm threads.
+# PUBLIC so a project adding shaped-core with add_subdirectory compiles with them too; tools/cmake/BuildConfig.cmake says why it is a target.
+# The build tree's interface only: an installed clean-core exports no compile or link option.
+# What of the configuration is ABI reaches every consumer through build_config.hh instead.
+# The root CMakeLists defines it; a consumer adding clean-core alone gets none.
 if(TARGET shaped-core::build-config)
-    target_link_libraries(clean-core PUBLIC shaped-core::build-config)
+    target_link_libraries(clean-core PUBLIC $<BUILD_INTERFACE:shaped-core::build-config>)
 endif()
 
 # The CPU feature query is compiled at the x86-64 baseline, so a library can ask it on a CPU below SC_X64_LEVEL and fail cleanly.
 # At the build's level the compiler spends AVX even there, e.g. on zeroing the cc::cpu_features it returns.
 # Its two files define no inline function another TU emits too, so the linker cannot swap in a copy compiled above the baseline.
-# They skip the precompiled header, which is compiled at the build's level.
 # cl.exe has no spelling below its x64 default to override /arch:AVX2 with, so this holds for clang and GCC only.
 if(SC_ARCH_X64 AND NOT EMSCRIPTEN)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
@@ -368,7 +376,7 @@ if(SC_ARCH_X64 AND NOT EMSCRIPTEN)
     endif()
     if(DEFINED _cc_baseline)
         set_source_files_properties(src/clean-core/platform/cpu_features.cc src/clean-core/platform/impl/cpuid.cc
-            TARGET_DIRECTORY clean-core PROPERTIES COMPILE_OPTIONS "${_cc_baseline}" SKIP_PRECOMPILE_HEADERS ON)
+            TARGET_DIRECTORY clean-core PROPERTIES COMPILE_OPTIONS "${_cc_baseline}")
     endif()
 endif()
 
@@ -407,22 +415,30 @@ if(NOT DEFINED SC_ASYNC_AMBIENT_TRACE)
     set(SC_ASYNC_AMBIENT_TRACE OFF)
 endif()
 
-# Define build configuration macros. These are the inputs macros.hh derives from; it owns the outputs
-# (CC_ASSERT_ENABLED, CC_HAS_THREADS). PUBLIC because they must agree across the whole build: consumers
-# branch on them, and CC_SINGLE_THREADED additionally changes struct layout (node_allocation's slab header),
-# so a target compiled without it could not share objects with one compiled with it; so does SC_SOURCE_SITES, cc::source_location's.
-target_compile_definitions(clean-core
-    PUBLIC
-    $<$<CONFIG:Debug>:CC_DEBUG>
-    $<$<CONFIG:Release>:CC_RELEASE>
-    $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
-    $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
-    $<$<NOT:$<BOOL:${SC_MIMALLOC}>>:CC_NO_MIMALLOC>
-    $<$<BOOL:${SC_FRAME_POINTERS}>:CC_FRAME_POINTERS>
-    $<$<STREQUAL:${SC_SOURCE_SITES},OPAQUE>:CC_SOURCE_SITES_OPAQUE>
-    $<$<STREQUAL:${SC_SOURCE_SITES},OFF>:CC_SOURCE_SITES_OFF>
-    $<$<BOOL:${SC_ASYNC_AMBIENT_TRACE}>:CC_ASYNC_AMBIENT_TRACE_REQUESTED>
-)
+# The build configuration macros macros.hh derives from, collected here and written into build_config.hh at the end of this file.
+# macros.hh owns the outputs (CC_ASSERT_ENABLED, CC_HAS_THREADS) and includes the header first.
+# They must agree between clean-core and everything including it: consumers branch on them, and CC_SINGLE_THREADED
+# changes struct layout (node_allocation's slab header), as SC_SOURCE_SITES changes cc::source_location's.
+# A header rather than PUBLIC definitions, because a header carries that agreement into an installed clean-core too.
+# Each entry is `NAME VALUE`; the configuration's own name is a generator expression, written per configuration.
+set(_cc_config_defines "")
+if(NOT SC_THREADS)
+    list(APPEND _cc_config_defines "CC_SINGLE_THREADED 1")
+endif()
+if(NOT SC_MIMALLOC)
+    list(APPEND _cc_config_defines "CC_NO_MIMALLOC 1")
+endif()
+if(SC_FRAME_POINTERS)
+    list(APPEND _cc_config_defines "CC_FRAME_POINTERS 1")
+endif()
+if(SC_SOURCE_SITES STREQUAL "OPAQUE")
+    list(APPEND _cc_config_defines "CC_SOURCE_SITES_OPAQUE 1")
+elseif(SC_SOURCE_SITES STREQUAL "OFF")
+    list(APPEND _cc_config_defines "CC_SOURCE_SITES_OFF 1")
+endif()
+if(SC_ASYNC_AMBIENT_TRACE)
+    list(APPEND _cc_config_defines "CC_ASYNC_AMBIENT_TRACE_REQUESTED 1")
+endif()
 
 # Detect and link the correct library for std::stacktrace support.
 # This is a link probe, so it is the authoritative answer and it publishes that answer as CC_HAS_STACKTRACE.
@@ -430,13 +446,13 @@ target_compile_definitions(clean-core
 # a libstdc++ shipped without libstdc++exp has <stacktrace> and none of its symbols, and that combination links
 # only because the header believed itself. When the probe finds nothing (WASI ships no such header at all) this is
 # not fatal: the header falls back to an empty stub. Only the GCC paths need a link library.
-# PUBLIC because consumers include stacktrace.hh and must reach the same verdict.
+# In build_config.hh because consumers include stacktrace.hh and must reach the same verdict.
 # Emscripten and Apple are decided before the probe and against it: neither ships a <stacktrace> that links, but both
 # still produce frames through cc::capture_stack and names through cc::symbolizer -- which the stub cannot.
 # platform/stacktrace.cc is that backend.
 if(EMSCRIPTEN OR APPLE)
     message(STATUS "[clean-core] std::stacktrace unavailable - using clean-core's own capture-and-symbolize backend")
-    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=1)
+    list(APPEND _cc_config_defines "CC_HAS_STACKTRACE 1")
 else()
 
 include(DetectStacktraceLib)
@@ -444,9 +460,9 @@ cc_detect_stacktrace_link(_CC_STACKTRACE_LIB)
 
 if(_CC_STACKTRACE_LIB STREQUAL "NOTFOUND")
     message(STATUS "[clean-core] std::stacktrace unavailable — building with the empty stacktrace stub")
-    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=0)
+    list(APPEND _cc_config_defines "CC_HAS_STACKTRACE 0")
 else()
-    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=1)
+    list(APPEND _cc_config_defines "CC_HAS_STACKTRACE 1")
 
     if(NOT _CC_STACKTRACE_LIB STREQUAL "")
         target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
@@ -466,68 +482,34 @@ endif()
 include(DetectLinker)
 cc_detect_linker(_CC_LINKER)
 
+# The build tree's choice only: an installed clean-core leaves the linker to its consumer.
 if(NOT _CC_LINKER STREQUAL "" AND NOT _CC_LINKER STREQUAL "msvc" AND NOT _CC_LINKER STREQUAL "wasm-ld")
-    target_link_options(clean-core PUBLIC -fuse-ld=${_CC_LINKER})
+    target_link_options(clean-core PUBLIC $<BUILD_INTERFACE:-fuse-ld=${_CC_LINKER}>)
 endif()
 
-# The PCH tiers clean-core owns. Every other library's tiers build on these, so they are declared first in the repo.
-# docs/guides/precompiled-headers.md is how to change one; the short version is that it is a measurement, not a guess.
+# What of the repo-wide build is ABI: tools/cmake/Simd.cmake's level and Emscripten.cmake's frame verdict.
+# A consumer adding clean-core alone runs neither, and its header names neither.
+if(DEFINED SC_X64_LEVEL_NUMBER)
+    list(APPEND _cc_config_defines "CC_X64_LEVEL ${SC_X64_LEVEL_NUMBER}")
+    if(SC_X64_AVX)
+        list(APPEND _cc_config_defines "CC_X64_AVX 1")
+    endif()
+endif()
+if(DEFINED SC_WASM_KEEPS_FRAME_STRUCTURE)
+    list(APPEND _cc_config_defines "CC_WASM_KEEPS_FRAME_STRUCTURE ${SC_WASM_KEEPS_FRAME_STRUCTURE}")
+endif()
 
-# The clean-core surface a typical TU reaches for.
-sc_declare_pch_tier(CC HEADERS
-    <clean-core/fwd.hh>
-    <clean-core/common/assert.hh>
-    <clean-core/common/macros.hh>
-    <clean-core/common/utility.hh>
-    <clean-core/common/hash.hh>
-    <clean-core/container/span.hh>
-    <clean-core/container/vector.hh>
-    <clean-core/container/array.hh>
-    <clean-core/container/map.hh>
-    <clean-core/container/set.hh>
-    <clean-core/container/pair.hh>
-    <clean-core/container/tuple.hh>
-    <clean-core/container/variant.hh>
-    <clean-core/container/small_vector.hh>
-    <clean-core/container/fixed_vector.hh>
-    <clean-core/string/string.hh>
-    <clean-core/string/string_view.hh>
-    <clean-core/string/format.hh>
-    <clean-core/error/optional.hh>
-    <clean-core/error/result.hh>
-    <clean-core/function/function_ref.hh>
-    <clean-core/function/unique_function.hh>
-    <clean-core/memory/unique_ptr.hh>
-    <clean-core/memory/shared_ptr.hh>
-    <clean-core/memory/allocation.hh>
-)
-
-# The heavy tail: threading, streams, node allocation.
-# A rung of its own because these churn most, and a given TU is least likely to need them.
-sc_declare_pch_tier(CC_ALL EXTENDS CC HEADERS
-    <clean-core/thread/mutex.hh>
-    <clean-core/thread/atomic.hh>
-    <clean-core/thread/async.hh>
-    <clean-core/thread/thread.hh>
-    <clean-core/memory/node_allocation.hh>
-    <clean-core/streams/stream.hh>
-    <clean-core/streams/file_stream.hh>
-    <clean-core/container/pinned_data.hh>
-    <clean-core/container/ringbuffer.hh>
-    <clean-core/math/random.hh>
-    <clean-core/platform/console.hh>
-    <clean-core/platform/stacktrace.hh>
-    <clean-core/sequence/sequence.hh>
-    <clean-core/common/log.hh>
-    <clean-core/common/profiling.hh>
-    <clean-core/record/record.hh>
-)
-
-# CC_ALL plus the expensive standard headers our containers and strings reach anyway.
-# A target that uses none of them is measurably worse off here than at CC_ALL — see shaped-linter-core.
-sc_declare_pch_tier(CC_STD EXTENDS CC_ALL STD)
-
-sc_target_pch(clean-core CC_STD) # 0.47
+# build_config.hh, one per configuration: a multi-config generator builds several from one configure.
+set(_cc_build_config "#pragma once\n\n")
+string(APPEND _cc_build_config "// Generated by clean-core's CMakeLists from the configuration clean-core was built in. Do not edit.\n")
+string(APPEND _cc_build_config "// Every setting clean-core and the code including it must agree on; common/macros.hh includes it first.\n\n")
+string(APPEND _cc_build_config "$<$<CONFIG:Debug>:#define CC_DEBUG 1\n>")
+string(APPEND _cc_build_config "$<$<CONFIG:Release>:#define CC_RELEASE 1\n>")
+string(APPEND _cc_build_config "$<$<CONFIG:RelWithDebInfo>:#define CC_RELWITHDEBINFO 1\n>")
+foreach(_cc_define IN LISTS _cc_config_defines)
+    string(APPEND _cc_build_config "#define ${_cc_define}\n")
+endforeach()
+file(GENERATE OUTPUT "${_cc_generated_dir}/clean-core/build_config.hh" CONTENT "${_cc_build_config}")
 
 # Test executable
 if(SC_BUILD_TESTS)
@@ -549,6 +531,7 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/sort-benchmark.cc
         tests/benchmarks/compression-benchmark.cc
         tests/benchmarks/record-open-event-benchmark.cc
+        tests/benchmarks/record-scope-cost-benchmark.cc
 
         # tests grouped by topic, mirroring src/clean-core/
         tests/common/assert-test.cc
@@ -570,6 +553,7 @@ if(SC_BUILD_TESTS)
 
         tests/platform/console-test.cc
         tests/platform/environment-test.cc
+        tests/platform/file_access-test.cc
         tests/platform/file_path-test.cc
         tests/platform/native-test.cc
         tests/platform/stack-capture-test.cc
@@ -599,6 +583,7 @@ if(SC_BUILD_TESTS)
         tests/math/wide_arith-test.cc
 
         tests/memory/allocation-test.cc
+        tests/memory/large_allocations-test.cc
         tests/memory/node_allocation-test.cc
         tests/memory/node_allocation-default-test.cc
         tests/memory/node_allocation-patterns-test.cc
@@ -675,6 +660,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-stamp-test.cc
         tests/record/record-query-test.cc
         tests/record/record-serialize-test.cc
+        tests/record/record-reader-fixture-test.cc
         tests/record/record-trace-test.cc
         tests/record/record-async-scope-test.cc
         tests/record/record-sampling-test.cc
@@ -708,8 +694,6 @@ if(SC_BUILD_TESTS)
         xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
         blake3 # and the raw BLAKE3 ones, in the same table
     )
-
-    sc_target_pch(clean-core-test CC_STD NEXUS) # 0.67
 
     # Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(clean-core-test)

@@ -29,7 +29,7 @@
 // than anything a wasm run could assert about itself.
 
 // Whether this build reports a frame per call the source makes.
-// Set by tools/cmake/Emscripten.cmake, where the same build types that keep the name section are decided; 1
+// Decided by tools/cmake/Emscripten.cmake, where the same build types that keep the name section are, and written into build_config.hh; 1
 // everywhere that is not a Release wasm build, since no other toolchain here collapses frames this way.
 #ifndef CC_WASM_KEEPS_FRAME_STRUCTURE
 #define CC_WASM_KEEPS_FRAME_STRUCTURE 1

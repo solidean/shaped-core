@@ -223,8 +223,9 @@ The megakernel does the same with a guide ray per sample, its payload's `guide` 
 
 A capture waits for samples per pixel rather than frames, since how many samples a frame finishes is the GPU's and the budget's.
 So any GPU stops at the same sample count, and for that count to be the same image a pixel's k-th sample has to trace the same path however it got there.
-**It is the same image only when the run restarted the same number of times**: the seed hashes the slot's restarts, and cold compiles and owed-work drains change how many come before the final run.
-A seed that does not depend on them is `feat-sv-deterministic-seed`.
+**Nor on how often the run restarted on the way**, which cold compiles and owed-work drains decide on their own clock.
+The seed hashes the image over inputs equal on any machine, mixed with the frame within the run, so the final run repeats its sequence whatever came before it.
+`tests/deterministic-seed-test.cc` pins it, for all three tracers.
 
 - **A pixel's paths continue one random stream from sample to sample**, and the fill draws from a stream of its own.
   That stream hashes the slot, the frame's seed, the pixel's count and the slot's draws since its sample last started, so it never advances the path's.
@@ -372,8 +373,8 @@ Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the 
 What is still open:
 
 - **A draining frame is bounded rather than empty.**
-  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 25` rounds.
-  That is enough for every surface bounce, eight free refractions through smooth glass, and a medium walk up to where its roulette starts.
+  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 26` rounds.
+  That is enough for every surface bounce, eight free refractions through smooth glass, the segment past the last bounce, and a medium walk up to where its roulette starts.
   A deeper walk finishes on the next still frame, or is dropped by the next restart.
 - **A moving frame is one sample per pixel**, where the megakernel's is `samples_per_pixel`; starting several per pixel on a draining frame is the fix, if a moving image turns out too noisy.
 - **A still image is an exact mean only once its pixels stop.**

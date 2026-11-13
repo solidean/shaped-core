@@ -49,6 +49,8 @@ HLSL writes `RaytracingAccelerationStructure`, MSL `instance_acceleration_struct
 * **`hit_decision`** is what an any-hit decision says of a candidate: `accept`, `ignore`, or `accept_and_end_search`.
 * **`triangle_candidate`** is a triangle the traversal could not decide alone, a non-opaque one.
   It holds `t`, `ray`, the instance's `instance_id` and `instance_index`, `geometry_index`, `primitive_index`, `barycentrics` and `is_front_face`.
+  `cluster_id` is the cluster the triangle is in, as its build numbered it, and -1 in a BLAS built from no clusters (EMIT-260).
+  Its `primitive_index` is then the triangle's within its cluster.
 * **`triangle_hit`** is the nearest triangle a trace accepted, with the candidate's fields and `is_hit`.
   **Where `is_hit` is false, `t` is the ray's `t_max` and nothing else is set.**
 * **`procedural_box`** is a box the traversal entered, which an intersection is handed.
@@ -281,6 +283,8 @@ else:
 ```
 
 Nothing but a device with the feature can trace without running those shaders, so a hit object has no fallback, and the `else` is the program's to write.
+
+A hit object stays where its trace put it (CHK-516): a function may read it, and no struct, array, `if` or `return` holds it.
 
 ### Hit groups
 

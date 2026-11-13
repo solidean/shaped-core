@@ -201,6 +201,35 @@ TEST("invocable tests - section filters scope invocation to a single instance", 
     CHECK(exec.executions[0].nested[0].instance.declaration->name == "childB");
 }
 
+TEST("invocable tests - a disabled instance runs only when named, or when disabled tests run too", no_scheduler)
+{
+    auto const run = [](nx::test_schedule_config const& config)
+    {
+        auto ran = 0;
+        nx::test_registry reg;
+        add_invocable(
+            reg, "parked",
+            [&](int)
+            {
+                ++ran;
+                CHECK(true);
+            },
+            nx::config::cfg{.enabled = false});
+        add_invocable(reg, "active", [&](int) { CHECK(true); });
+        reg.add_declaration("driver", {}, [&] { nx::invoke_tests<int>("group", 0); });
+        auto schedule = nx::test_schedule::create({}, reg);
+        auto exec = nx::execute_tests(schedule, config);
+        CHECK(exec.count_failed_tests() == 0);
+        return ran;
+    };
+
+    CHECK(run({}) == 0);
+    CHECK(run({.section_filters = {"group", "parked"}}) == 1);
+    // scoping to the group alone names no child, so the disabled one stays parked
+    CHECK(run({.section_filters = {"group"}}) == 0);
+    CHECK(run({.run_disabled_tests = true}) == 1);
+}
+
 TEST("invocable tests - a failing instance fails the run and is addressable, siblings still pass", no_scheduler)
 {
     nx::test_registry reg;

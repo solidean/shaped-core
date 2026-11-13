@@ -5,26 +5,33 @@ A positional argument is passed through to the binary as a test-name filter, a c
 
 A binary that writes no JUnit report of its own gets a synthesized single-case sidecar (see logs.write_step_junit), so test_diag and CI always have something machine-readable to parse.
 
+With the optional build server opted in (build_server.py), the binaries run through it instead, which serves a stored pass when nothing a binary executes or reads changed.
+dev.py still files what each run left (crash reports, resolved sites, kept failure logs, run logs), so a served run reads like one dev.py started.
+
 Public API:
     test(presets, binary_names, ...) -> list[dict]   (per-binary run records)
 """
 
 from __future__ import annotations
 
+import functools
+import itertools
 import json
 import os
+import shutil
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 from ..core import console, crash_reports, profile, ui
-from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
-from ..core.models import Preset, Target
-from ..core.process import emsdk_env, run_step
+from ..core.logs import capture_line, parse_junit, step_fields, step_log_paths, write_sidecar, write_step_junit
+from ..core.models import Preset, StepResult, Target, TestSummary
+from ..core.process import describe_exit_code, emsdk_env, run_step
 from ..toolchain import monado
 from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
-from . import sites
+from . import build_server, sites
 from .eligibility import nexus_filter
 
 # nexus prints this when a name filter matches no tests in a binary.
@@ -88,6 +95,27 @@ def _sanitizer_path_env(build_dir: Path) -> dict[str, str]:
         return {}
     existing = os.environ.get("PATH", "")
     return {"PATH": rtdir + os.pathsep + existing if existing else rtdir}
+
+
+def _preset_env(preset: Preset) -> dict[str, str]:
+    """Per-preset additions every binary gets, such as the Windows ASan runtime dir on PATH."""
+    env = _sanitizer_path_env(preset.build_dir)
+    env.update(_lsan_suppression_env())
+    env.update(_tsan_suppression_env())
+    env.update(monado.test_env())
+    return env
+
+
+def server_env(preset: Preset, root: Path, base: dict[str, str] | None = None,
+               preset_env: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a preset's binaries run in through the build server, which keys its results on it.
+
+    `ship`'s proof sends the same, so what it looks up is what `test` through the server stored.
+    """
+    return {
+        **os.environ, **(base or {}), **(_preset_env(preset) if preset_env is None else preset_env),
+        "SC_SOURCE_ROOT": str(root), "NX_CRASH_DIR": str(crash_reports.incoming_dir(preset.build_dir)),
+    }
 
 
 def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> None:
@@ -167,6 +195,248 @@ def _resolve_sites(stdout_log: Path | None, stderr_log: Path | None, artifact: P
         ui.write_line(console.yellow(f"  sites not resolved: {e}"))
 
 
+def _junit_fields(summary: TestSummary | None) -> dict | None:
+    if summary is None:
+        return None
+    return {
+        "tests": summary.tests,
+        "failures": summary.failures,
+        "errors": summary.errors,
+        "skipped": summary.skipped,
+        "assertions": summary.assertions,
+        "time_s": round(summary.time_s, 3),
+        "cpu_load": summary.cpu_load,
+        "cores_used": summary.cores_used,
+        "peak_resident_bytes": summary.peak_resident_bytes,
+        "serial_s": summary.serial_s,
+        "serial_group": summary.serial_group,
+        "serial_group_s": summary.serial_group_s,
+        "skip_reasons": [list(s) for s in summary.skip_reasons],
+    }
+
+
+def _record(result: StepResult, target: Target, preset: Preset, *, root: Path, test_name: str | None, write_xml: bool,
+            verbose: bool) -> dict | None:
+    """Files what one finished run of `target` left (crash report, resolved sites, kept logs, JUnit) and returns its record.
+
+    None when a name filter selected none of its tests, which is not a run to count.
+    Shared by the runs dev.py starts itself and the ones the build server reports, so both leave the same files behind.
+    """
+    name = target.name
+    xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
+    kept = crash_reports.collect(preset.build_dir, target.artifact, result.stdout_log, result.stderr_log)
+    if kept is not None:
+        ui.write_line(console.yellow(f"  crash report kept: {kept}"))
+
+    # With a name filter, "no matching tests in this binary" isn't a failure.
+    if test_name and not result.ok and _selected_no_tests(result.stderr_log):
+        if verbose:
+            ui.write_line(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
+        return None
+
+    # Below SC_SOURCE_SITES=FULL a failure names its sites by address.
+    # Resolved here and appended to the stderr log, so the kept logs and test_diag carry them too.
+    if not result.ok and not preset.is_cross_compiling:
+        _resolve_sites(result.stdout_log, result.stderr_log, target.artifact, preset.build_dir, root)
+
+    # a failure that left no crash report keeps its logs too: the next run overwrites them
+    if not result.ok and kept is None:
+        failed = crash_reports.keep_failure(preset.build_dir, target.artifact,
+                                            [result.stdout_log, result.stderr_log, xml_path if write_xml else None])
+        ui.write_line(console.yellow(f"  failed run's logs kept: {failed}"))
+
+    summary = None
+    if write_xml:
+        # Prefer the binary's own native report, one case per nexus test.
+        # Fall back to a synthesized single-case sidecar when it wrote nothing.
+        native = None
+        if xml_path.is_file() and xml_path.stat().st_size > 0:
+            native = parse_junit(xml_path)
+        summary = native or write_step_junit(xml_path, name=name, result=result)
+
+    return {
+        "name": name,
+        # Which preset ran it.
+        # The sidecar is per build dir so it is implied there, but the records a caller gets back span every
+        # preset in one list, and attributing a slow run needs it.
+        "preset": preset.name,
+        "artifact": str(target.artifact),
+        "junit": _junit_fields(summary),
+        **step_fields(result, preset.build_dir),
+    }
+
+
+def _server_bypass(*, sample: bool, write_xml: bool, extra_env: bool, preset: Preset) -> str | None:
+    """Why this preset's binaries run without the build server although it is opted in; None when they can go through it.
+
+    The server stores and restores a binary's console output and JUnit report only, so a run writing anything else runs the plain way.
+    """
+    if preset.is_emscripten or preset.is_cross_compiling:
+        return "a cross-compiled preset"
+    if sample:
+        return "--sample"
+    if profile.enabled():
+        return "--profile (per-test timings)"
+    if not write_xml:
+        return "--no-xml-reports"
+    if extra_env:
+        return "per-binary environment"
+    return None
+
+
+def _split_jobs(args: list[str]) -> tuple[list[str], int | None]:
+    """`--jobs N` out of the runner's arguments, since the server sizes each binary's width itself (--threads); the last one wins."""
+    rest: list[str] = []
+    jobs = None
+    it = iter(args)
+    for a in it:
+        if a == "--jobs":
+            value = next(it, "")
+            jobs = int(value) if value.isdigit() else jobs
+        else:
+            rest.append(a)
+    return rest, jobs
+
+
+def _served_result(r: dict, target: Target, preset: Preset, command: list[str], timeout: float | None) -> StepResult:
+    """A StepResult for one binary the build server ran or served, with its output in dev.py's own run logs."""
+    stdout_path, stderr_path = step_log_paths(preset.build_dir, "test", target.name)
+    log = Path(r["log"]) if r.get("log") else None
+    try:
+        if log is not None and log.is_file():
+            shutil.copyfile(log, stdout_path)
+        else:
+            stdout_path.write_text("", encoding="utf-8")
+    except OSError as e:
+        stdout_path.write_text(f"[dev.py] the build server's log {log} could not be read: {e}\n", encoding="utf-8")
+    status = r["status"]
+    note = {
+        "TimedOut": f"[dev.py] TIMEOUT: '{target.name}' exceeded {timeout or 0:.0f}s, then the build server killed it.\n",
+        "Missing": f"[dev.py] {target.artifact} is not built.\n",
+        "Cancelled": "[dev.py] cancelled.\n",
+    }.get(status, "")
+    stderr_path.write_text(note, encoding="utf-8")
+    code = r.get("exit_code")
+    returncode = {"Passed": 0, "NoTests": 0, "TimedOut": 124, "Missing": 127, "Cancelled": 130}.get(
+        status, code if code not in (None, 0) else 1)
+    return StepResult("test", target.name, command, returncode, (r.get("ms") or 0) / 1000, stdout_path, stderr_path,
+                      timed_out=status == "TimedOut")
+
+
+# How much of a failed binary's output the summary repeats; the whole of it is in the run log.
+_FAILED_TAIL_LINES = 30
+
+
+def _served_summary(r: dict, result: StepResult, xml_path: Path) -> None:
+    """Prints one binary's line as run_step would, marked with whether the server served a stored pass or ran it."""
+    name = result.name
+    ms = (r.get("ms") or 0)
+    if result.ok:
+        if r.get("cached"):
+            how = console.dim(f", cached (a stored pass of {(r.get('stored_ms') or 0) / 1000:.1f} s)")
+        else:
+            # `why` is the server's reason it could not serve a stored pass, such as which input changed
+            why = ", verifying a stored pass" if r.get("verified") is not None else f" ({r['why']})" if r.get("why") else ""
+            how = console.dim(f", ran{why}")
+        ui.write_line(console.green(f"  {name} succeeded{_test_extra(xml_path)} in {ms:.0f} ms") + how)
+        return
+    try:
+        lines = result.stdout_log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        lines = []
+    for line in lines[-_FAILED_TAIL_LINES:]:
+        ui.write_line(console.dim(f"  | {line}"))
+    for path in (result.stdout_log, result.stderr_log):
+        pointer = capture_line(path)
+        if pointer:
+            ui.write_line(pointer)
+    if result.timed_out:
+        verdict = f"TIMED OUT (killed) in {ms:.0f} ms"
+    elif r["status"] == "Missing":
+        verdict = "is not built"
+    else:
+        verdict = f"failed{_test_extra(xml_path)}{describe_exit_code(result.returncode)} in {ms:.0f} ms"
+    seed = f", seed {r['seed']}" if r.get("seed") is not None else ""
+    ui.write_line(console.red(f"  {name} {verdict}{seed}"))
+
+
+# Numbers each request to the build server, so a report can tell which binaries shared one wall clock (report.wall_s).
+_REQUESTS = itertools.count()
+
+
+def _test_through_server(
+    server: build_server.Session,
+    preset: Preset,
+    targets: list[Target],
+    *,
+    root: Path,
+    test_name: str | None,
+    extra_args: list[str],
+    env: dict[str, str],
+    timeout: float | None,
+    timeout_is_explicit: bool,
+    watchdog_fraction: float | None,
+    rerun: bool,
+    mirror: bool,
+    verbose: bool,
+) -> tuple[list[dict], list[Target]]:
+    """Runs `targets` through the build server: the records of those it ran or served, and the targets left to run the plain way.
+
+    One request per distinct timeout, since a request's timeout and arguments hold for each of its binaries, the watchdog among them.
+    """
+    runner_args, jobs = _split_jobs(extra_args)
+    groups: dict[float | None, list[Target]] = {}
+    for t in targets:
+        groups.setdefault(_binary_timeout(t, timeout, timeout_is_explicit) or None, []).append(t)
+
+    records: list[dict] = []
+    left: list[Target] = []
+    for binary_timeout, group in groups.items():
+        # The arguments as the plain run builds them, but for the --junit-xml and --jobs the server adds itself.
+        args = [nexus_filter(test_name)] if test_name else []
+        if verbose:
+            args.append("-v")
+        if watchdog_fraction is not None and binary_timeout:
+            args += ["--watchdog", f"{binary_timeout * watchdog_fraction:g}"]
+        args += runner_args
+        request, started = next(_REQUESTS), time.monotonic()
+        results = server.test(
+            preset.build_dir, [t.name for t in group], runner_args=args, timeout=binary_timeout,
+            threads=jobs or None, rerun=rerun, verbose=verbose, env=env,
+            run=functools.partial(run_step, step_type="test", name="build-server", build_dir=preset.build_dir,
+                                  cwd=root, env=env, mirror=mirror, verbose=verbose),
+        )
+        if results is None:
+            left.extend(group)
+            continue
+        request_s = time.monotonic() - started
+        by_name = {r["name"]: r for r in results}
+        for t in group:
+            r = by_name[t.name]
+            if r["status"] == "NoTests":
+                if verbose:
+                    ui.write_line(console.dim(f"  {t.name}: no tests selected, skipping"))
+                continue
+            seed = ["--seed", str(r["seed"])] if r.get("seed") is not None else []
+            command = [str(t.artifact), "--tests", *args, *seed]
+            result = _served_result(r, t, preset, command, binary_timeout)
+            xml_path = t.artifact.parent / f"{t.artifact.name}.results.xml"
+            _served_summary(r, result, xml_path)
+            record = _record(result, t, preset, root=root, test_name=test_name, write_xml=True, verbose=verbose)
+            if record is not None:
+                record["build_server"] = {k: r.get(k) for k in ("cached", "verified", "stored_ms", "seed")}
+                # The server runs a request's binaries side by side, so their own times overlap; the request's is the wall time.
+                record["build_server"].update(request=request, request_s=request_s)
+                records.append(record)
+
+    served = [r for r in records if r["build_server"]["cached"]]
+    if records:
+        saved = sum(r["build_server"]["stored_ms"] or 0 for r in served) / 1000
+        ui.write_line(console.dim(f"  build server: of {len(records)} test binaries {len(records) - len(served)} ran, "
+                                  f"{len(served)} served from its cache ({saved:.1f} s of runs saved)"))
+    return records, left
+
+
 def test(
     presets: list[Preset],
     binary_names: list[str],
@@ -185,6 +455,8 @@ def test(
     emsdk_path: str | None = None,
     runtime: jsr.JsRuntimeRequest | None = None,
     sample: bool = False,
+    server: build_server.Session | None = None,
+    rerun: bool = False,
 ) -> list[dict]:
     """Run the named test binaries, optionally filtered by `test_name`.
 
@@ -204,6 +476,9 @@ def test(
 
     `extra_env_for(name)` injects per-binary environment variables, merged on top of the inherited process env and `env` rather than replacing them.
     The coverage runner uses it to point each binary's LLVM_PROFILE_FILE at a distinct file; None leaves the child env untouched.
+
+    `server` runs the binaries through the optional build server when it serves and nothing in the run needs the plain way
+    (_server_bypass); `rerun` has it run every binary even when it holds a stored pass.
     """
     extra_args = list(extra_args or [])
     all_records: list[dict] = []
@@ -213,11 +488,7 @@ def test(
             t.name: t
             for t in targets_mod.discover_targets(preset.build_dir, preset.build_type)
         }
-        # Per-preset env additions that apply to every binary, such as the Windows ASan runtime dir on PATH.
-        preset_env = _sanitizer_path_env(preset.build_dir)
-        preset_env.update(_lsan_suppression_env())
-        preset_env.update(_tsan_suppression_env())
-        preset_env.update(monado.test_env())
+        preset_env = _preset_env(preset)
 
         # Emscripten test artifacts are .js/.wasm that run under node, which the emsdk environment puts on PATH.
         # Native presets keep the inherited environment.
@@ -239,8 +510,27 @@ def test(
         launcher_for_preset = jsr.LazyLauncher(runtime, preset_base_env)
 
         records: list[dict] = []
-        with ui.phase(f"test {preset.name}", total=len(binary_names)) as binaries:
-            for name in binary_names:
+        plain_names = binary_names
+        if server is not None:
+            bypass = _server_bypass(sample=sample, write_xml=write_xml, extra_env=extra_env_for is not None, preset=preset)
+            if bypass is not None:
+                ui.write_line(console.dim(f"  tests run without the build server: {bypass}"))
+            else:
+                built = [t for t in (by_name.get(n) for n in binary_names) if t is not None and t.artifact is not None]
+                # an artifact a runtime launches (a .js) is not a binary the server can start
+                targets = [t for t in built if not jsr.needs_launcher(False, t.artifact)]
+                served_env = server_env(preset, root, preset_base_env, preset_env)
+                served, left = _test_through_server(
+                    server, preset, targets, root=root, test_name=test_name, extra_args=extra_args, env=served_env,
+                    timeout=timeout, timeout_is_explicit=timeout_is_explicit, watchdog_fraction=watchdog_fraction,
+                    rerun=rerun, mirror=mirror, verbose=verbose,
+                )
+                records += served
+                all_records += served
+                plain_names = [t.name for t in built if t not in targets or t in left]
+
+        with ui.phase(f"test {preset.name}", total=len(plain_names)) as binaries:
+            for name in plain_names:
                 binaries.advance(name)
                 target = by_name.get(name)
                 if target is None or target.artifact is None:
@@ -315,66 +605,11 @@ def test(
                 if sample:
                     _echo_sample_report(result.stdout_log, sample_path)
 
-                kept = crash_reports.collect(preset.build_dir, target.artifact, result.stdout_log, result.stderr_log)
-                if kept is not None:
-                    ui.write_line(console.yellow(f"  crash report kept: {kept}"))
-
-                # With a name filter, "no matching tests in this binary" isn't a failure.
-                if test_name and not result.ok and _selected_no_tests(result.stderr_log):
-                    if verbose:
-                        ui.write_line(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
-                    continue
-
-                # Below SC_SOURCE_SITES=FULL a failure names its sites by address.
-                # Resolved here and appended to the stderr log, so the kept logs and test_diag carry them too.
-                if not result.ok and not preset.is_cross_compiling:
-                    _resolve_sites(result.stdout_log, result.stderr_log, target.artifact, preset.build_dir, root)
-
-                # a failure that left no crash report keeps its logs too: the next run overwrites them
-                if not result.ok and kept is None:
-                    failed = crash_reports.keep_failure(preset.build_dir, target.artifact,
-                                                        [result.stdout_log, result.stderr_log, xml_path if write_xml else None])
-                    ui.write_line(console.yellow(f"  failed run's logs kept: {failed}"))
-
-                summary = None
-                if write_xml:
-                    # Prefer the binary's own native report, one case per nexus test.
-                    # Fall back to a synthesized single-case sidecar when it wrote nothing.
-                    native = None
-                    if xml_path.is_file() and xml_path.stat().st_size > 0:
-                        native = parse_junit(xml_path)
-                    summary = native or write_step_junit(xml_path, name=name, result=result)
-
-                record = {
-                    "name": name,
-                    # Which preset ran it.
-                    # The sidecar is per build dir so it is implied there, but the records a caller gets back span every
-                    # preset in one list, and attributing a slow run needs it.
-                    "preset": preset.name,
-                    "artifact": str(target.artifact),
-                    "junit": (
-                        {
-                            "tests": summary.tests,
-                            "failures": summary.failures,
-                            "errors": summary.errors,
-                            "skipped": summary.skipped,
-                            "assertions": summary.assertions,
-                            "time_s": round(summary.time_s, 3),
-                            "cpu_load": summary.cpu_load,
-                            "cores_used": summary.cores_used,
-                            "peak_resident_bytes": summary.peak_resident_bytes,
-                            "serial_s": summary.serial_s,
-                            "serial_group": summary.serial_group,
-                            "serial_group_s": summary.serial_group_s,
-                            "skip_reasons": [list(s) for s in summary.skip_reasons],
-                        }
-                        if summary
-                        else None
-                    ),
-                    **step_fields(result, preset.build_dir),
-                }
-                records.append(record)
-                all_records.append(record)
+                record = _record(result, target, preset, root=root, test_name=test_name, write_xml=write_xml,
+                                 verbose=verbose)
+                if record is not None:
+                    records.append(record)
+                    all_records.append(record)
 
         totals = {
             "binaries": len(records),

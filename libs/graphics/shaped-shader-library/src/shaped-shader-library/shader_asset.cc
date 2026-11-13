@@ -101,11 +101,11 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     // What the device has is no option of the source, so no entry point lists it, and it may change what any of them
     // writes: a `has` anywhere it inlines, a prelude function's included.
     for (auto const& o : options)
-        if (o.name == k_device_features_option)
-        {
+        if (o.name == k_device_features_option || o.name == k_native_spirv_option || o.name == k_native_dxil_option
+            || o.name == k_native_line_table_option || o.name == k_mesh_form_option
+            || o.name == k_polyfill_vertex_option || o.name == k_polyfill_task_option
+            || o.name == k_polyfill_control_option || o.name == k_polyfill_pass_option)
             key.push_back(o);
-            break;
-        }
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 
     auto const entry_of = [&](state& s) -> format_entry&
@@ -180,31 +180,40 @@ bool slib::shader_asset::can_acquire(sg::context const& ctx) const
     return false;
 }
 
+void slib::add_context_options(cc::vector<shader_option>& options, sg::context const& ctx)
+{
+    auto is_set = false;
+    for (auto const& o : options)
+        is_set = is_set || o.name == k_device_features_option;
+    if (!is_set)
+    {
+        auto names = cc::string();
+        for (auto const f : sg::k_all_features)
+            if (ctx.supports(f))
+                names.appendf("{}{}", names.empty() ? "" : ",", sg::to_string(f));
+        options.push_back({.name = cc::string(k_device_features_option), .value = cc::move(names)});
+    }
+    // EMIT-185: a context that accepts weaker floats says so for every pipeline it builds
+    auto weakens = false;
+    for (auto const& o : options)
+        weakens = weakens || o.name == k_weakens_float_option;
+    if (!weakens && ctx.weakens_float_guarantees())
+        options.push_back({.name = cc::string(k_weakens_float_option), .value = cc::string("true")});
+    if (ctx.prefers_native_spirv())
+        options.push_back({.name = cc::string(k_native_spirv_option), .value = cc::string("true")});
+    if (ctx.prefers_native_dxil())
+        options.push_back({.name = cc::string(k_native_dxil_option), .value = cc::string("true")});
+    if (ctx.writes_native_line_tables())
+        options.push_back({.name = cc::string(k_native_line_table_option), .value = cc::string("true")});
+}
+
 sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc::span<shader_option const> options) const
 {
     // SGL's `has` asks what the device has, and its float atomics add in one instruction where the device can
     auto with_device = cc::vector<shader_option>::create_copy_of(options);
     if (auto const library = _library.lock();
         library != nullptr && library->language_of(_virtual_path) == shader_language::sgl)
-    {
-        auto is_set = false;
-        for (auto const& o : with_device)
-            is_set = is_set || o.name == k_device_features_option;
-        if (!is_set)
-        {
-            auto names = cc::string();
-            for (auto const f : sg::k_all_features)
-                if (ctx.supports(f))
-                    names.appendf("{}{}", names.empty() ? "" : ",", sg::to_string(f));
-            with_device.push_back({.name = cc::string(k_device_features_option), .value = cc::move(names)});
-        }
-        // EMIT-185: a context that accepts weaker floats says so for every pipeline it builds
-        auto weakens = false;
-        for (auto const& o : with_device)
-            weakens = weakens || o.name == k_weakens_float_option;
-        if (!weakens && ctx.weakens_float_guarantees())
-            with_device.push_back({.name = cc::string(k_weakens_float_option), .value = cc::string("true")});
-    }
+        add_context_options(with_device, ctx);
 
     // The context lists what it takes in preference order, so the first one we can actually build wins.
     for (auto const format : ctx.accepted_shader_formats())

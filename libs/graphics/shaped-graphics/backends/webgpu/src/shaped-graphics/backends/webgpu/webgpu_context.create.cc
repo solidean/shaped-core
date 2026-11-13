@@ -33,7 +33,12 @@ void on_uncaptured_error(WGPUDevice const*, WGPUErrorType type, WGPUStringView m
     }
     auto const kind = type == WGPUErrorType_OutOfMemory ? sg::device_error_kind::creation_failed
                                                         : sg::device_error_kind::validation;
-    anchor->ctx->report_device_error({.kind = kind, .message = text});
+    // WebGPU's own type stays in the message: an internal error is neither a validation failure nor a full device.
+    auto const type_name = type == WGPUErrorType_OutOfMemory ? "out of memory"
+                         : type == WGPUErrorType_Internal    ? "internal"
+                         : type == WGPUErrorType_Validation  ? "validation"
+                                                             : "unknown";
+    anchor->ctx->report_device_error({.kind = kind, .message = cc::format("webgpu {} error: {}", type_name, text)});
 }
 
 void on_device_lost(WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView message, void* userdata1, void*)

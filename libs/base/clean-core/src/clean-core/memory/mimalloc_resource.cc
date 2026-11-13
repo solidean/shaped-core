@@ -3,6 +3,7 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/memory/large_allocations.hh>
 #include <mimalloc.h>
 
 using namespace cc::primitive_defines;
@@ -32,6 +33,8 @@ isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, is
     {
         return -1;
     }
+    // One compare on the small path; see large_allocations.hh.
+    cc::large_allocations::impl::on_allocate(p, min_bytes);
 
     // Report mimalloc's actual usable size (size-class rounding), clamped into
     // [min_bytes, max_bytes] so containers can claim the extra capacity for free.
@@ -49,10 +52,10 @@ isize mi_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize 
 
 void mi_deallocate_bytes(byte* p, isize bytes, isize alignment, void* userdata)
 {
-    CC_UNUSED(bytes);
     CC_UNUSED(alignment);
     CC_UNUSED(userdata);
 
+    cc::large_allocations::impl::on_deallocate(p, bytes);
     // mimalloc tracks the block's size and alignment internally, so a plain mi_free suffices.
     mi_free(p);
 }

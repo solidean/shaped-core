@@ -270,10 +270,25 @@ described_option describe_option(check::checked_module const& m, check::symbol_i
 {
     auto const& s = m.at(id);
     auto const& c = m.constants[s.info];
-    auto value = c.kind == check::constant_kind::integer ? cc::format("{}", c.integer)
+    // a float is spelled so a compile reads back the very value, with a point or an exponent as a literal has
+    auto const real_text = [&]
+    {
+        auto text = m.name_of(c.type) == "float" ? cc::to_string(f32(c.real)) : cc::to_string(c.real);
+        return text.contains('.') || text.contains('e') ? text : text + ".0";
+    };
+    auto value = c.kind == check::constant_kind::real ? real_text()
+               : c.kind == check::constant_kind::integer
+                   ? (c.is_unsigned ? cc::format("{}", u32(c.integer)) : cc::format("{}", c.integer))
                : m.name_of(c.type) == "bool" ? cc::string(m.at(m.at(c.type).cases)[c.case_index].name)
                                              : cc::format(".{}", m.at(m.at(c.type).cases)[c.case_index].name);
-    return {.name = host_name_of(m, id), .type = cc::string(m.name_of(c.type)), .value = cc::move(value)};
+    auto follows = cc::vector<cc::string>();
+    for (auto const option : c.computed_options)
+        if (option != id)
+            follows.push_back(host_name_of(m, option));
+    return {.name = host_name_of(m, id),
+            .type = cc::string(m.name_of(c.type)),
+            .value = cc::move(value),
+            .follows = cc::move(follows)};
 }
 
 /// `legal` is `e` legalized, which is the tree the footprint is read from.
@@ -284,6 +299,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
+    result.is_dispatched_by_threads = e.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     result.float_guarantee = e.float_guarantee;
     if (check::is_valid(e.float_raised_by))
@@ -330,7 +346,7 @@ cc::string baked_samplers(check::checked_module const& m, cc::span<u8 const> is_
         if (is_reached[i] != 0)
             result += cc::format("{}{}#{}@{}", result.empty() ? "" : ", ", m.qualified_name_of(check::symbol_id(i)),
                                  sampler_index, check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
-        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler && m.is_reached_file(m.symbols[i].file) ? 1 : 0;
     }
     return result;
 }
@@ -438,7 +454,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
     // CHK-343: every table of the module, packed in declaration order
     auto tables = cc::vector<check::pipeline_info const*>();
     for (auto const& t : m.pipelines)
-        if (t.kind == check::pipeline_kind::callables)
+        if (t.kind == check::pipeline_kind::callables && m.is_reached_file(m.at(t.symbol).file))
             tables.push_back(&t);
     for (auto i = isize(0); i < tables.size(); ++i)
         for (auto j = i + 1; j < tables.size(); ++j)
@@ -532,7 +548,8 @@ described_callables describe_callables(check::checked_module const& m, check::pi
     for (auto const entry : m.at(p.records))
         result.entries.push_back(m.at(entry).name);
     for (auto const& t : m.pipelines)
-        if (t.kind == check::pipeline_kind::callables && index_of(t.symbol) < index_of(p.symbol))
+        if (t.kind == check::pipeline_kind::callables && index_of(t.symbol) < index_of(p.symbol)
+            && m.is_reached_file(m.at(t.symbol).file))
             result.offset += i32(t.records.count);
     return result;
 }
@@ -718,8 +735,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
                                   .kind = described_member_kind::constant,
                                   .type = host_spelling(m, member.type),
                                   .offset = placed.offsets[next_constant],
-                                  .size = placed.sizes[next_constant],
-                                  .length_of = member.length_of >= 0 ? members[member.length_of].name : cc::string()});
+                                  .size = placed.sizes[next_constant]});
         ++next_constant;
     }
     return result;
@@ -806,7 +822,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             }
         }
     };
-    if (is_module && m.library_files.empty())
+    if (is_module && m.reached_library_files.empty())
         return cc::error(
             cc::format("{}: error: no file of the library declares module {}\n", program_name, request.module));
     auto errors = cc::vector<emit::error>();
@@ -824,7 +840,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     {
         auto const id = check::symbol_id(i);
         auto const& s = m.at(id);
-        if (s.state != check::symbol_state::checked)
+        // a module the program does not use is checked behind a layer of the whole library, and is nothing of its
+        if (s.state != check::symbol_state::checked || !m.is_reached_file(s.file))
             continue;
         // an option of a module the source uses is the source's to set too, by its qualified name (CHK-354)
         auto const is_option = s.kind == check::symbol_kind::constant && m.constants[s.info].option == id;
@@ -899,7 +916,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     {
         auto const before = errors.size();
         legal.push_back(e.legalized != nullptr ? *e.legalized : check::legalize(m, e));
-        emit_impl::validate(m, legal.back(), errors);
+        // a compile writes a print or drops it (LEGAL-63), so no print keeps a description from being written
+        emit_impl::validate(m, legal.back(), errors, true);
         if (errors.size() == before)
             result.entry_points.push_back(describe_entry_point(m, e, legal.back()));
     }

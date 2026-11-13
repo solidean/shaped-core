@@ -4,23 +4,19 @@
 
 namespace
 {
-/// `source` formatted, which must succeed and leave no line as written.
+/// `source` formatted, which must skip nothing and leave no line as written.
 [[nodiscard]] cc::string formatted(cc::string_view source)
 {
     auto const r = sgl::format_source(source);
-    if (r.has_error())
-    {
-        FAIL("the source has syntax errors").dump("error", r.error()).dump("source", source);
-        return {};
-    }
-    CHECK(r.value().unformatted_lines.empty());
-    return r.value().text;
+    CHECK(r.skipped.empty()).dump("source", source);
+    CHECK(r.unformatted_lines.empty());
+    return r.text;
 }
 } // namespace
 
 TEST("sgl format - a line's tokens take SGL's spacing: after commas, around arrows and operators, none in brackets")
 {
-    CHECK(formatted("fun f(a:float,b :float)->float=>a+b*2.0\n") == "fun f(a:float, b :float) -> float => a + b * 2.0\n");
+    CHECK(formatted("fun f(a:float,b :float)->float=>a+b*2.0\n") == "fun f(a: float, b: float) -> float => a + b * 2.0\n");
     CHECK(formatted("fun f( v: vec3 ) -> float  =>   dot( v , v )\n") == "fun f(v: vec3) -> float => dot(v, v)\n");
     CHECK(formatted("fun f() -> float:\n    let a = { x = 1.0 }\n    return a.x\n")
           == "fun f() -> float:\n    let a = {x = 1.0}\n    return a.x\n");
@@ -43,16 +39,14 @@ TEST("sgl format - comments, strings and indentation stay as written, and traili
 {
     auto const source = cc::string_view("// a  comment,with odd spacing   \n"
                                         "fun f() -> float:   \n"
-                                        "    let x = 1.0    // aligned\n"
-                                        "    let y = 2.0  // aligned\n"
+                                        "    let x = 1.0\n"
                                         "\n"
                                         "    return x+y\n"
                                         "\n\n\n");
     CHECK(formatted(source)
           == "// a  comment,with odd spacing\n"
              "fun f() -> float:\n"
-             "    let x = 1.0    // aligned\n"
-             "    let y = 2.0  // aligned\n"
+             "    let x = 1.0\n"
              "\n"
              "    return x + y\n");
     // a test's message is a string, whose spacing is its content
@@ -61,17 +55,69 @@ TEST("sgl format - comments, strings and indentation stay as written, and traili
     CHECK(formatted("fun f() -> float:\r\n    return 1.0+2.0") == "fun f() -> float:\r\n    return 1.0 + 2.0\r\n");
 }
 
-TEST("sgl format - formatting twice changes nothing, and a source with syntax errors is refused, naming the first")
+TEST("sgl format - formatting twice changes nothing")
 {
-    auto const once = formatted("fun f(a:float,b:float)->float=>a+b\nfun g( ) -> float => f(1.0,2.0)\n");
+    auto const once
+        = formatted("fun f(a:float,b:float)->float=>a+b  // sum\nfun g( ) -> float => f(1.0,2.0)  // three\n");
     CHECK(formatted(once) == once);
-    auto const broken = sgl::format_source("fun f() -> float:\n    return (1.0\n");
-    REQUIRE(broken.has_error());
-    CHECK(broken.error().starts_with("line 2: "));
+}
+
+TEST("sgl format - a colon touches what stands before it and is followed by one space, `let x: T` included")
+{
+    CHECK(formatted("struct light:\n    power :float\n") == "struct light:\n    power: float\n");
+    CHECK(formatted("fun f(v :vec3) -> float:\n    let mut d :float = dot(v, v)\n    return d\n")
+          == "fun f(v: vec3) -> float:\n    let mut d: float = dot(v, v)\n    return d\n");
+}
+
+TEST("sgl format - the trailing comments of consecutive lines line up past the longest code, within a limit")
+{
+    // one space past the longest; a blank line, or a line without one, ends the run
+    CHECK(formatted("struct light:\n    power: float // watts\n    tint: float3       // linear\n\n    x: int  // "
+                    "own\n")
+          == "struct light:\n    power: float // watts\n    tint: float3 // linear\n\n    x: int // own\n");
+    // a line whose comment would move further than the limit starts a run of its own
+    CHECK(formatted("fun f() -> float:\n    let a = 1.0 // a\n    let much_longer_name_than_the_limit = 2.0 // b\n"
+                    "    return a\n")
+          == "fun f() -> float:\n    let a = 1.0 // a\n    let much_longer_name_than_the_limit = 2.0 // b\n"
+             "    return a\n");
+}
+
+TEST("sgl format - a syntax error leaves its block and the block's siblings as written, and formats the rest")
+{
+    auto const r = sgl::format_source("fun broken(a:float) -> float:\n"
+                                      "    let x=(1.0\n"
+                                      "    return a+x\n"
+                                      "fun fine(a:float) -> float => a*2.0\n");
+    CHECK(r.text
+          == "fun broken(a: float) -> float:\n"
+             "    let x=(1.0\n"
+             "    return a+x\n"
+             "fun fine(a: float) -> float => a * 2.0\n");
+    REQUIRE(r.skipped.size() == 1);
+    CHECK(r.skipped[0].first_line == 1);
+    CHECK(r.skipped[0].last_line == 2);
+    CHECK(r.skipped[0].error_line == 1);
+    CHECK(r.unformatted_lines.empty());
+    // at the top level, the declaration that holds the error is what stays
+    auto const top = sgl::format_source("fun f(a:float) -> float => (a\nfun g(a:float) -> float => a*2.0\n");
+    CHECK(top.text == "fun f(a:float) -> float => (a\nfun g(a: float) -> float => a * 2.0\n");
 }
 
 TEST("sgl format - the prelude is formatted already")
 {
     for (auto const& f : sgl::prelude_files())
         CHECK(formatted(f.source) == f.source).dump("file", f.name);
+}
+
+TEST("sgl format - code is indented four spaces a level, a tab included, and what a comment or string owns moves along")
+{
+    CHECK(formatted("fun f(a: float) -> float:\n  if a > 0.0:\n     return a\n  return 0.0\n")
+          == "fun f(a: float) -> float:\n    if a > 0.0:\n        return a\n    return 0.0\n");
+    // a tab in the indentation is an error with one reading, which the formatter fixes
+    CHECK(formatted("fun f() -> float:\n\treturn 0.0\n") == "fun f() -> float:\n    return 0.0\n");
+    // a comment's own lines keep their place below it, and a string's content its value (STR-16)
+    CHECK(formatted("fun f() -> float:\n  // a note\n    continued\n  let s = \"\n      hi\n        deeper\n  \"\n"
+                    "  return 0.0\n")
+          == "fun f() -> float:\n    // a note\n      continued\n    let s = \"\n        hi\n          deeper\n    \"\n"
+             "    return 0.0\n");
 }

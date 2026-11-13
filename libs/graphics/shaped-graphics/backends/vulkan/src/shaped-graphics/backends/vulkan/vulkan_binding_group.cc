@@ -138,6 +138,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
     for (auto const& nv : views)
         if (layout->bindings()[nv.slot].is_unbounded())
             unbounded_count = nv.view->span().size();
+    group->unbounded_length = u32(unbounded_count);
     {
         auto r = allocate_range(ctx, layout->group_size_in_bytes(unbounded_count), group->transient);
         CC_RETURN_IF_ERROR(r);
@@ -209,6 +210,13 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                                                 "walk sees: the shader's package takes SOFTWARE_TRACE in "
                                                 "sc_add_shader_package",
                                                 nv.name));
+                {
+                    auto const position = sg::impl::acceleration_position(bindings, b.index);
+                    while (group->acceleration_addresses.size() <= position)
+                        group->acceleration_addresses.push_back(0);
+                    group->acceleration_addresses[position]
+                        = tv_as->tlas != nullptr ? trace_target_of(*tv_as->tlas).address : 0;
+                }
                 if (b.traced_in_software)
                 {
                     if (tv_as->tlas != nullptr && software.pool == nullptr)
@@ -259,8 +267,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
             {
                 // A trace reads the TLAS's storage buffer, so that is what is kept alive and declared accel_read at
                 // dispatch — the structure object itself is not a resource the barrier vocabulary knows.
-                auto const& tlas = static_cast<vulkan_tlas const&>(*tv_as->tlas);
-                group->referenced.push_back(tlas._vulkan_storage);
+                group->referenced.push_back(trace_target_of(*tv_as->tlas).storage);
                 group->hazard_views.push_back({group->referenced.back(), sg::view_class::acceleration_structure, slot});
             }
             else if (is_array)
@@ -339,7 +346,9 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     cc::vector<vulkan_texture_handle> referenced_textures,
     cc::vector<vulkan_hazard_view> hazard_views,
     cc::vector<vulkan_texture_hazard_view> texture_hazard_views,
-    cc::vector<vulkan_array_binding> array_bindings)
+    cc::vector<vulkan_array_binding> array_bindings,
+    u32 unbounded_length,
+    cc::vector<u64> acceleration_addresses)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
     CC_ASSERT(image.size() <= layout->_size_in_bytes, "the descriptor image is one set, its unbounded binding cut "
@@ -348,6 +357,8 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     auto group = std::make_shared<vulkan_binding_group>();
     group->_ctx = &ctx;
     group->layout = layout;
+    group->unbounded_length = unbounded_length;
+    group->acceleration_addresses = cc::move(acceleration_addresses);
     group->creation_epoch = ctx.current_epoch();
 
     {

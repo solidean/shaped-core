@@ -374,6 +374,68 @@ type_id checker::check_hit_invoke(function_scope& scope, ast::expr_id id, ast::c
     return checked_module::void_type;
 }
 
+auto checker::find_hit_object_misuse(flat_entry_point const& e) const -> cc::optional<hit_object_misuse>
+{
+    // only a trace gives one, and no stage is handed one
+    if (e.traced_rays.empty())
+        return {};
+    auto const is_hit_object = [&](type_id type)
+    {
+        auto const* const record = out.builtin_type_of(type);
+        return record != nullptr && record->name == "hit_object";
+    };
+    auto const holds = [&](auto const& self, type_id type) -> bool
+    {
+        if (!is_valid(type) || type == checked_module::error_type)
+            return false;
+        if (out.builtin_type_of(type) != nullptr)
+            return is_hit_object(type);
+        auto const& t = out.at(type);
+        if (t.kind == type_kind::array)
+            return self(self, t.element);
+        if (t.kind != type_kind::structure)
+            return false;
+        for (auto const& m : out.at(t.members))
+            if (m.type != type && self(self, m.type))
+                return true;
+        return false;
+    };
+    auto const handed_on = [](origin where)
+    {
+        return hit_object_misuse{.where = where,
+                                 .detail = "a hit object an `if` or a `return` hands on, which is no `let h = "
+                                           "trace_hit(…)`"};
+    };
+    for (auto const& x : e.exprs)
+    {
+        if (!holds(holds, x.type))
+            continue;
+        if (!is_hit_object(x.type))
+            return hit_object_misuse{
+                .where = x.from,
+                .detail
+                = cc::format("a {} holding a hit object, which is no `let h = trace_hit(…)`", out.name_of(x.type))};
+        auto const* const call = x.node.try_as<flat_call>();
+        auto const* const record
+            = call != nullptr && is_valid(call->intrinsic) ? out.builtin_function(call->intrinsic) : nullptr;
+        if (!x.node.is<flat_local_ref>() && (record == nullptr || record->name != "trace_hit_ray"))
+            return handed_on(x.from);
+    }
+    for (auto const& s : e.stmts)
+    {
+        if (auto const* const var = s.node.try_as<flat_var>(); var != nullptr && holds(holds, e.at(var->local).type))
+            return handed_on(s.from);
+        if (auto const* const assign = s.node.try_as<flat_assign>();
+            assign != nullptr && holds(holds, e.at(assign->place).type))
+            return handed_on(s.from);
+        if (auto const* const print = s.node.try_as<flat_print>())
+            for (auto const value : e.at(print->values))
+                if (holds(holds, e.at(value).type))
+                    return hit_object_misuse{.where = e.at(value).from, .detail = "a print of a hit object"};
+    }
+    return {};
+}
+
 type_id checker::payload_of(symbol_id entry) const
 {
     for (auto const& p : out.at(out.functions[out.at(entry).info].parameters))
@@ -811,7 +873,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
         {
             auto const table = symbol_id(i);
             auto const& t = out.at(table);
-            if (t.kind != symbol_kind::pipeline || !ast::is_valid(t.declaration)
+            if (t.kind != symbol_kind::pipeline || !ast::is_valid(t.declaration) || !out.is_reached_file(t.file)
                 || !ast_of(t.file).at(t.declaration).node.as<ast::pipeline_decl>().is_callables)
                 continue;
             if (demand(table, file, span_of(file, decl)) == symbol_state::checked)
@@ -1125,10 +1187,12 @@ void checker::judge_callables()
     // tables pack in declaration order, so a table the host appends to is the last one
     auto last = symbol_id::none;
     for (auto const& p : out.pipelines)
-        if (p.kind == pipeline_kind::callables && (!is_valid(last) || index_of(p.symbol) > index_of(last)))
+        if (p.kind == pipeline_kind::callables && out.is_reached_file(out.at(p.symbol).file)
+            && (!is_valid(last) || index_of(p.symbol) > index_of(last)))
             last = p.symbol;
     for (auto const& p : out.pipelines)
-        if (p.kind == pipeline_kind::callables && p.has_host_callables && p.symbol != last)
+        if (p.kind == pipeline_kind::callables && p.has_host_callables && p.symbol != last
+            && out.is_reached_file(out.at(p.symbol).file))
             report(diagnostic_kind::invalid_pipeline, out.at(p.symbol).file,
                    span_of(out.at(p.symbol).file, out.at(p.symbol).declaration),
                    cc::format("{} takes the host's callables, so it is the module's last callables table: the host's "

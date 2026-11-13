@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # ///
 
 """Self-test for tools/dev/cmd/symbolize.py — reading wasm code offsets out of a report — and for lib/pipeline/sites.py,
@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.dev.cmd.symbolize import _JS_FRAME_BIT, _offsets_in  # noqa: E402
-from tools.dev.lib.pipeline.sites import Frame, find_sites, outside_site_header, parse_frames  # noqa: E402
+from tools.dev.lib.pipeline.sites import Frame, find_sites, outside_site_header, parse_atos, parse_frames  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 
@@ -115,6 +115,27 @@ def test_symbolizer_blocks_split_into_frames() -> None:
     assert len(blocks) == 3 and blocks[2] == []
     assert blocks[0][1] == Frame("_nx_test_fn_4", r"C:\src\round-test.cc", 42)
     assert blocks[1] == [Frame("??", "??", 0)]
+
+
+def test_atos_blocks_split_into_frames() -> None:
+    # what `atos -fullPath -i` printed for a resolved address, one in the Mach-O header, and one past every symbol
+    out = (
+        "cc::source_location::current() (in a-test) (/src/clean-core/platform/source_location.hh:94)\n"
+        "_nx_test_fn_4 (in a-test) (/src/round-test.cc:42)\n"
+        "\n"
+        "\n"
+        "\n"
+        "0x1fff00000\n"
+        "\n"
+        "main (in a-test) + 12\n"
+        "\n"
+    )
+    blocks = parse_atos(out, 4)
+    assert len(blocks) == 4
+    assert blocks[0][1] == Frame("_nx_test_fn_4", "/src/round-test.cc", 42)
+    assert blocks[1] == []
+    assert blocks[2] == [Frame("0x1fff00000", "??", 0)]
+    assert blocks[3] == [Frame("main", "??", 0)]
 
 
 def test_the_site_header_frames_are_skipped() -> None:

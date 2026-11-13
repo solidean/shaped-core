@@ -88,8 +88,6 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         {
             mo.write("offset", m.offset);
             mo.write("size", m.size);
-            if (!m.length_of.empty())
-                mo.write("length_of", cc::string_view(m.length_of));
             continue;
         }
         mo.write("access", cc::string_view(m.access));
@@ -387,6 +385,12 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
                 o.write("name", cc::string_view(option.name));
                 o.write("type", cc::string_view(option.type));
                 o.write("value", cc::string_view(option.value));
+                if (!option.follows.empty())
+                {
+                    auto follows = o.write_array("follows", babel::json::layout::compact);
+                    for (auto const& name : option.follows)
+                        follows.write(cc::string_view(name));
+                }
             }
         }
         {

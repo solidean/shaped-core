@@ -309,7 +309,6 @@ Both are no-ops when `SC_BUILD_EXAMPLES` is off, so a call site never needs an `
 sc_add_single_file_examples(clean-core
     FILES vector.cc string.cc result.cc map.cc
     LINK clean-core
-    PCH CC_STD NEXUS
 )
 
 # One binary from several sources, for an example with real internal structure.
@@ -376,6 +375,13 @@ It is the same cube with its shader written in SGL: one `cube.sgl` where `rotati
 Its page shows `cube.sgl` beside the canvas, and an edit there is built in the page as you type: the cube redraws with it, or keeps the last shader that built and shows why the edit does not.
 In Chrome and Edge it can follow a `cube.sgl` on disk instead, so a save in your editor reaches the page.
 Natively the example watches its source directory, so the same edit works there by saving the file.
+
+**`sc_add_example_web_page`** (nexus's `Examples.cmake`) is that second link: `sc_add_example_web_page(<target> EXAMPLE <name> OUTPUT <stem> SHELL <html>)`.
+It generates the `--pre-js` naming the example, so an example's page needs only its shell.
+
+**shaped-viewer's examples run on the web through `sv::interactive_async`**, whose frames are awaited rather than blocked on.
+They share one shell, `libs/graphics/shaped-viewer/web/example-shell.html`, and each that draws what the bound raster mode draws is a page: `web/<stem>.html`.
+`SV_AUTOMATIC_MODE=raster_bound uv run dev.py example shaped-viewer/<stem> --capture` shows one natively as the page draws it, in seconds and without a browser.
 
 Take the pattern where an example is worth showing to someone who will not build it.
 It is not automatic: an example that needs a window system, or a backend with no web arm, has nothing to put on a page.

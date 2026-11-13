@@ -212,6 +212,28 @@ fun finish_sample(r: mut bsdf_sample, b: bsdf, wo: float3, wi: float3):
     r.pdf = bsdf_pdf(b, wo, wi)
     r.valid = r.pdf > 1e-9
 
+/// A direction drawn from one of the four reflecting lobes ahead of the diffuse one, `pick` falling in their run of `p`'s cdf, and the lobe it named.
+/// Below the horizon where the lobe failed, which each lobe rejects for itself.
+/// Nothing is evaluated: `bsdf_sample_direction` finishes it, and a caller drawing from these lobes alone forms their density from `bsdf_pdf`.
+fun draw_specular_lobe(b: bsdf, p: lobe_probs, wo: float3, pick: float, uv: float2, lobe: mut uint) -> float3:
+    let failed = float3(0.0, 0.0, -1.0)
+    if pick < p.fuzz:
+        lobe = bsdf_lobe_fuzz
+        return sample_cosine_local(uv)
+    if pick < p.fuzz + p.coat:
+        lobe = bsdf_lobe_coat
+        // Drawn in the coat's frame and brought back, so a tilted coat reflects where its own normal says rather than where the base's does.
+        // The coat's own horizon is not the base's, so the caller rejects against the frame the closure is evaluated in.
+        let wo_c = to_coat(b, wo)
+        if wo_c.z <= 0.0 => return failed
+        let h_c = ggx_sample_vndf(wo_c, b.coat_alpha, uv)
+        return from_coat(b, reflect_about(-wo_c, h_c))
+    if pick < p.fuzz + p.coat + p.metal:
+        lobe = bsdf_lobe_metal
+        return reflect_about(-wo, ggx_sample_vndf(wo, b.metal_alpha, uv))
+    lobe = bsdf_lobe_spec
+    return reflect_about(-wo, ggx_sample_vndf(wo, b.spec_alpha, uv))
+
 /// One direction drawn from the closure, with the BSDF and the full pdf there.
 ///
 /// `u` is three uniforms in [0, 1): the first picks the lobe and the other two the direction within it.
@@ -237,30 +259,10 @@ fun bsdf_sample_direction(b: bsdf, wo: float3, u: float3) -> bsdf_sample:
     // A below-horizon reflection surviving to them would be valued as a BTDF and scored against a refraction density that did not produce it.
     // It would also report `medium_none` while pointing through the surface, which sends the path into an interior it never entered.
     // On an opaque surface the pdf collapses to zero and the sample is dropped anyway; on a transmissive one nothing downstream can tell the two apart.
-    if pick < p.fuzz:
-        r.lobe = bsdf_lobe_fuzz
-        wi = sample_cosine_local(u.yz)
-        if wi.z <= 0.0 => return r
-    else if pick < p.fuzz + p.coat:
-        r.lobe = bsdf_lobe_coat
-        // Drawn in the coat's frame and brought back, so a tilted coat reflects where its own normal says rather than where the base's does.
-        let wo_c = to_coat(b, wo)
-        if wo_c.z <= 0.0 => return r
-
-        let h_c = ggx_sample_vndf(wo_c, b.coat_alpha, u.yz)
-        wi = from_coat(b, reflect_about(-wo_c, h_c))
-
-        // The coat's own horizon is not the base's, so this rejects against the frame the closure is evaluated in.
-        if wi.z <= 0.0 => return r
-    else if pick < p.fuzz + p.coat + p.metal:
-        r.lobe = bsdf_lobe_metal
-        let hm = ggx_sample_vndf(wo, b.metal_alpha, u.yz)
-        wi = reflect_about(-wo, hm)
-        if wi.z <= 0.0 => return r
-    else if pick < p.fuzz + p.coat + p.metal + p.spec:
-        r.lobe = bsdf_lobe_spec
-        let hs = ggx_sample_vndf(wo, b.spec_alpha, u.yz)
-        wi = reflect_about(-wo, hs)
+    if pick < p.fuzz + p.coat + p.metal + p.spec:
+        let mut lobe = r.lobe
+        wi = draw_specular_lobe(b, p, wo, pick, u.yz, mut lobe)
+        r.lobe = lobe
         if wi.z <= 0.0 => return r
     else if pick < p.fuzz + p.coat + p.metal + p.spec + p.diffuse:
         r.lobe = bsdf_lobe_diffuse

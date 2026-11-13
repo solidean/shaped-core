@@ -1013,3 +1013,143 @@ void sgl::check::impl::flattener::judge_text_types()
         }
     }
 }
+
+void sgl::check::impl::flattener::place_target_layouts()
+{
+    if (c.target_layouts.empty() && c.unplaced_layouts.empty())
+        return;
+    auto const placed = [&](type_id type) -> type_id
+    {
+        for (auto const& [from, to] : c.target_layouts)
+            if (from == type)
+                return to;
+        return type;
+    };
+    // CHK-526: where each field the check judged stands in the branch's record, by the branch that made it
+    auto const places_of = [&](type_id to) -> cc::span<layout_place const>
+    {
+        for (auto const& b : c.out.target_type_branches)
+            if (b.layout == to)
+                return b.places;
+        return {};
+    };
+    auto const report_at = [&](flat_expr const& x, diagnostic_kind kind, cc::string detail)
+    {
+        auto const chain = entry.at(x.inlined_through);
+        unroll_reports.push_back({.kind = kind,
+                                  .file = x.from.file,
+                                  .where = c.span_of(x.from.file, x.from.expr),
+                                  .detail = cc::move(detail),
+                                  .site = chain.empty() ? call_site{} : chain[chain.size() - 1]});
+        is_failed = true;
+        meets_error = true;
+    };
+    // a node beside the construction it stands in, attributed to it
+    auto const add_beside = [&](isize at, type_id type, decltype(flat_expr::node) node) -> flat_expr_id
+    {
+        auto const origin = entry.exprs[at].from;
+        auto const through = entry.exprs[at].inlined_through;
+        entry.exprs.push_back({.type = type, .from = origin, .inlined_through = through, .node = cc::move(node)});
+        return flat_expr_id(entry.exprs.size() - 1);
+    };
+    auto const call_of = [&](isize at, cc::string_view op, flat_expr_id lhs, flat_expr_id rhs) -> flat_expr_id
+    {
+        auto const type = entry.at(lhs).type;
+        type_id const types[] = {type, type};
+        auto const callee = c.find_operator(entry.exprs[at].from.file, op, types);
+        if (!is_valid(callee))
+            return flat_expr_id::none;
+        flat_expr_id const arguments[] = {lhs, rhs};
+        return add_beside(at, type,
+                          flat_call{.callee = callee,
+                                    .intrinsic = c.out.at(callee).intrinsic,
+                                    .is_pure = true,
+                                    .arguments = add_list(arguments)});
+    };
+    auto const literal_of = [&](isize at, type_id type, u32 value)
+    { return add_beside(at, type, flat_int_literal{.value = i32(value), .is_unsigned = true, .is_hex = true}); };
+
+    auto is_reported = false;
+    for (auto i = isize(0); i < entry.exprs.size(); ++i)
+    {
+        if (!is_reported && c.unplaced_layouts.values().contains(entry.exprs[i].type))
+        {
+            report_at(entry.exprs[i], diagnostic_kind::invalid_target_text,
+                      cc::format("{} has no branch this compile takes, so it has no layout here",
+                                 c.out.name_of(entry.exprs[i].type)));
+            is_reported = true;
+        }
+        if (auto* const m = entry.exprs[i].node.try_as<flat_member>();
+            m != nullptr && is_valid(m->object) && !m->is_swizzle())
+        {
+            auto const object = entry.exprs[index_of(m->object)].type;
+            if (auto const to = placed(object); to != object)
+            {
+                auto const& place = places_of(to)[m->member];
+                if (place.member < 0 || place.bits != 0)
+                    report_at(entry.exprs[i], diagnostic_kind::unsupported_yet,
+                              cc::format("a read or a write of {}.{} alone, which this compile {}",
+                                         c.out.name_of(object), c.out.at(c.out.at(object).members)[m->member].name,
+                                         place.member < 0 ? "has no field of" : "packs into the bits of a word"));
+                else
+                    m->member = place.member;
+            }
+        }
+        auto* const k = entry.exprs[i].node.try_as<flat_construct>();
+        if (k == nullptr)
+            continue;
+        auto const from = entry.exprs[i].type;
+        auto const to = placed(from);
+        if (to == from)
+            continue;
+        auto const arguments = cc::vector<flat_expr_id>::create_copy_of(entry.at(k->arguments));
+        auto const places = cc::vector<layout_place>::create_copy_of(places_of(to));
+        // its arguments are written in the branch's order, and an absent field's is dropped, which no effect may tell
+        auto with_effect = 0;
+        auto is_dropped_effect = false;
+        for (auto a = isize(0); a < arguments.size(); ++a)
+        {
+            auto const has_effect = calls_impure(arguments[a], 0);
+            with_effect += has_effect ? 1 : 0;
+            is_dropped_effect = is_dropped_effect || (has_effect && places[a].member < 0);
+        }
+        if (with_effect >= 2 || is_dropped_effect)
+        {
+            report_at(entry.exprs[i], diagnostic_kind::unsupported_yet,
+                      cc::format("a construction of {} whose arguments' effects this compile would {}",
+                                 c.out.name_of(from), is_dropped_effect ? "drop" : "write in another order"));
+            continue;
+        }
+        // CHK-526: each member of the record from the arguments it holds, a packed word ORing its fields in place
+        auto members = cc::vector<flat_expr_id>::create_filled(c.out.at(to).members.count, flat_expr_id::none);
+        for (auto a = isize(0); a < arguments.size(); ++a)
+        {
+            auto const& place = places[a];
+            if (place.member < 0)
+                continue;
+            auto value = arguments[a];
+            if (place.bits != 0)
+            {
+                auto const type = entry.at(value).type;
+                auto const mask = place.bits == 32 ? 0xffff'ffffu : (1u << u32(place.bits)) - 1u;
+                value = call_of(i, "&", value, literal_of(i, type, mask));
+                if (place.offset != 0)
+                    value = call_of(i, "<<", value, literal_of(i, type, u32(place.offset)));
+                if (is_valid(members[place.member]))
+                    value = call_of(i, "|", members[place.member], value);
+            }
+            members[place.member] = value;
+        }
+        // a word whose fields are all absent, and none is, is zero
+        for (auto at = isize(0); at < members.size(); ++at)
+            if (!is_valid(members[at]))
+                members[at] = literal_of(i, c.out.at(c.out.at(to).members)[at].type, 0u);
+        auto const list = add_list(members);
+        entry.exprs[i].node.as<flat_construct>().arguments = list;
+    }
+    // the types last, since a field is renumbered from the type its object had
+    for (auto& x : entry.exprs)
+        x.type = placed(x.type);
+    for (auto& l : entry.locals)
+        l.type = placed(l.type);
+}

@@ -2,6 +2,7 @@
 
 #include <clean-core/container/pair.hh>
 #include <nexus/source_root.hh>
+#include <shaped-graphics-language/driver/compile_to_text.hh>
 
 using namespace sgl_test;
 using sgl::emit::target;
@@ -50,8 +51,8 @@ cc::string_view text_of(cc::span<cc::pair<cc::string, cc::string> const> stages,
 TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all agree on the ray data")
 {
     auto const stages = msl_stages_of(read_text(nx::source_path(SGL_SG_SHADERS_DIR) + "/raytracing_pipeline.sgl"));
-    // five raygens (three reordering, one storing into images) and three misses (one storing), three closest hits (one
-    // of them the empty one), two any hits, the intersection, and a traversal per ray type of the procedural group
+    // every stage the file declares, in its order, and then a traversal per ray type of the procedural group and the
+    // empty closest hit
     auto names = cc::string();
     for (auto const& [entry, text] : stages)
         names.appendf("{} ", entry);
@@ -59,7 +60,8 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
           == "primary sky open_sky shade cutout shadow_cutout sphere shade_sphere reordered_primary "
              "hit_reordered_primary inspected_primary pictured_primary "
              "pictured_sky "
-             "counted_primary counted_shade counted_sky sgl_spheres_surface "
+             "counted_primary counted_shade counted_sky asserted_primary asserted_shade asserted_sky "
+             "sgl_spheres_surface "
              "sgl_spheres_occlusion sgl_empty_closest_hit ");
 
     auto const expected = cc::string("struct sgl_ray_data\n{\n"
@@ -76,11 +78,17 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
               .contains("[[visible]] void sky(thread uint4* sgl_payload, thread sgl_hit_record const& "
                         "sgl_hit, thread sgl_context const& sgl_ctx)\n"));
     CHECK(text_of(stages, "cutout")
-              .contains("[[intersection(triangle, triangle_data, instancing, world_space_data)]]\nsgl_triangle_result "
-                        "cutout("));
+              .contains("[[intersection(triangle, triangle_data, instancing, world_space_data sgl_motion)]]\n"
+                        "sgl_triangle_result cutout("));
     CHECK(text_of(stages, "sgl_spheres_surface")
-              .contains("[[intersection(bounding_box, triangle_data, instancing, world_space_data)]]\nsgl_box_result "
-                        "sgl_spheres_surface("));
+              .contains("[[intersection(bounding_box, triangle_data, instancing, world_space_data sgl_motion)]]\n"
+                        "sgl_box_result sgl_spheres_surface("));
+    // a package without SOFTWARE_TRACE is bound no structure that moves, so no stage takes the motion tags
+    auto tagged = cc::string();
+    for (auto const& [entry, text] : stages)
+        if (!text.contains("#define sgl_motion\n") || text.contains("instance_motion"))
+            tagged.appendf("{} ", entry);
+    CHECK(tagged == "");
     // a traversal's payload is the ray set's, which only the ray data carries into it
     CHECK(text_of(stages, "sgl_spheres_occlusion").contains("ray_data sgl_ray_data& sgl_data [[payload]]"));
 }
@@ -170,13 +178,18 @@ TEST("sgl emit - a program name starting with sgl_ is renamed on every target, a
 struct instancing:
     v: float
 
+struct instance_motion:
+    w: float
+
 binding frame:
     output: mut buffer[float]
 
 @raygen fun start(@launch_id id: int3){frame}:
     let mut sgl_data = instancing((id.x as float) + 1.0)
     if id.x == 0 => sgl_data.v = 0.5
-    frame.output[id.x] = sgl_data.v * 2.0
+    let mut moved = instance_motion(id.x as float)
+    if id.x == 1 => moved.w = 3.0
+    frame.output[id.x] = sgl_data.v * 2.0 + moved.w
 )");
     auto unrenamed = cc::string();
     for (auto const t : sgl::emit::all_targets())
@@ -191,8 +204,14 @@ binding frame:
     CHECK(unrenamed == "");
     auto const msl = emit_source(source, 0, target::msl);
     CHECK(msl.text.contains("struct instancing_\n"));
-    // the tag itself is still Metal's own, in the tables every stage declares
-    CHECK(msl.text.contains("intersection_function_table<triangle_data, instancing, world_space_data>"));
+    CHECK(msl.text.contains("struct instance_motion_\n"));
+    CHECK(msl.text.contains("intersection_function_table<triangle_data, instancing, world_space_data sgl_motion>"));
+    // the tags themselves are still Metal's own where a package takes SOFTWARE_TRACE, which may bind what moves
+    auto const moving = sgl::compile_to_text(
+        {.source = source, .entry_point = "start", .target = target::msl, .software_trace = true, .device_features = {}});
+    REQUIRE(moving.has_value());
+    CHECK(moving.value().text.contains("#define sgl_motion , instance_motion, primitive_motion\n"));
+    CHECK(moving.value().text.contains("struct instance_motion_\n"));
 }
 
 TEST("sgl emit msl - an any hit two hit groups of differently sized ray sets hold is ray-data-conflict")

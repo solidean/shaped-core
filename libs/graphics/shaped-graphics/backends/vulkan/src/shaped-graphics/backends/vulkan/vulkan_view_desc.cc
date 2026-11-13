@@ -297,12 +297,14 @@ void write_view_descriptor(vulkan_context& ctx,
         // valid descriptor rather than an error, and there is nothing to keep alive for it.
         // It is the nullDescriptor feature that makes it writable at all; vkGetDescriptorEXT rejects address 0 without
         // it, which is why device creation requires VK_EXT_robustness2.
+        // A partitioned tlas has no structure object a descriptor could name, so it writes the null one: only a trace
+        // by address, SGL's own SPIR-V, reaches it.
         info.data.accelerationStructure = 0;
         if (tlas_view->tlas != nullptr)
         {
-            auto const& tlas = static_cast<vulkan_tlas const&>(*tlas_view->tlas);
-            CC_ASSERT(tlas._address != 0, "a bound acceleration structure has no device address");
-            info.data.accelerationStructure = u64(tlas._address);
+            auto const target = trace_target_of(*tlas_view->tlas);
+            CC_ASSERT(target.address != 0, "a bound acceleration structure has no device address");
+            info.data.accelerationStructure = u64(target.descriptor_address);
         }
     }
     else

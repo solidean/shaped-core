@@ -40,7 +40,7 @@ A reading taken right after `advance_epoch`, on the thread that advanced, is a c
 
 **An uncounted stat reads zero, and `is_counted` says so.**
 A barrier count on webgpu is zero because the WebGPU implementation tracks usage and nothing sg can see is emitted, not because there were none.
-Metal's barriers name stages and never a resource, so it counts `global_barriers` but no buffer or texture barriers.
+Metal's barriers name stages, so its buffer and texture barriers count the resources whose hazard one settled, and it has no layouts to count transitions of.
 A test asserting "no barriers" checks `is_counted` first, or it passes on a zero nobody measured.
 
 ## What counts as a barrier

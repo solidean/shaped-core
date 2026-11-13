@@ -101,8 +101,11 @@ sg::compute_pipeline_handle wavefront_routine::_shade_kernel_of(sg::context& ctx
             k.failed = true;
             return nullptr;
         }
-        k.shader = lib.value()->compile_source(p->shade_source, sg::shader_stage::compute, "sv_shade", format.value(),
-                                               {.language = slib::shader_language::sgl, .label = p->label});
+        auto context_options = cc::vector<slib::shader_option>();
+        slib::add_context_options(context_options, ctx);
+        k.shader = lib.value()->compile_source(
+            p->shade_source, sg::shader_stage::compute, "sv_shade", format.value(),
+            {.language = slib::shader_language::sgl, .label = p->label, .options = context_options});
         (void)ctx.backlog.start(k.shader);
         return nullptr;
     }

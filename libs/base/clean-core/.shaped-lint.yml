@@ -331,8 +331,8 @@ rules:
     files: src/clean-core/platform/system_metrics.cc
 
   - kind: allow-include
-    value: [<sched.h>, <unistd.h>]
-    reason: sched_getaffinity is the mask a container narrows, and sysconf is the fallback count
+    value: [<fcntl.h>, <sched.h>, <unistd.h>]
+    reason: sched_getaffinity is the mask a container narrows, sysconf is the fallback count, and open lets the memory watchdog read /proc without allocating
     files: src/clean-core/platform/resource_limits.cc
 
   - kind: allow-include
@@ -463,6 +463,11 @@ rules:
     value: <algorithm>
     reason: std::sort is the baseline cc::sort is measured against, which is the whole point of this file
     files: tests/benchmarks/sort-benchmark.cc
+
+  - kind: allow-include
+    value: <ctime>
+    reason: clock_gettime(CLOCK_THREAD_CPUTIME_ID), the per-thread CPU clock a scope's cost is measured against off Windows
+    files: tests/benchmarks/record-scope-cost-benchmark.cc
 
   # Blocking waits kept in tests, each where the wait or a scheduler the test drives is what is under test.
   - kind: allow-blocking-wait

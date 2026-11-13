@@ -1,5 +1,6 @@
 #include "emit-test-support.hh"
 
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 
 using namespace sgl_test;
@@ -34,24 +35,28 @@ sgl::emitted_source compile(cc::string_view source,
 
 TEST("sgl emit - with diagnostics each target declares sg's debug buffer where sg binds it (EMIT-183)")
 {
-    CHECK(compile(k_compute, target::hlsl_dx12).text.contains("RWByteAddressBuffer sg_debug : register(u0, space11);\n"));
-    CHECK(compile(k_compute, target::hlsl_vulkan).text.contains("[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;\n"));
+    CHECK(compile(k_compute, target::hlsl_dx12)
+              .text.contains("RWStructuredBuffer<uint> sg_debug : register(u0, space11);\n"));
+    CHECK(compile(k_compute, target::hlsl_vulkan)
+              .text.contains("[[vk::binding(19, 3)]] RWStructuredBuffer<uint> sg_debug;\n"));
     CHECK(compile(k_compute, target::wgsl)
-              .text.contains("@group(3) @binding(19) var<storage, read_write> sg_debug: sg_debug_buffer;\n"));
+              .text.contains("@group(3) @binding(19) var<storage, read_write> sg_debug: array<atomic<u32>>;\n"));
 }
 
 TEST("sgl emit - a print is one record: reserved at once, written whole where it fits, and counted where it does not")
 {
     auto const hlsl = compile(k_compute, target::hlsl_dx12).text;
-    CHECK(hlsl.contains("sg_debug.InterlockedAdd(0, 5, debug_at);\n"));
-    CHECK(hlsl.contains("if (debug_at + 5 <= sg_debug.Load(4))\n"));
-    CHECK(hlsl.contains("sg_debug.Store(12 + (debug_at + 1) * 4, 5u);\n"));
-    CHECK(hlsl.contains("sg_debug.InterlockedAdd(8, 1);\n"));
+    CHECK(hlsl.contains("InterlockedAdd(sg_debug[0u], 5u, "));
+    CHECK(hlsl.contains("InterlockedOr(sg_debug[1u], 0u, "));
+    CHECK(hlsl.contains("if (debug_at + 5u <= "));
+    CHECK(hlsl.contains("InterlockedExchange(sg_debug[debug_at + 4u], 5u, "));
+    CHECK(hlsl.contains("InterlockedAdd(sg_debug[2u], 1u, "));
 
     auto const wgsl = compile(k_compute, target::wgsl).text;
-    CHECK(wgsl.contains("let debug_at: u32 = atomicAdd(&sg_debug.cursor, 5u);\n"));
-    CHECK(wgsl.contains("sg_debug.words[debug_at + 2u] = bitcast<u32>(printed);\n"));
-    CHECK(wgsl.contains("_ = atomicAdd(&sg_debug.dropped, 1u);\n"));
+    CHECK(wgsl.contains("let debug_at: u32 = atomicAdd(&sg_debug[0u], 5u);\n"));
+    CHECK(wgsl.contains("if debug_at + 5u <= atomicLoad(&sg_debug[1u]) {\n"));
+    CHECK(wgsl.contains("atomicStore(&sg_debug[debug_at + 4u], 5u);\n"));
+    CHECK(wgsl.contains("_ = atomicAdd(&sg_debug[2u], 1u);\n"));
 }
 
 TEST("sgl emit - a failed assert writes its record and ends a compute invocation")
@@ -83,6 +88,38 @@ TEST("sgl emit - each site is described: an id, its pieces, its values' shapes a
     CHECK(assert_site.id != print.id);
     // the id is the site's wherever the text is written
     CHECK(compile(k_compute, target::wgsl).debug_sites[0].id == print.id);
+}
+
+TEST("sgl emit - a multi-line message is its content lines joined, past their indentation, with no escapes")
+{
+    // STR-15 to STR-21: a line deeper than the content keeps what it has beyond it, a blank one between is empty,
+    // a backslash is content, and `$$` is still a dollar
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    print \"\n"
+                            "        first $v\n"
+                            "          indented \\n\n"
+                            "\n"
+                            "        dollar $$\n"
+                            "    \"\n"
+                            "    assert v >= 0.0, \"\n"
+                            "        negative\n"
+                            "        $v\n"
+                            "    \"\n"
+                            "    work.values[id.x] = v * 2.0\n";
+    auto const e = compile(source, target::hlsl_dx12);
+    REQUIRE(e.debug_sites.size() == 2);
+    auto const& print = e.debug_sites[0];
+    REQUIRE(print.pieces.size() == 2);
+    CHECK(print.pieces[0] == "first ");
+    CHECK(print.pieces[1] == "\n  indented \\n\n\ndollar $");
+    auto const& assert_site = e.debug_sites[1];
+    REQUIRE(assert_site.pieces.size() == 2);
+    CHECK(assert_site.pieces[0] == "negative\n");
+    CHECK(assert_site.pieces[1] == "");
 }
 
 TEST("sgl emit - one print reached along two call chains is two sites, even in two compiles of one entry point")
@@ -143,7 +180,7 @@ TEST("sgl emit - a stage that cannot write the buffer drops its prints and decla
     // vulkan writes storage from a vertex stage only on a device with vertexPipelineStoresAndAtomics
     CHECK(!compile(vertex, target::hlsl_vulkan, "vs").text.contains("sg_debug"));
     auto const stores = compile(vertex, target::hlsl_vulkan, "vs", sgl::check::feature::vertex_pipeline_stores);
-    CHECK(stores.text.contains("[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;"));
+    CHECK(stores.text.contains("[[vk::binding(19, 3)]] RWStructuredBuffer<uint> sg_debug;"));
     CHECK(stores.debug_sites.size() == 1);
 }
 
@@ -151,7 +188,7 @@ TEST("sgl emit - MSL takes sg's debug buffer at the argument table's last slot, 
 {
     // a vertex stage's buffers start at buffer(5), so a slot just above them would be a vertex buffer's
     auto const msl = compile(k_compute, target::msl).text;
-    CHECK(msl.contains("device sg_debug_buffer& sg_debug [[buffer(30)]]")).dump("text", msl);
+    CHECK(msl.contains("device atomic_uint* sg_debug [[buffer(30)]]")).dump("text", msl);
 }
 
 TEST("sgl emit - a vertex stage's failed assert returns its vertex at a NaN position, which culls its primitives")
@@ -200,4 +237,37 @@ TEST("sgl emit - a failed assert ends a patch, a candidate and a box as each sta
                          "    return report(1.0, sphere_hit(float3(0.0, 1.0, 0.0)))\n";
     auto const intersection = compile(box, target::hlsl_dx12, "sphere").text;
     CHECK(intersection.contains("is_hit = false")).dump("text", intersection);
+}
+
+TEST("sgl emit - a metal raygen hands its debug buffer to every ray-tracing stage it calls, which prints through it "
+     "(EMIT-183)")
+{
+    auto const source = read_text(nx::source_path(SGL_SG_SHADERS_DIR) + "/raytracing_pipeline.sgl")
+                      + "\n@miss fun printing_sky(p: mut radiance):\n"
+                        "    print \"missed\"\n"
+                        "    p.is_hit = 0\n"
+                        "\n"
+                        "@closest_hit fun printing_shade(h: triangle_hit, p: mut radiance):\n"
+                        "    assert h.t >= 0.0, \"a hit behind the ray at $(h.t)\"\n"
+                        "    p.is_hit = 1\n";
+    // the raygen takes it whether it prints or not, since a stage it calls may
+    auto const raygen = compile(source, target::msl, "primary").text;
+    CHECK(raygen.contains("device atomic_uint* sg_debug [[buffer(30)]]")).dump("text", raygen);
+    CHECK(raygen.contains("    sgl_ctx.debug = sg_debug;\n")).dump("text", raygen);
+    CHECK(raygen.contains("    device atomic_uint* debug;\n")).dump("text", raygen);
+
+    for (auto const entry : {cc::string_view("printing_sky"), cc::string_view("printing_shade")})
+    {
+        auto const stage = compile(source, target::msl, entry);
+        CHECK(stage.text.contains("    device atomic_uint* sg_debug = sgl_ctx.debug;\n")).dump("text", stage.text);
+        CHECK(stage.debug_sites.size() == 1).context(cc::string(entry));
+    }
+    // a stage that prints nothing reaches no buffer
+    CHECK(!compile(source, target::msl, "sky").text.contains("sg_debug = sgl_ctx.debug"));
+
+    // without diagnostics no raygen takes it, and every stage's context holds none
+    auto const plain = sgl::compile_to_text({.source = source, .entry_point = "primary", .target = target::msl});
+    REQUIRE(plain.has_value());
+    CHECK(!plain.value().text.contains("sg_debug"));
+    CHECK(plain.value().text.contains("    sgl_ctx.debug = nullptr;\n"));
 }

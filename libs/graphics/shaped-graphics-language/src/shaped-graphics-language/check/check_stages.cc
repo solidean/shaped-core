@@ -15,9 +15,9 @@ constexpr auto error_type = checked_module::error_type;
 // vulkan's guaranteed maxGeometryTotalOutputComponents too
 constexpr auto k_max_geometry_vertices = 256;
 constexpr auto k_max_geometry_scalars = 1024;
-// CHK-480: what D3D allows a mesh stage, and vulkan's VK_EXT_mesh_shader guarantees
-constexpr auto k_max_mesh_outputs = 256;
 constexpr auto k_max_mesh_workgroup = 128;
+/// What one task workgroup launches at most on dx12, `DispatchMesh`'s 2^22 workgroups.
+constexpr auto k_max_task_meshes = 1 << 22;
 
 /// The scalars a value of `type` is: what D3D and vulkan count of a geometry stage's output vertex.
 i32 scalars_of(checked_module const& m, type_id type)
@@ -100,14 +100,63 @@ checker::mesh_shape checker::mesh_of(i32 file, ast::attribute const& a)
     return result;
 }
 
+checker::task_shape checker::task_of(i32 file, ast::attribute const& a)
+{
+    auto result = task_shape();
+    auto sizes = 0;
+    for (auto const& argument : ast_of(file).at(a.arguments))
+    {
+        auto const value = ast::is_valid(argument.value) && !argument.is_splat ? constant_count(file, argument.value)
+                                                                               : cc::optional<i32>();
+        auto const key = text_of(file, argument.name);
+        if (value.has_value() && value.value() >= 1 && key.empty() && sizes < 3 && result.meshes == 0)
+            result.workgroup[sizes++] = value.value();
+        else if (value.has_value() && value.value() >= 1 && value.value() <= k_max_task_meshes && key == "meshes"
+                 && result.meshes == 0 && sizes > 0)
+            result.meshes = value.value();
+        else
+        {
+            report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+                   cc::format("@task takes one to three workgroup sizes, then optionally how many mesh workgroups "
+                              "one launches at most, from 1 to {}: `@task(32, meshes = 64)`",
+                              k_max_task_meshes));
+            return {};
+        }
+    }
+    if (sizes == 0)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               "@task takes one to three workgroup sizes: `@task(32)`, `@task(32, meshes = 64)`");
+        return {};
+    }
+    return result;
+}
+
 checker::tessellation_mode checker::tessellation_of(i32 file, ast::attribute const& a)
 {
     auto result = tessellation_mode();
     auto has_partitioning = false;
     auto has_winding = false;
+    auto has_max_factor = false;
     for (auto const& argument : ast_of(file).at(a.arguments))
     {
         auto const key = text_of(file, argument.name);
+        if (key == "max_factor")
+        {
+            // CHK-304: the largest factor the stage hands the tessellator, which D3D's own caps at 64
+            auto const count = ast::is_valid(argument.value) && !argument.is_splat ? constant_count(file, argument.value)
+                                                                                   : cc::optional<i32>();
+            if (has_max_factor || !count.has_value() || count.value() < 1 || count.value() > k_max_tessellation_factor)
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, argument.name,
+                       cc::format("@tessellation_control names `max_factor` once, as an integer from 1 to {}",
+                                  k_max_tessellation_factor));
+                return result;
+            }
+            result.max_factor = count.value();
+            has_max_factor = true;
+            continue;
+        }
         // the leading-dot case the argument names, or nothing
         auto const* const dot
             = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
@@ -140,7 +189,7 @@ checker::tessellation_mode checker::tessellation_of(i32 file, ast::attribute con
     if (!has_partitioning || !has_winding)
         report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
                "@tessellation_control takes `partitioning = .integer`, `.fractional_even` or `.fractional_odd`, and "
-               "`winding = .clockwise` or `.counter_clockwise`");
+               "`winding = .clockwise` or `.counter_clockwise`, and may take `max_factor = N`");
     return result;
 }
 

@@ -53,6 +53,51 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_vector_math.cc
     src/shaped-graphics-language/builtins/registry.cc
 
+    src/shaped-graphics-language/check/reserved_bindings.cc
+    src/shaped-graphics-language/check/source_lines.cc
+    src/shaped-graphics-language/legalize/legalize_prints.cc
+    src/shaped-graphics-language/legalize/legalize_workgroup.cc
+    src/shaped-graphics-language/ir/ir.cc
+    src/shaped-graphics-language/ir/pipeline.cc
+    src/shaped-graphics-language/ir/cleanup.cc
+    src/shaped-graphics-language/ir/chain_sums.cc
+    src/shaped-graphics-language/ir/regroup.cc
+    src/shaped-graphics-language/ir/flatten.cc
+    src/shaped-graphics-language/ir/lower.cc
+    src/shaped-graphics-language/ir/lower_call.cc
+    src/shaped-graphics-language/ir/lower_query.cc
+    src/shaped-graphics-language/ir/lower_ray.cc
+    src/shaped-graphics-language/ir/lower_expr.cc
+    src/shaped-graphics-language/ir/lower_memory.cc
+    src/shaped-graphics-language/ir/lower_stage.cc
+    src/shaped-graphics-language/ir/spirv/spirv.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer_declarations.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer_lines.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer_operations.cc
+    src/shaped-graphics-language/ir/dominance.cc
+    src/shaped-graphics-language/ir/simplify.cc
+    src/shaped-graphics-language/ir/ssa.cc
+    src/shaped-graphics-language/ir/tables.cc
+    src/shaped-graphics-language/ir/verify.cc
+    src/shaped-graphics-language/ir/dxil/dxil.cc
+    src/shaped-graphics-language/ir/dxil/signature.cc
+    src/shaped-graphics-language/ir/dxil/impl/container.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm_bitcode.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm_passes.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_math.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_memory.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_lines.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_query.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_ray.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_resources.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_stage.cc
+
+    src/shaped-graphics-language/check/artifact.cc
+    src/shaped-graphics-language/check/own_part.cc
+    src/shaped-graphics-language/check/relocate.cc
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc
@@ -85,6 +130,10 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flatten_call.cc
     src/shaped-graphics-language/check/flatten_stmt.cc
     src/shaped-graphics-language/check/flatten_diff.cc
+    src/shaped-graphics-language/check/flatten_diff_lower.cc
+    src/shaped-graphics-language/check/flatten_diff_forward.cc
+    src/shaped-graphics-language/check/flatten_diff_straighten.cc
+    src/shaped-graphics-language/check/flatten_diff_backward.cc
     src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
@@ -92,6 +141,13 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
     src/shaped-graphics-language/legalize/legalize_guards.cc
+    src/shaped-graphics-language/legalize/legalize_grid.cc
+    src/shaped-graphics-language/legalize/legalize_geometry.cc
+    src/shaped-graphics-language/legalize/legalize_tessellation.cc
+    src/shaped-graphics-language/legalize/legalize_mesh.cc
+    src/shaped-graphics-language/legalize/legalize_task.cc
+    src/shaped-graphics-language/legalize/legalize_polyfill.cc
+    src/shaped-graphics-language/legalize/legalize_lengths.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
     src/shaped-graphics-language/legalize/legalize_lets.cc
     src/shaped-graphics-language/legalize/legalize_onces.cc
@@ -108,6 +164,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/memory_form.cc
     src/shaped-graphics-language/emit/impl/memory_access.cc
     src/shaped-graphics-language/emit/impl/msl.cc
+    src/shaped-graphics-language/emit/impl/payload_access.cc
     src/shaped-graphics-language/emit/impl/plan.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
     src/shaped-graphics-language/emit/impl/wgsl.cc
@@ -117,6 +174,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/describe.cc
     src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
+    src/shaped-graphics-language/driver/shared_library.cc
     src/shaped-graphics-language/driver/prelude.cc
     src/shaped-graphics-language/driver/classify.cc
     src/shaped-graphics-language/driver/inferred_results.cc
@@ -128,10 +186,10 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/completions.cc
 )
 
-# The prelude is three files, and two of them are embedded.
+# The prelude is four files, and three of them are embedded, as is prelude/accel.sgl, the module `accel` SGL ships.
 # prelude/builtins.sgl is GENERATED from the C++ builtin registry and committed.
 # The library produces the same text in memory, so it never reads that file.
-# prelude/core.sgl and prelude/raytracing.sgl are hand-written SGL, and the library carries their text: a page has no filesystem and a shipped binary no source tree.
+# prelude/core.sgl, prelude/raytracing.sgl and prelude/tessellation.sgl are hand-written SGL, and the library carries their text: a page has no filesystem and a shipped binary no source tree.
 # Baked in at configure time, and CMAKE_CONFIGURE_DEPENDS is what makes an edit of the file re-run this.
 #
 # MSVC caps ONE string literal at 16380 bytes, and adjacent literals are joined only after that limit applies.
@@ -169,22 +227,28 @@ endfunction()
 
 _sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/core.sgl" _sgl_prelude_literals)
 _sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/raytracing.sgl" _sgl_raytracing_literals)
+_sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/tessellation.sgl" _sgl_tessellation_literals)
+_sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/accel.sgl" _sgl_accel_literals)
 
 # Written only when it differs, so a configure that changes nothing recompiles nothing.
 # Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
 set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
 set(_sgl_prelude_cc
-"// Generated from prelude/core.sgl and prelude/raytracing.sgl by shaped-graphics-language's CMakeLists. Do not edit.
+"// Generated from prelude/core.sgl, prelude/raytracing.sgl, prelude/tessellation.sgl and prelude/accel.sgl by shaped-graphics-language's CMakeLists. Do not edit.
 #include <shaped-graphics-language/driver/prelude.hh>
 
 namespace
 {
 constexpr char const* k_prelude =${_sgl_prelude_literals};
 constexpr char const* k_raytracing =${_sgl_raytracing_literals};
+constexpr char const* k_tessellation =${_sgl_tessellation_literals};
+constexpr char const* k_accel =${_sgl_accel_literals};
 } // namespace
 
 cc::string_view sgl::impl::embedded_core_prelude() { return k_prelude; }
 cc::string_view sgl::impl::embedded_raytracing_prelude() { return k_raytracing; }
+cc::string_view sgl::impl::embedded_tessellation_prelude() { return k_tessellation; }
+cc::string_view sgl::impl::embedded_accel_module() { return k_accel; }
 ")
 set(_sgl_prelude_existing "")
 if(EXISTS "${_sgl_prelude_generated}")
@@ -253,6 +317,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/builtins/subgroup_calls.hh
     src/shaped-graphics-language/builtins/texture_calls.hh
 
+    src/shaped-graphics-language/check/artifact.hh
     src/shaped-graphics-language/check/check.hh
     src/shaped-graphics-language/check/checked_module.hh
     src/shaped-graphics-language/check/dump.hh
@@ -264,6 +329,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/resources.hh
     src/shaped-graphics-language/check/symbols.hh
     src/shaped-graphics-language/check/impl/checker.hh
+    src/shaped-graphics-language/check/impl/fields.hh
 
     src/shaped-graphics-language/legalize/core.hh
     src/shaped-graphics-language/legalize/legalize.hh
@@ -299,15 +365,9 @@ target_sources(shaped-graphics-language
 target_compile_features(shaped-graphics-language PUBLIC cxx_std_23)
 
 # Expose "src" so '#include <shaped-graphics-language/...>' works for consumers.
-target_include_directories(shaped-graphics-language PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(shaped-graphics-language PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 
 target_link_libraries(shaped-graphics-language PUBLIC clean-core)
-sc_declare_pch_tier(SGL EXTENDS CC_STD HEADERS
-    <shaped-graphics-language/check/checked_module.hh>
-    <shaped-graphics-language/check/check.hh>
-    <shaped-graphics-language/syntax/parsed_file.hh>
-    <shaped-graphics-language/emit/emit.hh>)
-sc_target_pch(shaped-graphics-language SGL)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
@@ -339,7 +399,6 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/protocol/stdio_host.cc
     )
     target_link_libraries(sgl-lsp-protocol PUBLIC clean-core babel-data)
-    sc_target_pch(sgl-lsp-protocol CC_ALL) # babel-data's tier, since no SGL header may reach it
 
     add_executable(sgl
         tools/sgl/main.cc
@@ -381,11 +440,13 @@ if(SC_BUILD_TOOLS)
     endif()
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
-    sc_target_pch(sgl SGL NEXUS)
     sc_target_source_paths(sgl PRIVATE
         SGL_SAMPLES_DIR tests/samples
         SGL_PRELUDE_DIR prelude
-        SGL_LSP_TEST_MODULES_DIR tools/sgl/lsp/tests/modules)
+        SGL_LSP_TEST_MODULES_DIR tools/sgl/lsp/tests/modules
+        SGL_LSP_TEST_CLEAN_MODULES_DIR tools/sgl/lsp/tests/clean-modules
+        SGL_LSP_SV_SHADERS_DIR ../shaped-viewer/shaders
+        SGL_LSP_SR_MODULES_DIR ../shaped-rendering/shaders/modules)
 endif()
 
 # Test executable
@@ -410,6 +471,7 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/check/autodiff-fuzz-test.cc
         tests/corpus/corpus-test.cc
         tests/check/array-check-test.cc
         tests/check/module-check-test.cc
@@ -440,6 +502,7 @@ if(SC_BUILD_TESTS)
         tests/interpret/driver-bindings-test.cc
         tests/interpret/driver-test-support.hh
         tests/interpret/emulated-trace-test.cc
+        tests/interpret/tessellation-test.cc
         tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc
         tests/interpret/run-tests-test.cc
@@ -463,9 +526,13 @@ if(SC_BUILD_TESTS)
         tests/emit/unroll-emit-test.cc
         tests/emit/primitive-stage-emit-test.cc
         tests/emit/mesh-stage-emit-test.cc
+        tests/emit/geometry-polyfill-emit-test.cc
+        tests/emit/tessellation-polyfill-emit-test.cc
+        tests/emit/mesh-polyfill-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/bytes-emit-test.cc
         tests/emit/texture-emit-test.cc
+        tests/emit/auto-workgroup-test.cc
         tests/emit/compute-emit-test.cc
         tests/emit/subgroup-emit-test.cc
         tests/emit/image-emit-test.cc
@@ -479,6 +546,16 @@ if(SC_BUILD_TESTS)
         tests/emit/sixteen-bit-emit-test.cc
         tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/double-maths-emit-test.cc
+        tests/emit/native-line-table-test.cc
+        tests/emit/spirv-emit-test.cc
+        tests/ir/debug-ir-test.cc
+        tests/ir/ir-test-support.hh
+        tests/ir/optimize-ir-test.cc
+        tests/ir/passes-ir-test.cc
+        tests/ir/signature-ir-test.cc
+        tests/ir/sweep-ir-test.cc
+        tests/ir/tables-ir-test.cc
+        tests/ir/verify-ir-test.cc
         tests/emit/matrix-arithmetic-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
         tests/emit/debug-emit-test.cc
@@ -494,6 +571,7 @@ if(SC_BUILD_TESTS)
         tests/driver/compile-target-test.cc
         tests/driver/target-text-test.cc
         tests/driver/target-type-test.cc
+        tests/driver/target-layout-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc
@@ -515,7 +593,11 @@ if(SC_BUILD_TESTS)
         SGL_CORPUS_DIR tests/corpus
         SGL_PRELUDE_DIR prelude
         # sg's metal ray-tracing shaders, whose MSL text is checked here on every box, while only a Mac runs them
-        SGL_SG_SHADERS_DIR ../shaped-graphics/tests/shaders/sgl)
+        SGL_SG_SHADERS_DIR ../shaped-graphics/tests/shaders/sgl
+        SGL_SR_SHADERS_DIR ../shaped-rendering/shaders
+        # shaped-viewer's package entries and their modules, whose sets of modules a measurement compares
+        SGL_SV_SHADERS_DIR ../shaped-viewer/shaders
+        SGL_SV_TEST_SHADERS_DIR ../shaped-viewer/tests/shaders)
 
     target_link_libraries(shaped-graphics-language-test
         PRIVATE
@@ -524,7 +606,6 @@ if(SC_BUILD_TESTS)
         # what a test loads or writes beside SGL: a Chrome trace today, textures later
         babel-serializer
     )
-    sc_target_pch(shaped-graphics-language-test SGL NEXUS)
 
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(shaped-graphics-language-test)

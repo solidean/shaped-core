@@ -20,29 +20,54 @@ const has_specular_albedo = 8u
 // A zero albedo would make demodulation divide by zero; one floor used both ways keeps the round trip exact.
 const albedo_floor = 0.001
 
-// What color is demodulated by: the surface's total reflectance, since SVGF filters unsplit radiance and a metal's color is in the specular half.
-fun reflectance(albedo: float3, specular_albedo: float3, flags: uint) -> float3:
+// Below this reflectance in every channel a surface reflects nothing worth demodulating: what it shows is its own emission.
+// It sits above a dielectric's 0.04 at normal incidence, since a black base under the default specular layer is such a surface, a lamp's included.
+const reflects_nothing_below = 0.06
+
+// The surface's total reflectance, since SVGF filters unsplit radiance and a metal's color is in the specular half.
+fun total_reflectance(albedo: float3, specular_albedo: float3, flags: uint) -> float3:
     let mut a = albedo
     if (flags & has_specular_albedo) != 0u:
         a += specular_albedo
-    return max(a, float3(albedo_floor))
+    return a
+
+// Whether a pixel shows a surface that reflects nothing, an emitter's own radiance, which is filtered as it is and apart from every reflecting surface.
+// Demodulated, a lamp of zero albedo is its radiance over the floor, a thousand times brighter than any wall beside it, and averages into them.
+fun reflects_nothing(albedo: float3, specular_albedo: float3, flags: uint) -> bool:
+    if (flags & has_albedo) == 0u => return false
+    return all(total_reflectance(albedo, specular_albedo, flags) < float3(reflects_nothing_below))
+
+// What color is demodulated by: the total reflectance, or 1 where the surface reflects nothing.
+fun reflectance(albedo: float3, specular_albedo: float3, flags: uint) -> float3:
+    if reflects_nothing(albedo, specular_albedo, flags) => return float3(1.0)
+    return max(total_reflectance(albedo, specular_albedo, flags), float3(albedo_floor))
 
 fun luminance(c: float3) => dot(c, float3(0.2126, 0.7152, 0.0722))
 
-// A zero normal or a non-positive depth is a pixel with no surface: the primary ray escaped.
-fun is_surface(n: float3, depth: float) => dot(n, n) > 0.0 and depth > 0.0
+// What a pixel of the normal and depth the temporal pass carries shows, each kind averaging with its own alone.
+// A non-positive depth is a missed ray, the sky; a zero normal at a positive depth is a surface that reflects nothing; anything else reflects.
+const kind_missed = 0u
+const kind_emitter = 1u
+const kind_surface = 2u
+fun kind_of(n: float3, depth: float) -> uint:
+    if depth <= 0.0 => return kind_missed
+    if dot(n, n) <= 0.0 => return kind_emitter
+    return kind_surface
+
+fun is_surface(n: float3, depth: float) => kind_of(n, depth) == kind_surface
 
 // Whether a neighbor at `offset` pixels shows the same surface as the center, as a weight in [0, 1].
 // Two missed pixels match each other and nothing else, so the sky never averages into geometry.
+// Two emitters match where their depths do, which is all that is known of them: a black vase and a lamp behind it do not.
 fun geometry_weight(n_p: float3, d_p: float, n_q: float3, d_q: float, offset: float2, normal_power: float, depth_sigma: float) -> float:
-    let surface_p = is_surface(n_p, d_p)
-    let surface_q = is_surface(n_q, d_q)
-    if surface_p != surface_q => return 0.0
-    if not surface_p => return 1.0
+    let kind_p = kind_of(n_p, d_p)
+    if kind_p != kind_of(n_q, d_q) => return 0.0
+    if kind_p == kind_missed => return 1.0
 
-    let w_n = pow(saturate(dot(normalize(n_p), normalize(n_q))), normal_power)
     let allowed = depth_sigma * d_p * max(length(offset), 1.0) + 0.00001
-    return w_n * exp(-abs(d_q - d_p) / allowed)
+    let w_d = exp(-abs(d_q - d_p) / allowed)
+    if kind_p == kind_emitter => return w_d
+    return pow(saturate(dot(normalize(n_p), normalize(n_q))), normal_power) * w_d
 
 fun as_float2(v: int2) => float2(v.x as float, v.y as float)
 
@@ -105,38 +130,61 @@ binding svgf_temporal_images:
     let p = id.xy
     let flags = svgf_temporal_constants.flags
 
-    let mut color = svgf_temporal_images.color.load(p).xyz
+    // A channel that is not a finite number reads as black: a half-float frame holds nothing past 65504, so a bright enough
+    // sample arrives as infinity, and folded into the history it would turn every pixel the filter reaches into NaN, for good.
+    let raw = svgf_temporal_images.color.load(p).xyz
+    let mut color = if any(is_nan(raw)) or any(is_inf(raw)) => float3(0.0) else raw
+    let albedo = svgf_temporal_images.albedo.load(p).xyz
+    let specular_albedo = svgf_temporal_images.specular_albedo.load(p).xyz
     if (flags & has_albedo) != 0u:
-        let albedo = svgf_temporal_images.albedo.load(p).xyz
-        color /= reflectance(albedo, svgf_temporal_images.specular_albedo.load(p).xyz, flags)
+        color /= reflectance(albedo, specular_albedo, flags)
 
-    let n = svgf_temporal_images.normal.load(p).xyz
+    // An emitter's pixel carries a zero normal from here on, so every later test keeps it apart from the surfaces it lights.
     let d = svgf_temporal_images.depth.load(p).x
-    let lum = luminance(color)
+    let n = if reflects_nothing(albedo, specular_albedo, flags) and d > 0.0 => float3(0.0) else svgf_temporal_images.normal.load(p).xyz
+    // Capped where its square still fits a float: past it the second moment is infinite, and the variance infinity less infinity.
+    let lum = min(luminance(color), 1e18)
     let moments = float2(lum, lum * lum)
 
-    // Where this pixel's surface was last frame: the pixel's center moved back by its motion.
-    let previous_center = as_float2(p) + 0.5 - svgf_temporal_images.motion.load(p).xy
-    let floored = floor(previous_center)
-    let q = int2(floored.x as int, floored.y as int)
+    // Where this pixel's surface was last frame, among last frame's pixel centers: this center moved back by its motion.
+    // The history there is read bilinearly from the four pixels around it, as Schied et al. do, each only where it shows this surface.
+    // A single nearest pixel would snap a sub-pixel motion to whole pixels, and resample the history differently from frame to frame.
+    let previous = as_float2(p) - svgf_temporal_images.motion.load(p).xy
+    let floored = floor(previous)
+    let fraction = previous - floored
+    let base = int2(floored.x as int, floored.y as int)
+    let kind = kind_of(n, d)
+    let surface = is_surface(n, d)
 
-    let mut valid = (flags & reset) == 0u and all(q >= int2(0)) and all(q < size)
-    if valid:
-        let prev_nd = svgf_temporal_images.previous_normal_depth.load(q)
-        let surface = is_surface(n, d)
-        let prev_surface = is_surface(prev_nd.xyz, prev_nd.w)
-        if surface != prev_surface:
-            valid = false
-        else if surface:
-            let same_normal = dot(normalize(n), normalize(prev_nd.xyz))
-            let depth_change = abs(prev_nd.w - d) / max(d, 0.0001)
-            valid = same_normal >= svgf_temporal_constants.normal_similarity and depth_change <= svgf_temporal_constants.depth_similarity
+    let mut sum_history = float4(0.0)
+    let mut sum_moments = float2(0.0)
+    let mut sum_weight = 0.0
+    if (flags & reset) == 0u:
+        for ty in 0 ..< 2:
+            for tx in 0 ..< 2:
+                let q = base + int2(tx, ty)
+                if any(q < int2(0)) or any(q >= size) => continue
+                let prev_nd = svgf_temporal_images.previous_normal_depth.load(q)
+                if kind_of(prev_nd.xyz, prev_nd.w) != kind => continue
+                if surface:
+                    let same_normal = dot(normalize(n), normalize(prev_nd.xyz))
+                    let depth_change = abs(prev_nd.w - d) / max(d, 0.0001)
+                    if same_normal < svgf_temporal_constants.normal_similarity or depth_change > svgf_temporal_constants.depth_similarity => continue
+                let wx = if tx == 0 => 1.0 - fraction.x else fraction.x
+                let wy = if ty == 0 => 1.0 - fraction.y else fraction.y
+                let w = wx * wy
+                sum_history += svgf_temporal_images.previous_history.load(q) * w
+                sum_moments += svgf_temporal_images.previous_moments.load(q) * w
+                sum_weight += w
+
+    // Too little of the footprint shows this surface to say what it held: a disocclusion, which starts over.
+    let valid = sum_weight > 0.01
 
     let mut out_color = color
     let mut out_moments = moments
     let mut history_length = 1.0
     if valid:
-        let prev = svgf_temporal_images.previous_history.load(q)
+        let prev = sum_history / sum_weight
         history_length = min(prev.w + 1.0, svgf_temporal_constants.max_history)
 
         // 1 / length is the exact running mean while the history is young.
@@ -144,7 +192,7 @@ binding svgf_temporal_images:
         let color_alpha = max(1.0 / history_length, svgf_temporal_constants.color_alpha_min)
         let moments_alpha = max(1.0 / history_length, svgf_temporal_constants.moments_alpha_min)
         out_color = mix(prev.xyz, color, color_alpha)
-        out_moments = mix(svgf_temporal_images.previous_moments.load(q), moments, moments_alpha)
+        out_moments = mix(sum_moments / sum_weight, moments, moments_alpha)
 
     svgf_temporal_images.history[id.xy] = float4(..out_color, history_length)
     svgf_temporal_images.moments[id.xy] = out_moments
@@ -213,6 +261,9 @@ binding svgf_variance_images:
 
 // ---- filter ---------------------------------------------------------------------------------------------------------
 
+// Schied et al. also feed the first pass's result back as the next frame's history; this does not, measured both ways.
+// While still, the history is the mean itself, so a frame changes no less with it, and it bakes the first pass's blur into every frame after.
+//
 // The difference from sr's plain à-trous is where the noise estimate comes from.
 // There it is modeled from a sample count; here it is measured per pixel, blurred over a 3x3 so one lucky sample does not stop a pixel from being filtered, and carried through every pass.
 // A pass leaves each pixel's variance as the variance of the average it produced, so the next pass, at twice the spacing, filters less where this one already removed the noise.
@@ -224,6 +275,8 @@ binding svgf_variance_images:
     luminance_sigma: float
     normal_power: float
     depth_sigma: float
+    // the largest magnitude `target_format` holds, which a brighter result saturates at rather than becoming infinity
+    ceiling: float
 
 binding svgf_atrous_images:
     // xyz demodulated color, w a variance
@@ -306,4 +359,5 @@ binding svgf_atrous_images:
             result *= reflectance(albedo, svgf_atrous_images.specular_albedo.load(p).xyz, flags)
         out_alpha = svgf_atrous_images.color.load(p).w
 
-    svgf_atrous_images.target[id.xy] = float4(..result, out_alpha) as texel[target_format]
+    let c = svgf_atrous_constants.ceiling
+    svgf_atrous_images.target[id.xy] = float4(..clamp(result, float3(-c), float3(c)), out_alpha) as texel[target_format]

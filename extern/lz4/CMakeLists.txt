@@ -14,7 +14,8 @@ add_library(lz4 STATIC
 )
 
 # SYSTEM so the lz4 headers do not trip our warnings in the consuming TU.
-target_include_directories(lz4 SYSTEM PUBLIC ${LZ4_DIR}/include)
+# The build tree's only: every library links it PRIVATE, so an installed copy is an archive to link, never a header to include.
+target_include_directories(lz4 SYSTEM PUBLIC $<BUILD_INTERFACE:${LZ4_DIR}/include>)
 
 # lz4's own xxhash.h lives here rather than in include/, so it cannot shadow the separately vendored
 # extern/xxhash/include/xxhash.h that cc::hash128 includes. Only lz4frame.c reaches it, via a quote include.

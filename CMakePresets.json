@@ -65,6 +65,16 @@
             }
         },
         {
+            "name": "x64-windows-msvc-ninja-v2-avx",
+            "displayName": "RelWithDebInfo MSVC at x86-64 v2-avx (Ninja)",
+            "description": "RelWithDebInfo build at SC_X64_LEVEL=v2-avx, /arch:AVX: the level of a consumer built for AVX without AVX2",
+            "inherits": "x64-windows-msvc-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_X64_LEVEL": "v2-avx"
+            }
+        },
+        {
             "name": "arm64-windows-base",
             "condition": {
                 "type": "equals",
@@ -141,10 +151,12 @@
         {
             "name": "x64-windows-clang-ninja-debug",
             "displayName": "Debug Clang (Ninja, Windows)",
-            "description": "Debug build with full symbols",
+            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES) and runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS).",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
+                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
+                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
                 "SC_SOURCE_SITES": "OPAQUE"
             }
         },
@@ -209,10 +221,12 @@
         {
             "name": "x64-linux-clang-ninja-debug",
             "displayName": "Debug Clang (Ninja, Linux)",
-            "description": "Debug build with full symbols",
+            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES) and runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS).",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
+                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
+                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
                 "SC_SOURCE_SITES": "OPAQUE"
             }
         },
@@ -317,7 +331,8 @@
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_COVERAGE": "ON"
+                "SC_COVERAGE": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -350,72 +365,6 @@
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "SC_THREADS": "OFF",
                 "SC_SOURCE_SITES": "FULL"
-            }
-        },
-        {
-            "name": "x64-windows-clang-ninja-debug-nopch",
-            "displayName": "Debug Clang, no PCH (Ninja, Windows)",
-            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES), runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS), and names who holds a test's leftover async work (SC_ASYNC_AMBIENT_TRACE).",
-            "inherits": "x64-windows-clang-ninja-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_CHECK_WIDE_ARITH": "ON",
-                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
-                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON",
-                "SC_SOURCE_SITES": "OPAQUE"
-            }
-        },
-        {
-            "name": "x64-linux-clang-ninja-debug-nopch",
-            "displayName": "Debug Clang, no PCH (Ninja, Linux)",
-            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES), runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS), and names who holds a test's leftover async work (SC_ASYNC_AMBIENT_TRACE).",
-            "inherits": "x64-linux-clang-ninja-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_CHECK_WIDE_ARITH": "ON",
-                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
-                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON",
-                "SC_SOURCE_SITES": "OPAQUE"
-            }
-        },
-        {
-            "name": "macos-arm-llvm-debug-nopch",
-            "displayName": "Debug Clang, no PCH (macOS ARM)",
-            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES), runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS), and names who holds a test's leftover async work (SC_ASYNC_AMBIENT_TRACE).",
-            "inherits": "macos-arm-llvm-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_CHECK_WIDE_ARITH": "ON",
-                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
-                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON"
-            }
-        },
-        {
-            "name": "x64-windows-clang-ninja-nopch",
-            "displayName": "No-PCH Clang (Ninja, Windows)",
-            "description": "RelWithDebInfo with precompiled headers off, for reproducing a CI no-PCH failure locally at the same optimization level.",
-            "inherits": "x64-windows-clang-ninja-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_SOURCE_SITES": "OPAQUE"
-            }
-        },
-        {
-            "name": "x64-linux-clang-ninja-nopch",
-            "displayName": "No-PCH Clang (Ninja, Linux)",
-            "description": "RelWithDebInfo with precompiled headers off — the CI canary. A TU relying on a header only the PCH supplied compiles everywhere else and fails here.",
-            "inherits": "x64-linux-clang-ninja-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -498,7 +447,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "SANITIZE": "address,undefined",
-                "SC_MIMALLOC": "OFF"
+                "SC_MIMALLOC": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -511,7 +461,8 @@
                 "SANITIZE": "thread",
                 "SC_MIMALLOC": "OFF",
                 "CMAKE_EXE_LINKER_FLAGS": "",
-                "CMAKE_SHARED_LINKER_FLAGS": ""
+                "CMAKE_SHARED_LINKER_FLAGS": "",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -541,10 +492,13 @@
         {
             "name": "macos-arm-llvm-debug",
             "displayName": "macOS ARM Debug",
-            "description": "Debug build with full symbols",
+            "description": "Debug build with full symbols. The `test` check's debug leg, and the one that checks typed-geometry's geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES) and runs clean-simd's tests at every lane width (SC_SIMD_EXHAUSTIVE_TESTS).",
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
+                "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -562,7 +516,8 @@
             "description": "Optimized build with debug symbols",
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -810,6 +765,10 @@
             "configurePreset": "x64-windows-msvc-ninja-relwithdebinfo"
         },
         {
+            "name": "v2-avx-msvc",
+            "configurePreset": "x64-windows-msvc-ninja-v2-avx"
+        },
+        {
             "name": "debug-clang",
             "configurePreset": "x64-windows-clang-ninja-debug"
         },
@@ -884,26 +843,6 @@
         {
             "name": "singlethreaded-linux-clang",
             "configurePreset": "x64-linux-clang-ninja-singlethreaded"
-        },
-        {
-            "name": "debug-nopch-clang",
-            "configurePreset": "x64-windows-clang-ninja-debug-nopch"
-        },
-        {
-            "name": "debug-nopch-linux-clang",
-            "configurePreset": "x64-linux-clang-ninja-debug-nopch"
-        },
-        {
-            "name": "macos-arm-llvm-debug-nopch",
-            "configurePreset": "macos-arm-llvm-debug-nopch"
-        },
-        {
-            "name": "nopch-clang",
-            "configurePreset": "x64-windows-clang-ninja-nopch"
-        },
-        {
-            "name": "nopch-linux-clang",
-            "configurePreset": "x64-linux-clang-ninja-nopch"
         },
         {
             "name": "pgo-generate-clang",

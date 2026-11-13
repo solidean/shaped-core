@@ -46,6 +46,8 @@ struct triangle_candidate:
     /// The instance's placement, object space to world space, and its inverse (CHK-408).
     object_to_world: affine3
     world_to_object: affine3
+    /// The cluster the hit is in, as its build numbered it; -1 where the BLAS is built from no clusters.
+    cluster_id: int = -1
 
 /// The nearest triangle a trace accepted, where `is_hit`; otherwise its `t` is the ray's `t_max` and nothing else is set.
 struct triangle_hit:
@@ -61,6 +63,8 @@ struct triangle_hit:
     /// The instance's placement, object space to world space, and its inverse (CHK-408).
     object_to_world: affine3
     world_to_object: affine3
+    /// The cluster the hit is in, as its build numbered it; -1 where the BLAS is built from no clusters.
+    cluster_id: int = -1
 
 /// A box of procedural geometry the traversal entered, which an intersection decides by what it reports.
 /// Its `object_ray` is the ray in the instance's object space, where the box and its primitive stand.
@@ -464,12 +468,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 /// It is dx12's `MaybeReorderThread` and vulkan's `OpReorderThreadWithHintEXT` where the device has `shader_execution_reordering`, and nothing elsewhere.
 @stages(.raygen)
 fun maybe_reorder(hint: uint, bits: int):
-    const if has(.shader_execution_reordering) and target_api == .vulkan:
+    const if has(.shader_execution_reordering):
         reorder_thread_by_hint(hint, bits)
-    else if has(.shader_execution_reordering):
-        "hlsl
-            dx::MaybeReorderThread($hint, (uint)$bits);
-        "
     else:
         return
 
@@ -502,6 +502,13 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let d = world_ray_direction()
     return ray(origin = o, direction = d, t_min = ray_t_min(), t_max = ray_t_current())
 
+// A hit's cluster, read only where the device builds a BLAS from clusters, so no other device needs the capability.
+@internal fun current_cluster_id() -> int:
+    const if has(.clustered_geometry):
+        return hit_cluster_id()
+    else:
+        return -1
+
 @internal fun current_triangle_hit() -> triangle_hit:
     let b = hit_barycentrics()
     return triangle_hit(
@@ -516,6 +523,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
         hit_is_front_face()
         affine3.from_rows(hit_object_to_world_row(0), hit_object_to_world_row(1), hit_object_to_world_row(2))
         affine3.from_rows(hit_world_to_object_row(0), hit_world_to_object_row(1), hit_world_to_object_row(2))
+        current_cluster_id()
     )
 
 @internal fun current_triangle_candidate() -> triangle_candidate:
@@ -531,6 +539,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
         hit_is_front_face()
         affine3.from_rows(hit_object_to_world_row(0), hit_object_to_world_row(1), hit_object_to_world_row(2))
         affine3.from_rows(hit_world_to_object_row(0), hit_world_to_object_row(1), hit_world_to_object_row(2))
+        current_cluster_id()
     )
 
 @internal fun current_procedural_box() -> procedural_box:
@@ -577,6 +586,18 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 
 // ---- the native form ------------------------------------------------------------------------------------------------
 
+@internal fun candidate_cluster_id(q: ray_query) -> int:
+    const if has(.clustered_geometry):
+        return ray_query_candidate_cluster_id(q)
+    else:
+        return -1
+
+@internal fun committed_cluster_id(q: ray_query) -> int:
+    const if has(.clustered_geometry):
+        return ray_query_committed_cluster_id(q)
+    else:
+        return -1
+
 @internal fun candidate_of(q: ray_query, r: ray) -> triangle_candidate:
     let b = ray_query_candidate_barycentrics(q)
     return triangle_candidate(
@@ -590,6 +611,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
         ray_query_candidate_is_front_face(q)
         affine3.from_rows(ray_query_candidate_object_to_world_row(q, 0), ray_query_candidate_object_to_world_row(q, 1), ray_query_candidate_object_to_world_row(q, 2))
         affine3.from_rows(ray_query_candidate_world_to_object_row(q, 0), ray_query_candidate_world_to_object_row(q, 1), ray_query_candidate_world_to_object_row(q, 2))
+        candidate_cluster_id(q)
     )
 
 @internal fun committed_of(q: ray_query, r: ray) -> triangle_hit:
@@ -607,6 +629,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
         ray_query_committed_is_front_face(q)
         affine3.from_rows(ray_query_committed_object_to_world_row(q, 0), ray_query_committed_object_to_world_row(q, 1), ray_query_committed_object_to_world_row(q, 2))
         affine3.from_rows(ray_query_committed_world_to_object_row(q, 0), ray_query_committed_world_to_object_row(q, 1), ray_query_committed_world_to_object_row(q, 2))
+        committed_cluster_id(q)
     )
 
 @internal fun trace_native(
@@ -618,7 +641,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 ) -> triangle_hit:
     let q = ray_query_begin()
     // a structure of triangles holds no box, and the target skips the procedural path whole
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_procedural, mask)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_procedural, mask, r.time)
     // Forced opaque, every candidate is committed by the target itself, and the query is only stepped to its end.
     if flags.has(ray_flags.force_opaque):
         while ray_query_proceed(q) => continue
@@ -689,7 +712,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let q = ray_query_begin()
     // a structure of boxes holds no triangle, and the target skips the triangle path whole
     let kept = without_facing(flags)
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, kept | ray_flags.skip_triangles, mask)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, kept | ray_flags.skip_triangles, mask, r.time)
     // the query keeps the committed box's distance and ids, and the trace keeps what it reported
     let mut best: procedural_hit[A] = procedural_hit.none(r)
     while ray_query_proceed(q):
@@ -720,7 +743,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let q = ray_query_begin()
     let mut given = flags
     if flags.has(ray_flags.skip_triangles) => given = without_facing(flags)
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, given, mask)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, given, mask, r.time)
     // the query keeps the committed hit's distance and ids, and the trace keeps what the last committed box reported
     let mut best: procedural_hit[A] = procedural_hit.none(r)
     while ray_query_proceed(q):

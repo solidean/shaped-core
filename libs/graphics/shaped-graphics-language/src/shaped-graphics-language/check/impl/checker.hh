@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
@@ -378,6 +379,41 @@ struct module_plan
 /// A library file without a `module` line is no module's, and is left out.
 [[nodiscard]] module_plan plan_modules(cc::span<module_file const> library, module_file program);
 
+/// The module `f`'s `module` line names, `a.b` as one name; empty without one.
+[[nodiscard]] cc::string module_name_of(module_file const& f);
+
+/// Whether `plan` reaches library modules a layer may hold: some, and none of them the program's own module.
+/// A library file of the program's module shares the program's scope, which a program's check starts afresh.
+[[nodiscard]] bool may_layer(module_plan const& plan);
+
+/// How long each list is that an id or a position of the check pass names, at one moment of a check.
+/// A chain's link is relocated by these: an id below a link's start stays, one in a later link's part moves with it.
+struct table_sizes
+{
+    isize symbols = 0;
+    isize types = 0;
+    isize members = 0;
+    isize enum_cases = 0;
+    isize functions = 0;
+    isize parameters = 0;
+    isize bindings = 0;
+    isize binding_lists = 0;
+    isize type_lists = 0;
+    isize samplers = 0;
+    isize pipelines = 0;
+    isize pipeline_settings = 0;
+    isize constants = 0;
+    isize call_records = 0;
+    isize written_arguments = 0;
+    isize call_slots = 0;
+    isize function_instances = 0;
+    isize target_texts = 0;
+    isize literals = 0;
+    isize function_arguments = 0;
+
+    constexpr bool operator==(table_sizes const&) const = default;
+};
+
 /// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {
@@ -419,6 +455,31 @@ struct checker
     /// CHK-432: the branches of a struct whose body is a `const if` chain, into `target_type_branches`.
     /// False where it has no SGL branch, which leaves it opaque.
     bool compile_type_branches(symbol_id id, i32 file, ast::struct_decl const& s);
+    /// CHK-522: the branches of a `@target_layout` struct, each a struct of the same fields in its own order, into
+    /// `target_type_branches`; `fields` are its first branch's, which the check judges it by.
+    void compile_layout_branches(symbol_id id,
+                                 type_id type,
+                                 i32 file,
+                                 ast::struct_decl const& s,
+                                 ast::range_of<member_info> fields);
+    /// Whether `file` belongs to a module SGL ships, the only place a `@target_layout` struct is declared (CHK-522).
+    [[nodiscard]] bool is_shipped_module_file(i32 file) const;
+    /// Whether `type` is a struct with a target layout (CHK-522).
+    [[nodiscard]] bool has_target_layout(type_id type) const;
+    /// CHK-522: a struct with a target layout stands as a buffer's element and a value, so the field or the array
+    /// element `type` is reports it at `where`; true where it did.
+    bool refuse_held_layout(i32 file, source_span where, type_id type, cc::string_view holder);
+    /// CHK-522: what each type holding a struct with a target layout is on this compile, the struct of the branch it
+    /// takes or a buffer of one, made before any entry point is flattened, since flattening interns no type.
+    void prepare_target_layouts();
+    /// CHK-522: each binding of the symbols from `first` on, its buffers of a struct with a target layout made buffers of
+    /// the struct this compile writes, once every tree is flattened against the type the check judged.
+    void place_layout_bindings(isize first);
+    /// Pairs of a type and what this compile writes in its place (CHK-522); empty where no compile reaches one.
+    cc::vector<cc::pair<type_id, type_id>> target_layouts;
+    /// The structs with a target layout that no branch of holds on this compile, which a flattened tree reaching one
+    /// reports.
+    cc::vector<type_id> unplaced_layouts;
     /// A text type's condition as nodes a compile decides alone, appended to `into`; false where it reads anything else.
     bool target_condition_of(i32 file, ast::expr_id expr, cc::vector<target_condition>& into);
     /// CHK-431: `@barrier`, `@subgroup` and `@derivatives` declare what a body in a target's text does, and stand on
@@ -539,6 +600,42 @@ struct checker
     cc::vector<footprint_pin> footprint_pins;
     /// Every access of a binding array by index, in each entry point that reaches it.
     cc::vector<index_use> index_uses;
+
+    // ---- what a link of a chain records for its relocation (relocate.cc) --------------------------------------------
+
+    /// Set while a link of a library's chain is checked.
+    bool records_interface = false;
+    /// The files the layers below declared, which a body read from is another layer's.
+    i32 run_from_files = 0;
+    /// The lists' sizes when this check began, and once every signature and default was checked, before any body:
+    /// what lies between is the link's interface, which `interface_digest` hashes with no place in a file in it.
+    table_sizes run_start;
+    table_sizes interface_end;
+    cc::hash128 interface_digest;
+    /// The same over the link's whole part once it is checked: a link checked again into the same is kept whole.
+    cc::hash128 part_digest;
+    /// The functions of lower layers whose bodies this layer inlined or instantiated: an edit of one checks it again.
+    mutable cc::vector<symbol_id> bodies_read;
+    /// Where this check's own entries of `bodies_read` begin.
+    isize bodies_read_from = 0;
+    void note_body_read(symbol_id function) const;
+
+    /// One link of a chain as the links after it were checked over it.
+    struct chain_part
+    {
+        cc::string module;
+        table_sizes start;
+        table_sizes interface_end;
+        table_sizes end;
+        /// How many files the layers up to this one declared.
+        i32 files = 0;
+        cc::hash128 interface_digest;
+        cc::hash128 part_digest;
+        /// The sources of the link's own files: an inlined body is read from its AST, which no table holds.
+        cc::hash128 sources_digest;
+    };
+    /// Every link of the chain up to this one, the first first: what a later link is moved past an edit by.
+    cc::vector<chain_part> chain;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -695,8 +792,19 @@ struct checker
     void compile(symbol_id id);
     void compile_struct(symbol_id id);
     void compile_enum(symbol_id id);
+    /// A `type` alias: the type its value names, which a function type may be as a parameter's whole type (CHK-14).
+    void compile_alias(symbol_id id);
+    /// The struct or enum `id` names: itself for one, and for an alias the one whose type it names.
+    /// `none` for every other symbol, and for an alias of any other type or one that failed.
+    [[nodiscard]] symbol_id declared_type_of(symbol_id id, i32 file, source_span where);
     /// A `const`: its value is a number literal, an enum case or another `const`, and anything else is `unsupported-yet`.
     void compile_const(symbol_id id);
+    /// A function of no parameter and no binding whose body is a value computed before anything runs, a const's or a
+    /// case's, named `name` and standing at `decl` of `file`; it is checked as a test's body is (CHK-224).
+    [[nodiscard]] symbol_id add_value_scope(i32 file, ast::decl_id decl, cc::string name);
+    /// CHK-146: the `int` a case's written `value` computes, once and before anything runs, as a const's is (CHK-219).
+    /// None where it is no `int`, does not compute, or reaches an option, each reported.
+    [[nodiscard]] cc::optional<i32> compute_case_value(i32 file, ast::decl_id member, ast::expr_id value);
     /// CHK-354: `info` as the compile's value for option `id` sets it, or as written where it sets none.
     /// A value of another type than the option's is `invalid-option`, and leaves the default.
     void apply_option_value(symbol_id id, constant_info& info);
@@ -752,12 +860,21 @@ struct checker
     };
     /// A bad argument reports and leaves a shape of one vertex and one triangle.
     [[nodiscard]] mesh_shape mesh_of(i32 file, ast::attribute const& a);
+    /// `@task(x, y, z, meshes = N)`: its workgroup, and the mesh workgroups one of them launches at most, 0 where it
+    /// states none (CHK-484); a bad argument reports and leaves a workgroup of one and no bound.
+    struct task_shape
+    {
+        cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
+        i32 meshes = 0;
+    };
+    [[nodiscard]] task_shape task_of(i32 file, ast::attribute const& a);
     struct tessellation_mode
     {
         tessellation_partitioning partitioning = tessellation_partitioning::integer;
         bool is_clockwise = true;
+        i32 max_factor = k_max_tessellation_factor;
     };
-    /// `@tessellation_control(partitioning = …, winding = …)`, both named (CHK-304).
+    /// `@tessellation_control(partitioning = …, winding = …, max_factor = N)`, the first two named (CHK-304).
     [[nodiscard]] tessellation_mode tessellation_of(i32 file, ast::attribute const& a);
     /// `point_stream[T]`, `line_stream[T]` and `triangle_stream[T]` in a type position (CHK-302).
     [[nodiscard]] type_id resolve_stream(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
@@ -801,8 +918,7 @@ struct checker
                                                              bool is_struct,
                                                              bool is_target_struct = false,
                                                              bool is_vertex_struct = false,
-                                                             bool is_workgroup = false,
-                                                             cc::string_view binding_name = {});
+                                                             bool is_workgroup = false);
     /// The bytes a value of `type` takes in workgroup memory, laid out as WGSL lays out its workgroup variables.
     [[nodiscard]] i32 workgroup_size_of(type_id type) const;
     /// The bytes one element of a `buffer[type]` takes by EMIT-111, before any stride rounding: each value aligned to
@@ -989,6 +1105,15 @@ struct checker
     };
     /// `in_memory`: what GPU memory holds, where a builtin with a layout there is no value of function bodies alone.
     [[nodiscard]] local_only_found local_only_path(type_id type, bool in_memory = false, bool in_link = false) const;
+    /// A value of a hit object that no target can keep: where it stands, and what it is.
+    struct hit_object_misuse
+    {
+        origin where;
+        cc::string detail;
+    };
+    /// CHK-516: the first value of `e` holding a hit object other than a trace's own.
+    /// `e` has every generic and call resolved, since a copy is reached through them as much as written.
+    [[nodiscard]] cc::optional<hit_object_misuse> find_hit_object_misuse(flat_entry_point const& e) const;
     /// CHK-397: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
     /// `is_link`: the edge is a stage link, where a mat2 and a mat3 cross a column per location (CHK-422).
     bool judge_edge_local_only(i32 file, source_span where, type_id type, bool is_link = false);
@@ -1166,6 +1291,8 @@ struct checker
         cc::set<cc::string> const* own = nullptr;
     };
     [[nodiscard]] taken_names module_names();
+    /// The emitted names of the first `count` symbols.
+    [[nodiscard]] cc::shared_ptr<cc::set<cc::string>> names_up_to(isize count) const;
     isize module_names_for = -1;
     cc::set<cc::string> const* own_module_names = nullptr;
     /// The prelude's every module-level name, made once with it and shared by every program's check behind it, and how

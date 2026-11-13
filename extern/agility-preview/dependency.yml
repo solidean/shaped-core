@@ -1,0 +1,33 @@
+# Pin and license for the upstream fetched here.
+# `fetch-agility.py --preview` reads its pin from this file; extern/agility/ holds the script and the CMake wrapper both use.
+
+upstreams:
+  - name: Agility SDK preview
+    homepage: https://www.nuget.org/packages/Microsoft.Direct3D.D3D12
+    install: on-request
+    source: nuget
+    # The package id on nuget.org, which with `version` names the download.
+    repo: Microsoft.Direct3D.D3D12
+    track: none
+    version: 1.722.1-preview
+    asset: Microsoft.Direct3D.D3D12.1.722.1-preview.nupkg
+    digest_algo: sha256
+    pin_hash: fb20dcbe0fe51e489b0c3985fd8f7e4010e493153bbd99725c466a4b4932da16
+    # The D3D12 runtime: there is nothing to run it on anywhere else.
+    unavailable_on: [linux, macos]
+    license: LicenseRef-Microsoft-DirectX-Preview
+    license_files: [.install/LICENSE.txt, .install/LICENSE-CODE.txt]
+    used_by: shaped-graphics' dx12 backend in a build configured with SC_AGILITY_PREVIEW, for clustered geometry and partitioned TLAS
+    notes: |
+      The preview D3D12 runtime, which carries DXR's clustered geometry and partitioned TLAS ahead of any retail release.
+      libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md is what sg builds on it.
+
+      A DEVELOPMENT dependency only, never shipped: the preview terms differ from the retail ones extern/agility pins.
+      They drop the distributable-code section, forbid sharing or distributing the software, and terminate 30 days after
+      a commercial release first becomes available.
+      So nothing builds against it unless a person configures with SC_AGILITY_PREVIEW=ON (`dev.py --agility-preview`),
+      and that build has a build directory of its own.
+
+      ON REQUEST, and fetch-agility.py refuses to run without `--accept-license`, as for the retail pin.
+      The runtime enables its preview features only through experimental features, which need Windows Developer Mode.
+      Re-read the terms on any bump: they are time-sensitive, and the license allowlist names them individually.

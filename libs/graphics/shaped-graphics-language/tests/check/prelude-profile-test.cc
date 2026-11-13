@@ -12,6 +12,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
+#include <shaped-graphics-language/check/artifact.hh>
 
 // Where a compile's time goes when the program is small and the prelude is not.
 // The prelude is checked once per process, before the rounds, so a round is the copy of its state and the program's check.
@@ -139,6 +140,23 @@ TEST("sgl profile - parsing and checking the prelude itself",
         cc::rec::unregister_listener(handle);
         captured = capture.take().spliced_samples();
     }
+    // the compilation model's artifacts: what a process that reads the checked prelude back pays instead of the check
+    auto modules = cc::vector<sgl::check::module_file>();
+    for (auto const& f : sgl::parsed_prelude())
+        modules.push_back({.file = f.file, .ast = f.ast});
+    auto const saved = sgl::check::save_artifact(*sgl::checked_prelude(), "profile");
+    REQUIRE(saved.has_value());
+    auto load_secs = 1e9;
+    for (auto i = 0; i < rounds; ++i)
+    {
+        auto const load_start = cc::current_time_steady_secs();
+        auto const loaded
+            = sgl::check::load_artifact(saved.value(), "profile", modules, sgl::builtins::default_registry());
+        load_secs = cc::min(load_secs, cc::current_time_steady_secs() - load_start);
+        CHECK(loaded.has_value());
+    }
+    cc::println("artifact: {} bytes, loaded in {:.2f} ms", saved.value().size(), load_secs * 1000);
+
     auto bytes = sgl::isize(0);
     for (auto const& f : sgl::prelude_files())
         bytes += f.source.size();

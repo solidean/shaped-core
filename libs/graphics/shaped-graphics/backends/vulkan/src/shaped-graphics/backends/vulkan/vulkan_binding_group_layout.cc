@@ -191,6 +191,16 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
         ctx._descriptor_functions.get_binding_offset(ctx._device, layout, bindings[i].index, &offset);
         binding_offsets[i] = isize(offset);
     }
+    // AMD's driver sizes a variable-count binding at no elements where the spec says its whole capacity
+    // (docs/bugs-external/amd-vulkan-variable-count-layout-size-omits-binding).
+    if (unbounded_capacity > 0)
+    {
+        auto const last = bindings.size() - 1;
+        auto const full
+            = binding_offsets[last] + isize(unbounded_capacity) * descriptor_size_of(ctx, bindings[last].type);
+        if (isize(layout_size) < full)
+            layout_size = VkDeviceSize(full);
+    }
 
     auto owned = cc::vector<sg::binding>::create_copy_of(bindings);
     auto owned_samplers = cc::vector<sg::named_sampler>::create_copy_of(static_samplers);

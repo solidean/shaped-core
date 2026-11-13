@@ -405,8 +405,9 @@ TEST("sgl - a buffer's length is how many elements the bound buffer holds (CHK-4
     CHECK(run.result.leaves[0].as_float() == float(k_store_elements));
 }
 
-TEST("sgl emit - a buffer's length is read through GetDimensions in HLSL and arrayLength in WGSL, and refused in MSL "
-     "(EMIT-195)")
+TEST("sgl emit - a buffer's length is read through GetDimensions in HLSL, arrayLength in WGSL, and its group's lengths "
+     "in "
+     "MSL (EMIT-195)")
 {
     constexpr auto source = "binding work:\n"
                             "    values: mut buffer[float]\n"
@@ -427,9 +428,13 @@ TEST("sgl emit - a buffer's length is read through GetDimensions in HLSL and arr
     REQUIRE(wgsl.has_value()).dump("error", wgsl.has_error() ? wgsl.error() : cc::string());
     CHECK(wgsl.value().text.contains("arrayLength(&")).dump("text", wgsl.value().text);
     CHECK(wgsl.value().text.contains(") * 4u)")).dump("text", wgsl.value().text);
+    // sg writes each slot's byte length behind the group's slots: an element count divides it, a bytes' is it
     auto const msl = text_for(sgl::emit::target::msl);
-    REQUIRE(msl.has_error());
-    CHECK(msl.error().contains("which a Metal buffer does not carry")).dump("error", msl.error());
+    REQUIRE(msl.has_value()).dump("error", msl.has_error() ? msl.error() : cc::string());
+    CHECK(msl.value().text.contains("    uint sgl_lengths [[id(2)]][2];\n")).dump("text", msl.value().text);
+    CHECK(msl.value().text.contains("(work_group.sgl_lengths[0] / uint(sizeof(work_values[0])))"))
+        .dump("text", msl.value().text);
+    CHECK(msl.value().text.contains("work_group.sgl_lengths[1]")).dump("text", msl.value().text);
 }
 
 TEST("sgl guards - a bytes load past the end or off a word ends the invocation, and one inside runs alike (LEGAL-66)")

@@ -1,0 +1,883 @@
+// The fixed-function tessellator, for a target without one: the domain points and primitives of one patch, from its
+// factors, exactly as D3D's tessellator places and orders them (CHK-527).
+//
+// Everything `@internal` here is this file's own, and no program finds it.
+// Every location is 16.16 fixed point, as D3D computes it, so a target's float rounding never moves a point.
+// The output goes through a sink, `tessellation_point` and `tessellation_index` of its type, so the same walk writes a
+// buffer on the GPU and a hash in a test.
+//
+// Ported from the reference tessellator Microsoft published, which Mesa carries as
+// src/gallium/auxiliary/tessellator/tessellator.cpp, under this notice:
+//
+//     Copyright (c) Microsoft Corporation
+//
+//     Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+//     associated documentation files (the "Software"), to deal in the Software without restriction,
+//     including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+//     and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
+//     subject to the following conditions:
+//
+//     The above copyright notice and this permission notice shall be included in all copies or substantial
+//     portions of the Software.
+//
+//     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+//     NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+//     IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+//     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+//     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+/// The partitionings, numbered as `@tessellation_control` names them; functions, since a const cannot be `@internal` yet.
+@internal fun tessellation_integer() -> int => 0
+@internal fun tessellation_fractional_even() -> int => 1
+@internal fun tessellation_fractional_odd() -> int => 2
+
+/// What a patch is cut into, as D3D's output topologies name them: a clockwise triangle keeps the corners a walk
+/// hands it, a counter-clockwise one swaps the last two.
+@internal fun tessellation_triangle_cw() -> int => 0
+@internal fun tessellation_triangle_ccw() -> int => 1
+@internal fun tessellation_line() -> int => 2
+
+@internal fun fxp_one() -> uint => 65536u
+@internal fun fxp_half() -> uint => 32768u
+@internal fun fxp_one_third() -> uint => 21845u
+@internal fun fxp_two_thirds() -> uint => 43690u
+@internal fun fxp_fraction_mask() -> uint => 65535u
+@internal fun fxp_integer_mask() -> uint => 2147418112u
+
+/// 1 / n in 16.16 for n segments, entry 0 unused.
+@internal fun fxp_reciprocals() -> uint[65] => [
+    4294967295u, 65536u, 32768u, 21845u, 16384u, 13107u, 10923u, 9362u, 8192u, 7282u, 6554u, 5958u, 5461u, 5041u,
+    4681u, 4369u, 4096u, 3855u, 3641u, 3449u, 3277u, 3121u, 2979u, 2849u, 2731u, 2621u, 2521u, 2427u, 2341u, 2260u,
+    2185u, 2114u, 2048u, 1986u, 1928u, 1872u, 1820u, 1771u, 1725u, 1680u, 1638u, 1598u, 1560u, 1524u, 1489u, 1456u,
+    1425u, 1394u, 1365u, 1337u, 1311u, 1285u, 1260u, 1237u, 1214u, 1192u, 1170u, 1150u, 1130u, 1111u, 1092u, 1074u,
+    1057u, 1040u, 1024u
+]
+
+/// Where point i of a half edge ends up at the largest factor, in the ruler function's split order, which decides
+/// when a transition stitch advances its inner or its outer row.
+@internal fun final_point_positions() -> int[33] => [
+    0, 32, 16, 8, 17, 4, 18, 9, 19, 2, 20, 10, 21, 5, 22, 11, 23, 1, 24, 12, 25, 6, 26, 13, 27, 3, 28, 14, 29, 7, 30,
+    15, 31
+]
+/// The first and last entries of the table above that a half edge of n points reaches, 0 and 1 skipping the walk.
+@internal fun stitch_loop_starts() -> int[33] => [
+    1, 1, 17, 9, 9, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2
+]
+@internal fun stitch_loop_ends() -> int[33] => [
+    0, 0, 17, 17, 25, 25, 25, 25, 29, 29, 29, 29, 29, 29, 29, 29, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31,
+    31, 31, 31, 32
+]
+
+/// How the diagonals of a regular stitch lean.
+@internal fun diagonals_inside_to_outside() -> int => 0
+@internal fun diagonals_inside_to_outside_except_middle() -> int => 1
+@internal fun diagonals_mirrored() -> int => 2
+
+/// What placing points along one factor needs, worked out once per factor.
+@internal struct tessellation_context:
+    inv_floor_segments: uint
+    inv_ceil_segments: uint
+    half_fraction: uint
+    half_points: int
+    split_point: int
+
+/// A patch's factors as the tessellator reads them: clamped, rounded where the partitioning is integer, in 16.16, and
+/// what each makes of its edge.
+/// A triangle uses outside 0 to 2 and inside 0, a quad outside 0 to 3 and inside 0 (U) and 1 (V), and isolines
+/// outside 0 for their density and outside 1 for their detail.
+@internal struct tessellation_patch:
+    domain: int
+    is_culled: bool
+    /// Every factor is 1, which is the domain's corners and nothing else.
+    is_minimum: bool
+    outside: uint[4]
+    outside_odd: bool[4]
+    outside_context: tessellation_context[4]
+    outside_points: int[4]
+    inside: uint[2]
+    inside_odd: bool[2]
+    inside_context: tessellation_context[2]
+    inside_points: int[2]
+    /// Where the first interior ring's points start.
+    inside_base: int
+    point_count: int
+    index_count: int
+
+/// The walk's state: the topology it writes and the index patching that lets a stitch see two straight rows where a
+/// ring wraps around to its start.
+@internal struct tessellation_walk:
+    output: int
+    is_patched: bool
+    is_patched2: bool
+    inside_delta: int
+    inside_bad: int
+    inside_replacement: int
+    outside_patch_base: int
+    outside_delta: int
+    outside_bad: int
+    outside_replacement: int
+    invert_base: int
+    invert_end: int
+    corner_bad: int
+    corner_replacement: int
+
+@internal fun fxp_ceil(x: uint) -> uint:
+    if (x & fxp_fraction_mask()) != 0u => return (x & fxp_integer_mask()) + fxp_one()
+    return x
+
+@internal fun fxp_floor(x: uint) -> uint => x & fxp_integer_mask()
+
+/// `v` without its highest set bit; 0 for 0.
+@internal fun remove_msb(v: int) -> int:
+    if v <= 0 => return 0
+    return v & ~(1 << (first_bit_high(v as uint) as int))
+
+/// A factor in 16.16, rounded to nearest even, for the positive factors the clamps leave.
+@internal fun tessellation_fixed_of(x: float) -> uint:
+    let bits = reinterpret_as_uint(x)
+    let exponent = (((bits >> 23u) & 255u) as int) - 127
+    if exponent < -17 => return 0u
+    let mantissa = (bits & 8388607u) | 8388608u
+    let extra = 7 - exponent
+    if extra < 0 => return mantissa << ((-extra) as uint)
+    let lsb = 1u << (extra as uint)
+    let bias = lsb >> 1u
+    let mut rounded = mantissa
+    if (rounded & lsb) != 0u or (rounded & (lsb - 1u)) > bias => rounded += bias
+    return rounded >> (extra as uint)
+
+/// Whether a factor is above zero, read from its bits so a target's fast float math cannot fold the NaN away.
+@internal fun tessellation_is_positive(x: float) -> bool:
+    let bits = reinterpret_as_uint(x)
+    return bits != 0u and bits <= 2139095040u
+
+/// `x` clamped to [lo, hi], a NaN to `lo`.
+@internal fun tessellation_clamped(x: float, lo: float, hi: float) -> float:
+    if (reinterpret_as_uint(x) & 2147483647u) > 2139095040u => return lo
+    return min(hi, max(lo, x))
+
+@internal fun tessellation_is_even(x: float) -> bool => ((x as int) & 1) == 0
+
+/// The points along an edge of factor `f`, both ends included.
+@internal fun tessellation_point_count(f: uint, odd: bool) -> int:
+    if odd => return ((fxp_ceil(fxp_half() + (f + 1u) / 2u) * 2u) >> 16u) as int
+    return (((fxp_ceil((f + 1u) / 2u) * 2u) >> 16u) as int) + 1
+
+@internal fun tessellation_context_of(f: uint, odd: bool) -> tessellation_context:
+    let mut halved = (f + 1u) / 2u
+    // a factor of 1 halves to 1/2, which is treated as even
+    if odd or halved == fxp_half() => halved += fxp_half()
+    let lo = fxp_floor(halved)
+    let hi = fxp_ceil(halved)
+    let points = (hi >> 16u) as int
+    let mut split = points + 1
+    if hi != lo:
+        if not odd => split = (remove_msb((lo >> 16u) as int) << 1) + 1
+        else if lo == fxp_one() => split = 0
+        else => split = (remove_msb(((lo >> 16u) as int) - 1) << 1) + 1
+    let mut floor_segments = ((lo * 2u) >> 16u) as int
+    let mut ceil_segments = ((hi * 2u) >> 16u) as int
+    if odd:
+        floor_segments -= 1
+        ceil_segments -= 1
+    return {
+        inv_floor_segments = fxp_reciprocals()[floor_segments]
+        inv_ceil_segments = fxp_reciprocals()[ceil_segments]
+        half_fraction = halved - lo
+        half_points = points
+        split_point = split
+    }
+
+/// Where point `index` of an edge stands, in 16.16 from 0 to 1.
+@internal fun tessellation_place(c: tessellation_context, index: int, odd: bool) -> uint:
+    let mut point = index
+    let mut is_flipped = false
+    if point >= c.half_points:
+        point = (c.half_points << 1) - point
+        if odd => point -= 1
+        is_flipped = true
+    // the middle, which 16-bit fixed point cannot reach exactly below
+    if point == c.half_points => return fxp_half()
+    let on_ceil = point as uint
+    let mut on_floor = on_ceil
+    if point > c.split_point => on_floor -= 1u
+    let at_floor = on_floor * c.inv_floor_segments
+    let at_ceil = on_ceil * c.inv_ceil_segments
+    let lerped = (at_floor * (fxp_one() - c.half_fraction) + at_ceil * c.half_fraction + fxp_half()) >> 16u
+    if is_flipped => return fxp_one() - lerped
+    return lerped
+
+/// The lower and upper bound of an edge factor under a partitioning.
+@internal fun tessellation_bounds(partitioning: int) -> float2:
+    if partitioning == tessellation_fractional_even() => return float2(2.0, 64.0)
+    if partitioning == tessellation_fractional_odd() => return float2(1.0, 63.0)
+    return float2(1.0, 64.0)
+
+/// The empty patch: culled, or not yet processed.
+@internal fun tessellation_patch.none(domain: int) -> tessellation_patch:
+    let c = tessellation_context(0u, 0u, 0u, 0, 0)
+    return {
+        domain = domain
+        is_culled = true
+        is_minimum = false
+        outside = [0u, 0u, 0u, 0u]
+        outside_odd = [false, false, false, false]
+        outside_context = [c, c, c, c]
+        outside_points = [0, 0, 0, 0]
+        inside = [0u, 0u]
+        inside_odd = [false, false]
+        inside_context = [c, c]
+        inside_points = [0, 0]
+        inside_base = 0
+        point_count = 0
+        index_count = 0
+    }
+
+/// The edge and inside factors of a triangle (`domain` 3) or a quad (4), as the tessellator reads them.
+/// `edges` holds 3 or 4 factors, `inside` 1 or 2.
+@internal fun tessellation_process(
+    domain: int, partitioning: int, edges: float4, inside_in: float2
+) -> tessellation_patch:
+    let mut p = tessellation_patch.none(domain)
+    let edge_count = domain
+    let axis_count = domain - 2
+    for e in 0 ..< edge_count:
+        if not tessellation_is_positive(edges[e]) => return p
+    p.is_culled = false
+
+    let is_integer = partitioning == tessellation_integer()
+    let is_odd = partitioning == tessellation_fractional_odd()
+    let bounds = tessellation_bounds(partitioning)
+    let mut outside = float4(0.0)
+    for e in 0 ..< edge_count:
+        outside[e] = tessellation_clamped(edges[e], bounds.x, bounds.y)
+        if is_integer => outside[e] = ceil(outside[e])
+
+    // under fractional odd partitioning, any factor above 1 forces the inside above 1 too, so there is a picture frame
+    let mut lower = bounds.x
+    if is_odd:
+        let mut is_framed = false
+        for e in 0 ..< edge_count:
+            is_framed = is_framed or outside[e] > 1.00000762939453125
+        if domain == 4:
+            for a in 0 ..< 2:
+                is_framed = is_framed or inside_in[a] > 1.00000762939453125
+        if is_framed => lower = 1.0000152587890625
+    let mut inside = float2(0.0)
+    for a in 0 ..< axis_count:
+        inside[a] = tessellation_clamped(inside_in[a], lower, bounds.y)
+        if is_integer => inside[a] = ceil(inside[a])
+
+    // integer partitioning takes each factor's own parity, a factor of 1 even; fractional takes the partitioning's
+    for e in 0 ..< edge_count:
+        p.outside_odd[e] = is_odd
+        if is_integer => p.outside_odd[e] = not tessellation_is_even(outside[e])
+        p.outside[e] = tessellation_fixed_of(outside[e])
+    for a in 0 ..< axis_count:
+        p.inside_odd[a] = is_odd
+        if is_integer => p.inside_odd[a] = not (tessellation_is_even(inside[a]) or inside[a] == 1.0)
+        p.inside[a] = tessellation_fixed_of(inside[a])
+
+    if is_integer or is_odd:
+        let mut is_minimum = true
+        for e in 0 ..< edge_count:
+            is_minimum = is_minimum and p.outside[e] == fxp_one()
+        for a in 0 ..< axis_count:
+            is_minimum = is_minimum and p.inside[a] == fxp_one()
+        if is_minimum:
+            p.is_minimum = true
+            p.point_count = domain
+            p.index_count = select(domain == 3, 3, 6)
+            return p
+
+    let mut points = 0
+    for e in 0 ..< edge_count:
+        p.outside_context[e] = tessellation_context_of(p.outside[e], p.outside_odd[e])
+        p.outside_points[e] = tessellation_point_count(p.outside[e], p.outside_odd[e])
+        points += p.outside_points[e]
+    points -= edge_count
+    for a in 0 ..< axis_count:
+        p.inside_context[a] = tessellation_context_of(p.inside[a], p.inside_odd[a])
+        // at least 3 or 4 allows a degenerate transition where the inside factor is 1
+        p.inside_points[a] = max(select(p.inside_odd[a], 4, 3), tessellation_point_count(p.inside[a], p.inside_odd[a]))
+    p.inside_base = points
+    if domain == 3:
+        let rings = (p.inside_points[0] >> 1) - 1
+        if p.inside_odd[0] => points += 3 * (rings * (rings + 1) - rings)
+        else => points += 3 * (rings * (rings + 1)) + 1
+    else:
+        points += (p.inside_points[0] - 2) * (p.inside_points[1] - 2)
+    p.point_count = points
+    p.index_count = tessellation_index_count(p)
+    return p
+
+/// The density and detail factors of isolines, as the tessellator reads them.
+@internal fun tessellation_process_isolines(
+    partitioning: int, density_in: float, detail_in: float
+) -> tessellation_patch:
+    let mut p = tessellation_patch.none(2)
+    if not (tessellation_is_positive(density_in) and tessellation_is_positive(detail_in)) => return p
+    p.is_culled = false
+    let bounds = tessellation_bounds(partitioning)
+    let density = ceil(tessellation_clamped(density_in, 1.0, 64.0))
+    let mut detail = tessellation_clamped(detail_in, bounds.x, bounds.y)
+    if partitioning == tessellation_integer():
+        detail = ceil(detail)
+        p.outside_odd[1] = not tessellation_is_even(detail)
+    else:
+        p.outside_odd[1] = partitioning == tessellation_fractional_odd()
+    p.outside[1] = tessellation_fixed_of(detail)
+    p.outside_context[1] = tessellation_context_of(p.outside[1], p.outside_odd[1])
+    p.outside_points[1] = tessellation_point_count(p.outside[1], p.outside_odd[1])
+    // the density is always integer, and its last line, at V == 1, is not drawn
+    p.outside_odd[0] = not tessellation_is_even(density)
+    p.outside[0] = tessellation_fixed_of(density)
+    p.outside_context[0] = tessellation_context_of(p.outside[0], p.outside_odd[0])
+    p.outside_points[0] = tessellation_point_count(p.outside[0], p.outside_odd[0]) - 1
+    p.point_count = p.outside_points[1] * p.outside_points[0]
+    p.index_count = p.outside_points[0] * (p.outside_points[1] - 1) * 2
+    return p
+
+/// The indices a processed triangle or quad patch is cut into: what its rings and its center stitch.
+@internal fun tessellation_index_count(p: tessellation_patch) -> int:
+    let mut count = 0
+    if p.domain == 3:
+        let rings = (p.inside_points[0] + 1) >> 1
+        let mut outside_points = p.outside_points
+        for ring in 1 ..< rings:
+            let inside_points = p.inside_points[0] - 2 * ring
+            for e in 0 ..< 3:
+                count += (inside_points + outside_points[e] - 2) * 3
+                outside_points[e] = inside_points
+        if p.inside_odd[0] => count += 3
+        return count
+    let rows = int2((p.inside_points[0] + 1) >> 1, (p.inside_points[1] + 1) >> 1)
+    let rings = min(rows.x, rows.y)
+    let mut outside_points = p.outside_points
+    for ring in 1 ..< rings:
+        let inside_points = int2(p.inside_points[0] - 2 * ring, p.inside_points[1] - 2 * ring)
+        for e in 0 ..< 4:
+            let along = inside_points[(e + 1) & 1]
+            count += (along + outside_points[e] - 2) * 3
+            outside_points[e] = along
+    if p.inside_points[0] > p.inside_points[1] and p.inside_odd[1]:
+        count += (((((p.inside_points[0] >> 1) - (p.inside_points[1] >> 1)) << 1) + select(p.inside_odd[0], 1, 2)) * 6)
+    else if p.inside_points[1] >= p.inside_points[0] and p.inside_odd[0]:
+        count += (((((p.inside_points[1] >> 1) - (p.inside_points[0] >> 1)) << 1) + select(p.inside_odd[1], 1, 2)) * 6)
+    return count
+
+@internal fun tessellation_walk.of(output: int) -> tessellation_walk:
+    return {
+        output = output
+        is_patched = false
+        is_patched2 = false
+        inside_delta = 0
+        inside_bad = 0
+        inside_replacement = 0
+        outside_patch_base = 0
+        outside_delta = 0
+        outside_bad = 0
+        outside_replacement = 0
+        invert_base = 0
+        invert_end = 0
+        corner_bad = 0
+        corner_replacement = 0
+    }
+
+/// The point an index a stitch wrote really is, past the patching that made a wrapped ring look straight.
+@internal fun tessellation_patched(w: tessellation_walk, index: int) -> int:
+    if w.is_patched:
+        if index >= w.outside_patch_base:
+            if index == w.outside_bad => return w.outside_replacement
+            return index + w.outside_delta
+        if index == w.inside_bad => return w.inside_replacement
+        return index + w.inside_delta
+    if w.is_patched2:
+        if index >= w.invert_base:
+            if index == w.corner_bad => return w.corner_replacement
+            return w.invert_end - index
+        if index == w.corner_bad => return w.corner_replacement
+    return index
+
+@internal fun tessellation_put_index[S](w: tessellation_walk, s: mut S, index: int, at: int){sg_tessellation_points, sg_tessellation_indices}:
+    tessellation_index(mut s, at, tessellation_patched(w, index))
+
+/// A triangle the walk hands clockwise, stored in the walk's own winding.
+@internal fun tessellation_put_triangle[S](w: tessellation_walk, s: mut S, i0: int, i1: int, i2: int, at: int){sg_tessellation_points, sg_tessellation_indices}:
+    tessellation_put_index(w, mut s, i0, at)
+    if w.output == tessellation_triangle_cw():
+        tessellation_put_index(w, mut s, i1, at + 1)
+        tessellation_put_index(w, mut s, i2, at + 2)
+    else:
+        tessellation_put_index(w, mut s, i2, at + 1)
+        tessellation_put_index(w, mut s, i1, at + 2)
+
+/// Two rows of points whose counts differ by at most one at each end, joined by triangles.
+@internal fun tessellation_stitch_regular[S](
+    w: tessellation_walk, s: mut S, is_trapezoid: bool, diagonals: int, base_index: int, inside_points: int
+    inside_base: int, outside_base: int
+){sg_tessellation_points, sg_tessellation_indices}:
+    let mut at = base_index
+    let mut inside = inside_base
+    let mut outside = outside_base
+    if is_trapezoid:
+        tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+        at += 3
+        outside += 1
+    if diagonals == diagonals_inside_to_outside():
+        for p in 0 ..< inside_points - 1:
+            tessellation_put_triangle(w, mut s, inside, outside, outside + 1, at)
+            tessellation_put_triangle(w, mut s, inside, outside + 1, inside + 1, at + 3)
+            at += 6
+            inside += 1
+            outside += 1
+    else if diagonals == diagonals_inside_to_outside_except_middle():
+        let mut p = 0
+        while p < inside_points / 2 - 1:
+            tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+            tessellation_put_triangle(w, mut s, inside, outside + 1, inside + 1, at + 3)
+            at += 6
+            inside += 1
+            outside += 1
+            p += 1
+        tessellation_put_triangle(w, mut s, outside, inside + 1, inside, at)
+        tessellation_put_triangle(w, mut s, outside, outside + 1, inside + 1, at + 3)
+        at += 6
+        inside += 1
+        outside += 1
+        p += 2
+        while p < inside_points:
+            tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+            tessellation_put_triangle(w, mut s, inside, outside + 1, inside + 1, at + 3)
+            at += 6
+            inside += 1
+            outside += 1
+            p += 1
+    else:
+        let mut p = 0
+        while p < inside_points / 2:
+            tessellation_put_triangle(w, mut s, outside, inside + 1, inside, at)
+            tessellation_put_triangle(w, mut s, outside, outside + 1, inside + 1, at + 3)
+            at += 6
+            inside += 1
+            outside += 1
+            p += 1
+        while p < inside_points - 1:
+            tessellation_put_triangle(w, mut s, inside, outside, outside + 1, at)
+            tessellation_put_triangle(w, mut s, inside, outside + 1, inside + 1, at + 3)
+            at += 6
+            inside += 1
+            outside += 1
+            p += 1
+    if is_trapezoid => tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+
+/// Two rows of points of any two factors joined by triangles, advancing each row in the ruler function's order.
+@internal fun tessellation_stitch_transition[S](
+    w: tessellation_walk, s: mut S, base_index: int, inside_base: int, inside_half_in: int, inside_odd: bool
+    outside_base: int, outside_half_in: int, outside_odd: bool
+){sg_tessellation_points, sg_tessellation_indices}:
+    let mut at = base_index
+    let inside_half = inside_half_in - select(inside_odd, 1, 0)
+    let outside_half = outside_half_in - select(outside_odd, 1, 0)
+    let mut outside = outside_base
+    let mut inside = inside_base
+    let first = min(stitch_loop_starts()[inside_half], stitch_loop_starts()[outside_half])
+    let last = max(stitch_loop_ends()[inside_half], stitch_loop_ends()[outside_half])
+    if final_point_positions()[0] < outside_half:
+        tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+        at += 3
+        outside += 1
+    for i in first ..= last:
+        if final_point_positions()[i] < inside_half:
+            tessellation_put_triangle(w, mut s, inside, outside, inside + 1, at)
+            at += 3
+            inside += 1
+        if final_point_positions()[i] < outside_half:
+            tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+            at += 3
+            outside += 1
+    if inside_odd != outside_odd or inside_odd:
+        if inside_odd == outside_odd:
+            // a quad in the middle
+            tessellation_put_triangle(w, mut s, inside, outside, inside + 1, at)
+            tessellation_put_triangle(w, mut s, inside + 1, outside, outside + 1, at + 3)
+            at += 6
+            inside += 1
+            outside += 1
+        else if not inside_odd:
+            // a triangle pointing inside
+            tessellation_put_triangle(w, mut s, inside, outside, outside + 1, at)
+            at += 3
+            outside += 1
+        else:
+            // a triangle pointing outside
+            tessellation_put_triangle(w, mut s, inside, outside, inside + 1, at)
+            at += 3
+            inside += 1
+    let mut i = last
+    while i >= first:
+        if final_point_positions()[i] < outside_half:
+            tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+            at += 3
+            outside += 1
+        if final_point_positions()[i] < inside_half:
+            tessellation_put_triangle(w, mut s, inside, outside, inside + 1, at)
+            at += 3
+            inside += 1
+        i -= 1
+    if final_point_positions()[0] < outside_half => tessellation_put_triangle(w, mut s, outside, outside + 1, inside, at)
+
+/// Every point and primitive of a processed patch, in D3D's order, through the sink.
+/// `output` is one of `tessellation_triangle_cw()`, `tessellation_triangle_ccw()` and `tessellation_line()`.
+@internal fun tessellate[S](p: tessellation_patch, output: int, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
+    if p.is_culled => return
+    let w = tessellation_walk.of(output)
+    if p.domain == 2:
+        tessellate_isolines(p, mut s)
+    else if p.is_minimum:
+        if p.domain == 3:
+            tessellation_point(mut s, 0, 0u, fxp_one())
+            tessellation_point(mut s, 1, 0u, 0u)
+            tessellation_point(mut s, 2, fxp_one(), 0u)
+            tessellation_put_triangle(w, mut s, 0, 1, 2, 0)
+        else:
+            tessellation_point(mut s, 0, 0u, 0u)
+            tessellation_point(mut s, 1, fxp_one(), 0u)
+            tessellation_point(mut s, 2, fxp_one(), fxp_one())
+            tessellation_point(mut s, 3, 0u, fxp_one())
+            tessellation_put_triangle(w, mut s, 0, 1, 3, 0)
+            tessellation_put_triangle(w, mut s, 1, 2, 3, 3)
+    else if p.domain == 3:
+        tessellate_triangle_points(p, mut s)
+        tessellate_triangle_connectivity(p, w, mut s)
+    else:
+        tessellate_quad_points(p, mut s)
+        tessellate_quad_connectivity(p, w, mut s)
+
+@internal fun tessellate_isolines[S](p: tessellation_patch, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
+    let lines = p.outside_points[0]
+    let per_line = p.outside_points[1]
+    let mut at = 0
+    for line in 0 ..< lines:
+        let v = tessellation_place(p.outside_context[0], line, p.outside_odd[0])
+        for point in 0 ..< per_line:
+            tessellation_point(mut s, at, tessellation_place(p.outside_context[1], point, p.outside_odd[1]), v)
+            at += 1
+    let mut index = 0
+    for line in 0 ..< lines:
+        for point in 1 ..< per_line:
+            tessellation_index(mut s, index, line * per_line + point - 1)
+            tessellation_index(mut s, index + 1, line * per_line + point)
+            index += 2
+
+/// The exterior ring clockwise from V, then the interior rings spiralling in, then the center of an even patch.
+@internal fun tessellate_triangle_points[S](p: tessellation_patch, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
+    let mut at = 0
+    for edge in 0 ..< 3:
+        let last = p.outside_points[edge] - 1
+        for i in 0 ..< last:
+            // edge 0 (VW) has V decreasing and edge 2 (UV) U decreasing, so both walk their points backwards
+            let q = select((edge & 1) == 1, i, last - i)
+            let param = tessellation_place(p.outside_context[edge], q, p.outside_odd[edge])
+            if edge == 0 => tessellation_point(mut s, at, 0u, param)
+            else => tessellation_point(mut s, at, param, select(edge == 2, fxp_one() - param, 0u))
+            at += 1
+    let c = p.inside_context[0]
+    let odd = p.inside_odd[0]
+    let rings = p.inside_points[0] >> 1
+    for ring in 1 ..< rings:
+        let last = p.inside_points[0] - 1 - ring
+        for edge in 0 ..< 3:
+            // the ring's distance from its edge, mapped to barycentric space and rounded back to 16.16
+            let perp = (tessellation_place(c, ring, odd) * fxp_two_thirds() + fxp_half()) >> 16u
+            let pulled = (perp + 1u) / 2u
+            for i in ring ..< last:
+                let q = select((edge & 1) == 1, i, last - (i - ring))
+                let param = tessellation_place(c, q, odd)
+                if edge == 0 => tessellation_point(mut s, at, perp, param - pulled)
+                else if edge == 1 => tessellation_point(mut s, at, param - pulled, perp)
+                else => tessellation_point(mut s, at, param - pulled, fxp_one() - (param - pulled) - perp)
+                at += 1
+    if not odd => tessellation_point(mut s, at, fxp_one_third(), fxp_one_third())
+
+@internal fun tessellate_triangle_connectivity[S](p: tessellation_patch, w_in: tessellation_walk, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
+    let mut w = w_in
+    let rings = (p.inside_points[0] + 1) >> 1
+    let mut outside_half = int3(
+        p.outside_context[0].half_points, p.outside_context[1].half_points, p.outside_context[2].half_points
+    )
+    let mut outside_odd = bool3(p.outside_odd[0], p.outside_odd[1], p.outside_odd[2])
+    let mut outside_points = int3(p.outside_points[0], p.outside_points[1], p.outside_points[2])
+    let mut inside_base = p.inside_base
+    let mut outside_base = 0
+    let mut index = 0
+    for ring in 1 ..< rings:
+        let inside_points = p.inside_points[0] - 2 * ring
+        let ring_inside_base = inside_base
+        let ring_outside_base = outside_base
+        for edge in 0 ..< 3:
+            let triangles = inside_points + outside_points[edge] - 2
+            let mut stitch_inside = inside_base
+            let mut stitch_outside = outside_base
+            if edge == 2:
+                w.inside_delta = inside_base
+                w.inside_bad = inside_points - 1
+                w.inside_replacement = ring_inside_base
+                w.outside_patch_base = w.inside_bad + 1
+                w.outside_delta = outside_base - w.outside_patch_base
+                w.outside_bad = w.outside_patch_base + outside_points[edge] - 1
+                w.outside_replacement = ring_outside_base
+                w.is_patched = true
+                stitch_inside = 0
+                stitch_outside = w.outside_patch_base
+            if ring == 1:
+                tessellation_stitch_transition(
+                    w, mut s, index, stitch_inside, p.inside_context[0].half_points, p.inside_odd[0], stitch_outside
+                    outside_half[edge], outside_odd[edge]
+                )
+            else:
+                tessellation_stitch_regular(
+                    w, mut s, true, diagonals_mirrored(), index, inside_points, stitch_inside, stitch_outside
+                )
+            w.is_patched = false
+            index += triangles * 3
+            outside_base += outside_points[edge] - 1
+            inside_base += inside_points - 1
+            outside_points[edge] = inside_points
+        if ring == 1:
+            outside_half = int3(p.inside_context[0].half_points)
+            outside_odd = bool3(p.inside_odd[0])
+    // an odd patch's center is a single triangle
+    if p.inside_odd[0] => tessellation_put_triangle(w, mut s, outside_base, outside_base + 1, outside_base + 2, index)
+
+/// The exterior ring clockwise from the top left, then the interior rings spiralling in, then the middle row of an
+/// even patch.
+@internal fun tessellate_quad_points[S](p: tessellation_patch, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
+    let mut at = 0
+    for edge in 0 ..< 4:
+        let last = p.outside_points[edge] - 1
+        for i in 0 ..< last:
+            let q = select(edge == 1 or edge == 2, i, last - i)
+            let param = tessellation_place(p.outside_context[edge], q, p.outside_odd[edge])
+            if (edge & 1) == 1 => tessellation_point(mut s, at, param, select(edge == 3, fxp_one(), 0u))
+            else => tessellation_point(mut s, at, select(edge == 2, fxp_one(), 0u), param)
+            at += 1
+    let rings = min(p.inside_points[0], p.inside_points[1]) >> 1
+    for ring in 1 ..< rings:
+        let last = int2(p.inside_points[0] - 1 - ring, p.inside_points[1] - 1 - ring)
+        for edge in 0 ..< 4:
+            let across = edge & 1
+            let along = (edge + 1) & 1
+            let perp_index = select(edge < 2, ring, last[across])
+            let perp = tessellation_place(p.inside_context[across], perp_index, p.inside_odd[across])
+            for i in ring ..< last[along]:
+                let q = select(edge == 1 or edge == 2, i, last[along] - (i - ring))
+                let param = tessellation_place(p.inside_context[along], q, p.inside_odd[along])
+                if along == 1 => tessellation_point(mut s, at, perp, param)
+                else => tessellation_point(mut s, at, param, perp)
+                at += 1
+    if p.inside_points[0] > p.inside_points[1] and not p.inside_odd[1]:
+        let last = p.inside_points[0] - 1 - rings
+        for i in rings ..= last:
+            tessellation_point(mut s, at, tessellation_place(p.inside_context[0], i, p.inside_odd[0]), fxp_half())
+            at += 1
+    else if p.inside_points[1] >= p.inside_points[0] and not p.inside_odd[0]:
+        let mut i = p.inside_points[1] - 1 - rings
+        while i >= rings:
+            tessellation_point(mut s, at, fxp_half(), tessellation_place(p.inside_context[1], i, p.inside_odd[1]))
+            at += 1
+            i -= 1
+
+@internal fun tessellate_quad_connectivity[S](p: tessellation_patch, w_in: tessellation_walk, s: mut S){sg_tessellation_points, sg_tessellation_indices}:
+    let mut w = w_in
+    let rows = int2((p.inside_points[0] + 1) >> 1, (p.inside_points[1] + 1) >> 1)
+    let rings = min(rows.x, rows.y)
+    // even partitioning leaves a degenerate row of points, an exception to the order around a ring
+    let degenerate = int2(select(p.inside_odd[1], -1, rows.y - 1), select(p.inside_odd[0], -1, rows.x - 1))
+    let mut outside_half = int4(
+        p.outside_context[0].half_points, p.outside_context[1].half_points, p.outside_context[2].half_points
+        p.outside_context[3].half_points
+    )
+    let mut outside_odd = bool4(p.outside_odd[0], p.outside_odd[1], p.outside_odd[2], p.outside_odd[3])
+    let mut outside_points = int4(p.outside_points[0], p.outside_points[1], p.outside_points[2], p.outside_points[3])
+    let mut inside_base = p.inside_base
+    let mut outside_base = 0
+    let mut index = 0
+    for ring in 1 ..< rings:
+        let inside_points = int2(p.inside_points[0] - 2 * ring, p.inside_points[1] - 2 * ring)
+        let ring_inside_base = inside_base
+        let ring_outside_base = outside_base
+        for edge in 0 ..< 4:
+            let axis = (edge + 1) & 1
+            let triangles = inside_points[axis] + outside_points[edge] - 2
+            let mut stitch_inside = inside_base
+            let mut stitch_outside = outside_base
+            if edge == 3:
+                if ring == degenerate[axis]:
+                    w.invert_base = inside_base + 1
+                    w.corner_bad = outside_base + outside_points[edge] - 1
+                    w.corner_replacement = ring_outside_base
+                    w.invert_end = (w.invert_base << 1) - 1
+                    stitch_inside = w.invert_base
+                    w.is_patched2 = true
+                else:
+                    w.inside_delta = inside_base
+                    w.inside_bad = inside_points[axis] - 1
+                    w.inside_replacement = ring_inside_base
+                    w.outside_patch_base = w.inside_bad + 1
+                    w.outside_delta = outside_base - w.outside_patch_base
+                    w.outside_bad = w.outside_patch_base + outside_points[edge] - 1
+                    w.outside_replacement = ring_outside_base
+                    stitch_inside = 0
+                    stitch_outside = w.outside_patch_base
+                    w.is_patched = true
+            else if edge == 2 and ring == degenerate[axis]:
+                w.invert_base = inside_base
+                w.corner_bad = -1
+                w.corner_replacement = -1
+                w.invert_end = w.invert_base << 1
+                stitch_inside = w.invert_base
+                w.is_patched2 = true
+            if ring == 1:
+                tessellation_stitch_transition(
+                    w, mut s, index, stitch_inside, p.inside_context[axis].half_points, p.inside_odd[axis]
+                    stitch_outside, outside_half[edge], outside_odd[edge]
+                )
+            else:
+                tessellation_stitch_regular(
+                    w, mut s, true, diagonals_mirrored(), index, inside_points[axis], stitch_inside, stitch_outside
+                )
+            w.is_patched = false
+            w.is_patched2 = false
+            index += triangles * 3
+            outside_base += outside_points[edge] - 1
+            if edge == 2 and ring == degenerate[axis] => inside_base -= inside_points[axis] - 1
+            else => inside_base += inside_points[axis] - 1
+            outside_points[edge] = inside_points[axis]
+        if ring == 1:
+            let across = int2(p.inside_context[0].half_points, p.inside_context[1].half_points)
+            outside_half = int4(across.x, across.y, across.x, across.y)
+            outside_odd = bool4(p.inside_odd[0], p.inside_odd[1], p.inside_odd[0], p.inside_odd[1])
+    // the center: a row of quads where the shorter axis is odd
+    if p.inside_points[0] > p.inside_points[1] and p.inside_odd[1]:
+        let quads = ((((p.inside_points[0] >> 1) - (p.inside_points[1] >> 1)) << 1) + select(p.inside_odd[0], 1, 2))
+        w.invert_base = outside_base + quads + 2
+        w.corner_bad = w.invert_base
+        w.corner_replacement = outside_base
+        w.invert_end = w.invert_base + w.invert_base + quads
+        w.is_patched2 = true
+        tessellation_stitch_regular(
+            w, mut s, false, diagonals_inside_to_outside(), index, quads + 1, w.invert_base, outside_base + 1
+        )
+    else if p.inside_points[1] >= p.inside_points[0] and p.inside_odd[0]:
+        let quads = ((((p.inside_points[1] >> 1) - (p.inside_points[0] >> 1)) << 1) + select(p.inside_odd[1], 1, 2))
+        w.invert_base = outside_base + quads + 1
+        w.corner_bad = -1
+        w.invert_end = w.invert_base + w.invert_base + quads
+        w.is_patched2 = true
+        let diagonals = select(
+            p.inside_odd[1], diagonals_inside_to_outside_except_middle(), diagonals_inside_to_outside()
+        )
+        tessellation_stitch_regular(w, mut s, false, diagonals, index, quads + 1, w.invert_base, outside_base)
+
+/// A sink that only counts, and says whether the walk handed every point and index in storage order.
+@internal struct tessellation_counter:
+    points: int
+    indices: int
+    is_in_order: bool
+
+@internal fun tessellation_counter.empty() -> tessellation_counter => tessellation_counter(0, 0, true)
+
+@internal fun tessellation_point(s: mut tessellation_counter, at: int, u: uint, v: uint):
+    s.is_in_order = s.is_in_order and at == s.points
+    s.points += 1
+
+@internal fun tessellation_index(s: mut tessellation_counter, at: int, index: int):
+    s.is_in_order = s.is_in_order and at == s.indices
+    s.indices += 1
+
+/// A triangle (`domain` 3), a quad (4) or isolines (2) as the tessellator reads it, from the factors a control stage
+/// returned: a triangle's edges and inside, a quad's edges and two insides, the isolines' density and detail.
+@internal fun tessellation_patch_of(domain: int, partitioning: int, edges: float4, inside: float2) -> tessellation_patch:
+    if domain == 2 => return tessellation_process_isolines(partitioning, edges.x, edges.y)
+    return tessellation_process(domain, partitioning, edges, inside)
+
+/// `x`, or `cap` where `x` is above it; a NaN stays one, so it still culls.
+@internal fun tessellation_capped(x: float, cap: float) -> float:
+    if x > cap => return cap
+    return x
+
+/// Patch `patch`'s factors from its record, capped at the pipeline's largest factor, which the scratch is sized for.
+@internal fun tessellation_patch_at(patch: uint){sg_tessellation_draw, sg_tessellation_patches} -> tessellation_patch:
+    let draw = sg_tessellation_draw.values[0]
+    let shape = sg_tessellation_draw.values[1]
+    let cap = reinterpret_as_float(shape.w)
+    let at = patch * 8u
+    let mut f = float4(0.0)
+    for i in 0 ..< 4:
+        f[i] = tessellation_capped(reinterpret_as_float(sg_tessellation_patches.words[at + (i as uint)]), cap)
+    let mut inside = float2(0.0)
+    for i in 0 ..< 2:
+        inside[i] = tessellation_capped(reinterpret_as_float(sg_tessellation_patches.words[at + 4u + (i as uint)]), cap)
+    return tessellation_patch_of(shape.x as int, draw.z as int, f, inside)
+
+/// The sink the GPU walk writes through: a patch's points and indices at the places the scan gave it.
+@internal struct tessellation_writer:
+    patch: uint
+    first_point: uint
+    first_index: uint
+
+@internal fun tessellation_point(s: mut tessellation_writer, at: int, u: uint, v: uint){sg_tessellation_points}:
+    let word = (s.first_point + (at as uint)) * 3u
+    sg_tessellation_points.words[word] = u
+    sg_tessellation_points.words[word + 1u] = v
+    sg_tessellation_points.words[word + 2u] = s.patch
+
+@internal fun tessellation_index(s: mut tessellation_writer, at: int, index: int){sg_tessellation_indices}:
+    sg_tessellation_indices.words[s.first_index + (at as uint)] = s.first_point + (index as uint)
+
+// The passes between the control stage's and the evaluation stage's (CHK-527), one thread a patch of every instance.
+// `sg_tessellation_draw` says what the draw is; the factors come first, written by the control stage's compute form.
+
+/// Each patch's point and index counts, into words 6 and 7 of its record.
+@internal @compute(64) fun sg_tessellation_count(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches}:
+    let draw = sg_tessellation_draw.values[0]
+    let patch = id.x as uint
+    if patch >= draw.x * draw.y => return
+    let p = tessellation_patch_at(patch)
+    sg_tessellation_patches.words[patch * 8u + 6u] = p.point_count as uint
+    sg_tessellation_patches.words[patch * 8u + 7u] = p.index_count as uint
+
+/// The counts scanned into each patch's first point and index, in patch order, then the draw's and the evaluation
+/// pass's arguments.
+@internal @compute(1) fun sg_tessellation_scan(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches, sg_tessellation_args}:
+    let draw = sg_tessellation_draw.values[0]
+    let patches = (draw.x * draw.y) as int
+    let mut points = 0u
+    let mut indices = 0u
+    for patch in 0 ..< patches:
+        let at = (patch as uint) * 8u
+        let point_count = sg_tessellation_patches.words[at + 6u]
+        let index_count = sg_tessellation_patches.words[at + 7u]
+        sg_tessellation_patches.words[at + 6u] = points
+        sg_tessellation_patches.words[at + 7u] = indices
+        points += point_count
+        indices += index_count
+    sg_tessellation_args.words[0] = indices
+    sg_tessellation_args.words[1] = 1u
+    sg_tessellation_args.words[2] = 0u
+    sg_tessellation_args.words[3] = 0u
+    sg_tessellation_args.words[4] = 0u
+    sg_tessellation_args.words[5] = (points + 63u) / 64u
+    sg_tessellation_args.words[6] = 1u
+    sg_tessellation_args.words[7] = 1u
+    sg_tessellation_args.words[8] = points
+
+/// Each patch's points and indices, at the places the scan gave it.
+@internal @compute(64) fun sg_tessellation_generate(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches, sg_tessellation_points, sg_tessellation_indices}:
+    let draw = sg_tessellation_draw.values[0]
+    let patch = id.x as uint
+    if patch >= draw.x * draw.y => return
+    let p = tessellation_patch_at(patch)
+    let mut s = tessellation_writer(patch, sg_tessellation_patches.words[patch * 8u + 6u], sg_tessellation_patches.words[patch * 8u + 7u])
+    tessellate(p, draw.w as int, mut s)

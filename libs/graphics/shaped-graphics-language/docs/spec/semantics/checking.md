@@ -38,7 +38,14 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
   An operator is looked up the same way: `a - b` in a prelude file chooses among the prelude's `@operator` functions alone.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
-* **CHK-14** A `type` alias is `unsupported-yet`, and it still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
+* **CHK-14** `type name = value` is an **alias**: a symbol whose name stands for the type its value names, in every type position.
+  A value of the alias is a value of that type, so an alias makes no type of its own, and two aliases of one type are one type.
+  An alias of a struct is called as the struct is, through its overload set as seen where the struct is declared, and reaches its type scope.
+  An alias of an enum names its cases, `curve.linear`.
+  An alias of a function type stands where that type does, a parameter's whole type alone (CHK-317); anywhere else it is `wrong-kind-of-name`.
+  An alias that names itself, directly or through other aliases, is a `dependency-cycle`.
+  An alias is no value, as its type's own name is none (CHK-63), and no type of a `fun T.name` extension yet, which is `unsupported-yet`.
+  A `const` is carried by CHK-219.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `notation` is `unsupported-yet`; `use` is CHK-347.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
@@ -63,14 +70,18 @@ The program is checked with a **library**: the files of the module directories i
 
 * **CHK-346** A library file belongs to the module its `module` line names, and every library file naming one module is a file of it ([why](why/checking.md#chk-346)).
   A library file without a `module` line belongs to no module and is not read.
-  A module's name is one identifier; a dotted one is `unsupported-yet`.
+  A module's name may be dotted, `module sv.scene`, and is then that whole name: no module `sv` holds it, nor is it one of a module `sv` (CHK-347).
   Only the modules the program reaches through `use`, directly or through another module, are checked.
   A program file whose `module` line names a module of the library is checked as one more file of that module.
+* **CHK-523** SGL ships modules of its own, which a program uses as it uses any other, with no module directory of its own: `accel` alone so far.
+  A shipped module joins the library where the program or a library file has a `use` of it.
+  A library file handed in as that module's own file, `shaped-graphics-language/prelude/accel.sgl`, stands in for the shipped one, and so does a program that is that file.
 * **CHK-347** `use m` binds the name `m`, and `use m as n` the name `n`, to module `m`, in the file that writes it alone ([why](why/checking.md#chk-347)).
   It brings no name of `m` into the file: what `m` declares is reached as `m.name` (CHK-348).
+  `use a.b` binds `b`, the last part of the module's name, so two modules whose names end alike need `as` to be used by one file.
   A module is no value, so its name where a value or a type stands is `wrong-kind-of-name`.
   A `use` of a module no library file declares is `unknown-module`, and one of the file's own module `use-of-own-module`.
-  A dotted path is `unsupported-yet`, and so is `use` in a function body.
+  A `use` in a function body is `unsupported-yet`.
   Two `use` lines binding one name, or a `use` binding a name a declaration of its file's module or of the prelude has, is `duplicate-declaration`, and that `use` binds nothing.
 * **CHK-348** `m.name`, where `m` is a name a `use` of the file binds and no local hides, stands for the module-level name `name` of module `m` wherever a bare name could stand.
   That is a value, a call, a type, an entry of a binding list, a binding member, an enum case and `m.T.f(…)`.
@@ -125,9 +136,9 @@ use view
   Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
   A double's maths functions are CHK-458's, and no subgroup operation takes a 64-bit value yet.
 * **CHK-458** A `double` and its vectors take `sqrt`, `inverse_sqrt`, `floor`, `ceil`, `trunc`, `round`, `fract`, `sign` and `saturate`.
-  They take `is_nan`, `is_inf`, `mix`, `step` and `smoothstep` too, the vectors `dot`, `length`, `distance` and `normalize`, and a `double3` `cross`.
+  They take `is_nan`, `is_inf`, `mix`, `step`, `smoothstep` and `fma` too, the vectors `dot`, `length`, `distance` and `normalize`, and a `double3` `cross`.
   No transcendental takes one, `sin` to `pow`: no target computes one in 64 bits, and a call is `no-matching-overload` whose detail says so; `x as float` takes the float's.
-  Neither DXIL nor DXC's SPIR-V has a double `sqrt` or rounding, and DXC narrows a double handed to its float functions without a word, so HLSL writes each as a function of the text (EMIT-219).
+  Neither DXIL nor DXC's SPIR-V has a double `sqrt` or rounding, and DXC narrows a double handed to its float functions without a word, so the prelude writes each in SGL (EMIT-219).
 * **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.
 * **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
 * **CHK-454** A 64-bit value crosses a stage link, flat as an integer does (CHK-273), on every target that has its type (EMIT-196).
@@ -159,10 +170,12 @@ use view
   A matrix has no subscript `m[i]`: HLSL's is a row and WGSL's and MSL's a column, so the name says which one is read.
   An index outside the matrix has no value, as EVAL-84 has it of a call no target defines.
 * **CHK-408** `affine3` is the prelude's affine map of space: a linear part and a translation, held as three rows of four `float`s ([why](why/checking.md#chk-408)).
-  It is a value of function bodies alone, as `mat3` is (CHK-397).
+  GPU memory holds it as CHK-518 states, and no stage edge carries one.
   `affine3.from_rows(r0, r1, r2)` makes one of its three `float4` rows, and `a.row(i)` reads one back, as CHK-407 reads a matrix's.
   `a * p` of a `pos3` translates it and gives a `pos3`, `a * v` of a `vec3` does not and gives a `vec3`, and `a * v` of a `float4` takes its own `w` and gives a `float3`.
   A ray-tracing stage's hit, candidate or box holds its placement as `object_to_world` and `world_to_object`, and crosses no stage edge for them: the flat tree builds it in place.
+* **CHK-518** An `affine3` in GPU memory is its three rows of four `float`s, 16 bytes apart: 48 bytes at an alignment of 16 ([why](why/checking.md#chk-518)).
+  That holds in a constant block, in a buffer and in a struct alike, and the host fills it as `slib::gpu_affine3`.
 * **CHK-233** A struct and an enum each have a **type scope**: the properties and functions declared in its block, and its extensions (CHK-237).
   A field and a case are members of the type, and no function.
 * **CHK-234** A `fun` in a type's block whose first parameter is `self` is a **method**, and `self` is a parameter of that type; `mut self` is CHK-48.
@@ -208,7 +221,9 @@ use view
   A property or a function of the type scope, an extension included, whose name is a swizzle of the type is `member-name-clash`, at that declaration.
 * **CHK-352** A swizzle whose letters are distinct is a place wherever its operand is one (CHK-112), so `=` and every `op=` take it.
   Its operand's indices are evaluated once, before any component is written, as a mut argument's are (CHK-316).
-  One with a repeated letter, `v.xx = p`, is `not-assignable`, and a swizzle as a mut argument, `f(mut v.xy)`, is `unsupported-yet`.
+  One with a repeated letter, `v.xx = p`, is `not-assignable`.
+  It is a mut argument too, `f(mut v.zx)`: the body reads and writes exactly those lanes, and a field or a swizzle of the parameter is one of them.
+  A swizzle of a struct of the program is a new value built of its fields, which no body can write through, so as a mut argument it is `unsupported-yet`.
 
 ```sgl
 struct falloff:
@@ -275,11 +290,16 @@ fun f(x: float) -> float:
   `mod(a, b)` is the remainder that floors, `a - b * floor(a / b)`, as GLSL's does, with `b` a scalar or of `a`'s type.
   The float `%` truncates instead, as HLSL's and MSL's `fmod` do (CHK-313).
 * **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).
-  An option is a `bool`, an `int` or an enum case, an image format among them; one of another type is `unsupported-yet`.
-  An option whose value names another option is `unsupported-yet` too, whether directly or through what it computes; a plain `const` naming one follows it.
+  An option is a `bool`, a scalar or an enum case, an image format among them; one of another type is `unsupported-yet`.
+  A value for a `float` option is written as its literal is, an integer among them, and the option holds the float nearest it.
+  A value for a `uint` option is an integer literal from 0 to 2^32 - 1.
   A computed `const` reaches every option its value reaches, wherever it is named (CHK-355).
+* **CHK-519** An option whose default names another option, directly or through what it computes, **follows** that option ([why](why/checking.md#chk-519)).
+  A compile that gives it no value computes its default from the value the compile gives the one it names, and a value given for it stands instead.
+  It reaches every option it follows, so an entry point that names it is compiled anew for each value of those.
+  A host's options struct holds it unset, as a `cc::optional`, so a host that sets only the option it follows has it follow.
 * **CHK-354** A compile names a value for each option it sets, and the option stands for that value wherever it is named, as CHK-219 has a `const` stand for its own.
-  So every rule that judges a constant judges each set of values on its own.
+  So a compile judges every rule on a constant with the values it gives, and a test with the defaults: no rule judges a value no compile gives.
   An option of the program's own module is named by its name, and one of a module the program uses by its qualified name, `common.taps` (CHK-348) ([why](why/checking.md#chk-354)).
   So a program's `taps` and a module's `common.taps` are two options, each set on its own.
   A value for a name no option is named by, a value of another type than the option's, and a second value for one name are each `invalid-option`, and the detail names it.
@@ -322,7 +342,10 @@ An option is read like any `const`, and a branch on it leaves the text with what
 * **CHK-143** A member of an `enum` block that is a case gives the type one **case**, named by that member, in the order written.
 * **CHK-144** A case has an `int` value: the one it writes, or one more than the case before it, and 0 for the first.
 * **CHK-145** Two cases of one enum may hold one value, so `all = 7` beside `red = 1` is a legal alias; two that hold one name is `duplicate-declaration` by CHK-28.
-* **CHK-146** The written value of a case is an `int` literal, by CHK-61; any other expression there is `unsupported-yet`.
+* **CHK-146** The written value of a case is an `int`, computed once before anything runs, as a const's value is (CHK-219).
+  So `vertex = 1 << 0` and `double = lanes * 2` are case values, a function of the module among what they call.
+  A value that reaches an option is `unsupported-yet`, since an enum is one type for every compile.
+  A value that names a case of its own enum needs the enum it is part of, which is a `dependency-cycle`.
 * **CHK-147** `enum.case` is an expression of the enum's type, and a name the enum has no case of is `unknown-member`.
 * **CHK-148** An enum's own name is no value, by CHK-63.
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
@@ -359,9 +382,10 @@ enum light_kind:
   A test whose asserts are what it checks ends in `true // why`.
   A test that expects `.fail`, `.assert` or `.discard` is exempt, since it cannot pass without its run ending so, and so is a test with no statement, which the AST pass reported.
 * **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else, and `assert condition, message` a message too (CHK-424).
-* **CHK-424** A message is a one-line quoted literal, and it is no value: a string has no type, and a quoted literal anywhere else is `unsupported-yet`.
+* **CHK-424** A message is a quoted literal, and it is no value: a string has no type, and a quoted literal anywhere else is `unsupported-yet`.
+  A multi-line message is its content lines joined by `\n`, past the opening line's indentation, as STR-15 to STR-21 give a multi-line string.
   Each interpolation is checked where the message stands, and is a scalar, a plain vector of one, or an enum; anything else is `type-mismatch`.
-  A multi-line message is `unsupported-yet`, and so is an `assert` message that is no quoted literal.
+  An `assert` message that is no quoted literal is `unsupported-yet`.
   `print value` with no quotes prints the one value, of any type.
   A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
@@ -437,13 +461,13 @@ fun shade(k: float) -> float:
 |---|---|
 | a function | `@builtin`, `@pure`, `@barrier`, `@subgroup`, `@derivatives`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal`, `@preferred_subgroup_size` |
 | a function, as a ray-tracing stage | `@raygen`, `@miss`, `@closest_hit`, `@any_hit`, `@intersection`, `@callable` |
-| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal`, `@swizzle` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal`, `@swizzle`, `@target_layout` |
 | an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
 | a const | `@shadowable`, `@option` |
 | a test | `@expect` |
 | a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding`, `@padding` |
 | a binding member | `@unfilterable`, `@non_filtering`, `@sampler`, `@coherent`, `@atomic` |
-| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@per_draw`, `@edge_factors` and `@inside_factors` on any other |
+| a struct field | `@bits` and `@absent` in a branch of a `@target_layout` struct (CHK-526), `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@per_draw`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 | a `for` statement | `@unroll` |
@@ -452,7 +476,7 @@ fun shade(k: float) -> float:
   That holds for every path a lookup takes: a name, the type scope and declaring scope of a first argument's type (CHK-247), and `T.f(…)` (CHK-248).
   A builtin step that a function of the prelude wraps is `@internal` too, such as a step of a ray query or of a pipeline's trace.
   On a declaration of the program's file it hides nothing.
-* **CHK-324** A function of the prelude may take a resource, as a function of the program may take a texture, an image or a sampler (CHK-366).
+* **CHK-324** A function of the prelude may take a resource, as a function of the program may (CHK-366).
   Inlining substitutes it: the argument stands wherever the parameter is named, since no target holds a resource in a local.
 
 ```sgl
@@ -497,6 +521,7 @@ fun shade(k: float) -> float:
   An attribute on the block is judged as on any other binding member.
 * **CHK-205** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
 * **CHK-206** A texture, an image and a sampler are parameters of a `@builtin` function, of a function of the prelude (CHK-324) and of a function of the program (CHK-366).
+  A buffer is a parameter of the last two.
   Anywhere else a value stands each is `unsupported-yet`.
 * **CHK-207** A builtin's image parameter names the texel it loads or stores instead of a format, `out image_2d[float4]`, and is a pattern:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
@@ -521,10 +546,13 @@ fun shade(k: float) -> float:
   It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).
   Either way it filters as a static sampler does for CHK-210 and CHK-281.
   Its name anywhere else is `unsupported-yet`; a test names it as a function does, and samples a texture its driver binds with it.
-* **CHK-366** A function of the program may take a texture, an image or a sampler as a parameter, which inlining substitutes as it does a prelude function's (CHK-324) ([why](why/checking.md#chk-366)).
+* **CHK-366** A function of the program may take a resource as a parameter: a buffer, `bytes`, a texture, an image, a sampler or an acceleration structure ([why](why/checking.md#chk-366)).
+  Inlining substitutes it as it does a prelude function's (CHK-324).
   Its argument is a binding member of exactly the parameter's type, an element of a binding array, a file-scope sampler, or a parameter of that type handed on.
-  Anything else does not match it, by CHK-70.
+  Anything else does not match it, by CHK-70, and the access is part of the type: a `buffer[float]` is no argument of a `mut buffer[float]`, nor the reverse.
+  `mut` on a buffer, `bytes` or an image is its access, as on a binding member, and never a caller's place (CHK-315).
   The parameter stands for its argument wherever it is named, so the member's access, its `@sampler` and its footprint are the parameter's, and the function lists no binding for it.
+  A buffer or `bytes` parameter is subscripted, its `length` read, or handed to a call; a texture, an image or a sampler is handed to a call.
   A local, a field and a result of a resource type stay `unsupported-yet`.
 * **CHK-367** `img[xy]` is a texel of an image member: a read of it is `img.load(xy)`, and an assignment to it is `img.store(xy, v)` ([why](why/checking.md#chk-367)).
   The subscript takes the arguments `load` takes, so an array's layer is named, `img[xy, layer = 2]`.
@@ -695,6 +723,7 @@ fun shade(k: float) -> float:
   WGSL refuses at shader creation what CHK-270, CHK-311 and CHK-312 refuse, so they hold on every target, and an entry point is written for all of them or none (EMIT-13).
 * **CHK-311** A call with no value is the normal error `constant-without-value`.
   That is an integer `/` or `%` by a constant with a zero component, whatever it divides, and a call of constants that EVAL-84 or EVAL-87 leaves without a value.
+  One that stands in a prelude body is reported at the program's call that reached it, since a program cannot fix the prelude.
 * **CHK-312** A call of constants whose value its type cannot hold is the normal error `constant-not-representable`, which WGSL folds exactly and refuses.
   That is an `int` sum, difference, product, negation, absolute value or left shift outside the `int`s, and a `uint` shifted left past its top bit.
   It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN.
@@ -742,6 +771,8 @@ fun shade(k: float) -> float:
   The interpreter's choice of the unspecified value is saturation at the integer's bounds, and 0 for a NaN.
 * **CHK-417** `h.bits` of a `half` is its 16 bits as the low bits of a `uint`, whose high bits are zero, and `half.from_bits(u)` is the `half` the low 16 bits of `u` are.
   The bits travel in a `uint` on every target, since WGSL has no 16-bit integer (EMIT-109), so the arithmetic on them is ordinary `uint` arithmetic.
+* **CHK-517** `d.bits` of a `double` is its 64 bits as a `uint2`, the low word first, and `double.from_bits(u)` is the `double` the two words of `u` are.
+  No `ulong` stands between, so neither needs `shader_int64`, and every bit comes back as it went, a NaN's payload too.
 * **CHK-412** `vec3` and `pos3` convert to `float3`, and `hpos4` to `float4`, with `as`: the value as the plain vector of its width, each component kept.
   Only that direction converts; the way back is a constructor, `vec3(..v)`, which says what the numbers become.
 * **CHK-396** `T(x)`, where `T` is a numeric scalar or a plain vector, is `x as T` wherever `as` converts the type of `x` to `T`, and `x` where it is a `T` already ([why](why/checking.md#chk-396)).
@@ -887,6 +918,9 @@ fun f() -> float:
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
   The count is the host's, so one shader serves one view and two alike: a pipeline of one view reads 0.
   It needs `view_instancing`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
+* **CHK-515** A pipeline of more than one view whose pixel stage takes no `@view_index` is `pixel-stage-ignores-view`, a warning.
+  Intel's dx12 driver may draw nothing for one, so a pixel stage takes the view and multiplies its color by `keep_view(view)`, which costs nothing elsewhere.
+  A hand-built pipeline is not a `pipeline` declaration, so nothing reports it.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`, one color value, or nothing (CHK-418).
 * **CHK-418** A `@pixel fun` that returns one numeric scalar or plain vector of `float`, `half`, `int` or `uint` writes it as its one color target, named `color`.
   It stands for a `@pixel struct` of that one member, which the compiler declares as `<entry>_target`, or under a name past it where the module has that one.
@@ -903,6 +937,21 @@ fun f() -> float:
   `sample` without a `level` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
 * **CHK-370** Each workgroup size of `@compute(x, y, z)` is an `int` literal, or names an `int` `const`, an option included; each is at least 1, or it is `invalid-attribute-arguments`.
+  More than three sizes is `invalid-attribute-arguments` too, and none is CHK-520's.
+* **CHK-520** A bare `@compute` states no size, and the compile chooses one from the axes of `@thread_id` its inlined body reads.
+  That is 64 where it reads `id.x` alone or no thread id, 8 × 8 where it reads `id.y`, and 4 × 4 × 4 where it reads `id.z` or hands the vector on whole.
+  Each is a multiple of 64, which fills a wave of 32 and of 64, and Intel's modes of 8 and 16 lanes.
+  Nothing the entry point reaches may read the group it runs in, so no size is observable.
+  A barrier, a uniform load, a subgroup or quad operation the inlined body reaches is `invalid-entry-point` at that call.
+  So is a `@workgroup` binding it lists, and `@local_thread_id`, `@local_thread_index`, `@workgroup_id`, `@subgroup_size` or `@subgroup_invocation_id` among its inputs.
+  The host dispatches it by threads alone, and a thread past the grid sg writes returns before the body; sg refuses a dispatch by groups.
+  dx12, vulkan and WebGPU read the grid from the reserved `sg_dispatch_grid`, and metal dispatches exactly the grid's threads ([reserved-bindings.md](../../reserved-bindings.md)).
+* **CHK-521** A stated size whose entry point a bare `@compute` could have sized warns `workgroup-wastes-lanes` where it wastes what that one would not.
+  Such a size is habit rather than its algorithm's, which a barrier, workgroup memory or an input of CHK-520's would make it, and only then is it judged.
+  It wastes lanes below 32 threads but for 1, a serial kernel's, and at a total that is no multiple of 32.
+  So does one past WebGPU's 256 threads, or 256, 256 and 64 along the axes.
+  And so does a group along more than one axis over a body that reads `id.x` alone, whose rows but the first lie past a grid of one row.
+  The detail names the size a bare `@compute` would choose.
 * **CHK-371** `@preferred_subgroup_size(n)` on a `@compute` entry point asks for subgroups of `n` invocations where the device runs that size, and promises nothing ([why](why/checking.md#chk-371)).
   The shader is correct at any size, reads the size it got through `@subgroup_size`, and needs no feature.
   `n` is a power of two from 4 to 128, written as an `int` literal or as an `int` `const`.
@@ -982,6 +1031,22 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   There a field read or a construction of it is `invalid-target-text`, since its fields are its SGL branch's alone, and so is a compile that takes no branch or one with no spelling in its language.
   A text type is a value of function bodies alone (CHK-397), so no binding, buffer or stage edge holds it, whatever branch a compile takes.
   A test runs on no target, so it takes the SGL branch, and one that takes another is `invalid-target-text`.
+* **CHK-522** `@target_layout` on a struct whose body is a `const if` chain lays its fields out per target ([why](why/checking.md#chk-522)).
+  Each branch declares the same fields, in the order that target's memory holds them.
+  It exists for the records a GPU API reads, whose order differs between APIs, so only a module SGL ships declares one (CHK-523); elsewhere it is `unsupported-yet`.
+  A branch that is a target's text, or one whose fields differ from the first branch's in a name or a type, is `invalid-target-text`.
+  `@target_layout` on a generic struct, or on a body that is no chain, is `invalid-attribute-arguments`.
+  The check judges the struct by its first branch: its fields, their defaults and its constructor's parameters are that branch's for every compile.
+  A compile writes the struct of the branch its target takes wherever the struct stands, so EMIT-110 places that branch's order, and a field is the same field in every branch.
+  A construction is written in that order too, and one with two arguments that have an effect is `unsupported-yet`, since the order would tell.
+  A compile for a target that no branch names reports the first use of the struct as `invalid-target-text`; a description and a test write for no target and take the first branch.
+  It stands as a buffer's element and as a value of a body, and in nothing else: a struct field, an array element, a constant block member, a stage edge or a payload holding one is `unsupported-yet`.
+  No host code mirrors it, so a program's C++ side stays the same on every backend: the host sizes a buffer of one through sg, which knows each backend's stride.
+* **CHK-526** In a branch of a `@target_layout` struct, `@bits(n)` places a `uint` field in the next `n` bits of a 32-bit word, and `@absent` declares a field the target's record lacks.
+  A run of `@bits` fields shares a word, lowest bits first, and a field that would cross its top starts the next word; any other field ends the run.
+  A construction packs each field into its bits, masked to them, and drops an absent one, whose argument may then have no effect.
+  A read or a write of a packed or an absent field alone is `unsupported-yet` on a compile that takes such a branch, so a shader builds the record whole.
+  `@bits` takes 1 to 32, and either attribute outside a branch of a `@target_layout` struct, or `@bits` on a field that is no `uint`, is `invalid-attribute-arguments`.
 * **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
   It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
   Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
@@ -1096,10 +1161,10 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-490** A binding member `T[]` of a texture, an image, a buffer or `bytes` is an **unbounded binding array**, whose length each binding group decides.
   It needs `binding_arrays` and `unbounded_binding_arrays`, and is its binding's last member, or it is `member-not-allowed-here`: both APIs size only a group's last binding.
   An index into it is judged as one into any binding array (CHK-300).
-* **CHK-491** `xs.length` of an unbounded binding array is an `int` the binding holds as a constant of its own, `xs_length`, which the host writes per group and no source declares.
-  No target reads the length back, which is why it travels in the binding.
-  The constant exists where some `.length` of a member of that name stands in the module, and a member of the binding already named `xs_length` is then `duplicate-declaration`.
-  It is reached through `xs.length` alone, so `b.xs_length` is `unknown-member`.
+* **CHK-491** `xs.length` of an unbounded binding array is an `int`: how many views its group binds, or a staging group's capacity, a vacant element among them.
+  sg writes it at each dispatch or draw from the groups bound, so no binding holds it and the host never sets it; [reserved-bindings.md](../../reserved-bindings.md) has where.
+  dx12 and vulkan read it from the reserved `sg_array_lengths`, at the array's position among the entry point's unbounded arrays, and metal from the array's table.
+  A pipeline binds at most 16 unbounded arrays, one to a group.
 * **CHK-300** An index into a binding array that the uniformity pass proves the same in every invocation needs no mark ([why](why/checking.md#chk-300)).
   Any other is marked `uniform i` or `nonuniform i`.
   Unmarked, an index the pass proves varying (CHK-399) is `non-uniform-index`, and one it proves neither way is `unproven-index`, whose detail offers both marks.
@@ -1314,9 +1379,12 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   A triangle patch evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z` of counter-clockwise corners is `.counter_clockwise`.
   So is a quad patch of corners counter-clockwise from its first, blended by `uv.x` from the first to the second and by `uv.y` from that edge to the opposite one.
   Power-of-two partitioning is none of them, since vulkan lacks it.
+  `max_factor = N` may follow, an integer from 1 to 64, and 64 where it is absent: every factor the stage returns above `N` is `N`, on every target.
+  A NaN factor is no factor above `N`, and reaches the tessellator as it is.
+  A polyfilled draw holds room for each patch cut at `N` (CHK-527), so a smaller `N` is less scratch memory.
   Its first parameter is the patch: an array of from 1 to 32 of the struct the vertex stage returns.
   Stage inputs follow it, and it returns a **factors struct**; no other parameter stands.
-  A repeated argument is `invalid-attribute-arguments`.
+  A repeated argument, and a `max_factor` that is no such integer, is `invalid-attribute-arguments`.
 * **CHK-305** A factors struct has exactly one `@edge_factors` member, `float[2]`, `float[3]` or `float[4]`, which makes its domain isolines, triangles or quads.
   It has one `@inside_factors` member, `float` for triangles and `float[2]` for quads, and none for isolines; any other member reaches the evaluation stage as it is.
 * **CHK-306** `@tessellation_evaluation` makes an entry point of the tessellation evaluation stage, which needs `tessellation_shader`.
@@ -1353,6 +1421,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   The mesh stage says what primitives it writes, so the pipeline sets no `topology`, and one of `lines` rasterizes a line list.
   What the mesh stage writes is what the pixel stage takes, by CHK-183's rule, and the pipeline reads no vertex input.
 * **CHK-484** `@task(x, y, z)` makes an entry point of the task stage, which needs `mesh_shader`.
+  `@task(x, y, z, meshes = N)` also states how many mesh workgroups one task workgroup launches at most, from 1 to 2^22, which a polyfilled draw holds slots for (CHK-524).
   Its workgroup sizes are `@compute`'s, and it takes the compute stage's inputs and `@workgroup` bindings, and returns nothing.
 * **CHK-485** `dispatch_mesh(x, y, z, payload)` launches `x * y * z` mesh workgroups and hands each the struct `payload`; it is a task stage's alone.
   The three counts are `uint`, and `payload` is a struct of the program, or `wrong-kind-of-name`.
@@ -1365,6 +1434,35 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   `o.primitive(i, f)` writes the values of the triangle at the `uint` index `i`, which convert to `F`; on an output of no `F` it is `unknown-member`.
 * **CHK-489** A pixel stage may take a second struct right after its stage struct: what a mesh stage wrote for the triangle, the same for each of its pixels.
   A pipeline's pixel stage takes it exactly where its mesh stage's output names `F`, and it is that struct, or the pipeline is `invalid-pipeline`.
+* **CHK-524** Where a device has no mesh stage, a mesh entry point can be polyfilled: a compute entry point that writes each workgroup's output, then a draw of it.
+  Workgroup `g` owns fixed slots: its two counts, `M` primitives' indices, then `N` vertices of one word a scalar leaf, so the draw keeps the native primitive order.
+  The vertex half draws one invocation a corner of every slot, and a slot past its workgroup's count stands outside the clip volume.
+  What it writes per primitive follows the vertices in the same words, and rides flat on each corner of its primitive, so the pixel stage reads it at CHK-489's locations.
+  A task stage before it is a compute entry point whose first invocation writes its launch and payload into a record, and a scan that numbers what all of them launched.
+  The mesh stage's compute half then runs once a launched workgroup, in that number's order, reading its workgroup id and payload from its task workgroup's record.
+  A launch past `meshes = N`, or past what the draw holds slots for, is dropped.
+  An indirect draw with no task stage is one record of no payload, which the same scan numbers, and the compute half it launches is a form of its own.
+  The words, the reserved buffers and how sg draws them are [the polyfill protocol](../../../../shaped-graphics/docs/concepts/mesh-polyfill.md).
+  A mesh entry point with a vertex, primitive or payload member that is no scalar, vector or array of them is `unsupported-yet` there, and so is one that takes a payload with no polyfilled task stage.
+* **CHK-525** Where a device has no geometry stage, a geometry entry point can be polyfilled the same way: its pipeline's vertex stage and itself as one compute entry point, then a draw.
+  One thread a primitive of an instance assembles it from the draw's index and vertex buffers, runs the vertex stage on each corner, and runs the geometry stage on the result.
+  What it appends goes into the primitive's fixed slots, the mesh polyfill's words, so the draw keeps the native order: primitive by primitive, then as appended.
+  A strip is cut into primitives as it grows, an odd triangle's first two corners swapped so every one winds alike; what is appended past `max_vertices` is dropped.
+  `vertex_index` counts from the draw's first vertex, or is the index an indexed draw read; `instance_index` counts from the draw's first instance, and `primitive_id` within the instance.
+  A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
+  Where the target has mesh shaders, the same body can be a mesh entry point instead, a primitive a lane of a workgroup.
+  Each lane writes its slots of the mesh output in lane order, so the draw is one mesh draw.
+  A slot a lane leaves unwritten is a triangle of one vertex thrice, which covers nothing; one that appends lines has no such filler, and is `unsupported-yet` by this route.
+* **CHK-527** Where a device has no tessellator, D3D's own stands in: `prelude/tessellation.sgl` cuts a patch into the domain points and primitives D3D's reference tessellator makes, in its order.
+  Every location is 16.16 fixed point, as D3D computes it, so no target's float rounding moves a point.
+  The factors are clamped and rounded as D3D does, and a patch with an edge factor that is zero, negative or NaN is culled; a NaN inside factor is the partitioning's least.
+  Every domain and every partitioning is carried, the walk writing through a sink, so the GPU and a test run the same code.
+  The control stage then becomes a compute entry point that runs its pipeline's vertex stage on each control point and itself on the patch, a thread a patch of every instance.
+  The prelude's passes count each patch's points and indices, scan them in patch order, and tessellate each patch; the evaluation stage becomes a compute entry point a thread a point.
+  The draw reads the points by the tessellator's indices, so it keeps patch order, then D3D's order within a patch.
+  The domain location is the tessellator's 16.16 point as a float, a triangle's third weight what remains of 1 in 16.16, and `primitive_id` counts patches within the instance.
+  A control stage's `.clockwise` hands its triangles to the tessellator as `triangle_ccw`, as EMIT-134 writes it for HLSL.
+  A stage input other than `primitive_id`, or a vertex stage that reads `view_index` or more than four vertex buffers, is `unsupported-yet` there.
 
 ## Ray tracing
 
@@ -1439,6 +1537,11 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   `h.reorder()` or `h.reorder(hint, bits)` regroups the invocations by it.
   A hit object is a `let` of the `trace_hit` that gave it, which is how its invocation knows the payload's type; any other value of it is `unsupported-yet`, and so is a `reorder` on the trace itself.
   Every part of it needs `shader_execution_reordering`, so it stands under `has(.shader_execution_reordering)` with a plain `trace` beside it, and is raygen's alone.
+* **CHK-516** A value of a type that holds a `hit_object`, a struct or an array of it, is `unsupported-yet` wherever an entry point reaches one.
+  That is judged with every generic and call resolved, so a `box[hit_object]` counts as much as a struct written out.
+  So is a hit object an `if` or a `return` hands on, and a `print` of one.
+  A hit object lives in the variable its trace filled, and SPIR-V forbids moving it out (EMIT-225), so a value that has to hold it is one no vulkan compile can write.
+  An argument is none of these: a call is inlined, and a parameter stands for the `let` it was handed.
 * **CHK-330** A `hit_group name for set:` is one row of a ray-tracing pipeline's table, for the ray set it names.
   A name that is no ray set is `invalid-pipeline`, and one that names nothing `unknown-name`, in a hit group and in a pipeline's `rays` alike.
   Its settings are `geometry`, `intersection`, and at most one record per ray type of its set, `ray = (closest_hit = f, any_hit = g)`, either left out.
@@ -1528,6 +1631,7 @@ hit_group textured for path_rays:
 * **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
   A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
   A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
+  The later passes walk 44 levels, and the 4 past a program's are what a robustness profile's guard nests its operands deeper (LEGAL-65), so no site of a program is left unguarded.
   This is an implementation limit rather than a rule of the language, and it is expected to rise.
 
 ## Control flow
@@ -1754,20 +1858,21 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## The files of the prelude
 
-* **CHK-138** The prelude has three files, in this order: `builtins.sgl`, `core.sgl` and `raytracing.sgl` ([why](why/checking.md#chk-138)).
-  The builtin registry generates the first, and the other two are written by hand.
+* **CHK-138** The prelude has four files, in this order: `builtins.sgl`, `core.sgl`, `raytracing.sgl` and `tessellation.sgl` ([why](why/checking.md#chk-138)).
+  The builtin registry generates the first, and the other three are written by hand.
 * **CHK-140** The text of `builtins.sgl` that is checked is generated in memory, and the committed file is byte for byte the same, so a diagnostic's line and column are right in it.
 * **CHK-141** Every record of the registry carries its declaration as SGL source, and that text goes through the same parser as any other: the registry has no second signature language.
 
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
-They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
+They are `unreachable-code`, `no-effect`, `unused-require`, `pixel-stage-ignores-view`, `needless-nonuniform` and `unroll-too-long`.
+`generic-not-instantiated`, `nan-test-at-fast` and `workgroup-wastes-lanes` are warnings too.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-450, CHK-453, CHK-454 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
@@ -1781,7 +1886,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480, CHK-522, CHK-526 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
@@ -1791,6 +1896,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unreachable-code` | CHK-126, CHK-162, CHK-430 |
 | `no-effect` | CHK-225 |
 | `nan-test-at-fast` | CHK-436 |
+| `workgroup-wastes-lanes` | CHK-521 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488 |
@@ -1802,11 +1908,12 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |
+| `pixel-stage-ignores-view` | CHK-515 |
 | `generic-not-instantiated` | CHK-338 |
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485, CHK-520 |
 | `nesting-too-deep` | CHK-268 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
@@ -1832,7 +1939,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
-| `invalid-target-text` | CHK-427, CHK-428, CHK-432 |
+| `invalid-target-text` | CHK-427, CHK-428, CHK-432, CHK-522 |
 
 ## Open
 

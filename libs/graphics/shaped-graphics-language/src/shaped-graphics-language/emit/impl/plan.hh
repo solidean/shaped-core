@@ -15,6 +15,11 @@ namespace sgl::emit::impl
 /// How many groups an entry point may list besides its `@inline` binding, `sg::max_binding_groups`.
 /// sgl does not link sg, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 inline constexpr auto k_max_groups = 3;
+/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
+/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
+inline constexpr auto k_inline_constants_space = 9;
+/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
+inline constexpr auto k_bound_samplers_space = 10;
 
 /// How many file-scope sampler indices a stage may reach.
 /// Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` both hold 16.
@@ -149,6 +154,8 @@ struct planned_constants
     /// The block as its target has to declare it to reach SGL's offsets, named `block_name`; absent where it declares
     /// the members as they are.
     cc::optional<memory_form> form;
+    /// A reserved binding's block, at the reserved table's address, which reaches no host list and no layout.
+    bool is_reserved = false;
 };
 
 /// A resource member of a binding — a buffer, a texture, an image or a sampler — rather than a field of a block.
@@ -171,6 +178,8 @@ struct planned_resource
     bool is_mut = false;
     /// `@coherent`: HLSL declares it `globallycoherent`, and MSL `coherent(device)` (EMIT-150).
     bool is_coherent = false;
+    /// An entry of `k_reserved_bindings`: sg binds it, so the host never hears of it, and it stands at its fixed address.
+    bool is_reserved = false;
     i32 group = 0;
     /// The first of the `count` consecutive slots it takes: a binding array takes one per element (CHK-299).
     i32 slot = 0;
@@ -228,11 +237,14 @@ struct plan
     check::checked_module const& m;
     check::flat_entry_point const& e;
     target which;
-    /// EMIT-183: the text writes a print into sg's debug buffer, which it declares.
-    bool writes_debug = false;
     /// Every `atomic[float]` is the target's own float atomic, rather than a `uint`'s bits: the device adds floats in one
     /// instruction, and the target can say so (vulkan, metal).
     bool native_float_atomics = false;
+    /// The text writes prints and asserts into sg's debug window (EMIT-183), which a metal raygen hands every stage it
+    /// calls through its context, whether it prints itself or not.
+    bool diagnostics = false;
+    /// MSL: the package takes `SOFTWARE_TRACE`, so a structure that moves may be bound, and a native trace takes motion tags.
+    bool sees_motion = false;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;
@@ -287,6 +299,13 @@ struct plan
 [[nodiscard]] i32 workgroup_of(plan const& p, check::symbol_id binding, i32 member);
 /// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
 [[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
+
+/// Where vulkan's `sg_acceleration_addresses` holds the address of resource `index`, an acceleration member: its rank
+/// among the plan's, group by group and each group's by slot, which is how sg numbers them.
+[[nodiscard]] u32 acceleration_address_position(plan const& p, i32 index);
+
+/// Whether the plan holds an acceleration member a trace reaches by address, which then declares the address block.
+[[nodiscard]] bool holds_acceleration_member(plan const& p);
 
 /// The position in `samplers` of the file-scope sampler `symbol`, or -1 where the entry point reaches none of it.
 [[nodiscard]] i32 sampler_of(plan const& p, check::symbol_id symbol);
@@ -376,6 +395,11 @@ struct block_placement
 /// EMIT-174: the members of `s` as its target declares them, an array or a matrix of an edge struct as one member per
 /// element or column, named `<member>_<i>` at consecutive locations.
 [[nodiscard]] cc::vector<planned_member> declared_members(planned_struct const& s);
+
+/// The semantic HLSL declares member `member` of `s` under, which is what a DXIL signature names it by on both routes;
+/// empty for a member of a struct that crosses no edge.
+/// SPIR-V has no semantics: vulkan takes the location as an attribute, and keeps this because HLSL's grammar asks for it.
+[[nodiscard]] cc::string semantic_of(plan const& p, planned_struct const& s, planned_member const& member);
 
 /// EMIT-174: whether `element` names one piece of an array held as pieces, by a literal index.
 /// `p.accesses` must hold the element's object already.

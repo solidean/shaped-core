@@ -6,7 +6,7 @@ struct varyings:
 
 @vertex fun fullscreen_vs(@vertex_index v: int) -> varyings:
     let uv = float2(((v << 1) & 2) as float, (v & 2) as float)
-    return { position = hpos4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0), uv = uv }
+    return {position = hpos4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0), uv = uv}
 
 @pixel struct shaded:
     color: float4
@@ -18,7 +18,7 @@ fun ramp(uv: float2) -> float => saturate(uv.x)
 test ramp(float2(0.25, 0.0)) == 0.25
 
 @pixel fun ramp_ps(p: varyings) -> shaded:
-    return { color = float4(1.0, 1.0, 1.0, 1.0), depth = ramp(p.uv) }
+    return {color = float4(1.0, 1.0, 1.0, 1.0), depth = ramp(p.uv)}
 
 pipeline ramp_depth:
     vertex = fullscreen_vs
@@ -35,7 +35,7 @@ pipeline ramp_depth:
     @sample_mask covered: uint
 
 @pixel fun push_back_ps(p: varyings) -> depth_only:
-    return { depth = p.position.z + 0.5, covered = 0x1 }
+    return {depth = p.position.z + 0.5, covered = 0x1}
 
 pipeline pushed:
     vertex = fullscreen_vs

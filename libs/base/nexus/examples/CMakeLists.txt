@@ -11,5 +11,4 @@ sc_add_single_file_examples(nexus
     args-commands.cc
     args-validation.cc
     LINK nexus
-    PCH CC_STD NEXUS
 )

@@ -44,7 +44,7 @@ target_sources(clean-simd
 )
 
 target_compile_features(clean-simd PUBLIC cxx_std_23)
-target_include_directories(clean-simd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(clean-simd PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 target_link_libraries(clean-simd PUBLIC clean-core)
 
 # cimd_dispatch(), for any target added after this one.

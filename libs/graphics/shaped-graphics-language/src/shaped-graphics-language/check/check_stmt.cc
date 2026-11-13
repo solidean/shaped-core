@@ -102,11 +102,6 @@ void checker::check_message(function_scope& scope, ast::expr_id message, bool ta
             unsupported(file, span_of(file, message), "an assert message that is no quoted literal");
         return;
     }
-    if (text_of(file, span_of(file, message)).contains('\n'))
-    {
-        unsupported(file, span_of(file, message), "a multi-line message");
-        return;
-    }
     // a message is no value, so it takes no type of its own: strings are not first class
     for (auto const part : ast.at(literal->interpolations))
     {
@@ -371,7 +366,20 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
     }
     if (operand != expr)
     {
-        if (!what.empty())
+        // a mut argument is the caller's place, named again wherever the body names it, as an assignment's target is;
+        // a payload and a callable's parameter are a value handed to the trace whole
+        // a struct of the program reads its swizzle as a new value, which no body could write through
+        auto const operand_type = tables_of(file).type_at(operand);
+        if (what == "a mut argument" && operand_type != type_id::none && out.at(operand_type).kind != type_kind::error
+            && out.builtin_type_of(operand_type) == nullptr)
+        {
+            if (quiet_why != nullptr)
+                *quiet_why = "a swizzle of a struct of the program as a mut argument is not supported yet";
+            else
+                unsupported(file, span_of(file, expr), "a swizzle of a struct of the program as a mut argument");
+            return false;
+        }
+        if (!what.empty() && what != "a mut argument")
         {
             if (quiet_why != nullptr)
                 *quiet_why = cc::format("a swizzle as {} is not supported yet", what);

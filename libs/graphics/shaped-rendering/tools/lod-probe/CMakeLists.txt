@@ -29,7 +29,6 @@ add_executable(lod-probe
 )
 sc_nexus_binary(lod-probe KINDS tool tests)
 target_link_libraries(lod-probe PRIVATE shaped-rendering nexus ${_lod_probe_backends})
-sc_target_pch(lod-probe SG NEXUS)
 
 target_compile_definitions(lod-probe PRIVATE
     LOD_PROBE_HAS_DX12=${_lod_probe_has_dx12}

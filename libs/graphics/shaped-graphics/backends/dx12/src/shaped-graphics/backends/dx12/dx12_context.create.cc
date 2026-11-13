@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
+#include <shaped-graphics/context/gpu_selector.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
 #include <d3d12sdklayers.h>
@@ -65,20 +66,47 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
     return factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf());
 }
 
-/// The first hardware adapter that supports D3D12, the discrete GPU before an integrated one, into `out`.
+/// The name DXGI gives an adapter; Description is a fixed-size WCHAR buffer, NUL-terminated within it.
+[[nodiscard]] cc::string adapter_name(DXGI_ADAPTER_DESC1 const& desc)
+{
+    auto const capacity = isize(sizeof(desc.Description) / sizeof(desc.Description[0]));
+    auto length = isize(0);
+    while (length < capacity && desc.Description[length] != L'\0')
+        ++length;
+    return cc::utf16_to_utf8(cc::span<char16_t const>(reinterpret_cast<char16_t const*>(desc.Description), length));
+}
+
+/// Every hardware adapter's name, for an error that says what a selector could have matched.
+[[nodiscard]] cc::string hardware_adapter_names(IDXGIFactory4* factory)
+{
+    auto names = cc::string();
+    ComPtr<IDXGIAdapter1> adapter;
+    for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    {
+        DXGI_ADAPTER_DESC1 desc = {};
+        if (FAILED(adapter->GetDesc1(&desc)) || is_software_adapter(desc))
+            continue;
+        names += names.empty() ? "" : ", ";
+        names += adapter_name(desc);
+    }
+    return names.empty() ? cc::string("none") : names;
+}
+
+/// The first hardware adapter that supports D3D12 and that `selector` asks for (sg::gpu_selector_matches), into `out`.
+/// The discrete GPU comes before an integrated one.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
 ///
 /// **A device-loss HRESULT stops the search rather than skipping the adapter.**
 /// Treating a reset GPU as "unsuitable" and quietly moving to the next one migrates the whole process to a
 /// different physical device, which nobody asked for and which surfaces much later as something unrelated.
 /// A reset is what `is_device_lost()` exists to report, so it is reported.
-adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
+adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out, cc::string_view selector)
 {
     for (UINT i = 0; enum_adapter(factory, i, out) != DXGI_ERROR_NOT_FOUND; ++i)
     {
         DXGI_ADAPTER_DESC1 ad = {};
         out->GetDesc1(&ad);
-        if (is_software_adapter(ad))
+        if (is_software_adapter(ad) || !sg::gpu_selector_matches(selector, u32(ad.VendorId), adapter_name(ad)))
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
@@ -166,6 +194,18 @@ cc::string loaded_warp_identity()
                       u16(fixed->dwFileVersionLS >> 16), u16(fixed->dwFileVersionLS & 0xFFFF), written);
 }
 
+void log_adapter(sg::adapter_info const& info)
+{
+    CC_LOG_INFO("dx12 context on '{}', driver {}", info.name, info.driver_version);
+}
+
+void log_no_clusters_and_ptlas(HRESULT hr)
+{
+    CC_LOG_INFO("the preview runtime runs, but the driver reports no clustered geometry or partitioned TLAS "
+                "(OPTIONS_RAYTRACING2 hr=0x{:08X})",
+                u32(hr));
+}
+
 /// What DXGI says about the adapter that was picked.
 ///
 /// The driver version comes from CheckInterfaceSupport, which is the only place d3d12 exposes one at all.
@@ -182,12 +222,7 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
     if (FAILED(adapter->GetDesc1(&desc)))
         return info;
 
-    // Description is a fixed-size WCHAR buffer, NUL-terminated within it rather than length-prefixed.
-    auto const capacity = isize(sizeof(desc.Description) / sizeof(desc.Description[0]));
-    auto length = isize(0);
-    while (length < capacity && desc.Description[length] != L'\0')
-        ++length;
-    info.name = cc::utf16_to_utf8(cc::span<char16_t const>(reinterpret_cast<char16_t const*>(desc.Description), length));
+    info.name = adapter_name(desc);
 
     info.vendor_id = u32(desc.VendorId);
     info.device_id = u32(desc.DeviceId);
@@ -207,7 +242,13 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
             info.driver_version = cc::move(warp);
     // The runtime is part of what a pipeline blob depends on: the Agility SDK's rejects the system runtime's, and back.
     if (runs_agility_runtime())
+    {
+#if SG_HAS_AGILITY_PREVIEW
+        info.driver_version += cc::format(" (Agility SDK {} preview)", D3D12_PREVIEW_SDK_VERSION);
+#else
         info.driver_version += cc::format(" (Agility SDK {})", D3D12_SDK_VERSION);
+#endif
+    }
 
     return info;
 }
@@ -423,7 +464,7 @@ bool sg::backend::dx12::has_hardware_adapter()
         ComPtr<IDXGIAdapter1> adapter;
         // A reset adapter is still a hardware adapter: answering `false` here would quietly hand the run to
         // WARP, which is the same substitution this function's caller is trying to avoid.
-        return find_hardware_adapter(factory.Get(), adapter).status != adapter_search::none;
+        return find_hardware_adapter(factory.Get(), adapter, {}).status != adapter_search::none;
     }();
     return has;
 }
@@ -514,7 +555,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     }
     else
     {
-        auto const search = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter);
+        auto const selector = sg::gpu_selector_from_environment();
+        auto const search
+            = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter, selector);
 
         // Reported rather than worked around: the machine has a GPU that just reset, and creating this context on
         // a different one would hide that behind whatever goes wrong next.
@@ -524,6 +567,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
         if (choice != dx12_adapter::warp && search.status != adapter_search::found)
         {
+            // Never WARP in its place: a run that asked for one GPU must not report results from another.
+            if (!selector.empty() && !hardware_hidden)
+                return cc::error(cc::format("SC_GPU='{}' matches no Direct3D 12 hardware adapter; the hardware "
+                                            "adapters are: {}",
+                                            selector, hardware_adapter_names(factory.Get())));
             if (choice == dx12_adapter::hardware && hardware_hidden)
                 return cc::error(cc::format("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER={} hides "
                                             "them)",
@@ -627,8 +675,26 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     auto const opacity_micromap = false;
 #endif
 
+    // The preview runtime's DXR operations: clustered geometry and partitioned TLAS, one cap for both.
+    // Only its headers name the query, and only its experimental features make the runtime answer it.
+#if SG_HAS_AGILITY_PREVIEW
+    D3D12_FEATURE_DATA_D3D12_OPTIONS_RAYTRACING2 raytracing2 = {};
+    auto clusters_and_ptlas = false;
+    if (runs_raytracing_preview() && raytracing_tier >= D3D12_RAYTRACING_TIER_1_1)
+    {
+        auto const hr = check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS_RAYTRACING2, &raytracing2,
+                                              sizeof(raytracing2));
+        clusters_and_ptlas = SUCCEEDED(hr) && raytracing2.ClustersAndPTLASSupported;
+        if (!clusters_and_ptlas)
+            log_no_clusters_and_ptlas(hr);
+    }
+#else
+    auto const clusters_and_ptlas = false;
+#endif
+
     auto ctx = std::make_shared<dx12_context>();
     ctx->set_adapter_info(describe_adapter(adapter.Get()));
+    log_adapter(ctx->metrics.adapter());
     // IDXGIAdapter3 is where QueryVideoMemoryInfo lives; an older runtime leaves this null and the query then refuses.
     adapter.As(&ctx->_adapter);
 
@@ -648,6 +714,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_shared_int64_atomics = shared_int64_atomics;
     ctx->_shader_execution_reordering = shader_execution_reordering;
     ctx->_opacity_micromap = opacity_micromap;
+    ctx->_clusters_and_ptlas = clusters_and_ptlas;
     if (opacity_micromap)
         mark_acceleration_structures();
     ctx->_vertex_layer_output = vertex_layer_output;
@@ -669,6 +736,16 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_dispatch_signature));
         if (FAILED(hr))
             return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect dispatch)");
+    }
+    // A draw's, which a polyfilled task stage's draw reads from what its scan wrote.
+    {
+        auto const argument = D3D12_INDIRECT_ARGUMENT_DESC{.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW};
+        auto const desc = D3D12_COMMAND_SIGNATURE_DESC{.ByteStride = UINT(sizeof(D3D12_DRAW_ARGUMENTS)),
+                                                       .NumArgumentDescs = 1,
+                                                       .pArgumentDescs = &argument};
+        auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_draw_signature));
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect draw)");
     }
     // The same for an indexed draw: `sg::draw_indexed_args` is `D3D12_DRAW_INDEXED_ARGUMENTS` field for field.
     {
@@ -721,6 +798,10 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // Bring up the inline transfer ring buffers; each system creates + maps its own heap (colocated
     // with its logic) off the now-populated device.
     ctx->_execution = config.execution;
+    ctx->_withhold_binding_arrays = config.withhold_binding_arrays;
+    ctx->_withhold_primitive_index = config.withhold_primitive_index;
+    ctx->_native_dxil = config.native_dxil;
+    ctx->_native_line_tables = config.native_line_tables;
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
 

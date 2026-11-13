@@ -451,6 +451,10 @@ The denoiser attaches to it in two halves, and both are built:
   The caller passes the mean's total sample count, and the member backs off as it grows.
   à-trous scales its luminance edge-stop by `1 / sqrt(sample_count)`, which is how a Monte Carlo mean's noise shrinks.
   A mean whose pixels hold different counts passes them per pixel, as `sample_counts`, and the scale is taken at each pixel.
+  **A mean that carries its samples' second moment measures its noise rather than modeling it**: `moment_in_alpha` says the alpha holds the mean of each sample's luminance squared.
+  à-trous then steers by each pixel's variance, `(alpha - luminance^2) / samples`, as SVGF steers by its own moments, and below four samples falls back to the model.
+  Its window is the pair's, both pixels' variance, since one sized by the center alone moves energy only downward.
+  Each tap's variance is capped at four times the median around the center, so a firefly widens no window and stays where it fell.
   The mean itself is never touched, so the image still converges to the unbiased answer, and turning the denoiser off costs nothing.
 - **Moving camera: a temporal member on fresh samples.**
   While the mean is young, the tracer also writes the frame's own samples and motion vectors, and a temporal member denoises those with its history.

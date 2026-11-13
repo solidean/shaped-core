@@ -123,7 +123,30 @@ struct micromap_descriptor;         // the GPU record of one map: where its stat
 enum class micromap_format : u16;   // 2-state or 4-state
 enum class micromap_state : u8;     // one micro-triangle's state in a 4-state map
 enum class micromap_special_index : i32; // a whole triangle's state, in place of a map index
+class partitioned_tlas;              // a tlas of fixed capacity, updated in place (see raytracing/partitioned_tlas.hh)
+struct partitioned_tlas_description; // value type — the capacities a partitioned_tlas is created with
+struct ptlas_write;                  // value type — writes one instance slot of a partitioned_tlas
+struct ptlas_update;                 // value type — replaces one instance's blas and hit-group offset
+struct ptlas_translation;            // value type — moves one partition
+struct ptlas_operations;             // value type — one update's writes, updates, clears and translations
+class blas_table;                    // BLASes, held, and a buffer of their addresses (see raytracing/blas_table.hh)
+struct gpu_blas_ref;                 // value type — SGL's accel.blas_ref, a BLAS's address
+struct gpu_ptlas_write;              // value type — SGL's accel.ptlas_write, opaque on the host
+struct gpu_ptlas_update;             // value type — SGL's accel.ptlas_update
+struct gpu_ptlas_translation;        // value type — SGL's accel.ptlas_translation
+struct indirect_records;             // value type — one kind of record a compute pass wrote, and its count
+struct ptlas_indirect_operations;    // value type — one GPU-written update of a partitioned_tlas
+class cluster_set;                   // immutable clusters one build made (see raytracing/clusters.hh)
+struct cluster_triangles;            // value type — one cluster's indexed triangles
+struct cluster_range;                // value type — the clusters of a set one cluster BLAS lists
+class cluster_pool;                  // a cluster set rebuilt in place from GPU-written records
+struct cluster_pool_description;     // value type — the capacities a cluster_pool is created with
+struct cluster_indirect_build;       // value type — one GPU-written cluster build's records and tables
+class buffer_table;                  // buffers, held, and a buffer of their addresses (see raytracing/blas_table.hh)
+struct gpu_buffer_ref;               // value type — SGL's accel.buffer_ref, a buffer's address
+struct gpu_clas_triangles;           // value type — SGL's accel.clas_triangles, opaque on the host
 
+struct reserved_binding_address;
 } // namespace sg
 
 /// Index-buffer element width — shared by draw index buffers (index_buffer_view) and raytracing BLAS
@@ -279,6 +302,10 @@ class pipeline_layout;
 struct bound_sampler;               // {binding, sampler} — a register-bound static sampler on a pipeline_layout
 struct pipeline_layout_description; // {groups, static_samplers} — input to create_pipeline_layout
 class compute_pipeline;
+/// A figure a driver reports of a pipeline it compiled; see query/driver_statistic.hh.
+struct driver_statistic;
+/// A form a driver keeps of a pipeline's code, its ISA among them; see query/driver_statistic.hh.
+struct driver_representation;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
 struct bound_view;    // one raw_view (inline) or a vector of them — a named_view's element list
@@ -361,7 +388,12 @@ struct vertex_type_layout;
 class raster_pipeline;
 struct color_target_state;          // {format, blend, write_mask} — one color target's PSO state
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
-struct raster_target_formats;       // {color formats, depth format, sample count} a pipeline is compiled for
+enum class mesh_polyfill_slots : u8;
+enum class polyfill_use : u8;
+enum class geometry_polyfill_route : u8;
+struct mesh_polyfill_description; // {compute_shader, corners, primitives_per_group, words_per_group} — a mesh stage as compute + draw
+struct tessellation_polyfill_description; // the tessellation stages as compute passes + draw
+struct raster_target_formats;             // {color formats, depth format, sample count} a pipeline is compiled for
 namespace impl
 {
 // records the target set and formats of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
@@ -372,6 +404,15 @@ void set_targets(raster_pipeline const& pipeline,
 // records what a pipeline's code does to each binding; defined beside each pipeline kind
 void set_footprint(compute_pipeline const& pipeline, pipeline_footprint footprint);
 void set_footprint(raster_pipeline const& pipeline, pipeline_footprint footprint);
+// records that a compute pipeline's shader is dispatched by threads alone; defined in compute/compute_pipeline.cc
+void set_dispatched_by_threads(compute_pipeline const& pipeline);
+// what a polyfilled mesh stage's draw runs and sizes by; defined in raster/raster_pipeline.cc
+struct mesh_polyfill_state;
+struct geometry_polyfill_draw;
+struct tessellation_polyfill_state;
+void set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_state state);
+void set_tessellation_polyfill(raster_pipeline const& pipeline, tessellation_polyfill_state state);
+void set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.
@@ -498,6 +539,11 @@ using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutab
 using blas_handle = std::shared_ptr<blas const>;               // shared-immutable: an opaque, driver-built structure
 using tlas_handle = std::shared_ptr<tlas const>;         // shared-immutable: indexes a set of instances of blas_handle
 using micromap_handle = std::shared_ptr<micromap const>; // shared-immutable: an opaque, driver-built micromap
+using partitioned_tlas_handle = std::shared_ptr<partitioned_tlas const>; // a tlas updated in place by recorded operations
+using blas_table_handle = std::shared_ptr<blas_table const>;             // immutable — BLASes and their addresses
+using cluster_set_handle = std::shared_ptr<cluster_set const>;           // immutable — the clusters one build made
+using cluster_pool_handle = std::shared_ptr<cluster_pool const>;         // a cluster set rebuilt in place
+using buffer_table_handle = std::shared_ptr<buffer_table const>;         // immutable — buffers and their addresses
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

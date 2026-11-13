@@ -285,6 +285,13 @@ void run_test_body(nx::test_execution& execution,
                    cc::span<cc::vector<cc::string> const> section_scopes,
                    int filter_offset);
 
+// Whether a disabled invocable `decl` stays parked at a dispatch: it runs as a disabled test does, named exactly as its
+// own segment of one of `child_scopes`, at `consumed + 1`, or under the bulk run_disabled_tests.
+[[nodiscard]] bool is_parked(nx::test_declaration const& decl,
+                             nx::test_schedule_config const& config,
+                             cc::span<cc::vector<cc::string> const> child_scopes,
+                             int consumed);
+
 // Accessors into the innermost running test context, used by nx::invoke_tests.
 // Must be called from within a running test body, so the context stack is non-empty.
 nx::test_execution* current_execution(); // where dispatched children attach

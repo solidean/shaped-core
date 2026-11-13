@@ -261,6 +261,7 @@ TEST("symbolize - a recorded module table resolves addresses this process did no
     CHECK(!local.is_foreign());
 
     auto agreed = 0;
+    auto placed_alike = 0;
     auto with_module = 0;
     for (isize i = 0; i < count; ++i)
     {
@@ -271,16 +272,23 @@ TEST("symbolize - a recorded module table resolves addresses this process did no
             ++with_module;
         if (f.has_function() && f.function == l.function)
             ++agreed;
+        if (!f.module.empty() && f.module == l.module && f.module_offset == l.module_offset)
+            ++placed_alike;
     }
 
     // A module for every frame comes from the TABLE alone, so it holds even where no debug info could be loaded.
     CHECK(with_module == count);
+    // and the table puts each frame where this process's own lookup does, which is what an offline resolve is keyed on
+    CHECK(placed_alike == count);
 
+#if !defined(__APPLE__) // macOS resolves a foreign table to modules alone: dladdr knows only this process's images
     if (build_has_symbols())
         CHECK(agreed > 0); // and where there are symbols, the two sessions say the same thing
+#endif
 }
 
-TEST("symbolize - a module table with no usable binaries still names the module")
+// Alone, since it times its own resolve, which waits on the lock every other symbolize test holds.
+TEST("symbolize - a module table with no usable binaries still names the module", exclusive())
 {
     if (!cc::symbolizer::is_available())
         SKIP("no symbolization on this platform");
@@ -290,14 +298,15 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     // Degrading to `module+offset` is the difference between a frame you can look up and a bare address.
     //
     // The drive must be one every machine has, and not one a developer might have mapped.
-    // What this pins is a path that is REACHABLE and absent, so the load is attempted and fails; the unreachable
-    // case is its own test below, and the two reach `module+offset` down different paths.
+    // What this pins is a path that is REACHABLE and absent; the unreachable case is its own test below.
     cc::loaded_module const invented = {
         .base = 0x4000'0000,
         .size = 0x1000,
         .path = "C:/nowhere/ghost.exe",
         .identity = "DEADBEEF1000",
     };
+
+    auto const t0 = cc::current_time_steady_secs();
 
     cc::symbolizer sym(cc::span<cc::loaded_module const>(&invented, 1));
 
@@ -306,6 +315,13 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     CHECK(info.module == "ghost.exe");
     CHECK(info.module_offset == 0x123);
     CHECK(info.to_string() == "ghost.exe+0x123");
+
+    // An absent image costs nothing to look for, wherever the process runs.
+    // Registered, DbgHelp walked the working directory for it at the first resolve: 10 s from a checkout holding its
+    // agents' worktrees, while holding the lock every other symbolize test queues on.
+    // The bound is far above what the work needs and far below what one such walk costs.
+    auto const seconds = cc::current_time_steady_secs() - t0;
+    CHECK(seconds < 1.0);
 }
 
 TEST("symbolize - a module on an unreachable path resolves without waiting for the network")

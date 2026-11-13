@@ -4,12 +4,20 @@
 # An example is built by every normal and CI build and run by nobody automatically; `dev.py example <match>`
 # runs exactly one. docs/guides/examples.md is the concept, nexus/test.hh the EXAMPLE macro.
 #
-#   sc_add_example(<target> SOURCES <file>... [MAIN <file>] [LINK <lib>...] [PCH <tier>...])
+#   sc_add_example(<target> SOURCES <file>... [MAIN <file>] [LINK <lib>...])
 #       One binary from one or more sources. Without MAIN, a main.cc calling nx::run is generated.
 #
-#   sc_add_single_file_examples(<prefix> FILES <file>... [LINK <lib>...] [PCH <tier>...])
+#   sc_add_single_file_examples(<prefix> FILES <file>... [LINK <lib>...])
 #       One binary per listed file, each with its own generated main, named `<prefix>-<stem>-example`.
 #       This is what lets one CMakeLists define a dozen single-file examples with no subdirectory clutter.
+#
+#   sc_add_example_web_page(<example-target> EXAMPLE <name> OUTPUT <stem> SHELL <html> [LINK_OPTIONS <opt>...])
+#       On an emscripten build, `<example-target>-web`: a second link of the example's sources as one standalone
+#       page, `<build>/web/<stem>.html`, which runs the example `<name>` in the page's `#canvas`.
+#       The page's `?NAME=value` with an upper-case NAME sets that environment variable, as a shell would.
+#       A second link rather than a wrapper, since the example target is linked for node, which a browser cannot load.
+#       SINGLE_FILE embeds the wasm in the page, so it opens straight from disk with no server and no CORS.
+#       A no-op elsewhere, and where the example target does not exist.
 #
 # Both are no-ops when SC_BUILD_EXAMPLES is off, so a call site needs no `if()` around it.
 
@@ -28,7 +36,7 @@ function(sc_add_example target)
         return()
     endif()
 
-    cmake_parse_arguments(PARSE_ARGV 1 EX "" "MAIN" "SOURCES;LINK;PCH")
+    cmake_parse_arguments(PARSE_ARGV 1 EX "" "MAIN" "SOURCES;LINK")
 
     if(NOT EX_SOURCES)
         message(FATAL_ERROR "sc_add_example(${target}): SOURCES is required")
@@ -58,10 +66,6 @@ function(sc_add_example target)
     target_link_libraries(${target} PRIVATE nexus ${EX_LINK})
     sc_nexus_binary(${target} KINDS examples)
 
-    if(EX_PCH)
-        sc_target_pch(${target} ${EX_PCH})
-    endif()
-
     # Stage the shared libraries an example links, so it starts when run from its own build directory.
     # A test binary that needs this does it by hand; an example is always launched directly, so the helper owes it.
     # Examples share output directories, which is why this goes through sc_stage_runtime_dlls — see RuntimeDlls.cmake.
@@ -73,7 +77,7 @@ function(sc_add_single_file_examples prefix)
         return()
     endif()
 
-    cmake_parse_arguments(PARSE_ARGV 1 EX "" "" "FILES;LINK;PCH")
+    cmake_parse_arguments(PARSE_ARGV 1 EX "" "" "FILES;LINK")
 
     if(NOT EX_FILES)
         message(FATAL_ERROR "sc_add_single_file_examples(${prefix}): FILES is required")
@@ -87,9 +91,67 @@ function(sc_add_single_file_examples prefix)
         sc_add_example("${prefix}-${_stem}-example"
             SOURCES "${_file}"
             LINK ${EX_LINK}
-            PCH ${EX_PCH}
         )
     endforeach()
+endfunction()
+
+function(sc_add_example_web_page example_target)
+    if(NOT EMSCRIPTEN OR NOT TARGET ${example_target})
+        return()
+    endif()
+
+    cmake_parse_arguments(PARSE_ARGV 1 WP "" "EXAMPLE;OUTPUT;SHELL" "LINK_OPTIONS")
+    if(NOT WP_EXAMPLE OR NOT WP_OUTPUT OR NOT WP_SHELL)
+        message(FATAL_ERROR "sc_add_example_web_page(${example_target}): EXAMPLE, OUTPUT and SHELL are required")
+    endif()
+    if(WP_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR "sc_add_example_web_page(${example_target}): unexpected arguments: ${WP_UNPARSED_ARGUMENTS}")
+    endif()
+
+    # A browser gives a wasm module no command line, so the page passes the one that runs this example:
+    # `--examples` opens nexus's example bucket, and the name selects the example.
+    # Nor an environment: the page's `?NAME=value` with an upper-case NAME sets that variable before main runs.
+    set(_arguments "${CMAKE_CURRENT_BINARY_DIR}/examples/${example_target}/web-arguments.js")
+    set(_arguments_content [=[
+Module['arguments'] = ['@WP_EXAMPLE@', '--examples'];
+Module['preRun'] = (Module['preRun'] || []).concat([function () {
+    if (typeof location == 'undefined') return;
+    new URLSearchParams(location.search).forEach(function (value, name) {
+        if (/^[A-Z][A-Z0-9_]*$/.test(name)) ENV[name] = value;
+    });
+}]);
+]=])
+    file(CONFIGURE OUTPUT "${_arguments}" CONTENT "${_arguments_content}" @ONLY)
+
+    set(_web ${example_target}-web)
+    get_target_property(_srcs ${example_target} SOURCES)
+    get_target_property(_libs ${example_target} LINK_LIBRARIES)
+    get_target_property(_incs ${example_target} INCLUDE_DIRECTORIES)
+    get_target_property(_defs ${example_target} COMPILE_DEFINITIONS)
+
+    add_executable(${_web} ${_srcs})
+    target_link_libraries(${_web} PRIVATE ${_libs})
+    if(_incs)
+        target_include_directories(${_web} PRIVATE ${_incs})
+    endif()
+    if(_defs)
+        target_compile_definitions(${_web} PRIVATE ${_defs})
+    endif()
+
+    target_link_options(${_web} PRIVATE
+        "SHELL:-s SINGLE_FILE=1"
+        "SHELL:-s NODERAWFS=0"
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        "SHELL:--pre-js ${_arguments}"
+        "SHELL:--shell-file ${WP_SHELL}"
+        ${WP_LINK_OPTIONS}
+    )
+    set_property(TARGET ${_web} APPEND PROPERTY LINK_DEPENDS "${_arguments}" "${WP_SHELL}")
+    set_target_properties(${_web} PROPERTIES
+        SUFFIX ".html"
+        OUTPUT_NAME "${WP_OUTPUT}"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/web"
+    )
 endfunction()
 
 # SC_EXAMPLE_BACKEND resolved for ONE example, whose own list of supported backends is the other half of it.

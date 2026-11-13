@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 namespace
@@ -51,40 +52,8 @@ public:
     bool has_line_directives() const override { return true; }
 
     // a ray-tracing stage is a visible function, which takes no buffer of its own
-    bool writes_debug_in(check::stage s, check::feature_set) const override { return s < check::stage::raygen; }
-    // a Metal buffer is a pointer, and emit refuses a length before any text is written (EMIT-195)
+    // a Metal buffer is a pointer, so the writer reads its length from its group's `sgl_lengths` instead (EMIT-195)
     cc::string buffer_length(cc::string_view, bool) const override { return "0u"; }
-    void write_debug_buffer(cc::string& out) const override
-    {
-        out += "struct sg_debug_buffer\n{\n    atomic_uint cursor;\n    uint capacity;\n    atomic_uint dropped;\n"
-               "    uint words[1];\n};\n\n";
-    }
-    cc::string debug_reserve(cc::string_view at, isize count) const override
-    {
-        return cc::format("uint {} = atomic_fetch_add_explicit(&sg_debug.cursor, {}u, memory_order_relaxed);", at, count);
-    }
-    cc::string debug_fits(cc::string_view at, isize count) const override
-    {
-        return cc::format("{} + {}u <= sg_debug.capacity", at, count);
-    }
-    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
-    {
-        return cc::format("sg_debug.words[{} + {}u] = {};", at, i, word);
-    }
-    cc::string debug_drop() const override
-    {
-        return "atomic_fetch_add_explicit(&sg_debug.dropped, 1u, memory_order_relaxed);";
-    }
-    cc::string debug_word(cc::string_view value, cc::string_view family) const override
-    {
-        if (family == "uint")
-            return cc::string(value);
-        if (family == "bool")
-            return cc::format("({} ? 1u : 0u)", value);
-        if (family == "half")
-            return cc::format("as_type<uint>(float({}))", value);
-        return cc::format("as_type<uint>({})", value);
-    }
     /// MSL's is a function; whether it terminates or demotes the pixel is for the metal backend's tests to pin.
     [[nodiscard]] cc::string_view discard_statement() const override { return "discard_fragment();"; }
     [[nodiscard]] bool fences_image_stores() const override { return true; }
@@ -138,6 +107,9 @@ public:
                                                                : "center",
                               i.kind == kind::linear ? "no_perspective" : "perspective");
         }
+        // EMIT-209: what a mesh stage writes per primitive, its locations past the stage link's
+        case struct_role::primitive_link:
+            return cc::format("user(sgl{})", member.location);
         case struct_role::render_targets:
             switch (member.output)
             {
@@ -155,7 +127,6 @@ public:
             return cc::format("color({})", member.location);
         // MSL refuses the tessellation stages (EMIT-122), so no struct of theirs reaches it
         case struct_role::patch_constants:
-        case struct_role::primitive_link:
         case struct_role::plain:
             break;
         }
@@ -281,17 +252,16 @@ public:
                      planned_constants const* block,
                      cc::span<planned_resource const> buffers) const override
     {
+        // a reserved binding is no group of the argument table, and the function head declares it
+        if (!buffers.empty() && buffers[0].is_reserved)
+            return;
         for (auto const& b : buffers)
             if (b.element_form.has_value())
                 write_form(out, b.element_form.value());
         if (block != nullptr)
             write_block_struct(out, p, *block);
 
-        auto const group = block != nullptr ? block->group : buffers[0].group;
-        out.appendf("struct {}\n{{\n", argument_buffer_of(p, group).struct_name);
-        if (block != nullptr)
-            out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, block->block_name, block->name, block->slot);
-        for (auto const& b : buffers)
+        auto const type_of = [&](planned_resource const& b)
         {
             auto type = b.element_form.has_value()
                           ? cc::format("{}device {}*", b.is_mut ? "" : "const ", b.element_form.value().name)
@@ -302,13 +272,41 @@ public:
                 type = cc::format("device coherent(device) {}", type.subview({.start = 7, .end = type.size()}));
             else if (b.is_coherent && type.ends_with(">"))
                 type = cc::format("{}, memory_coherence_device>", type.subview({.start = 0, .end = type.size() - 1}));
-            out.appendf("{}{} {} [[id({})]]", k_indent, type, b.name, b.slot);
+            return type;
+        };
+        // EMIT-211: an unbounded array is a table its group sizes, at the address its slot holds, since no member of an
+        // argument buffer is unsized: its count, its entries, and their byte lengths behind them
+        for (auto const& b : buffers)
+            if (b.count == 0)
+                out.appendf("struct {}\n{{\n{}uint count;\n{}uint sgl_pad;\n{}{} entries[1];\n}};\n\n", table_of(b),
+                            k_indent, k_indent, k_indent, type_of(b));
+
+        auto const group = block != nullptr ? block->group : buffers[0].group;
+        out.appendf("struct {}\n{{\n", argument_buffer_of(p, group).struct_name);
+        if (block != nullptr)
+            out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, block->block_name, block->name, block->slot);
+        for (auto const& b : buffers)
+        {
+            if (b.count == 0)
+            {
+                out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, table_of(b), b.name, b.slot);
+                continue;
+            }
+            out.appendf("{}{} {} [[id({})]]", k_indent, type_of(b), b.name, b.slot);
             if (b.count > 1)
                 out.appendf("[{}]", b.count);
             out += ";\n";
         }
+        // EMIT-195: each slot's byte length, which sg writes behind the slots, a buffer's and zero for anything else
+        auto slots = block != nullptr ? block->slot + 1 : 0;
+        for (auto const& b : buffers)
+            slots = cc::max(slots, b.slot + cc::max(b.count, 1));
+        out.appendf("{}uint sgl_lengths [[id({})]][{}];\n", k_indent, slots, slots);
         out += "};\n\n";
     }
+
+    /// EMIT-211: the struct of an unbounded array's table.
+    [[nodiscard]] static cc::string table_of(planned_resource const& b) { return cc::format("{}_table", b.name); }
 
     [[nodiscard]] static planned_argument_buffer const& argument_buffer_of(plan const& p, i32 group)
     {
@@ -414,7 +412,13 @@ public:
     {
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
         if (uses_ray_tracing(p))
+        {
             out += "#include <metal_raytracing>\nusing namespace raytracing;\n\n";
+            // EMIT-139: what closes every native trace's tags, motion only where a structure that moves can be bound
+            out += p.sees_motion ? "#define sgl_motion , instance_motion, primitive_motion\n"
+                                   "#define sgl_motion_time(t) , t\n\n"
+                                 : "#define sgl_motion\n#define sgl_motion_time(t)\n\n";
+        }
         write_enum_constants(out, p, *this);
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
@@ -481,6 +485,7 @@ public:
                "    constant sgl_hit_offsets_table* hit_offsets;\n"
                "    uint3 launch_id;\n"
                "    uint3 launch_size;\n"
+               "    device atomic_uint* debug;\n"
                "};\n\n";
         out += "struct sgl_hit_record\n{\n"
                "    float t;\n"
@@ -522,12 +527,14 @@ public:
         // sg's reserved group: ray type 0's intersection table at id 0, then miss, closest hit and callable, then the
         // other ray types' intersection tables from id 4
         out += "struct sgl_tables\n{\n"
-               "    intersection_function_table<triangle_data, instancing, world_space_data> hit_0 [[id(0)]];\n"
+               "    intersection_function_table<triangle_data, instancing, world_space_data" SGL_MSL_MOTION_TAGS
+               "> hit_0 [[id(0)]];\n"
                "    visible_function_table<sgl_hit_function> miss [[id(1)]];\n"
                "    visible_function_table<sgl_hit_function> closest_hit [[id(2)]];\n"
                "    visible_function_table<sgl_callable_function> callable [[id(3)]];\n";
         for (auto r = isize(1); r < ray_count; ++r)
-            out.appendf("    intersection_function_table<triangle_data, instancing, world_space_data> hit_{} "
+            out.appendf("    intersection_function_table<triangle_data, instancing, "
+                        "world_space_data" SGL_MSL_MOTION_TAGS "> hit_{} "
                         "[[id({})]];\n",
                         r, 3 + r);
         out += "};\n\n";
@@ -553,6 +560,10 @@ public:
             out.appendf("    constant {0}& {1} = *static_cast<constant {0}*>(sgl_ctx.constants);\n",
                         p.constants.value().block_name, p.constants.value().name);
         out += "    device sgl_tables& sgl_t = *static_cast<device sgl_tables*>(sgl_ctx.tables);\n";
+        // EMIT-183: a stage that prints reaches the window its raygen was handed
+        for (auto const& r : p.resources)
+            if (r.is_reserved && r.name == "sg_debug")
+                out += "    device atomic_uint* sg_debug = sgl_ctx.debug;\n";
     }
 
     /// EMIT-139: a ray-tracing stage as metal runs it: the raygen a kernel, a miss, closest hit or callable a visible
@@ -573,6 +584,11 @@ public:
             parameters.push_back(cc::format("device sgl_tables& sgl_t [[buffer({})]]", k_reserved_group));
             parameters.push_back(
                 cc::format("constant sgl_hit_offsets_table& sgl_hit_offsets [[buffer({})]]", k_hit_offsets_buffer));
+            // EMIT-183: the debug window, which the raygen hands every stage it calls, since none of them is a kernel
+            if (p.diagnostics)
+                parameters.push_back(
+                    cc::format("device atomic_uint* sg_debug [[buffer({})]]",
+                               check::reserved_binding_named("sg_debug")->targets[u8(emit::target::msl)].slot));
             parameters.push_back("uint3 sgl_launch_id [[thread_position_in_grid]]");
             parameters.push_back("uint3 sgl_launch_size [[threads_per_grid]]");
             auto list = cc::string();
@@ -591,6 +607,7 @@ public:
                    "    sgl_ctx.hit_offsets = &sgl_hit_offsets;\n"
                    "    sgl_ctx.launch_id = sgl_launch_id;\n"
                    "    sgl_ctx.launch_size = sgl_launch_size;\n";
+            out.appendf("    sgl_ctx.debug = {};\n", p.diagnostics ? "sg_debug" : "nullptr");
         }
         else if (stage_of == stage::miss || stage_of == stage::closest_hit || stage_of == stage::callable)
         {
@@ -611,7 +628,7 @@ public:
         {
             // an any hit decides a triangle, and a procedural group's traversal reports a box's primitive
             auto const is_triangle = stage_of == stage::any_hit;
-            out.appendf("[[intersection({}, triangle_data, instancing, world_space_data)]]\n",
+            out.appendf("[[intersection({}, triangle_data, instancing, world_space_data" SGL_MSL_MOTION_TAGS ")]]\n",
                         is_triangle ? "triangle" : "bounding_box");
             out.appendf("{} {}(", is_triangle ? "sgl_triangle_result" : "sgl_box_result", p.entry_name);
             if (is_triangle)
@@ -663,8 +680,56 @@ public:
             return;
         }
         auto parameters = cc::vector<cc::string>();
-        if (check::is_valid(p.e.input))
+        // CHK-489: a pixel stage's second struct, what a mesh stage wrote per primitive, arrives in one stage input
+        // beside the link, as Metal hands a mesh pipeline's fragment both
+        auto per_primitive = isize(-1);
+        if (p.e.entry_stage == stage::pixel && check::is_valid(p.e.input))
+            for (auto i = isize(1); i < p.e.locals.size(); ++i)
+            {
+                auto const& local = p.e.locals[i];
+                auto is_input = false;
+                for (auto const& s : p.e.stage_inputs)
+                    is_input = is_input || index_of(s.local) == i;
+                if (local.kind == check::local_kind::parameter && !is_input
+                    && p.m.at(local.type).kind == type_kind::structure && local.type != p.e.input)
+                    per_primitive = i;
+            }
+        if (per_primitive >= 0)
+        {
+            out.appendf("struct sgl_stage_in\n{{\n    {} link;\n    {} primitive;\n}};\n\n",
+                        type_text(p, *this, p.e.input), type_text(p, *this, p.e.locals[per_primitive].type));
+            parameters.push_back("sgl_stage_in sgl_in [[stage_in]]");
+        }
+        else if (check::is_valid(p.e.input) && p.e.entry_stage != stage::mesh && p.e.entry_stage != stage::task)
             parameters.push_back(cc::format("{} {} [[stage_in]]", type_text(p, *this, p.e.input), p.locals[0]));
+        // EMIT-206: a mesh stage's output is Metal's mesh object, and the struct it is handed its object stage's payload
+        if (p.e.entry_stage == stage::mesh)
+            for (auto i = isize(0); i < p.e.locals.size(); ++i)
+            {
+                auto const& local = p.e.locals[i];
+                auto is_input = false;
+                for (auto const& s : p.e.stage_inputs)
+                    is_input = is_input || index_of(s.local) == i;
+                if (local.kind != check::local_kind::parameter || is_input)
+                    continue;
+                auto const& t = p.m.at(local.type);
+                auto const& mesh = p.m.functions[p.m.at(p.e.function).info];
+                if (t.kind == type_kind::stream && t.count == 0)
+                    parameters.push_back(cc::format(
+                        "metal::mesh<{}, {}, {}, {}, metal::topology::{}> {}", type_text(p, *this, t.element),
+                        check::is_valid(t.primitive) ? cc::string(type_text(p, *this, t.primitive)) : cc::string("void"),
+                        mesh.max_vertices, mesh.max_primitives, mesh.is_line_mesh ? "line" : "triangle", p.locals[i]));
+                else if (t.kind == type_kind::structure)
+                    parameters.push_back(cc::format("const object_data {}& {} [[payload]]",
+                                                    type_text(p, *this, local.type), p.locals[i]));
+            }
+        // EMIT-207: an object stage writes its payload and its grid of mesh workgroups from its first invocation
+        if (p.e.entry_stage == stage::task)
+        {
+            parameters.push_back(cc::format("object_data {}& sgl_payload [[payload]]", payload_type(p)));
+            parameters.push_back("mesh_grid_properties sgl_grid");
+            parameters.push_back("uint sgl_thread [[thread_index_in_threadgroup]]");
+        }
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
@@ -682,9 +747,18 @@ public:
         // EMIT-133: a static sampler's slot of the argument table is its index, and MSL has one sampler type
         for (auto const& s : p.samplers)
             parameters.push_back(cc::format("sampler {} [[sampler({})]]", s.name, s.index));
-        // EMIT-183: sg's debug buffer
-        if (p.writes_debug)
-            parameters.push_back("device sg_debug_buffer& sg_debug [[buffer(30)]]");
+        // a reserved binding is a parameter at its own slot of the argument table
+        for (auto const& r : p.resources)
+            if (r.is_reserved)
+                parameters.push_back(cc::format("{} {} [[buffer({})]]", resource_text(p, r.type), r.name, r.slot));
+        // EMIT-135: an emulated trace reads sg's pool and the dispatch's roots, at their slots of the argument table
+        if (traces_in_software(p))
+        {
+            auto const& pool = check::reserved_binding_named("sg_acceleration_pool")->targets[u8(emit::target::msl)];
+            auto const& roots = check::reserved_binding_named("sg_acceleration_roots")->targets[u8(emit::target::msl)];
+            parameters.push_back(cc::format("const device uint4* sg_acceleration_pool [[buffer({})]]", pool.slot));
+            parameters.push_back(cc::format("constant uint4* sg_acceleration_roots [[buffer({})]]", roots.slot));
+        }
         auto list = cc::string();
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
@@ -692,10 +766,19 @@ public:
         // EMIT-59: MSL states no threadgroup shape, so a kernel carries none; SGL's stated one is what reaches sg
         if (p.e.entry_stage == stage::compute)
             out.appendf("kernel void {}({})\n{{\n", p.entry_name, list);
+        else if (p.e.entry_stage == stage::mesh || p.e.entry_stage == stage::task)
+            out.appendf("[[{}]] void {}({})\n{{\n", p.e.entry_stage == stage::mesh ? "mesh" : "object", p.entry_name,
+                        list);
         else
             out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
                         type_text(p, *this, p.e.result), p.entry_name, list);
         write_bound_resources(out, p);
+        if (per_primitive >= 0)
+        {
+            out.appendf("    const {} {} = sgl_in.link;\n", type_text(p, *this, p.e.input), p.locals[0]);
+            out.appendf("    const {} {} = sgl_in.primitive;\n", type_text(p, *this, p.e.locals[per_primitive].type),
+                        p.locals[per_primitive]);
+        }
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             if (!p.stage_input_read[i])
@@ -706,13 +789,42 @@ public:
         }
     }
 
+    /// The payload an object stage hands its mesh workgroups: the struct its `dispatch_mesh` passes (EMIT-207).
+    [[nodiscard]] cc::string payload_type(plan const& p) const
+    {
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<check::flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                    record != nullptr && record->name == "dispatch_mesh" && p.e.at(call->arguments).size() > 3)
+                    return cc::string(type_text(p, *this, p.e.at(p.e.at(call->arguments)[3]).type));
+        CC_UNREACHABLE("a task stage launches its mesh workgroups once (CHK-485)");
+    }
+
+    /// Whether the entry point walks a structure in software, which reads sg's pool and roots (EMIT-135).
+    [[nodiscard]] static bool traces_in_software(plan const& p)
+    {
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<check::flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                    record != nullptr && (record->takes_acceleration_index || record->name == "acceleration_pool_load"))
+                    return true;
+        return false;
+    }
+
     static void write_bound_resources(cc::string& out, plan const& p)
     {
         for (auto const& block : p.group_blocks)
             out.appendf("    constant auto& {} = *{}.{};\n", block.name, argument_buffer_of(p, block.group).parameter,
                         block.name);
         for (auto const& r : p.resources)
-            out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
+            if (r.is_reserved)
+                continue;
+            // EMIT-211: an unbounded array is read through its table's entries
+            else if (r.count == 0)
+                out.appendf("    auto const {} = &{}.{}->entries[0];\n", r.name,
+                            argument_buffer_of(p, r.group).parameter, r.name);
+            else
+                out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
     }
 };
 

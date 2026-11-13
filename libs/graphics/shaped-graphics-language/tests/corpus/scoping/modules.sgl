@@ -29,7 +29,7 @@ test {shading.frame}:
     let x = shading.frame.exposure
 
 // a literal converts to a module's struct by the functions of its name visible where it is declared, as a call does
-fun made(power: float) -> shading.light => { power = power }
+fun made(power: float) -> shading.light => {power = power}
 
 test made(5.0).power == 5.0
 

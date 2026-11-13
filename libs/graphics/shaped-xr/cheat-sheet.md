@@ -27,6 +27,16 @@ sys->create_session(*ctx, {.near_distance = 0.05f, .far_distance = 100.0f, .blen
 SXR_HAS_OPENXR                                      // 1/0: whether the build has the loader at all
 ```
 
+## Drawing the controllers
+
+```cpp
+#include <shaped-xr/controller_routine.hh>
+lib.add_package(sxr::shader_package());            // the application's shader library must mount these
+sxr::controller_poses(*session)                    // -> vector<controller_pose>: tracked hands, from `grip` and `aim`
+sxr::controller_routine::execute(pass, frame, hands)  // -> sg::routine_outcome; inside a view_count = 2 pass with frame.depth
+//   declines until built: asking registers it, ctx.routines.tick() builds it; prewarm(ctx, frame.color.format()) asks early
+```
+
 ## What a runtime offers
 
 ```cpp

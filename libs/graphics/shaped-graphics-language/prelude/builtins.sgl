@@ -75,7 +75,7 @@
 
 /// An affine map of space: a linear part and a translation, as three rows of four.
 /// It translates a `pos3` and leaves a `vec3` untranslated, so the type decides the w.
-/// A value of function bodies alone, which no GPU memory holds yet.
+/// In GPU memory its three rows stand back to back, 48 bytes, as an instance's transform does.
 @shadowable(false)
 @builtin struct affine3
 
@@ -2114,6 +2114,8 @@
 @builtin @pure fun step(edge: float, x: float) -> float
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float, high: float, x: float) -> float
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float, b: float, c: float) -> float
 @builtin @pure fun sin(x: float2) -> float2
 @builtin @pure fun cos(x: float2) -> float2
 @builtin @pure fun tan(x: float2) -> float2
@@ -2143,6 +2145,8 @@
 @builtin @pure fun step(edge: float2, x: float2) -> float2
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float2, high: float2, x: float2) -> float2
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float2, b: float2, c: float2) -> float2
 @builtin @pure fun sin(x: float3) -> float3
 @builtin @pure fun cos(x: float3) -> float3
 @builtin @pure fun tan(x: float3) -> float3
@@ -2172,6 +2176,8 @@
 @builtin @pure fun step(edge: float3, x: float3) -> float3
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float3, high: float3, x: float3) -> float3
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float3, b: float3, c: float3) -> float3
 @builtin @pure fun sin(x: float4) -> float4
 @builtin @pure fun cos(x: float4) -> float4
 @builtin @pure fun tan(x: float4) -> float4
@@ -2201,6 +2207,8 @@
 @builtin @pure fun step(edge: float4, x: float4) -> float4
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float4, high: float4, x: float4) -> float4
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: float4, b: float4, c: float4) -> float4
 @builtin @pure fun sin(x: half) -> half
 @builtin @pure fun cos(x: half) -> half
 @builtin @pure fun tan(x: half) -> half
@@ -2230,6 +2238,8 @@
 @builtin @pure fun step(edge: half, x: half) -> half
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half, high: half, x: half) -> half
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half, b: half, c: half) -> half
 @builtin @pure fun sin(x: half2) -> half2
 @builtin @pure fun cos(x: half2) -> half2
 @builtin @pure fun tan(x: half2) -> half2
@@ -2259,6 +2269,8 @@
 @builtin @pure fun step(edge: half2, x: half2) -> half2
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half2, high: half2, x: half2) -> half2
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half2, b: half2, c: half2) -> half2
 @builtin @pure fun sin(x: half3) -> half3
 @builtin @pure fun cos(x: half3) -> half3
 @builtin @pure fun tan(x: half3) -> half3
@@ -2288,6 +2300,8 @@
 @builtin @pure fun step(edge: half3, x: half3) -> half3
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half3, high: half3, x: half3) -> half3
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half3, b: half3, c: half3) -> half3
 @builtin @pure fun sin(x: half4) -> half4
 @builtin @pure fun cos(x: half4) -> half4
 @builtin @pure fun tan(x: half4) -> half4
@@ -2317,6 +2331,8 @@
 @builtin @pure fun step(edge: half4, x: half4) -> half4
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half4, high: half4, x: half4) -> half4
+/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).
+@builtin @pure fun fma(a: half4, b: half4, c: half4) -> half4
 
 // whether a float or a half is a NaN or an infinity, per component; read from its bits on every
 // target, a half's as the float it widens to, so no target's assumption that neither arises can
@@ -2458,114 +2474,56 @@
 @builtin @pure fun pack_half2x16(v: float2) -> uint
 @builtin @pure fun unpack_half2x16(u: uint) -> float2
 
-// the maths of a double and its vectors (CHK-458): rounding exact, `sqrt` within an ULP and
-// `inverse_sqrt` within two, written as HLSL over a double's arithmetic, since no target has them;
-// no transcendental, which no target computes in 64 bits either
-@builtin @pure fun sqrt(x: double) -> double
-@builtin @pure fun inverse_sqrt(x: double) -> double
-@builtin @pure fun floor(x: double) -> double
-@builtin @pure fun ceil(x: double) -> double
-@builtin @pure fun trunc(x: double) -> double
-@builtin @pure fun round(x: double) -> double
-@builtin @pure fun fract(x: double) -> double
+// what a double's maths needs of the registry (CHK-458): `sign` and `saturate`, which HLSL takes a
+// double to, and `fma`; core.sgl writes the rest over them and a double's bits, and no transcendental
+// takes a double, which no target computes in 64 bits
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double) -> double
 @builtin @pure fun saturate(x: double) -> double
-/// Whether each component is a NaN, read from its bits.
-@builtin @pure fun is_nan(x: double) -> bool
-/// Whether each component is an infinity, of either sign, read from its bits.
-@builtin @pure fun is_inf(x: double) -> bool
-/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
-@builtin @pure fun mix(a: double, b: double, t: double) -> double
-/// 0 where `x` is below `edge`, and 1 from it on.
-@builtin @pure fun step(edge: double, x: double) -> double
-/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
-@builtin @pure fun smoothstep(low: double, high: double, x: double) -> double
-@builtin @pure fun sqrt(x: double2) -> double2
-@builtin @pure fun inverse_sqrt(x: double2) -> double2
-@builtin @pure fun floor(x: double2) -> double2
-@builtin @pure fun ceil(x: double2) -> double2
-@builtin @pure fun trunc(x: double2) -> double2
-@builtin @pure fun round(x: double2) -> double2
-@builtin @pure fun fract(x: double2) -> double2
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double, b: double, c: double) -> double
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double2) -> double2
 @builtin @pure fun saturate(x: double2) -> double2
-/// Whether each component is a NaN, read from its bits.
-@builtin @pure fun is_nan(x: double2) -> bool2
-/// Whether each component is an infinity, of either sign, read from its bits.
-@builtin @pure fun is_inf(x: double2) -> bool2
-/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
-@builtin @pure fun mix(a: double2, b: double2, t: double) -> double2
-/// `mix` of each component by its own `t`.
-@builtin @pure fun mix(a: double2, b: double2, t: double2) -> double2
-/// 0 where `x` is below `edge`, and 1 from it on.
-@builtin @pure fun step(edge: double2, x: double2) -> double2
-/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
-@builtin @pure fun smoothstep(low: double2, high: double2, x: double2) -> double2
-/// The products of the components, summed from the first on.
-@builtin @pure fun dot(a: double2, b: double2) -> double
-@builtin @pure fun length(v: double2) -> double
-@builtin @pure fun distance(a: double2, b: double2) -> double
-/// `v * inverse_sqrt(dot(v, v))`.
-@builtin @pure fun normalize(v: double2) -> double2
-@builtin @pure fun sqrt(x: double3) -> double3
-@builtin @pure fun inverse_sqrt(x: double3) -> double3
-@builtin @pure fun floor(x: double3) -> double3
-@builtin @pure fun ceil(x: double3) -> double3
-@builtin @pure fun trunc(x: double3) -> double3
-@builtin @pure fun round(x: double3) -> double3
-@builtin @pure fun fract(x: double3) -> double3
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double2, b: double2, c: double2) -> double2
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double3) -> double3
 @builtin @pure fun saturate(x: double3) -> double3
-/// Whether each component is a NaN, read from its bits.
-@builtin @pure fun is_nan(x: double3) -> bool3
-/// Whether each component is an infinity, of either sign, read from its bits.
-@builtin @pure fun is_inf(x: double3) -> bool3
-/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
-@builtin @pure fun mix(a: double3, b: double3, t: double) -> double3
-/// `mix` of each component by its own `t`.
-@builtin @pure fun mix(a: double3, b: double3, t: double3) -> double3
-/// 0 where `x` is below `edge`, and 1 from it on.
-@builtin @pure fun step(edge: double3, x: double3) -> double3
-/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
-@builtin @pure fun smoothstep(low: double3, high: double3, x: double3) -> double3
-/// The products of the components, summed from the first on.
-@builtin @pure fun dot(a: double3, b: double3) -> double
-@builtin @pure fun length(v: double3) -> double
-@builtin @pure fun distance(a: double3, b: double3) -> double
-/// `v * inverse_sqrt(dot(v, v))`.
-@builtin @pure fun normalize(v: double3) -> double3
-@builtin @pure fun sqrt(x: double4) -> double4
-@builtin @pure fun inverse_sqrt(x: double4) -> double4
-@builtin @pure fun floor(x: double4) -> double4
-@builtin @pure fun ceil(x: double4) -> double4
-@builtin @pure fun trunc(x: double4) -> double4
-@builtin @pure fun round(x: double4) -> double4
-@builtin @pure fun fract(x: double4) -> double4
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double3, b: double3, c: double3) -> double3
 /// -1, 0 or 1, by the sign of each component.
 @builtin @pure fun sign(x: double4) -> double4
 @builtin @pure fun saturate(x: double4) -> double4
-/// Whether each component is a NaN, read from its bits.
-@builtin @pure fun is_nan(x: double4) -> bool4
-/// Whether each component is an infinity, of either sign, read from its bits.
-@builtin @pure fun is_inf(x: double4) -> bool4
-/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
-@builtin @pure fun mix(a: double4, b: double4, t: double) -> double4
-/// `mix` of each component by its own `t`.
-@builtin @pure fun mix(a: double4, b: double4, t: double4) -> double4
-/// 0 where `x` is below `edge`, and 1 from it on.
-@builtin @pure fun step(edge: double4, x: double4) -> double4
-/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
-@builtin @pure fun smoothstep(low: double4, high: double4, x: double4) -> double4
-/// The products of the components, summed from the first on.
-@builtin @pure fun dot(a: double4, b: double4) -> double
-@builtin @pure fun length(v: double4) -> double
-@builtin @pure fun distance(a: double4, b: double4) -> double
-/// `v * inverse_sqrt(dot(v, v))`.
-@builtin @pure fun normalize(v: double4) -> double4
-@builtin @pure fun cross(a: double3, b: double3) -> double3
+/// `a * b + c`, rounded once on the interpreter and by DXIL; vulkan may round the product first.
+@builtin @pure fun fma(a: double4, b: double4, c: double4) -> double4
+
+// a double's bits as two words, the low first, so no ulong and no shader_int64 stands between (CHK-517);
+// `d.bits` and `double.from_bits(u)` in core.sgl are how a program spells them
+@builtin @pure fun reinterpret_as_uint(x: double) -> uint2
+@builtin @pure fun reinterpret_as_double(x: uint2) -> double
+
+// what the interpreter gives where a GPU gives its own: core.sgl calls these where the language is `.sgl`
+/// The double nearest the root, as IEEE 754's sqrt.
+@builtin @internal @pure fun nearest_sqrt(x: double) -> double
+/// smoothstep's steps, with no value where `low` is not below `high`.
+@builtin @internal @pure fun ordered_smoothstep(low: double, high: double, x: double) -> double
+
+// what vulkan takes a double to, which core.sgl calls where the API is vulkan (EMIT-256)
+/// The integral part, as GLSL.std.450's `Trunc`.
+@builtin @internal @pure fun spirv_trunc(x: double) -> double
+/// The integral part toward negative infinity, as GLSL.std.450's `Floor`.
+@builtin @internal @pure fun spirv_floor(x: double) -> double
+/// The integral part toward positive infinity, as GLSL.std.450's `Ceil`.
+@builtin @internal @pure fun spirv_ceil(x: double) -> double
+/// The nearest integer, a tie to the even one, as GLSL.std.450's `RoundEven`.
+@builtin @internal @pure fun spirv_round(x: double) -> double
+/// `x - floor(x)`, as GLSL.std.450's `Fract`.
+@builtin @internal @pure fun spirv_fract(x: double) -> double
+/// The root, as GLSL.std.450's `Sqrt`.
+@builtin @internal @pure fun spirv_sqrt(x: double) -> double
+/// `1 / sqrt(x)`, as GLSL.std.450's `InverseSqrt`.
+@builtin @internal @pure fun spirv_inverse_sqrt(x: double) -> double
 
 // Textures and images, called as methods: `tex.sample(uv, smp)` is `sample(tex, uv, smp)`.
 // A texture samples, gathers and loads; an image loads where the shader may read it and stores where it may write it.
@@ -3637,11 +3595,87 @@
 @builtin @internal @stages(.compute) fun workgroup_written_word(word: uint) -> uint
 /// Sets `bits` of word `word` of the shadow, in one step.
 @builtin @internal @stages(.compute) fun workgroup_mark_written(word: uint, bits: uint)
-/// The bits of word `word` that the scalars `first ..< first + count` take; 0 where it holds none.
-@builtin @internal @pure fun workgroup_written_bits(word: uint, first: uint, count: uint) -> uint
 
 // What a weak compare-exchange gives, a struct of fields every target declares as a program's own.
 // The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it stored (EMIT-161).
+
+// What sg binds itself: an entry of `check::k_reserved_bindings`, which legalize alone reaches.
+
+@internal binding sg_debug:
+    words: mut buffer[atomic[uint]]
+
+
+@internal binding sg_array_lengths:
+    values: uint4[4]
+
+
+@internal binding sg_dispatch_grid:
+    threads: uint4
+
+
+@internal binding sg_mesh_output:
+    words: mut buffer[uint]
+
+
+@internal binding sg_mesh_input:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_draw:
+    values: buffer[uint4]
+
+
+@internal binding sg_geometry_indices:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices0:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices1:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices2:
+    words: buffer[uint]
+
+
+@internal binding sg_geometry_vertices3:
+    words: buffer[uint]
+
+
+@internal binding sg_tessellation_draw:
+    values: buffer[uint4]
+
+
+@internal binding sg_tessellation_patches:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_controls:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_points:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_indices:
+    words: mut buffer[uint]
+
+
+@internal binding sg_tessellation_args:
+    words: mut buffer[uint]
+
+
+@internal binding sg_task_output:
+    words: mut buffer[uint]
+
+
+@internal binding sg_task_input:
+    words: buffer[uint]
+
 
 /// What a weak compare-exchange read, and whether it stored `desired`.
 struct exchange_result[T]:
@@ -5038,11 +5072,11 @@ struct exchange_result[T]:
 /// A query nothing traced yet.
 @builtin @internal fun ray_query_begin() -> ray_query
 /// Starts the trace of a ray.
-@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, time: float)
 /// Starts the trace of a ray.
-@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, time: float)
 /// Starts the trace of a ray.
-@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, time: float)
 /// Traverses to the next candidate the shader decides, and false once there is none.
 @builtin @internal fun ray_query_proceed(q: ray_query) -> bool
 /// Whether the candidate is a non-opaque triangle rather than a procedural primitive's box.
@@ -5101,6 +5135,10 @@ struct exchange_result[T]:
 @builtin @internal fun ray_query_candidate_object_ray_direction(q: ray_query) -> float3
 /// Of the committed hit.
 @builtin @internal fun ray_query_committed_object_ray_direction(q: ray_query) -> float3
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_cluster_id(q: ray_query) -> int
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_cluster_id(q: ray_query) -> int
 
 // What a ray-tracing stage reads of its launch, its ray and its hit, which raytracing.sgl hands its entry point.
 @builtin @internal @stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3
@@ -5119,6 +5157,7 @@ struct exchange_result[T]:
 @builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4
 @builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_origin() -> float3
 @builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_direction() -> float3
+@builtin @internal @stages(.closest_hit, .any_hit) fun hit_cluster_id() -> int
 
 // A ray-tracing stage's trace, which a `trace` naming a ray type of its set lowers to (CHK-329).
 /// Traces a ray through the pipeline's tables, handing the payload over past the signature.
@@ -5173,7 +5212,7 @@ struct exchange_result[T]:
 @builtin @internal @stages(.raygen) fun hit_object_reorder_by_hint(h: hit_object, hint: uint, bits: int)
 /// Runs the closest hit or the miss the hit object holds, handing the payload over past the signature.
 @builtin @internal @stages(.raygen) fun hit_object_invoke(h: hit_object)
-/// Regroups the invocations by the low `bits` bits of `hint`, which `maybe_reorder` writes on vulkan.
+/// Regroups the invocations by the low `bits` bits of `hint`, which `maybe_reorder` writes.
 @builtin @internal @stages(.raygen) fun reorder_thread_by_hint(hint: uint, bits: int)
 
 // A call of a callable, which `table[i](mut p)` lowers to with the table's place in the section added (CHK-344).
@@ -5236,6 +5275,7 @@ enum feature:
     float_specials
     float_denormals
     view_instancing
+    pixel_view_read_workaround
     vertex_pipeline_stores
     shader_int64
     shader_f64
@@ -5243,6 +5283,7 @@ enum feature:
     unbounded_binding_arrays
     shader_shared_int64_atomics
     shader_int64_min_max_atomics
+    clustered_geometry
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

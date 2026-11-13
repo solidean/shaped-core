@@ -7,6 +7,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
@@ -95,11 +96,8 @@ cc::string reflection_mismatch(sg::compiled_shader const& reflected,
     auto out = cc::string();
     for (auto const& r : reflected.bindings)
     {
-        // sg's debug window, which sg binds itself wherever a shader writes print or assert records (EMIT-183)
-        if (r.name == "sg_debug" && !stated.debug_sites.empty())
-            continue;
-        // what sg binds for an emulated trace, in the reserved group (EMIT-135)
-        if (r.name == "sg_acceleration_pool" || r.name == "sg_acceleration_roots_block")
+        // what sg binds itself, outside the groups SGL declares
+        if (sg::is_reserved_binding_name(r.name))
             continue;
         sg::binding const* match = nullptr;
         for (auto const& d : declared)
@@ -298,6 +296,8 @@ void slib::shader_library::add_compiler(std::unique_ptr<shader_compiler> compile
         }
     }
     _compilers.push_back(std::shared_ptr<shader_compiler const>(cc::move(compiler)));
+    if (language == shader_language::sgl && !_module_dirs.empty())
+        (void)prefetch_modules();
 }
 
 slib::shader_compiler const* slib::shader_library::find_compiler(shader_language language, sg::shader_format format) const
@@ -343,6 +343,33 @@ void slib::shader_library::add_module_dir(cc::string_view virtual_dir)
             return;
     _module_dirs.push_back(cc::move(normalized.value()));
     _module_sources.push_back({});
+    (void)prefetch_modules();
+}
+
+namespace
+{
+cc::shared_async<cc::unit> all_of(cc::vector<cc::shared_async<cc::unit>> nodes)
+{
+    co_await cc::async_all(cc::span<cc::shared_async<cc::unit> const>(nodes));
+    co_return;
+}
+} // namespace
+
+cc::shared_async<cc::unit> slib::shader_library::prefetch_modules() const
+{
+    // read once, and only where a compiler keeps anything
+    auto read = cc::optional<module_library>();
+    auto const read_once = [&]() -> module_library
+    {
+        if (!read.has_value())
+            read = read_modules();
+        return read.value();
+    };
+    auto fetches = cc::vector<cc::shared_async<cc::unit>>();
+    for (auto const& compiler : _compilers)
+        if (compiler->source_language() == shader_language::sgl)
+            fetches.push_back(compiler->prefetch_modules(read_once));
+    return all_of(cc::move(fetches));
 }
 
 slib::module_library slib::shader_library::read_modules() const
@@ -384,7 +411,9 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
 
     _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name),
                                       .language = package.language,
-                                      .software_trace = package.software_trace});
+                                      .software_trace = package.software_trace,
+                                      .native_spirv = package.native_spirv,
+                                      .native_dxil = package.native_dxil});
 
     if (fs != nullptr)
     {
@@ -416,6 +445,8 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
             _module_dirs.push_back(cc::move(virtual_dir.value()));
             _module_sources.push_back(cc::string::create_copy_of(dir.source_dir));
         }
+    if (package.language == shader_language::sgl && !package.module_dirs.empty())
+        (void)prefetch_modules();
 
     for (auto const& definition : package.definitions)
     {
@@ -492,7 +523,8 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
-                  file_namespace, package.language, stage, entry_point, format, options, package.software_trace);
+                  file_namespace, package.language, stage, entry_point, format, options, package.software_trace,
+                  package.native_spirv, package.native_dxil);
     return outcome;
 }
 
@@ -504,7 +536,7 @@ sg::async_compiled_shader slib::shader_library::compile_source(cc::string_view s
 {
     compile_outcome outcome;
     _compile_text(outcome, cc::string::create_copy_of(source), opts.label, opts.include_dir, cc::string_view(),
-                  cc::string_view(), opts.language, stage, entry_point, format);
+                  cc::string_view(), opts.language, stage, entry_point, format, opts.options, opts.software_trace);
     return cc::move(outcome.shader);
 }
 
@@ -519,7 +551,9 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          cc::string_view entry_point,
                                          sg::shader_format format,
                                          cc::span<shader_option const> options,
-                                         bool software_trace) const
+                                         bool software_trace,
+                                         bool native_spirv,
+                                         bool native_dxil) const
 {
     // What an SGL source's `use` reaches, read as it is now: the modules are files like an include is.
     auto const modules = language == shader_language::sgl ? read_modules() : module_library();
@@ -592,7 +626,9 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                       .stage = stage,
                                       .label = cc::string::create_copy_of(label),
                                       .modules = module_files,
-                                      .software_trace = software_trace};
+                                      .software_trace = software_trace,
+                                      .native_spirv = native_spirv,
+                                      .native_dxil = native_dxil};
     desc.options.push_back_range(options);
 
     auto preprocessed = compiler->preprocess(desc, resolve);
@@ -613,6 +649,11 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         if (_logged_warnings.lock([&](cc::set<cc::string>& logged)
                                   { return logged.insert(cc::format("{}\n{}", name, w)); }))
             CC_LOG_WARNING("SGL warns of '{}' {}: {}", name, entry_point, w);
+    // A preferred native route that fell back is no fault, but nobody should run on DXC without being able to tell.
+    if (auto const& gap = preprocessed.value().native_gap; !gap.empty())
+        if (_logged_warnings.lock([&](cc::set<cc::string>& logged)
+                                  { return logged.insert(cc::format("{}\n{}\nnative: {}", name, entry_point, gap)); }))
+            CC_LOG_INFO("SGL compiles '{}' {} through DXC: it holds {}", name, entry_point, gap);
 
     for (auto& path : preprocessed.value().used_modules)
     {
@@ -626,10 +667,13 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     }
 
     desc.source = cc::move(preprocessed.value().source);
+    desc.bytecode = cc::move(preprocessed.value().bytecode);
     auto pending = cc::optional<sgl_interface>();
     if (preprocessed.value().stated.has_value())
     {
         desc.required_features = preprocessed.value().stated.value().required_features.value_or(sg::feature_set());
+        // what SGL wrote is a stage of its own where it wrote a polyfilled mesh stage's half (CHK-524)
+        desc.stage = preprocessed.value().stated.value().stage;
         pending = sgl_interface{.shader = cc::move(preprocessed.value().stated.value()),
                                 .declared = cc::move(preprocessed.value().declared_bindings),
                                 .layouts = cc::move(preprocessed.value().layouts),

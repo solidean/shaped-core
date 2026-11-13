@@ -3,8 +3,12 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-shader-library/compiler/available_compilers.hh>
+#include <shaped-shader-library/shader_library.hh>
+#include <shaped-xr/controller_routine.hh>
 #include <shaped-xr/runtime_report.hh>
 #include <shaped-xr/xr.hh>
+#include <typed-geometry/transform/compose.hh>
 
 using namespace cc::primitive_defines;
 
@@ -127,8 +131,8 @@ ASYNC_TEST("shaped-xr session - vulkan renders into the runtime's images, frame 
 ASYNC_TEST("shaped-xr session - a blend mode the runtime lacks falls back to opaque, and says so",
            nx::config::exclusive("openxr"))
 {
-    nx::expect_warning("a blend mode was asked of a session*");
     auto const system = simulated_system({.api = sxr::graphics_api::vulkan});
+    nx::expect_warning("a blend mode was asked of a session*");
     CHECK(system->offers_blend(sxr::blend_mode::opaque));
     CHECK(!system->offers_blend(sxr::blend_mode::additive));
 
@@ -201,6 +205,85 @@ ASYNC_TEST("shaped-xr session - a readable frame's clear reaches both layers of 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
 }
+
+#if SXR_TEST_HAS_DXC
+
+namespace
+{
+/// Draws a hand half a metre ahead of the left eye into a frame cleared to `readback_clear`, and reads both eyes back.
+[[nodiscard]] cc::shared_async<cc::unit> check_a_hand_is_drawn(sxr::graphics_api api)
+{
+    auto lib = slib::shader_library();
+    slib::add_available_compilers(lib);
+    lib.add_package(sxr::shader_package());
+
+    auto const system = simulated_system({.api = api});
+    auto const ctx = system->create_context().value();
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+    auto const session = system->create_session(*ctx, {.readable_color = true}).value();
+
+    auto const frame = next_rendered_frame(*session);
+    sxr::controller_routine::prewarm(*ctx, frame.color.format());
+    (void)co_await ctx->routines.idle_completion();
+
+    // +z is forward in tg's frame
+    auto const hand = tg::rigid_transform3f(
+        tg::compose(frame.views[0].camera_to_world, tg::rigid_transform3f::make_translation(tg::vec3f(0, 0, 0.5f))));
+    sxr::controller_pose const hands[] = {{.grip = hand}};
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto pass = cmd->raster.render_to({.color_targets = {frame.color.as_render_target_view().cleared(readback_clear)},
+                                           .depth_stencil_target = frame.depth.as_depth_stencil_view().cleared(1.0f),
+                                           .view_count = 2,
+                                           .target_set = "an::application's::own::target"});
+        CHECK(sxr::controller_routine::execute(pass, frame, hands) == sg::routine_outcome::executed);
+    }
+    auto const left = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 0});
+    auto const right = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 1});
+    session->submit_frame(cc::move(cmd));
+    ctx->advance_epoch();
+
+    // each eye sees the hand where that eye's own projection puts it, so both layers prove their own matrix
+    auto const center = hand.translation();
+    auto const check_eye = [&](cc::span<byte const> bytes, sxr::view const& view)
+    {
+        REQUIRE(bytes.size() == frame.width * frame.height * 4);
+        auto const green_at = [&](int x, int y) { return u8(bytes[(isize(y) * frame.width + x) * 4 + 1]); };
+
+        auto const clip = view.world_to_clip() * tg::vec4f(center[0], center[1], center[2], 1.0f);
+        auto const x = int((clip[0] / clip[3] * 0.5f + 0.5f) * float(frame.width));
+        auto const y = int((0.5f - clip[1] / clip[3] * 0.5f) * float(frame.height));
+        REQUIRE(x >= 0);
+        REQUIRE(x < frame.width);
+        REQUIRE(y >= 0);
+        REQUIRE(y < frame.height);
+
+        // the clear leaves green at 0, and the box's grey does not
+        CHECK(green_at(x, y) != 0);
+        CHECK(green_at(2, 2) == 0);
+    };
+    check_eye(co_await left.bytes(), frame.views[0]);
+    check_eye(co_await right.bytes(), frame.views[1]);
+    co_await ctx->idle_completion();
+    co_return;
+}
+} // namespace
+
+ASYNC_TEST("shaped-xr session - a hand is drawn where its pose puts it, on vulkan", nx::config::exclusive("openxr"))
+{
+    co_await check_a_hand_is_drawn(sxr::graphics_api::vulkan);
+}
+
+#ifdef CC_OS_WINDOWS
+ASYNC_TEST("shaped-xr session - a hand is drawn where its pose puts it, on dx12", nx::config::exclusive("openxr"))
+{
+    co_await check_a_hand_is_drawn(sxr::graphics_api::dx12);
+}
+#endif
+
+#endif
 
 #ifdef CC_OS_WINDOWS
 ASYNC_TEST("shaped-xr session - a frame's clear reaches both layers of dx12's own image", nx::config::exclusive("openxr"))

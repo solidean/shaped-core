@@ -204,6 +204,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "feature-not-declared";
     case diagnostic_kind::unused_require:
         return "unused-require";
+    case diagnostic_kind::pixel_stage_ignores_view:
+        return "pixel-stage-ignores-view";
     case diagnostic_kind::generic_not_instantiated:
         return "generic-not-instantiated";
     case diagnostic_kind::stage_not_allowed:
@@ -248,6 +250,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "invalid-target-text";
     case diagnostic_kind::nan_test_at_fast:
         return "nan-test-at-fast";
+    case diagnostic_kind::workgroup_wastes_lanes:
+        return "workgroup-wastes-lanes";
     case diagnostic_kind::missing_sampler:
         return "missing-sampler";
     case diagnostic_kind::invalid_constant_argument:
@@ -526,12 +530,17 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a body in a target's own text that stands where none may, or names what it may not";
     case diagnostic_kind::nan_test_at_fast:
         return "a float compared with itself, a NaN test that code compiled at @float(.fast) may fold";
+    case diagnostic_kind::workgroup_wastes_lanes:
+        return "a stated workgroup size that idles lanes of a wave, that webgpu refuses, or that the indexing "
+               "contradicts";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
         return "an entry point that uses a feature its file, its bindings and its body never `require`";
     case diagnostic_kind::unused_require:
         return "a `require` in a body that nothing there needed";
+    case diagnostic_kind::pixel_stage_ignores_view:
+        return "a pipeline of several views whose pixel stage takes no `@view_index`";
     case diagnostic_kind::generic_not_instantiated:
         return "a generic function that nothing instantiates, whose body is checked for its names alone";
     }
@@ -670,9 +679,11 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::redundant_yield:
     case diagnostic_kind::unreachable_code:
     case diagnostic_kind::unused_require:
+    case diagnostic_kind::pixel_stage_ignores_view:
     case diagnostic_kind::generic_not_instantiated:
     case diagnostic_kind::unroll_too_long:
     case diagnostic_kind::nan_test_at_fast:
+    case diagnostic_kind::workgroup_wastes_lanes:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

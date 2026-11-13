@@ -10,11 +10,15 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <imgui/imgui.h>
 #include <nexus/async-test.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/input.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/impl/capture_session.hh> // sv::impl::partial_capture_path
 
@@ -552,6 +556,114 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A surface the viewer did not open: a headless chain, the one kind every backend with `headless_present` has, stands in for a canvas.
+// There is no window behind it, so the loop ends by `request_close`, and the viewer's size is the chain's.
+ASYNC_INVOCABLE_TEST("sv - a viewer presents into a caller's surface with no window", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!ctx.supports(sg::feature::headless_present))
+        SKIP("this device has no headless swapchain");
+
+    auto const size = tg::vec2i(48, 32);
+    auto v_r = sv::viewer::try_create(
+        ctx, "sv-test/surface", {.width = 7, .height = 9, .surface = sg::swapchain_description{.headless_extent = size}});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    // A headless chain never resizes, so this asks for nothing and the size below must hold.
+    viewer.set_surface_size(tg::vec2i(16, 16));
+
+    auto frames = 0;
+    while (viewer.is_running())
+    {
+        auto& f = viewer.begin_frame();
+        if (f.is_open())
+        {
+            CHECK(f.viewport_size() == size);
+            ++frames;
+        }
+        if (frames == 3)
+            viewer.request_close();
+        co_await viewer.end_frame_async();
+    }
+    co_await viewer.finish();
+    CHECK(frames == 3);
+}
+
+// A page feeds its canvas's events, since a viewer on its surface has no window to poll.
+ASYNC_INVOCABLE_TEST("sv - a windowless viewer answers the events fed to it in the next frame, and only there",
+                     (sg::context_handle const& ctx_h))
+{
+    auto v_r = sv::viewer::try_create(*ctx_h, "sv-test/fed-input", {.width = 32, .height = 32, .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    viewer.feed_input({.payload = sr::key_event{.scancode = sr::scancode::w, .is_down = true}});
+    viewer.feed_input({.payload = sr::mouse_wheel_event{.delta = tg::vec2f(0, 1), .cursor_pos = tg::pos2f(4, 5)}});
+
+    auto frames = 0;
+    while (viewer.is_running())
+    {
+        auto& f = viewer.begin_frame();
+        if (f.is_open())
+        {
+            ++frames;
+            if (frames == 1)
+            {
+                REQUIRE(f.input_events().size() == 2);
+                CHECK(f.input_events()[0].is_key());
+                CHECK(f.input_events()[0].as_key().scancode == sr::scancode::w);
+                CHECK(f.input_events()[1].is_mouse_wheel());
+            }
+            else
+                CHECK(f.input_events().empty());
+        }
+        if (frames == 2)
+            viewer.request_close();
+        co_await viewer.end_frame_async();
+    }
+    co_await viewer.finish();
+    CHECK(frames == 2);
+}
+
+INVOCABLE_TEST("sv - a surface needs a positive size", (sg::context_handle const& ctx_h))
+{
+    auto const no_size = sg::native_window{.platform = sg::window_platform::web_canvas, .handle = (void*)"#canvas"};
+    auto const created
+        = sv::viewer::try_create(*ctx_h, "sv-test/no-size", {.surface = sg::swapchain_description{.window = no_size}});
+    REQUIRE(created.has_error());
+    // A native backend refuses a canvas anyway, so the error must be the size check's rather than the swapchain's.
+    CHECK(created.error().to_string().contains("positive size"));
+}
+
+// The loop a context that never blocks needs, run here on one that may, since the shape is the same on both.
+// Each frame is awaited rather than waited for, and finish drains what the destructor would have, so it owes nothing.
+ASYNC_INVOCABLE_TEST("sv - a frame loop awaited through end_frame_async and finish draws every frame and drains",
+                     (sg::context_handle const& ctx_h))
+{
+    auto v_r = sv::viewer::try_create(*ctx_h, "sv-test/async-loop", {.width = 32, .height = 32, .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    auto frames = 0;
+    while (viewer.is_running())
+    {
+        auto& f = viewer.begin_frame();
+        if (f.is_open())
+            ++frames;
+        if (frames == 3)
+            viewer.request_close();
+        co_await viewer.end_frame_async();
+    }
+    co_await viewer.finish();
+    CHECK(frames == 3);
+
+    // A finished viewer owes nothing: finishing it again submits nothing and waits for nothing.
+    auto const epoch_before = ctx_h->current_epoch();
+    co_await viewer.finish();
+    CHECK(ctx_h->current_epoch() == epoch_before);
+}
+
 // A frames() loop opens no `sv.frame` scope, so tearing its viewer down must close none.
 // An unmatched close pops whatever scope the caller has open on its thread, and a coroutine step around the loop then
 // fails as a profiling scope crossing a co_await.
@@ -718,4 +830,377 @@ ASYNC_INVOCABLE_TEST("sv - frame imgui opens one imgui frame per frame and ends 
         co_await cc::async_settled(sv::background_work(ctx));
     }
     CHECK(ImGui::GetCurrentContext() == nullptr);
+}
+
+// A settled render is the capture a headless `sv::interactive` takes, handed back rather than written.
+// So one body rendered both ways is one image: the capture's lossless file against the returned pixels, byte for byte.
+// It renders with the wavefront and no denoiser, whose image is its samples' mean: the default hybrid denoises through
+// a history of frames, and the first viewer of a process runs more of them while its shaders compile.
+// Measured, 2026-11-12: under the hybrid the two differ by up to 13 of 255 in half the pixels, the same on every run.
+ASYNC_INVOCABLE_TEST("sv - a settled render hands back the image a capture of the same body writes",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto const path = cc::temp_file_path("sv-settled-test", ".png");
+    auto const size = tg::vec2i(96, 64);
+    auto const box = sv_test::make_cornell_box();
+    auto const lit = sv_test::as_lit_meshes(box, box.light.emission[0]);
+    auto const body = [&](sv::frame& f)
+    {
+        auto view = f.window().view();
+        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+        auto scene = view.add_scene();
+        // the wavefront with no denoiser, whose image is its samples' mean whatever frames it took to reach them
+        scene.settings({.mode = sv::render_mode::wavefront});
+        scene.studio();
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
+    };
+
+    // WARP traces in software, so few samples, and a timeout no hardware run comes near
+    auto const request
+        = sr::capture_request{.active = true, .output_path = path, .size = size, .accumulate = 4, .timeout_seconds = 120.0};
+    for (auto f : sv::interactive(ctx, "sv-test/settled", {}, request))
+        body(f);
+    co_await cc::async_settled(sv::background_work(ctx));
+
+    auto const rendering
+        = sv::render_settled(ctx, "sv-test/settled", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+    auto const settled = co_await cc::async_as_result(rendering);
+    co_await cc::async_settled(sv::background_work(ctx));
+    REQUIRE(settled.has_value()).context(settled.has_error() ? settled.error().underlying().to_string() : cc::string());
+    CHECK(settled.value().settled);
+    CHECK(settled.value().size == size);
+    REQUIRE(settled.value().rgba.size() == isize(size[0]) * size[1] * 4);
+
+    auto written = babel::image::image();
+    {
+        auto reread = cc::file_read_stream_adapter::open(path);
+        REQUIRE(reread.has_value());
+        cc::read_stream in = reread.value();
+        auto decoded = babel::image::read(in);
+        REQUIRE(decoded.has_value());
+        written = cc::move(decoded.value());
+    }
+    cc::remove_file(path);
+    REQUIRE(written.width == size[0]);
+    REQUIRE(written.height == size[1]);
+
+    // the file holds red, green and blue; the settled image red, green, blue and alpha, opaque
+    auto differing = 0;
+    auto lit_pixels = 0;
+    for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+    {
+        auto same = true;
+        for (auto c = 0; c < 3; ++c)
+            same = same && settled.value().rgba[i * 4 + c] == u8(written.pixels[i * written.channels + c]);
+        differing += same ? 0 : 1;
+        lit_pixels += settled.value().rgba[i * 4 + 0] > 16 ? 1 : 0;
+    }
+    {
+        auto const rendering_again
+            = sv::render_settled(ctx, "sv-test/settled", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+        auto const again = co_await cc::async_as_result(rendering_again);
+        co_await cc::async_settled(sv::background_work(ctx));
+        REQUIRE(again.has_value());
+        auto self_max = 0;
+        auto self_diff = 0;
+        for (auto i = isize(0); i < again.value().rgba.size(); ++i)
+        {
+            auto const d = i32(again.value().rgba[i]) - i32(settled.value().rgba[i]);
+            self_max = cc::max(self_max, d < 0 ? -d : d);
+            self_diff += d != 0 ? 1 : 0;
+        }
+        CHECK(self_diff == 0).dump("self_differing", self_diff).dump("self_max", self_max);
+    }
+    auto max_diff = 0;
+    auto sum_diff = 0.0;
+    auto sum_a = 0.0;
+    auto sum_b = 0.0;
+    for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+        for (auto c = 0; c < 3; ++c)
+        {
+            auto const a = i32(settled.value().rgba[i * 4 + c]);
+            auto const b = i32(u8(written.pixels[i * written.channels + c]));
+            max_diff = cc::max(max_diff, a > b ? a - b : b - a);
+            sum_diff += a > b ? a - b : b - a;
+            sum_a += a;
+            sum_b += b;
+        }
+    CHECK(differing == 0)
+        .dump("differing", differing)
+        .dump("max", max_diff)
+        .dump("mean", sum_diff / (3.0 * size[0] * size[1]))
+        .dump("mean_settled", sum_a / (3.0 * size[0] * size[1]))
+        .dump("mean_written", sum_b / (3.0 * size[0] * size[1]));
+    // and it is a picture of the box, not a cleared target
+    CHECK(lit_pixels > size[0] * size[1] / 4).dump("lit", lit_pixels);
+}
+
+// An orthographic camera draws a thing the same size at any distance, and every renderer draws it at the same pixels.
+// A white quad a meter wide, 3 m and 12 m in front of a view 4 m high over 64 pixels, covers 16 by 16 pixels each time,
+// through the wavefront's parallel rays, raster's orthographic clip position and culling, and the hybrid's rebuilt point.
+ASYNC_INVOCABLE_TEST("sv - an orthographic camera draws a quad the same size at any distance, traced and raster alike",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto& lib = sv_test::shared_material_library();
+    auto const white = lib.acquire(
+        sv::material::create("orthographic test white", lib.acquire_type(sv::builtin_material::unlit).value(),
+                             {sv::material_attribute_binding::of("color", tg::vec3f(1, 1, 1))}));
+    // a meter square in the plane z = 0, facing -z, where the cameras stand
+    auto const positions
+        = cc::vector<tg::pos3f>{tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(-0.5f, 0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),
+                                tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),  tg::pos3f(0.5f, -0.5f, 0)};
+    auto const quad = sv::mesh{.name = "orthographic test quad",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = white};
+
+    auto const size = tg::vec2i(64, 64);
+    for (auto const [mode, name] : {cc::pair<sv::render_mode, cc::string_view>{sv::render_mode::wavefront, "wavefront"},
+                                    {sv::render_mode::raster, "raster"},
+                                    {sv::render_mode::hybrid, "hybrid"}})
+        for (auto const distance : {3.0, 12.0})
+        {
+            auto cam = sv::camera::looking_at(tg::pos3d(0, 0, -distance), tg::pos3d(0, 0, 0));
+            cam.projection.kind = sv::projection_kind::orthographic;
+            cam.projection.view_height = 4.0;
+            cam.projection.far_plane = 50.0;
+            auto const body = [&](sv::frame& f)
+            {
+                auto view = f.window().view();
+                view.camera(cam);
+                auto scene = view.add_scene();
+                scene.settings({.mode = mode});
+                scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
+                scene.add_mesh(quad);
+            };
+            auto const rendering = sv::render_settled(ctx, cc::format("sv-test/orthographic-{}-{}", name, distance),
+                                                      {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+            auto const image = co_await cc::async_as_result(rendering);
+            co_await cc::async_settled(sv::background_work(ctx));
+            REQUIRE(image.has_value()).context(image.has_error() ? image.error().underlying().to_string() : cc::string());
+
+            auto covered = 0;
+            for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+                covered += image.value().rgba[i * 4 + 1] > 128 ? 1 : 0;
+            CHECK(covered == 16 * 16).dump("renderer", name).dump("distance", distance).dump("covered", covered);
+        }
+}
+
+// A wavefront layer averages the channels it asks for at its pixels' primary hits, and a settled render hands them back.
+// A floor quad 2 m wide seen straight down by an orthographic view 4 m high over 32 pixels: every quantity is known.
+// Covered pixels hold their own ray's point, the camera's height as depth, the floor's normal and its material;
+// uncovered ones hold nothing, coverage 0.
+ASYNC_INVOCABLE_TEST("sv - a settled render hands back the channels a wavefront layer averages at its primary hits",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto& lib = sv_test::shared_material_library();
+    auto const color = tg::vec3f(0.2f, 0.5f, 0.7f);
+    auto const material
+        = lib.acquire(sv::material::create("channel test floor", lib.acquire_type(sv::builtin_material::openpbr).value(),
+                                           {sv::material_attribute_binding::of("base_color", color),
+                                            sv::material_attribute_binding::of("specular_roughness", 0.35f),
+                                            sv::material_attribute_binding::of("base_metalness", 0.25f)}));
+    // two meters square at y = 0, its winding facing up
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(-1, 0, -1), tg::pos3f(-1, 0, 1), tg::pos3f(1, 0, 1),
+                                                 tg::pos3f(-1, 0, -1), tg::pos3f(1, 0, 1),  tg::pos3f(1, 0, -1)};
+    auto const floor = sv::mesh{.name = "channel test floor",
+                                .geometry = sv::triangle_geometry::create_from_positions(positions),
+                                .material = material};
+
+    auto const size = tg::vec2i(32, 32);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 5, 0), tg::pos3d(0, 0, 0), tg::vec3d(0, 0, 1));
+    cam.projection.kind = sv::projection_kind::orthographic;
+    cam.projection.view_height = 4.0;
+    cam.projection.far_plane = 20.0;
+    auto const channels = u32(sv::render_channel::position) | u32(sv::render_channel::view_depth)
+                        | u32(sv::render_channel::geometric_normal) | u32(sv::render_channel::shading_normal)
+                        | u32(sv::render_channel::base_color) | u32(sv::render_channel::material)
+                        | u32(sv::render_channel::instance);
+    auto const body = [&](sv::frame& f)
+    {
+        auto view = f.window().view();
+        view.camera(cam);
+        auto scene = view.add_scene();
+        scene.settings({.channels = channels, .mode = sv::render_mode::wavefront});
+        scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
+        scene.add_mesh(floor);
+    };
+    auto const rendering
+        = sv::render_settled(ctx, "sv-test/channels", {.size = size, .samples = 4, .timeout_seconds = 120.0}, body);
+    auto const image = co_await cc::async_as_result(rendering);
+    co_await cc::async_settled(sv::background_work(ctx));
+    REQUIRE(image.has_value()).context(image.has_error() ? image.error().underlying().to_string() : cc::string());
+    REQUIRE(image.value().channels.size() == 7);
+
+    auto const& c = image.value().channels;
+    CHECK(c[0].channel == sv::render_channel::position);
+    CHECK(c[6].channel == sv::render_channel::instance);
+    auto const at = [&](i32 channel, i32 x, i32 y) { return c[channel].values[isize(y) * size[0] + x]; };
+
+    // inside the quad, away from its edges: the camera's right is the world's -x, its up the world's +z
+    auto const b = cam.basis();
+    for (auto const [x, y] : {cc::pair<i32, i32>{16, 16}, {10, 12}, {20, 21}})
+    {
+        auto const ndc_x = (f64(x) + 0.5) / 32.0 * 2.0 - 1.0;
+        auto const ndc_y = (f64(y) + 0.5) / 32.0 * 2.0 - 1.0;
+        auto const ray = cam.position + b.right * (2.0 * ndc_x) - b.up * (2.0 * ndc_y);
+        auto const p = at(0, x, y);
+        // the sample jitter spreads a pixel's points over its 1/8 m width, and their mean lies inside it, half a width either way
+        // a tighter bound is a bet on the sequence: 4 samples put the mean's standard deviation at about 0.018 m
+        CHECK(tg::abs(p[0] - f32(ray[0])) <= 0.0625f + 1e-4f).dump("x", p[0]).dump("wanted", ray[0]);
+        CHECK(tg::abs(p[2] - f32(ray[2])) <= 0.0625f + 1e-4f).dump("z", p[2]).dump("wanted", ray[2]);
+        CHECK(tg::abs(p[1]) < 1e-4f);
+        CHECK(tg::abs(p[3] - 1.0f) < 1e-6f).dump("coverage", p[3]);
+        CHECK(tg::abs(at(1, x, y)[0] - 5.0f) < 1e-3f).dump("depth", at(1, x, y)[0]);
+        CHECK(tg::abs(at(2, x, y)[1] - 1.0f) < 1e-4f).dump("geometric up", at(2, x, y)[1]);
+        CHECK(tg::abs(at(3, x, y)[1] - 1.0f) < 1e-4f).dump("shading up", at(3, x, y)[1]);
+        for (auto k = 0; k < 3; ++k)
+            CHECK(tg::abs(at(4, x, y)[k] - color[k]) < 1e-5f).dump("base color", at(4, x, y)[k]);
+        CHECK(tg::abs(at(5, x, y)[0] - 0.35f) < 1e-5f).dump("roughness", at(5, x, y)[0]);
+        CHECK(tg::abs(at(5, x, y)[1] - 0.25f) < 1e-5f).dump("metalness", at(5, x, y)[1]);
+        CHECK(at(6, x, y)[1] == at(6, 16, 16)[1]);
+    }
+    CHECK(at(6, 16, 16)[1] > 0.0f);
+
+    // outside it, nothing: no sample hit a surface there
+    for (auto const [x, y] : {cc::pair<i32, i32>{1, 1}, {30, 2}, {3, 29}})
+        for (auto ch = 0; ch < 7; ++ch)
+            CHECK(at(ch, x, y) == tg::vec4f(0, 0, 0, 0)).dump("channel", ch).dump("x", x).dump("y", y);
+}
+
+// A guest render lives inside its host's frames: it records and submits on the host's home, between them, and the host
+// alone advances epochs, so a library rendering this way never disturbs the frame pacing of the app it runs in.
+// Here the host is a thread of the test's own: it pumps the home, then advances, as an app's loop does once a frame.
+ASYNC_INVOCABLE_TEST("sv - a guest settled render advances no epoch of its own, and settles in its host's frames",
+                     (sg::context_handle const& ctx_h))
+{
+#if !CC_HAS_THREADS
+    SKIP("the host is a thread of its own");
+#else
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
+
+    auto& lib = sv_test::shared_material_library();
+    auto const white
+        = lib.acquire(sv::material::create("guest test white", lib.acquire_type(sv::builtin_material::unlit).value(),
+                                           {sv::material_attribute_binding::of("color", tg::vec3f(1, 1, 1))}));
+    auto const positions
+        = cc::vector<tg::pos3f>{tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(-0.5f, 0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),
+                                tg::pos3f(-0.5f, -0.5f, 0), tg::pos3f(0.5f, 0.5f, 0),  tg::pos3f(0.5f, -0.5f, 0)};
+    auto const quad = sv::mesh{.name = "guest test quad",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = white};
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 0, -3.0), tg::pos3d(0, 0, 0));
+    cam.projection.kind = sv::projection_kind::orthographic;
+    cam.projection.view_height = 4.0;
+    cam.projection.far_plane = 50.0;
+    auto const body = [&](sv::frame& f)
+    {
+        auto view = f.window().view();
+        view.camera(cam);
+        auto scene = view.add_scene();
+        scene.settings({.mode = sv::render_mode::wavefront});
+        scene.background(sv::background::uniform(tg::vec3f(0, 0, 0)));
+        scene.add_mesh(quad);
+    };
+
+    // the host: its home bound to its own thread and living there, pumped and then followed by an advance, round after round
+    auto home = cc::atomic<cc::thread_bound_scheduler*>(nullptr);
+    auto stop = cc::atomic<bool>(false);
+    auto host_advances = cc::atomic<i64>(0);
+    auto const epoch_before = u64(ctx.current_epoch());
+    auto host = cc::native_thread::start(
+        [&]
+        {
+            auto own = cc::thread_bound_scheduler();
+            own.bind_to_current_thread();
+            home.store(&own, cc::memory_order_release);
+            while (!stop.load(cc::memory_order_acquire))
+            {
+                (void)own.pump_for(1.0);
+                ctx.advance_epoch();
+                host_advances.fetch_add(1, cc::memory_order_relaxed);
+            }
+            own.drain();
+        });
+    while (home.load(cc::memory_order_acquire) == nullptr)
+        co_await cc::async_yield();
+
+    auto const size = tg::vec2i(64, 64);
+    auto covered = -1;
+    auto settled = false;
+    {
+        auto const rendering = sv::render_settled(
+            ctx, "sv-test/guest",
+            {.size = size, .samples = 4, .timeout_seconds = 120.0, .host = home.load(cc::memory_order_acquire)}, body);
+        auto const image = co_await cc::async_as_result(rendering);
+        if (image.has_value())
+        {
+            settled = image.value().settled;
+            covered = 0;
+            for (auto i = isize(0); i < isize(size[0]) * size[1]; ++i)
+                covered += image.value().rgba[i * 4 + 1] > 128 ? 1 : 0;
+        }
+    }
+    stop.store(true, cc::memory_order_release);
+    host.join();
+    auto const advanced = u64(ctx.current_epoch()) - epoch_before;
+
+    CHECK(settled);
+    // a meter square, four meters tall in a 64-pixel view: 16 by 16 pixels
+    CHECK(covered == 16 * 16).dump("covered", covered);
+    // every epoch since the render began is one its host advanced
+    CHECK(advanced == u64(host_advances.load(cc::memory_order_relaxed)))
+        .dump("advanced", advanced)
+        .dump("host", host_advances.load(cc::memory_order_relaxed));
+#endif
 }

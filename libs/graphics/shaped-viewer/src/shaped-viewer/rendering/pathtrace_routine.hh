@@ -37,6 +37,10 @@ namespace sv
 /// describing what this frame renders.
 [[nodiscard]] shaders::tracer::frame_constants default_frame_constants();
 
+/// Sets what one pixel of `fc.camera`'s image, `height` pixels high, spans: a pinhole's angle in `pixel_spread`,
+/// or an orthographic camera's width in meters in `pixel_width`, the other 0.
+void set_pixel_footprint(shaders::tracer::frame_constants& fc, i32 height);
+
 /// Writes into `record` what `gpu_resource_manager::describe_instance` leaves to the trace: the placement, and how its cutout opacity is read.
 ///
 /// The placement is copied from `instance`, the TLAS instance the record describes, so the two cannot disagree.

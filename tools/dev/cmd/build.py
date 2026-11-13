@@ -18,6 +18,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Build the project")
     a.preset(p)
     a.build_overrides(p)
+    a.server(p)
     a.emsdk(p)
     a.profile(p)
     p.add_argument("--target", "-t", action="append",
@@ -69,6 +70,7 @@ def _object_targets(args: argparse.Namespace, ctx: Context, preset) -> list[str]
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
+    server = ctx.build_server(args)
 
     if args.files:
         # Objects are per-build-dir paths, so each preset resolves its own rather than sharing one list.
@@ -77,7 +79,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             results += dev.build(
                 [preset], _object_targets(args, ctx, preset), root=ctx.root,
                 auto_configure=not args.no_configure, mirror=args.mirror_output,
-                verbose=args.verbose, emsdk_path=args.emsdk_path, keep_going=args.keep_going,
+                verbose=args.verbose, emsdk_path=args.emsdk_path, keep_going=args.keep_going, server=server,
             )
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)
@@ -104,6 +106,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         verbose=args.verbose,
         emsdk_path=args.emsdk_path,
         keep_going=args.keep_going,
+        server=server,
     )
     # Bundle the diag sidecars before the pass/fail gate: a failed build is exactly when its per-invocation compiler errors are worth capturing.
     if args.diag_archive:

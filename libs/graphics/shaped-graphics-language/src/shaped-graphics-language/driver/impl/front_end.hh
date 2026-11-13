@@ -6,35 +6,16 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
-#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/driver/library_file.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
+#include <shaped-graphics-language/driver/shared_library.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
 namespace sgl::driver::impl
 {
-/// A library's module files parsed once, shared by every compile in the process that hands in the same files.
-/// It also keeps the checked layers of the module sets those compiles reach, so a module's body is checked once per set.
-struct parsed_library
-{
-    cc::vector<cc::unique_ptr<parsed_file>> parsed;
-    cc::vector<cc::unique_ptr<ast::file_ast>> built;
-    /// Each file as the check pass takes it, and the name it was handed in under.
-    cc::vector<check::module_file> files;
-    cc::vector<cc::string> names;
-
-    struct layers
-    {
-        cc::vector<cc::shared_ptr<check::checked_prelude const>> made;
-        /// Set once a set of this library's modules failed to make a layer, after which its compiles check it whole.
-        bool has_failed = false;
-    };
-    cc::mutex<layers> checked;
-};
-
 /// One source checked against the prelude, which is what every driver starts from.
 ///
 /// `module` refers into `files` and `asts`, so the three move together and are never copied apart.
@@ -47,16 +28,19 @@ struct front_end
     cc::vector<cc::unique_ptr<parsed_file>> owned_files;
     cc::vector<cc::unique_ptr<ast::file_ast>> owned_asts;
     /// The library files the check read, where they came from the process's cache rather than `owned_files`.
-    cc::shared_ptr<parsed_library const> library;
-    /// The layer the check continued from, which `module` reads in place.
-    cc::shared_ptr<check::checked_prelude const> layer;
+    cc::shared_ptr<shared_library const> library;
+    /// The link whose layer the check continued from, which `module` reads in place.
+    shared_library::link_ptr layer;
     check::checked_module module;
     cc::string_view source_name;
     /// The file the source is: behind the prelude and the library files it reaches, or the prelude's own file when it
     /// is one (`prelude_file_of`).
     i32 program = 0;
-    /// Parallel to the files between the prelude and the program: the name of each reached library file.
+    /// Parallel to the files between the prelude and the program: the name of each library file checked.
     cc::vector<cc::string_view> library_names;
+    /// The names of the library files the program reaches through `use`, which an edit of any of them changes it for.
+    /// `library_names` unless the compile continued from a layer of the whole library, which checks every file.
+    cc::vector<cc::string_view> reached_library_names;
     /// Every error of every phase, one formatted diagnostic per line and its notes under it; empty when there is none.
     /// A diagnostic a test's `@expect` names is in neither this nor `warnings`, and neither is one of `entry_diagnostics`.
     cc::string errors;

@@ -1,0 +1,56 @@
+; One workgroup of 4 lanes: lane x reads views[(x + shift) % 2], shift being specialization constant 0, with the index and the access chain marked NonUniform.
+; out[x] is OpArrayLength of that element, and out[4 + x] its first word, which shows the load reaches it.
+               OpCapability Shader
+               OpCapability StorageBufferArrayNonUniformIndexing
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid %out %views
+               OpExecutionMode %main LocalSize 4 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %words ArrayStride 4
+               OpDecorate %block Block
+               OpMemberDecorate %block 0 Offset 0
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 0
+               OpDecorate %views DescriptorSet 0
+               OpDecorate %views Binding 1
+               OpDecorate %views NonWritable
+               OpDecorate %shift SpecId 0
+               OpDecorate %index NonUniform
+               OpDecorate %element NonUniform
+               OpDecorate %first_word NonUniform
+               OpDecorate %first NonUniform
+       %void = OpTypeVoid
+     %void_f = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+   %in_uint3 = OpTypePointer Input %uint3
+        %gid = OpVariable %in_uint3 Input
+      %words = OpTypeRuntimeArray %uint
+      %block = OpTypeStruct %words
+  %ssbo_ptr = OpTypePointer StorageBuffer %block
+        %out = OpVariable %ssbo_ptr StorageBuffer
+     %uint_0 = OpConstant %uint 0
+     %uint_2 = OpConstant %uint 2
+     %uint_4 = OpConstant %uint 4
+      %shift = OpSpecConstant %uint 0
+     %blocks = OpTypeArray %block %uint_2
+ %blocks_ptr = OpTypePointer StorageBuffer %blocks
+      %views = OpVariable %blocks_ptr StorageBuffer
+   %uint_ptr = OpTypePointer StorageBuffer %uint
+       %main = OpFunction %void None %void_f
+      %entry = OpLabel
+         %id = OpLoad %uint3 %gid
+          %x = OpCompositeExtract %uint %id 0
+    %shifted = OpIAdd %uint %x %shift
+      %index = OpUMod %uint %shifted %uint_2
+    %element = OpAccessChain %ssbo_ptr %views %index
+     %length = OpArrayLength %uint %element 0
+  %length_at = OpAccessChain %uint_ptr %out %uint_0 %x
+               OpStore %length_at %length
+ %first_word = OpAccessChain %uint_ptr %element %uint_0 %uint_0
+      %first = OpLoad %uint %first_word
+         %x4 = OpIAdd %uint %x %uint_4
+   %first_at = OpAccessChain %uint_ptr %out %uint_0 %x4
+               OpStore %first_at %first
+               OpReturn
+               OpFunctionEnd

@@ -201,7 +201,7 @@ struct sg::binding
     /// See sampler_binding_type.
     cc::optional<sampler_binding_type> sampler_type;
 
-    /// For `acceleration_structure` bindings on dx12 and vulkan: its shader traces it through the software walk.
+    /// For `acceleration_structure` bindings on dx12, vulkan and metal: its shader's inline traces take the software walk.
     /// A layout holding one carries sg's acceleration pool and roots in the reserved group, and only such a binding takes a tlas that moves.
     /// A shader package's `SOFTWARE_TRACE` sets it; webgpu has no other walk and ignores it.
     bool traced_in_software = false;

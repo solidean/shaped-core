@@ -98,7 +98,7 @@ sg::blas_handle metal_command_list::build_blas_common(MTL4::PrimitiveAcceleratio
     auto* const accel = build_accel_common(descriptor, size, build_scratch, update_scratch);
 
     auto const result = std::make_shared<metal_blas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
-                                                     geometry_count);
+                                                     geometry_count, descriptor->motionKeyframeCount() > 1);
 
     auto const scratch_raw
         = _metal_context.transient.create_raw_buffer(build_scratch, sg::buffer_usage::readwrite_buffer);
@@ -126,7 +126,16 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
     auto const scope = autorelease_scope();
 
     cc::vector<sg::raw_buffer_handle> inputs;
-    cc::vector<MTL4::AccelerationStructureTriangleGeometryDescriptor*> geometry_descs;
+    cc::vector<MTL4::AccelerationStructureGeometryDescriptor*> geometry_descs;
+
+    // A BLAS whose vertices move is a motion structure, every geometry of it with a pose per keyframe over [0, 1]: a
+    // geometry that stands still repeats its one pose.
+    auto keyframes = isize(1);
+    for (auto const& g : geometries)
+        keyframes = cc::max(keyframes, 1 + g.later_poses.size());
+    for (auto const& g : geometries)
+        CC_ASSERT(g.later_poses.empty() || 1 + g.later_poses.size() == keyframes, "the moving geometries of one BLAS "
+                                                                                  "take as many poses each");
 
     for (auto const& g : geometries)
     {
@@ -140,12 +149,48 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
             CC_ASSERT(g.vertex_count % 3 == 0, "a non-indexed triangle geometry needs vertex_count % 3 == 0");
         CC_ASSERT(triangle_count > 0, "triangle geometry resolves to zero triangles");
 
-        auto* const d = MTL4::AccelerationStructureTriangleGeometryDescriptor::alloc()->init();
-        d->setVertexBuffer(range_of(vertices, g.vertex_offset_in_bytes, g.vertex_count * g.vertex_stride_in_bytes));
-        d->setVertexStride(NS::UInteger(g.vertex_stride_in_bytes));
-        d->setVertexFormat(MTL::AttributeFormatFloat3);
-        d->setTriangleCount(NS::UInteger(triangle_count));
-        d->setOpaque(g.is_opaque);
+        auto const vertex_bytes = g.vertex_count * g.vertex_stride_in_bytes;
+        auto const configure = [&](auto* d)
+        {
+            d->setVertexStride(NS::UInteger(g.vertex_stride_in_bytes));
+            d->setVertexFormat(MTL::AttributeFormatFloat3);
+            d->setTriangleCount(NS::UInteger(triangle_count));
+            d->setOpaque(g.is_opaque);
+        };
+        auto* triangles = static_cast<MTL4::AccelerationStructureTriangleGeometryDescriptor*>(nullptr);
+        auto* motion = static_cast<MTL4::AccelerationStructureMotionTriangleGeometryDescriptor*>(nullptr);
+        auto* d = static_cast<MTL4::AccelerationStructureGeometryDescriptor*>(nullptr);
+        if (keyframes == 1)
+        {
+            triangles = MTL4::AccelerationStructureTriangleGeometryDescriptor::alloc()->init();
+            triangles->setVertexBuffer(range_of(vertices, g.vertex_offset_in_bytes, vertex_bytes));
+            configure(triangles);
+            d = triangles;
+        }
+        else
+        {
+            // the keyframes' vertex buffers, as a buffer of one range each, which the build reads by address
+            auto table = cc::vector<MTL4::BufferRange>();
+            for (auto k = isize(0); k < keyframes; ++k)
+            {
+                auto const* const pose = k == 0 || g.later_poses.empty() ? nullptr : &g.later_poses[k - 1];
+                auto const& buffer = pose != nullptr ? require_build_input(pose->vertices, "later_poses") : vertices;
+                table.push_back(
+                    range_of(buffer, pose != nullptr ? pose->offset_in_bytes : g.vertex_offset_in_bytes, vertex_bytes));
+                if (pose != nullptr)
+                    inputs.push_back(pose->vertices);
+            }
+            auto const table_raw = _metal_context.transient.create_raw_buffer(
+                isize(table.size() * sizeof(MTL4::BufferRange)),
+                sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+            upload_bytes_to_buffer(table_raw, cc::as_bytes(cc::span<MTL4::BufferRange const>(table)), 0);
+            inputs.push_back(table_raw);
+            motion = MTL4::AccelerationStructureMotionTriangleGeometryDescriptor::alloc()->init();
+            motion->setVertexBuffers(range_of(static_cast<metal_buffer const&>(*table_raw), 0,
+                                              isize(table.size() * sizeof(MTL4::BufferRange))));
+            configure(motion);
+            d = motion;
+        }
 
         // **DXR's geometry contribution to the hit index, which Metal spells per geometry descriptor.**
         // The instance's own offset alone makes every geometry of a BLAS select one hit group, so a BLAS whose second
@@ -158,18 +203,37 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
         {
             auto const& indices = require_build_input(g.indices, "indices");
             auto const index_width = g.index_type == sg::index_format::uint16 ? isize(2) : isize(4);
-            d->setIndexBuffer(range_of(indices, g.index_offset_in_bytes, g.index_count * index_width));
-            d->setIndexType(g.index_type == sg::index_format::uint16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32);
+            auto const range = range_of(indices, g.index_offset_in_bytes, g.index_count * index_width);
+            auto const type = g.index_type == sg::index_format::uint16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32;
+            if (motion != nullptr)
+            {
+                motion->setIndexBuffer(range);
+                motion->setIndexType(type);
+            }
+            else
+            {
+                triangles->setIndexBuffer(range);
+                triangles->setIndexType(type);
+            }
             inputs.push_back(g.indices);
         }
 
         if (g.transform != nullptr)
         {
             auto const& transform = require_build_input(g.transform, "transform");
-            d->setTransformationMatrixBuffer(range_of(transform, g.transform_offset_in_bytes, 12 * isize(sizeof(float))));
+            auto const range = range_of(transform, g.transform_offset_in_bytes, 12 * isize(sizeof(float)));
             // sg's transform is row-major 3x4 — the DXR / Vulkan wire layout — and Metal takes it verbatim rather than
             // transposed, which is what MatrixLayout is for.
-            d->setTransformationMatrixLayout(MTL::MatrixLayoutRowMajor);
+            if (motion != nullptr)
+            {
+                motion->setTransformationMatrixBuffer(range);
+                motion->setTransformationMatrixLayout(MTL::MatrixLayoutRowMajor);
+            }
+            else
+            {
+                triangles->setTransformationMatrixBuffer(range);
+                triangles->setTransformationMatrixLayout(MTL::MatrixLayoutRowMajor);
+            }
             inputs.push_back(g.transform);
         }
 
@@ -183,6 +247,12 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
     auto* const descriptor = MTL4::PrimitiveAccelerationStructureDescriptor::alloc()->init();
     descriptor->setGeometryDescriptors(array);
     descriptor->setUsage(to_metal_usage(flags));
+    if (keyframes > 1)
+    {
+        descriptor->setMotionKeyframeCount(NS::UInteger(keyframes));
+        descriptor->setMotionStartTime(0.0f);
+        descriptor->setMotionEndTime(1.0f);
+    }
 
     auto const result = build_blas_common(descriptor, inputs, flags, int(geometries.size()));
 
@@ -303,13 +373,58 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
         referenced_blases.push_back(inst.blas);
     }
 
-    auto const stride = isize(sizeof(MTL::IndirectAccelerationStructureInstanceDescriptor));
+    // A TLAS of which an instance moves is a motion structure: every instance takes its transform at time 0 and at
+    // time 1 from a buffer of its own, a still one the same twice.
+    auto moves = false;
+    auto reaches_motion = false;
+    for (auto const& inst : instances)
+    {
+        moves = moves || inst.transform_at_end.has_value();
+        reaches_motion = reaches_motion || static_cast<metal_blas const&>(*inst.blas).is_moving();
+    }
+    reaches_motion = reaches_motion || moves;
+    auto motion_descs = cc::vector<MTL::IndirectAccelerationStructureMotionInstanceDescriptor>();
+    auto transforms = cc::vector<MTL::PackedFloat4x3>();
+    if (moves)
+        for (auto i = isize(0); i < instances.size(); ++i)
+        {
+            auto const& d = instance_descs[i];
+            motion_descs.push_back({.options = d.options,
+                                    .mask = d.mask,
+                                    .intersectionFunctionTableOffset = d.intersectionFunctionTableOffset,
+                                    .userID = d.userID,
+                                    .accelerationStructureID = d.accelerationStructureID,
+                                    .motionTransformsStartIndex = u32(transforms.size()),
+                                    .motionTransformsCount = 2,
+                                    .motionStartBorderMode = MTL::MotionBorderModeClamp,
+                                    .motionEndBorderMode = MTL::MotionBorderModeClamp,
+                                    .motionStartTime = 0.0f,
+                                    .motionEndTime = 1.0f});
+            transforms.push_back(d.transformationMatrix);
+            auto at_end = d.transformationMatrix;
+            if (auto const& end = instances[i].transform_at_end; end.has_value())
+                for (int col = 0; col < 4; ++col)
+                {
+                    at_end.columns[col].x = end.value()[0 * 4 + col];
+                    at_end.columns[col].y = end.value()[1 * 4 + col];
+                    at_end.columns[col].z = end.value()[2 * 4 + col];
+                }
+            transforms.push_back(at_end);
+        }
+
+    auto const stride = moves ? isize(sizeof(MTL::IndirectAccelerationStructureMotionInstanceDescriptor))
+                              : isize(sizeof(MTL::IndirectAccelerationStructureInstanceDescriptor));
     auto const instance_raw = _metal_context.transient.create_raw_buffer(
         isize(instances.size()) * stride, sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
 
-    upload_bytes_to_buffer(
-        instance_raw,
-        cc::as_bytes(cc::span<MTL::IndirectAccelerationStructureInstanceDescriptor const>(instance_descs)), 0);
+    if (moves)
+        upload_bytes_to_buffer(
+            instance_raw,
+            cc::as_bytes(cc::span<MTL::IndirectAccelerationStructureMotionInstanceDescriptor const>(motion_descs)), 0);
+    else
+        upload_bytes_to_buffer(
+            instance_raw,
+            cc::as_bytes(cc::span<MTL::IndirectAccelerationStructureInstanceDescriptor const>(instance_descs)), 0);
 
     auto const& instance_buffer = static_cast<metal_buffer const&>(*instance_raw);
 
@@ -317,9 +432,21 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
     descriptor->setInstanceDescriptorBuffer(range_of(instance_buffer, 0, isize(instances.size()) * stride));
     descriptor->setInstanceDescriptorStride(NS::UInteger(stride));
     descriptor->setInstanceCount(NS::UInteger(instances.size()));
-    descriptor->setInstanceDescriptorType(MTL::AccelerationStructureInstanceDescriptorTypeIndirect);
+    descriptor->setInstanceDescriptorType(moves ? MTL::AccelerationStructureInstanceDescriptorTypeIndirectMotion
+                                                : MTL::AccelerationStructureInstanceDescriptorTypeIndirect);
     descriptor->setInstanceTransformationMatrixLayout(MTL::MatrixLayoutColumnMajor);
     descriptor->setUsage(to_metal_usage(flags));
+    auto transforms_raw = sg::raw_buffer_handle();
+    if (moves)
+    {
+        transforms_raw = _metal_context.transient.create_raw_buffer(
+            isize(transforms.size() * sizeof(MTL::PackedFloat4x3)),
+            sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+        upload_bytes_to_buffer(transforms_raw, cc::as_bytes(cc::span<MTL::PackedFloat4x3 const>(transforms)), 0);
+        descriptor->setMotionTransformBuffer(range_of(static_cast<metal_buffer const&>(*transforms_raw), 0,
+                                                      isize(transforms.size() * sizeof(MTL::PackedFloat4x3))));
+        descriptor->setMotionTransformCount(NS::UInteger(transforms.size()));
+    }
 
     auto size = isize(0);
     auto build_scratch = isize(0);
@@ -335,9 +462,9 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
         sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
     upload_bytes_to_buffer(hit_group_offsets, cc::as_bytes(cc::span<u32 const>(offsets)), 0);
 
-    auto const result
-        = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
-                                       int(instances.size()), cc::move(referenced_blases), hit_group_offsets);
+    auto const result = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
+                                                     int(instances.size()), cc::move(referenced_blases),
+                                                     hit_group_offsets, reaches_motion);
 
     auto const scratch_raw
         = _metal_context.transient.create_raw_buffer(build_scratch, sg::buffer_usage::readwrite_buffer);
@@ -347,6 +474,8 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
     declare_accel(result, result->storage(), sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);
     declare_buffer(scratch_raw, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
     declare_buffer(instance_raw, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    if (transforms_raw != nullptr)
+        declare_buffer(transforms_raw, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
     for (auto const& inst : instances)
     {
         auto const& mtl_blas = static_cast<metal_blas const&>(*inst.blas);

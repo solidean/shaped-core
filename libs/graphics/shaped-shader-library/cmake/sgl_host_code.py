@@ -43,6 +43,8 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     # a float's atomic holds its bits, so the host writes and reads the float itself
     "atomic[float]": ("float", 4, None),
     "bool32": ("slib::gpu_bool", 4, None),
+    # three rows of four, as an instance's transform is (CHK-518)
+    "affine3": ("slib::gpu_affine3", 48, None),
     # the 16-bit families: typed-geometry's IEEE binary16, and clean-core's 16-bit integers
     "half": ("tg::f16", 2, None),
     "half2": ("tg::vec<2, tg::f16>", 4, None),
@@ -84,6 +86,8 @@ WIDE_VECTORS = {f"{family}{width}" for family in ("long", "ulong", "double") for
 OPTION_TYPES = {
     "bool": ("bool", lambda value: value),
     "int": ("int", lambda value: value),
+    "uint": ("cc::u32", lambda value: f"{value}u"),
+    "float": ("float", lambda value: f"{value}f"),
     "pixel_format": ("sg::pixel_format", lambda value: f"sg::pixel_format::{value.lstrip('.')}"),
 }
 
@@ -102,18 +106,29 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
         if o["type"] not in OPTION_TYPES:
             continue
         if "." in o["name"]:
-            module, name = o["name"].split(".", 1)
+            module, name = split_module_name(o["name"])
             modules.setdefault(module, []).append((name, o))
         else:
             own.append((o["name"], o))
-    clash = sorted({name for name, _ in own} & set(modules))
+    clash = sorted({name for name, _ in own} & {m.split(".", 1)[0] for m in modules})
     if clash:
         raise HostCodeError(
             f"shader package '{package}': '{path}' has an option '{clash[0]}', and the options of module "
             f"'{clash[0]}' nest under that name in its options struct; rename the option")
+    for module, fields in modules.items():
+        for name, _ in fields:
+            if f"{module}.{name}" in modules:
+                raise HostCodeError(
+                    f"shader package '{package}': '{path}' reaches option '{name}' of module '{module}', and module "
+                    f"'{module}.{name}' nests its options under that name; rename the option")
 
     def field(name: str, option: dict, indent: str, of: str) -> str:
         cpp, spell = OPTION_TYPES[option["type"]]
+        follows = option.get("follows", [])
+        if follows:
+            # CHK-519: left unset, the compile computes it from the options its default names
+            return (f"{indent}cc::optional<{cpp}> {name} = {{}}; ///< `@option const {name}`{of}, "
+                    f"which follows {', '.join(follows)} unless set\n")
         return f"{indent}{cpp} {name} = {spell(option['value'])}; ///< `@option const {name}`{of}\n"
 
     out = [f"/// The options of {path}, each at the default its source writes. Generated; do not edit.\n"]
@@ -121,18 +136,44 @@ def options_struct(package: str, path: str, struct_name: str, options: list[dict
     out.append(f"struct {struct_name}\n{{\n")
     for name, option in own:
         out.append(field(name, option, "    ", ""))
+    # a dotted module's options nest by the parts of its name, so a field is reached as the compile names it
+    tree: dict = {}
     for module, fields in modules.items():
-        out.append(f"    /// The options of module `{module}`, which a compile sets as `{module}.<name>`.\n")
-        out.append("    struct\n    {\n")
-        for name, option in fields:
-            out.append(field(name, option, "        ", f" of module `{module}`"))
-        out.append(f"    }} {module};\n")
+        node = tree
+        for part in module.split("."):
+            node = node.setdefault(part, {})
+        node[None] = (module, fields)
+
+    def nested(node: dict, prefix: str, indent: str) -> None:
+        for part, child in node.items():
+            if part is None:
+                continue
+            leaf = child.get(None)
+            if leaf is not None:
+                out.append(f"{indent}/// The options of module `{leaf[0]}`, which a compile sets as `{leaf[0]}.<name>`.\n")
+            else:
+                out.append(f"{indent}/// The options of the modules named `{prefix}{part}.<module>`.\n")
+            out.append(f"{indent}struct\n{indent}{{\n")
+            if leaf is not None:
+                for name, option in leaf[1]:
+                    out.append(field(name, option, indent + "    ", f" of module `{leaf[0]}`"))
+            nested(child, f"{prefix}{part}.", indent + "    ")
+            out.append(f"{indent}}} {part};\n")
+
+    nested(tree, "", "    ")
     out.append("\n")
     out.append("    /// The values as an acquire takes them, each by the name the compile sets it by.\n")
     out.append("    [[nodiscard]] cc::vector<slib::shader_option> values() const\n    {\n")
-    names = [name for name, _ in own] + [f"{m}.{name}" for m, fields in modules.items() for name, _ in fields]
-    listed = ", ".join(f'slib::option_of("{name}", {name})' for name in names)
-    out.append(f"        return {{{listed}}};\n    }}\n")
+    named = [(name, o) for name, o in own] + [(f"{m}.{name}", o) for m, fields in modules.items() for name, o in fields]
+    listed = ", ".join(f'slib::option_of("{name}", {name})' for name, o in named if not o.get("follows"))
+    following = [name for name, o in named if o.get("follows")]
+    if not following:
+        out.append(f"        return {{{listed}}};\n    }}\n")
+    else:
+        out.append(f"        auto values = cc::vector<slib::shader_option>{{{listed}}};\n")
+        for name in following:
+            out.append(f'        if ({name}.has_value())\n            values.push_back(slib::option_of("{name}", {name}.value()));\n')
+        out.append("        return values;\n    }\n")
     out.append("};\n")
     return "".join(out)
 
@@ -227,13 +268,29 @@ def cpp_name(sgl_name: str, namespace: str = "") -> str:
     where one is given.
     """
     if "." in sgl_name:
-        module, name = sgl_name.split(".", 1)
-        return f"::{MODULES_NAMESPACE}::{module}::{name}"
+        module, name = split_module_name(sgl_name)
+        return f"::{MODULES_NAMESPACE}::{module_cpp(module)}::{name}"
     return f"{namespace}::{sgl_name}" if namespace else sgl_name
 
 
+def split_module_name(sgl_name: str) -> tuple[str, str]:
+    """`m.x` as module `m` and its name `x`; a module's name may be dotted, `a.b.x`, and a declaration's never is."""
+    module, name = sgl_name.rsplit(".", 1)
+    return module, name
+
+
+def module_cpp(module: str) -> str:
+    """A module's name as the C++ namespace under `sgl_modules` it generates into: `a.b` is `a::b`."""
+    return module.replace(".", "::")
+
+
+def module_path(module: str) -> str:
+    """A module's name as the path of its header under `sgl_modules/`: `a.b` is `a/b`."""
+    return module.replace(".", "/")
+
+
 def module_header(module: str) -> str:
-    return f"<{MODULES_NAMESPACE}/{module}.hh>"
+    return f"<{MODULES_NAMESPACE}/{module_path(module)}.hh>"
 
 
 def modules_used(entries: SglEntries) -> list[str]:
@@ -243,7 +300,7 @@ def modules_used(entries: SglEntries) -> list[str]:
         names += p["layout"] + [p["inline"], p["vertex_input"], p["target_set"]]
     for _, p in entries.raytracing_pipelines:
         names += p["layout"] + [p["inline"]]
-    modules = [n.split(".", 1)[0] for n in names if n and "." in n]
+    modules = [split_module_name(n)[0] for n in names if n and "." in n]
     modules += [m for m, _ in entries.foreign_structs.values()]
     return sorted(set(modules) - ({entries.module} if entries.module else set()))
 
@@ -376,8 +433,8 @@ def includes(entries: SglEntries) -> list[str]:
     # A file's options struct: its values as an acquire takes them, and a format's enumerators for a default.
     # A wrapper's reached names are a span of string views.
     if entries.option_structs:
-        out += ["<clean-core/container/vector.hh>", "<shaped-shader-library/compiler/shader_compiler.hh>",
-                "<shaped-graphics/resource/pixel_format.hh>"]
+        out += ["<clean-core/container/vector.hh>", "<clean-core/error/optional.hh>",
+                "<shaped-shader-library/compiler/shader_compiler.hh>", "<shaped-graphics/resource/pixel_format.hh>"]
     if entries.option_structs or entries.described_entry_points or entries.pipelines or entries.raytracing_pipelines:
         out += ["<clean-core/container/span.hh>", "<clean-core/string/string_view.hh>"]
     # A layout built per set of values, from a group whose formats name options.
@@ -430,6 +487,8 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")
+    if "affine3" in types:
+        out.append("<shaped-shader-library/gpu_affine3.hh>")
     if any(padded_element(m) for _, b in entries.bindings for m in b["members"]) or any("[" in t for t in types):
         out.append("<shaped-shader-library/gpu_padded.hh>")
     return list(dict.fromkeys(out))
@@ -506,8 +565,6 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         array = ((lambda view: f"cc::vector<{view}>") if count == 0
                  else (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1
                  else (lambda view: view))
-        if member["kind"] == "constant" and member.get("length_of"):
-            continue  # an unbounded array's length, which write_constants takes from its views
         if member["kind"] == "constant":
             cpp = sized_host_type(package, memory, where, member["type"], member["size"])
             out.append(f"    {cpp} {member['name']}; ///< `{member['type']}`, "
@@ -661,11 +718,13 @@ def bound_samplers(where: str, samplers: list[dict], names: list[str], indent: s
 
 
 def mark_software_trace(entries: SglEntries) -> None:
-    """A package's SOFTWARE_TRACE, on each acceleration member of its bindings and of the modules it exports."""
+    """A package's SOFTWARE_TRACE, on each acceleration member of its bindings, on its ray-tracing pipelines, and in the modules it exports."""
     for _, binding in entries.bindings:
         for member in binding["members"]:
             if member["kind"] == "acceleration_structure":
                 member["software_trace"] = True
+    for _, pipeline in entries.raytracing_pipelines:
+        pipeline["software_trace"] = True
     for unit in entries.modules.values():
         mark_software_trace(unit)
 
@@ -778,11 +837,6 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
     out = []
     for member in binding["members"]:
         if member["kind"] != "constant":
-            continue
-        if member.get("length_of"):
-            # the views the group binds, which is the length the shader reads
-            out.append(f"    auto const {member['name']} = cc::i32(this->{member['length_of']}.size());\n")
-            out.append(f"    cc::memcpy(block.data() + {member['offset']}, &{member['name']}, 4);\n")
             continue
         cpp = sized_host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'",
                               member["type"], member["size"])
@@ -950,7 +1004,7 @@ def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
     for file, struct in entries.render_targets:
         space = file_namespace(namespace, entries, file.path)
         # a module's target set is named after its module, which the runtime names a module's shader by too
-        identity = f"{MODULES_NAMESPACE}::{entries.module}" if entries.module else space
+        identity = f"{MODULES_NAMESPACE}::{module_cpp(entries.module)}" if entries.module else space
         out.append(emit_render_target(package, space, file, struct, identity))
     return "".join(out)
 
@@ -1681,6 +1735,8 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
             out.append(f"        .hit_groups = k_{key}_groups,\n")
         if p["host_hit_groups"]:
             out.append("        .has_host_hit_groups = true,\n")
+        if p.get("software_trace"):
+            out.append("        .software_trace = true,\n")
         if p["callables"]:
             out.append(f"        .callables = k_{key}_callables,\n")
         if p["host_callables"]:

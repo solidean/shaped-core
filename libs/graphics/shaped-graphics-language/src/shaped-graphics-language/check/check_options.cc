@@ -1,6 +1,7 @@
 #include <clean-core/algorithm/search.hh>
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/math/float.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 
@@ -56,6 +57,35 @@ void checker::apply_option_value(symbol_id id, constant_info& info)
                               out.name_of(info.type)));
         };
         auto text = cc::string_view(given.value);
+        if (info.kind == constant_kind::real)
+        {
+            // what a literal of the type is, its sign the value's: a float holds the nearest float to it (CHK-353)
+            auto const digits = text.starts_with('-') ? text.subview(1) : text;
+            auto const shape = classify_number(digits);
+            auto const value = digits.starts_with('-') || digits.starts_with('+') ? cc::optional<f64>()
+                             : shape == number_class::plain_float                 ? parse_plain_float(digits)
+                             : shape == number_class::plain_integer
+                                 ? (parse_literal_integer(digits).has_value()
+                                        ? cc::optional<f64>(f64(parse_literal_integer(digits).value()))
+                                        : cc::optional<f64>())
+                                 : cc::optional<f64>();
+            if (!value.has_value() || !cc::is_finite(value.value()))
+                return refuse();
+            auto const signed_value = text.starts_with('-') ? -value.value() : value.value();
+            info.real = out.name_of(info.type) == "float" ? f64(f32(signed_value)) : signed_value;
+            if (!cc::is_finite(info.real))
+                return refuse();
+            return;
+        }
+        if (info.kind == constant_kind::integer && info.is_unsigned)
+        {
+            auto const value = classify_number(text) == number_class::plain_integer ? parse_literal_integer(text)
+                                                                                    : cc::optional<i64>();
+            if (!value.has_value() || value.value() < 0 || value.value() > i64(0xffffffffu))
+                return refuse();
+            info.integer = i32(u32(value.value()));
+            return;
+        }
         if (info.kind == constant_kind::integer)
         {
             // the sign belongs to the value, so the most negative int is one too
@@ -104,7 +134,8 @@ void checker::judge_option_values()
         for (auto s = isize(0); s < out.symbols.size(); ++s)
         {
             auto const& symbol = out.symbols[s];
-            if (is_prelude_file(symbol.file) || symbol.kind != symbol_kind::constant || !ast::is_valid(symbol.declaration)
+            if (is_prelude_file(symbol.file) || !out.is_reached_file(symbol.file)
+                || symbol.kind != symbol_kind::constant || !ast::is_valid(symbol.declaration)
                 || find_attribute(symbol.file, ast_of(symbol.file).at(symbol.declaration).attributes, "option") == nullptr)
                 continue;
             auto const name = out.qualified_name_of(symbol_id(s));

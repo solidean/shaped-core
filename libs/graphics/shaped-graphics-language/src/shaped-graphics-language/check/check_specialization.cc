@@ -48,7 +48,7 @@ bool checker::is_type_operand(function_scope const& scope, ast::expr_id expr) co
     if (found == nullptr || found->empty())
         return false;
     auto const kind = out.at(found->front()).kind;
-    return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
+    return kind == symbol_kind::structure || kind == symbol_kind::enumeration || kind == symbol_kind::alias;
 }
 
 cc::optional<type_id> checker::check_type_comparison(function_scope& scope, ast::expr_id id, ast::call const& call)
@@ -389,6 +389,195 @@ bool checker::compile_type_branches(symbol_id id, i32 file, ast::struct_decl con
         out.target_type_branches.push_back(cc::move(record));
     }
     return has_fields;
+}
+
+// ---- target layouts (CHK-522) ------------------------------------------------------------------------------------
+
+namespace
+{
+/// The modules SGL ships, which a program reaches by `use` without a module directory of its own.
+constexpr cc::string_view k_shipped_modules[] = {"accel"};
+} // namespace
+
+bool checker::is_shipped_module_file(i32 file) const
+{
+    if (file < 0 || file >= file_module.size() || file_module[file] <= 0)
+        return false;
+    for (auto const name : k_shipped_modules)
+        if (modules[file_module[file]] == name)
+            return true;
+    return false;
+}
+
+bool checker::has_target_layout(type_id type) const
+{
+    return is_valid(type) && type != checked_module::error_type && out.at(type).kind == type_kind::structure
+        && out.at(type).has_target_layout;
+}
+
+bool checker::refuse_held_layout(i32 file, source_span where, type_id type, cc::string_view holder)
+{
+    auto inner = type;
+    while (is_valid(inner) && inner != checked_module::error_type && out.at(inner).kind == type_kind::array)
+        inner = out.at(inner).element;
+    if (!has_target_layout(inner))
+        return false;
+    unsupported(file, where,
+                cc::format("{} holding a {}, which stands in each target's own order, so only a buffer's element and a "
+                           "value of a body hold one",
+                           holder, out.name_of(inner)));
+    return true;
+}
+
+void checker::compile_layout_branches(symbol_id id,
+                                      type_id type,
+                                      i32 file,
+                                      ast::struct_decl const& s,
+                                      ast::range_of<member_info> fields)
+{
+    auto const& ast = ast_of(file);
+    auto const name = cc::string(out.at(id).name);
+    auto is_first = true;
+    for (auto const& branch : ast.at(s.branches))
+    {
+        auto record = target_type_branch{.type_symbol = id, .is_fields = true};
+        if (ast::is_valid(branch.condition))
+            (void)target_condition_of(file, branch.condition, record.condition);
+        if (!ast.at(branch.texts).empty())
+        {
+            report(diagnostic_kind::invalid_target_text, file, file_of(file).at(branch.form).where,
+                   cc::format("{} lays its fields out per target, so each branch is its fields, never a target's text",
+                              name));
+            continue;
+        }
+        // the first branch is the fields the check judges, so its members are those already compiled
+        auto const members = is_first ? fields : compile_members(file, branch.members, true);
+        is_first = false;
+        auto const theirs = out.at(fields);
+        auto const mine = out.at(members);
+        auto why = cc::string();
+        for (auto const& m : mine)
+        {
+            auto is_known = false;
+            for (auto const& f : theirs)
+                is_known = is_known || (f.name == m.name && f.type == m.type);
+            if (!is_known && why.empty())
+                why = cc::format("{} {}: {}, which its first branch does not", name, m.name, out.name_of(m.type));
+        }
+        if (why.empty() && mine.size() != theirs.size())
+            why = cc::format("{} has {} fields in one branch and {} in another", name, theirs.size(), mine.size());
+        if (!why.empty())
+        {
+            report(diagnostic_kind::invalid_target_text, file, file_of(file).at(branch.form).where,
+                   cc::format("every branch of a @target_layout struct declares the same fields, and this one declares "
+                              "{}",
+                              why));
+            continue;
+        }
+        // CHK-526: the record as the target lays it out: a run of @bits fields shares one word, and an @absent one is
+        // none; each field the check judged is then placed by name
+        auto placed = cc::vector<member_info>();
+        auto by_name = cc::vector<layout_place>();
+        auto word_bits = 32;
+        for (auto const& m : out.at(members))
+        {
+            if (m.is_absent)
+            {
+                by_name.push_back({.member = -1});
+                continue;
+            }
+            if (m.layout_bits == 0)
+            {
+                placed.push_back(m);
+                word_bits = 32;
+                by_name.push_back({.member = i32(placed.size()) - 1});
+                continue;
+            }
+            if (word_bits + m.layout_bits > 32)
+            {
+                placed.push_back({.name = cc::format("sgl_bits{}", placed.size()), .type = m.type});
+                word_bits = 0;
+            }
+            by_name.push_back({.member = i32(placed.size()) - 1, .offset = word_bits, .bits = m.layout_bits});
+            word_bits += m.layout_bits;
+        }
+        for (auto const& f : theirs)
+            for (auto k = isize(0); k < mine.size(); ++k)
+                if (mine[k].name == f.name)
+                    record.places.push_back(by_name[k]);
+        auto const first = u32(out.members.size());
+        for (auto& m : placed)
+            out.members.push_back(cc::move(m));
+        record.layout = type_id(out.types.size());
+        out.types.push_back({
+            .kind = type_kind::structure,
+            .symbol = id,
+            .members = {.first = first, .count = u32(placed.size())},
+            .layout_of = type,
+            .arguments = {.first = u32(out.type_lists.size()), .count = 0},
+        });
+        out.target_type_branches.push_back(cc::move(record));
+    }
+}
+
+void checker::prepare_target_layouts()
+{
+    target_layouts.clear();
+    unplaced_layouts.clear();
+    for (auto i = isize(0); i < out.types.size(); ++i)
+    {
+        auto const type = type_id(i);
+        if (!has_target_layout(type))
+            continue;
+        auto const chosen = chosen_type_branch(out, out.at(type).symbol, compiled_target);
+        if (chosen < 0 || !is_valid(out.target_type_branches[chosen].layout))
+        {
+            // a description and a test write for no target, and judge the type by its first branch alone
+            if (compiled_target.api != graphics_api::none)
+                unplaced_layouts.push_back(type);
+            continue;
+        }
+        target_layouts.push_back({type, out.target_type_branches[chosen].layout});
+    }
+    if (target_layouts.empty())
+        return;
+    // a buffer is the one type that holds one (CHK-522), and it is interned, so its twin is made here
+    auto const count = out.types.size();
+    auto const structs = target_layouts.size();
+    for (auto i = isize(0); i < count; ++i)
+    {
+        // by value: interning below moves `types`
+        auto const element = out.at(type_id(i)).element;
+        auto const is_mut = out.at(type_id(i)).is_mut;
+        if (out.at(type_id(i)).kind != type_kind::buffer)
+            continue;
+        for (auto k = isize(0); k < structs; ++k)
+            if (element == target_layouts[k].first)
+            {
+                auto const to = buffer_type(target_layouts[k].second, is_mut);
+                target_layouts.push_back({type_id(i), to});
+                break;
+            }
+    }
+}
+
+void checker::place_layout_bindings(isize first)
+{
+    if (target_layouts.empty())
+        return;
+    for (auto i = first; i < out.symbols.size(); ++i)
+    {
+        if (out.symbols[i].kind != symbol_kind::binding || out.symbols[i].state != symbol_state::checked)
+            continue;
+        auto const members = out.bindings[out.symbols[i].info].members;
+        for (auto k = u32(0); k < members.count; ++k)
+            for (auto const& [from, to] : target_layouts)
+                if (out.members[members.first + k].type == from)
+                {
+                    out.members.own(members.first + k).type = to;
+                    break;
+                }
+    }
 }
 
 namespace

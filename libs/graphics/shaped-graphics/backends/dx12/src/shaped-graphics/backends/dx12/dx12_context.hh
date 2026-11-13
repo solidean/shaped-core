@@ -94,6 +94,14 @@ struct sg::backend::dx12::dx12_config
     /// Best-effort: skipped when the layer isn't installed.
     bool activate_global_debug_layer = false;
 
+    /// SGL shaders are DXIL that SGL writes itself, and an entry point it has no lowering for yet goes through DXC.
+    /// `false` takes the text route, SGL's HLSL through DXC, for every SGL shader of this context.
+    bool native_dxil = true;
+
+    /// SGL's own DXIL carries each operation's `.sgl` line, in a debug module beside the program, for PIX (EMIT-257).
+    /// The program part keeps its bytes, and what DXC compiles is untouched.
+    bool native_line_tables = false;
+
     /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
     ///
     /// Auto-breadcrumbs cost a write per command-list operation, which is why this is off by default and worth
@@ -126,6 +134,18 @@ struct sg::backend::dx12::dx12_config
     /// It is how a suite proves that a caller draws on a device without ray tracing, on a host whose device has it.
     /// Building an acceleration structure then breaks its precondition, exactly as it would on an adapter without DXR.
     bool withhold_raytracing = false;
+
+    /// Whether this context reports no `binding_arrays` whatever the device has, as WebGPU's core does.
+    ///
+    /// Test-only in intent, like `withhold_raytracing`.
+    /// It is how a suite runs a caller's non-bindless path, sv's bound raster mode above all, natively on a host whose device has them.
+    /// Only the report changes: a layout with an array binding still builds, so it is the caller's to honor it.
+    bool withhold_binding_arrays = false;
+
+    /// Whether this context reports no `primitive_index`, as the webgpu backend always does.
+    ///
+    /// Test-only in intent, like `withhold_binding_arrays`: it is how sv's pulled bound draws run natively.
+    bool withhold_primitive_index = false;
 
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
@@ -209,7 +229,24 @@ public:
     /// Whether this device supports inline `RayQuery` (DXR tier >= 1.1).
     [[nodiscard]] bool supports_ray_query() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_1; }
 
+    /// Whether this device builds clustered geometry and partitioned TLAS through `ExecuteIndirectRTASOperations`.
+    /// Only the preview Agility SDK, with its experimental features enabled, ever answers true.
+    /// `sg::feature::partitioned_tlas` reports it; clusters wait for libs/graphics/shaped-graphics/docs/plans/clusters-and-partitioned-tlas.md.
+    [[nodiscard]] bool supports_clusters_and_ptlas() const { return _clusters_and_ptlas; }
+
+    /// Sizes and allocates a partitioned tlas through the preview runtime; refused on any other.
+    [[nodiscard]] cc::result<sg::partitioned_tlas_handle> try_create_partitioned_tlas(
+        sg::partitioned_tlas_description const& desc) override;
+    [[nodiscard]] u64 blas_address_of(sg::blas const& blas) const override;
+    [[nodiscard]] u64 buffer_address_of(sg::raw_buffer const& buffer) const override;
+    /// Sizes and allocates a cluster pool through the preview runtime; refused on any other.
+    [[nodiscard]] cc::result<sg::cluster_pool_handle> try_create_cluster_pool(
+        sg::cluster_pool_description const& desc) override;
+
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+    [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
+    [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
+    [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
 
     /// D3D12 has every stage sg models, and headless present is always available here.
     ///
@@ -226,14 +263,16 @@ public:
             return supports_raytracing();
         case sg::feature::timestamp_query:
             return _query_system.supports_timestamps();
+        case sg::feature::binding_arrays:
+            return !_withhold_binding_arrays;
+        case sg::feature::primitive_index:
+            return !_withhold_primitive_index;
         case sg::feature::headless_present:
         case sg::feature::geometry_shader:
-        case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
         case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
         case sg::feature::multisampled_array_textures:
-        case sg::feature::primitive_index:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
         case sg::feature::depth32_float_stencil8:
@@ -279,6 +318,9 @@ public:
             return true;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::pixel_view_read_workaround:
+            // docs/bugs-external/intel-d3d12-view-instancing-draws-nothing
+            return _view_instancing && metrics.adapter().vendor_id == 0x8086 && !metrics.adapter().is_software;
         case sg::feature::mesh_shader:
             return _mesh_shader;
         case sg::feature::ray_tracing_motion_blur:
@@ -290,6 +332,12 @@ public:
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;
+        case sg::feature::partitioned_tlas:
+            // the preview runtime's, which reports it for clusters and partitioned tlas together
+            return _clusters_and_ptlas;
+        case sg::feature::clustered_geometry:
+            // the preview runtime's, reported with the partitioned tlas under one cap
+            return _clusters_and_ptlas;
         }
         return false;
     }
@@ -711,6 +759,8 @@ public:
 
     // What ExecuteIndirect reads a `sg::dispatch_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _dispatch_signature;
+    // What ExecuteIndirect reads a `D3D12_DRAW_ARGUMENTS` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _draw_signature;
     // What ExecuteIndirect reads a `sg::draw_indexed_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _draw_indexed_signature;
     // A mesh draw's, made only where the device has mesh shaders.
@@ -726,8 +776,12 @@ public:
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false;    // D3D12_OPTIONS8, cached at creation
     bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
+    bool _withhold_binding_arrays = false;     // dx12_config::withhold_binding_arrays
+    bool _withhold_primitive_index = false;    // dx12_config::withhold_primitive_index
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
+    bool _native_dxil = false;                 // dx12_config::native_dxil
+    bool _native_line_tables = false;          // dx12_config::native_line_tables
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
     bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
     bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation
@@ -735,6 +789,7 @@ public:
     bool _unbounded_binding_arrays = false;    // resource binding tier 3, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
+    bool _clusters_and_ptlas = false;          // ClustersAndPTLASSupported, from the preview Agility SDK alone
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
     bool _view_instancing = false;             // D3D12_OPTIONS3's ViewInstancingTier, cached at creation
     bool _mesh_shader = false;                 // D3D12_OPTIONS7's MeshShaderTier, cached at creation

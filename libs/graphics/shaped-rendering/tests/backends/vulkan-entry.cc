@@ -11,15 +11,37 @@
 // Validation runs with synchronization validation on, as sg's own sweep does: it is the oracle that sees a hazard between two submissions.
 
 // No exclusion tags, for the reason dx12-entry.cc gives.
+// Every routine through SGL's own SPIR-V where it has a lowering, and DXC's elsewhere.
+ASYNC_TEST("sr vulkan - native-spirv")
+{
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .native_spirv = true, .enable_sync_validation = true});
+    if (ctx.has_error())
+        SKIP("no vulkan device");
+    else
+    {
+        (void)sr_test::shader_fixtures();
+        co_await nx::async_invoke_tests_in_sequence(
+            "vulkan-native-spirv", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())},
+            ctx.value());
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
+    }
+}
+
 ASYNC_TEST("sr vulkan")
 {
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .enable_sync_validation = true});
+    // the text route, SGL's HLSL through DXC; `sr vulkan - native-spirv` is the default's
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .native_spirv = false, .enable_sync_validation = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
     else
     {
         (void)sr_test::shader_fixtures(); // alive before any child acquires through it
-        co_await nx::async_invoke_tests_in_sequence("vulkan", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "vulkan", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.
         CHECK(!ctx.value()->is_device_lost())

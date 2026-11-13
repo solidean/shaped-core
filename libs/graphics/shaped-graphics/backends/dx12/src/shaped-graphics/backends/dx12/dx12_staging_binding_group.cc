@@ -174,16 +174,11 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
             {
                 // A null handle is the null acceleration structure, not a mistake: a valid descriptor every ray
                 // misses, with no storage to keep alive and nothing to declare a hazard on.
-                auto dx_tlas = std::shared_ptr<dx12_tlas const>();
-                if (av.tlas != nullptr)
+                auto const storage = av.tlas != nullptr ? trace_storage_of(*av.tlas) : dx12_buffer_handle();
+                create_accel_view(device, storage.get(), dst);
+                if (storage != nullptr)
                 {
-                    dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av.tlas);
-                    CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
-                }
-                create_accel_view(device, dx_tlas.get(), dst);
-                if (dx_tlas != nullptr)
-                {
-                    res.buffer = dx_tlas->_dx12_storage;
+                    res.buffer = storage;
                     res.bound_as = sg::view_class::acceleration_structure;
                 }
             },
@@ -259,6 +254,9 @@ cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
     {
         auto const& s = _dx_layout->view_slots[slot];
         auto const binding = _dx_layout->binding_of_view_slot(slot);
+        // a staging group's unbounded array is as long as its capacity, a vacant element a null descriptor
+        if (s.binding.is_unbounded())
+            group->unbounded_length = u32(element_count(s.binding));
         if (s.binding.is_array())
         {
             auto ab = dx12_array_binding{.name = s.binding.name,

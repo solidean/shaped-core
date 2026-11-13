@@ -11,7 +11,8 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/backends/metal/fwd.hh> // where every backend type is declared, autorelease_scope included
-#include <shaped-graphics/fwd.hh>                // also what puts the bare sized aliases in scope inside sg
+#include <shaped-graphics/binding/reserved_bindings.hh>
+#include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg
 
 #include <mutex> // pipeline_compilation_lock, which serializes the MTL4 compiler
 
@@ -154,15 +155,22 @@ inline constexpr int k_vertex_buffer_base_index = k_inline_constants_buffer_inde
 /// A raygen kernel draws no vertices, so vertex-input slot 0 is free during a dispatch and the index is borrowed from it.
 inline constexpr int k_hit_group_offsets_buffer_index = k_vertex_buffer_base_index;
 
-/// The buffer slots one command list's argument table holds: the groups, the reserved one, inline constants, and
-/// every vertex-input slot.
-///
-/// Metal allows 31, so this is sg's budget rather than the API's — and the static_assert below is what says so.
-inline constexpr int k_argument_table_buffer_count = k_vertex_buffer_base_index + sg::max_vertex_buffers;
+/// The MSL buffer index a compute or raster pipeline that writes print and assert records finds sg's debug window at.
+/// The table's last slot, clear of every vertex-input slot; a ray-tracing stage takes no buffer, so none is bound there.
+inline constexpr int k_debug_window_buffer_index = sg::reserved_debug_window.metal_buffer;
 
-static_assert(k_argument_table_buffer_count <= 31,
-              "the metal argument table has 31 buffer slots, and sg's budget "
-              "no longer fits");
+/// The buffer slots one command list's argument table holds: the groups, the reserved one, inline constants, every
+/// vertex-input slot, and the debug window in the last of Metal's 31.
+inline constexpr int k_argument_table_buffer_count = k_debug_window_buffer_index + 1;
+
+/// The MSL buffer indices an inline trace of an opted-in package finds the software walk's pool and roots at (EMIT-135).
+inline constexpr int k_acceleration_pool_buffer_index = sg::reserved_acceleration_pool.metal_buffer;
+inline constexpr int k_acceleration_roots_buffer_index = sg::reserved_acceleration_roots.metal_buffer;
+
+static_assert(k_vertex_buffer_base_index + sg::max_vertex_buffers <= k_acceleration_pool_buffer_index,
+              "the vertex-input slots reach the software walk's");
+static_assert(k_acceleration_roots_buffer_index < k_debug_window_buffer_index, "the reserved slots overlap");
+static_assert(k_argument_table_buffer_count <= 31, "the metal argument table has 31 buffer slots");
 
 /// The sampler slots one command list's argument table holds, which is where each `bound_sampler` goes.
 /// A bound sampler at register `n` is MSL's `[[sampler(n)]]`, set straight into the table rather than into an argument buffer.

@@ -126,6 +126,43 @@ cc::result<compiler> compiler::create()
 
 compiler::~compiler() = default;
 
+cc::optional<cc::string> compiler::validate(cc::span<byte const> container) const
+{
+    impl::ComPtr<IDxcValidator> validator;
+    if (HRESULT hr = DxcCreateInstance(CLSID_DxcValidator, IID_PPV_ARGS(validator.GetAddressOf())); FAILED(hr))
+        return cc::string("no DXIL validator: dxil.dll did not load");
+    impl::ComPtr<IDxcBlobEncoding> blob;
+    if (HRESULT hr = _state->utils->CreateBlob(container.data(), UINT32(container.size()), 0, blob.GetAddressOf());
+        FAILED(hr))
+        return cc::string("no blob of the container");
+    impl::ComPtr<IDxcOperationResult> outcome;
+    if (HRESULT hr = validator->Validate(blob.Get(), DxcValidatorFlags_Default, outcome.GetAddressOf()); FAILED(hr))
+        return cc::string("the validator did not run");
+    HRESULT status = S_OK;
+    outcome->GetStatus(&status);
+    if (SUCCEEDED(status))
+        return {};
+    impl::ComPtr<IDxcBlobEncoding> errors;
+    outcome->GetErrorBuffer(errors.GetAddressOf());
+    if (!errors || errors->GetBufferSize() == 0)
+        return cc::string("the validator refused it, with no message");
+    return cc::string(
+        cc::string_view(static_cast<char const*>(errors->GetBufferPointer()), isize(errors->GetBufferSize())));
+}
+
+cc::result<cc::string> compiler::disassemble(cc::span<byte const> container) const
+{
+    auto const buffer = DxcBuffer{.Ptr = container.data(), .Size = SIZE_T(container.size()), .Encoding = 0};
+    impl::ComPtr<IDxcResult> outcome;
+    if (HRESULT hr = _state->compiler->Disassemble(&buffer, IID_PPV_ARGS(outcome.GetAddressOf())); FAILED(hr))
+        return impl::dxc_error(hr, "IDxcCompiler3::Disassemble");
+    impl::ComPtr<IDxcBlobUtf8> text;
+    if (HRESULT hr = outcome->GetOutput(DXC_OUT_DISASSEMBLY, IID_PPV_ARGS(text.GetAddressOf()), nullptr);
+        FAILED(hr) || !text)
+        return cc::error("the container disassembled to nothing");
+    return cc::string(cc::string_view(text->GetStringPointer(), isize(text->GetStringLength())));
+}
+
 cc::string_view compiler::version() const
 {
     return _state->version;

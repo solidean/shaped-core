@@ -14,9 +14,6 @@ using namespace sgl::check::impl;
 
 namespace
 {
-/// A guard nests its operands a level deeper; one that would pass the limit every later walk stops at is not written.
-constexpr int k_guard_depth_reserve = 4;
-
 /// One numeric shape: a scalar, or a vector of `width` scalars of `element`.
 struct shape
 {
@@ -368,22 +365,20 @@ struct guarder
                                             .text = call.text});
     }
 
-    /// CHK-491's constant of the unbounded binding array `object` names, as a `uint`; `none` where its binding holds none.
+    /// CHK-491's length of the unbounded binding array `object` names, as a `uint`; `none` where it names none.
     flat_expr_id unbounded_length_of(flat_expr_id object)
     {
         auto const* const b = out.e.at(object).node.try_as<flat_binding_member>();
         if (b == nullptr)
             return flat_expr_id::none;
         auto const named = *b;
-        auto const members = out.m.at(out.m.bindings[out.m.at(named.binding).info].members);
-        for (auto i = isize(0); i < members.size(); ++i)
-            if (members[i].length_of == named.member)
-            {
-                flat_expr_id const held[]
-                    = {out.add_expr(members[i].type, flat_binding_member{.binding = named.binding, .member = i32(i)})};
-                return out.call("convert_int_to_uint", held);
-            }
-        return flat_expr_id::none;
+        flat_expr_id const held[]
+            = {out.add_expr(out.type_named(builtins::k_int),
+                            flat_buffer_length{.buffer = out.add_expr(out.e.at(object).type, flat_binding_member{
+                                                                                                 .binding = named.binding,
+                                                                                                 .member = named.member,
+                                                                                             })})};
+        return out.call("convert_int_to_uint", held);
     }
 
     /// The test that the pinned `i` of shape `s` is outside `0 ..< length`, a pinned `uint`.
@@ -1217,6 +1212,40 @@ struct guarder
         return out.call(name, args);
     }
 
+    /// The bits of shadow word `word` that the scalars `first ..< first + count` take, 0 where it holds none, as a
+    /// `uint` local; a shift by 32 has no value on any target, so a whole word is its own case.
+    local_id bits_of(local_id word, local_id first, u32 count, stmt_list& into)
+    {
+        auto const uint_type = out.type_named(builtins::k_uint);
+        auto const pinned = [&](cc::string_view name, flat_expr_id value)
+        {
+            auto const local = out.add_local(local_kind::temporary, name, uint_type);
+            into.push_back(out.let(local, value));
+            return local;
+        };
+        auto const base = pinned("base", uint_call("shift_left_uint", out.local(word), uint_literal(5)));
+        auto const lo = pinned("lo", uint_call("max", out.local(first), out.local(base)));
+        auto const hi = pinned("hi", uint_call("min", uint_call("add_uint", out.local(first), uint_literal(i32(count))),
+                                               uint_call("add_uint", out.local(base), uint_literal(32))));
+        auto const bits = add_temporary_var(out, "bits", uint_type);
+        into.push_back(out.var(bits, uint_literal(0)));
+        auto const n = out.add_local(local_kind::temporary, "n", uint_type);
+        auto const all = out.add_expr(uint_type, flat_int_literal{.value = -1, .is_unsigned = true, .is_hex = true});
+        auto const low_bits
+            = uint_call("subtract_uint", uint_call("shift_left_uint", uint_literal(1), out.local(n)), uint_literal(1));
+        flat_stmt_id const whole[] = {out.assign(out.local(bits), all)};
+        flat_stmt_id const part[]
+            = {out.assign(out.local(bits), uint_call("shift_left_uint", low_bits,
+                                                     uint_call("subtract_uint", out.local(lo), out.local(base))))};
+        flat_stmt_id const held[]
+            = {out.let(n, uint_call("subtract_uint", out.local(hi), out.local(lo))),
+               out.if_(compare("greater_equal", shape{.element = builtins::k_uint}, out.local(n), uint_literal(32)),
+                       whole, part)};
+        into.push_back(
+            out.if_(compare("greater", shape{.element = builtins::k_uint}, out.local(hi), out.local(lo)), held));
+        return bits;
+    }
+
     /// Calls `each(word, bits)` for every word of the shadow that the scalars `first ..< first + count` take, with the
     /// bits they take there; `first` is a pinned `uint`.
     template <class Each>
@@ -1229,10 +1258,7 @@ struct guarder
             auto const word = out.add_local(local_kind::temporary, "word", out.type_named(builtins::k_uint));
             body.push_back(out.let(
                 word, uint_call("add_uint", uint_call("shift_right_uint", out.local(first), uint_literal(5)), k)));
-            flat_expr_id const bits_args[] = {out.local(word), out.local(first), uint_literal(i32(count))};
-            auto const bits = out.add_local(local_kind::temporary, "bits", out.type_named(builtins::k_uint));
-            body.push_back(out.let(bits, out.call("workgroup_written_bits", bits_args)));
-            each(word, bits, body);
+            each(word, bits_of(word, first, count, body), body);
         };
         if (words <= 4)
         {
@@ -1844,8 +1870,8 @@ i32 workgroup_bytes_of(checked_module const& m, type_id type)
     return measure(measure, type).size;
 }
 
-/// LEGAL-69: the shadow of a compute stage's workgroup memory where the profile tests reads, or its zeroing under
-/// `define`, and the invocation's index in its workgroup that the text's prologue strides by.
+/// LEGAL-69: the shadow of a compute, task or mesh stage's workgroup memory where the profile tests reads, or its zeroing under
+/// `define`, and the invocation's index in its workgroup that LEGAL-71's prologue strides by.
 void prepare_workgroup(flat_builder& out, guarder& g)
 {
     auto& e = out.e;
@@ -1869,6 +1895,9 @@ void prepare_workgroup(flat_builder& out, guarder& g)
     // the shadow takes a word per 32 scalars, beside the memory it shadows, in the budget CHK-294 holds every stage to
     constexpr auto k_portable_workgroup_bytes = 16384;
     auto const shadows = !g.defines && bytes + 4 * words <= k_portable_workgroup_bytes;
+    // a compile says so rather than testing nothing in silence
+    if (!members.empty() && !g.defines && !shadows)
+        e.unshadowed_bytes = bytes;
     if (members.empty() || (!g.defines && !shadows))
         return;
 
@@ -1900,7 +1929,10 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
                      .guards_buffers = options.guards_buffers,
                      .defines = options.guards_undefined == undefined_guard::define,
                      .lowers_asserts = options.lowers_asserts};
-    if (g.guards && out.e.entry_stage == stage::compute)
+    // the stages that have workgroup memory: a compute stage, and a task and a mesh stage, which are dispatched alike
+    auto const has_workgroup
+        = out.e.entry_stage == stage::compute || out.e.entry_stage == stage::task || out.e.entry_stage == stage::mesh;
+    if (g.guards && has_workgroup)
         prepare_workgroup(out, g);
 
     // The last statement of the body that holds a barrier, a derivative or a subgroup operation, which an invocation

@@ -1,0 +1,150 @@
+// Module `accel`: the records a compute shader writes for sg to build acceleration structures from, on the GPU.
+//
+// SGL ships it, so `use accel` finds it without a module directory of the program's.
+// Each record is what the target's API reads, so nothing translates it before a build.
+// Where the two APIs order a record's fields differently, its struct is `@target_layout` (CHK-522), and no host code
+// mirrors it: the host sizes a buffer of records through sg, which knows each backend's stride.
+module accel
+
+/// A BLAS as a record names it: its address, which only an sg BLAS table hands out.
+/// A shader copies one from the table it binds into a record, and never makes one up.
+struct blas_ref:
+    address: uint2
+
+/// A buffer as a record names it: its address, which only an sg buffer table hands out.
+struct buffer_ref:
+    address: uint2
+
+/// Builds one cluster: up to 256 triangles over up to 256 float3 vertices, by index.
+/// Built by name, `accel.clas_triangles(cluster_id = c, triangle_count = t, vertex_count = v, index_buffer = i,
+/// vertex_buffer = p)`, every other field having a default; a field is never read or written alone (CHK-526).
+/// Vulkan packs its counts into bits and D3D12 gives them 16 each, so `@bits` places them, and `@absent` a field one
+/// API lacks: D3D12 states the index format per build, and Vulkan has no micromap base or geometry index buffer.
+@target_layout
+struct clas_triangles:
+    const if target_api == .vulkan:
+        cluster_id: uint
+        flags: uint = 0u
+        @bits(9) triangle_count: uint
+        @bits(9) vertex_count: uint
+        @bits(6) truncate_bits: uint = 0u
+        /// 1, 2 or 4 bytes an index, as D3D12_INDEX_FORMAT and Vulkan's index format number them.
+        @bits(4) index_format: uint = 4u
+        @bits(4) micromap_index_format: uint = 0u
+        @bits(24) geometry_index: uint = 0u
+        @bits(5) geometry_reserved: uint = 0u
+        /// `geometry_opaque` where no any-hit runs for the cluster's triangles.
+        @bits(3) geometry_flags: uint = 0u
+        @bits(16) index_stride: uint = 4u
+        @bits(16) vertex_stride: uint = 12u
+        @bits(16) geometry_stride: uint = 0u
+        @bits(16) micromap_index_stride: uint = 0u
+        index_buffer: buffer_ref
+        vertex_buffer: buffer_ref
+        geometry_buffer: buffer_ref = no_buffer()
+        micromap_array: buffer_ref = no_buffer()
+        micromap_index_buffer: buffer_ref = no_buffer()
+        @absent micromap_base: uint = 0u
+        @absent geometry_index_buffer: buffer_ref = no_buffer()
+        @absent reserved: uint = 0u
+    else if target_api == .dx12:
+        cluster_id: uint
+        flags: uint = 0u
+        @bits(16) triangle_count: uint
+        @bits(16) vertex_count: uint
+        @bits(24) geometry_index: uint = 0u
+        @bits(5) geometry_reserved: uint = 0u
+        @bits(3) geometry_flags: uint = 0u
+        micromap_base: uint = 0u
+        @bits(16) vertex_stride: uint = 12u
+        @bits(16) index_stride: uint = 4u
+        @bits(16) micromap_index_stride: uint = 0u
+        @bits(16) geometry_stride: uint = 0u
+        @bits(16) truncate_bits: uint = 0u
+        @bits(16) reserved: uint = 0u
+        vertex_buffer: buffer_ref
+        index_buffer: buffer_ref
+        geometry_buffer: buffer_ref = no_buffer()
+        geometry_index_buffer: buffer_ref = no_buffer()
+        micromap_array: buffer_ref = no_buffer()
+        micromap_index_buffer: buffer_ref = no_buffer()
+        @absent index_format: uint = 4u
+        @absent micromap_index_format: uint = 0u
+
+/// The address `bytes` past this one: a cluster's part of a buffer the table lists whole.
+fun buffer_ref.offset(self, bytes: uint) -> buffer_ref:
+    let low = self.address.x + bytes
+    let carry = if low < self.address.x => 1u else 0u
+    return buffer_ref(uint2(low, self.address.y + carry))
+
+/// No buffer at all, for a record's address that names none.
+@internal
+fun no_buffer() -> buffer_ref => buffer_ref(uint2(0u, 0u))
+
+/// `clas_triangles.geometry_flags`: no any-hit runs for the cluster's triangles.
+/// The top bit of the word on both APIs: Vulkan's cluster flag, and D3D12's `CLUSTERED_GEOMETRY_FLAG_OPAQUE`.
+const geometry_opaque: uint = 0x4
+/// `clas_triangles.geometry_flags`: an any-hit runs at most once for a triangle, bit 30 of the word on both APIs.
+const geometry_no_duplicate_any_hit: uint = 0x2
+
+/// Writes one instance of a partitioned TLAS: what it places, where, and into which partition.
+/// Built by name, `accel.ptlas_write(index = i, blas = b)`, every field but those two having a default.
+@target_layout
+struct ptlas_write:
+    const if target_api == .vulkan:
+        transform: affine3 = identity_rows()
+        /// The instance's box in world space, min then max, read where `flags` holds `explicit_aabb()`.
+        aabb: float[6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        instance_id: uint = 0u
+        mask: uint = 0xffu
+        hit_group_offset: uint = 0u
+        flags: uint = 0u
+        index: uint
+        /// A partition's index, or `global_partition`.
+        partition: uint = global_partition
+        blas: blas_ref
+    else if target_api == .dx12:
+        transform: affine3 = identity_rows()
+        instance_id: uint = 0u
+        mask: uint = 0xffu
+        hit_group_offset: uint = 0u
+        flags: uint = 0u
+        blas: blas_ref
+        index: uint
+        partition: uint = global_partition
+        aabb: float[6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+/// No transform at all: the rows of the identity.
+@internal
+fun identity_rows() -> affine3 => affine3.from_rows(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0))
+
+/// Points instance `index` of a partitioned TLAS at another BLAS and another hit group offset, leaving its placement.
+struct ptlas_update:
+    index: uint
+    hit_group_offset: uint
+    blas: blas_ref
+
+/// Moves every instance of one partition by `translation`, which a TLAS created with partition translation allows.
+struct ptlas_translation:
+    partition: uint
+    translation: float[3]
+
+/// The partition an instance stands in when it belongs to none, which no translation moves.
+const global_partition: uint = 0xffff'ffff
+
+/// `ptlas_write.flags`: triangles of either facing are hit, whatever the ray's culling.
+const cull_disable: uint = 0x1
+/// `ptlas_write.flags`: a counter-clockwise triangle faces front.
+const front_counterclockwise: uint = 0x2
+/// `ptlas_write.flags`: every geometry of the instance is opaque, and no any-hit runs.
+const force_opaque: uint = 0x4
+/// `ptlas_write.flags`: every geometry of the instance is non-opaque, and any-hit runs for each.
+const force_non_opaque: uint = 0x8
+
+/// `ptlas_write.flags`: the instance is bounded by its `aabb`, rather than its BLAS's own box placed by its transform.
+/// The one flag whose value the two APIs disagree on.
+fun explicit_aabb() -> uint:
+    const if target_api == .vulkan:
+        return 0x10
+    else:
+        return 0x40

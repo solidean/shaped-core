@@ -460,7 +460,6 @@ Small, and each costs a build cycle to rediscover.
 - **`cc::memcpy` lives in `clean-core/common/utility.hh`**, and is the blessed form.
 - **clang-format rewrites `namespace sg::backend::x { struct y }` into the qualified `struct sg::backend::x::y`**, which then requires a forward declaration in the backend's `fwd.hh`.
   Declare every backend type there; it is the convention anyway.
-- **A precompiled header hides a missing include.** A header that compiles inside its `.cc` can still fail standalone, and clang-tidy or a `nopch-*` preset is what catches it.
 - **The prose linter enforces one semantic point per line** in comments as strictly as in docs, and a reflowed comment block trips it.
   See [prose](../../../../docs/guides/prose.md).
 - **A test name containing a comma needs the comma escaped** on the command line (`dev.py test 'sg - a\, b'`), because

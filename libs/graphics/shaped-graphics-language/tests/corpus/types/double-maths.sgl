@@ -48,6 +48,31 @@ test:
     sign(-0.0f64) == 0.0f64 and sign(double2(-3.0f64, 2.0f64)) == double2(-1.0f64, 1.0f64)
     saturate(1.5f64) == 1.0f64 and clamp(-1.0f64, 0.0f64, 1.0f64) == 0.0f64
 
+// a double's `fma` rounds once, however wide the product (EVAL-146)
+test:
+    // (1 + 2^-27)^2 is 1 + 2^-26 + 2^-54, half an ULP past 1 + 2^-26, which the product alone rounds away
+    let a = 1.0000000074505806f64
+    let b = 1.0000000149011612f64
+    a * a - b == 0.0f64
+    fma(a, a, -b) == 0.000000000000000055511151231257827f64
+    // a product past the largest double is no infinity where the sum comes back in range
+    fma(1.0e308f64, 2.0f64, -1.0e308f64) == 1.0e308f64
+    // 1.5 of the smallest subnormal is a tie, which goes to the even one, two of it
+    fma(1.5f64, 5.0e-324f64, 0.0f64) == 1.0e-323f64
+    fma(double2(1.0f64, 2.0f64), double2(3.0f64, 4.0f64), double2(5.0f64, 6.0f64)) == double2(8.0f64, 14.0f64)
+    1.0f64 / fma(-0.0f64, 1.0f64, -0.0f64) < 0.0f64
+
+// a double's bits are two words, the low first, and come back from them unchanged (CHK-517)
+test:
+    let one = 1.0f64
+    one.bits == uint2(0u, 0x3ff00000u) and (-0.0f64).bits == uint2(0u, 0x80000000u)
+    double.from_bits(uint2(0u, 0x40000000u)) == 2.0f64
+    // the smallest subnormal is the lowest bit of the low word
+    double.from_bits(uint2(1u, 0u)) == 5.0e-324f64
+    double.from_bits((0.1f64).bits) == 0.1f64
+    // a NaN keeps every bit of its payload
+    double.from_bits(uint2(0x1234u, 0x7ff80000u)).bits == uint2(0x1234u, 0x7ff80000u)
+
 // smoothstep whose edges are not in order has no value, as of a float (EVAL-87)
 @expect(error = "constant-without-value")
 test smoothstep(1.0f64, 0.0f64, 0.5f64) == 0.5f64
@@ -65,3 +90,8 @@ binding numbers:
 @compute(64) fun rounded(@thread_id id: int3){numbers}:
     let v = numbers.values[id.x]
     numbers.values[id.x] = double4(sqrt(v.x), floor(v.y), round(v.z), length(v.xy)) + normalize(v)
+
+@compute(64) fun reworded(@thread_id id: int3){numbers}:
+    let v = numbers.values[id.x]
+    let words = v.x.bits
+    numbers.values[id.x] = double4(double.from_bits(uint2(words.x, words.y ^ 0x80000000u)), fma(v.y, v.z, v.w), v.z, v.w)

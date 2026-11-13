@@ -35,6 +35,25 @@ using stmt_list = cc::vector<flat_stmt_id>;
 /// Rule V0, first: no check and no `assert` is left, since no target writes one, and neither is what computed its condition.
 [[nodiscard]] stmt_list erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts);
 
+/// LEGAL-70: every print of a finished core tree as statements, so what folding removed gets no site.
+[[nodiscard]] stmt_list expand_prints(flat_builder& out, stmt_list const& body, legalize_options const& options);
+
+/// LEGAL-71: whether `e` holds a shadow of workgroup memory, or zeroes that memory, which `expand_workgroup` writes.
+[[nodiscard]] bool has_workgroup_shadow(flat_entry_point const& e);
+
+/// LEGAL-71: the shadow's reads and marks as atomics, and the prologue ahead of `body`, of a finished core tree.
+[[nodiscard]] stmt_list expand_workgroup(flat_builder& out, stmt_list const& body, legalize_options const& options);
+
+/// The prelude's declaration of reserved binding `name`, or none where this prelude holds no such thing.
+[[nodiscard]] symbol_id reserved_symbol_of(checked_module const& m, cc::string_view name);
+
+/// LEGAL-70: `n` as statements into `into`, and its site in the entry point's table.
+void expand_print(flat_builder& out,
+                  flat_stmt const& s,
+                  flat_print const& n,
+                  legalize_options const& options,
+                  stmt_list& into);
+
 /// Rule G1, before every other: each operation that may have no value is a block that tests its operands first (LEGAL-65).
 /// With `undefined_guard::none` it is `body` as it is.
 [[nodiscard]] stmt_list guard_undefined(flat_builder& out, stmt_list const& body, legalize_options const& options);

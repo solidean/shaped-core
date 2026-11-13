@@ -1,8 +1,12 @@
 #include "emit.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
+#include <shaped-graphics-language/ir/ir.hh>
+#include <shaped-graphics-language/ir/pipeline.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
@@ -147,11 +151,134 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
         t, sources);
 }
 
+namespace sgl::emit
+{
+namespace
+{
+/// EMIT-257: each statement's line and its calls, as `source_lines` reads them, in the order the statements stand.
+[[nodiscard]] ir::line_table line_table_of(check::checked_module const& m,
+                                           check::flat_entry_point const& e,
+                                           options const& sources)
+{
+    auto lines = check::source_lines{.m = m, .files = sources.files, .names = sources.names};
+    auto table = ir::line_table();
+    for (auto f = isize(0); f < sources.files.size(); ++f)
+    {
+        table.names.push_back(cc::string(lines.name_of(i32(f))));
+        table.texts.push_back(cc::string(sources.files[f].file.source));
+    }
+    table.statements.reserve(e.stmts.size());
+    for (auto const& s : e.stmts)
+    {
+        auto const origin = lines.origin_of(e, s);
+        auto place = ir::source_place{.file = origin.at.file,
+                                      .line = origin.at.line,
+                                      .calls_first = u32(table.calls.size()),
+                                      .calls_count = u32(origin.inlined_from.size())};
+        for (auto const& call : origin.inlined_from)
+            table.calls.push_back({.file = call.file, .line = call.line});
+        table.statements.push_back(place);
+    }
+    return table;
+}
+} // namespace
+} // namespace sgl::emit
+
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,
                                                     check::flat_entry_point const& e,
                                                     target t,
                                                     options const& sources)
 {
+    // CHK-491: dx12 and vulkan read an unbounded array's length from the block sg writes per dispatch or draw
+    if ((t == target::hlsl_dx12 || t == target::hlsl_vulkan) && check::reads_array_lengths(m, e))
+    {
+        auto const reading = check::with_reserved_array_lengths(m, e);
+        if (!check::reads_array_lengths(m, reading))
+            return emit_entry_point(m, reading, t, sources);
+    }
+    // CHK-520: a bare @compute's threads past the grid sg writes return; metal dispatches the grid's threads alone
+    if (e.is_auto_workgroup && t != target::msl && !check::guards_dispatch_grid(m, e))
+    {
+        auto const guarded = check::with_dispatch_grid_guard(m, e);
+        if (check::guards_dispatch_grid(m, guarded))
+            return emit_entry_point(m, guarded, t, sources);
+    }
+
+    // CHK-524: a polyfilled mesh entry point is written as a compute or a vertex entry point, from the same slots
+    // A task entry point is written as the compute entry point of its records; a mesh stage it launches takes it by
+    // name, which only a compile of the whole source has (`text_request::polyfill_task`).
+    if (e.entry_stage == check::stage::task && sources.mesh == mesh_form::compute)
+    {
+        auto const layout = check::task_polyfill_layout_of(m, e);
+        if (layout.has_error())
+        {
+            auto refused = emitted_text();
+            refused.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = layout.error()});
+            return refused;
+        }
+        auto native = sources;
+        native.mesh = mesh_form::native;
+        auto result = emit_entry_point(m, check::task_as_compute(m, e), t, native);
+        result.task_layout = layout.value();
+        return result;
+    }
+    if (e.entry_stage == check::stage::mesh && sources.mesh != mesh_form::native)
+    {
+        // a task stage is named by a compile of the whole source alone, so the scan and the launched form here are an
+        // indirect draw's, whose one record carries no payload
+        auto const layout = check::mesh_polyfill_layout_of(m, e, sources.mesh == mesh_form::vertex_fetch);
+        if (layout.has_error())
+        {
+            auto refused = emitted_text();
+            refused.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = layout.error()});
+            return refused;
+        }
+        auto native = sources;
+        native.mesh = mesh_form::native;
+        auto const indirect = check::task_polyfill_layout{};
+        if (sources.mesh == mesh_form::compute || sources.mesh == mesh_form::launched)
+        {
+            auto const is_launched = sources.mesh == mesh_form::launched;
+            auto result = emit_entry_point(m, check::mesh_as_compute(m, e, is_launched ? &indirect : nullptr), t, native);
+            result.mesh_layout = layout.value();
+            if (is_launched)
+                result.task_layout = indirect;
+            return result;
+        }
+        if (sources.mesh == mesh_form::scan)
+        {
+            auto result = emit_entry_point(m, check::mesh_task_scan(m, e, indirect), t, native);
+            result.mesh_layout = layout.value();
+            result.task_layout = indirect;
+            return result;
+        }
+        // a vertex half that hands values per primitive on returns a struct of both, which a copy of the module holds
+        auto const parts = check::mesh_corner_parts_of(m, e);
+        auto extended = cc::optional<check::checked_module>();
+        auto corner = check::type_id::none;
+        if (check::is_valid(parts.primitive))
+        {
+            extended = m;
+            corner = check::add_mesh_corner(extended.value(), parts);
+        }
+        auto const& written = extended.has_value() ? extended.value() : m;
+        auto result = emit_entry_point(written, check::mesh_as_vertex_fetch(written, e, corner), t, native);
+        result.mesh_layout = layout.value();
+        return result;
+    }
+    // CHK-524: the pixel stage of a polyfilled mesh pipeline takes that struct in place of its two
+    if (e.entry_stage == check::stage::pixel && sources.mesh == mesh_form::vertex_fetch)
+    {
+        auto native = sources;
+        native.mesh = mesh_form::native;
+        auto const parts = check::mesh_corner_parts_of(m, e);
+        if (!check::is_valid(parts.primitive))
+            return emit_entry_point(m, e, t, native);
+        auto extended = m;
+        auto const corner = check::add_mesh_corner(extended, parts);
+        return emit_entry_point(extended, check::pixel_after_mesh_polyfill(extended, e, corner), t, native);
+    }
+
     auto result = emitted_text();
     impl::validate(m, e, result.errors, sources.diagnostics);
     if (!result.errors.empty())
@@ -175,6 +302,15 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                          .symbol = e.function,
                                          .detail = cc::format("{} needs {}, which WebGPU does not have", e.name,
                                                               check::k_feature_names[i])});
+        // EMIT-261: only a polyfilled mesh stage feeds WebGPU's pixel stage, which takes its values in another form
+        if (e.entry_stage == check::stage::pixel && check::is_valid(check::mesh_corner_parts_of(m, e).primitive))
+            result.errors.push_back(
+                {.kind = error_kind::target_lacks_feature,
+                 .symbol = e.function,
+                 .detail = cc::format("{} takes what a mesh stage wrote per primitive, which needs mesh_shader, which "
+                                      "WebGPU does not have; the pixel stage of a polyfilled mesh pipeline is written "
+                                      "with `--mesh vertex` instead (CHK-524)",
+                                      e.name)});
 
         if (!result.errors.empty())
             return result;
@@ -204,30 +340,6 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         }
     }
 
-    // EMIT-211: a Metal argument buffer would hold an unbounded array, which sg does not lay out yet
-    if (t == target::msl && e.features.has(check::feature::unbounded_binding_arrays))
-    {
-        result.errors.push_back({.kind = error_kind::target_lacks_feature,
-                                 .symbol = e.function,
-                                 .detail = cc::format("{} needs unbounded_binding_arrays, which sg's metal backend "
-                                                      "does not bind yet",
-                                                      e.name)});
-        return result;
-    }
-
-    // EMIT-195: a Metal buffer argument is a pointer and carries no length, which sg does not pass in yet
-    if (t == target::msl)
-        for (auto const& x : e.exprs)
-            if (x.node.is<check::flat_buffer_length>())
-            {
-                result.errors.push_back({.kind = error_kind::target_lacks_feature,
-                                         .symbol = e.function,
-                                         .detail = cc::format("{} reads a buffer's length, which a Metal buffer does "
-                                                              "not carry",
-                                                              e.name)});
-                return result;
-            }
-
     // EMIT-122: Metal has no geometry stage, and its tessellation is shaped otherwise: a compute kernel writes the factors
     if (t == target::msl
         && (e.features.has(check::feature::geometry_shader) || e.features.has(check::feature::tessellation_shader)))
@@ -238,17 +350,6 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                  .symbol = e.function,
                                  .detail = cc::format("{} is a {} stage and needs {}, which Metal does not have",
                                                       e.name, check::stage_name(e.entry_stage), check::name_of(f))});
-        return result;
-    }
-
-    // EMIT-206: sg's metal backend does not wire Metal's mesh stage up yet, so no MSL text writes one
-    if (t == target::msl && e.features.has(check::feature::mesh_shader))
-    {
-        result.errors.push_back({.kind = error_kind::target_lacks_feature,
-                                 .symbol = e.function,
-                                 .detail = cc::format("{} is a {} stage and needs mesh_shader, which the metal target "
-                                                      "does not write yet",
-                                                      e.name, check::stage_name(e.entry_stage))});
         return result;
     }
 
@@ -323,6 +424,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
 
     auto plan = impl::make_plan(m, e, t, sources.device_features.has(check::feature::float_atomic_add));
+    plan.diagnostics = sources.diagnostics;
+    plan.sees_motion = sources.software_trace;
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
         for (auto const& s : plan.samplers)
@@ -349,17 +452,50 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 }
     if (!result.errors.empty())
         return result;
-    auto written = impl::write_text(plan, impl::dialect_of(t), sources);
-    result.text = cc::move(written.text);
-    result.lines = cc::move(written.lines);
-    result.debug_sites = cc::move(written.debug_sites);
+    // The plan decided every name and address already, so a binary answers to the host as the text would.
+    auto is_native = false;
+    if (sources.native != native_route::text)
+    {
+        auto program = ir::program();
+        if (sources.native_line_table && !sources.files.empty())
+            program.lines = line_table_of(m, plan.e, sources);
+        auto const is_dxil = t == target::hlsl_dx12;
+        auto const gap
+            = is_dxil ? ir::compile_dxil(plan, program, result.dxil) : ir::compile_spirv(plan, program, result.spirv);
+        if (is_dxil)
+            result.signature = ir::dxil::pack_signature(program);
+        if (!gap.has_value())
+        {
+            result.text = ir::dump(program);
+            is_native = true;
+        }
+        else if (sources.native == native_route::prefer)
+            result.native_gap = gap.value();
+        else
+        {
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} holds {}, which the {} route does not lower yet", e.name,
+                                                          gap.value(), is_dxil ? "DXIL" : "SPIR-V")});
+            return result;
+        }
+    }
+    if (!is_native)
+    {
+        auto written = impl::write_text(plan, impl::dialect_of(t), sources);
+        result.text = cc::move(written.text);
+        result.lines = cc::move(written.lines);
+    }
+    result.debug_sites = e.debug_sites;
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});
     for (auto const& block : plan.group_blocks)
-        result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
+        if (!block.is_reserved)
+            result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
     for (auto const& buffer : plan.resources)
-        result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
+        if (!buffer.is_reserved)
+            result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);

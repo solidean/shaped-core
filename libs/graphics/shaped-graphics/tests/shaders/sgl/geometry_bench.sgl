@@ -1,0 +1,49 @@
+// What the geometry polyfill's two routes cost against each other: a stage that passes triangles on, and one that
+// grows each point into a quad, the two shapes a geometry stage is mostly used for.
+require geometry_shader
+
+@vertex struct bench_corner:
+    position: float2
+
+struct bench_staged:
+    @position position: hpos4
+    color: float4
+
+@pixel struct bench_target:
+    color: float4
+
+@vertex fun bench_vs(v: bench_corner) -> bench_staged:
+    return {position = hpos4(v.position.x, v.position.y, 0.5, 1.0), color = float4(v.position.x, v.position.y, 0.5, 1.0)}
+
+@pixel fun bench_ps(p: bench_staged) -> bench_target:
+    return {color = p.color}
+
+@geometry(max_vertices = 3)
+fun passed_on_gs(tri: bench_staged[3], stream: mut triangle_stream[bench_staged]):
+    for i in 0 ..< 3:
+        stream.emit(tri[i])
+
+// A quad of a 64th of the target's width around each point, as a strip of two triangles.
+@geometry(max_vertices = 4)
+fun billboard_gs(point: bench_staged[1], stream: mut triangle_stream[bench_staged]):
+    let p = point[0].position
+    let r = 1.0 / 64.0
+    stream.emit({position = hpos4(p.x - r, p.y - r, p.z, p.w), color = point[0].color})
+    stream.emit({position = hpos4(p.x + r, p.y - r, p.z, p.w), color = point[0].color})
+    stream.emit({position = hpos4(p.x - r, p.y + r, p.z, p.w), color = point[0].color})
+    stream.emit({position = hpos4(p.x + r, p.y + r, p.z, p.w), color = point[0].color})
+
+pipeline passed_on:
+    vertex = bench_vs
+    geometry = passed_on_gs
+    pixel = bench_ps
+    cull = .none
+    format = .rgba8_unorm
+
+pipeline billboards:
+    vertex = bench_vs
+    geometry = billboard_gs
+    pixel = bench_ps
+    topology = .point_list
+    cull = .none
+    format = .rgba8_unorm

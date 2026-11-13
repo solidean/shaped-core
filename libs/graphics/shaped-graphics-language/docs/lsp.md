@@ -30,7 +30,7 @@ This page is for whoever works on the server.
   A named argument marks the parameter it names; the active signature is the resolved one while it has the argument the cursor is in.
 * **References and rename**: `sgl::occurrences_at`, which resolves the name at the cursor and then every name of the same text in every file, keeping those that resolve to the same declaration.
   A rename refuses a keyword, a word that is no name, and a declaration of the prelude; `prepareRename` answers null for those.
-* **Formatting**: `sgl::format_source`, one edit replacing the whole document; an error where the document has syntax errors.
+* **Formatting**: `sgl::format_source`, one edit replacing the whole document; the blocks around a syntax error stay as written, which their diagnostic already marks.
 * **Outline and folding**: `sgl::outline_of` and `sgl::folds_of`, read from the tree and the line tree alone, so a document whose check fails keeps both.
   An entry's detail is its first line as written.
 * **Workspace symbols**: every open document and every module directory file that is not open, parsed per request, matched by the query's characters in order.
@@ -89,7 +89,11 @@ The command owns the recorder, since nexus's console listener would write info l
 On a Ryzen 9 7950X3D, release build:
 
 * **Analyzing `tests/samples/helpers.sgl`** takes 0.30 ms with the prelude's parse cached, and 0.88 ms when the prelude is parsed again, which the server therefore never does.
-  The prelude is still checked with every document, since `check` cannot reuse a checked one.
+
+On a Ryzen 9 9950X3D2, release build, 2026-11-09:
+
+* **A keystroke in shaped-viewer's `tracer_pipeline.sgl`** is a 3.6 ms analysis: the module directories read, and the document checked behind its modules' layer.
+  A keystroke in a module it uses checks that module again, and relocates the ones after it in the library's chain where its interface stands: 5.6 ms in its last, 7.4 ms in its first, `scene`.
 * **A test that runs to its fuel limit**, a million steps, takes 57 ms; that is what made the interpreter read the stop flag itself.
 
 `uv run dev.py benchmark "sgl lsp"` reproduces both.
@@ -119,11 +123,13 @@ Recorded so they are not re-derived:
 * **Generating the LSP types** from the specification's `metaModel.json`, once the hand-written subset in `protocol/types.hh` becomes a chore.
 * **Module directories** come from the `sgl.moduleDirs` setting, which the extension resolves against the workspace folder and hands over at initialization.
   Changing the setting restarts the server, which the extension does, so the directories are read anew.
-  An analysis reads and parses every file of them anew each time, and a module file open in the editor is read as its open text, unsaved edits and all.
+  An analysis reads every file of them anew each time, and a module file open in the editor is read as its open text, unsaved edits and all.
+  What it reads is parsed and checked once for the process, `sgl::shared_library_of` and `sgl::layer_of` as every compile has them, so an edit of the document checks it alone.
   An edit to an open module file, and its opening and closing, checks every other open document again.
   A relative directory is resolved against the first workspace folder only, which leaves a multi-root workspace and per-folder settings open.
   An error in a module a document reaches is shown once, on the document's `use` of that module, with the module's own location beside it.
-* **Reusing a checked prelude and checked modules** across analyses, which waits for the compilation model's interfaces.
+* **An edit that changes what a module declares checks every module after it that names anything of it again**, its unchanged part included.
+  Keeping what did not change is the next cut ([the compilation model](spec/incubator/compilation-model.md#separate-compilation-checked-layers)).
 * **Completion from the last analysis that checked**, so `x.` completes `x` by its checked type even where the line under edit breaks its function's check.
   Today the name is looked up again by its text, which knows locals, parameters and module-level names, and not `a.b.` chains.
 * **Occurrences from an index**: `occurrences_at` resolves every name of the right text, which is fine at a document's size and would want an index across many modules.

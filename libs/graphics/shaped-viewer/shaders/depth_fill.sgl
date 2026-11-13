@@ -16,8 +16,8 @@ struct depth_fill_varyings:
 @vertex fun main_vs(@vertex_index vertex: int) -> depth_fill_varyings:
     let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
     let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
-    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+    return {position = hpos4(clip.x, clip.y, 0.0, 1.0)}
 
 @pixel fun main_ps(p: depth_fill_varyings){depth_fill_source} -> depth_fill_target:
     let texel = int2(p.position.x as int, p.position.y as int)
-    return { depth = depth_fill_source.source.load(texel) }
+    return {depth = depth_fill_source.source.load(texel)}

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/vector.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/query/driver_statistic.hh>
 
 /// Everything needed to build a compute_pipeline: the compiled compute `shader` and the `pipeline_layout` it is compiled against.
 /// A struct rather than loose arguments, so it stays consistent with the graphics-pipeline descriptions to come and can grow a cached-pipeline field for PSO caching.
@@ -42,9 +44,23 @@ public:
     /// The shader's workgroup size (`[numthreads]` / `local_size`) — drives `cmd.compute.dispatch_threads`.
     [[nodiscard]] compute_dimensions workgroup_size() const { return _workgroup_size; }
 
+    /// Whether its shader's compiler chose that size (`compiled_shader::is_dispatched_by_threads`), so it is dispatched
+    /// by threads alone, `cmd.compute.dispatch_threads`, and its layout holds the grid.
+    [[nodiscard]] bool is_dispatched_by_threads() const { return _is_dispatched_by_threads; }
+
     /// The backend's serialized PSO blob, for persisting and feeding back via compute_pipeline_description::cached_pipeline.
     /// Empty if the backend does not support it.
     [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;
+
+    /// What the driver reports of the code it compiled for this pipeline: registers, spills, instructions.
+    /// Empty where the backend has no such report, or its context was not asked to capture one
+    /// (`vulkan_config::capture_driver_statistics`).
+    [[nodiscard]] virtual cc::vector<driver_statistic> driver_statistics() const { return {}; }
+
+    /// The forms the driver kept of this pipeline's code, its machine code among them where it gives that.
+    /// Empty where the backend has none, or its context was not asked to keep them
+    /// (`vulkan_config::capture_driver_representations`).
+    [[nodiscard]] virtual cc::vector<driver_representation> driver_representations() const { return {}; }
 
     /// Whether creation actually consumed the `cached_pipeline` blob it was handed.
     ///
@@ -67,6 +83,8 @@ protected:
 
 private:
     friend void impl::set_footprint(compute_pipeline const& pipeline, impl::pipeline_footprint footprint);
+    friend void impl::set_dispatched_by_threads(compute_pipeline const& pipeline);
 
     impl::pipeline_footprint _footprint;
+    bool _is_dispatched_by_threads = false;
 };

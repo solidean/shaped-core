@@ -117,7 +117,7 @@ def find(build_dir: Path, source_root: Path) -> list[Finding]:
             if any(r in _normalized(value) for r in roots):
                 found.setdefault(("macro", name), Finding(value=value, macro=name, example=str(file)))
         resolved = file.resolve()
-        # CMake's own files (precompiled-header shims, compiler probes) are its business, not a generator of ours.
+        # CMake's own files (compiler probes) are its business, not a generator of ours.
         if _is_under(resolved, build) and "CMakeFiles" not in resolved.parts:
             generated_dirs.add(resolved.parent)
 

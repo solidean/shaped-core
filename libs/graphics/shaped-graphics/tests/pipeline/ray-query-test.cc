@@ -2,6 +2,7 @@
 #include "pipeline_harness.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -213,6 +214,80 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage traces inline, one ray per pixel", (sg:
             CHECK(tg::abs(got[1] - want.u) < 1e-4f).context(where);
             CHECK(tg::abs(got[2] - want.v) < 1e-4f).context(where);
         }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an inline trace through a mesh built in shuffled order reports each triangle's own index",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::ray_query))
+        SKIP("this device has no ray queries");
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    // The 8 x 8 cells the grid traces, two triangles each, handed to the build in a shuffled order.
+    // Enough of them that webgpu's polyfill reorders the records spatially, which must not change what a hit reports.
+    // Cell (x, y)'s first triangle is its lower-left half, which the cell's ray, a quarter cell off its center, meets.
+    auto order = cc::vector<int>::create_defaulted(2 * grid * grid);
+    for (auto i = 0; i < order.size(); ++i)
+        order[i] = i;
+    auto rng = cc::random(0x7a11u);
+    rng.shuffle(order);
+    auto vertices = cc::vector<float>();
+    auto expected_primitive = cc::vector<int>::create_filled(grid * grid, -1);
+    for (auto t = 0; t < order.size(); ++t)
+    {
+        auto const cell = order[t] / 2;
+        auto const x = float(cell % grid);
+        auto const y = float(cell / grid);
+        if (order[t] % 2 == 0)
+        {
+            expected_primitive[cell] = t;
+            for (auto const f : {x, y, 0.0f, x + 1, y, 0.0f, x, y + 1, 0.0f})
+                vertices.push_back(f);
+        }
+        else
+            for (auto const f : {x + 1, y, 0.0f, x + 1, y + 1, 0.0f, x, y + 1, 0.0f})
+                vertices.push_back(f);
+    }
+
+    auto const input = ctx->persistent.create_buffer_from_data(cc::span<float const>(vertices),
+                                                               sg::buffer_usage::accel_structure_build_input);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+    auto const pipeline = co_await shaders::raytracing::trace_cells_opaque.acquire_pipeline(*ctx);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = vertices.size() / 3};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1));
+    sg::tlas_instance const instances[] = {{.blas = blas, .instance_id = 10}};
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::raytracing::scene{.world = tlas->as_view(),
+                                                                                      .hits = hits.as_readwrite_buffer(),
+                                                                                      .ids = ids.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(grid, grid);
+    auto const hits_back = cmd->download.data_from_buffer(hits);
+    auto const ids_back = cmd->download.data_from_buffer(ids);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_hits = co_await hits_back.data();
+    auto const got_ids = co_await ids_back.data();
+    for (auto cell = 0; cell < grid * grid; ++cell)
+    {
+        auto const where = cc::format("cell ({}, {})", cell % grid, cell / grid);
+        CHECK(got_ids[cell][0] == 1).context(where);
+        CHECK(got_ids[cell][1] == 10).context(where);
+        CHECK(got_ids[cell][2] == expected_primitive[cell]).context(where);
+        CHECK(tg::abs(got_hits[cell][0] - 1.0f) < 1e-4f).context(where);
+    }
 }
 
 ASYNC_INVOCABLE_TEST("sg - an inline trace forced opaque asks no any-hit decision", (sg::context_handle const& ctx))

@@ -144,6 +144,15 @@ TEST("sgl check - a control stage names its partitioning and winding, takes a pa
     CHECK(with_head(cc::format(tc, "(partitioning = .integer, winding = .clockwise, partitioning = .fractional_odd)", 3,
                                "tri_factors", factors))
               .contains("@tessellation_control names partitioning once"));
+    // `max_factor` is optional, an integer from 1 to D3D's largest factor
+    CHECK(with_head(cc::format(tc, "(partitioning = .integer, winding = .clockwise, max_factor = 8)", 3, "tri_factors",
+                               factors))
+          == "");
+    for (auto const bad : {"0", "65", "8.0", "8, max_factor = 8"})
+        CHECK(with_head(cc::format(tc, cc::format("(partitioning = .integer, winding = .clockwise, max_factor = {})", bad),
+                                   3, "tri_factors", factors))
+                  .contains("@tessellation_control names `max_factor` once, as an integer from 1 to 64"))
+            .dump("max_factor", cc::string_view(bad));
     CHECK(
         with_head(cc::format(tc, mode, 33, "tri_factors", factors)).contains("a patch holds from 1 to 32 control points"));
     CHECK(with_head(cc::format(tc, mode, 3, "varyings",

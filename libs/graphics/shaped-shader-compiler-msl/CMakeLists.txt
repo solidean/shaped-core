@@ -36,13 +36,23 @@ target_compile_features(shaped-shader-compiler-msl PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-shader-compiler-msl/...>' works for consumers.
 target_include_directories(shaped-shader-compiler-msl
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # shaped-graphics provides sg::compiled_shader, which is this library's whole output type.
 target_link_libraries(shaped-shader-compiler-msl PUBLIC shaped-graphics)
 
-sc_target_pch(shaped-shader-compiler-msl SG)
+# What the persistent shader cache keys on beside the toolchain: a stored shader holds this library's reflection, so an
+# edit to it has to miss, and sg's binding headers too, since the stored bytes hold their enums by number.
+file(GLOB_RECURSE _ssc_msl_fingerprinted CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/binding/*.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/binding/impl/*.hh")
+sc_add_source_fingerprint(shaped-shader-compiler-msl
+    FUNCTION ssc::msl::impl::source_fingerprint
+    HEADER shaped-shader-compiler-msl/shader_cache.hh
+    FILES ${_ssc_msl_fingerprinted})
 
 # Test binary. Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)
@@ -56,8 +66,6 @@ if(SC_BUILD_TESTS)
     sc_nexus_binary(shaped-shader-compiler-msl-test KINDS tests)
 
     target_link_libraries(shaped-shader-compiler-msl-test PRIVATE shaped-shader-compiler-msl nexus)
-
-    sc_target_pch(shaped-shader-compiler-msl-test SG NEXUS)
 
     # The metal backend is added before this library (root CMakeLists order), so its target exists here and the whole
     # chain can be tested: MSL text -> reflect -> layout -> dispatch -> read back.

@@ -1,5 +1,5 @@
 #include <clean-core/container/vector.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 
@@ -35,6 +35,7 @@ using namespace cc::primitive_defines;
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/quadric-arrows
+// On the web, build the emscripten-webgpu preset and open web/quadric-arrows.html, served over https or from localhost.
 //   uv run dev.py example shaped-viewer/quadric-arrows --capture
 
 namespace
@@ -53,7 +54,7 @@ float column_of(int i, float shift)
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/quadric-arrows")
+ASYNC_EXAMPLE("shaped-viewer/quadric-arrows")
 {
     auto arrows = sv::quadric_set();
     arrows.name = "arrows";
@@ -110,9 +111,10 @@ EXAMPLE("shaped-viewer/quadric-arrows")
                                              tg::pos3f(-9, 0, -9), tg::pos3f(-9, 0, 5), tg::pos3f(9, 0, 5)}),
                    .attributes = {sv::mesh_attribute::create_value("base_color", tg::vec3f(0.22f, 0.23f, 0.25f))}};
 
-    for (auto f : sv::interactive("shaped-viewer/quadric-arrows"))
+    auto frames = sv::interactive_async("shaped-viewer/quadric-arrows");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
 
         // Yawed well off the z axis on purpose: at a near-zero yaw the frame's own +z arrow points straight at the
         // camera and reads as a stub, so a gizmo drawn to say "these are the three axes" says something else.

@@ -5,6 +5,7 @@
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh> // sg::reserved_binding_group
 
@@ -220,6 +221,10 @@ public:
             auto debug_window = is_debug_window(b);
             CC_RETURN_IF_ERROR(debug_window);
             if (debug_window.value())
+                continue;
+            auto reserved = is_reserved_entry(b);
+            CC_RETURN_IF_ERROR(reserved);
+            if (reserved.value())
                 continue;
 
             auto binding = sg::binding{};
@@ -675,9 +680,9 @@ private:
         auto const& type = resolved(p.type);
         auto const is_array_of_vec4u = type.name == "array" && type.args.size() == 1 && is_vec4u(type.args[0]);
 
-        if (index.value() == 17)
+        if (index.value() == sg::reserved_acceleration_pool.webgpu_binding)
         {
-            auto const is_pool = p.name == "sg_acceleration_pool" && p.address_space == "storage"
+            auto const is_pool = p.name == sg::reserved_acceleration_pool.name && p.address_space == "storage"
                               && (p.access.empty() || p.access == "read") && is_array_of_vec4u && type.count.empty();
             if (!is_pool)
                 return cc::error(cc::format("line {}: @group({}) @binding(17) is the ray-query polyfill's pool, which "
@@ -686,8 +691,8 @@ private:
             return true;
         }
 
-        auto is_roots = p.name == "sg_acceleration_roots" && p.address_space == "uniform" && is_array_of_vec4u
-                     && !type.count.empty();
+        auto is_roots = p.name == sg::reserved_acceleration_roots.name && p.address_space == "uniform"
+                     && is_array_of_vec4u && !type.count.empty();
         if (is_roots)
         {
             auto count = integer_of(type.count, p.line);
@@ -708,13 +713,35 @@ private:
         CC_RETURN_IF_ERROR(group);
         auto index = integer_of(p.index, p.line);
         CC_RETURN_IF_ERROR(index);
-        if (group.value() != sg::reserved_binding_group || index.value() != 19)
+        if (group.value() != sg::reserved_binding_group || index.value() != sg::reserved_debug_window.webgpu_binding)
             return false;
-        if (p.name != "sg_debug" || p.address_space != "storage" || p.access != "read_write")
+        if (p.name != sg::reserved_debug_window.name || p.address_space != "storage" || p.access != "read_write")
             return cc::error(cc::format("line {}: @group({}) @binding(19) is sg's debug window, which must be "
                                         "'var<storage, read_write> sg_debug'",
                                         p.line, group.value()));
         return true;
+    }
+
+    /// Whether `p` is any other entry of sg's reserved table, at its WebGPU address and under its own name, which the
+    /// webgpu backend binds itself: a polyfilled mesh stage's slots, a bare @compute's grid.
+    cc::result<bool> is_reserved_entry(pending_binding const& p) const
+    {
+        auto group = integer_of(p.group, p.line);
+        CC_RETURN_IF_ERROR(group);
+        auto index = integer_of(p.index, p.line);
+        CC_RETURN_IF_ERROR(index);
+        for (auto const& entry : sg::reserved_bindings)
+        {
+            if (entry.webgpu_group < 0 || group.value() != i64(entry.webgpu_group)
+                || index.value() != i64(entry.webgpu_binding))
+                continue;
+            if (p.name != entry.name)
+                return cc::error(cc::format("line {}: @group({}) @binding({}) is sg's reserved '{}', and '{}' stands "
+                                            "there",
+                                            p.line, group.value(), index.value(), entry.name, p.name));
+            return true;
+        }
+        return false;
     }
 
     /// The layout of a host-shareable type, under WGSL's alignment and size rules.

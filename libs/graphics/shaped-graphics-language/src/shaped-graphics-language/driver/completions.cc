@@ -65,7 +65,7 @@ struct completer
             }
             return token_class::function;
         case check::symbol_kind::test:
-        case check::symbol_kind::unsupported:
+        case check::symbol_kind::alias:
             return token_class::type;
         }
         return token_class::name;

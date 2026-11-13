@@ -185,14 +185,14 @@ Discarding is done too: a type comparison, and the three-valued decision that le
 Text bodies in their first form are done too: the tagged string as a body, its placement, placeholders and `$result`, a `flat_call` with `text`, and the emitters writing it inline.
 So is their declared contract, `@pure`, `@barrier`, `@subgroup` and `@derivatives` on the `fun`, which the uniformity pass reads in place of the text (CHK-431).
 So are text types, a struct spelled per compile in the target's text or as its SGL fields (AST-160, CHK-432).
+So are a buffer as a parameter, which a text body names as it names a texture (CHK-366), and `#line` inside the text (EMIT-182).
 Left:
 
 * The check pass: SGL branches checked against the declared contract, so a fallback of a `@pure` function that writes memory is an error, and coverage.
 * The attributes' stages: `@derivatives` keeps a call to the pixel stage, and `@subgroup` to a device with subgroups, which `@stages` and `has` say by hand today.
 * Generics: questions of a type beyond its identity, such as whether it is a vector, and its scalar where it is a scalar itself.
-* The emitters: reserved names read from the text, and `#line` inside it.
+* The emitters: reserved names read from the text.
   The preamble is done (CHK-428), a file's per language; one per API, such as vulkan's alone among the HLSL targets, is open.
-* A buffer as a parameter, which SGL has for no function yet, so a text body reaches a buffer through an element or an atomic alone.
 * Text types beyond their first form (CHK-432): a condition on an option.
 * The interpreter: the features a test sets.
 * `sgl describe`: optional features.

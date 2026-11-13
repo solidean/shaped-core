@@ -468,6 +468,7 @@ i32 checker::instantiate(symbol_id function, cc::span<type_id const> bindings, i
     }
     if (auto const found = existing_function_instance(function, key); found >= 0)
         return found;
+    note_body_read(function);
     // recursion was or will be reported where the calls loop, and an instance of it would never end
     for (auto const& at : instantiating)
         if (out.function_instances[at.instance].function == function)

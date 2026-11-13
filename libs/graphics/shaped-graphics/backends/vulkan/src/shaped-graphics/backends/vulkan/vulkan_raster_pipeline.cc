@@ -315,7 +315,12 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
     auto const info = VkGraphicsPipelineCreateInfo{
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = &rendering,
-        .flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT,
+        .flags
+        = VkPipelineCreateFlags(VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT)
+        | (ctx.captures_driver_statistics() ? VkPipelineCreateFlags(VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR) : 0u)
+        | (ctx.captures_driver_representations()
+               ? VkPipelineCreateFlags(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR)
+               : 0u),
         .stageCount = u32(stages.size()),
         .pStages = stages.data(),
         .pVertexInputState = is_mesh_shaded ? nullptr : &vertex_input,

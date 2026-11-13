@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/barrier/access_inference.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
 
 namespace sg::backend::vulkan
@@ -30,6 +31,7 @@ void vulkan_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipe
     };
     _ctx._descriptor_functions.cmd_bind_descriptor_buffers(_buffer, 1, &binding);
     vkCmdBindPipeline(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vp->_pipeline);
+    _bound_compute_pipeline = vp->_pipeline;
 
     // A new pipeline may declare a different number of slots, so the bound groups reset to one null per slot.
     _bound_pipeline_layout = vp->layout.get();
@@ -139,10 +141,15 @@ void vulkan_command_list::bind_software_trace(vulkan_pipeline_layout const& layo
                                               cc::span<vulkan_binding_group const* const> groups,
                                               VkPipelineBindPoint bind_point)
 {
-    if (!layout._traces_in_software)
+    if (!layout.binds_set_per_op())
         return;
+    u32 lengths[sg::impl::array_lengths_capacity] = {};
+    for (isize g = 0; g < groups.size() && g < layout._length_bases.size(); ++g)
+        if (groups[g] != nullptr && layout._length_bases[g] >= 0)
+            lengths[layout._length_bases[g]] = groups[g]->unbounded_length;
+    u32 const grid[4] = {u32(_dispatch_grid[0]), u32(_dispatch_grid[1]), u32(_dispatch_grid[2]), 0};
     u32 roots[sg::impl::software_trace_roots] = {};
-    for (isize g = 0; g < groups.size(); ++g)
+    for (isize g = 0; g < groups.size() && layout._traces_in_software; ++g)
         if (groups[g] != nullptr)
             for (isize k = 0; k < groups[g]->acceleration_roots.size(); ++k)
             {
@@ -151,15 +158,36 @@ void vulkan_command_list::bind_software_trace(vulkan_pipeline_layout const& layo
                                                                "software");
                 roots[at] = groups[g]->acceleration_roots[k];
             }
+    // each member's address as two words, low first, which SGL's own SPIR-V converts to the structure it traces
+    u32 addresses[2 * sg::impl::acceleration_address_capacity] = {};
+    for (isize g = 0; g < groups.size() && layout._traces_by_address; ++g)
+        if (groups[g] != nullptr)
+            for (isize k = 0; k < groups[g]->acceleration_addresses.size(); ++k)
+            {
+                auto const at = layout._acceleration_bases[g] + k;
+                auto const address = groups[g]->acceleration_addresses[k];
+                addresses[2 * at] = u32(address);
+                addresses[2 * at + 1] = u32(address >> 32);
+            }
     auto const pool = _ctx._software_pool.storage();
-    // a loop of draws under one set of roots takes one region of the transient heap
+    // a loop of draws under one set of roots and lengths takes one region of the transient heap
     if (_software_set_layout == &layout && _software_set_pool == pool.gpu_address
-        && cc::memcmp(_software_set_roots, roots, sizeof(roots)) == 0)
+        && cc::memcmp(_software_set_roots, roots, sizeof(roots)) == 0
+        && cc::memcmp(_software_set_lengths, lengths, sizeof(lengths)) == 0
+        && cc::memcmp(_software_set_grid, grid, sizeof(grid)) == 0
+        && cc::memcmp(_software_set_addresses, addresses, sizeof(addresses)) == 0
+        && _software_set_mesh_slots == _mesh_slots && _software_set_task_slots == _task_slots)
         return;
-    layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots);
+    layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots, lengths, grid, addresses,
+                               _mesh_slots, _mesh_slots_bytes, _task_slots, _task_slots_bytes);
+    _software_set_mesh_slots = _mesh_slots;
+    _software_set_task_slots = _task_slots;
     _software_set_layout = &layout;
     _software_set_pool = pool.gpu_address;
     cc::memcpy(_software_set_roots, roots, sizeof(roots));
+    cc::memcpy(_software_set_lengths, lengths, sizeof(lengths));
+    cc::memcpy(_software_set_grid, grid, sizeof(grid));
+    cc::memcpy(_software_set_addresses, addresses, sizeof(addresses));
 }
 
 void vulkan_command_list::declare_debug_window(sg::impl::pipeline_footprint const* footprint,

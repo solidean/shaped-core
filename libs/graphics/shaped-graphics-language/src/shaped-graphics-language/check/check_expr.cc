@@ -282,8 +282,9 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
         auto is_handed = false;
         for (auto const h : handed)
             is_handed = is_handed || h == id;
+        // CHK-366: a buffer is subscripted, or handed to a call as a texture is
         auto const is_buffer = out.at(result).kind == type_kind::buffer;
-        if (is_buffer ? id != subscripted : !is_handed)
+        if (!is_handed && !(is_buffer && id == subscripted))
         {
             unsupported(
                 file, where,
@@ -812,13 +813,15 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
             return error_type;
         }
         // CHK-366: a resource parameter stands where its binding member would, which is as a call's argument
-        if (local->type != error_type && is_resource(out.at(local->type).kind)
-            && out.at(local->type).kind != type_kind::buffer)
+        if (local->type != error_type && is_resource(out.at(local->type).kind))
         {
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;
-            if (!is_handed)
+            // a buffer and bytes are subscripted, or their length read, as a member's are
+            auto const kind = out.at(local->type).kind;
+            auto const is_read = (kind == type_kind::buffer || kind == type_kind::bytes) && id == subscripted;
+            if (!is_handed && !is_read)
             {
                 unsupported(file, where,
                             cc::format("{} as a value; hand it to a call, as in `t.load(xy)`", out.name_of(local->type)));
@@ -876,6 +879,7 @@ type_id checker::check_symbol_value(function_scope& scope,
     {
     case symbol_kind::structure:
     case symbol_kind::enumeration:
+    case symbol_kind::alias:
         unsupported(file, where, "a type as a value");
         break;
     case symbol_kind::function:
@@ -911,8 +915,6 @@ type_id checker::check_symbol_value(function_scope& scope,
         }
         return out.at(symbol).type;
     }
-    case symbol_kind::unsupported:
-        break;
     }
     return error_type;
 }
@@ -926,9 +928,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     auto const find_member = [&](ast::range_of<member_info> range)
     {
         auto const members = out.at(range);
-        // the length of an unbounded array is reached through `.length` alone (CHK-491)
         for (auto i = isize(0); i < members.size(); ++i)
-            if (members[i].name == name && members[i].length_of < 0)
+            if (members[i].name == name)
                 return i;
         return isize(-1);
     };
@@ -986,9 +987,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             }
             set_target(file, id, {.kind = target_kind::binding_member, .symbol = binding, .index = i32(index)});
             auto const type = out.at(out.bindings[out.at(binding).info].members)[index].type;
-            if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted)
+            // CHK-366: a buffer is subscripted, or handed to a call as a texture is
+            auto is_buffer_handed = false;
+            for (auto const h : handed)
+                is_buffer_handed = is_buffer_handed || h == id;
+            if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted && !is_buffer_handed)
             {
-                unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
+                unsupported(file, span_of(file, id),
+                            "a buffer as a value; read an element of it, as in `values[i]`, or hand it to a call");
                 return error_type;
             }
             if (!judge_atomic_use(file, id, type))
@@ -1018,11 +1024,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
 
         // `light_kind.point`: an enum is no value either (CHK-148), so its name never reaches `check_expr`
-        if (out.at(found->front()).kind == symbol_kind::enumeration)
+        // an alias of an enum names its cases as the enum's own name does (CHK-14)
+        auto const enumeration = out.at(found->front()).kind == symbol_kind::alias
+                                   ? declared_type_of(found->front(), file, span_of(file, member.object))
+                                   : found->front();
+        if (is_valid(enumeration) && out.at(enumeration).kind == symbol_kind::enumeration)
         {
-            auto const enumeration = found->front();
             auto const object_where = span_of(file, member.object);
-            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = enumeration});
+            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = found->front()});
             if (demand(enumeration, file, object_where) != symbol_state::checked)
                 return error_type;
 
@@ -1056,7 +1065,7 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // CHK-288: an array's length is a constant of its type, and it has no other member
     if (out.at(object).kind == type_kind::array)
     {
-        // CHK-491: an unbounded array's length is the host's, which its binding holds as a constant
+        // CHK-491: an unbounded array's length is the views a group binds, which sg writes per dispatch or draw
         if (name == "length" && out.at(object).count == 0)
         {
             auto const where = tables_of(file).target_at(member.object);
@@ -1067,14 +1076,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                             "as its binding's member");
                 return error_type;
             }
-            auto const members = out.at(out.bindings[out.at(where.symbol).info].members);
-            for (auto i = isize(0); i < members.size(); ++i)
-                if (members[i].length_of == where.index)
-                {
-                    set_target(file, id, {.kind = target_kind::binding_member, .symbol = where.symbol, .index = i32(i)});
-                    return members[i].type;
-                }
-            return error_type; // its name was taken, which the binding reported
+            set_target(file, id, {.kind = target_kind::buffer_length});
+            return type_of_builtin(builtins::k_int, file, span_of(file, id));
         }
         if (name != "length")
         {

@@ -244,8 +244,12 @@ TEST("sgl emit - an element's length keeps its mark in the helper, and a zero is
         auto const text = sgl::compile_to_text(
             {.source = source, .entry_point = "cs", .target = t, .guards_undefined = undefined_guard::define});
         REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
-        CHECK(text.value().text.contains("[NonUniformResourceIndex(i)].GetDimensions(n, stride);"))
-            .dump("text", text.value().text);
+        if (t == sgl::emit::target::hlsl_dx12)
+            CHECK(text.value().text.contains("[NonUniformResourceIndex(i)].GetDimensions(n, stride);"))
+                .dump("text", text.value().text);
+        else // asked per element, at uniform indices (debt-sgl-vulkan-element-length-asked-at-uniform-indices)
+            CHECK(text.value().text.contains("[3].GetDimensions(k, stride);\n    n = i == 3u ? k : n;"))
+                .dump("text", text.value().text);
         CHECK(text.value().text.contains(")0;")).dump("text", text.value().text);
     }
 }
@@ -267,8 +271,8 @@ TEST("sgl emit - metal bounds a binding array's own index by its size, and reads
     REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
 }
 
-TEST("sgl guards - an unbounded array's index is bounded by the length its code reads, and otherwise by nothing "
-     "(LEGAL-65)")
+TEST("sgl guards - an unbounded array's index is bounded by its length, whether or not its code reads it (LEGAL-65, "
+     "CHK-491)")
 {
     constexpr auto program = "require binding_arrays, unbounded_binding_arrays\n"
                              "\n"
@@ -296,6 +300,6 @@ TEST("sgl guards - an unbounded array's index is bounded by the length its code 
                 pieces += piece;
         return pieces;
     };
-    CHECK(!dump_of("").contains("outside a binding array"));
+    CHECK(dump_of("").contains("outside a binding array"));
     CHECK(dump_of(" + int(work.views.length)").contains("outside a binding array"));
 }

@@ -10,6 +10,8 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh>
+#include <shaped-shader-library/shader_asset.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 // What the benchmarks of SGL against a hand-written original share: the inputs, the targets and the timed loop.
@@ -27,7 +29,64 @@ struct contender
     cc::string name;
     cc::unique_function<bool()> is_ready;
     cc::unique_function<void(sg::command_list&)> record;
+    /// What the driver reports of the contender's pipeline, where its context captures it; empty otherwise.
+    cc::unique_function<cc::vector<sg::driver_statistic>()> statistics;
 };
+
+/// `options` with the one that asks for SGL's own binary on `ctx`'s format, which a context of the text route honours.
+[[nodiscard]] inline cc::vector<slib::shader_option> with_native(sg::context const& ctx,
+                                                                 cc::vector<slib::shader_option> options)
+{
+    auto const name
+        = ctx.backend() == sg::backend_kind::vulkan ? slib::k_native_spirv_option : slib::k_native_dxil_option;
+    options.push_back({.name = cc::string(name), .value = cc::string("true")});
+    return options;
+}
+
+/// A contender of `pipeline`, once it has built, recorded by `record`.
+[[nodiscard]] inline contender contender_of(cc::string_view name,
+                                            sg::context& ctx,
+                                            sg::async_compute_pipeline const& pipeline,
+                                            cc::unique_function<void(sg::command_list&, sg::compute_pipeline const&)>* record)
+{
+    return {.name = cc::string(name),
+            .is_ready =
+                [&ctx, &pipeline]
+            {
+                (void)ctx.backlog.start(pipeline);
+                return pipeline->is_ready() && pipeline->try_value() != nullptr;
+            },
+            .record = [record, &pipeline](sg::command_list& cmd) { (*record)(cmd, **pipeline->try_value()); },
+            .statistics = [&pipeline] { return (*pipeline->try_value())->driver_statistics(); }};
+}
+
+/// Each statistic the driver reports of the contenders' pipelines, a line per statistic and a column per contender.
+/// Nothing where none reports any, which is every context but a vulkan one asked to capture them.
+inline void log_driver_statistics(cc::string_view kernel, cc::span<contender> contenders)
+{
+    auto all = cc::vector<cc::vector<sg::driver_statistic>>();
+    auto any = false;
+    for (auto& c : contenders)
+    {
+        all.push_back(c.statistics ? c.statistics() : cc::vector<sg::driver_statistic>());
+        any = any || !all.back().empty();
+    }
+    if (!any)
+        return;
+    for (auto const& s : all[0])
+    {
+        auto line = cc::format("{} driver: {} {}:", kernel, s.executable, s.name);
+        for (auto i = isize(0); i < contenders.size(); ++i)
+        {
+            auto value = cc::string("-");
+            for (auto const& t : all[i])
+                if (t.executable == s.executable && t.name == s.name)
+                    value = cc::format("{}", t.value);
+            line.appendf(" {} {}", contenders[i].name, value);
+        }
+        CC_LOG_INFO("{}", line);
+    }
+}
 
 /// The GPU milliseconds of each span, sorted.
 [[nodiscard]] inline cc::vector<f64> sorted_ms(cc::span<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp> const> spans)
@@ -74,10 +133,11 @@ inline cc::shared_async<sg::texture_2d> filled_texture(sg::context& ctx,
 
 [[nodiscard]] inline sg::texture_2d target_texture(sg::context& ctx)
 {
-    return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
-                                             .width = k_extent[0],
-                                             .height = k_extent[1],
-                                             .usage = sg::texture_usage::texture | sg::texture_usage::image});
+    return ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = k_extent[0],
+         .height = k_extent[1],
+         .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 }
 
 /// Records `rounds` dispatches of each contender, alternating, and logs what they took.
@@ -107,6 +167,7 @@ inline cc::shared_async<cc::unit> measure(sg::context& ctx,
         ctx.advance_epoch();
         co_await ctx.idle_completion();
     }
+    log_driver_statistics(kernel, contenders);
 
     // Without timestamp queries a dispatch is timed as a batch of them on the wall clock, from one completion to the
     // next, and the batches of a pair alternate as single dispatches do.

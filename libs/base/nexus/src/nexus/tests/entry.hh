@@ -38,11 +38,14 @@ struct entry_route
     test_declaration const* entry = nullptr;
     cc::vector<cc::string> entry_args;
     cc::string message;
+    /// A `--jobs N` given before an app's or command's name: the pool its run gets, 0 for the default.
+    int jobs = 0;
 };
 
 /// Decides what `args` (argv without the program) selects, name first.
 ///
 /// An app or command named by the first token runs with the rest.
+/// So does one named after a leading `--jobs N`, `--jobs=N`, `-j N` or `-jN`, which sizes its pool; before anything else that token is the default's, as every other.
 /// A nexus selector anywhere (--tests, --examples, --benchmarks, --pgo-benchmarks, --manual, --apps, --commands,
 /// --list-tests, --list-tests-json, --list-hw-counters, --reporter) hands the line to nexus, as does a test named exactly, or a bare
 /// --help when there is no default.

@@ -120,6 +120,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
+                                                   //   | pixel_view_read_workaround (no capability: Intel dx12 needs a pixel stage to read the view; SGL's keep_view asks for it)
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
                                                    //     false on metal (amplification not wired yet) and webgpu)
                                                    //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes
@@ -157,6 +158,14 @@ sg::to_string(f)  sg::feature_from_string(name)    // "ray_query" <-> feature::r
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
                                                    //   FLOORS a portable caller sizes against, not the most the hardware could do
 ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
+ctx.set_mesh_polyfill(sg::polyfill_use::where_missing) // slib draws a mesh stage as compute + draw where the device has none (`always`: everywhere, `never`: refuse); `where_missing` by default
+ctx.draws_mesh_polyfill()                          // bool — whether this backend draws a polyfilled pipeline at all (all but metal, which needs none)
+desc.mesh_polyfill->launch_budget = 4096;          // the mesh workgroups a polyfilled draw launches at most where the GPU counts them and no `meshes = N` bounds them; an indirect draw's task workgroups too
+ctx.set_geometry_polyfill(sg::polyfill_use::where_missing) // slib draws a geometry stage as compute + draw where the device has none; `never` by default, opt-in until measured
+ctx.draws_geometry_polyfill()                      // bool — whether this backend draws a polyfilled geometry stage (metal so far)
+ctx.set_geometry_polyfill_route(sg::geometry_polyfill_route::compute) // `mesh` by default: one mesh draw where the device has mesh shaders, else compute
+ctx.set_tessellation_polyfill(sg::polyfill_use::where_missing) // slib draws tessellation by D3D's tessellator in compute where the device has none; `never` by default
+ctx.draws_tessellation_polyfill()                  // bool — whether this backend draws polyfilled tessellation (metal so far)
 ctx.set_hit_record_checks(bool)                    // dispatch_rays checks the hit records each tlas instance reaches; default = CC_ASSERT_ENABLED (see dispatch_rays)
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
@@ -173,7 +182,7 @@ sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total
                                                    //   Windows reads the GPU Engine perf counters; elsewhere it refuses
                                                    //   see docs/concepts/gpu-metrics.md
 auto const d = ctx.metrics.stats() - before;       // sg::stats — monotone i64 totals per sg::stat; subtract two readings for "per frame"
-d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no per-resource ones
+d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no layout transitions
 d[sg::stat::blas_builds] / d[sg::stat::tlas_builds] //   acceleration structures built, counted at the facade on every backend
                                                    //   a list counts at its SUBMIT, a transfer at its ENQUEUE; see docs/concepts/metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
@@ -250,11 +259,16 @@ ctx.is_shut_down()                                 // bool
 // invariant: a context must OUTLIVE every command list & buffer it created (must be shut down before dtor)
 // you never call sg::create_context — there is none. each backend library provides the factory:
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+// SC_GPU=intel|amd|nvidia|<name substring>  every hardware dx12 and vulkan context of the process on that GPU; none matching fails, never falls back
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 // vulkan_config { adapter_luid  (optional<u64>; in place of sg's ranking, fails rather than falling back)
 //                 correct_anisotropic_lod=true  (anisotropic samplers pick dx12's level; off only to measure the driver) }
 sg::enumerate_vulkan_adapters()                    // -> cc::vector<adapter_info>; every device with a graphics queue, no device created
+//   vulkan_config { bool capture_driver_statistics=false; }   VK_KHR_pipeline_executable_properties: each compute and raster pipeline keeps what the driver reports of it
+//   vulkan_config { bool capture_driver_representations=false; }   the driver's forms of each pipeline's code too, AMD's ISA among them; implies the statistics
+//   vulkan_config { bool native_spirv=true; }   SGL shaders take SGL's own SPIR-V where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_spirv()
+//   dx12_config { bool native_dxil=true; }     SGL shaders take SGL's own DXIL where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_dxil()
 // created to someone else's spec (an XR runtime's): MOVE-ONLY once a hook is set
 //   vulkan_config { extra_instance_extensions / extra_device_extensions  (cc::vector<cc::string>; a missing one fails creation, naming it)
 //                   create_instance(info, out) / create_device(phys, info, out)  (in place of vkCreate*; the context owns and destroys the result)
@@ -276,10 +290,17 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 // dx12_config { adapter_luid  (optional<u64>; overrides `adapter`, fails rather than falling back; SC_DX12_ADAPTER still hides it)
 //               minimum_feature_level=11_0  (a runtime may demand more, never less) }
 sg::enumerate_dx12_adapters()                      // -> cc::vector<adapter_info>; every FL 11_0 adapter, WARP included; pass .luid to adapter_luid
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>  // ONE D3D12 runtime per process, settled by its first use
+dx12::choose_d3d12_runtime(d3d12_runtime::system)  // before any device; wins over SC_DX12_RUNTIME=system|agility; default agility where fetched, system on an Intel GPU
+dx12::requested_d3d12_runtime() / runs_agility_runtime()  // what was asked for / whether the Agility SDK actually loaded
+// GOTCHA: on Intel, the Agility SDK's device factory alone costs the process every shader cache hit, vulkan's included
 // dx12_ctx.device() / queue()                     // ID3D12Device* / ID3D12CommandQueue*, owned by the context
 dx12_ctx.wrap_dx12_texture(ID3D12Resource*, desc)  // -> result<dx12_texture_handle>; refuses a shape or flag mismatch
 //   GOTCHA: only a resource in COMMON at every submit — sg's enhanced barriers meet a legacy state nowhere else, so an
 //   OpenXR D3D12 image (legacy RENDER_TARGET) is filled from a dx12_native_scope with legacy ResourceBarrier calls instead
+#include <shaped-graphics/backends/metal/metal_context.hh>   // Apple only
+metal_ctx.wrap_metal_texture(MTL::Texture*, desc)  // -> result<metal_texture_handle>; retains it, so the owner may release at once
+//   refuses a shape, a usage it lacks, or a format other than its own (unless it allows pixel-format views); no layouts to hand back
 // GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
 //   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it
@@ -419,7 +440,7 @@ cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.off
 //   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
 cmd.raster.draw_mesh_tasks(x, y = 1, z = 1)  // void — x*y*z workgroups of a mesh-shaded pipeline's task stage, or mesh stage without one;
 //   only a pipeline with a mesh stage draws this way (pipeline.is_mesh_shaded()), and it asserts in draw / draw_indexed
-cmd.raster.draw_mesh_tasks_indirect(args, first = 0, count = 1)  // void — `count` mesh draws, each record of buffer<sg::dispatch_args> (x, y, z) read by the GPU
+cmd.raster.draw_mesh_tasks_indirect(args, first = 0, count = 1)  // void — `count` mesh draws, each record of buffer<sg::dispatch_args> (x, y, z) read by the GPU; a polyfilled pipeline too
 cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
 //   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
 //   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts (not 0 needs sg::feature::indirect_first_instance)
@@ -760,6 +781,8 @@ sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle,
 sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout; pinned_data<byte const> cached_pipeline={} }
 compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backend's serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported / accelerator only, NOT in the cache key)
 pipeline.used_cached_pipeline()          // -> bool — did creation actually CONSUME desc.cached_pipeline? false = none given, or the backend rejected it
+pipeline.driver_statistics()             // -> vector<driver_statistic {executable, name, description, value}> — the driver's own figures (AMD: VGPRs, SGPRs; Intel: instructions, blocks); empty unless vulkan_config::capture_driver_statistics
+pipeline.driver_representations()        // -> vector<driver_representation {executable, name, description, text}> — AMD's ISA as text, Intel's none; empty unless vulkan_config::capture_driver_representations
                                          // A rejection is the exact "this persisted blob is stale" signal (driver update, other adapter) — refresh the entry on it, never on a byte compare
 layout->structural_hash()                // -> cc::hash128 on binding_group_layout / pipeline_layout — content identity, NOT the handle address; stable across processes, so it can key a persistent cache
 // layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
@@ -845,6 +868,8 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups; each count ASSERTS <= sg::max_dispatch_groups_per_dimension (65535)
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis, under the same 65535 cap: nothing splits a larger 1D range
+                                         //   a pipeline whose compiler chose its size (is_dispatched_by_threads(), a bare SGL @compute) takes this alone,
+                                         //   and its threads past (x, y, z) return; dispatch_groups and indirect ASSERT on it
 cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group counts buffer<sg::dispatch_args> element `index` holds, read by the GPU at the dispatch
                                          //   sg::dispatch_args { u32 x = 0, y = 1, z = 1 } — a shader's own uint3 struct re-types with reinterpret_as<sg::dispatch_args>()
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
@@ -872,7 +897,7 @@ sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_s
                                   //   optional<compiled_shader> mesh_shader, task_shader (need mesh_shader; mesh replaces vertex stage + vertex input; one view);
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
                                   //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1;
-                                  //   int view_count=1 (>1 needs view_instancing: view i into layer i, SGL's @view_index; dx12 caps it at 4);
+                                  //   int view_count=1 (>1 needs view_instancing: view i into layer i, SGL's @view_index; dx12 caps it at 4, metal at what the device amplifies);
                                   //   pinned_data cached_pipeline={}; string target_set }
                                   //   depth/stencil state with no depth_stencil_format warns at creation: it would draw without either
                                   //   creation refuses a stage whose reflection does not fit `layout` (sg::describe_layout_misfit, binding/layout_fit.hh),
@@ -938,6 +963,37 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace, int hit_
 //   metal bakes it (geometry g's offset = g*stride), dx12/vulkan take the multiplier per TraceRay and ignore it
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
 cmd.raytracing.build_micromap(micromap_triangles)  // -> micromap_handle; ASSERTS without sg::feature::opacity_micromap, as does a blas naming one
+ctx.persistent.create_partitioned_tlas({.instance_capacity, .partition_count, .max_instances_per_partition,
+                                        .max_global_instances, .allows_partition_translation, .flags})
+                                                   // -> partitioned_tlas_handle, a tlas: empty, built by its first update;
+                                                   //    needs sg::feature::partitioned_tlas (vulkan's NV extension today)
+cmd.raytracing.update(ptlas, {.writes, .updates, .clears, .translations})
+                                                   // in place; a slot once per update; ptlas_write{index, partition, tlas_instance},
+                                                   // ptlas_update{index, blas, hit_group_offset}, ptlas_translation{partition, xyz};
+                                                   // sg::global_partition for what moves every frame. GOTCHA: vulkan traces one
+                                                   // by address, which SGL writes on both routes; a package's own HLSL sees
+                                                   // the null structure
+ctx.persistent.create_blas_table(span<blas_handle const>)
+                                                   // -> blas_table_handle: holds them; table->view() binds as buffer[accel.blas_ref]
+cmd.raytracing.update_indirect(ptlas, {.writes, .updates, .translations, .tables})
+                                                   // records a shader wrote (SGL's `use accel`), each indirect_records
+                                                   // {records, offset, max_count, count, count_offset}; sg copies each u32 count
+                                                   // into the operation it writes. gpu_ptlas_write is opaque: only a shader fills one
+cmd.raytracing.build_clusters(span<cluster_triangles const>{vertices, vertex_count, indices, triangle_count, cluster_id,
+                                                            geometry_index, is_opaque, ...}, flags=fast_trace)
+                                                   // -> cluster_set_handle: immutable, <= 256 triangles and vertices a cluster;
+                                                   //    needs sg::feature::clustered_geometry (vulkan's NV extension today)
+cmd.raytracing.build_cluster_blas(set, span<cluster_range const>{first, count}, flags, hit_record_stride=1)
+                                                   // -> vector<blas_handle>, one per contiguous range, each holding the set
+ctx.persistent.create_cluster_pool({.max_clusters, .max_total_triangles, .max_total_vertices, .max_triangles_per_cluster,
+                                    .max_vertices_per_cluster, .max_geometry_index, .index_type, .flags})
+                                                   // -> cluster_pool_handle: a cluster_set rebuilt in place; generation()
+ctx.persistent.create_buffer_table(span<raw_buffer_handle const>)
+                                                   // -> buffer_table_handle: table->view() binds as buffer[accel.buffer_ref]
+cmd.raytracing.build_clusters_indirect(pool, {.clusters = indirect_records{...}, .tables})
+                                                   // accel.clas_triangles records a shader wrote; bumps the generation, so
+                                                   // a BLAS built before is_stale() and a tlas build asserts on it;
+                                                   // so does a dispatch through a tlas built earlier (hit_record_checks)
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

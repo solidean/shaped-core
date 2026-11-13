@@ -3,7 +3,7 @@
 using namespace sgl_test;
 using sgl::emit::target;
 
-// The mesh stage as HLSL (EMIT-205), and the two targets that refuse it (EMIT-109, EMIT-206).
+// The mesh stage as HLSL (EMIT-205) and as Metal's mesh object (EMIT-206), and WGSL, which refuses it (EMIT-109).
 
 namespace
 {
@@ -38,12 +38,19 @@ TEST("sgl emit - HLSL writes a mesh stage's output as its two arrays, and its ca
     }
 }
 
-TEST("sgl emit - WGSL and MSL refuse a mesh stage (EMIT-109, EMIT-206)")
+TEST("sgl emit - WGSL refuses a mesh stage, and MSL writes it as Metal's mesh object (EMIT-109, EMIT-206)")
 {
     auto const wgsl = sgl::emit::dump_errors(emit_source(k_program, 0, target::wgsl));
     CHECK(wgsl.contains("needs mesh_shader, which WebGPU does not have")).dump("errors", wgsl);
-    auto const msl = sgl::emit::dump_errors(emit_source(k_program, 0, target::msl));
-    CHECK(msl.contains("is a mesh stage and needs mesh_shader")).dump("errors", msl);
+    auto const e = emit_source(k_program, 0, target::msl);
+    REQUIRE(sgl::emit::dump_errors(e) == "");
+    auto const& msl = e.text;
+    CHECK(msl.contains("[[mesh]] void ms(")).dump("text", msl);
+    CHECK(msl.contains("metal::mesh<corner, void, 4, 2, metal::topology::triangle> output")).dump("text", msl);
+    // Metal counts the primitives alone, and a triangle is three indices
+    CHECK(msl.contains("output.set_primitive_count(2u);")).dump("text", msl);
+    CHECK(msl.contains("output.set_vertex(")).dump("text", msl);
+    CHECK(msl.contains(".set_index(")).dump("text", msl);
 }
 
 TEST("sgl emit - HLSL hands a task stage's payload over from groupshared memory, and a mesh stage takes it in "
@@ -72,7 +79,16 @@ TEST("sgl emit - HLSL hands a task stage's payload over from groupshared memory,
         CHECK(mesh.text.contains("in payload handed h,")).dump("text", mesh.text);
     }
     CHECK(sgl::emit::dump_errors(emit_source(program, 0, target::wgsl)).contains("WebGPU does not have"));
-    CHECK(sgl::emit::dump_errors(emit_source(program, 0, target::msl)).contains("needs mesh_shader"));
+    // Metal's object stage writes its payload and its grid from its first invocation, and the mesh stage takes it
+    auto const task = emit_source(program, 0, target::msl);
+    REQUIRE(sgl::emit::dump_errors(task) == "");
+    CHECK(task.text.contains("[[object]] void ts(object_data handed& sgl_payload [[payload]], mesh_grid_properties "
+                             "sgl_grid, uint sgl_thread [[thread_index_in_threadgroup]])"))
+        .dump("text", task.text);
+    CHECK(task.text.contains("sgl_grid.set_threadgroups_per_grid(uint3(2u, 1u, 1u));")).dump("text", task.text);
+    auto const mesh = emit_source(program, 1, target::msl);
+    REQUIRE(sgl::emit::dump_errors(mesh) == "");
+    CHECK(mesh.text.contains("const object_data handed& h [[payload]]")).dump("text", mesh.text);
 }
 
 TEST("sgl emit - a per-triangle struct is out primitives in a mesh stage, and a flat per-primitive input in the pixel "

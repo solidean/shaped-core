@@ -139,6 +139,49 @@ isize n = r.size();               // child block count
 babel::markdown::ref c = r[0];    // i-th child block; invalid ref if out of range
 ```
 
+## SPIR-V (`babel::spirv`)
+
+```cpp
+#include <babel-data/shader/spirv.hh>
+
+auto const m = babel::spirv::read(bytes).value();     // bytes, a read_stream, or words; a big-endian module is swapped
+m.head.version; m.head.bound;                          // the header as stored; major_version() / minor_version()
+m.instruction_count(); m.at(i);                        // the instructions in module order, each a view of its words
+i.opcode(); i.operands();                              // the first word's low half; every word after it
+i.result_id(); i.result_type();                        // 0 where the opcode has none, or the table does not know it
+i.arguments();                                         // the operands after the result type and id
+i.string_at(k, &taken);                                // the literal string at operand k, and how many words it took
+babel::spirv::info_of(opcode);                         // -> opcode_info const* {name, has_result, has_result_type}; null if unknown
+```
+
+Nothing is decoded beyond the shape every instruction shares; what an operand means is `shan`'s or the caller's.
+The opcode table is generated from the SPIR-V headers: `uv run libs/data/babel-data/tools/gen-spirv-opcodes.py --write`.
+
+## DXIL and LLVM bitcode (`babel::dxil`, `babel::llvm`, `babel::llvm37`)
+
+```cpp
+#include <babel-data/shader/dxil_container.hh>
+#include <babel-data/shader/llvm37.hh>
+#include <babel-data/shader/llvm_bitstream.hh>
+
+auto const c = babel::dxil::read(bytes).value();       // the DXBC container: parts, each a view of c.bytes
+c.part_named("DXIL");                                  // -> part const*, null for none; also ILDB, PSV0, ISG1, HASH ...
+auto const p = babel::dxil::program_of(*part).value(); // shader_kind (5 compute), model_major/minor, bitcode
+auto const bc = babel::llvm::read_bitstream(p.bitcode).value();   // blocks of records, abbreviations undone
+bc.blocks[0].entries;                                  // block 0 is the stream; an entry is a record or a sub-block
+bc.operands_of(record); bc.blob_of(record);            // a record's u64s; its blob, a view of the input
+auto const m = babel::llvm37::read(bc).value();        // LLVM 3.7, the version DXIL froze
+m.types; m.globals; m.functions; m.constants;          // as the module states them
+m.bodies[f.body].instructions;                         // code, sub, type, result, operands, block, line
+m.operands_of(body, i); body.roles[i.first + k];       // value ids, or a block, or a literal
+m.value_of(body, id);                                  // -> value {kind, type, index}: global, function, constant, argument, instruction
+m.callee_name(body, call);                             // "dx.op.rawBufferLoad.f32"
+```
+
+The bitstream is version-free and every LLVM version's bitcode reads through it; `llvm37` is one version family's
+meaning on top, and a second family would be a reader of its own.
+A container must outlive the program and the bitstream read from it, which view its bytes.
+
 ## Gotchas
 
 Only what the signatures above cannot tell you.

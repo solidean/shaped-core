@@ -38,7 +38,7 @@ For barrier tracking, geometry/tessellation reads fold into the `vertex` pipelin
 `mesh_shader` replaces the vertex stage and the input assembler: each of its workgroups writes its own vertices and primitives for the rasterizer.
 `task_shader` stands before it, and each of its workgroups launches mesh workgroups and hands them one payload.
 Both need `sg::feature::mesh_shader`: dx12's mesh shader tier 1, vulkan's `VK_EXT_mesh_shader` with `meshShader` and `taskShader`.
-metal's object and mesh stages are not wired up yet, and WebGPU has neither.
+metal has them as a mesh render pipeline's object and mesh functions, and WebGPU has neither.
 
 A mesh-shaded description sets no vertex stage, no vertex input, and no tessellation or geometry stage, which the frontend refuses before any backend sees it.
 It renders one view so far.

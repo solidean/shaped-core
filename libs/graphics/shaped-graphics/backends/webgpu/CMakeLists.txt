@@ -17,6 +17,7 @@ add_library(shaped-graphics-webgpu
     src/shaped-graphics/backends/webgpu/webgpu_query.cc
     src/shaped-graphics/backends/webgpu/webgpu_raytracing.cc
     src/shaped-graphics/backends/webgpu/webgpu_resources.cc
+    src/shaped-graphics/backends/webgpu/webgpu_reuse.cc
     src/shaped-graphics/backends/webgpu/webgpu_stream.cc
     src/shaped-graphics/backends/webgpu/webgpu_swapchain.cc
     src/shaped-graphics/backends/webgpu/webgpu_transfer.cc
@@ -58,8 +59,6 @@ target_include_directories(shaped-graphics-webgpu
 
 target_link_libraries(shaped-graphics-webgpu PUBLIC shaped-graphics)
 
-sc_target_pch(shaped-graphics-webgpu SG)
-
 # Backend-specific test binary: compute, raster, inline constants, samplers, texture copies and presentation, over hand-written WGSL.
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-webgpu-test
@@ -71,6 +70,7 @@ if(SC_BUILD_TESTS)
         tests/webgpu-raytracing-test.cc
         tests/webgpu-threading-test.cc
         tests/webgpu-stream-test.cc
+        tests/webgpu-reuse-test.cc
     )
     sc_nexus_binary(shaped-graphics-webgpu-test KINDS tests)
     target_link_libraries(shaped-graphics-webgpu-test PRIVATE shaped-graphics-webgpu nexus)

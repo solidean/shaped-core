@@ -21,6 +21,9 @@ Neither has landed; the items below are the way there, and [wavefront.md](../wav
 **The raster mode is meant to look good in its own right**, not only to stand in.
 Today it is unshadowed and reflects only the SH environment; a device without ray tracing sees exactly that, and the hybrid builds on it.
 
+**A second raster mode, `raster_bound`, is planned for devices without binding arrays**: WebGPU and phones first.
+It binds per material, shades forward, and approximates GI with probes traced through the polyfill — [raster-bound.md](raster-bound.md).
+
 ## Decided for the raster path and the hybrid
 
 - **Quality over cost for what is not opaque.**
@@ -41,7 +44,7 @@ Today it is unshadowed and reflects only the SH environment; a device without ra
    Before upscaling it was ~64 ms at 1080p; the number decides how urgent everything below is.
 2. **The step when the camera stops.**
    The first still frame starts the full-size temporal history over, so it is denoised from one sample.
-3. **Ray cones**, so a hit picks a texture's mip level instead of always sampling level 0.
+3. ~~**Ray cones**~~, done: a hit picks a texture's level from its cone (feat-sv-texture-ray-cones, closed).
 4. **A design review of [hybrid-renderer.md](hybrid-renderer.md)**, run with the review tool.
    - Interactive: rasterized primaries into a thin G-buffer, GPU-culled, then one inline-traced lighting kernel ending in a radiance cache.
    - Final: the wavefront tracer converging without the cache, with power-weighted light selection.

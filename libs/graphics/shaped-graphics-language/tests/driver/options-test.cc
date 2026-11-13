@@ -74,13 +74,91 @@ TEST("sgl options - a const computed from an option follows its value, and reach
     CHECK(set.value().text.contains("data_out_buf[0] = f32(15);"));
     REQUIRE(defaults.value().options.size() == 1);
     CHECK(defaults.value().options[0] == "taps");
+}
 
-    // CHK-353: an option the host sets would not be followed by one computed from it
-    auto const derived = sgl::compile_to_text({.source = "@option const taps = 4\n@option const span = taps * 2\n",
-                                               .entry_point = "main",
-                                               .target = target::wgsl});
-    REQUIRE(derived.has_error());
-    CHECK(derived.error().contains("an option whose value names another option"));
+TEST("sgl options - an option whose default names another follows the value a compile gives that one")
+{
+    // CHK-519: its default is computed from this compile's value of `taps`, and a value given for it stands instead
+    constexpr auto source = "@option const taps = 4\n"
+                            "@option const span = taps * 2\n"
+                            "\n"
+                            "binding data:\n"
+                            "    out_buf: mut buffer[float]\n"
+                            "\n"
+                            "@compute(1) fun main(@thread_id id: int3){data}:\n"
+                            "    data.out_buf[0] = span as float\n";
+    auto const text = [&](cc::span<sgl::check::option_value const> options)
+    {
+        auto r
+            = sgl::compile_to_text({.source = source, .entry_point = "main", .target = target::wgsl, .options = options});
+        REQUIRE(r.has_value()).dump("errors", r.has_value() ? cc::string() : r.error());
+        return cc::move(r.value());
+    };
+    sgl::check::option_value const five[] = {{.name = "taps", .value = "5"}};
+    sgl::check::option_value const both[] = {{.name = "taps", .value = "5"}, {.name = "span", .value = "3"}};
+    CHECK(text({}).text.contains("data_out_buf[0] = f32(8);"));
+    CHECK(text(five).text.contains("data_out_buf[0] = f32(10);"));
+    CHECK(text(both).text.contains("data_out_buf[0] = f32(3);"));
+    // the entry point reaches both, so a compile is keyed on each
+    auto const reached = text({}).options;
+    REQUIRE(reached.size() == 2);
+    CHECK(reached[0] == "taps");
+    CHECK(reached[1] == "span");
+    // describe names what it follows, which is what a host's options struct leaves unset for it
+    auto const described = sgl::describe({.source = source});
+    REQUIRE(described.has_value());
+    REQUIRE(described.value().options.size() == 2);
+    CHECK(described.value().options[0].follows.empty());
+    REQUIRE(described.value().options[1].follows.size() == 1);
+    CHECK(described.value().options[1].follows[0] == "taps");
+}
+
+TEST("sgl options - a float or a uint option is set by a literal of its type, and spelled so it reads back")
+{
+    // CHK-353: a float holds the nearest float to what the value spells, and a uint any value an int literal writes
+    constexpr auto source = "@option const strength = 0.5\n"
+                            "@option const count: uint = 3u\n"
+                            "\n"
+                            "binding data:\n"
+                            "    out_buf: mut buffer[float]\n"
+                            "\n"
+                            "@compute(1) fun main(@thread_id id: int3){data}:\n"
+                            "    data.out_buf[0] = strength * (count as float)\n";
+    auto const text = [&](cc::span<sgl::check::option_value const> options)
+    {
+        return sgl::compile_to_text({.source = source, .entry_point = "main", .target = target::wgsl, .options = options});
+    };
+    auto const defaults = text({});
+    REQUIRE(defaults.has_value());
+    CHECK(defaults.value().text.contains("0.5"));
+    sgl::check::option_value const set[]
+        = {{.name = "strength", .value = "-1.25e1"}, {.name = "count", .value = "4000000000"}};
+    auto const given = text(set);
+    REQUIRE(given.has_value()).dump("errors", given.has_value() ? cc::string() : given.error());
+    CHECK(given.value().text.contains("-12.5"));
+    CHECK(given.value().text.contains("4000000000"));
+    // an integer is a float's literal too, and what no literal of the type spells is no value of it
+    sgl::check::option_value const whole[] = {{.name = "strength", .value = "2"}};
+    CHECK(text(whole).has_value());
+    sgl::check::option_value const words[] = {{.name = "strength", .value = "half"}};
+    CHECK(text(words).has_error());
+    sgl::check::option_value const negative[] = {{.name = "count", .value = "-1"}};
+    CHECK(text(negative).has_error());
+    sgl::check::option_value const past[] = {{.name = "strength", .value = "1e40"}};
+    CHECK(text(past).has_error());
+
+    // describe spells each as a compile reads it back, a float always with a point or an exponent
+    auto const described = sgl::describe({.source = source, .options = set});
+    REQUIRE(described.has_value());
+    auto const& d = described.value();
+    REQUIRE(d.options.size() == 2);
+    CHECK(d.options[0].type == "float");
+    CHECK(d.options[0].value == "-12.5");
+    CHECK(d.options[1].type == "uint");
+    CHECK(d.options[1].value == "4000000000");
+    auto const round = sgl::describe({.source = source, .options = whole});
+    REQUIRE(round.has_value());
+    CHECK(round.value().options[0].value == "2.0");
 }
 
 TEST("sgl options - each set of values is a text of its own, and a branch on one leaves what only it used")
@@ -260,9 +338,10 @@ TEST("sgl options - an option of a pipeline's stage is the pipeline's, and one o
     CHECK(d.pipelines[0].options[1] == "nested");
 }
 
-TEST("sgl options - an option is a bool, an int or an enum case, at file scope")
+TEST("sgl options - an option is a bool, a scalar or an enum case, at file scope")
 {
-    CHECK(reports_for("@option const blend = 0.5\n").contains("unsupported-yet"));
+    CHECK(reports_for("@option const blend = 0.5\n") == "");
+    CHECK(reports_for("@option const tint = float3(1.0, 0.5, 0.0)\n").contains("unsupported-yet"));
     CHECK(reports_for("@option(1) const tile = 8\n").contains("invalid-attribute-arguments"));
     // a leading dot is resolved against the written type, and needs one
     CHECK(reports_for("@option const f = .rgba8_unorm\n").contains("unsupported-yet"));
@@ -456,9 +535,9 @@ TEST("sgl options - a struct an entry point names reaches the options its fields
     CHECK(d.entry_points[1].options[0] == "width");
 }
 
-TEST("sgl options - an option whose value names another option is unsupported-yet")
+TEST("sgl options - an option whose value names another option is an option of its own")
 {
-    CHECK(reports_for("@option const base = 8\n@option const tile = base\n").contains("unsupported-yet"));
+    CHECK(reports_for("@option const base = 8\n@option const tile = base\n") == "");
     // a plain const naming an option follows it, which is how a helper reads one
     CHECK(reports_for("@option const base = 8\nconst tile = base\n") == "");
 }

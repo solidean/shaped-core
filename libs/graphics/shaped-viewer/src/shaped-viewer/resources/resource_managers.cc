@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
+#include <clean-core/common/utility.hh> // cc::memcpy
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
@@ -35,14 +36,6 @@ namespace
     return build_input_usage(ctx) | sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 }
 
-// A quadric batch splits what a mesh keeps in one kind of buffer, so the two usages are narrower than geometry_usage.
-// The boxes are the acceleration structure's build input, and the raster path's too: it draws each primitive as its box.
-// The primitives are read through the bindless table by the primitive index, and never seen by the hardware.
-[[nodiscard]] sg::buffer_usages quadric_aabb_usage(sg::context const& ctx)
-{
-    return build_input_usage(ctx) | sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
-}
-constexpr auto quadric_primitive_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 
 /// The area of the triangle over `a`, `b` and `c`.
 [[nodiscard]] f64 triangle_area(tg::pos3f a, tg::pos3f b, tg::pos3f c)
@@ -71,6 +64,10 @@ constexpr i32 texture_stream_priority = 0;
 
 namespace
 {
+// A quadric record and its box, in the vertex pool's 12-byte elements.
+constexpr isize primitive_elements = 8;
+constexpr isize box_elements = 2;
+
 // Room for a small scene before the first growth: 768 KB of positions and as many bytes of indices.
 constexpr isize initial_pool_vertices = isize(1) << 16;
 constexpr isize initial_pool_indices = isize(3) << 16;
@@ -279,7 +276,7 @@ void mesh_manager::on_remove(mesh_id id, mesh_record& record)
 
 void mesh_manager::_reclaim()
 {
-    if (_retiring.empty())
+    if (_retiring.empty() && _retiring_blocks.empty())
         return;
 
     auto const completed = u64(_ctx.completed_epoch());
@@ -292,6 +289,40 @@ void mesh_manager::_reclaim()
         _index_ranges.free(r.geometry.first_index, r.geometry.index_count());
         _retiring.remove_at_unordered(i);
     }
+    for (auto i = _retiring_blocks.size() - 1; i >= 0; --i)
+    {
+        auto const& r = _retiring_blocks[i];
+        if (u64(r.evicted_in) > completed)
+            continue;
+        _vertex_ranges.free(r.block.taken_offset, r.block.taken_count);
+        _retiring_blocks.remove_at_unordered(i);
+    }
+}
+
+mesh_manager::pool_block mesh_manager::allocate_block(isize count, isize alignment)
+{
+    CC_ASSERT(count > 0 && alignment >= 1, "a pool block needs a positive size and alignment");
+    _ensure_pools();
+    _reclaim();
+
+    // Widened by what the alignment may skip, so any start the allocator hands back has an aligned one inside it.
+    auto const taken_count = count + alignment - 1;
+    auto taken = _vertex_ranges.allocate(taken_count);
+    if (!taken.has_value())
+    {
+        _grow_vertex_pool(_vertex_ranges.capacity() + taken_count);
+        taken = _vertex_ranges.allocate(taken_count);
+    }
+    CC_ASSERT(taken.has_value(), "a grown pool always fits the range it grew for");
+
+    auto const offset = (taken.value() + alignment - 1) / alignment * alignment;
+    return {.offset = offset, .count = count, .taken_offset = taken.value(), .taken_count = taken_count};
+}
+
+void mesh_manager::retire_block(pool_block const& block)
+{
+    if (block.taken_count > 0)
+        _retiring_blocks.push_back({.block = block, .evicted_in = _ctx.current_epoch()});
 }
 
 geometry_range const& mesh_manager::placeholder_geometry()
@@ -371,12 +402,25 @@ sg::blas_handle const& mesh_manager::acquire_blas(sg::command_list& cmd, mesh_id
 
     // `complete` means the copy into the pools was submitted, and `cmd` is the caller's to submit after this.
     auto const& g = record->geometry;
-    record->blas = cmd.raytracing.build_blas({{.vertices = _vertex_pool.raw(),
-                                               .vertex_count = g.vertex_count,
-                                               .vertex_offset_in_bytes = g.base_vertex * isize(sizeof(tg::pos3f)),
-                                               .indices = _index_pool.raw(),
-                                               .index_count = g.index_count(),
-                                               .index_offset_in_bytes = g.first_index * isize(sizeof(u32))}});
+    try
+    {
+        record->blas = cmd.raytracing.build_blas({{.vertices = _vertex_pool.raw(),
+                                                   .vertex_count = g.vertex_count,
+                                                   .vertex_offset_in_bytes = g.base_vertex * isize(sizeof(tg::pos3f)),
+                                                   .indices = _index_pool.raw(),
+                                                   .index_count = g.index_count(),
+                                                   .index_offset_in_bytes = g.first_index * isize(sizeof(u32))}});
+    }
+    catch (sg::allocation_exception const& e)
+    {
+        // A pool with a ceiling, as webgpu's is, can be full of a scene that was just left and is still retiring.
+        // The mesh traces as the placeholder meanwhile, and asks again on a later frame.
+        if (!_told_blas_pool_full)
+            CC_LOG_INFO("a mesh's acceleration structure does not fit yet, so it stands in until space frees: {}",
+                        e.message());
+        _told_blas_pool_full = true;
+        return placeholder_blas();
+    }
 
     // Only now is the acceleration structure's own cost known, which is the one thing a record cannot size at insert.
     add_bytes(id, record->blas->size_in_bytes());
@@ -579,7 +623,7 @@ quadric_manager quadric_manager::create(sg::context& ctx, manager_config const& 
     return manager;
 }
 
-quadric_set_id quadric_manager::acquire(quadric_data const& set)
+quadric_set_id quadric_manager::acquire(quadric_data const& set, mesh_manager& meshes)
 {
     if (auto const id = find_by_hash(set.hash); id.has_value())
         return id.value();
@@ -588,46 +632,60 @@ quadric_set_id quadric_manager::acquire(quadric_data const& set)
     CC_ASSERT(!primitives.empty(), "quadric_manager::acquire expects at least one primitive");
 
     // The split the authored form cannot avoid: a primitive carries its box beside it, and the two go to different
-    // buffers — the boxes to the acceleration structure's build input, the rest to what the intersection shader reads.
+    // blocks — the boxes to the acceleration structure's build input, the rest to what an intersection reads.
     // It happens HERE rather than at authoring time because it is only paid on a miss, which is what lets a batch be
     // re-acquired every frame for the cost of a hash lookup.
-    auto packed = cc::vector<quadric_gpu>();
-    auto boxes = cc::vector<tg::aabb3f>();
-    packed.reserve(primitives.size());
-    boxes.reserve(primitives.size());
-    for (auto const& p : primitives)
+    static_assert(sizeof(quadric_gpu) == primitive_elements * sizeof(tg::pos3f), "a record must fill whole pool "
+                                                                                 "elements");
+    static_assert(sizeof(tg::aabb3f) == box_elements * sizeof(tg::pos3f), "a box must fill whole pool elements");
+    auto const n = primitives.size();
+    auto packed = cc::vector<tg::pos3f>::create_uninitialized(n * primitive_elements);
+    auto boxes = cc::vector<tg::pos3f>::create_uninitialized(n * box_elements);
+    for (auto i = isize(0); i < n; ++i)
     {
-        packed.push_back(quadric_gpu::of(p));
-        boxes.push_back(p.bounds);
+        auto const record = quadric_gpu::of(primitives[i]);
+        cc::memcpy(packed.data() + i * primitive_elements, &record, sizeof(quadric_gpu));
+        cc::memcpy(boxes.data() + i * box_elements, &primitives[i].bounds, sizeof(tg::aabb3f));
     }
 
-    // As for a mesh: the buffers are created here and the bytes are not, so a large batch does not stall the frame
-    // that asked for it.
-    auto primitive_buffer = _ctx.persistent.create_buffer<quadric_gpu>(packed.size(), quadric_primitive_usage);
-    auto aabb_buffer = _ctx.persistent.create_buffer<tg::aabb3f>(boxes.size(), quadric_aabb_usage(_ctx));
+    // Blocks of the vertex pool, and staging the payload streams into, as for a mesh: the bytes are not sent here, so
+    // a large batch does not stall the frame that asked for it.
+    auto const primitive_block = meshes.allocate_block(packed.size());
+    auto const box_block = meshes.allocate_block(boxes.size(), box_elements);
+    auto pending = pending_set{
+        .staged_primitives = _ctx.persistent.create_buffer<tg::pos3f>(packed.size(), staging_usage),
+        .staged_aabbs = _ctx.persistent.create_buffer<tg::pos3f>(boxes.size(), staging_usage),
+        .bytes = (packed.size() + boxes.size()) * isize(sizeof(tg::pos3f)),
+    };
+    pending.primitives = _ctx.stream.data_to_buffer(pending.staged_primitives, cc::make_pinned_data(cc::move(packed)));
+    pending.aabbs = _ctx.stream.data_to_buffer(pending.staged_aabbs, cc::make_pinned_data(cc::move(boxes)));
+    pending.primitives.set_priority(impl::geometry_stream_priority);
+    pending.aabbs.set_priority(impl::geometry_stream_priority);
 
     // The BLAS is not charged yet, since it is not built: `acquire_blas` adds its size once it is.
-    auto const size_in_bytes = primitive_buffer.size_in_bytes() + aabb_buffer.size_in_bytes();
-
-    auto primitive_transfer = _ctx.stream.data_to_buffer(primitive_buffer, cc::make_pinned_data(cc::move(packed)));
-    auto aabb_transfer = _ctx.stream.data_to_buffer(aabb_buffer, cc::make_pinned_data(cc::move(boxes)));
-    primitive_transfer.set_priority(impl::geometry_stream_priority);
-    aabb_transfer.set_priority(impl::geometry_stream_priority);
-
     auto const id = insert(set.hash,
                            {.state = residency::pending,
-                            .primitives = cc::move(primitive_buffer),
-                            .aabbs = cc::move(aabb_buffer),
-                            .primitive_count = primitives.size(),
+                            .primitives = primitive_block,
+                            .aabbs = box_block,
+                            .primitive_count = n,
                             .bounds = set.bounds},
-                           size_in_bytes);
-
-    _settling[id]
-        = {.primitives = cc::move(primitive_transfer), .aabbs = cc::move(aabb_transfer), .bytes = size_in_bytes};
+                           pending.bytes);
+    _settling[id] = cc::move(pending);
     return id;
 }
 
-bool quadric_manager::_try_settle(quadric_set_id id, pending_set& p)
+void quadric_manager::on_remove(quadric_set_id id, quadric_set_record& record)
+{
+    // A still-streaming batch never reached its blocks; dropping its entry cancels the transfers into its staging.
+    _settling.erase(id);
+    _released.push_back(record.primitives);
+    _released.push_back(record.aabbs);
+}
+
+bool quadric_manager::_try_settle(quadric_set_id id,
+                                  pending_set& p,
+                                  mesh_manager& meshes,
+                                  std::unique_ptr<sg::command_list>& copies)
 {
     if (!p.primitives.is_settled() || !p.aabbs.is_settled())
         return false;
@@ -644,23 +702,35 @@ bool quadric_manager::_try_settle(quadric_set_id id, pending_set& p)
         return true;
     }
 
+    // As a mesh's: the staging is touched only now that its streams are observed settled, and every later list reading
+    // the pool is submitted after this copy.
+    if (copies == nullptr)
+        copies = _ctx.create_command_list();
+    auto const& pool = meshes.vertex_pool();
+    copies->copy.buffer_data_region<tg::pos3f>({.src = p.staged_primitives.raw(),
+                                                .dst = pool.raw(),
+                                                .count = record->primitives.count,
+                                                .dst_offset = record->primitives.offset});
+    copies->copy.buffer_data_region<tg::pos3f>(
+        {.src = p.staged_aabbs.raw(), .dst = pool.raw(), .count = record->aabbs.count, .dst_offset = record->aabbs.offset});
     record->state = residency::complete;
     return true;
 }
 
-sg::blas_handle const& quadric_manager::acquire_blas(sg::command_list& cmd, quadric_set_id id)
+sg::blas_handle const& quadric_manager::acquire_blas(sg::command_list& cmd, quadric_set_id id, mesh_manager& meshes)
 {
     auto* const record = mutable_record(id);
     CC_ASSERT(record != nullptr && record->state == residency::complete, "quadric_manager::acquire_blas needs a "
-                                                                         "resident batch whose buffers have landed");
+                                                                         "resident batch whose blocks have landed");
     if (record->blas != nullptr)
         return record->blas;
 
-    // Only the BOXES are the build input; the primitive buffer is the shader's and the hardware never sees it.
+    // Only the BOXES are the build input; the records are an intersection's and the hardware never sees them.
     // `tg::aabb3f` is already the six-float min-then-max layout a procedural BLAS wants, so the stride is its own size.
-    auto const geometry = sg::blas_aabbs{.aabbs = record->aabbs.raw(),
+    auto const geometry = sg::blas_aabbs{.aabbs = meshes.vertex_pool().raw(),
                                          .aabb_count = record->primitive_count,
-                                         .aabb_stride_in_bytes = isize(sizeof(tg::aabb3f))};
+                                         .aabb_stride_in_bytes = isize(sizeof(tg::aabb3f)),
+                                         .aabb_offset_in_bytes = record->aabbs.offset * isize(sizeof(tg::pos3f))};
 
     // `complete` was observed before this call, as the streaming contract asks of the list `cmd` is submitted as.
     record->blas = cmd.raytracing.build_blas(cc::span<sg::blas_aabbs const>(&geometry, 1));
@@ -670,26 +740,32 @@ sg::blas_handle const& quadric_manager::acquire_blas(sg::command_list& cmd, quad
     return record->blas;
 }
 
-isize quadric_manager::collect_settled()
+isize quadric_manager::collect_settled(mesh_manager& meshes)
 {
+    for (auto const& block : _released)
+        meshes.retire_block(block);
+    _released.clear();
     if (_settling.empty())
         return 0;
 
     auto finished = isize(0);
     auto keep = cc::map<quadric_set_id, pending_set>();
+    auto copies = std::unique_ptr<sg::command_list>();
     for (auto&& [id, p] : _settling)
     {
-        if (_try_settle(id, p))
+        if (_try_settle(id, p, meshes, copies))
             ++finished;
         else
             keep[id] = cc::move(p);
     }
+    if (copies != nullptr)
+        _ctx.submit_command_list(cc::move(copies));
 
     _settling = cc::move(keep);
     return finished;
 }
 
-void quadric_manager::wait_for_settled()
+void quadric_manager::wait_for_settled(mesh_manager& meshes)
 {
     if (_settling.empty())
         return;
@@ -703,7 +779,7 @@ void quadric_manager::wait_for_settled()
         (void)cc::try_async_blocking_get(p.primitives.completion());
         (void)cc::try_async_blocking_get(p.aabbs.completion());
     }
-    (void)collect_settled();
+    (void)collect_settled(meshes);
 }
 
 texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg)
@@ -759,6 +835,35 @@ void texture_manager::replace_with_compressed(texture_id id, sg::texture_2d comp
         record->summary.value().exact = false;
 }
 
+sg::texture_2d_description adoptable_texture(sg::context& ctx, sg::pixel_format format, i32 width, i32 height)
+{
+    CC_ASSERT(width > 0 && height > 0, "a texture needs a positive extent");
+
+    // Which routine can fill the levels an upload did not supply is a property of the FORMAT, and the usage it needs
+    // is fixed at creation — so the choice is made here rather than where the generation is recorded.
+    // An sRGB format carries no typed UAV and a compressed one is neither writable nor renderable, which leaves the
+    // compressed case with no path at all; it allocates only the levels its file supplied.
+    // An image format outside the portable set is writable only where the device grants extended image formats.
+    auto const compute_mips = sg::supports_typed_uav(format)
+                           && (sg::is_portable_image_format(format) || ctx.supports(sg::feature::extended_image_formats));
+    auto const raster_mips = !compute_mips && sg::is_render_target_format(format);
+
+    // The full chain is allocated up front even when only the base level is supplied, so generating the rest
+    // later fills this texture in place rather than replacing it.
+    // A format neither routine can fill has room for the levels it is given only, which is 1 here.
+    auto usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
+    if (compute_mips)
+        usage = usage | sg::texture_usage::image;
+    else if (raster_mips)
+        usage = usage | sg::texture_usage::render_target;
+
+    return {.format = format,
+            .width = width,
+            .height = height,
+            .mip_levels = compute_mips || raster_mips ? impl::mip_count_of(width, height) : 1,
+            .usage = usage};
+}
+
 texture_id texture_manager::acquire(texture_data const& texture)
 {
     if (auto const resident = find_by_hash(texture.hash); resident.has_value())
@@ -767,33 +872,49 @@ texture_id texture_manager::acquire(texture_data const& texture)
     CC_ASSERT(texture.width > 0 && texture.height > 0, "a texture needs a positive extent");
     CC_ASSERT(texture.mip_count >= 1, "a texture carries at least its base level");
 
-    // Which routine can fill the levels an upload did not supply is a property of the FORMAT, and the usage it needs
-    // is fixed at creation — so the choice is made here rather than where the generation is recorded.
-    // An sRGB format carries no typed UAV and a compressed one is neither writable nor renderable, which leaves the
-    // compressed case with no path at all; it allocates only the levels its file supplied.
-    // An image format outside the portable set is writable only where the device grants extended image formats.
-    auto const compute_mips
-        = sg::supports_typed_uav(texture.format)
-       && (sg::is_portable_image_format(texture.format) || _ctx.supports(sg::feature::extended_image_formats));
-    auto const raster_mips = !compute_mips && sg::is_render_target_format(texture.format);
+    // The budget is charged for the whole allocated chain rather than the levels supplied so far.
+    // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
+    // completed texture would sit in the budget at three quarters of what it costs.
+    auto const chain_bytes_of = [&](i32 levels)
+    {
+        auto bytes = isize(0);
+        for (auto mip = i32(0); mip < levels; ++mip)
+            bytes += impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
+        return bytes;
+    };
 
-    // The full chain is allocated up front even when only the base level is supplied, so generating the rest
-    // later fills this texture in place rather than replacing it.
-    auto const total_mips
-        = compute_mips || raster_mips ? impl::mip_count_of(texture.width, texture.height) : texture.mip_count;
+    auto const description = adoptable_texture(_ctx, texture.format, texture.width, texture.height);
+
+    if (texture.gpu.has_value())
+    {
+        auto const& gpu = texture.gpu.value();
+        CC_ASSERT(gpu.raw()->format() == texture.format && gpu.width() == texture.width && gpu.height() == texture.height,
+                  "an adopted texture has the shape its data names");
+        CC_ASSERT(gpu.mip_levels() == description.mip_levels && gpu.raw()->usage().has_all(description.usage),
+                  "an adopted texture is created from adoptable_texture's description");
+
+        // Nothing streams: an empty transfer list is settled and delivered, so the next `collect_settled` reports it
+        // as landed, and its follow-up work is queued as an upload's is.
+        auto const id = insert(texture.hash,
+                               {.texture = gpu,
+                                .state = residency::pending,
+                                .uploaded_mips = texture.mip_count,
+                                .total_mips = description.mip_levels,
+                                .summary = texture.summary},
+                               chain_bytes_of(description.mip_levels));
+        _settling[id] = {};
+        return id;
+    }
+
+    // A format with no mip routine keeps the levels it was given, whatever their number.
+    auto const total_mips = description.mip_levels > 1 ? description.mip_levels : texture.mip_count;
     CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
-
-    auto usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
-    if (compute_mips)
-        usage = usage | sg::texture_usage::image;
-    else if (raster_mips)
-        usage = usage | sg::texture_usage::render_target;
 
     auto gpu = _ctx.persistent.create_texture_2d({.format = texture.format,
                                                   .width = texture.width,
                                                   .height = texture.height,
                                                   .mip_levels = total_mips,
-                                                  .usage = usage});
+                                                  .usage = description.usage});
 
     // Every supplied level as its own transfer, each keeping a pin into the caller's pixels — so the payload outlives
     // this call without the manager holding a copy of it.
@@ -814,12 +935,7 @@ texture_id texture_manager::acquire(texture_data const& texture)
     // Every texture is, since which ones a material reads as an emission is not known here; the scan is capped and cheap.
     auto const summary = summarize_texture(texture);
 
-    // The budget is charged for the whole allocated chain rather than the levels supplied so far.
-    // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
-    // completed texture would sit in the budget at three quarters of what it costs.
-    auto chain_bytes = isize(0);
-    for (auto mip = i32(0); mip < total_mips; ++mip)
-        chain_bytes += impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
+    auto const chain_bytes = chain_bytes_of(total_mips);
 
     auto const id = insert(texture.hash,
                            {.texture = cc::move(gpu),
@@ -897,8 +1013,18 @@ void texture_manager::wait_for_settled(cc::vector<texture_id>& newly_resident)
 
 namespace
 {
-// readonly_buffer so a shader reads it as a `bytes` element through the bindless table; copy_dst for the upload.
-constexpr auto bindless_bytes_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
+// readonly_buffer so a shader reads the pool as `bytes`; copy_dst for the writes into it; copy_src for its growth and a readback.
+constexpr auto attribute_pool_usage
+    = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src;
+
+// What an attribute streams into before it is copied into its range.
+constexpr auto attribute_staging_usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
+
+/// The attribute pool's first size.
+constexpr isize initial_attribute_pool_bytes = 1024 * 1024;
+
+/// Every range starts on 16 bytes, so a `load4` of an element whose format is 16-byte aligned stays aligned in the pool.
+constexpr isize attribute_alignment = 16;
 } // namespace
 
 attribute_manager attribute_manager::create(sg::context& ctx, manager_config const& cfg)
@@ -916,23 +1042,21 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
     auto const bytes = attribute.data.span();
     CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
 
-    // The buffer exists from here on, so a descriptor naming it is valid immediately; only its contents wait.
-    auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
-
-    auto transfer = _ctx.stream.bytes_to_buffer(data.raw(), attribute.data);
+    auto staging = _ctx.persistent.create_buffer<byte>(bytes.size(), attribute_staging_usage);
+    auto transfer = _ctx.stream.bytes_to_buffer(staging.raw(), attribute.data);
     transfer.set_priority(impl::attribute_stream_priority);
 
     // Summarized while the payload is at hand, since it is the stream's from here on.
     auto const id = insert(attribute.hash,
                            {.state = residency::pending,
-                            .data = cc::move(data),
+                            .size_bytes = bytes.size(),
                             .format = attribute.format,
                             .frequency = attribute.frequency,
                             .element_count = attribute.element_count(),
                             .summary = summarize_elements(bytes, attribute.format, attribute.element_count())},
                            bytes.size());
 
-    _settling[id] = cc::move(transfer);
+    _settling[id] = {.staging = cc::move(staging), .transfer = cc::move(transfer)};
     return id;
 }
 
@@ -944,10 +1068,9 @@ attribute_id attribute_manager::acquire_inline(mesh_attribute const& attribute)
     auto const bytes = attribute.data.span();
     CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
 
-    auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
     auto const id = insert(attribute.hash,
                            {.state = residency::pending,
-                            .data = cc::move(data),
+                            .size_bytes = bytes.size(),
                             .format = attribute.format,
                             .frequency = attribute.frequency,
                             .element_count = attribute.element_count(),
@@ -955,6 +1078,35 @@ attribute_id attribute_manager::acquire_inline(mesh_attribute const& attribute)
                            bytes.size());
     _inline_bytes[id] = attribute.data;
     return id;
+}
+
+isize attribute_manager::_allocate(sg::command_list& cmd, isize bytes)
+{
+    _reclaim();
+    auto const size = cc::align_up(bytes, attribute_alignment);
+    if (_pool.raw() == nullptr)
+    {
+        auto const capacity = grown_capacity(initial_attribute_pool_bytes / 2, size);
+        _pool = _ctx.persistent.create_buffer<byte>(capacity, attribute_pool_usage);
+        _ranges.grow(capacity);
+    }
+    auto offset = _ranges.allocate(size);
+    if (!offset.has_value())
+    {
+        // Recorded on `cmd`, after every write into the old pool this manager already recorded or submitted.
+        auto const old_capacity = _ranges.capacity();
+        auto const capacity = grown_capacity(old_capacity, old_capacity + size);
+        auto grown = _ctx.persistent.create_buffer<byte>(capacity, attribute_pool_usage);
+        cmd.copy.buffer_data_region<byte>({.src = _pool.raw(), .dst = grown.raw(), .count = old_capacity});
+
+        // The old buffer stays alive for the lists in flight that read it, as every dropped sg handle does.
+        _pool = cc::move(grown);
+        _ranges.grow(capacity);
+        offset = _ranges.allocate(size);
+        CC_LOG_INFO("grew the attribute pool to {} bytes", capacity);
+    }
+    CC_ASSERT(offset.has_value(), "a grown pool always fits the range it grew for");
+    return offset.value();
 }
 
 void attribute_manager::record_inline_uploads(sg::command_list& cmd)
@@ -965,31 +1117,49 @@ void attribute_manager::record_inline_uploads(sg::command_list& cmd)
         auto* const record = mutable_record(id);
         if (record == nullptr)
             continue;
-        cmd.upload.bytes_to_buffer(record->data.raw(), bytes.span(), 0);
+        record->offset = _allocate(cmd, record->size_bytes);
+        cmd.upload.bytes_to_buffer(_pool.raw(), bytes.span(), record->offset);
         record->state = residency::complete;
     }
     _inline_bytes.clear();
 }
 
-isize attribute_manager::collect_settled()
+isize attribute_manager::collect_settled(sg::command_list* cmd)
 {
+    _reclaim();
     if (_settling.empty())
         return 0;
 
     auto finished = isize(0);
-    auto keep = cc::map<attribute_id, sg::stream_upload_handle>();
-    for (auto&& [id, transfer] : _settling)
+    auto keep = cc::map<attribute_id, pending_attribute>();
+    auto own = std::unique_ptr<sg::command_list>();
+    for (auto&& [id, p] : _settling)
     {
-        if (!transfer.is_settled())
+        if (!p.transfer.is_settled())
         {
-            keep[id] = cc::move(transfer);
+            keep[id] = cc::move(p);
             continue;
         }
-
-        if (auto* const record = mutable_record(id); record != nullptr)
-            record->state = transfer.is_complete() ? residency::complete : residency::failed;
         ++finished;
+
+        auto* const record = mutable_record(id);
+        if (record == nullptr)
+            continue;
+        if (!p.transfer.is_complete())
+        {
+            record->state = residency::failed;
+            continue;
+        }
+        if (cmd == nullptr && own == nullptr)
+            own = _ctx.create_command_list();
+        auto& copies = cmd != nullptr ? *cmd : *own;
+        record->offset = _allocate(copies, record->size_bytes);
+        copies.copy.buffer_data_region<byte>(
+            {.src = p.staging.raw(), .dst = _pool.raw(), .count = record->size_bytes, .dst_offset = record->offset});
+        record->state = residency::complete;
     }
+    if (own != nullptr)
+        _ctx.submit_command_list(cc::move(own));
 
     _settling = cc::move(keep);
     return finished;
@@ -997,13 +1167,40 @@ isize attribute_manager::collect_settled()
 
 void attribute_manager::wait_for_settled()
 {
-    for (auto&& [id, transfer] : _settling)
+    for (auto&& [id, p] : _settling)
     {
         (void)id;
-        transfer.promote_to_async();
-        (void)cc::try_async_blocking_get(transfer.completion());
+        p.transfer.promote_to_async();
+        (void)cc::try_async_blocking_get(p.transfer.completion());
     }
     (void)collect_settled();
+}
+
+void attribute_manager::on_remove(attribute_id id, attribute_record& record)
+{
+    // A still-streaming attribute never reached the pool; dropping its entry cancels the transfer into its staging.
+    _settling.erase(id);
+    _inline_bytes.erase(id);
+    if (record.offset >= 0)
+        _retiring.push_back({.offset = record.offset,
+                             .size_bytes = cc::align_up(record.size_bytes, attribute_alignment),
+                             .evicted_in = _ctx.current_epoch()});
+}
+
+void attribute_manager::_reclaim()
+{
+    if (_retiring.empty())
+        return;
+
+    auto const completed = u64(_ctx.completed_epoch());
+    for (auto i = _retiring.size() - 1; i >= 0; --i)
+    {
+        auto const& r = _retiring[i];
+        if (u64(r.evicted_in) > completed)
+            continue;
+        _ranges.free(r.offset, r.size_bytes);
+        _retiring.remove_at_unordered(i);
+    }
 }
 
 } // namespace sv

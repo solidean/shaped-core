@@ -26,11 +26,17 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   So `+`, `-`, `*`, `/` and `sqrt` of halves are exactly binary16's own, and a builtin of several steps, such as `mix` or `dot`, rounds once where a GPU may round each step.
 * **EVAL-108** A double's rounding functions are exact, and a zero they give keeps the sign of the argument: `trunc(-0.5)` is -0.0 (CHK-458).
   `round` takes a tie to the even neighbour, and `fract(x)` is `x - floor(x)`.
-  `sqrt` is the double nearest the root on the interpreter, and within one ULP of it on a GPU; `inverse_sqrt` is `1 / sqrt(x)` there, and within two ULP on a GPU.
+  `sqrt` is the double nearest the root on the interpreter, and within one ULP of it on dx12; `inverse_sqrt` is `1 / sqrt(x)` there, and within two ULP on dx12.
+  On vulkan both are GLSL.std.450's, which Vulkan bounds only as a float's: `inverse_sqrt` within two ULP of a float, and `sqrt` as `1 / inverse_sqrt(x)` (EMIT-256).
+  The roundings are exact on the interpreter and on dx12, and Vulkan states its as correctly rounded.
   Each other function is its formula, every step rounded to a double: `mix` is `a * (1 - t) + b * t`, `dot` sums from the first component on, and `normalize(v)` is `v * inverse_sqrt(dot(v, v))`.
   `smoothstep` whose low edge is not below its high one has no value, as of a float.
   An entry point's float level (CHK-435) licenses for a double what it licenses for a float: at `fast` a GPU may read a subnormal as a zero, and `fract` of a NaN or an infinity has no value it keeps.
   `sqrt`, `inverse_sqrt`, `is_nan` and `is_inf` read a NaN and an infinity from the bits at every level.
+* **EVAL-146** `fma(a, b, c)` of halves, floats or doubles, and of their vectors per component, is `a * b + c` rounded once to its type, to nearest, ties to even.
+  The interpreter computes it from the exact value, so a half's rounds straight to a half and never to a float on the way.
+  A NaN and an infinity are IEEE's: an infinity times a zero is a NaN, and a finite product plus an infinity is that infinity, however large the product.
+  On a GPU it is as precise as its target states (EVAL-6), and EMIT-254 says which round once: a target may round the product first.
 * **EVAL-104** A `long` and a `ulong` are 64 bits whose arithmetic wraps, and a `double` is a 64-bit IEEE number, each operation rounded once to nearest, ties to even (CHK-450).
   Their bits work as EVAL-86 says of 32, a shift using the low six bits of its count.
   An integer `/` and `%` of them have no value where EVAL-84 says so of an `int`: a zero divisor, and the most negative long divided by -1.

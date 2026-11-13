@@ -1,0 +1,38 @@
+// a case's written value is an `int` computed before anything runs, as a const's value is (CHK-144, CHK-146)
+
+const lanes = 4
+
+enum stage_bit:
+    vertex = 1 << 0
+    pixel = 1 << 1
+    compute = 1 << 2
+    every = (1 << 3) - 1
+    // an implicit value follows a computed one as it follows a literal
+    after
+
+enum width:
+    single = lanes
+    double = lanes * 2
+    // a const's value reaches through a function of the module, run on the abstract machine
+    widest = max(lanes * 4, 12)
+
+test stage_bit.pixel as int == 2
+test stage_bit.every as int == 7
+test stage_bit.after as int == 8
+test width.double as int == 8 and width.widest as int == 16
+
+// a computed value is a case's value like any other, which `case` and `==` see
+fun is_wide(w: width) -> bool:
+    return case w:
+        .single => false
+        .double => true
+        .widest => true
+
+test is_wide(width.double) and not is_wide(width.single)
+
+// two cases may still compute one value, which makes the second an alias of the first (CHK-145)
+enum mode:
+    plain = 2
+    default = 1 + 1
+
+test mode.default == mode.plain

@@ -1,5 +1,5 @@
 #include <clean-core/container/vector.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual — the wedge and its Hodge dual
@@ -31,6 +31,7 @@
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/mesh-structure
+// On the web, build the emscripten-webgpu preset and open web/mesh-structure.html, served over https or from localhost.
 //   uv run dev.py example shaped-viewer/mesh-structure --capture    # headless, writes an image
 
 namespace
@@ -111,7 +112,7 @@ tg::vec3f color_of(tg::pos3f const& v)
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/mesh-structure")
+ASYNC_EXAMPLE("shaped-viewer/mesh-structure")
 {
     auto const vertices = icosahedron_vertices();
     auto const edges = edges_of(vertices);
@@ -158,9 +159,10 @@ EXAMPLE("shaped-viewer/mesh-structure")
     structure.attributes.push_back(
         sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
 
-    for (auto f : sv::interactive("shaped-viewer/mesh-structure"))
+    auto frames = sv::interactive_async("shaped-viewer/mesh-structure");
+    while (auto* f = co_await frames.next())
     {
-        auto view = f.window().view();
+        auto view = f->window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0, 0),
                             .distance = 5.4,
                             .azimuth = tg::angle_d::make_from_degree(30.0),

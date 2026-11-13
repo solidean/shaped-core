@@ -8,6 +8,7 @@ module display
 const curve_none = 0u
 const curve_srgb = 1u
 const curve_neutral = 2u
+const curve_agx = 3u
 
 /// Where the neutral curve stops being the identity.
 const neutral_knee = 0.6
@@ -32,17 +33,78 @@ fun neutral(linear: float3) -> float3:
     if peak <= neutral_knee => return saturate(linear)
     return saturate(linear * (neutral_peak(peak) / peak))
 
+// AgX, a filmic curve: very bright saturated light desaturates toward white as film does, where the neutral curve keeps its hue.
+// The analytic fit is Benjamin Wrensch's, "Minimal AgX Implementation" (2023), of Troy Sobotka's AgX, from linear sRGB.
+const agx_min_ev = -12.47393
+const agx_max_ev = 4.026069
+
+fun agx_inset(c: float3) -> float3:
+    let x = 0.842479062253094 * c.x + 0.0784335999999992 * c.y + 0.0792237451477643 * c.z
+    let y = 0.0423282422610123 * c.x + 0.878468636469772 * c.y + 0.0791661274605434 * c.z
+    let z = 0.0423756549057051 * c.x + 0.0784336 * c.y + 0.879142973793104 * c.z
+    return float3(x, y, z)
+
+fun agx_outset(c: float3) -> float3:
+    let x = 1.19687900512017 * c.x - 0.0980208811401368 * c.y - 0.0990297440797205 * c.z
+    let y = -0.0528968517574562 * c.x + 1.15190312990417 * c.y - 0.0989611768448433 * c.z
+    let z = -0.0529716355144438 * c.x - 0.0980434501171241 * c.y + 1.15107367264116 * c.z
+    return float3(x, y, z)
+
+/// The fit of AgX's sigmoid, over log light normalized to [0, 1].
+fun agx_sigmoid(x: float) -> float:
+    let x2 = x * x
+    let x4 = x2 * x2
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232
+
+fun agx_channel(v: float) -> float:
+    let ev = clamp(log2(max(v, 1e-10)), agx_min_ev, agx_max_ev)
+    return agx_sigmoid((ev - agx_min_ev) / (agx_max_ev - agx_min_ev))
+
+fun agx(linear: float3) -> float3:
+    let c = agx_inset(linear)
+    let shaped = agx_outset(float3(agx_channel(c.x), agx_channel(c.y), agx_channel(c.z)))
+    return saturate(float3(pow(max(shaped.x, 0.0), 2.2), pow(max(shaped.y, 0.0), 2.2), pow(max(shaped.z, 0.0), 2.2)))
+
+/// A grade on exposed light, before the curve, so that nothing it does clips after the curve's roll-off.
+/// `balance` is temperature, tint and vignette, `tone` contrast and saturation; `at` is where the pixel is in its image, in [0, 1].
+fun grade(light: float3, balance: float3, tone: float2, at: float2) -> float3:
+    let middle_gray = 0.18
+    let centered = (at - float2(0.5, 0.5)) * 2.0
+    let reach = dot(centered, centered) * 0.5
+    let balanced = float3(light.x * (1.0 + balance.x), light.y * (1.0 + balance.y), light.z * (1.0 - balance.x)) * (1.0 - balance.z * reach)
+
+    let sx = middle_gray * pow(max(balanced.x, 0.00001) / middle_gray, tone.x)
+    let sy = middle_gray * pow(max(balanced.y, 0.00001) / middle_gray, tone.x)
+    let sz = middle_gray * pow(max(balanced.z, 0.00001) / middle_gray, tone.x)
+    let shaped = float3(sx, sy, sz)
+    let l = 0.2126 * shaped.x + 0.7152 * shaped.y + 0.0722 * shaped.z
+    let l3 = float3(l, l, l)
+    return max(l3 + (shaped - l3) * tone.y, float3(0.0, 0.0, 0.0))
+
+/// A value in (-0.5, 0.5] of one 8-bit step at `pixel`: an interleaved gradient, a function of the position alone, so an image stays repeatable.
+fun dither_at(pixel: float2) -> float:
+    let g = fract(52.9829189 * fract(0.06711056 * pixel.x + 0.00583715 * pixel.y))
+    return (g - 0.5) / 255.0
+
 /// `linear` exposed by `exposure_scale` and mapped by `curve`; `curve_none` returns the exposed radiance unencoded.
 fun transform(linear: float3, exposure_scale: float, curve: uint) -> float3:
     let exposed = max(linear * exposure_scale, float3(0.0, 0.0, 0.0))
     if curve == curve_srgb => return srgb_encode(saturate(exposed))
     if curve == curve_neutral => return srgb_encode(neutral(exposed))
+    if curve == curve_agx => return srgb_encode(agx(exposed))
     return exposed
 
 /// The same for a premultiplied color: the transform applies to the color the alpha covers, and the alpha stays.
 fun transform_premultiplied(c: float4, exposure_scale: float, curve: uint) -> float4:
     if c.w <= 0.0 => return c
     let t = transform(c.xyz / c.w, exposure_scale, curve)
+    return float4(t.x * c.w, t.y * c.w, t.z * c.w, c.w)
+
+/// `transform_premultiplied` with a grade between the exposure and the curve.
+fun transform_graded(c: float4, exposure_scale: float, curve: uint, balance: float3, tone: float2, at: float2) -> float4:
+    if c.w <= 0.0 => return c
+    let graded = grade(max(c.xyz / c.w * exposure_scale, float3(0.0, 0.0, 0.0)), balance, tone, at)
+    let t = transform(graded, 1.0, curve)
     return float4(t.x * c.w, t.y * c.w, t.z * c.w, c.w)
 
 // ---- tests: run when this file is compiled on its own, as sr's display-module test does ----
@@ -84,3 +146,26 @@ test:
 test:
     let c = transform_premultiplied(float4(0.09, 0.09, 0.09, 0.5), 1.0, curve_srgb)
     nearly_equal(c.x, srgb_encode(0.18) * 0.5, within = 0.0001) and c.w == 0.5
+
+// AgX's matrix and its inverse undo each other, which is what says their constants are right.
+test:
+    let c = agx_outset(agx_inset(float3(0.25, 0.5, 0.75)))
+    nearly_equal(c.x, 0.25, within = 0.0001) and nearly_equal(c.y, 0.5, within = 0.0001) and nearly_equal(c.z, 0.75, within = 0.0001)
+// It rises with light, stays below 1, and takes a very bright pure red toward white, which is what a filmic curve is for.
+test agx(float3(0.18, 0.18, 0.18)).x < agx(float3(1.0, 1.0, 1.0)).x
+test agx(float3(1.0, 1.0, 1.0)).x < agx(float3(8.0, 8.0, 8.0)).x
+test agx(float3(100.0, 100.0, 100.0)).x <= 1.0
+test agx(float3(16.0, 0.0, 0.0)).y > 0.2
+test neutral(float3(16.0, 0.0, 0.0)).y == 0.0
+
+// A grade of nothing leaves light as it is, in the middle of the image.
+test:
+    let c = grade(float3(0.5, 0.25, 1.5), float3(0.0, 0.0, 0.0), float2(1.0, 1.0), float2(0.5, 0.5))
+    nearly_equal(c.x, 0.5, within = 0.0001) and nearly_equal(c.y, 0.25, within = 0.0001) and nearly_equal(c.z, 1.5, within = 0.0001)
+// Contrast turns about middle gray, and saturation about luminance.
+test nearly_equal(grade(float3(0.18, 0.18, 0.18), float3(0.0, 0.0, 0.0), float2(1.5, 1.0), float2(0.5, 0.5)).x, 0.18, within = 0.0001)
+test nearly_equal(grade(float3(0.8, 0.2, 0.1), float3(0.0, 0.0, 0.0), float2(1.0, 0.0), float2(0.5, 0.5)).x, 0.2126 * 0.8 + 0.7152 * 0.2 + 0.0722 * 0.1, within = 0.0001)
+// A vignette leaves the middle and darkens the corner by its share.
+test nearly_equal(grade(float3(1.0, 1.0, 1.0), float3(0.0, 0.0, 0.5), float2(1.0, 1.0), float2(1.0, 1.0)).x, 0.5, within = 0.0001)
+// Dither stays within half a step.
+test abs(dither_at(float2(17.0, 301.0))) <= 0.5 / 255.0

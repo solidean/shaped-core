@@ -18,6 +18,8 @@ struct layout_constants_gpu
     tg::vec4f wipe = tg::vec4f(0.5f, 0, 0, 0);
     tg::vec4f separator_color = tg::vec4f(1, 1, 1, 1);
     tg::vec4f display = tg::vec4f(1, 0, 0, 0);
+    tg::vec4f grade_balance = tg::vec4f(0, 0, 0, 0);
+    tg::vec4f grade_tone = tg::vec4f(1, 1, 0, 0);
 };
 
 // A field moved in the shader is a compile error here rather than a wrong sample.
@@ -236,7 +238,14 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
             constants.wipe = tg::vec4f(d.post.split, d.post.horizontal ? 0.0f : 1.0f,
                                        w > 0 ? 0.5f * float(d.post.separator_width) / float(w) : 0.0f, 0.0f);
             constants.separator_color = d.post.separator_color;
-            constants.display = tg::vec4f(d.display.exposure_scale(), f32(d.display.curve), 0.0f, 0.0f);
+            constants.display = tg::vec4f(d.display.exposure_scale(), f32(d.display.curve),
+                                          d.display.grade.is_identity() ? 0.0f : 1.0f, d.display.dither ? 1.0f : 0.0f);
+            constants.grade_balance
+                = tg::vec4f(d.display.grade.temperature, d.display.grade.tint, d.display.grade.vignette, 0.0f);
+            // A scene layer's image is opaque, and its alpha holds its samples' second moment rather than coverage.
+            auto const opaque = d.primary.kind == draw_source_kind::trace;
+            constants.grade_tone
+                = tg::vec4f(d.display.grade.contrast, d.display.grade.saturation, opaque ? 1.0f : 0.0f, 0.0f);
 
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;

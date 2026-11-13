@@ -516,6 +516,8 @@ struct compactor
         }
         else if (auto* const length = copy.node.try_as<flat_buffer_length>())
             length->buffer = expr(length->buffer, depth + 1);
+        else if (auto* const written = copy.node.try_as<flat_written_word>())
+            written->word = expr(written->word, depth + 1);
         else if (auto* const array_element = copy.node.try_as<flat_element>())
         {
             array_element->object = expr(array_element->object, depth + 1);
@@ -649,9 +651,11 @@ flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry
     return cc::move(c.out.e);
 }
 
-flat_entry_point sgl::check::legalize(checked_module const& m,
-                                      flat_entry_point const& given,
-                                      legalize_options const& options)
+namespace
+{
+[[nodiscard]] flat_entry_point core_form_of(checked_module const& m,
+                                            flat_entry_point const& given,
+                                            legalize_options const& options)
 {
     // First, each `flat_by_target` becomes the one form this target writes, and the other is left unreachable.
     auto chosen = given;
@@ -692,4 +696,26 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
     auto const without_leaves = lower_exits(out, without_blocks, options);
     auto const without_void = erase_void(out, without_leaves);
     return compacted(m, out.e, simplify_lets(out, dissolve_onces(out, without_void)));
+}
+} // namespace
+
+flat_entry_point sgl::check::legalize(checked_module const& m,
+                                      flat_entry_point const& given,
+                                      legalize_options const& options)
+{
+    auto core = core_form_of(m, given, options);
+    auto prints = false;
+    if (options.expands_prints)
+        for (auto const& s : core.stmts)
+            prints = prints || s.node.is<flat_print>();
+    auto const shadows = options.expands_workgroup && impl::has_workgroup_shadow(core);
+    if (!prints && !shadows)
+        return core;
+    auto out = flat_builder::extend(m, cc::move(core));
+    auto body = ids_of(out.e, out.e.body);
+    if (prints)
+        body = impl::expand_prints(out, body, options);
+    if (shadows)
+        body = impl::expand_workgroup(out, body, options);
+    return compacted(m, out.e, body);
 }

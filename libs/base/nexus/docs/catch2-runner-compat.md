@@ -57,6 +57,7 @@ This compatibility layer rests on two properties of the declaration:
 | `--list-hw-counters` | Prints the hardware counters this machine can read, then exits 0 without running anything. Any nexus binary answers it, which is what `dev.py profiling counters` runs. Not a Catch2 flag |
 | `--match-files` | Reads the filters as globs over the tests' source files, skipping name matching. Not a Catch2 flag |
 | `--match-names` | Reads the filters as test names only, without the file fallback. Not a Catch2 flag |
+| `--shard <K/N>` | Runs only shard `K` of `N`, 0-based; see [Shards](#shards). A malformed value fails the run. Not Catch2's `--shard-count` / `--shard-index` |
 | `--test-args <line>` | A command line for the selected test, tokenized by the [nx::args rules](args.md#the-tokenizer). Not a Catch2 flag |
 | `--` | The same, for everything after it, already split. Not a Catch2 flag |
 | `-h` / `--help` | Prints the generated help and exits 0. The parse is what recognizes them, so one past a bare `--`, or inside `--test-args`, belongs to the test instead |
@@ -87,6 +88,20 @@ A file match selects exactly like a substring filter does — it is **never** an
 
 The fallback is decided once per binary, by `resolve_filter_mode`, before anything queries a filter — so the schedule and the `--list-tests-json` listing always agree.
 `--match-files` and `--match-names` pin the reading instead of letting it fall back.
+
+### Shards
+
+`--shard K/N` splits a run into `N` disjoint parts that together are the whole of it, for bisecting what only a large run shows.
+A test's shard is a 64-bit hash of its name modulo `N`, so a test stays in its shard on every run and every machine, and a filter or a seed never moves it.
+The hash is nexus's own FNV-1a with a finalizer rather than `cc`'s, so no library change moves one either.
+
+Most of a backend's tests are invocable children of one driver, which a shard of top-level names alone could only take or leave whole.
+So a driver some alias names runs in every shard and dispatches only the children of this one, each placed by `driver / group / child`.
+Only its direct children are sharded, so a child's own dispatches go with it.
+A driver no alias names cannot be known before it runs, and is placed whole, like any other test.
+
+Shards apply after filters and buckets: `--shard 1/4 async` is a quarter of the `async` tests.
+`test_schedule_config::in_shard` is the one predicate, and [test-shard-test.cc](../tests/test-shard-test.cc) pins that shards are disjoint, covering and stable.
 
 ### Buckets and disabled tests
 

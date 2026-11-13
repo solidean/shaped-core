@@ -8,6 +8,18 @@
 
 namespace sg::backend::webgpu
 {
+namespace
+{
+/// The storage a surface's texture of this frame is handed out in; the canvas hands out a new texture every frame.
+[[nodiscard]] std::shared_ptr<webgpu_texture_storage> surface_storage(webgpu_context& ctx, wgpu_texture texture)
+{
+    auto storage = std::make_shared<webgpu_texture_storage>();
+    storage->texture = cc::move(texture);
+    storage->serial = ctx.next_resource_serial();
+    return storage;
+}
+} // namespace
+
 webgpu_swapchain::webgpu_swapchain(webgpu_context& ctx, sg::swapchain_description const& desc)
   : sg::swapchain(desc), _ctx(ctx)
 {
@@ -128,7 +140,7 @@ sg::render_target_view webgpu_swapchain::acquire_backbuffer()
                                                .height = _configured_size[1],
                                                .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src,
                                            },
-                                           wgpu_texture(surface_texture.texture), false);
+                                           surface_storage(_ctx, wgpu_texture(surface_texture.texture)), false);
     return sg::render_target_view(_surface_texture, sg::texture_view_dimension::tex_2d, _desc.format, whole);
 }
 

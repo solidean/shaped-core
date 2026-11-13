@@ -20,6 +20,11 @@ What is installed: the headers, the host architecture's D3D12Core.dll and d3d12S
 Pinning lives in dependency.yml next to this script: `version` names the package, and `pin_hash` (its SHA-256) is the
 authority.
 Re-running is idempotent; --force re-downloads anyway.
+
+`--preview` installs extern/agility-preview's pin into extern/agility-preview/.install instead: the pre-release runtime
+with clustered geometry and partitioned TLAS, under narrower terms, read only by a build configured with
+SC_AGILITY_PREVIEW.
+Its dependency.yml says why it is a development dependency only.
 """
 
 import argparse
@@ -32,25 +37,33 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-DEST = Path(__file__).resolve().parent
-INSTALL = DEST / ".install"
-PIN_FILE = INSTALL / "pin.txt"
+HERE = Path(__file__).resolve().parent
 
-sys.path.insert(0, str(DEST.parent))
+sys.path.insert(0, str(HERE.parent))
 import deps_manifest  # noqa: E402
 
 # platform.machine() -> the package's per-arch folder.
 ARCH_MAP = {"amd64": "x64", "x86_64": "x64", "arm64": "arm64", "aarch64": "arm64"}
+
+# Runtime DLLs a package may carry beyond the two every one has: the preview's state objects compile through this one.
+OPTIONAL_DLLS = ("D3D12StateObjectCompiler.dll",)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Download the pinned D3D12 Agility SDK.")
     ap.add_argument("--accept-license", action="store_true",
                     help="accept Microsoft's DirectX license terms of the pinned package")
+    ap.add_argument("--preview", action="store_true",
+                    help="install extern/agility-preview's pre-release pin instead of the retail one")
     ap.add_argument("--force", action="store_true", help="re-download even if the install is current")
     args = ap.parse_args()
 
-    up = deps_manifest.one(DEST)
+    dest = HERE.parent / "agility-preview" if args.preview else HERE
+    install = dest / ".install"
+    pin_file = install / "pin.txt"
+    command = "uv run extern/agility/fetch-agility.py" + (" --preview" if args.preview else "")
+
+    up = deps_manifest.one(dest)
     if not up.is_available:
         print("agility: the D3D12 runtime is Windows-only — nothing to install on this host")
         return 0
@@ -58,11 +71,11 @@ def main() -> int:
     if not args.accept_license:
         print(f"The {up.name} {up.version} is licensed under Microsoft's DirectX terms, which nothing accepts for you.\n"
               f"Read them in the package ({up.homepage}, its LICENSE.txt), then run:\n"
-              f"    uv run extern/agility/fetch-agility.py --accept-license")
+              f"    {command} --accept-license")
         return 1
 
-    if not args.force and PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == up.pin_hash:
-        print(f"agility {up.version} already installed at {INSTALL.as_posix()} — nothing to do")
+    if not args.force and pin_file.is_file() and pin_file.read_text(encoding="utf-8").strip() == up.pin_hash:
+        print(f"agility {up.version} already installed at {install.as_posix()} — nothing to do")
         return 0
 
     arch = ARCH_MAP.get(platform.machine().lower())
@@ -83,6 +96,8 @@ def main() -> int:
         names = zf.namelist()
         # The runtime under build/native/bin/<arch>/, the headers under build/native/include/, the licenses at the root.
         plan = [(f"build/native/bin/{arch}/{dll}", Path("bin") / dll) for dll in ("D3D12Core.dll", "d3d12SDKLayers.dll")]
+        plan += [(f"build/native/bin/{arch}/{dll}", Path("bin") / dll) for dll in OPTIONAL_DLLS
+                 if f"build/native/bin/{arch}/{dll}" in names]
         plan += [("LICENSE.txt", Path("LICENSE.txt")), ("LICENSE-CODE.txt", Path("LICENSE-CODE.txt"))]
         prefix = "build/native/include/"
         plan += [(n, Path("include") / n[len(prefix):]) for n in names if n.startswith(prefix) and not n.endswith("/")]
@@ -91,21 +106,24 @@ def main() -> int:
             sys.exit(f"{up.asset} is missing {', '.join(missing)} — its layout changed; the installed copy is untouched")
 
         # Staged beside the live install and swapped in only once complete, so a failed extract never leaves it half-gone.
-        staging = INSTALL.with_name(".install.staging")
+        staging = install.with_name(".install.staging")
         if staging.exists():
             shutil.rmtree(staging)
-        for member, dest in plan:
-            (staging / dest).parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(member) as src, open(staging / dest, "wb") as out:
+        for member, target in plan:
+            (staging / target).parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member) as src, open(staging / target, "wb") as out:
                 shutil.copyfileobj(src, out)
 
-    if INSTALL.exists():
-        shutil.rmtree(INSTALL)
-    staging.rename(INSTALL)
-    PIN_FILE.write_text(up.pin_hash + "\n", encoding="utf-8")
+    if install.exists():
+        shutil.rmtree(install)
+    staging.rename(install)
+    pin_file.write_text(up.pin_hash + "\n", encoding="utf-8")
 
-    print(f"\ninstalled {up.name} {up.version} ({arch}) -> {INSTALL.as_posix()}")
-    print("  reconfigure (any dev.py build does) so the dx12 backend creates its devices through it")
+    print(f"\ninstalled {up.name} {up.version} ({arch}) -> {install.as_posix()}")
+    if args.preview:
+        print("  only a build configured with SC_AGILITY_PREVIEW reads it: `uv run dev.py build --agility-preview`")
+    else:
+        print("  reconfigure (any dev.py build does) so the dx12 backend creates its devices through it")
     return 0
 
 

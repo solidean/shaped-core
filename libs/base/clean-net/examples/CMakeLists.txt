@@ -9,5 +9,4 @@ sc_add_single_file_examples(clean-net
     dev-server.cc
     datagrams.cc
     LINK clean-net
-    PCH CC_STD NEXUS
 )

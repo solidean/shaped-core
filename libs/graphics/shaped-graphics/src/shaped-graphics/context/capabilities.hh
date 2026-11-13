@@ -13,6 +13,27 @@
 /// So a `feature` earns its place only when a whole code path is present or absent, never to describe a difference of
 /// degree.
 
+/// When a stage is drawn as its polyfill rather than natively.
+enum class sg::polyfill_use : sg::u8
+{
+    never,
+    /// Where the device lacks the stage.
+    where_missing,
+    /// On every device, the stage's own included: what compares the two on one device.
+    always,
+};
+
+/// How a polyfilled geometry stage draws (SGL's CHK-525).
+enum class sg::geometry_polyfill_route : sg::u8
+{
+    /// A compute pass ahead of the draw writes each primitive's slots, and the draw reads them back; on every backend that
+    /// draws the polyfill.
+    compute,
+    /// One mesh draw: the vertex and geometry stages as a mesh stage, a workgroup's lanes writing their slots of its
+    /// output, with no buffer of the draw's own and no pass split; where the device has mesh shaders.
+    mesh,
+};
+
 /// A capability a context either has or does not.
 /// Absent means the code path does not exist on this backend or device — not that it is slow.
 enum class sg::feature
@@ -43,7 +64,7 @@ enum class sg::feature
 
     /// The mesh stage exists, and the task stage that launches it, so a raster pipeline may draw from workgroups rather than vertices.
     /// D3D12 grants it with mesh shader tier 1, Vulkan with VK_EXT_mesh_shader's `meshShader` and `taskShader`.
-    /// Metal's object and mesh stages are not wired up yet, and WebGPU has neither.
+    /// Metal grants it with its object and mesh stages, and WebGPU has neither.
     mesh_shader,
 
     /// A binding may be an array (`count > 1`), and so `staging_binding_group` and `bindless_array` work.
@@ -184,9 +205,14 @@ enum class sg::feature
     /// SGL's `@view_index` reads.
     /// What a stereo frame wants on a tiled GPU, where the driver bins both views together: layered rendering through
     /// `vertex_layer_output` rasterises them separately.
-    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
-    /// yet, and WebGPU has no such thing.
+    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`, Metal with vertex amplification of two views,
+    /// and WebGPU has no such thing.
     view_instancing,
+
+    /// Not a capability: this device's driver may write nothing for a draw of several views whose pixel stage ignores the view.
+    /// SGL's `keep_view` reads it where this is set, and is free everywhere else.
+    /// See docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
+    pixel_view_read_workaround,
 
     /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.
     /// D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none.
@@ -210,7 +236,7 @@ enum class sg::feature
     /// A binding of `count == 0`, an array whose length each binding group decides by the views it is given.
     /// It is the last binding of its layout, and of its kind's table, which is where both APIs allow one.
     /// D3D12 grants it at resource binding tier 3, Vulkan with `descriptorBindingVariableDescriptorCount`.
-    /// Metal would reach it through an argument buffer, which is not wired up yet, and WebGPU has no binding arrays.
+    /// Metal reaches it through a table each group sizes behind its argument buffer, and WebGPU has no binding arrays.
     unbounded_binding_arrays,
 
     /// A shader may update a 64-bit integer of workgroup memory atomically (SGL's `atomic[long]` in a `@workgroup` binding).
@@ -225,8 +251,18 @@ enum class sg::feature
     /// over the frame, and a trace places them at its ray's time.
     /// **Emulated wherever it is offered**: webgpu through its polyfill, dx12 and vulkan through a package's SOFTWARE_TRACE.
     /// A native trace sees none of it, since DXR has no motion and vulkan's VK_NV_ray_tracing_motion_blur reaches no ray query.
-    /// metal does not offer it yet.
+    /// metal offers it natively to a pipeline's trace, and through the software walk to an inline one, whose query has no motion.
     ray_tracing_motion_blur,
+
+    /// A tlas may be a `partitioned_tlas`: created with fixed capacities, and updated in place by `cmd.raytracing.update`.
+    /// Vulkan grants it with `VK_NV_partitioned_acceleration_structure`, and traces it by its address.
+    /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
+    partitioned_tlas,
+
+    /// A blas may be built from clusters: `cmd.raytracing.build_clusters`, then `build_cluster_blas` over ranges of them.
+    /// Vulkan grants it with `VK_NV_cluster_acceleration_structure`, and a shader reads a hit's cluster as `cluster_id`.
+    /// D3D12 grants it only on the preview Agility SDK, with `ClustersAndPTLASSupported`; metal and WebGPU have none.
+    clustered_geometry,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -271,6 +307,7 @@ inline constexpr feature k_all_features[] = {
     feature::float_specials,
     feature::float_denormals,
     feature::view_instancing,
+    feature::pixel_view_read_workaround,
     feature::vertex_pipeline_stores,
     feature::shader_int64,
     feature::shader_f64,
@@ -279,8 +316,10 @@ inline constexpr feature k_all_features[] = {
     feature::shader_shared_int64_atomics,
     feature::shader_int64_min_max_atomics,
     feature::ray_tracing_motion_blur,
+    feature::partitioned_tlas,
+    feature::clustered_geometry,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::ray_tracing_motion_blur) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::clustered_geometry) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -354,6 +393,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_denormals";
     case feature::view_instancing:
         return "view_instancing";
+    case feature::pixel_view_read_workaround:
+        return "pixel_view_read_workaround";
     case feature::vertex_pipeline_stores:
         return "vertex_pipeline_stores";
     case feature::shader_int64:
@@ -370,6 +411,10 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "shader_int64_min_max_atomics";
     case feature::ray_tracing_motion_blur:
         return "ray_tracing_motion_blur";
+    case feature::partitioned_tlas:
+        return "partitioned_tlas";
+    case feature::clustered_geometry:
+        return "clustered_geometry";
     }
     return "";
 }

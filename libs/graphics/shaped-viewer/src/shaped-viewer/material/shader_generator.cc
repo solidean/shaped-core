@@ -138,6 +138,31 @@ enum class load_shape
     CC_UNREACHABLE("the layout has a slot for every attribute it was built from");
 }
 
+/// Which of the layout's texture slots attribute `index`'s is, counted in slot order: its texture and sampler in `sv_textures`.
+[[nodiscard]] i32 texture_ordinal(material_parameter_layout const& layout, i32 index)
+{
+    auto ordinal = 0;
+    for (auto const& s : layout.slots)
+    {
+        if (s.kind != material_slot_kind::texture_index)
+            continue;
+        if (s.attribute_index == index)
+            return ordinal;
+        ++ordinal;
+    }
+    CC_UNREACHABLE("the layout has a texture slot for every sampled attribute");
+}
+
+/// How many texture slots the layout holds, which is how many textures `sv_textures` binds.
+[[nodiscard]] i32 texture_count(material_parameter_layout const& layout)
+{
+    auto count = 0;
+    for (auto const& s : layout.slots)
+        if (s.kind == material_slot_kind::texture_index)
+            ++count;
+    return count;
+}
+
 /// The `xyzw` letter one selector names, or empty for a constant one: SGL's swizzle letters are the field names.
 [[nodiscard]] cc::string_view channel_letter(texture_channel c)
 {
@@ -247,15 +272,64 @@ enum class load_shape
     }
 }
 
+/// What differs between the stages a material's body is spelled for: how a texture picks its level, whether an index
+/// is marked, and whether its buffers are bindless slots or the bound mode's pools.
+///
+/// Everything else — the loads, the fragment, the layout — is the same text for a traced hit and a rasterized pixel.
+struct body_spelling
+{
+    /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
+    /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
+    bool explicit_level = true;
+    /// What an index into a bindless table is written behind: `nonuniform ` at a hit, where the lanes of a wave hit
+    /// different instances, and nothing in a pixel, whose instance is `@per_draw` (`raster.varyings`).
+    cc::string_view mark = "nonuniform ";
+    /// Whether the body reads the bound raster mode's pools, `raster_bound.bound`, in place of `tracer.bindless`.
+    /// A record's offsets are the same either way; its slots are simply not read.
+    bool bound = false;
+    /// With `bound`: whether the material samples textures, which its own group `sv_textures` holds beside the pools.
+    bool textured = false;
+
+    /// The groups the body's functions list.
+    [[nodiscard]] cc::string_view group() const
+    {
+        if (!bound)
+            return "tracer.bindless";
+        return textured ? "raster_bound.bound, sv_textures" : "raster_bound.bound";
+    }
+
+    /// The buffer holding the parameter block whose slot is the local `block`.
+    [[nodiscard]] cc::string params() const
+    {
+        return bound ? cc::string("raster_bound.bound.params") : cc::format("tracer.bindless.buffers[{}block]", mark);
+    }
+
+    /// The buffer holding the attribute the descriptor named `desc` names, whose slot is the local `<desc>_buffer`.
+    [[nodiscard]] cc::string attributes(cc::string_view desc) const
+    {
+        return bound ? cc::string("raster_bound.bound.attributes")
+                     : cc::format("tracer.bindless.buffers[{}{}_buffer]", mark, desc);
+    }
+};
+
+/// The spelling a hit group and a wavefront shade kernel read their attributes in.
+constexpr auto traced_spelling = body_spelling{};
+
+/// The spelling a raster pixel stage reads its attributes in.
+constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
+
+/// The spelling the bound raster mode's pixel stage reads its attributes in: the pools of `raster_bound.bound`.
+constexpr auto bound_spelling = body_spelling{.explicit_level = false, .mark = "", .bound = true};
+
 /// The load of mesh attribute `binding` through the descriptor named `desc`, as a float expression of `components` lanes.
-/// It reads the buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
+/// It reads a bindless buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
 [[nodiscard]] cc::string mesh_load(mesh_attribute_binding const& binding,
                                    cc::string_view desc,
                                    int components,
                                    bool rotates,
-                                   cc::string_view mark)
+                                   body_spelling const& spelling)
 {
-    auto const buffer = cc::format("tracer.bindless.buffers[{}{}_buffer]", mark, desc);
+    auto const buffer = spelling.attributes(desc);
     if (shape_of(binding.frequency) == load_shape::flat)
         return cc::format("material.load_element_{}({}, {}, {})", load_suffix(components), buffer, desc,
                           element_expression(binding.frequency));
@@ -265,77 +339,27 @@ enum class load_shape
                       element_expression(binding.frequency));
 }
 
-/// What differs between the stages a material's body is spelled for: how a texture picks its level, and whether an index is marked.
-///
-/// Everything else — the loads, the fragment, the bindless tables and the sampler palette among them — is the same text for a traced hit and a rasterized pixel.
-struct body_spelling
-{
-    /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
-    /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
-    bool explicit_level = true;
-    /// What an index into a bindless table is written behind: `nonuniform ` at a hit, where the lanes of a wave hit
-    /// different instances, and nothing in a pixel, whose instance is `@per_draw` (`raster.varyings`).
-    cc::string_view mark = "nonuniform ";
-};
-
-/// The spelling a hit group and a wavefront shade kernel read their attributes in.
-constexpr auto traced_spelling = body_spelling{};
-
-/// The spelling a raster pixel stage reads its attributes in.
-constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
-
-/// The statements that sample sampled attribute `index` at a `uv` already in scope, through its swizzle and transform, and return it.
-/// `block` must be in scope too.
-[[nodiscard]] cc::string texture_sample_tail(resolved_material const& r,
-                                             material_parameter_layout const& layout,
-                                             i32 index,
-                                             body_spelling const& spelling)
-{
-    auto const& a = r.attributes[index];
-    auto const components = a.format.component_count();
-    auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
-
-    auto out = cc::string();
-    cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
-                      spelling.mark, tex.offset);
-    // An explicit level where there are no derivatives, at a hit.
-    // The texel is named because a constant selector reads it twice.
-    cc::format_append(out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
-                      spelling.mark, sgl_palette_sampler(a.sample->sampler),
-                      spelling.explicit_level ? ", level = 0.0" : "");
-
-    auto value = texel_expression(a.sample->swizzle, a.format);
-
-    // The scale and the bias are parameters rather than literals, so a material changing only its normal scale re-uses this source.
-    if (!a.sample->transform.is_identity(components))
-    {
-        auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
-        auto const lanes = component_swizzle(components);
-        cc::format_append(out,
-                          "    let scale = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
-                          "ctx.param_offset + {1}u))\n"
-                          "    let bias = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
-                          "ctx.param_offset + {2}u))\n",
-                          spelling.mark, tf.offset, tf.offset + 16);
-        value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
-    }
-    cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));
-    return out;
-}
-
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
+/// With `at_uv`, a texture's `fun sv_<name>_at(ctx, at)` instead, read at the uv `at` rather than the hit's own.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
                                             material_parameter_layout const& layout,
                                             i32 index,
-                                            body_spelling const& spelling)
+                                            body_spelling const& spelling,
+                                            bool at_uv = false)
 {
     auto const& a = r.attributes[index];
     auto const components = a.format.component_count();
+    auto const params = spelling.params();
 
     auto out = cc::string();
-    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
-                      sgl_type_of(a.format));
-    out += "    let block = ctx.param_buffer as int\n";
+    if (at_uv)
+        cc::format_append(out, "fun sv_{}_at(ctx: material.shading_context, at: float2){{{}}} -> {}:\n", a.name,
+                          spelling.group(), sgl_type_of(a.format));
+    else
+        cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}}} -> {}:\n", a.name,
+                          spelling.group(), sgl_type_of(a.format));
+    if (!spelling.bound)
+        out += "    let block = ctx.param_buffer as int\n";
 
     switch (a.frequency)
     {
@@ -346,8 +370,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         // A constant is read out of the parameter block whatever it is worth, which is why gold and copper share this source.
         auto const& s = slot_for(layout, index, material_slot_kind::constant);
         auto const load = components == 1 ? cc::string("load") : cc::format("load{}", components);
-        auto const raw
-            = cc::format("tracer.bindless.buffers[{}block].{}(ctx.param_offset + {}u)", spelling.mark, load, s.offset);
+        auto const raw = cc::format("{}.{}(ctx.param_offset + {}u)", params, load, s.offset);
         auto value = raw;
         if (a.format.scalar == scalar_type::f32)
             value = cc::format("reinterpret_as_float({})", raw);
@@ -360,14 +383,13 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     case material_frequency::mesh_attribute:
     {
         auto const& s = slot_for(layout, index, material_slot_kind::attribute_descriptor);
-        cc::format_append(out,
-                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
-                          "ctx.param_offset + {}u)\n",
-                          spelling.mark, s.offset);
-        out += "    let desc_buffer = desc.buffer as int\n";
+        cc::format_append(out, "    let desc = material.load_attribute_desc({}, ctx.param_offset + {}u)\n", params,
+                          s.offset);
+        if (!spelling.bound)
+            out += "    let desc_buffer = desc.buffer as int\n";
         auto const rotates = a.interpolation == attribute_interpolation::rotation;
         cc::format_append(out, "    return {}\n",
-                          as_format(mesh_load(*a.attribute, "desc", components, rotates, spelling.mark), a.format));
+                          as_format(mesh_load(*a.attribute, "desc", components, rotates, spelling), a.format));
         break;
     }
 
@@ -375,42 +397,156 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     case material_frequency::mesh_texture_binding:
     {
         auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
-        cc::format_append(out,
-                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
-                          "ctx.param_offset + {}u)\n",
-                          spelling.mark, uv_slot.offset);
-        out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
+        cc::format_append(out, "    let uv_desc = material.load_attribute_desc({}, ctx.param_offset + {}u)\n", params,
+                          uv_slot.offset);
+        if (!spelling.bound)
+            out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
         // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
-        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
-        out += texture_sample_tail(r, layout, index, spelling);
+        // Every texture reads where a relief's parallax found the ray meets it, the hit's own uv elsewhere.
+        if (at_uv)
+            out += "    let uv = at\n";
+        else
+            cc::format_append(out, "    let uv = {} + ctx.uv_offset\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling));
+        if (spelling.bound)
+        {
+            // The material's own group holds the texture and its sampler, so the block's texture slot is not read.
+            auto const k = texture_ordinal(layout, index);
+            cc::format_append(out, "    let texel = sv_textures.t{0}.sample(uv, sv_textures.s{0})\n", k);
+        }
+        else
+        {
+            auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
+            cc::format_append(out, "    let image = {}.load(ctx.param_offset + {}u) as int\n", params, tex.offset);
+            // At a hit, which has no derivatives, the gradients are the ray cone's: its footprint's two axes through this uv's edges.
+            // A flat uv has one value per triangle and so no footprint, which samples the base level.
+            // Emission and opacity sample the base level wherever they are read: next-event estimation and an any-hit read
+            // them with no cone, and a light or a cutout that a bounce ray sees blurred would weigh against one it does not.
+            // The texel is named because a constant selector reads it twice.
+            auto const base_level_only
+                = r.type != nullptr
+               && (a.name == r.type->emission_color_attribute || a.name == r.type->emission_scale_attribute
+                   || a.name == r.type->opacity_attribute);
+            auto level = cc::string();
+            if (spelling.explicit_level && base_level_only)
+                level = ", level = 0.0";
+            else if (spelling.explicit_level)
+            {
+                auto const edges
+                    = shape_of(a.uv->frequency) == load_shape::flat
+                        ? cc::string("float4(0.0, 0.0, 0.0, 0.0)")
+                        : cc::format("material.uv_edges(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, {})",
+                                     spelling.mark, element_expression(a.uv->frequency));
+                cc::format_append(out, "    let grads = material.texture_gradients(ctx, {})\n", edges);
+                level = ", grad_x = grads.xy, grad_y = grads.zw";
+            }
+            cc::format_append(out,
+                              "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
+                              spelling.mark, sgl_palette_sampler(a.sample->sampler), level);
+        }
+
+        auto value = texel_expression(a.sample->swizzle, a.format);
+
+        // The scale and the bias are parameters rather than literals, so a material changing only its normal scale re-uses this source.
+        if (!a.sample->transform.is_identity(components))
+        {
+            auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
+            auto const lanes = component_swizzle(components);
+            cc::format_append(out,
+                              "    let scale = reinterpret_as_float({0}.load4(ctx.param_offset + {1}u))\n"
+                              "    let bias = reinterpret_as_float({0}.load4(ctx.param_offset + {2}u))\n",
+                              params, tf.offset, tf.offset + 16);
+            value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
+        }
+        cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));
         break;
     }
     }
     return out;
 }
 
-/// `fun sv_sample_<name>(ctx, uv)`: attribute `index` read at a uv the fragment chose, rather than at the mesh's own.
-///
-/// A sampled attribute samples its texture there, through the same swizzle and transform; any other attribute has no uv to move and returns its value.
-/// So a fragment written against it compiles whichever frequency the attribute resolved at.
-[[nodiscard]] cc::string sample_function(resolved_material const& r,
-                                         material_parameter_layout const& layout,
-                                         i32 index,
-                                         body_spelling const& spelling)
+/// `fun sv_parallax(ctx, g)`: `ctx` with the uv offset where the hit's ray meets the type's relief, or `ctx` itself.
+/// A relief marches only where the type declares a height and it is bound to a texture, read through a uv per corner.
+/// The march steps the ray down from the face, which stands at the top, to the bottom, and refines the crossing linearly
+/// (Tatarchuk, "Practical Parallax Occlusion Mapping", 2006); the height is read at the hit's ray-cone level.
+[[nodiscard]] cc::string parallax_function(resolved_material const& r,
+                                           material_parameter_layout const& layout,
+                                           body_spelling const& spelling)
 {
-    auto const& a = r.attributes[index];
-
-    auto out = cc::string();
-    cc::format_append(out, "fun sv_sample_{}(ctx: material.shading_context, uv: float2){{tracer.bindless}} -> {}:\n",
-                      a.name, sgl_type_of(a.format));
-    if (a.frequency != material_frequency::material_texture && a.frequency != material_frequency::mesh_texture_binding)
+    auto out = cc::string("fun sv_parallax(ctx: material.shading_context, g: tracer.hit_geometry){tracer.bindless} -> "
+                          "material.shading_context:\n");
+    auto height = i32(-1);
+    if (r.type != nullptr && !r.type->height_attribute.empty())
+        for (auto i = 0; i < r.attributes.size(); ++i)
+            if (r.attributes[i].name == r.type->height_attribute)
+                height = i32(i);
+    auto const textured = height >= 0
+                       && (r.attributes[height].frequency == material_frequency::material_texture
+                           || r.attributes[height].frequency == material_frequency::mesh_texture_binding)
+                       && shape_of(r.attributes[height].uv->frequency) != load_shape::flat;
+    if (!textured)
     {
-        cc::format_append(out, "    return sv_attribute_{}(ctx)\n", a.name);
+        out += "    return ctx\n";
         return out;
     }
-    out += "    let block = ctx.param_buffer as int\n";
-    out += texture_sample_tail(r, layout, index, spelling);
+
+    auto const& a = r.attributes[height];
+    auto const& uv_slot = slot_for(layout, height, material_slot_kind::attribute_descriptor);
+    cc::format_append(
+        out,
+        "    let top = sv_attribute_{}(ctx)\n"
+        "    let bottom = sv_attribute_{}(ctx)\n"
+        "    if top <= bottom => return ctx\n"
+        "    let block = ctx.param_buffer as int\n"
+        "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], ctx.param_offset + {}u)\n"
+        "    let uv_desc_buffer = uv_desc.buffer as int\n"
+        "    let corners = {}\n"
+        "    let u0 = material.load_element_f2(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, corners.x)\n"
+        "    let u1 = material.load_element_f2(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, corners.y)\n"
+        "    let u2 = material.load_element_f2(tracer.bindless.buffers[{}uv_desc_buffer], uv_desc, corners.z)\n"
+        "    let velocity = material.parallax_velocity(u1 - u0, u2 - u0, g.e1, g.e2, g.dir)\n"
+        "    if velocity.z == 0.0 => return ctx\n"
+        "    let uv = u0 * ctx.barycentrics.x + u1 * ctx.barycentrics.y + u2 * ctx.barycentrics.z\n"
+        "    let depth_range = top - bottom\n"
+        "    let mut prev_depth = 0.0\n"
+        "    let mut prev_gap = top - sv_{}_at(ctx, uv)\n"
+        "    if prev_gap <= 0.0 => return ctx\n"
+        "    let mut hit = depth_range\n"
+        "    for i in 1 ..= 32:\n"
+        "        let depth = depth_range * (i as float) / 32.0\n"
+        "        let gap = top - sv_{}_at(ctx, uv + velocity.xy * depth) - depth\n"
+        "        if gap <= 0.0:\n"
+        "            hit = prev_depth + (depth - prev_depth) * prev_gap / (prev_gap - gap)\n"
+        "            break\n"
+        "        prev_depth = depth\n"
+        "        prev_gap = gap\n"
+        "    let mut moved = ctx\n"
+        "    moved.uv_offset = velocity.xy * hit\n"
+        // the ray went on past the face to the relief, by the depth over the cosine, and its cone widened with it
+        "    let facing = max(abs(dot(normalize(cross(g.e1, g.e2)), g.dir)), 0.05)\n"
+        "    let grow = (g.t + hit / facing) / max(g.t, 1e-9)\n"
+        "    moved.footprint_a = ctx.footprint_a * grow\n"
+        "    moved.footprint_b = ctx.footprint_b * grow\n"
+        "    return moved\n",
+        r.type->height_top_attribute, r.type->height_bottom_attribute, spelling.mark, uv_slot.offset,
+        element_expression(a.uv->frequency), spelling.mark, spelling.mark, spelling.mark, a.name, a.name);
     return out;
+}
+
+/// `fun sv_<name>_at(ctx, at)`: attribute `index` read at a uv the fragment or a relief chose, rather than the mesh's own.
+///
+/// A texture samples there, through the same swizzle and transform; any other attribute has no uv to move and returns its value.
+/// So a fragment written against it compiles whichever frequency the attribute resolved at.
+[[nodiscard]] cc::string at_uv_function(resolved_material const& r,
+                                        material_parameter_layout const& layout,
+                                        i32 index,
+                                        body_spelling const& spelling)
+{
+    auto const& a = r.attributes[index];
+    if (a.frequency == material_frequency::material_texture || a.frequency == material_frequency::mesh_texture_binding)
+        return attribute_function(r, layout, index, spelling, true);
+    return cc::format("fun sv_{0}_at(ctx: material.shading_context, at: float2){{{1}}} -> {2}:\n"
+                      "    return sv_attribute_{0}(ctx)\n",
+                      a.name, spelling.group(), sgl_type_of(a.format));
 }
 
 /// Module `material`'s `frequency_*` for a mesh attribute's frequency.
@@ -623,11 +759,15 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     {
         src += attribute_function(r, layout, i32(i), spelling);
         src += "\n";
-        src += sample_function(r, layout, i32(i), spelling);
+        src += at_uv_function(r, layout, i32(i), spelling);
         src += "\n";
     }
 
-    src += "fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:\n";
+    src += parallax_function(r, layout, spelling);
+    src += "\n";
+
+    cc::format_append(src, "fun sv_evaluate_material(ctx: material.shading_context){{{}}} -> openpbr.surface:\n",
+                      spelling.group());
     for (auto const& a : r.attributes)
         cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
     src += "    let mut surface = openpbr.default_surface()\n";
@@ -704,7 +844,8 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     cc::format_append(src,
                       "@closest_hit fun sv_closest_hit(h: triangle_hit, p: mut tracer.surface_payload){{tracer.traced, "
                       "tracer.bindless, slug.tables}}:\n"
-                      "    let ctx = tracer.triangle_context(h)\n"
+                      "    let coned = tracer.cone_context(h, p)\n"
+                      "    let ctx = sv_parallax(coned, tracer.hit_geometry_of(h, coned))\n"
                       "    tracer.shade_triangle(h, mut p, ctx, sv_evaluate_material(ctx), {})\n\n",
                       supplied_frame);
 
@@ -753,7 +894,8 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
                           supplied_frame);
     else
         cc::format_append(src,
-                          "    let ctx = tracer.stored_triangle_context(slot)\n"
+                          "    let coned = tracer.stored_triangle_context(slot)\n"
+                          "    let ctx = sv_parallax(coned, tracer.stored_hit_geometry(slot, coned))\n"
                           "    tracer.shade_stored_triangle(slot, ctx, sv_evaluate_material(ctx), {})\n",
                           supplied_frame);
     return src;
@@ -793,6 +935,72 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
                       occlusion);
     opening("sv_gbuffer", "raster.thin_targets");
     cc::format_append(src, "    return raster.thin(p, ctx, sv_evaluate_material(ctx), {})\n", supplied_frame);
+    return src;
+}
+
+/// The bound raster mode's pixel stage of one permutation, over `raster_bound_pass.sgl`'s vertex stage: `sv_raster_bound`.
+///
+/// The material body is spelled `bound`, so it reads the pools of `raster_bound.bound` and lists no bindless table.
+/// An indexed draw's pixel learns its triangle from `@primitive_id`, as the raster path's does.
+/// A `pulled` one, `sv_raster_bound_pulled`, reads the flat triangle its vertex stage wrote, and so needs no `primitive_index`.
+/// A quadric permutation's pixel solves its primitive along its camera ray over the box `bound_quadric_vs` drew, as the
+/// raster path's does; it reads no triangle, so `pulled` changes only its entry's name.
+/// No cutout yet: the opacity record is read through `tracer.instance_opacity`, which reads a bindless table.
+[[nodiscard]] cc::string generate_bound_raster_pixel(resolved_material const& r,
+                                                     material_parameter_layout const& layout,
+                                                     geometry_kind kind,
+                                                     bool pulled)
+{
+    cc::string_view const uses[] = {"raster", "raster_bound"};
+    auto const triangles = kind == geometry_kind::triangles;
+    auto src = source_header(r, kind, triangles && !pulled ? "require primitive_index\n" : "", uses);
+
+    // The material's textures and their samplers, a group of its own beside the pools: group 1 of the bound mode.
+    auto const textures = texture_count(layout);
+    auto spelling = bound_spelling;
+    spelling.textured = textures > 0;
+    if (spelling.textured)
+    {
+        src += "/// The material's textures, in the order of its texture slots, each with its own sampler.\nbinding "
+               "sv_textures:\n";
+        for (auto k = 0; k < textures; ++k)
+            cc::format_append(src, "    t{0}: texture_2d[float4]\n    s{0}: sampler\n", k);
+        src += "\n";
+    }
+
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, spelling);
+
+    // The decal atlas is group 1 of every bound pixel stage, and the material's textures group 2 where it has any.
+    auto const groups = spelling.textured ? cc::string_view("raster_bound.bound, slug.tables, sv_textures")
+                                          : cc::string_view("raster_bound.bound, slug.tables");
+    auto const occlusion = r.type->occlusion_attribute.empty()
+                             ? cc::string("1.0")
+                             : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);
+    if (!triangles)
+    {
+        cc::format_append(src,
+                          "@pixel fun {}(p: raster_bound.quadric_varyings){{{}}} -> raster_bound.quadric_targets:\n"
+                          "    let hit = raster_bound.quadric_pixel_of(p)\n"
+                          "    if not hit.valid => discard\n"
+                          "    let ctx = raster_bound.quadric_context_of(p)\n"
+                          "    return raster_bound.shade_quadric(p, hit, sv_evaluate_material(ctx), {}, {})\n",
+                          pulled ? "sv_raster_bound_pulled" : "sv_raster_bound", groups, supplied_frame, occlusion);
+        return src;
+    }
+    if (pulled)
+        cc::format_append(src,
+                          "@pixel fun sv_raster_bound_pulled(p: raster_bound.varyings){{{}}} -> raster_bound.targets:\n"
+                          "    let ctx = raster_bound.pixel_context(p, p.primitive)\n",
+                          groups);
+    else
+        cc::format_append(src,
+                          "@pixel fun sv_raster_bound(p: raster_bound.varyings, @primitive_id primitive: int){{{}}} "
+                          "-> raster_bound.targets:\n"
+                          "    let ctx = raster_bound.pixel_context(p, primitive as uint)\n",
+                          groups);
+    cc::format_append(src, "    return raster_bound.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n", supplied_frame,
+                      occlusion);
     return src;
 }
 
@@ -980,13 +1188,22 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     auto const triangles = opts.kind == geometry_kind::triangles;
     auto raster_source = triangles ? generate_raster_pixel(r, layout, opacity) : generate_quadric_raster_pixel(r, layout);
     auto hybrid_source = triangles ? generate_hybrid_pixel(r, layout, opacity) : generate_quadric_hybrid_pixel(r, layout);
+    auto bound_source = generate_bound_raster_pixel(r, layout, opts.kind, false);
+    auto bound_pulled_source = generate_bound_raster_pixel(r, layout, opts.kind, true);
+    auto bound_samplers = cc::vector<sg::sampler>();
+    for (auto const& s : layout.slots)
+        if (s.kind == material_slot_kind::texture_index)
+            bound_samplers.push_back(r.attributes[s.attribute_index].sample->sampler);
     // Read off the layout before it is moved into the result.
     auto const factor_of = [&](cc::string const& attribute)
     { return attribute.empty() ? material_emission_factor{} : emission_factor_of(r, layout, attribute); };
-    auto const secondary = material_secondary{.base_color = factor_of(r.type->base_color_attribute),
+    // A display material reflects nothing, so what a secondary hit reads of it is black.
+    auto const reflected = [&](cc::string const& attribute)
+    { return r.type->display_only ? material_emission_factor{.kind = material_value_kind::zero} : factor_of(attribute); };
+    auto const secondary = material_secondary{.base_color = reflected(r.type->base_color_attribute),
                                               .roughness = factor_of(r.type->roughness_attribute),
                                               .metalness = factor_of(r.type->metalness_attribute),
-                                              .specular_weight = factor_of(r.type->specular_weight_attribute),
+                                              .specular_weight = reflected(r.type->specular_weight_attribute),
                                               .transmission = factor_of(r.type->transmission_attribute),
                                               .thin_walled = factor_of(r.type->thin_walled_attribute),
                                               .tangent_frame = factor_of(r.type->tangent_frame_attribute)};
@@ -994,6 +1211,9 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
             .shade_source = cc::move(shade_source),
             .raster_source = cc::move(raster_source),
             .hybrid_source = cc::move(hybrid_source),
+            .bound_source = cc::move(bound_source),
+            .bound_pulled_source = cc::move(bound_pulled_source),
+            .bound_samplers = cc::move(bound_samplers),
             .layout = cc::move(layout),
             .secondary = secondary,
             .opacity = opacity,

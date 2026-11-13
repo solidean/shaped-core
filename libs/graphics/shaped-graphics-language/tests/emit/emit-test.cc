@@ -261,7 +261,8 @@ TEST("sgl emit - a group's plain member is a field of the constant buffer the gr
     // EMIT-89: MSL's group is an argument buffer, whose block is a pointer at slot 0, bound to a local of the block's name.
     auto const msl = emit_source(source, 0, target::msl);
     CHECK(sgl::emit::dump_errors(msl) == "");
-    CHECK(msl.text.contains("struct scene_arguments\n{\n    constant scene_data* scene [[id(0)]];\n};\n"));
+    CHECK(msl.text.contains("struct scene_arguments\n{\n    constant scene_data* scene [[id(0)]];\n    uint "
+                            "sgl_lengths [[id(1)]][1];\n};\n"));
     CHECK(msl.text.contains("constant scene_arguments& scene_group [[buffer(0)]]"));
     CHECK(msl.text.contains("    constant auto& scene = *scene_group.scene;\n"));
     CHECK(msl.text.contains("scene.tint"));

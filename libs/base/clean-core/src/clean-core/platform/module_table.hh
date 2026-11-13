@@ -19,7 +19,8 @@ namespace cc
 struct loaded_module;
 
 /// Every module mapped into this process, in no particular order.
-/// Empty where the platform cannot be asked, which `module_enumeration_available` reports up front.
+/// Empty where the platform cannot be asked, which `module_enumeration_available` reports up front: Windows and macOS can.
+/// On macOS a module's size is its `__TEXT` segment, which holds every code address it has, and dyld itself is listed.
 [[nodiscard]] cc::vector<cc::loaded_module> enumerate_loaded_modules();
 
 /// Whether this build can enumerate modules at all.
@@ -29,7 +30,7 @@ struct loaded_module;
 /// One mapped binary, and enough to find the same one again elsewhere.
 struct cc::loaded_module
 {
-    /// Where it was mapped, which is what a recorded address is relative to.
+    /// Where it was mapped, which is what a recorded address is relative to; on macOS the Mach-O header, `__TEXT`'s first byte.
     /// ASLR moves this between runs, so it is meaningless without the recording it came from.
     u64 base = 0;
     u64 size = 0;
@@ -39,8 +40,8 @@ struct cc::loaded_module
 
     /// What identifies this exact build, in whatever form the platform's symbol servers key on.
     ///
-    /// On Windows that is the PE `TimeDateStamp` and `SizeOfImage` concatenated as hex — literally the key a symbol
-    /// server URL is built from — and on ELF it would be the build id.
+    /// On Windows that is the PE `TimeDateStamp` and `SizeOfImage` concatenated as hex, the key a symbol server URL is built from.
+    /// On macOS it is the image's LC_UUID as `dwarfdump --uuid` prints it, what a dSYM is matched on; on ELF it would be the build id.
     /// Empty when it could not be read, which means a consumer can locate the module but cannot prove it is the right
     /// build of it.
     cc::string identity;

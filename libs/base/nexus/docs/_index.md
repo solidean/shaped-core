@@ -23,6 +23,8 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
 - [test-runtime](test-runtime.md) — keeping a test's runtime proportional to what it proves.
   `nx::is_thorough()` narrows an expensive test for the default run, `thorough_only` skips one with no narrow version, and a profiled run finds the slow one.
 - [catch2-runner-compat](catch2-runner-compat.md) — the CLI layer: which Catch2 v3 flags nexus accepts, how IDE discovery works, buckets, name and file filters, and the JUnit and JSON side-outputs.
+- [external-runner](external-runner.md) — `NX_EXTERNAL_RUNNER_REPORT`: per test, its outcome and the files it read, wrote and listed, for a tool running the binary.
+  Read its rule before a test touches a file past clean-core: undeclared, the access is not seen.
 - [args](args.md) — `nx::args`, one declaration of a command line producing parsing, help, diagnostics and completion.
   The grammar section is the spec; read it before adding a flag spelling.
 - [stdlib-migration](stdlib-migration.md) — the remaining `std::` usages and what each is waiting on, so the move onto clean-core can finish as clean-core grows.

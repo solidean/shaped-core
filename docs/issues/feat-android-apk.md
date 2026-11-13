@@ -3,6 +3,8 @@ created: 2026-11-05
 priority: normal
 tags: [xr, android, dev.py]
 parent: epic-xr
+claimed-by: Claude (for Philip)
+claimed-at: 2026-11-06T13:21Z
 ---
 
 # A gradle-free Android APK, deployed and launched by `dev.py`

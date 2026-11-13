@@ -10,6 +10,15 @@ if(CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER_INIT)
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/ConfigureEnvironment.cmake")
 
+# A cross preset names the Unix launcher, and a preset cannot pick one value by host, so a Windows host swaps it here.
+if(CMAKE_HOST_WIN32)
+    foreach(_launcher CMAKE_C_COMPILER_LAUNCHER CMAKE_CXX_COMPILER_LAUNCHER CMAKE_C_LINKER_LAUNCHER CMAKE_CXX_LINKER_LAUNCHER)
+        if("${${_launcher}}" MATCHES "diag_launcher\\.sh$")
+            set(${_launcher} "${CMAKE_CURRENT_SOURCE_DIR}/tools/bin/diag-launcher.exe" CACHE STRING "" FORCE)
+        endif()
+    endforeach()
+endif()
+
 project(shaped-core LANGUAGES CXX)
 
 # Lock in C++23 for the whole repo.
@@ -43,6 +52,11 @@ option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEV
 # what keeps them compiling against the API they demonstrate. `dev.py example <match>` runs exactly one.
 option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVEL})
 
+# Which libraries this build adds: SC_LIBRARIES names a subset, built with every shaped-core library it depends on, and
+# empty is all of them. The table of what each library depends on lives in the module, beside sc_add_library.
+# After the three gates above, which decide whether nexus and the libraries' TEST_DEPENDS join a subset.
+include(Libraries)
+
 # Which graphics backend the examples are built against.
 #
 # `auto` takes dx12 where there is one, which on Windows means the vulkan arm is never reached by default — so the
@@ -56,6 +70,13 @@ option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVE
 # the example's own first choice. See docs/platforms.md.
 set(SC_EXAMPLE_BACKEND "auto" CACHE STRING "Backend the graphics examples build against: auto, dx12, vulkan, webgpu or metal")
 set_property(CACHE SC_EXAMPLE_BACKEND PROPERTY STRINGS auto dx12 vulkan webgpu metal)
+
+# Build dx12 against the PRE-RELEASE Agility SDK in extern/agility-preview, for DXR's clustered geometry and partitioned TLAS.
+# A development switch only: the preview's terms forbid distributing it, so nothing shipped may be built with it ON.
+# ON with no preview fetched is a configure error rather than a silent retail build; `dev.py --agility-preview` gives
+# it a build directory of its own, since the headers it swaps in rebuild everything that includes d3d12.h.
+# See docs/platforms.md.
+option(SC_AGILITY_PREVIEW "Build dx12 against the pre-release Agility SDK in extern/agility-preview (development only)" OFF)
 
 # Threading mode for the whole project. OFF reaches the compiler as CC_SINGLE_THREADED, which forces
 # clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set
@@ -103,22 +124,23 @@ option(SC_MIMALLOC "Back the default memory resource with mimalloc; OFF uses the
 # amount, a float converted into a fixed_int.
 # These sit in the hottest loops of exact geometry predicates, which is why they are not CC_ASSERTs and default OFF.
 # A whole-build switch, never per-target: a header-only check compiled two ways in one program is an ODR violation.
-# The debug-nopch presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+# Off in every preset: a build dir configured with it ON runs the checks now and then, not on every commit.
 option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and preconditions at runtime" OFF)
 
 # Log a warning wherever a typed-geometry query meets an input it assumes away: parallel lines, a zero-length segment.
 # A warning rather than an assert, so a test can feed a special case on purpose and declare it; nexus fails the rest.
-# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug-nopch presets.
+# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH; the clang debug presets turn it on.
 option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
 
 # Let a context link's releases be watched, so nexus names who still holds a test's context when it reports leftover async work.
 # Off, the release path is exactly what it is without the feature; on, every release of a context link pays one load and a compare.
 # Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH: the release is inline.
+# Off in every preset, like SC_CHECK_WIDE_ARITH.
 option(SC_ASYNC_AMBIENT_TRACE "Let nexus name who holds a test's context when it reports leftover async work" OFF)
 
 # Test clean-simd at every lane width it generates flat, rather than at one 256-bit type per element.
 # Every width is every kernel instantiated four times over, which is most of clean-simd-test's compile time.
-# Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.
+# Only the test binary sees it, so unlike the checks above it is no ODR hazard; the clang debug presets turn it on.
 option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one per element type" OFF)
 
 # Shaders come from the binary alone: no source directory is mounted over a package's embedded copy, and nothing hot-reloads.
@@ -191,13 +213,14 @@ endif()
 # v2 machine, wherever that instruction is. Anything above it is clean-simd's dispatched kernels, never this switch.
 # v3 by default: every mainstream desktop x86 since Haswell (2013) and Zen 1 (2017) has it.
 # Android x86_64 defaults to v2, the most its ABI guarantees. Applied by tools/cmake/Simd.cmake; see docs/platforms.md.
+# v2-avx is v2 plus AVX without AVX2, FMA or BMI: the level of a consumer built for AVX alone (MSVC's /arch:AVX).
 if(ANDROID)
     set(_sc_x64_level_default v2)
 else()
     set(_sc_x64_level_default v3)
 endif()
-set(SC_X64_LEVEL "${_sc_x64_level_default}" CACHE STRING "x86-64 feature level every function may assume: v1, v2, v3 or v4")
-set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v3 v4)
+set(SC_X64_LEVEL "${_sc_x64_level_default}" CACHE STRING "x86-64 feature level every function may assume: v1, v2, v2-avx, v3 or v4")
+set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v2-avx v3 v4)
 
 # The clean-simd kernels compiled for runtime dispatch on top of that floor: `auto` (every x86-64 kernel above it, up
 # to avx512), a list such as `avx2;avx512`, or empty for none. Only kernels above the floor belong here — the ones at or
@@ -216,18 +239,12 @@ include(FloatingPoint) # no floating-point contraction, on every compiler
 include(LibcxxFloatH)  # Homebrew LLVM < 23 on Apple: libc++'s <float.h> against the macOS 27 SDK
 include(MacosSdk)      # macOS: the SDK on the command line, so it moves only with a reconfigure
 
-# Per-target precompiled headers.
-# Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();
-# sc_finalize_pch() at the bottom of this file resolves the two together.
-# Unlike the four above this one adds no flags of its own, so its position here is convention rather than a requirement.
-# CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (the nopch-* presets) turns every application into a no-op.
-include(PrecompiledHeaders)
-
 # Staging an executable's DLLs beside it on Windows (sc_stage_runtime_dlls), which the example and shader-package
 # helpers below both call.
 include(RuntimeDlls)
 include(SourceFingerprint) # sc_add_source_fingerprint — a cache key that moves with a library's own sources
 include(SourcePaths)       # sc_target_source_paths — a source-tree directory as a path relative to the source root
+include(Install)           # SC_INSTALL — install() rules and the shaped-core CMake package, set up once the libraries exist
 
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
@@ -302,62 +319,66 @@ include(libs/base/nexus/cmake/Examples.cmake)
 include(libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake)
 
 # clean-core must come first: everything depends on it.
-add_subdirectory(libs/base/clean-core)
-add_subdirectory(libs/base/typed-geometry)
+sc_add_library(clean-core)
+sc_add_library(typed-geometry)
 
 # clean-net (cnet): sockets, HTTP and a loopback dev server, over clean-core alone.
 # Above clean-core rather than inside it: a TLS stack and its system libraries are a tax every binary in the repo
 # would otherwise pay, and a library that can be left out expresses "absent on this platform" with a target instead
 # of a maze of stubs.
-add_subdirectory(libs/base/clean-net)
+sc_add_library(clean-net)
 
 # clean-simd (cimd): fixed-width SIMD lane types templated on a kernel, over clean-core alone.
 # Above clean-core so its generated headers and intrinsics includes are paid only by what uses SIMD.
-add_subdirectory(libs/base/clean-simd)
+sc_add_library(clean-simd)
 
 # data stack: babel-data + babel-serializer (both namespace babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
 # plus blob-cache (bcache) beside them.
 # Added in dependency order, the two babel libraries first because both persisting libraries store through babel::sqlite.
 # The model library itself depends on clean-core alone, so an in-memory document never links a database engine.
-add_subdirectory(libs/data/babel-data)
-add_subdirectory(libs/data/babel-serializer)
-add_subdirectory(libs/data/versioned-document)
-add_subdirectory(libs/data/versioned-document-file)
-add_subdirectory(libs/data/blob-cache)
+sc_add_library(babel-data)
+sc_add_library(babel-serializer)
+sc_add_library(versioned-document)
+sc_add_library(versioned-document-file)
+sc_add_library(blob-cache)
 
 # graphics stack: shaped-graphics (sg) -> shaped-rendering (sr) -> shaped-viewer (sv).
 # Added in dependency order; sg pulls in its per-backend static libraries itself.
-add_subdirectory(libs/graphics/shaped-graphics)
-add_subdirectory(libs/graphics/shaped-rendering)
-add_subdirectory(libs/graphics/shaped-xr)
-add_subdirectory(libs/graphics/shaped-viewer)
+sc_add_library(shaped-graphics)
+sc_add_library(shaped-rendering)
+sc_add_library(shaped-xr)
+sc_add_library(shaped-viewer)
 
 # shaped-graphics-language (sgl): the SGL compiler, linter and language server. The syntactic half is over clean-core
 # alone, so it sits beside the graphics stack rather than on it.
-add_subdirectory(libs/graphics/shaped-graphics-language)
+sc_add_library(shaped-graphics-language)
+
+# shader-analysis (shan): what a SPIR-V or DXIL module costs, over babel-data's readers alone.
+sc_add_library(shader-analysis)
 
 # shaped-shader-compiler-dxc (ssc): HLSL -> sg::compiled_shader via DXC. Windows-only, and only when
 # DXC has been built (extern/dxc adds the `dxc` target). Run `uv run extern/dxc/build-dxc.py` (dev.py
 # does this automatically) to enable it.
 if(SC_HAS_DXC_COMPILER)
-    add_subdirectory(libs/graphics/shaped-shader-compiler-dxc)
+    sc_add_library(shaped-shader-compiler-dxc)
 endif()
 
 # shaped-shader-compiler-msl (ssc::msl): MSL -> sg::compiled_shader, for the metal backend.
 # APPLE alone gates it: nothing here links a compiler, `xcrun metal` is resolved at run time, and the
 # MSL-source arm works on a Mac with no Metal toolchain installed at all.
 if(APPLE)
-    add_subdirectory(libs/graphics/shaped-shader-compiler-msl)
+    sc_add_library(shaped-shader-compiler-msl)
 endif()
 
 # shaped-shader-library (slib): shader packages + hot reload, over sg. Added after ssc so its optional
 # dxc compiler adapter can see that target; the packages themselves work without any compiler.
-add_subdirectory(libs/graphics/shaped-shader-library)
+sc_add_library(shaped-shader-library)
 
 # nexus goes LAST among the libraries even though it lives in libs/base: nothing here links it but test binaries, so
 # the harness sits on top of everything it tests. It may therefore depend on any library — today babel-data, for the
 # JSON sidecars — and the add order is what makes that direction readable.
-add_subdirectory(libs/base/nexus)
+# A SC_LIBRARIES subset has it only when it builds tests, tools or examples, which is all that links it.
+sc_add_library(nexus)
 
 # Developer tools. instruction-tracer needs the Win32 debug API, dbghelp and the fetched Zydis
 # decoder (extern/zydis); it gates itself on the `zydis` target existing, so a checkout that has
@@ -366,22 +387,27 @@ add_subdirectory(libs/base/nexus)
 # x86-64 only, and not incidentally: it single-steps a debuggee through the x86-64 CONTEXT registers
 # (Rip/Rsp/EFlags) and decodes with Zydis, an x86 decoder. Windows on ARM64 has neither, so the tool is
 # absent there rather than ported — see SC_ARCH_X64 above.
-if(SC_BUILD_TOOLS AND WIN32 AND SC_ARCH_X64 AND TARGET zydis)
+#
+# The repo's own tools and the cross-library examples below belong to no library, so a SC_LIBRARIES subset adds none of them.
+if(SC_BUILD_TOOLS AND NOT SC_LIBRARY_SUBSET AND WIN32 AND SC_ARCH_X64 AND TARGET zydis)
     add_subdirectory(tools/instruction-tracer)
 endif()
 
 # shaped-linter: a self-contained C++ custom linter (its own lexer + parser, no LLVM). Cross-platform,
 # so it gates on SC_BUILD_TOOLS alone; clean-core and nexus are already added above.
-if(SC_BUILD_TOOLS)
+if(SC_BUILD_TOOLS AND NOT SC_LIBRARY_SUBSET)
     add_subdirectory(tools/shaped-linter)
 endif()
 
 # Cross-library examples: the ones that demonstrate several libraries together and so belong to no single
 # one. Added last, after every library it may reach, and before sc_finalize_shader_packages() below because
 # a graphical example declares its own shader package.
-if(SC_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
+if(SC_BUILD_EXAMPLES AND NOT SC_LIBRARY_SUBSET AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
     add_subdirectory(examples)
 endif()
+
+# The install rules and the package config for the built libraries, when SC_INSTALL asks for them. See tools/cmake/Install.cmake.
+sc_install_libraries()
 
 # The end-of-configure registries: each collects what every target declared, so it runs once all of them exist.
 function(sc_finalize_build)
@@ -396,13 +422,12 @@ function(sc_finalize_build)
     # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
     sc_finalize_shader_packages()
 
-    # Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
-    # Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
-    sc_finalize_pch()
+    # Check that tools/cmake/Libraries.cmake's table names every shaped-core library each library links.
+    sc_check_library_links()
 endfunction()
 
 # As a subdirectory of another project, "every target" includes the consumer's, which do not exist yet here.
-# So the finalizers run at the end of the top-level CMakeLists instead, and the consumer's tests, PCH requests and shader packages are seen with ours.
+# So the finalizers run at the end of the top-level CMakeLists instead, and the consumer's tests and shader packages are seen with ours.
 # A consumer calls none of them itself: two writers of nexus-binaries.json would be a generate error.
 if(PROJECT_IS_TOP_LEVEL)
     sc_finalize_build()

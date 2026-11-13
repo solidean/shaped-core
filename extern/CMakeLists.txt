@@ -3,16 +3,21 @@
 # `uv run dev.py deps list` shows every pin and whether upstream has moved on; the per-lib vendor-*.py / fetch-*.py reads its pin from the same manifest.
 # Each SC_USE_VENDORED_<LIB> defaults ON and builds the in-tree copy;
 # turning one OFF means the embedding project must already provide a target of that name.
+# clean-core's six (mimalloc, xxHash, BLAKE3, zstd, LZ4, zlib) are found by find_package where no such target exists,
+# under the package and target names Conan's CMakeDeps and most package managers give them; see _sc_external_package below.
+#
+# Under a SC_LIBRARIES subset every directory here is added EXCLUDE_FROM_ALL: configured, so a built library finds its
+# target, and built only where a built library links it — an external nothing built needs is neither built nor installed.
 #
 # Add new vendored deps here so the root CMakeLists.txt only does add_subdirectory(extern).
 
-option(SC_USE_VENDORED_MIMALLOC "Build the in-tree vendored mimalloc (OFF expects an external `mimalloc` target)" ON)
-option(SC_USE_VENDORED_XXHASH "Build the in-tree vendored xxHash (OFF expects an external `xxhash` target)" ON)
+option(SC_USE_VENDORED_MIMALLOC "Build the in-tree vendored mimalloc (OFF expects an external `mimalloc` target, or finds package mimalloc)" ON)
+option(SC_USE_VENDORED_XXHASH "Build the in-tree vendored xxHash (OFF expects an external `xxhash` target, or finds package xxHash)" ON)
 
 # BLAKE3's C implementation, committed in-source (a handful of small TUs; the hand-written assembly variants are not vendored).
 # Backs cc::blake3 / cc::hash256, the cryptographic hash content addressing needs; linked PRIVATE by clean-core, so blake3.h reaches one TU.
 # Vendored rather than fetched because it is small and every build needs it — the xxHash tier, not the SQLite one.
-option(SC_USE_VENDORED_BLAKE3 "Build the in-tree vendored BLAKE3 (OFF expects an external `blake3` target)" ON)
+option(SC_USE_VENDORED_BLAKE3 "Build the in-tree vendored BLAKE3 (OFF expects an external `blake3` target, or finds package BLAKE3)" ON)
 
 # Zstandard and LZ4, committed in-source: together they are cc::compress / cc::decompress.
 # Linked PRIVATE by clean-core, so neither upstream header reaches a cc public header.
@@ -20,14 +25,14 @@ option(SC_USE_VENDORED_BLAKE3 "Build the in-tree vendored BLAKE3 (OFF expects an
 # when a flag is off is a broken format, so there is no configuration in which these may be absent.
 # zstd is the largest thing vendored in source here (~2.1 MB), which is the price of that guarantee;
 # upstream's legacy decoders, deprecated zbuff API and DLL projects are not part of it.
-option(SC_USE_VENDORED_ZSTD "Build the in-tree vendored Zstandard (OFF expects an external `zstd` target)" ON)
-option(SC_USE_VENDORED_LZ4 "Build the in-tree vendored LZ4 (OFF expects an external `lz4` target)" ON)
+option(SC_USE_VENDORED_ZSTD "Build the in-tree vendored Zstandard (OFF expects an external `zstd` target, or finds package zstd)" ON)
+option(SC_USE_VENDORED_LZ4 "Build the in-tree vendored LZ4 (OFF expects an external `lz4` target, or finds package lz4)" ON)
 
 # zlib, committed in-source: the Deflate third of cc::compress / cc::decompress, and the same always-present argument applies.
 # Deflate is the interop codec — what reads a zip, a gzip or a PNG stream — while zstd and lz4 own the ratio and speed axes.
 # zlib rather than the faster zlib-ng because it needs no generated config and no per-architecture SIMD detection,
 # so it compiles unchanged on every target; the vendored subset drops the stdio gzFile layer, which cc::read_stream replaces.
-option(SC_USE_VENDORED_ZLIB "Build the in-tree vendored zlib (OFF expects an external `zlib` target)" ON)
+option(SC_USE_VENDORED_ZLIB "Build the in-tree vendored zlib (OFF expects an external `zlib` target, or finds package ZLIB)" ON)
 
 # stb single-file image libraries (stb_image + stb_image_write), committed in-source (two small headers).
 # Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
@@ -133,68 +138,117 @@ option(SC_USE_VENDORED_OIDN_WEIGHTS "Use the fetched OIDN weights in extern/oidn
 # not built against another C runtime yet, so elsewhere sr builds without FSR.
 option(SC_USE_VENDORED_FIDELITYFX "Build the fetched FSR 3.1 sources in extern/fidelityfx/.install" ON)
 
+if(SC_LIBRARY_SUBSET)
+    set(_sc_extern_scope EXCLUDE_FROM_ALL)
+else()
+    set(_sc_extern_scope "")
+endif()
+
+# _sc_external_package(<target> <option> <package> <imported target>...)
+# A non-vendored clean-core external: an existing <target> is used as it is, as every SC_USE_VENDORED_<LIB>=OFF is.
+# Otherwise find_package(<package>) runs, and <target> becomes an alias of the first of the imported targets it defined.
+# GLOBAL, since clean-core links the alias from another directory.
+# The package and its target are recorded for tools/cmake/Install.cmake: shaped-coreConfig.cmake finds the package again.
+function(_sc_external_package target option package)
+    if(TARGET ${target})
+        return()
+    endif()
+    find_package(${package} GLOBAL)
+    foreach(_imported IN ITEMS ${target} ${ARGN}) # mimalloc's own config names its target as we do
+        if(TARGET ${_imported})
+            if(NOT _imported STREQUAL target)
+                add_library(${target} ALIAS ${_imported})
+            endif()
+            set_property(GLOBAL APPEND PROPERTY SC_EXTERNAL_PACKAGES ${package})
+            set_property(GLOBAL APPEND PROPERTY SC_EXTERNAL_PACKAGE_TARGETS ${_imported})
+            return()
+        endif()
+    endforeach()
+    list(JOIN ARGN ", " _candidates)
+    message(FATAL_ERROR "${option} is OFF, but no `${target}` target exists and find_package(${package}) defined none of "
+                        "${_candidates}.
+Provide the package, or turn ${option} back on to build the vendored copy.")
+endfunction()
+
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
 # dead weight in exactly the sanitizer builds that are already the slowest.
-if(SC_USE_VENDORED_MIMALLOC AND SC_MIMALLOC)
-    add_subdirectory(mimalloc)
+if(SC_MIMALLOC)
+    if(SC_USE_VENDORED_MIMALLOC)
+        add_subdirectory(mimalloc ${_sc_extern_scope})
+    else()
+        _sc_external_package(mimalloc SC_USE_VENDORED_MIMALLOC mimalloc mimalloc-static)
+    endif()
 endif()
 
 if(SC_USE_VENDORED_XXHASH)
-    add_subdirectory(xxhash)
+    add_subdirectory(xxhash ${_sc_extern_scope})
+else()
+    _sc_external_package(xxhash SC_USE_VENDORED_XXHASH xxHash xxHash::xxhash)
 endif()
 
 if(SC_USE_VENDORED_BLAKE3)
-    add_subdirectory(blake3)
+    add_subdirectory(blake3 ${_sc_extern_scope})
+else()
+    _sc_external_package(blake3 SC_USE_VENDORED_BLAKE3 BLAKE3 BLAKE3::blake3)
 endif()
 
 if(SC_USE_VENDORED_ZSTD)
-    add_subdirectory(zstd)
+    add_subdirectory(zstd ${_sc_extern_scope})
+else()
+    _sc_external_package(zstd SC_USE_VENDORED_ZSTD zstd zstd::libzstd_static zstd::libzstd_shared zstd::libzstd)
 endif()
 
 if(SC_USE_VENDORED_LZ4)
-    add_subdirectory(lz4)
+    add_subdirectory(lz4 ${_sc_extern_scope})
+else()
+    _sc_external_package(lz4 SC_USE_VENDORED_LZ4 lz4 lz4::lz4 LZ4::lz4 LZ4::lz4_static LZ4::lz4_shared)
 endif()
 
 if(SC_USE_VENDORED_ZLIB)
-    add_subdirectory(zlib)
+    add_subdirectory(zlib ${_sc_extern_scope})
+else()
+    _sc_external_package(zlib SC_USE_VENDORED_ZLIB ZLIB ZLIB::ZLIB)
 endif()
 
 if(SC_USE_VENDORED_STB)
-    add_subdirectory(stb)
+    add_subdirectory(stb ${_sc_extern_scope})
 endif()
 
 if(SC_USE_VENDORED_SPNG)
-    add_subdirectory(libspng)
+    add_subdirectory(libspng ${_sc_extern_scope})
 endif()
 
 if(SC_USE_VENDORED_LIBWEBP)
-    add_subdirectory(libwebp)
+    add_subdirectory(libwebp ${_sc_extern_scope})
 endif()
 
 if(SC_USE_VENDORED_UFBX)
-    add_subdirectory(ufbx)
+    add_subdirectory(ufbx ${_sc_extern_scope})
 endif()
 
 if(SC_USE_VENDORED_MESHOPTIMIZER)
-    add_subdirectory(meshoptimizer)
+    add_subdirectory(meshoptimizer ${_sc_extern_scope})
 endif()
 
 if(SC_USE_VENDORED_MBEDTLS)
-    add_subdirectory(mbedtls)
+    add_subdirectory(mbedtls ${_sc_extern_scope})
 endif()
 
 if(SC_USE_VENDORED_SPIRV_REFLECT)
-    add_subdirectory(spirv-reflect)
+    add_subdirectory(spirv-reflect ${_sc_extern_scope})
 endif()
 
 if(SC_USE_VENDORED_IMGUI)
-    add_subdirectory(imgui)
+    add_subdirectory(imgui ${_sc_extern_scope})
 endif()
+
+# Inter, the UI font a web page draws text in; one vendored file, built into nothing.
+add_subdirectory(inter ${_sc_extern_scope})
 
 # APPLE covers macOS and iOS alike, which is the platform set metal-cpp compiles on at all.
 # The metal backend gates itself on the target existing, so a non-Apple build simply never sees one.
 if(SC_USE_VENDORED_METAL_CPP AND APPLE)
-    add_subdirectory(metal-cpp)
+    add_subdirectory(metal-cpp ${_sc_extern_scope})
 endif()
 
 # The fetched deps below are host-side, so a cross-target build must not pick them up.
@@ -214,60 +268,72 @@ endif()
 # A subdirectory that is not added must not leave the CACHE INTERNAL values an earlier configure set behind.
 # Otherwise switching an option off, or deleting an .install/, keeps consumers staging and compiling in paths that are gone.
 if(_sc_host_side_deps AND SC_USE_VENDORED_DXC AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
-    add_subdirectory(dxc)
+    add_subdirectory(dxc ${_sc_extern_scope})
 else()
     unset(DXC_RUNTIME_DLLS CACHE)
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_ZYDIS AND SC_BUILD_TOOLS AND SC_ARCH_X64 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/zydis/.install/pin.txt")
-    add_subdirectory(zydis)
+    add_subdirectory(zydis ${_sc_extern_scope})
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_SDL3 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdl3/.install/pin.txt")
-    add_subdirectory(sdl3)
+    add_subdirectory(sdl3 ${_sc_extern_scope})
 endif()
 
 # The OpenXR loader, prebuilt for Windows; it defines `openxr_loader` where it was fetched.
 if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/openxr/.install/pin.txt")
-    add_subdirectory(openxr)
+    add_subdirectory(openxr ${_sc_extern_scope})
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
-    add_subdirectory(sqlite)
+    add_subdirectory(sqlite ${_sc_extern_scope})
 endif()
 
 # After dxc, whose .install supplies the compiler NRD's shader build runs.
 if(_sc_host_side_deps AND SC_USE_VENDORED_NRD AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/nrd/.install/pin.txt")
-    add_subdirectory(nrd)
+    add_subdirectory(nrd ${_sc_extern_scope})
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oidn/.install/pin.txt")
-    add_subdirectory(oidn)
+    add_subdirectory(oidn ${_sc_extern_scope})
 else()
     unset(OIDN_RUNTIME_LIBRARIES CACHE)
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN_WEIGHTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oidn-weights/.install/pin.txt")
-    add_subdirectory(oidn-weights)
+    add_subdirectory(oidn-weights ${_sc_extern_scope})
 else()
     unset(OIDN_WEIGHTS_DIR CACHE)
 endif()
 
 if(_sc_host_side_deps AND WIN32 AND SC_USE_VENDORED_FIDELITYFX
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fidelityfx/.install/pin.txt")
-    add_subdirectory(fidelityfx)
+    add_subdirectory(fidelityfx ${_sc_extern_scope})
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_DLSS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dlss/.install/pin.txt")
-    add_subdirectory(dlss)
+    add_subdirectory(dlss ${_sc_extern_scope})
 endif()
 
 # Reset first, so uninstalling it takes effect at the next configure rather than leaving the old path cached.
 set(SC_PINNED_WARP_DLL "" CACHE INTERNAL "The pinned WARP the dx12 test binaries load")
 if(WIN32 AND SC_USE_VENDORED_WARP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/warp/.install/pin.txt")
-    add_subdirectory(warp)
+    add_subdirectory(warp ${_sc_extern_scope})
 endif()
 
-if(WIN32 AND SC_USE_VENDORED_AGILITY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/agility/.install/pin.txt")
-    add_subdirectory(agility)
+# SC_AGILITY_PREVIEW swaps the runtime for extern/agility-preview's pin, read through the same wrapper.
+# It is required there, since a retail build under that name would test nothing the switch is for.
+set(_sc_agility_install "${CMAKE_CURRENT_SOURCE_DIR}/agility/.install")
+if(WIN32 AND SC_AGILITY_PREVIEW)
+    set(_sc_agility_install "${CMAKE_CURRENT_SOURCE_DIR}/agility-preview/.install")
+    if(NOT SC_USE_VENDORED_AGILITY OR NOT EXISTS "${_sc_agility_install}/pin.txt")
+        message(FATAL_ERROR "SC_AGILITY_PREVIEW is ON, but no preview Agility SDK was fetched: "
+                            "run `uv run extern/agility/fetch-agility.py --preview --accept-license` after reading its terms")
+    endif()
+endif()
+
+if(WIN32 AND SC_USE_VENDORED_AGILITY AND EXISTS "${_sc_agility_install}/pin.txt")
+    set(AGILITY_INSTALL "${_sc_agility_install}")
+    add_subdirectory(agility ${_sc_extern_scope})
 endif()

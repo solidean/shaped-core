@@ -117,7 +117,7 @@ struct framed_value:
     }
 
 @pixel fun framed_ps(p: framed_value) -> index_target:
-    return { indices = p.value }
+    return {indices = p.value}
 
 pipeline framed_points:
     vertex = framed_vs

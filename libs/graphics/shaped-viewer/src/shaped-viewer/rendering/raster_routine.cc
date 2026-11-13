@@ -8,6 +8,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/slug_atlas.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <shaped-viewer/impl/gpu_marks.hh> // TEMPORARY(debt-sv-gpu-stage-marks)
 #include <shaped-viewer/rendering/raster_routine.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
@@ -324,9 +325,11 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
             s.failed = true;
             return nullptr;
         }
-        s.shader
-            = lib.value()->compile_source(source, sg::shader_stage::fragment, stage_entry_of(shading), format.value(),
-                                          {.language = slib::shader_language::sgl, .label = p->label});
+        auto context_options = cc::vector<slib::shader_option>();
+        slib::add_context_options(context_options, ctx);
+        s.shader = lib.value()->compile_source(
+            source, sg::shader_stage::fragment, stage_entry_of(shading), format.value(),
+            {.language = slib::shader_language::sgl, .label = p->label, .options = context_options});
         (void)ctx.backlog.start(s.shader);
         return nullptr;
     }
@@ -870,6 +873,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             auto const declared = d.bindless->declare_raster_access(cmd);
             draw_bins(pass, first_drawn, true);
         }
+        impl::gpu_mark(cmd, "raster: first cull and draw");
 
         // The pyramid: the farthest primary depth under each texel, level by level.
         auto levels = 1;
@@ -915,6 +919,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             auto const height = extent[1] >> level;
             cmd.compute.dispatch_threads(width > 0 ? width : 1, height > 0 ? height : 1);
         }
+        impl::gpu_mark(cmd, "raster: depth pyramid");
 
         // Second: everything tested against the pyramid, drawing what is visible and was not drawn first, and recording what is visible.
         auto const second_args = args_buffer();
@@ -938,6 +943,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             cmd.compute.dispatch_threads(int(total));
         }
         drawn_args = second_args.reinterpret_as<sg::draw_indexed_args>();
+        impl::gpu_mark(cmd, "raster: second cull");
 
         if (prepass)
         {
@@ -957,6 +963,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             draw_bins(pass, drawn_args, false);
             draw_environment(pass);
         }
+        impl::gpu_mark(cmd, "raster: depth and shading");
     }
     draw_quadrics();
     if (d.drawn_args != nullptr)

@@ -270,6 +270,56 @@ TEST("sv - primary_hit_position inverts the tracer's primary depth")
     CHECK(!sv::primary_hit_position(record, pixel, resolution, 1.0f, near_plane).has_value());
 }
 
+// An orthographic camera's rays run parallel along forward, each from its own point of the image plane.
+// So an image corner is the same corner at every depth, the clip depth runs linearly from the near plane to the far one,
+// and a primary depth names the point along that pixel's own parallel ray.
+TEST("sv - an orthographic camera's matrices and primary depth describe the parallel rays it traces")
+{
+    // Off every axis, rolled, and not square, as the pinhole's frustum test is.
+    auto cam = sv::camera::looking_at(tg::pos3d(3.0, 2.0, -4.0), tg::pos3d(0.5, -0.3, 1.0), tg::vec3d(0.2, 0.9, 0.1));
+    cam.projection.kind = sv::projection_kind::orthographic;
+    cam.projection.aspect_ratio = 16.0 / 9.0;
+    cam.projection.view_height = 3.0;
+    cam.projection.far_plane = 40.0;
+    auto const record = sv::camera_record_of(cam);
+    CHECK(record.orthographic == 1.0f);
+
+    auto const near_plane = 0.25f;
+    auto const m = sv::matrices_of(record, near_plane);
+    auto const b = cam.basis();
+    auto const half_w = 0.5 * cam.projection.view_height * cam.projection.aspect_ratio;
+    auto const half_h = 0.5 * cam.projection.view_height;
+    for (auto const depth : {1.0, 10.0, 30.0})
+    {
+        auto const corner = cam.position + b.right * half_w + b.up * half_h + b.forward * depth;
+        auto const view = m.world_to_view * tg::vec4f(f32(corner[0]), f32(corner[1]), f32(corner[2]), 1.0f);
+        auto const clip = m.view_to_clip * view;
+        CHECK(tg::abs(clip[3] - 1.0f) < 1e-6f).dump("w", clip[3]);
+        CHECK(tg::abs(clip[0] - 1.0f) < 1e-4f).dump("x", clip[0]).dump("depth", depth);
+        CHECK(tg::abs(clip[1] - 1.0f) < 1e-4f).dump("y", clip[1]).dump("depth", depth);
+        auto const linear = (f32(depth) - near_plane) / (40.0f - near_plane);
+        CHECK(tg::abs(clip[2] - linear) < 1e-5f).dump("z", clip[2]).dump("linear", linear);
+    }
+
+    // A pixel's primary depth names the point on its own ray: from its point of the image plane, along forward.
+    auto const resolution = tg::vec2i(200, 100);
+    auto const pixel = tg::vec2i(137, 22);
+    auto const view_depth = 4.2;
+    auto const depth = f32((view_depth - f64(near_plane)) / (40.0 - f64(near_plane)));
+    auto const hit = sv::primary_hit_position(record, pixel, resolution, depth, near_plane);
+    REQUIRE(hit.has_value());
+    auto const ndc_x = (f64(pixel[0]) + 0.5) / f64(resolution[0]) * 2.0 - 1.0;
+    auto const ndc_y = (f64(pixel[1]) + 0.5) / f64(resolution[1]) * 2.0 - 1.0;
+    auto const wanted = cam.position + b.right * (half_w * ndc_x) - b.up * (half_h * ndc_y) + b.forward * view_depth;
+    CHECK((hit.value() - wanted).length() < 1e-3).dump("off", (hit.value() - wanted).length());
+
+    // An orthographic orbit shows what the perspective one shows at its target, so the wheel zooms both alike.
+    auto const o = sv::orbit_state{.distance = 5.0, .kind = sv::projection_kind::orthographic};
+    auto const from_orbit = o.to_camera();
+    CHECK(from_orbit.projection.kind == sv::projection_kind::orthographic);
+    CHECK(abs_of(from_orbit.projection.view_height - 2.0 * 5.0 * (o.vertical_fov * 0.5).tan()) < 1e-9);
+}
+
 TEST("sv - orbit_state and camera::orbiting agree")
 {
     auto const o = sv::orbit_state{.target = tg::pos3d(1, 2, 3),

@@ -1,6 +1,7 @@
 #include "gpu_resource_manager.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh> // cc::memcmp
 #include <sgl_modules/tracer.hh>        // the manager's group is module tracer's `binding bindless`
 #include <shaped-graphics/binding/staging_binding_group.hh>
@@ -199,6 +200,15 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
 
 gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource_manager_config const& cfg)
 {
+    auto tables = cc::vector<table_entry>();
+
+    // A device without binding arrays has no tables: the bound raster mode reads the pools through bound buffers instead.
+    if (!ctx.supports(sg::feature::binding_arrays))
+        return gpu_resource_manager(
+            ctx, mesh_manager::create(ctx, cfg.meshes), quadric_manager::create(ctx, cfg.quadrics),
+            texture_manager::create(ctx, cfg.textures), attribute_manager::create(ctx, cfg.attributes),
+            material_shader_cache::create(&ctx), nullptr, cc::move(tables), cfg.textures_policy, cfg.work);
+
     // The tracer's own layout, so the group a trace binds fits its pipeline and sg resolves its footprint by name.
     // It carries the material sampler palette too, as static samplers nothing sets.
     auto group = ctx.persistent.create_staging_binding_group(
@@ -206,7 +216,6 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
 
     // One array per binding, owned here: an array cannot refuse an acquire on behalf of its siblings, so nothing
     // else may hold one over a binding of this group.
-    auto tables = cc::vector<table_entry>();
     tables.reserve(isize(bindless_table::count_));
     for (auto i = u32(0); i < u32(bindless_table::count_); ++i)
     {
@@ -263,9 +272,18 @@ void append_pod(cc::vector<byte>& out, T const& value)
 u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
 {
     if (slot.kind == material_slot_kind::attribute_descriptor)
-        return u32(acquire_buffer(attributes.get(slot.attribute).data.as_readonly_buffer()));
+    {
+        CC_ASSERT(attributes.get(slot.attribute).state == residency::complete,
+                  "a block naming an attribute is built only once the attribute is in the pool");
+        return u32(acquire_buffer(attributes.pool().as_readonly_buffer()));
+    }
 
     CC_ASSERT(slot.kind == material_slot_kind::texture_index, "only a descriptor or a texture slot names an index");
+    return u32(acquire_texture(bindless_table::textures_2d, _slot_texture(slot).as_texture_view()));
+}
+
+sg::texture_2d const& gpu_resource_manager::_slot_texture(instance_slot const& slot)
+{
     auto const& record = textures.get(slot.texture);
 
     // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
@@ -279,12 +297,20 @@ u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
     // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
     // own factor, `failed` is "never" and wants to be seen.
     // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
-    auto const& texture
-        = record.state == residency::pending
-            ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
-            : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
-                                                 : record.texture);
-    return u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view()));
+    if (record.state == residency::pending)
+        return _placeholder_texture(slot.placeholder_texel, record.texture.format());
+    if (record.state == residency::failed)
+        return _placeholder_texture(k_failed_texel, record.texture.format());
+    return record.texture;
+}
+
+cc::vector<sg::texture_2d> gpu_resource_manager::instance_textures(instance_id id)
+{
+    auto out = cc::vector<sg::texture_2d>();
+    for (auto const& slot : get_instance(id).slots)
+        if (slot.kind == material_slot_kind::texture_index)
+            out.push_back(_slot_texture(slot));
+    return out;
 }
 
 cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record const& r)
@@ -312,8 +338,9 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
         case material_slot_kind::attribute_descriptor:
         {
-            // Tightly packed from offset 0 within its own buffer, so the stride is just the element size.
-            u32 const desc[attribute_desc_size / sizeof(u32)] = {_slot_index(slot), 0u, slot.element_stride};
+            // Tightly packed from the attribute's offset in the pool, so the stride is just the element size.
+            auto const offset = u32(attributes.get(slot.attribute).offset);
+            u32 const desc[attribute_desc_size / sizeof(u32)] = {_slot_index(slot), offset, slot.element_stride};
             write(slot.offset, cc::span<u32 const>(desc).as_bytes());
             break;
         }
@@ -330,17 +357,56 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
     return out;
 }
 
+namespace
+{
+/// The parameter pool's first size, and the alignment of every block in it: a `load4` reads 16 bytes, and a block on a
+/// 16-byte boundary keeps every slot the layout aligned within it aligned in the pool too.
+constexpr isize initial_param_pool_bytes = 64 * 1024;
+constexpr isize param_block_alignment = 16;
+
+/// Read as `bytes` by every shader, written by uploads, and read back by whoever checks it.
+constexpr auto param_pool_usage
+    = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src;
+} // namespace
+
+isize gpu_resource_manager::_allocate_parameters(isize bytes)
+{
+    auto const size = cc::align_up(cc::max(bytes, isize(4)), param_block_alignment);
+    if (_param_pool.raw() == nullptr)
+    {
+        _param_pool = _ctx->persistent.create_buffer<byte>(initial_param_pool_bytes, param_pool_usage);
+        _param_ranges.grow(initial_param_pool_bytes);
+    }
+    auto offset = _param_ranges.allocate(size);
+    if (!offset.has_value())
+    {
+        // Every block uploads again into the larger pool: see `_param_pool`.
+        auto const capacity = cc::max(2 * _param_ranges.capacity(), _param_ranges.capacity() + size);
+        _param_pool = _ctx->persistent.create_buffer<byte>(capacity, param_pool_usage);
+        _param_ranges.grow(capacity);
+        ++_param_pool_generation;
+        offset = _param_ranges.allocate(size);
+        CC_LOG_INFO("grew the parameter pool to {} bytes", capacity);
+    }
+    CC_ASSERT(offset.has_value(), "a grown pool always fits the range it grew for");
+    return offset.value();
+}
+
 void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_record& r)
 {
     if (r.built_in == _record_stamp)
         return;
     r.built_in = _record_stamp;
 
+    if (r.param_offset < 0)
+        r.param_offset = _allocate_parameters(r.size_bytes);
+
     // Once a block is uploaded, only its indices can move from one epoch to the next: its constants are the record's own.
-    // So a later epoch re-acquires each index, as the access declaration needs, and patches and uploads only those that moved.
+    // So a later epoch re-acquires each index, as the access declaration needs, and patches only those that moved.
+    // A pool replaced since the last upload holds nothing of the block, so it uploads whole.
     if (!r.uploaded.empty())
     {
-        auto moved = false;
+        auto moved = r.param_generation != _param_pool_generation;
         for (auto const& slot : r.slots)
         {
             if (slot.kind != material_slot_kind::attribute_descriptor && slot.kind != material_slot_kind::texture_index)
@@ -355,29 +421,19 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
             moved = true;
         }
         if (moved)
-            cmd.upload.data_to_buffer(r.parameters, r.uploaded);
+            cmd.upload.data_to_buffer(_param_pool, cc::span<byte const>(r.uploaded), r.param_offset);
+        r.param_generation = _param_pool_generation;
         return;
     }
 
+    // An empty block, a material whose every attribute needs no parameter, still names its range, and uploads nothing.
     auto bytes = build_instance_parameters(r);
-
-    // A material whose every attribute is sourced from somewhere needing no parameter has an empty block, and a zero-sized
-    // buffer has no descriptor to acquire.
-    // Four bytes keep the shape uniform rather than making the shader branch on whether it has a block at all.
-    if (r.parameters.raw() == nullptr)
-        r.parameters = cmd.context().persistent.create_buffer<byte>(
-            bytes.empty() ? isize(4) : bytes.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-
-    // The bytes are the epoch's, the buffer is not.
-    // In the steady state they come out identical, and skipping the copy is what keeps the upload path quiet — the buffer's
-    // own descriptor never moves either way, so the group's snapshot stays valid.
-    auto const unchanged = bytes.size() == r.uploaded.size()
-                        && (bytes.empty() || cc::memcmp(bytes.data(), r.uploaded.data(), size_t(bytes.size())) == 0);
-    if (!bytes.empty() && !unchanged)
+    if (!bytes.empty())
     {
-        cmd.upload.data_to_buffer(r.parameters, bytes);
+        cmd.upload.data_to_buffer(_param_pool, cc::span<byte const>(bytes), r.param_offset);
         r.uploaded = cc::move(bytes);
     }
+    r.param_generation = _param_pool_generation;
 }
 
 shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
@@ -400,26 +456,30 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     // The cube is uploaded directly rather than streamed, so it is never the thing being waited on.
     // A batch whose attributes still stream is the cube too, as the resolve draws it: its parameter block would bind them.
     auto const pending = q.state != residency::complete || !attributes_resident(instance);
-    auto const vertices = pending ? meshes.vertex_pool().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const pool = meshes.vertex_pool().raw()->as_raw_readonly();
     auto const& cube = meshes.placeholder_geometry();
 
     // The cube shades through the fallback, which reads no parameter block, so none is built: building it binds the attributes.
     // The index pool fills the slot, since a record has to name some buffer there.
     auto param_buffer = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly()));
+    auto param_offset = u32(0);
     if (!pending)
     {
         _upload_parameters(cmd, r);
-        param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer()));
+        param_buffer = u32(acquire_buffer(_param_pool.as_readonly_buffer()));
+        param_offset = u32(r.param_offset);
     }
 
-    // A landed quadric indexes nothing, so the field names its boxes, which the raster path draws each primitive as.
-    auto const indices = pending ? meshes.index_pool().raw()->as_raw_readonly() : q.aabbs.raw()->as_raw_readonly();
+    // A landed batch's records and boxes are both blocks of the vertex pool: `base_vertex` is where its records start
+    // and `first_index` where its boxes do, in the pool's 12-byte elements.
+    // It indexes nothing, so the second field names the boxes, which the raster paths draw each primitive as.
+    auto const indices = pending ? meshes.index_pool().raw()->as_raw_readonly() : pool;
     return {.param_buffer = param_buffer,
-            .param_offset = 0,
-            .vertices = u32(acquire_buffer(vertices)),
+            .param_offset = param_offset,
+            .vertices = u32(acquire_buffer(pool)),
             .indices = u32(acquire_buffer(indices)),
-            .base_vertex = pending ? u32(cube.base_vertex) : 0u,
-            .first_index = pending ? u32(cube.first_index) : 0u,
+            .base_vertex = pending ? u32(cube.base_vertex) : u32(q.primitives.offset),
+            .first_index = pending ? u32(cube.first_index) : u32(q.aabbs.offset),
             .link_mask = ~0u,
             .shade_group = 0,
             .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
@@ -459,8 +519,8 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
 
     // Every index here is this epoch's, minted right where it is written — which is what puts all of them into the access
     // declaration `freeze()` hands the trace.
-    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
-            .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
+    return {.param_buffer = u32(acquire_buffer(_param_pool.as_readonly_buffer())),
+            .param_offset = u32(r.param_offset),
             .vertices = vertices,
             .indices = indices,
             .base_vertex = u32(geometry.base_vertex),
@@ -495,8 +555,8 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
                 .emitter = 0xffffffffu};
 
     _upload_parameters(cmd, r);
-    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
-            .param_offset = 0,
+    return {.param_buffer = u32(acquire_buffer(_param_pool.as_readonly_buffer())),
+            .param_offset = u32(r.param_offset),
             .vertices = vertices,
             .indices = indices,
             .base_vertex = 0,
@@ -890,7 +950,7 @@ sv::resident_quadric_set const& gpu_resource_manager::create_quadric_set(sv::qua
         return data.cache.resources;
     }
 
-    auto const geometry = quadrics.acquire(quadric_data::of(data));
+    auto const geometry = quadrics.acquire(quadric_data::of(data), meshes);
 
     auto bindings = cc::vector<mesh_attribute_binding>();
     bindings.reserve(data.attributes.size());
@@ -1021,6 +1081,9 @@ sg::bindless_index gpu_resource_manager::_acquire(bindless_table table, sg::raw_
 {
     CC_ASSERT(!_locked, "no acquires while frozen — the bound snapshot could not contain the mint");
     CC_ASSERT(table < bindless_table::count_, "not a bindless table");
+    // Without tables the index names nothing, and only a reader binding the resource itself ever runs.
+    if (!has_bindless_tables())
+        return sg::bindless_index(0);
     auto& t = _tables[u32(table)];
     auto const index = t.array.transient.acquire(view);
     _record(t, u32(index));
@@ -1030,6 +1093,8 @@ sg::bindless_index gpu_resource_manager::_acquire(bindless_table table, sg::raw_
 sg::bindless_element_handle gpu_resource_manager::_pin(bindless_table table, sg::raw_view const& view)
 {
     CC_ASSERT(table < bindless_table::count_, "not a bindless table");
+    CC_ASSERT(has_bindless_tables(), "a pin names an element of a table, which a device without binding arrays has "
+                                     "none of");
     auto& t = _tables[u32(table)];
     auto handle = t.array.persistent.acquire(view);
 
@@ -1203,9 +1268,11 @@ bool gpu_resource_manager::_compress(sg::command_list& cmd, texture_id id)
     }
     // The element the uploaded texture was sampled through would otherwise hold it resident until the table fills,
     // and the swap would cost memory rather than save it.
+    // A device without binding arrays has no table, and nothing holds the uploaded texture but the record.
     auto const replaced = sg::raw_view(source.as_texture_view());
     textures.replace_with_compressed(id, cc::move(compressed));
-    _tables[u32(bindless_table::textures_2d)].array.transient.release(replaced);
+    if (has_bindless_tables())
+        _tables[u32(bindless_table::textures_2d)].array.transient.release(replaced);
     return true;
 }
 
@@ -1213,7 +1280,7 @@ void gpu_resource_manager::wait_for_pending_uploads()
 {
     attributes.wait_for_settled();
     meshes.wait_for_settled();
-    quadrics.wait_for_settled();
+    quadrics.wait_for_settled(meshes);
 
     auto landed = cc::vector<texture_id>();
     textures.wait_for_settled(landed);
@@ -1226,9 +1293,9 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
     // triangles this frame rather than next.
     // What ORDER the transfers themselves ran in is the streaming actor's business, decided by the priority each
     // acquire set — this only collects the results.
-    (void)attributes.collect_settled();
+    (void)attributes.collect_settled(&cmd);
     (void)meshes.collect_settled();
-    (void)quadrics.collect_settled();
+    (void)quadrics.collect_settled(meshes);
     _collect_textures();
 
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())
@@ -1312,12 +1379,16 @@ void gpu_resource_manager::unlock()
 bound_resources gpu_resource_manager::freeze()
 {
     lock();
+    if (!has_bindless_tables())
+        return bound_resources(*this, nullptr);
     return bound_resources(*this, _group->snapshot());
 }
 
 cc::result<bound_resources> gpu_resource_manager::try_freeze()
 {
     lock();
+    if (!has_bindless_tables())
+        return bound_resources(*this, nullptr);
     auto group = _group->try_snapshot();
     if (group.has_error())
         unlock();
@@ -1327,6 +1398,7 @@ cc::result<bound_resources> gpu_resource_manager::try_freeze()
 
 sg::binding_group_layout_handle const& gpu_resource_manager::bindless_layout() const
 {
+    CC_ASSERT(has_bindless_tables(), "a device without binding arrays has no bindless layout");
     return _group->layout();
 }
 

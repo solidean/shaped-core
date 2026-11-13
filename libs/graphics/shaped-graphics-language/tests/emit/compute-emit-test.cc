@@ -107,7 +107,7 @@ TEST("sgl emit - a compute entry point that needs legalizing keeps its workgroup
                              "    return x\n"
                              "\n"
                              "@compute(8, 4, 2) fun main(@thread_id id: int3){work}:\n"
-                             "    work.values[id.x] = clamp_to(work.values[id.x], 4.0)\n";
+                             "    work.values[id.x] = clamp_to(work.values[id.x], float(id.z) + 4.0)\n";
     auto const wgsl = text_of(clamped, target::wgsl);
     CHECK(wgsl.contains("@compute @workgroup_size(8, 4, 2)\n"));
     CHECK(wgsl.contains("    let id: vec3i = vec3i(id_in);\n"));
@@ -584,10 +584,14 @@ TEST("sgl emit - a software trace writes the emulated form on HLSL, and reads sg
     CHECK(vulkan.contains("[[vk::binding(17, 3)]] StructuredBuffer<uint4> sg_acceleration_pool;"));
     CHECK(vulkan.contains("[[vk::binding(18, 3)]] cbuffer sg_acceleration_roots_block"));
 
-    // without it HLSL stays native, and a Metal text has no pool to read
+    // without it HLSL stays native
     CHECK(text_at(target::hlsl_dx12, false).contains("RayQuery<"));
     CHECK(!text_at(target::hlsl_dx12, false).contains("sg_acceleration_pool"));
-    CHECK(!text_at(target::msl, true).contains("sg_acceleration_pool"));
+    // MSL walks too, so a pipeline's native motion and an inline trace's walk agree; the pool and roots are parameters
+    auto const msl = text_at(target::msl, true);
+    CHECK(msl.contains("const device uint4* sg_acceleration_pool [[buffer(28)]]")).dump("text", msl);
+    CHECK(msl.contains("constant uint4* sg_acceleration_roots [[buffer(29)]]")).dump("text", msl);
+    CHECK(!msl.contains("intersection_query")).dump("text", msl);
 }
 
 TEST("sgl emit - a library calls back into its shader, whose callback reads bindings the library never names")
@@ -604,7 +608,7 @@ TEST("sgl emit - a library calls back into its shader, whose callback reads bind
                                    "fun mine(c: uint){io}:\n"
                                    "    io.scatter[0] = c * io.scale\n"
                                    "\n"
-                                   "@compute(4) fun main(@thread_id id: int3){io}:\n"
+                                   "@compute(64) fun main(@thread_id id: int3){io}:\n"
                                    "    print_char(id.x as uint, mine)\n");
     for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
     {

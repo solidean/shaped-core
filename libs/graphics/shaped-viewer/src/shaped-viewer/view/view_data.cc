@@ -67,6 +67,11 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         // The second is why every traced layer keeps one, drawings or not.
         out.push_back({.id = temporal_id::primary_depth(u8(i)), .format = sg::pixel_format::r32_float});
 
+        // The bound raster mode keeps its own histories and never denoises, whatever denoiser its settings name: the
+        // guides would be slots in formats WebGPU cannot store into without `texture-formats-tier1`.
+        if (v.layers[i].settings.mode == render_mode::raster_bound)
+            continue;
+
         // A rasterized layer writes its whole G-buffer every frame, denoised or not: it is what a lighting pass after it reads.
         // The slots are the guides', in the guides' formats, so a denoiser or a hybrid pass reads either path's alike.
         // It never denoises, since every frame it draws is final.

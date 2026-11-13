@@ -1079,6 +1079,8 @@ void checker::judge_expecting_in_pipelines()
     for (auto const& p : out.pipelines)
     {
         auto const& s = out.at(p.symbol);
+        if (!out.is_reached_file(s.file))
+            continue;
         auto const& ast = ast_of(s.file);
         auto const* const d = ast.at(s.declaration).node.try_as<ast::pipeline_decl>();
         if (d == nullptr)

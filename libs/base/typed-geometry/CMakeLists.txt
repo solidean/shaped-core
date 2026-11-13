@@ -158,7 +158,7 @@ target_compile_features(typed-geometry
 # Expose "src" so '#include <typed-geometry/...>' works for consumers.
 target_include_directories(typed-geometry
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # clean-core provides the vocabulary types (i32/f32/isize) and assertions used across the public API.
@@ -188,10 +188,6 @@ target_compile_options(typed-geometry
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
-
-sc_declare_pch_tier(TG EXTENDS CC_STD HEADERS <typed-geometry/all.hh>)
-
-sc_target_pch(typed-geometry TG)
 
 # Test executable
 if(SC_BUILD_TESTS)
@@ -274,8 +270,6 @@ if(SC_BUILD_TESTS)
         typed-geometry
         nexus
     )
-
-    sc_target_pch(typed-geometry-test TG NEXUS) # 0.73 — the least include-bound target measured
 
     # Browser test runner (Emscripten only): typed-geometry-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(typed-geometry-test)

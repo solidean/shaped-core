@@ -67,6 +67,11 @@ enum class sv::residency : sv::u8
 
 namespace sv
 {
+/// The description a texture to adopt (`texture_data::adopt`) is created with on `ctx`: the full chain, and the usage
+/// a texture manager on `ctx` needs to fill and encode it, the same a texture of uploaded pixels gets.
+/// A producer writes its base level through `copy_dst`, or through `image` where the format allows one.
+[[nodiscard]] sg::texture_2d_description adoptable_texture(sg::context& ctx, sg::pixel_format format, i32 width, i32 height);
+
 /// How many triangles one block of an emitter's area CDF covers — `tracer.emitter_block_size` and shaders/emitter_cdf.sgl's `block_size`.
 inline constexpr u32 emitter_cdf_block_size = 256;
 
@@ -146,6 +151,8 @@ struct sv::mesh_record
 /// here rather than in a routine), and it runs only for a mesh something traces.
 ///
 /// **Every mesh's geometry lives in two central pools**, one vertex buffer and one index buffer, each mesh a range of both.
+/// A quadric batch's records and boxes are blocks of the vertex pool too, `allocate_block`, so one bound buffer reaches
+/// every kind of geometry, which is what the bound raster mode has instead of bindless.
 /// That is what lets a draw be indexed without a buffer bound per mesh, and a BLAS be built from the very bytes a draw reads.
 /// A mesh streams into staging of its own and is copied into its ranges once it landed, so no stream ever targets a pool.
 /// A pool that runs out is replaced by one twice its size, its contents copied over on the GPU.
@@ -153,6 +160,18 @@ struct sv::mesh_record
 class sv::mesh_manager : public impl::lru_pool<mesh_id, mesh_record>
 {
 public:
+    /// A range of the vertex pool holding something other than a mesh's positions, in its 12-byte elements.
+    struct pool_block
+    {
+        /// Where the block starts, a multiple of the alignment it was asked for.
+        isize offset = 0;
+        isize count = 0;
+
+        /// The range taken from the allocator, which the alignment may have widened; what `retire_block` frees.
+        isize taken_offset = 0;
+        isize taken_count = 0;
+    };
+
     /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
     [[nodiscard]] static mesh_manager create(sg::context& ctx, manager_config const& cfg = {});
 
@@ -206,6 +225,7 @@ public:
     /// `sg::stream_upload_handle` states: a list touching a streamed extent must be SUBMITTED after completion is
     /// observed, and `cmd` is submitted by the caller after this returns.
     /// The first call charges the BLAS's size to the budget.
+    /// Where the context's acceleration storage is full for now, it is `placeholder_blas()`, and a later call tries again.
     [[nodiscard]] sg::blas_handle const& acquire_blas(sg::command_list& cmd, mesh_id id);
 
     /// `id`'s area CDF, built onto `cmd` from the mesh's own buffers the first time a caller asks and held from then on.
@@ -239,6 +259,13 @@ public:
     /// How many meshes are still streaming.
     [[nodiscard]] isize settling_count() const { return _settling.size(); }
 
+    /// A block of `count` vertex-pool elements, 12 bytes each, starting at a multiple of `alignment` elements.
+    /// The pool grows to fit it, as it does for a mesh.
+    [[nodiscard]] pool_block allocate_block(isize count, isize alignment = 1);
+
+    /// Frees `block` once the frames that may still read it have retired.
+    void retire_block(pool_block const& block);
+
     /// How many vertices and indices the pools hold room for; they grow, and never shrink.
     [[nodiscard]] isize vertex_pool_capacity() const { return _vertex_ranges.capacity(); }
     [[nodiscard]] isize index_pool_capacity() const { return _index_ranges.capacity(); }
@@ -263,6 +290,13 @@ private:
     struct retiring_ranges
     {
         geometry_range geometry;
+        sg::epoch evicted_in = sg::epoch(0);
+    };
+
+    /// A retired block, waiting as an evicted mesh's ranges wait.
+    struct retiring_block
+    {
+        pool_block block;
         sg::epoch evicted_in = sg::epoch(0);
     };
 
@@ -301,34 +335,39 @@ private:
     sg::async_compute_pipeline _world_total;
     bool _cdf_failed = false;
     sg::blas_handle _placeholder_blas;
+    bool _told_blas_pool_full = false;
     geometry_range _placeholder;
     sg::buffer<tg::pos3f> _vertex_pool;
     sg::buffer<u32> _index_pool;
     impl::range_allocator _vertex_ranges;
     impl::range_allocator _index_ranges;
     cc::vector<retiring_ranges> _retiring;
+    cc::vector<retiring_block> _retiring_blocks;
     cc::map<mesh_id, pending_mesh> _settling;
 };
 
-/// One uploaded quadric batch: its two buffers, and the procedural BLAS built over them once something traces it.
+/// One uploaded quadric batch: its two blocks of the mesh manager's vertex pool, and the procedural BLAS built over them
+/// once something traces it.
 ///
-/// Two buffers rather than one, because the hardware and the shader want different things.
-/// `aabbs` is the acceleration structure's build input, and what the raster path draws each primitive as, read by the vertex stage.
-/// `primitives` is what the intersection shader reads by the primitive index, through the bindless table.
+/// Two blocks rather than one, because the hardware and the shader want different things.
+/// `aabbs` is the acceleration structure's build input, and what a raster path draws each primitive as, read by the vertex stage.
+/// `primitives` is what an intersection reads by the primitive index.
+/// An instance record names the pool for both, `base_vertex` the records' block and `first_index` the boxes'.
 ///
 /// The BLAS is built once, by the first trace that reaches the batch, exactly as a mesh's is: from then on only the (cheap) TLAS is
 /// rebuilt per frame.
 struct sv::quadric_set_record
 {
-    /// `complete` once both buffers are uploaded, whether or not a BLAS was built.
+    /// `complete` once both blocks hold their bytes, whether or not a BLAS was built.
     /// While `pending` there is nothing to trace, so the batch is drawn as the shared placeholder box scaled onto `bounds`.
     residency state = residency::pending;
 
-    /// the intersection shader's own data, read by the primitive index
-    sg::buffer<quadric_gpu> primitives;
+    /// The intersection's own data, `quadric_gpu` records of 8 pool elements each, read by the primitive index.
+    mesh_manager::pool_block primitives;
 
-    /// the BLAS build input, one box per primitive; its layout is `D3D12_RAYTRACING_AABB`, which `tg::aabb3f` already is
-    sg::buffer<tg::aabb3f> aabbs;
+    /// The BLAS build input, one box of 2 pool elements per primitive, at an even element so each box is 8-byte aligned
+    /// as D3D12 requires; its layout is `D3D12_RAYTRACING_AABB`, which `tg::aabb3f` already is.
+    mesh_manager::pool_block aabbs;
 
     isize primitive_count = 0;
 
@@ -341,7 +380,10 @@ struct sv::quadric_set_record
     cc::optional<tg::aabb3f> bounds;
 };
 
-/// Hands out `quadric_set_id`s and owns the two buffers + procedural BLAS behind each, with LRU budgeting.
+/// Hands out `quadric_set_id`s and owns the two pool blocks + procedural BLAS behind each, with LRU budgeting.
+///
+/// The blocks are the mesh manager's, which every call that allocates, copies or frees one is handed: the two managers
+/// sit side by side in `gpu_resource_manager`, which moves, so neither keeps a pointer to the other.
 ///
 /// The quadric counterpart of `mesh_manager`, and deliberately the same shape: acquire queues transfers and returns at once,
 /// `collect_settled` sees them land, `acquire_blas` builds the acceleration structure behind them, and residency says how far
@@ -356,25 +398,26 @@ public:
 
     /// The quadric_set_id for `set.hash`, resident from a prior acquire (O(1)), or a freshly queued one.
     ///
-    /// On a miss the two buffers are created, the authored primitives are split into them, and both payloads go to `ctx.stream`
-    /// — so an acquire costs two allocations and a hash lookup rather than a transfer.
+    /// On a miss the two blocks are allocated in `meshes`' vertex pool, the authored primitives are split into staging for
+    /// them, and both payloads go to `ctx.stream` — so an acquire costs two allocations and a hash lookup rather than a transfer.
     /// **The split happens only on a miss**, which is why `quadric_data` borrows its span instead of pinning it: a batch
     /// re-acquired every frame touches none of its bytes.
     /// The id is usable at once and the batch is `pending` until `collect_settled` sees its buffers land.
     /// Ray tracing need not be supported: nothing here builds an acceleration structure.
-    [[nodiscard]] quadric_set_id acquire(quadric_data const& set);
+    [[nodiscard]] quadric_set_id acquire(quadric_data const& set, mesh_manager& meshes);
 
-    /// Marks every batch whose buffers have finished streaming `complete`; returns how many.
+    /// Marks every batch whose payload has finished streaming `complete`, its copy into `meshes`' pool submitted; returns how many.
     /// A transfer that settled without delivering leaves its batch `failed` rather than pending.
-    isize collect_settled();
+    /// Also hands the blocks of batches evicted since to `meshes` to retire.
+    isize collect_settled(mesh_manager& meshes);
 
     /// `id`'s procedural BLAS, recorded onto `cmd` the first time a caller asks and held from then on.
     /// Same contract as `mesh_manager::acquire_blas`: `id` must be `complete`, and ray tracing supported on the context.
-    [[nodiscard]] sg::blas_handle const& acquire_blas(sg::command_list& cmd, quadric_set_id id);
+    [[nodiscard]] sg::blas_handle const& acquire_blas(sg::command_list& cmd, quadric_set_id id, mesh_manager& meshes);
 
     /// Blocks until every queued transfer has landed, then finishes them all.
     /// For a caller with no frame loop to drain the queue — a test tracing what it just built, or a one-pass tool.
-    void wait_for_settled();
+    void wait_for_settled(mesh_manager& meshes);
 
     /// How many batches are still streaming.
     [[nodiscard]] isize settling_count() const { return _settling.size(); }
@@ -382,34 +425,47 @@ public:
 private:
     explicit quadric_manager(sg::context& ctx) : _ctx(ctx) {}
 
-    /// The transfers one queued batch is waiting on.
+    /// The transfers one queued batch is waiting on, into staging of its own that is copied into its blocks once landed.
     /// The payload is NOT held here: `ctx.stream` took the pins, so dropping this entry cancels whatever has not been sent —
     /// which is what makes evicting a still-streaming batch free.
     struct pending_set
     {
         sg::stream_upload_handle primitives;
         sg::stream_upload_handle aabbs;
+        sg::buffer<tg::pos3f> staged_primitives;
+        sg::buffer<tg::pos3f> staged_aabbs;
         isize bytes = 0;
     };
 
-    /// Finishes `id` if its transfers have settled; returns whether it did.
-    [[nodiscard]] bool _try_settle(quadric_set_id id, pending_set& p);
+    void on_remove(quadric_set_id id, quadric_set_record& record) override;
+
+    /// Finishes `id` if its transfers have settled, recording its copy into `meshes`' pool onto `copies`, opened on first need.
+    [[nodiscard]] bool _try_settle(quadric_set_id id,
+                                   pending_set& p,
+                                   mesh_manager& meshes,
+                                   std::unique_ptr<sg::command_list>& copies);
 
     sg::context& _ctx;
     cc::map<quadric_set_id, pending_set> _settling;
+
+    /// The blocks of batches evicted since `collect_settled` last ran, which it hands to the mesh manager to retire.
+    cc::vector<mesh_manager::pool_block> _released;
 };
 
-/// One uploaded mesh attribute: its bytes as a byte-address buffer, plus what a shader has to know to read them.
+/// One uploaded mesh attribute: where its bytes sit in the manager's attribute pool, plus what a shader has to know to read them.
 ///
-/// Elements are tightly packed from offset 0, so the descriptor a parameter block carries is this epoch's bindless index of
-/// `data`, offset 0, and `format.size_bytes()` as the stride.
+/// Elements are tightly packed from `offset`, so the descriptor a parameter block carries is this epoch's bindless index of
+/// the pool, `offset`, and `format.size_bytes()` as the stride.
 struct sv::attribute_record
 {
-    /// The buffer exists from the moment the id is minted, so a descriptor pointing at it is always valid — what
-    /// `pending` means here is that its CONTENTS have not landed, and a shader reading it early reads zeros.
+    /// `pending` until the bytes are in the pool; only then does the record have a range, and may a descriptor name it.
     residency state = residency::pending;
 
-    sg::buffer<byte> data;
+    /// The elements' byte offset in `attribute_manager::pool()`, -1 while pending; fixed for the record's life once set.
+    isize offset = -1;
+
+    /// How many bytes the elements take, and so the range they hold in the pool.
+    isize size_bytes = 0;
 
     attribute_format format = attribute_format::of_scalar(scalar_type::f32);
     attribute_frequency frequency = attribute_frequency::per_vertex;
@@ -426,6 +482,12 @@ struct sv::attribute_record
 /// This is what makes the `mesh_attribute` rank of the material chain reach the GPU at all: any attribute a material resolves to,
 /// at any format and frequency, rather than the four PBR names the old repack knew.
 /// Keyed on the attribute's own `hash`, so a mesh re-acquired every frame costs one lookup.
+///
+/// **Every attribute lives in one pool**, each a range of it, read as `bytes` through one bindless slot or one bound buffer.
+/// An attribute streams into staging of its own and is copied into its range once it lands, so no stream ever targets the pool.
+/// A range is allocated only where a list then copies into it: when a stream settles, or when inline bytes are written.
+/// So the pool grows only there, its old contents copied over ahead of every write into the new one.
+/// An evicted range is reused only once the frames that may still read it have retired.
 class sv::attribute_manager : public impl::lru_pool<attribute_id, attribute_record>
 {
 public:
@@ -434,8 +496,7 @@ public:
 
     /// The attribute_id for `attribute.hash`, resident from a prior acquire (O(1)), or a freshly queued one.
     ///
-    /// The BUFFER exists immediately, so a descriptor naming it is valid from here on; its contents land when
-    /// `record_uploads` drains, and a shader that reads it before then reads zeros.
+    /// A queued attribute is `pending` and has no range until `collect_settled` copies it in, so nothing may name it before.
     /// That is why the manager's queue is drained ahead of the mesh one: an attribute is up before the geometry it
     /// belongs to is drawn with anything but a placeholder.
     [[nodiscard]] attribute_id acquire(mesh_attribute const& attribute);
@@ -453,9 +514,9 @@ public:
     /// How many attributes acquired inline wait for `record_inline_uploads`.
     [[nodiscard]] isize inline_count() const { return _inline_bytes.size(); }
 
-    /// Marks every attribute whose bytes have finished streaming `complete`; returns how many.
-    /// Nothing is recorded — an attribute is done the moment its transfer is, since nothing has to be built from it.
-    isize collect_settled();
+    /// Copies every attribute whose bytes have finished streaming into its range and marks it `complete`; returns how many.
+    /// The copies go on `cmd`, in order with what it already wrote into the pool, or on a list of their own submitted here.
+    isize collect_settled(sg::command_list* cmd = nullptr);
 
     /// Blocks until every queued transfer has landed, then collects them.
     void wait_for_settled();
@@ -463,13 +524,44 @@ public:
     /// How many attributes are still streaming.
     [[nodiscard]] isize settling_count() const { return _settling.size(); }
 
+    /// The pool every resident attribute lives in, at its record's `offset`; empty until the first one landed.
+    /// Replaced by a larger one when it fills, so read it per frame rather than keeping it.
+    [[nodiscard]] sg::buffer<byte> const& pool() const { return _pool; }
+
 private:
     explicit attribute_manager(sg::context& ctx) : _ctx(ctx) {}
 
+    /// One queued attribute: the staging it streams into, and the transfer filling it; dropping one cancels it.
+    struct pending_attribute
+    {
+        sg::buffer<byte> staging;
+        sg::stream_upload_handle transfer;
+    };
+
+    /// An evicted attribute's range, waiting for the last frame that may read it to retire.
+    struct retiring_range
+    {
+        isize offset = 0;
+        isize size_bytes = 0;
+        sg::epoch evicted_in = sg::epoch(0);
+    };
+
+    void on_remove(attribute_id id, attribute_record& record) override;
+
+    /// Frees every retiring range whose epoch has completed.
+    void _reclaim();
+
+    /// A range of `bytes` in the pool, recording on `cmd` the copy of the old pool into a grown one when none fits.
+    /// Everything this manager wrote into the pool before is recorded or submitted ahead of `cmd`'s next command.
+    [[nodiscard]] isize _allocate(sg::command_list& cmd, isize bytes);
+
     sg::context& _ctx;
 
-    /// The in-flight transfer per queued attribute; dropping one cancels it.
-    cc::map<attribute_id, sg::stream_upload_handle> _settling;
+    sg::buffer<byte> _pool;
+    impl::range_allocator _ranges;
+    cc::vector<retiring_range> _retiring;
+
+    cc::map<attribute_id, pending_attribute> _settling;
 
     /// Per attribute acquired inline, its bytes until a command list writes them; pinned, so holding them copies nothing.
     cc::map<attribute_id, cc::pinned_data<byte const>> _inline_bytes;
@@ -518,6 +610,9 @@ public:
     /// immediately while the pixels are still in flight.
     /// It is `pending` until `collect_settled` sees the transfers land, and a slot sampling it meanwhile reads a 1x1
     /// placeholder seeded from the material's own factor rather than an empty texture.
+    ///
+    /// An adopted texture is taken as it is, with nothing to stream; it settles at the next `collect_settled`, which
+    /// reports it as landed, so its follow-up work is queued as for any upload.
     [[nodiscard]] texture_id acquire(texture_data const& texture);
 
     /// Advances every texture whose pixels have landed, and reports the ids that just became sampleable.

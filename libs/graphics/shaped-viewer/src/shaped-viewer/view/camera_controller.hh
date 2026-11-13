@@ -29,6 +29,10 @@ struct sv::orbit_state
     /// Carried here so a controller-driven camera keeps the projection a caller seeded it with.
     tg::angle_d vertical_fov = tg::angle_d::make_from_degree(60);
 
+    /// An orthographic orbit shows what the perspective one shows at the target, `2 * distance * tan(vertical_fov / 2)` high,
+    /// so the wheel zooms both alike.
+    projection_kind kind = projection_kind::perspective;
+
     [[nodiscard]] sv::camera to_camera() const;
 
     /// The orbit that best reproduces `cam`, keeping this state's `distance` — the target is placed that far down the view direction.

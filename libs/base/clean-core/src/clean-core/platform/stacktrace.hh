@@ -15,7 +15,7 @@
 // are still there and read as offsets rather than names.
 //
 // CC_HAS_STACKTRACE reflects which path is active.
-// Our CMake defines it from a link probe (clean-core/cmake/DetectStacktraceLib.cmake) and that verdict wins:
+// Our CMake writes it into build_config.hh from a link probe (clean-core/cmake/DetectStacktraceLib.cmake) and that verdict wins:
 // the header alone can only prove <stacktrace> exists, never that anything implements it — a libstdc++ without libstdc++exp has the header and none of the symbols.
 // The stub is a complete, allocatable value type that reports an empty trace, so storing or passing a cc::stacktrace needs no #ifdef.
 // Only code that *renders* a trace, by calling description() or to_string, must guard on CC_HAS_STACKTRACE.

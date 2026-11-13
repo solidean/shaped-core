@@ -1,0 +1,418 @@
+// The bound raster mode's traced indirect light: one ray a pixel at a reduced size, in a cosine-weighted direction off
+// the surface the depth shows, and the light it brings back.
+//
+// What a ray meets is lit as a diffuse surface of its instance's secondary material, the base color a hybrid bounce
+// reads too, by one light chosen in proportion to its unshadowed light there, through a shadow ray toward a point on it.
+// A ray that meets nothing brings back the environment.
+// An emissive mesh a ray meets brings back its emission as well, which is the only way the bound mode lights from one:
+// its direct light comes from the analytic lights alone.
+// The radiance a pixel's rays bring back averages to its irradiance over pi, which the shading multiplies by the diffuse
+// albedo in place of the environment's diffuse light.
+module raster_bound_indirect
+
+require ray_query
+
+use material
+use pt
+use raster
+use raster_bound
+use raster_bound_shadow_maps
+use raster_bound_shadows
+use scene
+use tracer
+
+/// The indirect pass's one group.
+///
+/// Six storage buffers, beside the ray query's pool and sg's diagnostics window: WebGPU's default of eight for a stage.
+binding indirect_scene:
+    /// One element, the frame constants.
+    frame: buffer[raster.frame_constants]
+
+    /// The per-item table, a ray's hit's instance id its row.
+    instances: buffer[tracer.instance_record]
+
+    /// Every light of the layer, `light_count` of them.
+    lights: buffer[tracer.light_record]
+
+    /// The mesh manager's central pools, as `raster_bound.bound` binds them.
+    vertices: bytes
+    indices: bytes
+    params: bytes
+
+    /// The environment, `sv::background_gpu` byte for byte: its 16 SH lanes, then a dome's.
+    background: float4[28]
+
+    /// The depth the prepass laid down, reversed, `near / view depth`.
+    depth: texture_2d_depth
+
+    /// The prepass's flat normal of each full-size pixel's triangle, turned toward the camera; zero where none was drawn.
+    normals: texture_2d[float4]
+
+    /// The scene, as the tracer's instances place it.
+    world: acceleration_structure[.mixed]
+
+    /// The frame's number, which turns the random numbers; how many full-size pixels one side of a traced pixel spans;
+    /// 1 to show each reflection's history length in its place, white for 64 frames, a debugging view; w unused.
+    settings: float4
+
+/// What the indirect pass writes: the radiance one ray brought back, and the view depth of the surface it left, which
+/// the blur and the shading's upsample weigh by.
+@pixel struct indirect_target:
+    @format(.rgba16_float) radiance: float4
+
+/// The environment's radiance along `dir`, from its SH lanes.
+fun environment_along(dir: float3){indirect_scene} -> float3:
+    let mut sh = float4[16].filled(float4(0.0))
+    for k in 0 ..< 16:
+        sh[k] = indirect_scene.background[k]
+    return scene.background_radiance(sh, dir)
+
+/// The base color of `inst`, where its parameter block holds it as a constant; mid-gray where a texture or an attribute
+/// gives it, which this pass cannot read, and where its type declares none.
+fun secondary_color(inst: scene.instance){indirect_scene} -> float3:
+    if inst.base_kind == scene.value_zero => return float3(0.0)
+    if inst.base_kind != scene.value_constant => return float3(0.5)
+    return saturate(reinterpret_as_float(indirect_scene.params.load3(inst.param_offset + inst.base_offset)))
+
+/// The light leaving point `p` of a diffuse surface of color `color` facing `n`, toward wherever the ray came from:
+/// one light chosen in proportion to its light there, through a shadow ray toward a point on it.
+fun lit_hit(p: float3, n: float3, color: float3, state: mut uint){indirect_scene} -> float3:
+    let f = indirect_scene.frame[0]
+    let mut total = 0.0
+    for i in 0 ..< (f.light_count as int):
+        total += raster_bound_shadow_maps.light_weight(scene.light(..indirect_scene.lights[i]), p, n)
+    if total <= 0.0 => return float3(0.0)
+    let pick = pt.rand(mut state) * total
+    let mut chosen = 0
+    let mut running = 0.0
+    for i in 0 ..< (f.light_count as int):
+        running += raster_bound_shadow_maps.light_weight(scene.light(..indirect_scene.lights[i]), p, n)
+        if running >= pick:
+            chosen = i
+            break
+    let light = scene.light(..indirect_scene.lights[chosen])
+    let weight = raster_bound_shadow_maps.light_weight(light, p, n)
+    if weight <= 0.0 => return float3(0.0)
+
+    let origin = p + n * (0.001 + 0.0005 * length(p))
+    let mut direction = -light.normal
+    let mut reach = 3.0e38
+    if light.path == scene.light_path_area:
+        let a = pt.rand(mut state) * 2.0 - 1.0
+        let b = pt.rand(mut state) * 2.0 - 1.0
+        let target = light.position + a * light.u + b * light.v
+        reach = length(target - origin) * 0.999
+        direction = (target - origin) / max(reach, 1e-6)
+    else if light.path == scene.light_path_point:
+        reach = length(light.position - origin) * 0.999
+        direction = (light.position - origin) / max(reach, 1e-6)
+    else if light.path == scene.light_path_distant_disc:
+        direction = pt.sample_cone(-light.normal, light.one_minus_cos_angular_radius, pt.rand(mut state), pt.rand(mut state))
+    if traced(ray(pos3(..origin), vec3(..normalize(direction)), 0.0, reach), true).is_hit => return float3(0.0)
+
+    // The chosen light's irradiance, over the chance of choosing it, in the diffuse surface's own color.
+    let irradiance = light.emission * raster_bound_shadow_maps.light_geometry(light, p, n) * (total / weight)
+    return color * irradiance / pt.pi
+
+/// `r` traced against the scene, meshes and quadric batches both; `any`, stopping at the first hit it accepts, for a
+/// shadow ray.
+fun traced(r: ray, any: bool){indirect_scene} -> mixed_hit[raster_bound_shadows.quadric_attributes]:
+    let flags = if any => ray_flags.accept_first_hit_and_end_search else ray_flags.none
+    return indirect_scene.world.trace(r, b => raster_bound_shadows.quadric_report_of(b, scene.instance(..indirect_scene.instances[b.instance_id]), indirect_scene.vertices), flags = flags)
+
+/// The geometric normal of what `h` met on `inst`, turned toward the ray along `dir`: its triangle's, or the one a
+/// quadric's intersection reported.
+fun hit_normal(h: mixed_hit[raster_bound_shadows.quadric_attributes], inst: scene.instance, dir: float3){indirect_scene} -> float3:
+    let mut n = float3(0.0, 0.0, 1.0)
+    if h.kind == hit_kind.procedural:
+        let a = h.attributes.normal
+        let w = h.normal_to_world(vec3(a.x, a.y, a.z))
+        n = normalize(float3(w.x, w.y, w.z))
+    else:
+        let corner = material.triangle_corners(inst, indirect_scene.indices, h.primitive_index as uint)
+        let o0 = material.position_of(inst, indirect_scene.vertices, corner.x)
+        let o1 = material.position_of(inst, indirect_scene.vertices, corner.y)
+        let o2 = material.position_of(inst, indirect_scene.vertices, corner.z)
+        n = normalize(raster.to_world_vector(inst, cross(o1 - o0, o2 - o0)))
+    return if dot(n, dir) > 0.0 => -n else n
+
+/// The radiance one ray from traced pixel `t` brings back, and the view depth of the surface it left; 0 for both at the
+/// far plane.
+fun indirect(t: int2){indirect_scene} -> float4:
+    let f = indirect_scene.frame[0]
+    let scale = indirect_scene.settings.y as int
+    let pixel = t * scale
+    let center = raster_bound_shadow_maps.world_from(indirect_scene.depth, f, pixel)
+    if center.w == 0.0 => return float4(0.0)
+    let p = center.xyz
+    let cam = scene.camera(..f.camera)
+    let n = raster_bound_shadow_maps.normal_from(indirect_scene.normals, indirect_scene.depth, f, pixel, p, cam.position)
+    let depth_here = dot(p - cam.position, normalize(cam.forward))
+
+    let mut state = pt.hash((t.x as uint) * 1973u + (t.y as uint) * 9277u + (indirect_scene.settings.x as uint) * 26699u)
+    let u1 = pt.rand(mut state)
+    let u2 = pt.rand(mut state)
+    let dir = pt.sample_cosine_hemisphere(n, u1, u2)
+    let origin = p + n * (0.001 + 0.002 * depth_here)
+    let h = traced(ray(pos3(..origin), vec3(..dir), 0.0, 1.0e5), false)
+    if not h.is_hit => return float4(..environment_along(dir), depth_here)
+
+    // The surface the ray met, and its own normal turned toward the ray.
+    let inst = scene.instance(..indirect_scene.instances[h.instance_id as int])
+    let hit_n = hit_normal(h, inst, dir)
+    let hit_p = origin + dir * h.t
+    let mut radiance = lit_hit(hit_p, hit_n, secondary_color(inst), mut state)
+    // The record's emission estimates the instance's radiance; one flagged unseen holds a stand-in, which stays out.
+    if inst.emitter != scene.no_offset:
+        let emitter = scene.light(..indirect_scene.lights[inst.emitter as int])
+        if (emitter.flags & scene.light_flag_unseen_emission) == 0u => radiance += emitter.emission
+    return float4(..radiance, depth_here)
+
+/// What the indirect accumulation reads: the frame, the depth, this frame's rays and last frame's accumulation.
+binding indirect_accumulate_source:
+    /// One element, the frame constants: the cameras and jitters the reprojection runs through.
+    frame: buffer[raster.frame_constants]
+
+    /// The depth the prepass laid down, reversed, `near / view depth`.
+    depth: texture_2d_depth
+
+    /// This frame's rays: radiance, and the view depth they left from.
+    @unfilterable raw: texture_2d[float4]
+
+    /// Last frame's accumulation: radiance and how many frames it holds, and its view depth apart, at full precision.
+    @unfilterable history: texture_2d[float4]
+    @unfilterable history_depth: texture_2d[float]
+
+    /// The prepass's flat normal of each full-size pixel's triangle; zero where none was drawn.
+    normals: texture_2d[float4]
+
+    /// How many full-size pixels one side of a traced pixel spans; 1 where `history` holds last frame's accumulation,
+    /// else 0; and the most frames a still pixel and a moving one keep.
+    settings: float4
+
+/// What the accumulation writes: the averaged radiance and how many frames it holds, and the view depth apart.
+@pixel struct indirect_history_target:
+    @format(.rgba16_float) radiance: float4
+    @format(.r32_float) depth: float
+
+/// 1 for each of four remembered depths within 3% of `depth`, else 0.
+fun same_surface(depths: float4, depth: float) -> float4:
+    let limit = 0.03 * depth
+    let x = if abs(depths.x - depth) <= limit => 1.0 else 0.0
+    let y = if abs(depths.y - depth) <= limit => 1.0 else 0.0
+    let z = if abs(depths.z - depth) <= limit => 1.0 else 0.0
+    let w = if abs(depths.w - depth) <= limit => 1.0 else 0.0
+    return float4(x, y, z, w)
+
+/// `radiance` holding one frame, at view depth `depth`: an accumulation starting over.
+fun started(radiance: float3, depth: float) -> indirect_history_target:
+    return {radiance = float4(..radiance, 1.0), depth = depth}
+
+/// Last frame's accumulation at world point `world`, which this frame shows at traced pixel `t` of a grid `scale`
+/// full-size pixels to a side: the radiance, and how many frames it holds, 0 where nothing remembered is this surface's.
+///
+/// History is this surface's where the point a texel around it showed lies on the plane through `world` facing `n`.
+/// Where `n` is zero, unknown, it is where a remembered depth matches the depth the point had from the previous
+/// camera, or where the depth interpolated between them does, for a surface seen edge-on.
+fun reprojected(history: texture_2d[float4], history_depth: texture_2d[float], f: raster.frame_constants, world: float3, n: float3, scale: float) -> float4:
+    let previous = scene.camera(..f.previous_camera)
+    let at = scene.camera_project(previous, world - previous.position, f.size)
+    if at.x < 0.0 or at.y < 0.0 or at.x >= f.size.x or at.y >= f.size.y => return float4(0.0)
+
+    // Traced texel t holds full-size pixel t * scale, centered at t * scale + 0.5, at the jitter its frame was drawn at.
+    let hp = (at - float2(0.5) - f.previous_jitter) / scale
+    let base = int2(floor(hp))
+    let w = hp - floor(hp)
+    let limit = history.size() - int2(1)
+    let q0 = clamp(base, int2(0), limit)
+    let q1 = clamp(base + int2(1, 0), int2(0), limit)
+    let q2 = clamp(base + int2(0, 1), int2(0), limit)
+    let q3 = clamp(base + int2(1, 1), int2(0), limit)
+    let a = history.load(q0)
+    let b = history.load(q1)
+    let c = history.load(q2)
+    let e = history.load(q3)
+    let d0 = history_depth.load(q0)
+    let d1 = history_depth.load(q1)
+    let d2 = history_depth.load(q2)
+    let d3 = history_depth.load(q3)
+    let depths = float4(d0, d1, d2, d3)
+    let depth_then = dot(world - previous.position, normalize(previous.forward))
+    let bilinear = float4((1.0 - w.x) * (1.0 - w.y), w.x * (1.0 - w.y), (1.0 - w.x) * w.y, w.x * w.y)
+    let planar = dot(n, n) > 0.25
+    let cam = scene.camera(..f.camera)
+    let distance = dot(world - cam.position, normalize(cam.forward))
+    let mut same = same_surface(depths, depth_then)
+    if planar:
+        same = raster_bound.on_plane_then4(f, q0, q1, q2, q3, scale, depths, world, normalize(n), distance)
+    let mut weights = bilinear * same
+    let mut total = weights.x + weights.y + weights.z + weights.w
+    if total <= 0.0:
+        if planar => return float4(0.0)
+        if d0 <= 0.0 or d1 <= 0.0 or d2 <= 0.0 or d3 <= 0.0 => return float4(0.0)
+        let plane = 1.0 / dot(bilinear, float4(1.0) / depths)
+        if abs(plane - depth_then) > 0.03 * depth_then => return float4(0.0)
+        weights = bilinear
+        total = 1.0
+    return (a * weights.x + b * weights.y + c * weights.z + e * weights.w) / total
+
+/// How far, in full-size pixels, the camera's motion carried world point `world` since last frame, at traced pixel
+/// `t` of a grid `scale` full-size pixels to a side.
+fun carried(f: raster.frame_constants, world: float3, t: int2, scale: float) -> float:
+    let previous = scene.camera(..f.previous_camera)
+    let at = scene.camera_project(previous, world - previous.position, f.size)
+    return length(at - (float2(t) * scale + float2(0.5) + f.jitter))
+
+/// `current` averaged into `remembered`, which holds `remembered.w` frames, keeping at most `still_cap` frames where
+/// the point held still and fewer as the camera's motion carried it `motion` pixels, down to `fast_cap`.
+fun blended_in(remembered: float4, current: float3, motion: float, still_cap: float, moving_cap: float, fast_cap: float) -> float4:
+    let cap = mix(if motion < 0.25 => still_cap else moving_cap, fast_cap, saturate(motion / 16.0))
+    let n = min(remembered.w + 1.0, max(cap, 1.0))
+    return float4(..mix(remembered.xyz, current, 1.0 / n), n)
+
+/// This frame's rays at traced pixel `t` averaged into last frame's accumulation, reprojected through the previous
+/// camera, as module `raster_bound` accumulates its half-size signals.
+/// A still pixel keeps up to `settings.z` frames, one the camera's motion carried keeps fewer, down to 8.
+fun indirect_accumulated(t: int2){indirect_accumulate_source} -> indirect_history_target:
+    let f = indirect_accumulate_source.frame[0]
+    let scale = indirect_accumulate_source.settings.x
+    let current = indirect_accumulate_source.raw.load(t)
+    let world = raster_bound_shadow_maps.world_from(indirect_accumulate_source.depth, f, t * (scale as int))
+    if world.w == 0.0 => return started(float3(0.0), 0.0)
+    let cam = scene.camera(..f.camera)
+    let depth_now = dot(world.xyz - cam.position, normalize(cam.forward))
+    if indirect_accumulate_source.settings.y == 0.0 => return started(current.xyz, depth_now)
+    let n = indirect_accumulate_source.normals.load(clamp(t * (scale as int), int2(0), int2(f.size) - int2(1))).xyz
+    let remembered = reprojected(indirect_accumulate_source.history, indirect_accumulate_source.history_depth, f, world.xyz, n, scale)
+    if remembered.w <= 0.0 => return started(current.xyz, depth_now)
+    let motion = carried(f, world.xyz, t, scale)
+    let s = indirect_accumulate_source.settings
+    return {radiance = blended_in(remembered, current.xyz, motion, s.z, s.w, 8.0), depth = depth_now}
+
+/// What the indirect blur reads: the accumulated radiance and how many frames it holds, and its view depth.
+binding indirect_blur_source:
+    @unfilterable accumulated: texture_2d[float4]
+    @unfilterable depth: texture_2d[float]
+
+    /// One element, the frame constants: the camera the texels' points are found through.
+    frame: buffer[raster.frame_constants]
+
+    /// The prepass's flat normal of each full-size pixel's triangle; zero where none was drawn.
+    normals: texture_2d[float4]
+
+    /// How many full-size pixels one side of a traced pixel spans; the other lanes unused.
+    settings: float4
+
+/// The accumulated radiance at traced pixel `t` averaged over the 5x5 around it, each neighbor weighed out by how far its
+/// depth strays from this one's, so light does not bleed across an edge, and the view depth beside it.
+/// Taps twice as far apart where the pixel holds few frames, so what was just uncovered is spread wider.
+/// A neighbour off this texel's plane is another surface, a ceiling beside a wall at the same depth, and is left out.
+fun indirect_blurred(t: int2){indirect_blur_source} -> float4:
+    let size = indirect_blur_source.accumulated.size()
+    let here = indirect_blur_source.accumulated.load(t)
+    let depth = indirect_blur_source.depth.load(t)
+    if depth <= 0.0 => return float4(0.0)
+    let f = indirect_blur_source.frame[0]
+    let cam = scene.camera(..f.camera)
+    let scale = indirect_blur_source.settings.x as int
+    let n0 = indirect_blur_source.normals.load(clamp(t * scale, int2(0), int2(f.size) - int2(1))).xyz
+    let planar = dot(n0, n0) > 0.25
+    let p0 = cam.position + scene.camera_ray_offset(cam, float2(t * scale) + float2(0.5) + f.jitter, f.size) * depth
+    let step = if here.w < 8.0 => 2 else 1
+    let mut sum = float3(0.0)
+    let mut weight = 0.0
+    for j in -2 ..< 3:
+        for i in -2 ..< 3:
+            let q = clamp(t + int2(i, j) * step, int2(0), size - int2(1))
+            let d = indirect_blur_source.depth.load(q)
+            let s = indirect_blur_source.accumulated.load(q)
+            let mut w = if d > 0.0 => exp(-abs(d - depth) / (0.02 * depth)) * max(s.w, 1.0) else 0.0
+            if w > 0.0 and planar:
+                let pq = cam.position + scene.camera_ray_offset(cam, float2(q * scale) + float2(0.5) + f.jitter, f.size) * d
+                if abs(dot(pq - p0, normalize(n0))) > 0.003 * depth:
+                    w = 0.0
+            sum += s.xyz * w
+            weight += w
+    return float4(..(sum / max(weight, 1e-6)), depth)
+
+// -- Traced reflections: a mirror ray where the screen lost or missed its own.
+
+/// What the traced reflection pass reads besides `indirect_scene`: the screen's reflection and the instance ids.
+binding reflection_trace_source:
+    /// The row of the instance table each full-size pixel shows, plus 1; 0 where none does.
+    ids: texture_2d[uint]
+
+    /// The reflection module `raster_bound_reflections` found on screen, at half the image's size.
+    @unfilterable screen: texture_2d[float4]
+
+    /// Last frame's accumulation: radiance and how many frames it holds, and its view depth apart.
+    @unfilterable history: texture_2d[float4]
+    @unfilterable history_depth: texture_2d[float]
+
+    /// The roughness above which nothing is traced, where the shading shows the environment's reflection alone; 1 where
+    /// `history` holds last frame's accumulation, else 0; and the most frames a still pixel and a moving one keep.
+    settings: float4
+
+/// What the traced reflection pass writes in place of the screen's: the accumulated radiance and how far to trust it,
+/// and the accumulation again for the next frame, its frame count in w, with its view depth apart.
+@pixel struct traced_reflection_target:
+    @format(.rgba16_float) reflection: float4
+    @format(.rgba16_float) history: float4
+    @format(.r32_float) depth: float
+
+/// The specular roughness of `inst`, where its parameter block holds it as a constant; 0.5 where a texture or an
+/// attribute gives it, which this pass cannot read; 1 for a type that declares none, which stays matte.
+fun secondary_roughness(inst: scene.instance){indirect_scene} -> float:
+    if inst.rough_kind == scene.value_none => return 1.0
+    if inst.rough_kind == scene.value_zero => return 0.0
+    if inst.rough_kind != scene.value_constant => return 0.5
+    return saturate(reinterpret_as_float(indirect_scene.params.load(inst.param_offset + inst.rough_offset)))
+
+/// This frame's reflection at half-size pixel `h`, before accumulation: the screen's where it found one with full
+/// trust, or where the surface is too rough for a mirror's to show; elsewhere a traced mirror ray, with what the screen
+/// did find blended over it.
+fun traced_reflection_now(h: int2, p: float3, n: float3, depth_here: float){indirect_scene, reflection_trace_source} -> float4:
+    let screen = reflection_trace_source.screen.load(h)
+    if screen.w >= 0.99 => return screen
+    let f = indirect_scene.frame[0]
+    let id = reflection_trace_source.ids.load(clamp(h * 2, int2(0), int2(f.size) - int2(1)))
+    if id == 0u => return screen
+    let here = scene.instance(..indirect_scene.instances[(id - 1u) as int])
+    if secondary_roughness(here) > reflection_trace_source.settings.x => return screen
+
+    let cam = scene.camera(..f.camera)
+    let v = normalize(cam.position - p)
+    let r = normalize(reflect(vec3(..(-v)), vec3(..n)).xyz)
+    let origin = p + n * (0.001 + 0.002 * depth_here)
+    let mut state = pt.hash((h.x as uint) * 7919u + (h.y as uint) * 104729u + (indirect_scene.settings.x as uint) * 15485863u)
+
+    let mut radiance = float3(0.0)
+    let hit = traced(ray(pos3(..origin), vec3(..r), 0.0, 1.0e5), false)
+    if not hit.is_hit:
+        radiance = environment_along(r)
+    else:
+        let inst = scene.instance(..indirect_scene.instances[hit.instance_id as int])
+        let hit_n = hit_normal(hit, inst, r)
+        radiance = lit_hit(origin + r * hit.t, hit_n, secondary_color(inst), mut state)
+    return float4(..mix(radiance, screen.xyz, screen.w), 1.0)
+
+/// The reflection at half-size pixel `h`, averaged into last frame's: how much the shading trusts it is this frame's.
+fun traced_reflection(h: int2){indirect_scene, reflection_trace_source} -> traced_reflection_target:
+    let f = indirect_scene.frame[0]
+    let pixel = h * 2
+    let center = raster_bound_shadow_maps.world_from(indirect_scene.depth, f, pixel)
+    if center.w == 0.0 => return {reflection = float4(0.0), history = float4(0.0), depth = 0.0}
+    let p = center.xyz
+    let cam = scene.camera(..f.camera)
+    let n = raster_bound_shadow_maps.normal_from(indirect_scene.normals, indirect_scene.depth, f, pixel, p, cam.position)
+    let depth_here = dot(p - cam.position, normalize(cam.forward))
+    let now = traced_reflection_now(h, p, n, depth_here)
+
+    let s = reflection_trace_source.settings
+    let mut kept = float4(..now.xyz, 1.0)
+    if s.y != 0.0:
+        let remembered = reprojected(reflection_trace_source.history, reflection_trace_source.history_depth, f, p, n, 2.0)
+        if remembered.w > 0.0:
+            kept = blended_in(remembered, now.xyz, carried(f, p, h, 2.0), s.z, s.w, 2.0)
+    if indirect_scene.settings.z == 1.0 => return {reflection = float4(..float3(kept.w / 64.0), 1.0), history = kept, depth = depth_here}
+    return {reflection = float4(..kept.xyz, now.w), history = kept, depth = depth_here}

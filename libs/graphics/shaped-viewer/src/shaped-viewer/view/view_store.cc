@@ -96,7 +96,16 @@ view_store::accumulation_history view_store::history_of(view_id id, u64 temporal
     auto const* const st = _entries.peek_ptr(id);
     auto const* const slot = st == nullptr ? nullptr : st->temporal.get_ptr(temporal_id);
     return slot == nullptr ? accumulation_history{}
-                           : accumulation_history{.restarts = slot->restarts, .loading_frames = slot->loading_frames};
+                           : accumulation_history{.seed_key = slot->seed_key, .loading_frames = slot->loading_frames};
+}
+
+wavefront_state const* view_store::wavefront_paths(view_id id, u64 temporal_id) const
+{
+    auto const* const st = _entries.peek_ptr(id); // a query must not keep a view alive
+    if (st == nullptr)
+        return nullptr;
+    auto const* const slot = st->temporal.get_ptr(temporal_id);
+    return slot == nullptr || !slot->paths.has_value() ? nullptr : &slot->paths.value();
 }
 
 u32 view_store::min_accumulated_samples(view_id id) const
@@ -115,6 +124,12 @@ bool view_store::is_accumulation_converged(view_id id, cc::optional<u32> samples
 {
     auto const* const st = _entries.peek_ptr(id);
     return st != nullptr && impl::is_accumulation_converged(*st, samples);
+}
+
+bool view_store::is_auto_exposure_read(view_id id)
+{
+    auto* const st = _entries.get_ptr(id);
+    return st == nullptr || impl::is_auto_exposure_read(*st);
 }
 
 void view_store::restart_accumulation(view_id id)
@@ -146,6 +161,22 @@ void restart_accumulation(view_state& state)
 
     // A cut is what throws the rest away on the view's next trace: the temporal histories and the reprojection camera.
     state.camera_cut_pending = true;
+
+    // The image a meter was awaited for is gone with its samples.
+    for (auto& exposure : state.auto_exposure)
+        exposure.meter_awaited = 0;
+}
+
+bool is_auto_exposure_read(view_state& state)
+{
+    auto read = true;
+    for (auto& exposure : state.auto_exposure)
+    {
+        if (exposure.meter_awaited == 0)
+            exposure.meter_awaited = exposure.meters_started + 1;
+        read = read && exposure.meters_landed >= exposure.meter_awaited;
+    }
+    return read;
 }
 
 namespace

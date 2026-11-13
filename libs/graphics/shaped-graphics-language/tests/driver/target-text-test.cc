@@ -89,6 +89,61 @@ TEST("sgl target text - a parameter of an atomic hands the text the place the ca
     CHECK(sgl::check::footprint_text(native.value().footprint) == "work.sum: read write");
 }
 
+namespace
+{
+constexpr cc::string_view k_buffers = "binding work:\n"
+                                      "    values: buffer[float]\n"
+                                      "    sums: mut buffer[float]\n"
+                                      "\n"
+                                      "fun load_twice(b: buffer[float], i: int) -> float:\n"
+                                      "    const if target_language == .hlsl:\n"
+                                      "        \"hlsl\n"
+                                      "            $result = $b[$i] + $b.Load($i);\n"
+                                      "        \"\n"
+                                      "    else:\n"
+                                      "        return b[i] * 2.0\n"
+                                      "\n"
+                                      "fun store(b: mut buffer[float], i: int, v: float):\n"
+                                      "    const if target_language == .hlsl:\n"
+                                      "        \"hlsl\n"
+                                      "            float stored = $v;\n"
+                                      "\n"
+                                      "            $b[$i] = stored;\n"
+                                      "        \"\n"
+                                      "    else:\n"
+                                      "        b[i] = v\n"
+                                      "\n"
+                                      "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                                      "    store(work.sums, id.x, load_twice(work.values, id.x))\n";
+} // namespace
+
+TEST("sgl target text - a buffer parameter hands the text the member the call named, and the footprint its access")
+{
+    auto const hlsl = compiled(k_buffers, target::hlsl_dx12);
+    REQUIRE(hlsl.has_value());
+    CHECK(hlsl.value().text.contains("load_twice_text = work_values[id.x] + work_values.Load(id.x);\n"));
+    CHECK(hlsl.value().text.contains("work_sums[i_1] = stored;\n"));
+    // the text may read what it is handed `mut` as well as write it, whatever the SGL branch does
+    CHECK(sgl::check::footprint_text(hlsl.value().footprint) == "work.values: read, work.sums: read write");
+}
+
+TEST("sgl target text - each line of a body's text names its own line of the source, which DXC's errors then name")
+{
+    auto const hlsl = sgl::compile_to_text({.source = k_buffers,
+                                            .source_name = "buffers.sgl",
+                                            .entry_point = "main_cs",
+                                            .target = target::hlsl_dx12,
+                                            .line_directives = true});
+    REQUIRE(hlsl.has_value());
+    auto const& text = hlsl.value().text;
+    CHECK(text.contains("#line 8 \"buffers.sgl\"\n    load_twice_text = work_values[id.x] + "
+                        "work_values.Load(id.x);\n"));
+    // an empty line of the text keeps the count, so the line after it is the source's
+    CHECK(text.contains("#line 16 \"buffers.sgl\"\n    float stored = v;\n\n    work_sums[i_1] = stored;\n"));
+    // after the text the statement's lines name the statement's line again
+    CHECK(text.contains("work_values.Load(id.x);\n#line 7 \"buffers.sgl\"\n    v = load_twice_text;\n"));
+}
+
 TEST("sgl target text - a run of tagged strings is one body, one per language, of which a target writes its own")
 {
     constexpr auto source = "binding work:\n"
@@ -424,11 +479,13 @@ TEST("sgl target text - vulkan reorders through SPIR-V's own instructions, which
     CHECK(!text.contains("dx::"));
     CHECK(text.contains("[[vk::ext_storage_class(/* RayPayloadKHR */ 5338)]] static radiance "
                         "sgl_hit_payload_radiance;"));
-    CHECK(text.contains("vk::SpirvOpaqueType<5313> h = "));
+    // SPIR-V forbids loading or storing a hit object, so its let names the trace's variable rather than copying it
+    CHECK(!text.contains("vk::SpirvOpaqueType<5313> h = "));
+    CHECK(!text.contains("= hit_object"));
     CHECK(text.contains("sgl_reorder_thread(uint(uint(id.x)), uint(1));"));
     CHECK(text.contains("sgl_hit_object_trace_reorder_execute("));
     CHECK(text.contains("sgl_hit_object_trace_ray("));
-    CHECK(text.contains("sgl_hit_object_execute(h, sgl_hit_payload_radiance);"));
+    CHECK(text.contains("sgl_hit_object_execute(hit_object"));
     // the payload's variable is declared once, though three calls hand a payload of its type over
     constexpr auto declaration = cc::string_view("static radiance sgl_hit_payload_radiance;");
     auto const first = cc::string_view(text).find(declaration);
@@ -439,6 +496,48 @@ TEST("sgl target text - vulkan reorders through SPIR-V's own instructions, which
     REQUIRE(without.has_value());
     CHECK(!without.value().text.contains("sgl_hit_object"));
     CHECK(!without.value().text.contains("sgl_reorder_thread"));
+}
+
+TEST("sgl target text - a hit object handed to a function is the trace's own variable, on vulkan")
+{
+    // EMIT-225: a parameter stands for the let it was handed, so no copy reaches DXC, loop and early return included
+    constexpr auto source = "require raytracing_pipeline\n"
+                            "\n"
+                            "struct radiance:\n"
+                            "    color: float\n"
+                            "\n"
+                            "rays rs:\n"
+                            "    primary: radiance\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.triangles]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun total(x: hit_object, n: int) -> float:\n"
+                            "    if n < 0:\n"
+                            "        return 0.0\n"
+                            "    let mut v = x.t\n"
+                            "    for i in 0 ..< n:\n"
+                            "        v += x.t\n"
+                            "    return v\n"
+                            "\n"
+                            "@raygen fun main_cs(@launch_id id: int3){work}:\n"
+                            "    let mut p = radiance(0.0)\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    const if has(.shader_execution_reordering):\n"
+                            "        let h = trace_hit(work.world, r, rs.primary, mut p)\n"
+                            "        p.color = total(h, id.x)\n"
+                            "    work.values[id.x] = p.color\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::shader_execution_reordering);
+    auto const with = compiled(source, target::hlsl_vulkan, device);
+    REQUIRE(with.has_value()).dump("error", with.has_error() ? cc::string(with.error()) : cc::string());
+    auto const& text = with.value().text;
+    CHECK(text.contains("vk::SpirvOpaqueType<5313> hit_object_1;"));
+    CHECK(text.contains("sgl_hit_object_t(hit_object_1)"));
+    CHECK(!text.contains("= hit_object"));
+    CHECK(!text.contains("vk::SpirvOpaqueType<5313> x"));
+    CHECK(!text.contains("dx::HitObject"));
 }
 
 TEST("sgl target text - a reordering trace takes its hint's bits from a named const")
@@ -518,4 +617,41 @@ TEST("sgl target text - a dx12 ray query sees the opacity micromaps of a device 
     CHECK(vulkan.value().text.contains(", RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>"));
     CHECK(vulkan.value().text.contains("[[vk::ext_capability(5381)]]"));
     CHECK(vulkan.value().features.has(sgl::check::feature::opacity_micromap));
+    // vulkan sees micromaps without the flag, and DXC takes minutes over either and can write invalid SPIR-V, so a
+    // query not forced to 2 states carries neither
+    auto const vulkan_plain = compiled(source, target::hlsl_vulkan, device);
+    REQUIRE(vulkan_plain.has_value());
+    CHECK(!vulkan_plain.value().text.contains("OPACITY_MICROMAPS"));
+    CHECK(!vulkan_plain.value().text.contains("ext_capability(5381)"));
+}
+
+TEST("sgl target text - a ray query takes the flags its trace hands it through a local as its template")
+{
+    // EMIT-159: a local given a constant and never assigned again is that constant; a mixed world's trace hands its
+    // flags on through one
+    constexpr auto source = "require ray_query\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.mixed]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "struct ball:\n"
+                            "    normal: vec3\n"
+                            "\n"
+                            "fun nothing(b: procedural_box) -> report[ball] => report.none()\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    work.values[id.x] = work.world.trace(r, nothing, flags = "
+                            "ray_flags.accept_first_hit_and_end_search).t\n";
+    auto const out = compiled(source, target::hlsl_dx12);
+    REQUIRE(out.has_value());
+    CHECK(out.value().text.contains("RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH>"));
+    // EMIT-184: known flags that force nothing leave a vulkan query without the micromap flag and its capability
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::opacity_micromap);
+    auto const vulkan = compiled(source, target::hlsl_vulkan, device);
+    REQUIRE(vulkan.has_value());
+    CHECK(!vulkan.value().text.contains("OPACITY_MICROMAPS"));
+    CHECK(!vulkan.value().text.contains("ext_capability(5381)"));
 }

@@ -25,6 +25,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run tests")
     a.preset(p)
     a.build_overrides(p)
+    a.server(p)
     a.emsdk(p)
     a.jsruntime(p)
     a.profile(p)
@@ -69,6 +70,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Let a heavy test narrow to its smallest case, as `check` asks of every preset but its default "
                         "one: tests read it through nx::is_smoke(). Forwarded to the runner as --smoke; "
                         "--thorough wins over it.")
+    p.add_argument("--shard", metavar="K/N",
+                   help="Run only shard K of N, 0-based: each test lands in one shard by a hash of its name, the "
+                        "same on every run, and an aliased driver's children (a backend's context, say) are placed "
+                        "one by one. Forwarded to the runner as --shard; the shards partition the run, which is "
+                        "what a bisection needs.")
     p.add_argument("--sample", action="store_true",
                    help="Profile the run: each binary samples its threads until the run ends, prints where the busy "
                         "time went, and keeps the recording as <binary>.ccrec beside it. "
@@ -90,6 +96,26 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     # `-c <section>` scopes into a section or instance, repeated to descend a path.
     # An optional leading `--` is dropped, and dev.py's own options still bind wherever they sit relative to the test name.
     return p
+
+
+def _rebuild_built_outside_all(ctx: Context, args: argparse.Namespace, presets: list, primary, all_targets: list,
+                               binary_names: list[str], server) -> None:
+    """Builds by name each of `binary_names` that a preset's build directory already holds an artifact of."""
+    selected = set(binary_names)
+    for preset in presets:
+        targets = all_targets if preset is primary else ctx.discover(preset, args.emsdk_path)
+        names = sorted(t.name for t in targets
+                       if t.name in selected and t.artifact is not None and Path(t.artifact).exists())
+        if not names:
+            continue
+        results = dev.build(
+            [preset], names, root=ctx.root,
+            auto_configure=False,
+            mirror=args.mirror_output, verbose=args.verbose,
+            emsdk_path=args.emsdk_path, server=server,
+        )
+        if not all(r.ok for r in results):
+            ctx.fail_build(results, [preset])
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
@@ -120,6 +146,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if args.seed is not None:
         runner_args = ["--seed", str(args.seed), *runner_args]
 
+    if args.shard is not None:
+        runner_args = ["--shard", args.shard, *runner_args]
+
     # The runner's own default is 60 s, which the default timeout would kill it before reaching.
     # Without --watchdog each binary gets half of ITS timeout, since a binary may declare a longer one than the default.
     if args.watchdog is not None:
@@ -132,6 +161,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if args.test_args is not None:
         runner_args = ["--test-args", args.test_args, *runner_args]
 
+    # One server session for the build and the run, so it is asked once and a fallback warns once.
+    server = ctx.build_server(args)
+
     # Optionally build first (incremental — fast when nothing changed).
     if not args.no_build:
         target_names = (
@@ -142,7 +174,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             presets, target_names, root=ctx.root,
             auto_configure=not args.no_configure,
             mirror=args.mirror_output, verbose=args.verbose,
-            emsdk_path=args.emsdk_path,
+            emsdk_path=args.emsdk_path, server=server,
         )
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)
@@ -159,6 +191,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     )
     if err:
         ctx.die(err)
+
+    # A binary outside `all` (EXCLUDE_FROM_ALL) is not rebuilt by the build above, yet its artifact from an earlier build is still there.
+    # Run or probed as it is, it is stale: a new test is missing from its listing, and a fixed one still fails.
+    # So every selected binary that has an artifact is built by name, which costs a no-op ninja call when it is current.
+    # One never built stays unbuilt and is reported so, rather than pulling in what `all` deliberately leaves out.
+    if not args.no_build and not args.target:
+        _rebuild_built_outside_all(ctx, args, presets, primary, all_targets, binary_names, server)
 
     # Both probes below launch the artifact, so on a wasm preset they need the same runtime the run itself will use.
     # Resolved against the emsdk overlay rather than the inherited PATH, because emsdk's bundled node is usually the
@@ -204,6 +243,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             emsdk_path=args.emsdk_path,
             runtime=jsr.JsRuntimeRequest.from_args(args),
             sample=args.sample,
+            # A repeat chases a flake, so a stored pass must not answer for it.
+            server=server, rerun=repeat > 1,
         )
 
         if any(r["returncode"] != 0 for r in records):

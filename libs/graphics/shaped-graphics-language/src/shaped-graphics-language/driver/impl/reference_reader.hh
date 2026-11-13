@@ -233,8 +233,9 @@ struct reader
             return cc::string("sampler ") + s.name;
         case check::symbol_kind::test:
             return "test";
-        case check::symbol_kind::unsupported:
-            return cc::string("type ") + s.name;
+        case check::symbol_kind::alias:
+            return s.type == check::type_id::none ? cc::string("type ") + s.name
+                                                  : cc::format("type {} = {}", s.name, type_name(s.type));
         }
         return s.name;
     }
@@ -265,7 +266,7 @@ struct reader
             auto const& o = m.symbols[i];
             if (check::symbol_id(i) != id && o.kind == check::symbol_kind::function && o.name == s.name
                 && o.owner == s.owner && o.role == s.role && o.operator_spelling == s.operator_spelling
-                && (o.file < m.prelude_file_count()) == is_prelude)
+                && (o.file < m.prelude_file_count()) == is_prelude && m.is_reached_file(o.file))
                 out.push_back(check::symbol_id(i));
         }
         return out;

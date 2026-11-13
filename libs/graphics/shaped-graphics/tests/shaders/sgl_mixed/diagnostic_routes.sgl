@@ -1,0 +1,39 @@
+// One print and one assert per stage, built through DXC and through each native route (EMIT-183).
+// Each failed assert logs a line every value of which has to read the same, whichever route wrote its record.
+
+enum tone:
+    low
+    high
+
+binding checked:
+    values: mut buffer[int]
+
+@compute fun stamped(@thread_id id: int3){checked}:
+    let v = checked.values[id.x]
+    print "thread $(id.x) holds $v"
+    assert v != 3, "int $v, uint $(v as uint), float $(v as float), lanes $(int2(v, 7)), near $(float3(0.5, 2.0, v as float)), bool $(v > 2), tone $(tone.high)"
+    checked.values[id.x] = v * 2
+
+struct marked:
+    @position position: hpos4
+
+@pixel struct marked_target:
+    color: float4
+
+@vertex fun cover_vs(@vertex_index v: int) -> marked:
+    let x = ((v & 1) as float) * 4.0 - 1.0
+    let y = ((v >> 1) as float) * 4.0 - 1.0
+    return {position = hpos4(x, y, 0.0, 1.0)}
+
+@pixel fun marked_ps(p: marked) -> marked_target:
+    let x = p.position.x as int
+    let y = p.position.y as int
+    print "pixel $x, $y"
+    assert not (x == 1 and y == 2), "pixel ($x, $y) of the target"
+    return {color = float4(1.0, 0.0, 0.0, 1.0)}
+
+pipeline marked_pixels:
+    vertex = cover_vs
+    pixel = marked_ps
+    cull = .none
+    format = .rgba8_unorm

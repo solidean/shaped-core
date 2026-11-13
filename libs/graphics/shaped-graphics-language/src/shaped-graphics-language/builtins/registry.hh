@@ -95,6 +95,12 @@ struct sgl::builtins::helper_context
     u32 data = 0;
 };
 
+/// What every intersector, function table and intersection function of an MSL compile closes its tags with.
+/// The file defines `sgl_motion` once (EMIT-139): the motion tags in a package that takes `SOFTWARE_TRACE`, and nothing elsewhere.
+/// `sgl_motion_time(t)` beside it is the time argument a tagged `intersect` takes, and nothing where the tags are.
+/// The tags double a static scene's traversal on Apple GPUs, and only such a package is bound a structure that moves.
+#define SGL_MSL_MOTION_TAGS " sgl_motion"
+
 namespace sgl::builtins
 {
 using custom_writer = written (*)(call_context const&);
@@ -297,6 +303,8 @@ struct sgl::builtins::function_record
     /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
     /// what it gives differs within a workgroup (CHK-377).
     bool is_subgroup_operation = false;
+    /// A step or a read of a `ray_query`, which `spelling::data` names as a `query_op`.
+    bool is_ray_query = false;
     /// Of those, one whose result is the same in every invocation of the subgroup, a vote, a reduction or a broadcast,
     /// so its value is unproven rather than varying whatever its argument is (CHK-399).
     bool agrees_in_subgroup = false;
@@ -325,6 +333,8 @@ struct sgl::builtins::function_record
     /// Takes, past its signature, the position of its acceleration-structure argument among the acceleration members
     /// of the entry point's binding list, which flatten appends as an int: the emulated trace's root (CHK-325).
     bool takes_acceleration_index = false;
+    /// Takes, past its signature and ahead of its payload, the ray's time, which MSL places what moves at (EVAL-130).
+    bool takes_ray_time = false;
     /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
     /// The call itself writes nothing, and a local it initializes is never copied.
     bool declares_only = false;

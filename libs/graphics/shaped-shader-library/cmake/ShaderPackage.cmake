@@ -46,8 +46,9 @@
 # Stages are spelled exactly as sg::shader_stage (compute / vertex / fragment / raygen / ...), so the
 # generator emits the enumerator instead of a string for C++ to parse back.
 #
-# LANGUAGE is hlsl (the default), wgsl or sgl.
-# The four generating kinds above read HLSL, so a WGSL package that names one is a generator error.
+# LANGUAGE is hlsl (the default), wgsl, msl or sgl.
+# The four generating kinds above read HLSL, so a WGSL or MSL package that names one is a generator error.
+# An MSL package's files are `.metal`, compiled by slib's metal compiler, so only a metal context acquires them.
 #
 # An SGL package spells its stages as SGL does -- `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps` -- and
 # `pixel` is sg's fragment stage.
@@ -95,7 +96,7 @@ set(SC_SGL_TOOL "" CACHE FILEPATH
     "A runnable `sgl`, for an SGL shader package's `*` and typed entries where the tree's own cannot run or is not built")
 
 function(sc_add_shader_package)
-    cmake_parse_arguments(PKG "SOFTWARE_TRACE" "TARGET;NAME;NAMESPACE;SOURCE_DIR;LANGUAGE" "SHADERS;MODULE_DIRS" ${ARGN})
+    cmake_parse_arguments(PKG "SOFTWARE_TRACE;NATIVE_SPIRV;NATIVE_DXIL" "TARGET;NAME;NAMESPACE;SOURCE_DIR;LANGUAGE" "SHADERS;MODULE_DIRS" ${ARGN})
 
     foreach(_required TARGET NAME NAMESPACE SOURCE_DIR SHADERS)
         if(NOT PKG_${_required})
@@ -113,6 +114,12 @@ function(sc_add_shader_package)
     endif()
     if(PKG_SOFTWARE_TRACE AND NOT PKG_LANGUAGE STREQUAL "sgl")
         message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): SOFTWARE_TRACE is for an SGL package")
+    endif()
+    if(PKG_NATIVE_SPIRV AND NOT PKG_LANGUAGE STREQUAL "sgl")
+        message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): NATIVE_SPIRV is for an SGL package")
+    endif()
+    if(PKG_NATIVE_DXIL AND NOT PKG_LANGUAGE STREQUAL "sgl")
+        message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): NATIVE_DXIL is for an SGL package")
     endif()
 
     # add_custom_command(OUTPUT) attaches to the directory scope it is called from, and a function does not create one.
@@ -158,6 +165,12 @@ function(sc_add_shader_package)
     if(PKG_SOFTWARE_TRACE)
         string(APPEND _manifest_text "SOFTWARE_TRACE=1\n")
     endif()
+    if(PKG_NATIVE_SPIRV)
+        string(APPEND _manifest_text "NATIVE_SPIRV=1\n")
+    endif()
+    if(PKG_NATIVE_DXIL)
+        string(APPEND _manifest_text "NATIVE_DXIL=1\n")
+    endif()
     foreach(_dir IN LISTS _module_dirs)
         string(APPEND _manifest_text "MODULE_DIR=${_dir}\n")
     endforeach()
@@ -190,8 +203,27 @@ function(sc_add_shader_package)
                         "a module has one exporting package, which every other one reaches through its MODULE_DIRS")
                 endif()
                 set_property(GLOBAL PROPERTY "SC_SGL_EXPORTED_MODULE_${_kind}" "${PKG_TARGET}/${PKG_NAME}")
-                list(APPEND _module_headers "${_gen_dir}/modules/sgl_modules/${_kind}.hh")
-                list(APPEND _module_sources "${_gen_dir}/modules/sgl_modules/${_kind}.cc")
+                # Module `a`'s C++ namespace is an alias, which module `a.b`'s cannot nest in from another package.
+                get_property(_exported GLOBAL PROPERTY SC_SGL_EXPORTED_MODULES)
+                foreach(_other IN LISTS _exported)
+                    string(FIND "${_kind}" "${_other}." _is_under)
+                    string(FIND "${_other}" "${_kind}." _is_over)
+                    if(_is_under EQUAL 0 OR _is_over EQUAL 0)
+                        get_property(_other_exporter GLOBAL PROPERTY "SC_SGL_EXPORTED_MODULE_${_other}")
+                        if(NOT _other_exporter STREQUAL "${PKG_TARGET}/${PKG_NAME}")
+                            message(FATAL_ERROR
+                                "sc_add_shader_package(${PKG_NAME}): module:${_kind} and module:${_other} nest in one "
+                                "C++ namespace, and ${_other_exporter} exports the second; export both from one package")
+                        endif()
+                    endif()
+                endforeach()
+                if(NOT _kind IN_LIST _exported)
+                    set_property(GLOBAL APPEND PROPERTY SC_SGL_EXPORTED_MODULES "${_kind}")
+                endif()
+                # a dotted module `a.b` writes sgl_modules/a/b.hh
+                string(REPLACE "." "/" _module_path "${_kind}")
+                list(APPEND _module_headers "${_gen_dir}/modules/sgl_modules/${_module_path}.hh")
+                list(APPEND _module_sources "${_gen_dir}/modules/sgl_modules/${_module_path}.cc")
             endif()
         endforeach()
 

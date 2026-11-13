@@ -163,8 +163,8 @@ TEST("sgl check - a computed const reads no binding, and one without a value say
     CHECK(reports_for("fun spin() -> int:\n    let mut i = 0\n    while i >= 0:\n        i = (i + 1) % 7\n    "
                       "return i\nconst k = spin()\n")
               .contains("constant-without-value user:[spin()] k takes more than 100000 steps to compute"));
-    // CHK-353: an option is a bool, an int or an enum case, which a computed value of another type is not
-    CHECK(reports_for("@option const v = float2(1.0, 2.0)\n").contains("an option of float or uint"));
+    // CHK-353: an option is a bool, a scalar or an enum case, which a computed value of another type is not
+    CHECK(reports_for("@option const v = float2(1.0, 2.0)\n").contains("an option of this type"));
     // a computed int is the same constant a literal is, so an array length and a workgroup size take it
     CHECK(reports_for("const n = 2 * 4\nfun f() -> float[n] => float[n].filled(0.0)\n") == "");
 }
@@ -197,8 +197,6 @@ TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
 
 TEST("sgl check - what the tracer does not carry is unsupported-yet, and names the construct")
 {
-    CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
-
     CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
           == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
@@ -207,11 +205,18 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("@format(rgba8) struct a:\n    x: float\n")
           == "unsupported-yet user:[format] the attribute @format on a struct\n");
 
-    // an unsupported declaration still owns its name, so a use of it is silent
-    CHECK(reports_for("type color = float3\nstruct a:\n    x: color\n")
-          == "unsupported-yet user:[type color = float3] type alias\n");
+    // an alias whose value the tracer does not carry names no type, and a use of it is silent
+    CHECK(reports_for("type pair = (float, float)\nstruct a:\n    x: pair\n")
+          == "unsupported-yet user:[(float, float)] a tuple type\n");
     // the module line is accepted
     CHECK(reports_for("module cube\nstruct a:\n    x: float\n") == "");
+}
+
+TEST("sgl check - two aliases that name each other are a dependency cycle, and name no type")
+{
+    CHECK(reports_for("type ping = pong\ntype pong = ping\nstruct a:\n    x: ping\n")
+          == "dependency-cycle user:[ping] ping -> pong -> ping\n");
+    CHECK(reports_for("type again = again\n") == "dependency-cycle user:[again] again -> again\n");
 }
 
 TEST("sgl check - a function needs a body unless it is @builtin")
@@ -373,9 +378,11 @@ TEST("sgl check - a binding records @inline and its members")
     CHECK(reports_of(checked) == "");
     CHECK(
         sgl::check::dump(checked.module).ends_with("(binding a inline (m : mat4))\n(binding b (v : vec3) (k : float))\n"));
-    REQUIRE(checked.module.bindings.size() == 2);
-    CHECK(checked.module.bindings[0].is_inline);
-    CHECK(!checked.module.bindings[1].is_inline);
+    // the prelude's reserved bindings stand ahead of the program's
+    auto const& all = checked.module.bindings;
+    REQUIRE(all.size() >= 2);
+    CHECK(all[all.size() - 2].is_inline);
+    CHECK(!all[all.size() - 1].is_inline);
 }
 
 TEST("sgl check - the binding list is checked: every entry is the name of a binding")

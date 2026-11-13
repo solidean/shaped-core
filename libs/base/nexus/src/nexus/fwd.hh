@@ -18,12 +18,14 @@ struct test_schedule;        // the runs a CLI invocation selected (tests/schedu
 struct test_schedule_config; // what the CLI arguments select (tests/schedule.hh)
 struct test_thread_scope;    // attributes a thread's checks to a captured test (tests/thread_scope.hh)
 struct log_expectation;      // how often an expected log record must appear (tests/logs.hh)
+struct sampled_context;      // what the runner report's sampler saw under one test (tests/export/runner_report.hh)
+struct sampled_functions;    // what it saw over a run, by test (tests/export/runner_report.hh)
+struct covered_functions; // the functions each test entered, counted by a coverage build (tests/export/runner_report.hh)
 
 enum class filter_mode; // how the positional filters are read (tests/schedule.hh)
 
 /// The domain every recording site in nexus is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
-
 } // namespace nx
 
 namespace nx::config

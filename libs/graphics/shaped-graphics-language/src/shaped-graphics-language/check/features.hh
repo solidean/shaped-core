@@ -59,6 +59,8 @@ enum class sgl::check::feature : sgl::u8
     float_denormals,
     /// `@view_index` (CHK-437): one draw renders several views, which WebGPU has on no device.
     view_instancing,
+    /// No program names it: `keep_view` asks for it with `has`, on a device whose driver needs the pixel stage to read the view.
+    pixel_view_read_workaround,
     /// A vertex, geometry or tessellation stage writes a storage buffer, which vulkan asks of the device (EMIT-183).
     /// No program names it: a vulkan text writes a `print` from those stages where the device has it, and drops one elsewhere.
     vertex_pipeline_stores,
@@ -75,6 +77,9 @@ enum class sgl::check::feature : sgl::u8
     /// `atomic[ulong]` in a buffer, its `min` and `max` alone (CHK-511); `shader_int64_atomics` grants it too.
     /// It is all of Metal's 64-bit atomics, on the GPUs that have any.
     shader_int64_min_max_atomics,
+    /// A hit's cluster, which `cluster_id` reads where the device builds a BLAS from clusters, and is -1 elsewhere.
+    /// No program names it: the prelude asks it with `has`, so a device without it needs no capability of it.
+    clustered_geometry,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
@@ -109,6 +114,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "float_specials",               //
     "float_denormals",              //
     "view_instancing",              //
+    "pixel_view_read_workaround",   //
     "vertex_pipeline_stores",       //
     "shader_int64",                 //
     "shader_f64",                   //
@@ -116,6 +122,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "unbounded_binding_arrays",     //
     "shader_shared_int64_atomics",  //
     "shader_int64_min_max_atomics", //
+    "clustered_geometry",           //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

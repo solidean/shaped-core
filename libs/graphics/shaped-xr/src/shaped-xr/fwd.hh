@@ -19,6 +19,8 @@ struct action_binding;        // an interaction profile's path an action is sugg
 struct action_description;    // an action by name, its kind and its bindings
 struct runtime_feature;       // one thing a runtime says about its headset
 struct runtime_report;        // what the active runtime offers
+struct controller_pose;       // one hand as the controller routine draws it
+class controller_routine;     // draws the hands as plain boxes
 struct view;                  // one eye's pose and projection in tg's frame
 struct frame;                 // one frame's views and the images each is rendered into
 class system;                 // the runtime and the headset it found

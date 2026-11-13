@@ -137,6 +137,7 @@ TEST("sgl emit - MSL passes a group of textures as one argument buffer, its stat
                        "    texture2d<float, access::write> post_dst [[id(2)]];\n"
                        "    texture2d<float, access::read_write> post_acc [[id(3)]];\n"
                        "    sampler post_bilinear [[id(4)]];\n"
+                       "    uint sgl_lengths [[id(5)]][5];\n"
                        "};\n"));
     CHECK(msl.contains("kernel void blur(uint3 id_in [[thread_position_in_grid]], constant post_arguments& post_group "
                        "[[buffer(0)]])\n"));
@@ -816,9 +817,10 @@ TEST("sgl emit - a file-scope sampler named as a word the target reserves is ren
     CHECK((dx12.bound_names.back() == sgl::emit::bound_name{.emitted = "register_", .host = "register"}));
 }
 
-TEST("sgl emit - an unbounded array's length is a constant of its binding, which a namesake elsewhere does not gain")
+TEST("sgl emit - an unbounded array's length is what sg writes into its reserved block, at the array's position "
+     "(CHK-491)")
 {
-    // CHK-491: the binding whose array's length is read holds it; the other has no constant block at all
+    // no binding holds a constant of it, so neither has a constant block
     constexpr auto arrays = "require binding_arrays, unbounded_binding_arrays\n"
                             "\n"
                             "binding read:\n"
@@ -832,12 +834,21 @@ TEST("sgl emit - an unbounded array's length is a constant of its binding, which
                             "    read.out_values[id.x] = read.sources[nonuniform (id.x % read.sources.length)][0] + "
                             "unread.sources[nonuniform id.x][0]\n";
     auto const dx12 = text_of(arrays, target::hlsl_dx12);
-    CHECK(dx12.contains("struct read_data\n{\n    int sources_length;\n};\n")).dump("text", dx12);
-    CHECK(dx12.contains("read_sources[NonUniformResourceIndex(id.x % read.sources_length)][0]")).dump("text", dx12);
-    CHECK(!dx12.contains("unread_data")).dump("text", dx12);
+    CHECK(!dx12.contains("read_data")).dump("text", dx12);
+    CHECK(dx12.contains("ConstantBuffer<sg_array_lengths_data> sg_array_lengths : register(b1, space12);")).dump("text", dx12);
+    CHECK(dx12.contains("read_sources[NonUniformResourceIndex(id.x % int(sg_array_lengths.values[0].x))][0]"))
+        .dump("text", dx12);
+    auto const vulkan = text_of(arrays, target::hlsl_vulkan);
+    CHECK(vulkan.contains("[[vk::binding(20, 3)]] ConstantBuffer<sg_array_lengths_data> sg_array_lengths;"))
+        .dump("text", vulkan);
+    // metal's table carries its own count
+    auto const msl = text_of(arrays, target::msl);
+    CHECK(msl.contains("int(read_group.read_sources->count)")).dump("text", msl);
+    CHECK(!msl.contains("sg_array_lengths")).dump("text", msl);
 }
 
-TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, and WGSL and MSL refuse it (EMIT-210, EMIT-211)")
+TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, a table its group sizes in MSL, and WGSL refuses it "
+     "(EMIT-210, EMIT-211)")
 {
     constexpr auto arrays = "require binding_arrays, unbounded_binding_arrays\n"
                             "\n"
@@ -861,5 +872,12 @@ TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, and WGSL and MS
     auto const vulkan = text_of(arrays, target::hlsl_vulkan);
     CHECK(vulkan.contains("Texture2D<float4> scene_albedo[];\n")).dump("text", vulkan);
     CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
-    CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::msl)).contains("unbounded_binding_arrays"));
+    // no argument buffer member is unsized, so the member's slot holds the address of a table each group sizes
+    auto const msl = text_of(arrays, target::msl);
+    CHECK(msl.contains("struct scene_albedo_table\n{\n    uint count;\n    uint sgl_pad;\n    texture2d<float> "
+                       "entries[1];\n};\n"))
+        .dump("text", msl);
+    CHECK(msl.contains("    constant scene_albedo_table* scene_albedo [[id(1)]];\n")).dump("text", msl);
+    CHECK(msl.contains("    auto const scene_albedo = &scene_group.scene_albedo->entries[0];\n")).dump("text", msl);
+    CHECK(msl.contains("scene_albedo[p.material].sample(")).dump("text", msl);
 }

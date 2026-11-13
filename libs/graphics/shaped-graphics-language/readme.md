@@ -32,6 +32,8 @@ What a target lacks is the exception: WGSL's emulated ray tracing pays for being
 `uv run dev.py benchmark "sr - SGL against the HLSL it was ported from"` measures it on dx12, with sr's shaders against the hand-written HLSL they were ported from.
 On an RTX 5070 Ti in October 2026 SGL took 0.99x to 1.00x the HLSL's GPU time for à-trous, 0.99x for the network's convolution, and 1.02x for SVGF's filter.
 On an Intel Arc B580 in November 2026 it took 0.99x to 1.00x of it on dx12, and 0.97x to 0.99x on vulkan, where both go through DXC's SPIR-V backend.
+`uv run dev.py benchmark "sr - SGL against the same kernels written in MSL, on metal"` measures the same kernels against MSL ports of that HLSL.
+On an Apple M4 in November 2026 SGL's minima were 0.99x to 1.05x the MSL's for à-trous, 0.97x to 1.12x for SVGF's filter, and 1.00x to 1.02x for the convolution.
 `uv run dev.py benchmark "written in WGSL" --preset emscripten-webgpu-relwithdebinfo` measures WebGPU, against the same kernels written by hand in WGSL.
 On the same Arc it took 1.00x for à-trous and SVGF's filter under node's Dawn and deno's wgpu alike, and 0.81x and 0.52x for the convolution.
 The convolution is faster because SGL unrolls the loops the HLSL marks `[unroll]`, which WGSL cannot ask for.
@@ -107,9 +109,15 @@ To uninstall, delete the link and reload.
 ### The formatter
 
 `sgl format FILE…` writes SGL's spacing into each file in place; `--check` changes nothing and exits 2 where a file would change.
-It is the spacing within a line: one space where tokens stand apart, a space after a comma, around an arrow and around a binary operator, none inside brackets or before a comma.
-Indentation and line breaks are the line tree's, comments and strings are content, and all of them stay as written.
-It formats a file whose only errors are operators without their spaces, `a+b`, and refuses one with any other syntax error.
+`dev.py check` holds every tracked `.sgl` file to it through the `sgl-format` gate, which `--fix` formats.
+It is the spacing within a line: one space where tokens stand apart, a space after a comma and a colon, around an arrow and around a binary operator, none inside brackets or before a comma or a colon.
+So a type is `name: type` everywhere, `let x: T = …` included.
+The trailing comments of consecutive lines line up one space past the longest code, unless that moves a comment more than 16 columns, which starts a new run.
+Code is indented four spaces a level of the line tree, a tab in the indentation included.
+The lines a comment or a multi-line string owns move with it, so the comment keeps its layout and the string its value.
+Line breaks, comment text and strings are content, and stay as written.
+A syntax error leaves its block and the block's siblings as written, with a warning naming the error, and the rest of the file is formatted; at the top level, its declaration stays.
+An operator without its spaces, `a+b`, and a tab in the indentation are no such errors: each has one reading, which the formatter fixes.
 Its output always parses to the tree its input did, which it checks; a line whose formatting would not is left as written and named, as a bug of the formatter.
 
 ### The language server

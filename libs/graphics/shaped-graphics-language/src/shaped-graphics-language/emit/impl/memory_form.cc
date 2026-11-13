@@ -462,7 +462,8 @@ cc::optional<sgl::emit::impl::memory_form> sgl::emit::impl::element_form_of(chec
         for (auto const& leaf : placed.leaves)
             leaves.push_back({.path = {}, .type = leaf.type, .offset = leaf.offset, .size = leaf.size});
         // EMIT-112: HLSL strides a buffer by its element's own size, so a 3-vector's padding has to be a field
-        if (is_hlsl(t) && stride != record->leaf_count * scalar_size_of(*record))
+        // CHK-518: and DXC's DXIL drops a `row_major` written in the buffer's template, which a field keeps
+        if (is_hlsl(t) && (stride != record->leaf_count * scalar_size_of(*record) || record->name == "affine3"))
             return build(m, members, leaves, space, stride, stride, "value", t, false);
         return form_for(m, members, leaves, space, stride, stride, "value", t);
     }

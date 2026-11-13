@@ -55,6 +55,8 @@ private:
         vulkan_texture_handle texture;
         sg::subresource_range range;
         sg::view_class bound_as = sg::view_class::readonly;
+        /// An acceleration member's device address, which a minted group hands its trace; 0 otherwise.
+        u64 address = 0;
     };
 
     /// Fills every descriptor with its binding's empty value, which the base requires before it hands the group out.

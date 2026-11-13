@@ -5,9 +5,12 @@
 require first_instance
 require ray_query
 require raytracing_pipeline
+require readwrite_image_formats
+require extended_image_formats
 
 use hybrid
 use openpbr
+use pt
 use raster
 use scene
 use tracer
@@ -49,7 +52,7 @@ binding thin_io:
     let emission = thin_io.emission.load(px)
 
     if thin_io.primary_depth.load(px) >= 1.0:
-        tracer.traced.output.store(px, float4(emission.x, emission.y, emission.z, 1.0))
+        tracer.traced.output.store(px, float4(emission.x, emission.y, emission.z, pt.moment_of(emission.xyz)))
         tracer.traced.guide_normal.store(px, float4(0.0))
         tracer.traced.guide_albedo.store(px, float4(0.0))
         tracer.traced.guide_specular_albedo.store(px, float4(0.0))
@@ -61,46 +64,114 @@ binding thin_io:
     // Where the raster sampled the pixel, which is off its center on a frame drawn for an upscaler.
     let pixel = float2((id.x as float) + 0.5, (id.y as float) + 0.5) + hybrid.jitter_of(f)
     let ray = scene.camera_ray_offset(cam, pixel, hybrid.pass.size)
+    let origin = scene.camera_origin(cam, pixel, hybrid.pass.size)
     let t = thin_io.depth.load(px) / dot(ray, normalize(cam.forward))
 
     let normals = thin_io.normals.load(px)
     let shading_n = raster.oct_decode(float2(normals.x, normals.y))
     let n = raster.oct_decode(float2(normals.z, normals.w))
-    // The point is rounded as `cam.position + ray * t` is, to a scale of the camera's distance from the origin plus the ray's length.
+    // The point is rounded as `origin + ray * t` is, to a scale of the camera's distance from the origin plus the ray's length.
     // `pt.offset_ray` sizes its offset from the point's own coordinates, as an interpolated point is rounded, which is far less on a floor near y = 0.
     // So the point is lifted off the surface by that rounding first, or a row of it starts under the floor and its bounce rays hit the floor.
-    let reach = max(abs(cam.position.x), max(abs(cam.position.y), abs(cam.position.z))) + length(ray) * t
+    // The face's own reach, which the G-buffer holds in emission's alpha, adds the rounding a ray leaving it meets on its far corners.
+    let reach = max(abs(origin.x), max(abs(origin.y), abs(origin.z))) + length(ray) * t + emission.w
     let lift = reach * (1.0 / 1048576.0)
-    let surface_p = cam.position + ray * t
+    let surface_p = origin + ray * t
     // Reflections and light samples leave on the viewer's side; a refraction leaves through the surface, which `bounce_from` lifts toward itself.
     let p = surface_p + n * lift
     let surface = raster.thin_surface(thin_io.base.load(px), thin_io.specular.load(px), thin_io.extra.load(px))
     let shading = openpbr.make_frame(shading_n)
-    let v = normalize(cam.position - p)
+    let v = normalize(scene.camera_eye_of(cam, p) - p)
     // The normals were turned toward the viewer, so the viewer is outside.
     let b = openpbr.bsdf_prepare(surface, false, 3u)
     let wo_local = openpbr.to_local(shading, v)
 
+    // As many samples as the frame asks for, each its own light sample and bounce, averaged: `hybrid.samples_of`.
     let mut rng = hybrid.pixel_rng(uint2(id.x as uint, id.y as uint), size.x as uint)
-    let lit = hybrid.direct(b, shading, n, wo_local, p, true, mut rng)
-    let bounced = hybrid.bounce_from(b, shading, n, wo_local, surface_p, lift, mut rng)
-    let followed = hybrid.is_followed(bounced)
-    let s2 = hybrid.secondary_of(bounced, followed)
-    let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng)
-        + hybrid.secondary_environment(s2.b, s2.f, bounced.n, hybrid.unless_followed(followed, s2.wo_local), bounced.at, mut rng)
-    let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.if_followed(followed, s2.wo_local), bounced.at, mut rng)
-    let s3 = hybrid.secondary_of(next, false)
-    let next_lit = hybrid.direct(s3.b, s3.f, next.n, s3.wo_local, next.at, false, mut rng)
-        + hybrid.secondary_environment(s3.b, s3.f, next.n, s3.wo_local, next.at, mut rng)
-    let beyond = next.throughput * (next.escaped + next.lights + next_lit)
-    let color = hybrid.finite(float3(emission.x, emission.y, emission.z) + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
+    // The pixel's one closure, so one variate serves every sample of it.
+    let v = tracer.environment_variate_of(b, wo_local)
+    let count = hybrid.samples_of(f)
+    let mut sum = float3(0.0)
+    // Each sample's luminance squared, `pt.moment_of`, which the frame's alpha carries into the mean beside its color.
+    let mut moment_sum = 0.0
+    let mut hit_distance = float2(0.0)
+    for sample in 0 ..< count:
+        let direct_lit = hybrid.direct(b, shading, n, wo_local, p, true, true, v, mut rng)
+        let bounced = hybrid.bounce_from(b, shading, n, wo_local, surface_p, lift, mut rng)
+        let lit = direct_lit + hybrid.bounce_variate(v, b, shading, wo_local, bounced) + tracer.environment_specular_variate(v, b, shading, wo_local, mut rng)
+        // Where the first sample's bounce went, in its lobe's half, as the tracer writes it: 1e4 for an escape, and 0 for the half no direction was drawn from.
+        if sample == 0:
+            let distance = if not bounced.drawn => 0.0 else (if bounced.hit => length(bounced.at - p) else 1e4)
+            hit_distance = if bounced.specular => float2(0.0, distance) else float2(distance, 0.0)
+        let followed = hybrid.is_followed(bounced)
+        let s2 = hybrid.secondary_of(bounced, followed)
+        // Where no bounce follows the surface the bounce met, its lights are one of two halves: `direct`'s, or the lights `next` reaches.
+        let light_taken = pt.rand(mut rng) < 0.5
+        let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, light_taken, tracer.no_environment_variate(), mut rng)
+            + hybrid.secondary_environment(s2.b, s2.f, bounced.n, hybrid.unless_followed(followed, s2.wo_local), bounced.at, mut rng)
+        let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.kept_if(followed or not light_taken, s2.wo_local), bounced.at, mut rng)
+        // Where nothing follows the bounced surface, `next` was its BSDF's half, and nothing past it is lit: the rest would all come to zero.
+        if not followed:
+            let unfollowed = hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + 2.0 * next.throughput * next.lights))
+            sum += unfollowed
+            moment_sum += pt.moment_of(hybrid.finite(float3(emission.x, emission.y, emission.z)) + unfollowed)
+            continue
+        // The surface after a followed one is followed by none, so its lights are halved the same way, `last` the BSDF's half.
+        let s3 = hybrid.secondary_of(next, false)
+        let s3_wo = hybrid.kept_if(followed, s3.wo_local)
+        let last_taken = pt.rand(mut rng) < 0.5
+        let last = hybrid.bounce_plain(s3.b, s3.f, next.n, hybrid.kept_if(not last_taken, s3_wo), next.at, mut rng)
+        let next_lit = hybrid.direct(s3.b, s3.f, next.n, s3_wo, next.at, false, last_taken, tracer.no_environment_variate(), mut rng) + 2.0 * last.throughput * last.lights
+            + hybrid.secondary_environment(s3.b, s3.f, next.n, s3_wo, next.at, mut rng)
+        let beyond = next.throughput * (next.escaped + next.lights + next_lit)
+        let one = hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
+        sum += one
+        moment_sum += pt.moment_of(hybrid.finite(float3(emission.x, emission.y, emission.z)) + one)
+    let color = hybrid.finite(float3(emission.x, emission.y, emission.z)) + sum / (count as float)
 
-    tracer.traced.output.store(px, float4(..color, 1.0))
-    // Where the bounce went, in its lobe's half, as the tracer writes it: 1e4 for an escape, and 0 for the half no direction was drawn from.
+    tracer.traced.output.store(px, float4(..color, moment_sum / (count as float)))
     if f.write_hit_distance != 0u:
-        let distance = if not bounced.drawn => 0.0 else (if bounced.hit => length(bounced.at - p) else 1e4)
-        tracer.traced.guide_hit_distance[px] = if bounced.specular => float2(0.0, distance) else float2(distance, 0.0)
+        tracer.traced.guide_hit_distance[px] = hit_distance
     tracer.traced.guide_normal.store(px, float4(..n, 0.0))
     tracer.traced.guide_albedo.store(px, float4(..openpbr.pt_diffuse_albedo(surface), 0.0))
     tracer.traced.guide_specular_albedo.store(px, float4(..openpbr.pt_specular_albedo(surface), 0.0))
     tracer.traced.guide_roughness.store(px, openpbr.pt_roughness(surface))
+
+/// One still frame's guides, and the layer's that `blend_guides` folds them into.
+binding guide_io:
+    @unfilterable
+    normal: texture_2d[float4]
+    @unfilterable
+    depth: texture_2d[float]
+    @unfilterable
+    albedo: texture_2d[float4]
+    @unfilterable
+    specular_albedo: texture_2d[float4]
+    @unfilterable
+    roughness: texture_2d[float]
+    blended_normal: mut image_2d[.rgba16_float]
+    blended_depth: mut image_2d[.r32_float]
+    blended_albedo: mut image_2d[.rgba16_float]
+    blended_specular_albedo: mut image_2d[.rgba16_float]
+    blended_roughness: mut image_2d[.r16_float]
+
+/// How many frames the layer's guides already hold.
+@inline binding guide_blend:
+    frames: uint
+    pad0: uint
+    pad1: uint
+    pad2: uint
+
+/// Folds a still frame's guides into the layer's, as the tracer folds its guides into the mean: each frame at the same weight.
+/// Each still frame draws its pixels at another sub-pixel offset, so a pixel an edge crosses holds each surface's share, as its color does.
+@compute(8, 8) fun blend_guides(@thread_id id: int3){guide_io, guide_blend}:
+    let size = guide_io.depth.size()
+    if id.x >= size.x or id.y >= size.y => return
+    let px = int2(id.x, id.y)
+    let g = guide_blend.frames as float
+    let w = 1.0 / (g + 1.0)
+    guide_io.blended_normal[px] = float4(..((guide_io.blended_normal[px].xyz * g + guide_io.normal.load(px).xyz) * w), 0.0)
+    guide_io.blended_depth[px] = (guide_io.blended_depth[px] * g + guide_io.depth.load(px)) * w
+    guide_io.blended_albedo[px] = float4(..((guide_io.blended_albedo[px].xyz * g + guide_io.albedo.load(px).xyz) * w), 0.0)
+    guide_io.blended_specular_albedo[px] = float4(..((guide_io.blended_specular_albedo[px].xyz * g + guide_io.specular_albedo.load(px).xyz) * w), 0.0)
+    guide_io.blended_roughness[px] = (guide_io.blended_roughness[px] * g + guide_io.roughness.load(px)) * w

@@ -9,7 +9,7 @@ refs:
 SGL writes readable text today and leaves optimizing to the compiler behind each target.
 That holds for DXC and for Metal's toolchain, and it was assumed not to hold for WGSL, compiled with little optimization of its own.
 Measured on 2026-11-05, SGL's WGSL matched hand-written WGSL on three sr kernels under Dawn and wgpu, and beat it by unrolling.
-[chore-sgl-emitted-code-speed-on-every-target](chore-sgl-emitted-code-speed-on-every-target.md) has the numbers.
+[chore-sgl-emitted-code-speed-on-every-target](.closed/2026/11/chore-sgl-emitted-code-speed-on-every-target.md) has the numbers.
 So WGSL's need is a kernel where SGL's text measurably loses, not the assumption alone.
 The architecture has the place for it: every pass already works on the flat tree, legalized, before a target's emitter reads it.
 

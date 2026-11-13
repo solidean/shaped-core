@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../module_dirs.hh"
 #include "fwd.hh"
 #include "protocol/documents.hh"
 
@@ -10,6 +9,7 @@
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
+#include <shaped-graphics-language/driver/shared_library.hh>
 
 /// The prelude's files as the library carries them, parsed once for the whole process, with what the server adds.
 struct sgl_lsp::prelude
@@ -47,11 +47,12 @@ struct sgl_lsp::analysis
     sgl::ast::file_ast empty_ast;
     /// The document's position among the module's files: the last, or its place in the prelude (`sgl::prelude_file_of`).
     i32 own_file = 0;
-    /// Every file of the module directories as read for this analysis, and the ones the document reached parsed.
-    /// `module.library_files` says which of `library.files` each checked file between the prelude and the document is.
-    sgl_tool::module_library library;
-    cc::vector<cc::unique_ptr<sgl::parsed_file>> library_parsed;
-    cc::vector<cc::unique_ptr<sgl::ast::file_ast>> library_asts;
+    /// The module files of the module directories as this analysis read them, parsed once for the process and shared
+    /// with every analysis that reads them the same; null where there are none.
+    /// `module.library_files` says which of `library->files` each checked file between the prelude and the document is.
+    cc::shared_ptr<sgl::shared_library const> library;
+    /// The checked modules the document continued from, which `module` reads in place; null where it checked them itself.
+    sgl::shared_library::link_ptr layer;
     /// Parallel to `module.library_files`.
     cc::vector<lsp::text_index> library_indices;
     sgl::check::checked_module module;

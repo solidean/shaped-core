@@ -37,6 +37,7 @@
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh> // cc::unit
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
@@ -63,6 +64,11 @@ struct nx::invocation_options
     /// Only the child's body is placed: its helper coroutines are unhomed asyncs, which go to compute like any homed body's.
     /// A helper that must touch the pinned subject hops there itself, and one that does not surfaces on its first line rather than after a suspend.
     bool inherit_home = false;
+
+    /// Awaited after each child of a sequential invocation, before the next starts; empty awaits nothing.
+    /// Children sharing one subject leave it what they did not clean up, so this is where a driver bounds that: a GPU context sweeping the epochs a test left in flight.
+    /// Ignored by a parallel invocation, whose children have no "after" to speak of.
+    cc::unique_function<cc::shared_async<cc::unit>()> after_each;
 };
 
 namespace nx::impl
@@ -79,7 +85,8 @@ cc::shared_async<invocation_result> async_invoke_tests_impl(cc::string name,
                                                             cc::vector<typed_value> boxes,
                                                             bool in_parallel,
                                                             isize max_concurrent,
-                                                            cc::thread_bound_scheduler* home);
+                                                            cc::thread_bound_scheduler* home,
+                                                            cc::unique_function<cc::shared_async<cc::unit>()> after_each);
 
 // The home the calling body runs in, for invocation_options::inherit_home; asserts there is one.
 [[nodiscard]] cc::thread_bound_scheduler* invoking_home();
@@ -90,7 +97,7 @@ cc::shared_async<invocation_result> async_invoke_tests_impl(cc::string name,
 template <class... Args>
 cc::shared_async<invocation_result> async_invoke_tests_boxed(cc::string_view name,
                                                              bool in_parallel,
-                                                             invocation_options const& options,
+                                                             invocation_options options,
                                                              Args... args)
 {
     // Read now, in the invoking body's segment: the invocation's own coroutine is cold and may first run elsewhere.
@@ -100,7 +107,7 @@ cc::shared_async<invocation_result> async_invoke_tests_boxed(cc::string_view nam
     boxes.reserve(sizeof...(Args));
     (boxes.push_back(typed_value::create(cc::move(args))), ...);
     return async_invoke_tests_impl(cc::string(name), cc::arg_types_of(cc::signature<void(Args...)>{}), cc::move(boxes),
-                                   in_parallel, options.max_concurrent, home);
+                                   in_parallel, options.max_concurrent, home, cc::move(options.after_each));
 }
 
 template <class... A, std::size_t... I>
@@ -228,7 +235,7 @@ template <class... Args>
                                                                                  invocation_options options,
                                                                                  Args... args)
 {
-    return impl::async_invoke_tests_boxed(name, false, options, cc::move(args)...);
+    return impl::async_invoke_tests_boxed(name, false, cc::move(options), cc::move(args)...);
 }
 
 /// Start every invocable matching `args...`, then await them all.
@@ -249,7 +256,7 @@ template <class... Args>
                                                                                  invocation_options options,
                                                                                  Args... args)
 {
-    return impl::async_invoke_tests_boxed(name, true, options, cc::move(args)...);
+    return impl::async_invoke_tests_boxed(name, true, cc::move(options), cc::move(args)...);
 }
 } // namespace nx
 

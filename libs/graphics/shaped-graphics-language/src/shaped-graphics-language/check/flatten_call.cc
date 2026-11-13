@@ -111,36 +111,89 @@ auto sgl::check::impl::flattener::add_message(ast::expr_id message) -> i32
     auto result = flat_message{.pieces = {cc::string()}};
     auto const& tokens = source.tokens;
     auto const open = index_of(source.at(ast().at(message).form).token);
-    for (auto i = open + 1; i < tokens.size() && tokens[i].kind != token_kind::quote_close; ++i)
+
+    // The tokens from `i` up to `end`, or to the closing quote: a body's text, and a new piece after each interpolation.
+    // A multi-line string's body has no escapes (STR-21), and `$$` is a dollar in either form (STR-27).
+    auto const take = [&](isize i, isize end, bool is_multi_line)
     {
-        auto const& t = tokens[i];
-        if (t.kind == token_kind::string_body)
-            append_unescaped(result.pieces.back(), source.text_of(t.where));
-        else if (t.kind == token_kind::dollar && i + 1 < tokens.size())
+        for (; i < end && tokens[i].kind != token_kind::quote_close; ++i)
         {
-            // past the interpolation: its parenthesized code, or its name and each `.name` fused after it
-            if (tokens[i + 1].kind == token_kind::round_open)
+            auto const& t = tokens[i];
+            if (t.kind == token_kind::string_body)
             {
-                auto depth = 0;
-                for (++i; i < tokens.size(); ++i)
+                auto const body = source.text_of(t.where);
+                if (!is_multi_line)
+                    append_unescaped(result.pieces.back(), body);
+                else
+                    for (auto k = isize(0); k < body.size(); ++k)
+                    {
+                        result.pieces.back() += body[k];
+                        if (body[k] == '$' && k + 1 < body.size() && body[k + 1] == '$')
+                            ++k;
+                    }
+            }
+            else if (t.kind == token_kind::dollar && i + 1 < tokens.size())
+            {
+                // past the interpolation: its parenthesized code, or its name and each `.name` fused after it
+                if (tokens[i + 1].kind == token_kind::round_open)
                 {
-                    depth += tokens[i].kind == token_kind::round_open  ? 1
-                           : tokens[i].kind == token_kind::round_close ? -1
-                                                                       : 0;
-                    if (depth == 0)
-                        break;
+                    auto depth = 0;
+                    for (++i; i < tokens.size(); ++i)
+                    {
+                        depth += tokens[i].kind == token_kind::round_open  ? 1
+                               : tokens[i].kind == token_kind::round_close ? -1
+                                                                           : 0;
+                        if (depth == 0)
+                            break;
+                    }
                 }
+                else if (tokens[i + 1].kind == token_kind::symbol)
+                {
+                    ++i;
+                    while (i + 2 < tokens.size() && tokens[i + 1].kind == token_kind::dot
+                           && tokens[i + 2].kind == token_kind::symbol)
+                        i += 2;
+                }
+                else
+                    continue;
+                result.pieces.push_back(cc::string());
             }
-            else if (tokens[i + 1].kind == token_kind::symbol)
+        }
+    };
+
+    // the line that holds the opening quote; lines and their tokens are in source order
+    auto const& lines = source.lines;
+    auto opening = isize(-1);
+    for (auto l = isize(0); l < lines.size() && opening < 0; ++l)
+        if (lines[l].token_count > 0 && lines[l].first_token <= u32(open)
+            && u32(open) < lines[l].first_token + lines[l].token_count)
+            opening = l;
+    if (opening < 0 || !lines[opening].opens_string)
+        take(open + 1, tokens.size(), false);
+    else
+    {
+        // STR-15 to STR-20: the content lines joined by `\n`, each past the opening line's indentation and 4 columns
+        auto const content_columns = lines[opening].indent_columns + 4;
+        auto is_first = true;
+        auto blanks = 0;
+        for (auto l = opening + 1; l < lines.size(); ++l)
+        {
+            auto const& line = lines[l];
+            if (line.kind == line_kind::blank)
             {
-                ++i;
-                while (i + 2 < tokens.size() && tokens[i + 1].kind == token_kind::dot
-                       && tokens[i + 2].kind == token_kind::symbol)
-                    i += 2;
-            }
-            else
+                ++blanks;
                 continue;
-            result.pieces.push_back(cc::string());
+            }
+            if (line.kind != line_kind::string_content)
+                break;
+            if (!is_first)
+                for (auto k = 0; k <= blanks; ++k)
+                    result.pieces.back() += '\n';
+            is_first = false;
+            blanks = 0;
+            for (auto k = content_columns; k < line.indent_columns; ++k)
+                result.pieces.back() += ' ';
+            take(isize(line.first_token), isize(line.first_token + line.token_count), true);
         }
     }
     entry.messages.push_back(cc::move(result));
@@ -568,6 +621,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
         bindings.push_back(concrete(type_arguments[i + 1]));
     }
     judge_stage(call, callee);
+    c.note_body_read(callee);
     auto const& s = c.out.at(callee);
     auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
     for (auto const& f : frames)

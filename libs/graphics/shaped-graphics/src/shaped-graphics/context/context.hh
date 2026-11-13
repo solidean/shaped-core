@@ -100,6 +100,58 @@ public:
     [[nodiscard]] bool portability_checks() const { return _portability_checks.load(cc::memory_order_relaxed); }
     void set_portability_checks(bool enabled) { _portability_checks.store(enabled, cc::memory_order_relaxed); }
 
+    /// Whether a mesh-shaded pipeline shaped-shader-library describes is drawn as its polyfill: a compute pass and a
+    /// draw (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
+    /// **`where_missing` by default**: a device without a mesh stage draws it this way, and one with a mesh stage draws
+    /// it natively, which measured faster than the polyfill on every device that has both.
+    /// Set it before acquiring the pipelines it should cover.
+    [[nodiscard]] polyfill_use mesh_polyfill() const { return _mesh_polyfill.load(cc::memory_order_relaxed); }
+    void set_mesh_polyfill(polyfill_use use) { _mesh_polyfill.store(use, cc::memory_order_relaxed); }
+
+    /// Whether this backend draws a pipeline whose description holds a `mesh_polyfill`.
+    [[nodiscard]] virtual bool draws_mesh_polyfill() const { return false; }
+
+    /// Whether a pipeline with a geometry stage that shaped-shader-library describes is drawn as its polyfill: a
+    /// compute pass and a draw over the mesh polyfill's words (SGL's CHK-525).
+    /// **`never` by default**: a polyfill is opt-in until its benchmark against the native stage has run.
+    /// Set it before acquiring the pipelines it should cover.
+    [[nodiscard]] polyfill_use geometry_polyfill() const { return _geometry_polyfill.load(cc::memory_order_relaxed); }
+    void set_geometry_polyfill(polyfill_use use) { _geometry_polyfill.store(use, cc::memory_order_relaxed); }
+
+    /// Whether this backend draws a pipeline whose `mesh_polyfill` stands for a geometry stage.
+    [[nodiscard]] virtual bool draws_geometry_polyfill() const { return false; }
+
+    /// How a polyfilled geometry stage is drawn where `geometry_polyfill` asks for it.
+    /// `mesh` is taken where the device has `feature::mesh_shader` and the backend `draws_geometry_mesh_route`, and
+    /// `compute` otherwise.
+    /// **`mesh` by default**: on an Apple M4 it drew a third faster in one draw, and many times faster over many draws,
+    /// each of which splits the compute route's pass (`sg geometry polyfill - a frame through a geometry stage …`).
+    /// Set it before acquiring the pipelines it should cover.
+    [[nodiscard]] geometry_polyfill_route geometry_polyfill_route() const
+    {
+        return _geometry_polyfill_route.load(cc::memory_order_relaxed);
+    }
+    void set_geometry_polyfill_route(sg::geometry_polyfill_route route)
+    {
+        _geometry_polyfill_route.store(route, cc::memory_order_relaxed);
+    }
+
+    /// Whether this backend draws a mesh pipeline that stands for a geometry stage, `geometry_mesh_corners`.
+    [[nodiscard]] virtual bool draws_geometry_mesh_route() const { return false; }
+
+    /// Whether a pipeline with tessellation stages that shaped-shader-library describes is drawn as their polyfill:
+    /// compute passes over D3D's tessellator and a draw of the points (SGL's CHK-527).
+    /// **`never` by default**, opt-in until its benchmark against the native stages has run.
+    /// Set it before acquiring the pipelines it should cover.
+    [[nodiscard]] polyfill_use tessellation_polyfill() const
+    {
+        return _tessellation_polyfill.load(cc::memory_order_relaxed);
+    }
+    void set_tessellation_polyfill(polyfill_use use) { _tessellation_polyfill.store(use, cc::memory_order_relaxed); }
+
+    /// Whether this backend draws a pipeline whose description holds a `tessellation_polyfill`.
+    [[nodiscard]] virtual bool draws_tessellation_polyfill() const { return false; }
+
     /// Whether `dispatch_rays` checks every instance of every bound tlas against the hit records it reaches.
     /// A record past the shader table or of the wrong kind is undefined behavior on every backend.
     /// On metal a record past the table can fault the GPU, so `dispatch_rays` skips a dispatch that reaches one.
@@ -140,6 +192,17 @@ public:
     /// shaped-shader-library asks it, so SGL compiles such an entry point at `.fast` with a warning rather than
     /// refusing it (SGL's EMIT-185).
     [[nodiscard]] virtual bool weakens_float_guarantees() const { return false; }
+
+    /// Whether SGL shaders for this context are written as SPIR-V by SGL itself rather than compiled through DXC, where
+    /// SGL has a lowering for them yet: a vulkan context, unless it was created with `vulkan_config::native_spirv` off.
+    /// shaped-shader-library asks it, as it asks `weakens_float_guarantees`.
+    [[nodiscard]] virtual bool prefers_native_spirv() const { return false; }
+
+    /// The same of DXIL: a dx12 context, unless it was created with `dx12_config::native_dxil` off.
+    [[nodiscard]] virtual bool prefers_native_dxil() const { return false; }
+    /// Whether SGL's own SPIR-V and DXIL should carry each operation's `.sgl` line, for a debugger (EMIT-257).
+    /// Opt-in, since it grows every binary by the sources it names: a context created with `native_line_tables`.
+    [[nodiscard]] virtual bool writes_native_line_tables() const { return false; }
 
     /// The home the bound calls run in, or null when there is none to move to.
     ///
@@ -732,6 +795,23 @@ protected:
     [[nodiscard]] virtual cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
                                                                                 memory_heap_contents contents) = 0;
 
+    /// Allocates an empty partitioned_tlas, reached through ctx.persistent.create_partitioned_tlas.
+    /// Only a backend that reports `sg::feature::partitioned_tlas` overrides it.
+    [[nodiscard]] virtual cc::result<partitioned_tlas_handle> try_create_partitioned_tlas(
+        partitioned_tlas_description const& desc);
+
+    /// The GPU address a record names `blas` by, which only a blas_table hands out.
+    /// Only a backend that reports `sg::feature::partitioned_tlas` overrides it.
+    [[nodiscard]] virtual u64 blas_address_of(blas const& blas) const;
+
+    /// The GPU address a record names `buffer` by, which only a buffer_table hands out.
+    /// Only a backend that reports `sg::feature::clustered_geometry` overrides it.
+    [[nodiscard]] virtual u64 buffer_address_of(raw_buffer const& buffer) const;
+
+    /// Allocates an empty cluster pool, reached through ctx.persistent.create_cluster_pool.
+    /// Only a backend that reports `sg::feature::clustered_geometry` overrides it.
+    [[nodiscard]] virtual cc::result<cluster_pool_handle> try_create_cluster_pool(cluster_pool_description const& desc);
+
     // The bind-path creates carry an explicit lifetime_scope; buffers carry it inside allocation_info instead.
     // binding_group is a real per-scope descriptor allocation, so ctx.persistent / ctx.transient append the scope.
     // Layouts and pipelines are schemas / PSOs with no transient variant — ctx.uncached always passes persistent.
@@ -842,6 +922,10 @@ protected:
     cc::atomic<bool> _device_loss_claimed = false;
     cc::atomic<bool> _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
+    cc::atomic<polyfill_use> _mesh_polyfill = polyfill_use::where_missing;
+    cc::atomic<polyfill_use> _geometry_polyfill = polyfill_use::never;
+    cc::atomic<polyfill_use> _tessellation_polyfill = polyfill_use::never;
+    cc::atomic<sg::geometry_polyfill_route> _geometry_polyfill_route = sg::geometry_polyfill_route::mesh;
     cc::atomic<bool> _hit_record_checks = CC_ASSERT_ENABLED != 0;
     cc::atomic<bool> _render_pass_split_warnings = true;
 

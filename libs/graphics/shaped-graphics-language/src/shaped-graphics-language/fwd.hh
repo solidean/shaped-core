@@ -33,6 +33,8 @@ struct emitted_source;
 struct interface_binding;
 struct prelude_file;
 struct library_file;
+struct shared_library;
+struct module_artifact;
 struct parsed_prelude_file;
 
 enum class token_class : u8;
@@ -47,6 +49,7 @@ struct parameter_label;
 struct call_signature;
 struct signature_help;
 struct formatted_source;
+struct format_skip;
 struct outline_entry;
 struct fold_range;
 
@@ -224,6 +227,7 @@ struct target_text;
 struct target_preamble;
 struct target_condition;
 struct target_type_branch;
+struct layout_place;
 struct sampler_state;
 struct shape_info;
 struct image_format_info;
@@ -265,6 +269,10 @@ struct ray_trace;
 struct callable_call;
 struct texel_store;
 struct flat_traced_ray;
+struct source_line;
+struct line_origin;
+struct debug_value;
+struct debug_site;
 struct flat_text_type;
 struct call_record;
 struct function_instance;
@@ -293,6 +301,7 @@ struct flat_binding_member;
 struct flat_file_sampler;
 struct flat_member;
 struct flat_buffer_element;
+struct flat_written_word;
 struct flat_buffer_length;
 struct flat_element;
 struct flat_construct;
@@ -351,6 +360,10 @@ struct outcome;
 
 enum class undefined_guard : u8;
 struct legalize_options;
+struct mesh_polyfill_layout;
+struct tessellation_polyfill_layout;
+struct mesh_corner_parts;
+struct task_polyfill_layout;
 
 enum class expectation_kind : u8;
 struct test_expectation;
@@ -362,12 +375,18 @@ struct suggested_fix;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;
+struct chained_module;
 struct checked_prelude;
 template <class T>
 class layered;
 template <class K, class V>
 class layered_map;
 enum class ray_trace_kind : u8;
+struct source_lines;
+enum class reserved_use : u8;
+struct reserved_target;
+struct reserved_binding;
+struct geometry_mesh_parts;
 } // namespace sgl::check
 
 namespace sgl::test
@@ -384,17 +403,64 @@ namespace sgl::emit
 {
 enum class target : u8;
 enum class error_kind : u8;
+enum class native_route : u8;
+enum class mesh_form : u8;
 struct error;
 struct emitted_text;
 struct bound_name;
 struct emitted_field;
 struct emitted_layout;
-struct source_line;
-struct line_origin;
-struct debug_value;
-struct debug_site;
+using check::debug_site;
+using check::debug_value;
+using check::line_origin;
+using check::source_line;
 struct options;
 } // namespace sgl::emit
+
+namespace sgl::ir
+{
+struct program;
+enum class type_kind : u8;
+struct member;
+enum class op : u16;
+enum class storage : u8;
+struct type;
+enum class math : u8;
+enum class subgroup : u8;
+enum class ray_query_value : u8;
+enum class hit_object_value : u8;
+enum class group_fold : u8;
+enum class derivative : u8;
+enum class barrier : u8;
+struct instruction;
+enum class merge_kind : u8;
+struct block;
+struct constant;
+enum class global_kind : u8;
+enum class built_in : u8;
+enum class stage_part : u8;
+enum class interpolation : u8;
+struct stage_element;
+enum class tessellation_domain : u8;
+struct primitive_stage;
+struct global;
+struct local;
+struct source_place;
+struct line_table;
+struct payload_annotation;
+enum class type_ref : u32;
+enum class value_ref : u32;
+enum class block_ref : u32;
+enum class operand : u8;
+enum class control_flow : u8;
+class dominance;
+} // namespace sgl::ir
+
+namespace sgl::ir::dxil
+{
+enum class signature_table : u8;
+struct signature_element;
+} // namespace sgl::ir::dxil
 
 namespace sgl::builtins::texture
 {
@@ -407,4 +473,6 @@ struct call;
 namespace sgl::builtins
 {
 enum class subgroup_op : u8;
+enum class query_op : u32;
+enum class query_read : u32;
 } // namespace sgl::builtins

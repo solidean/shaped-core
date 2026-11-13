@@ -12,7 +12,7 @@ The prelude is checked once per process, and every compile then continues from t
 Both halves still carry work that is not the program's own.
 The children name each cut, with what it costs today and the test that measures it.
 
-The persistent shader cache of slib does not skip the prelude check, so this cost is paid once per process wherever a pipeline is acquired (shaped-shader-library's `docs/structure.md`).
+The checked prelude can be written as an artifact and read back, but no process keeps one for another, so each still checks it once.
 
 ## Measured, 2026-11-06
 
@@ -35,6 +35,17 @@ The form parser climbs precedence in one loop instead of a frame per level, whic
 The test-only builtins (`test_texel` and its siblings) are about 16 KB of the prelude, some 4% of what a process pays for it.
 A compile pays nothing for them, since no pass of a program's check walks the prelude any more.
 
-Step 3 of the compilation model, saving checked layers (`docs/spec/incubator/compilation-model.md`), would remove the 20 ms.
-It is shelved, and belongs to [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md): a cache with its invalidation does not pay for 15 ms per process yet.
-What would reopen it: many short-lived processes compiling, or a prelude that grows well past today's size.
+Saving checked layers removes the check from a process that reads the prelude back: 5.8 ms became a 0.68 ms load on 2026-11-08.
+It belongs to [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md).
+
+## Measured in a fresh process, 2026-11-08
+
+Release `sgl emit` of the sgl-cube's vertex shader, with the checked prelude read back from the tool's file.
+
+- **The builtin registry: 11 ms.** Registering the records takes 2.2 ms, and `finalize` 8.6 ms, which is the parse of `builtins.sgl`, 387 KB of the prelude's 467 KB.
+  `finalize` reads each record's name and parameters back from that parse, and the prelude's first file is the same parse.
+- **The two hand-written files' parse: about 1 ms.**
+- **Reading the checked layer back: 2.3 ms,** the 1.6 MB file's read included.
+
+Putting the parses into the artifact was tried, and lost: the artifact grew to 9.6 MB, and reading it back cost what parsing does.
+So what is left is the parse itself: a faster parse, or a `builtins.sgl` with less in it, are the cuts.

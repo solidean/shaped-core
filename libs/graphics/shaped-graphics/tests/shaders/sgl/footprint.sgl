@@ -28,10 +28,10 @@ struct shift_varyings:
     color: float4
 
 @vertex fun shifted_vs(v: shift_corner){shift} -> shift_varyings:
-    return { position = hpos4(v.position.x + shift.offsets[0], v.position.y, 0.0, 1.0) }
+    return {position = hpos4(v.position.x + shift.offsets[0], v.position.y, 0.0, 1.0)}
 
 @pixel fun flat_ps(p: shift_varyings){shift} -> shift_target:
-    return { color = float4(1.0, 0.0, 0.0, 1.0) }
+    return {color = float4(1.0, 0.0, 0.0, 1.0)}
 
 pipeline shifted:
     vertex = shifted_vs
@@ -46,18 +46,18 @@ binding marks:
     hits: mut buffer[float]
 
 @vertex fun marks_vs(v: shift_corner){marks} -> shift_varyings:
-    return { position = hpos4(v.position.x, v.position.y, 0.0, 1.0) }
+    return {position = hpos4(v.position.x, v.position.y, 0.0, 1.0)}
 
 fun pixel_index(p: shift_varyings) -> int => (p.position.y as int) * 4 + (p.position.x as int)
 
 @pixel fun mark_ps(p: shift_varyings){marks} -> shift_target:
     let i = pixel_index(p)
     marks.hits[i] = (i + 1) as float
-    return { color = float4(0.0, 1.0, 0.0, 1.0) }
+    return {color = float4(0.0, 1.0, 0.0, 1.0)}
 
 @pixel fun read_ps(p: shift_varyings){marks} -> shift_target:
     let v = marks.hits[pixel_index(p)] / 255.0
-    return { color = float4(v, v, v, 1.0) }
+    return {color = float4(v, v, v, 1.0)}
 
 pipeline marking:
     vertex = marks_vs
@@ -75,7 +75,7 @@ pipeline reading:
 @pixel fun accumulate_ps(p: shift_varyings){marks} -> shift_target:
     let i = pixel_index(p)
     marks.hits[i] = marks.hits[i] + 1.0
-    return { color = float4(0.0, 1.0, 0.0, 1.0) }
+    return {color = float4(0.0, 1.0, 0.0, 1.0)}
 
 pipeline accumulating:
     vertex = marks_vs
@@ -90,12 +90,12 @@ binding peek:
     seen: mut buffer[float]
 
 @vertex fun peek_vs(v: shift_corner){peek} -> shift_varyings:
-    return { position = hpos4(v.position.x, v.position.y, 0.0, 1.0) }
+    return {position = hpos4(v.position.x, v.position.y, 0.0, 1.0)}
 
 @pixel fun peek_ps(p: shift_varyings){peek} -> shift_target:
     let i = pixel_index(p)
     peek.seen[i] = peek.hits[i]
-    return { color = float4(0.0, 1.0, 0.0, 1.0) }
+    return {color = float4(0.0, 1.0, 0.0, 1.0)}
 
 pipeline peeking:
     vertex = peek_vs

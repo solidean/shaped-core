@@ -5,7 +5,7 @@ project(shaped-graphics-metal LANGUAGES CXX)
 # The enclosing CMakeLists only adds this subdirectory on APPLE with the metal-cpp target present, so both are
 # guaranteed available here.
 #
-# Everything is plain C++ over metal-cpp rather than Objective-C++, which is what keeps the repo's format, lint and PCH
+# Everything is plain C++ over metal-cpp rather than Objective-C++, which is what keeps the repo's format and lint
 # tooling — all of which speak only ('.cc', '.hh') — working unchanged. See extern/metal-cpp/dependency.yml.
 add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_acceleration_structure.cc
@@ -36,6 +36,7 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_raster_state.cc
     src/shaped-graphics/backends/metal/metal_residency.cc
     src/shaped-graphics/backends/metal/metal_staging_binding_group.cc
+    src/shaped-graphics/backends/metal/metal_software_pool.cc
     src/shaped-graphics/backends/metal/metal_staging_ring.cc
     src/shaped-graphics/backends/metal/metal_stream.cc
     src/shaped-graphics/backends/metal/metal_swapchain.cc
@@ -71,6 +72,7 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_raster_state.hh
     src/shaped-graphics/backends/metal/metal_residency.hh
     src/shaped-graphics/backends/metal/metal_staging_binding_group.hh
+    src/shaped-graphics/backends/metal/metal_software_pool.hh
     src/shaped-graphics/backends/metal/metal_staging_ring.hh
     src/shaped-graphics/backends/metal/metal_swapchain.hh
 )
@@ -86,10 +88,6 @@ target_include_directories(shaped-graphics-metal
 # metal-cpp carries the headers plus the Metal / Foundation / QuartzCore framework links.
 target_link_libraries(shaped-graphics-metal PUBLIC shaped-graphics metal-cpp)
 
-# SG rather than a metal-specific tier: the SG tier holds no Metal header, and a tier over <Metal/Metal.hpp> would be
-# worth measuring before it is worth having.
-sc_target_pch(shaped-graphics-metal SG)
-
 # Backend-specific test binary: device creation, the floor refusal, epochs and command-list lifetime.
 # Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)
@@ -97,6 +95,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/metal-barrier-test.cc
         tests/metal-binding-test.cc
+        tests/metal-wrap-texture-test.cc
         tests/metal-compute-test.cc
         tests/metal-native-scope-test.cc
         tests/metal-present-test.cc

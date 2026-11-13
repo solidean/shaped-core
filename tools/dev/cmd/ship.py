@@ -9,6 +9,12 @@ The gate is the project's own `dev.py check`, whatever registry the project wire
 A push the remote rejected because it moved merges again and re-runs the static gates on top of what came in, up to three rounds;
 the tests ran on this change already, and what came in was gated by whoever pushed it.
 A submodule's push is retried the same way, its own static gate re-run and its pointer bumped again, within the same rounds.
+
+The gate builds and tests through the build server when it is opted in, as `check` does; `--no-server` keeps every gate off it.
+With the build server opted in, `--proof` (or the project's `BuildServer.ship_proof`) replaces the gate's build and test steps with the server's proof
+of the change being pushed; a red blocks only when the change turned it red, and the others are listed to be filed:
+a green build of exactly this tree and every test green at least once, the tests without such a result run, then the likeliest affected within a short budget.
+The static gates run as always; any problem with the server runs the full gate instead (lib/pipeline/build_server.py).
 """
 
 from __future__ import annotations
@@ -21,7 +27,10 @@ from pathlib import Path
 from tools import dev
 from tools.dev import console
 
+from ..lib.pipeline import build_server
+from ..lib.pipeline import test as pipeline_test
 from ..lib.project import submodules as lib
+from . import args as a
 from .context import Context
 
 NAME = "ship"
@@ -40,6 +49,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--resolution", choices=("fixed", "wontfix", "duplicate", "obsolete"), default="fixed",
                    help="How --closes closes them (default: fixed)")
     p.add_argument("--dry-run", action="store_true", help="Say what would be pulled, bumped and pushed, and change nothing")
+    p.add_argument("--proof", action=argparse.BooleanOptionalAction, default=None,
+                   help="Prove the build and the tests through the build server instead of the gate's build and test steps "
+                        "(default: the project's BuildServer.ship_proof, off); needs the server opted in, "
+                        "and runs the full gate whenever the server cannot prove")
+    a.server(p)
     return p
 
 
@@ -159,14 +173,218 @@ def _pointers_off_remote(ctx: Context, branch: str, subs: list[lib.Submodule]) -
     return missing
 
 
-def _gate(ctx: Context, *, tests: bool) -> None:
+def _prover(ctx: Context, flag: bool | None) -> build_server.Session | None:
+    """The build server to prove through, or None for the full gate: `--proof`/`--no-proof`, else the project's `ship_proof`.
+
+    Only with the server opted in, as `build` and `test` decide it; a missing client still gives a Session, which warns and falls back.
+    """
+    config = ctx.policy.build_server
+    if not (flag if flag is not None else bool(config and config.ship_proof)):
+        return None
+    session = build_server.session(config, flag=None)
+    if session is None:
+        _say("--proof: the build server is not opted in here, so the full gate runs")
+    return session
+
+
+def _prove(ctx: Context, server: build_server.Session) -> bool | None:
+    """The server's proof of the default preset's build: whether it holds, or None when the full gate has to run instead."""
+    preset = ctx.resolve_presets([ctx.default_preset_name()])[0]
+    # Built here first, in the build environment and through the server: the proof's own build runs in the tests'
+    # environment, which its results are keyed on, and a tool such as rc.exe cannot build in that one.
+    # `all` and every test binary, as the proof builds them, since a project may leave one out of `all`.
+    targets = ["all", *(t.name for t in ctx.discover(preset) if ctx.is_test_target(t))]
+    results = dev.build([preset], targets, root=ctx.root, auto_configure=True, server=server)
+    if not all(r.ok for r in results):
+        dev.report.print_build_failure(results, [preset], ctx.root)
+        return False
+    proof = server.proof(preset.build_dir, env=pipeline_test.server_env(preset, ctx.root),
+                         progress=lambda line: dev.ui.write_line(console.dim(f"  {line}")))
+    if proof is None:
+        return None
+    plan = proof.report.get("plan") or {}
+    ran = proof.report.get("ran") or []
+    _say(f"proof: {proof.report.get('declared', 0)} test(s), {len(plan.get('must_run') or [])} without a green result ran, "
+         f"{len([r for r in ran if r.get('why') == 'affected'])} likely affected ran, "
+         f"{len(plan.get('over_budget') or [])} past the budget")
+    for s in proof.report.get("sideband") or []:
+        _say(f"sideband, not blocking: {s.get('config')} {s.get('mode')} {s.get('binary')}: {s.get('outcome')} {s.get('range')}")
+    passed, filed, blockers = _settle_at_base(ctx, preset, proof)
+    # Reds the change did not cause: flaky, red before it, or red at its base too.
+    # The push goes on; each is the session's to file as an issue, after `issues known <test>`.
+    # Past a handful of one binary and reason (a binary that crashes has every case red), they are one line.
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for binary, test, outcome, why in filed:
+        groups.setdefault((binary, outcome, why), []).append(test)
+    for (binary, outcome, why), tests in groups.items():
+        named = tests[0] if len(tests) == 1 else f"{len(tests)} tests" if len(tests) > 5 else ", ".join(tests)
+        dev.ui.write_line(console.yellow(f"ship: not blocking, file an issue: {binary}: {named}: {outcome} ({why})"))
+    if filed:
+        _say(f"{len(filed)} red test(s) above are not this change's; `uv run dev.py issues known <test>`, then file each that is not known")
+    for reason in blockers:
+        dev.ui.write_line(console.red(f"ship: proof: {reason}"))
+    return passed
+
+
+# The judgements only a run at the change's base settles; the server decides `flaky` and `red_before` itself.
+_SETTLED_AT_BASE = {"green_before", "tied", "untied", "unknown"}
+
+
+def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bool, list[tuple[str, str, str, str]], list[str]]:
+    """The proof's verdict once its reds are run at the change's base: whether it holds, the reds to file, the blockers.
+
+    A red the server judged by its history or its evidence alone is run again in a worktree at the base (lib/project/base_worktree.py):
+    red there too, the change did not cause it, whatever the evidence said; green there, the change did, and it blocks.
+    A red whose base run cannot be made or read keeps the server's judgement.
+    """
+    report = proof.report
+    ran = report.get("ran") or []
+    red = [r for r in ran if r.get("outcome") not in ("pass", "skip")]
+    unfiled = [r for r in red if not r.get("filed")]
+    # Each red that blocks is one of the proof's reasons; the rest (a failed build, a moved tree, an unbuilt binary) stand.
+    others = [why for why in proof.reasons if not any(why.startswith(f"{r['binary']}: {r['test']}: ") for r in unfiled)]
+    settle = [r for r in red if r.get("judged") in _SETTLED_AT_BASE]
+    at_base: dict[tuple[str, str], bool | None] = {}
+    base = (report.get("delta") or {}).get("base")
+    if settle and base:
+        at_base = _red_at_base(ctx, preset, base, settle)
+    filed, blockers = [], list(others)
+    for r in red:
+        key, desc = (r["binary"], r["test"]), f"{r['binary']}: {r['test']}: {r['outcome']}"
+        verdict = at_base.get(key)
+        if verdict is True and _binary_red(r):
+            filed.append((*key, r["outcome"], f"its binary ends without a report at the change's base {base[:12]} too, so the case is unproven"))
+        elif verdict is True:
+            filed.append((*key, r["outcome"], f"red at the change's base {base[:12]} too"))
+        elif verdict is False:
+            blockers.append(f"{desc} (green at the change's base {base[:12]}, red with it)")
+        elif r.get("filed"):
+            filed.append((*key, r["outcome"], r["filed"]))
+        else:
+            blockers.append(f"{desc} ({r.get('why')})")
+    return not blockers, filed, blockers
+
+
+def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tuple[str, str], bool | None]:
+    """Per red (binary, test): whether it is red at `base`, run through `dev.py test` in the base worktree; None where unknown."""
+    from ..lib.project import base_worktree
+
+    _say(f"running {len(reds)} red test(s) at the change's base {base[:12]}, in {base_worktree.DIR}")
+    wt, why = base_worktree.ensure(ctx.root, base)
+    if wt is None:
+        _say(f"the base worktree could not be made, so the server's judgement stands: {why}")
+        return {}
+    artifacts = {t.name: t.artifact for t in ctx.discover(preset) if t.artifact}
+    try:
+        build_rel = preset.build_dir.resolve().relative_to(ctx.root.resolve())
+    except ValueError:
+        _say(f"{preset.build_dir} is outside the checkout, so the base worktree has no build dir to mirror it")
+        return {}
+    def dev(*args: str) -> int:
+        return subprocess.run(["uv", "run", "dev.py", *args, "--preset", preset.name], cwd=str(wt),
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+
+    def run(rs: list[dict]) -> dict[tuple[str, str], bool | None]:
+        # One run per binary: a lone red of its own runs alone, anything more runs the whole binary, read from its one report,
+        # since a run per case cost seconds each.
+        by_binary: dict[str, list[dict]] = {}
+        for r in rs:
+            by_binary.setdefault(r["binary"], []).append(r)
+        out: dict[tuple[str, str], bool | None] = {}
+        for binary, mine in by_binary.items():
+            keys = [(binary, r["test"]) for r in mine]
+            art = artifacts.get(binary)
+            # Built on its own first, so a binary that cannot be built at the base reads as no result, never as a crash there.
+            if art is None or dev("build", "-t", binary) != 0:
+                out.update(dict.fromkeys(keys))
+                continue
+            rel = Path(art).resolve().relative_to(preset.build_dir.resolve())
+            xml = wt / build_rel / rel.parent / f"{rel.name}.results.xml"
+            xml.unlink(missing_ok=True)
+            # A binary that ended without a report (a crash, a timeout) has every case red by the binary's ending:
+            # it says nothing of a single case, only the whole binary run again can show whether it ends that way at the base too.
+            whole = len(mine) > 1 or any(_binary_red(r) for r in mine)
+            rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"]]))
+            found = _cases_red(xml)
+            # a binary that wrote no report of its own gets dev.py's stand-in, one case named after the binary
+            if set(found) == {binary}:
+                found = {}
+            ended_without_report = rc != 0 and not found
+            for r, key in zip(mine, keys):
+                out[key] = True if _binary_red(r) and ended_without_report else found.get(r["test"])
+        return out
+
+    out = run(reds)
+    _say_at_base(out)
+    # A red at the base counts only where the worktree reproduces the checkout: red there too at the commit being pushed,
+    # which is everything ship pushes, since it refuses uncommitted work.
+    # Green there, the worktree differs from the checkout, and its base run says nothing.
+    reproduce = [r for r in reds if out[(r["binary"], r["test"])] is True]
+    head = subprocess.run(["git", "-C", str(ctx.root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if reproduce and head:
+        wt, why = base_worktree.ensure(ctx.root, head)
+        if wt is None:
+            _say(f"the worktree could not be moved to {head[:12]} to check it, so the server's judgement stands: {why}")
+            return {k: (None if v else v) for k, v in out.items()}
+        for key, red in run(reproduce).items():
+            if red is not True:
+                _say(f"  but green in the worktree at {head[:12]} too, so the worktree differs from the checkout: {key[0]}: {key[1]}")
+                out[key] = None
+    return out
+
+
+def _say_at_base(out: dict[tuple[str, str], bool | None], listed: int = 10) -> None:
+    """Each red's result at the base; past `listed` of one binary, its counts instead."""
+    word = {True: "red", False: "green", None: "no result"}
+    by_binary: dict[str, list[tuple[str, bool | None]]] = {}
+    for (b, t), red in out.items():
+        by_binary.setdefault(b, []).append((t, red))
+    for b, rs in by_binary.items():
+        if len(rs) <= listed:
+            for t, red in rs:
+                _say(f"  at the base: {b}: {t}: {word[red]}")
+        else:
+            counts = ", ".join(f"{sum(1 for _, r in rs if r is v)} {word[v]}" for v in (True, False, None))
+            _say(f"  at the base: {b}: {len(rs)} red tests: {counts}")
+
+
+def _binary_red(r: dict) -> bool:
+    """Whether a red is its binary's ending (the server's `failed`, `timed out`) rather than the case's own `fail` in a report."""
+    return r.get("outcome") in ("failed", "timed out")
+
+
+def _cases_red(xml: Path) -> dict[str, bool]:
+    """Each case of a JUnit report: failed (True) or passed (False); a skipped case and an unreadable report are absent, saying nothing."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        cases = list(ET.parse(xml).getroot().iter("testcase"))
+    except (OSError, ET.ParseError):
+        return {}
+    out: dict[str, bool] = {}
+    for c in cases:
+        name = c.get("name")
+        if name is None or c.find("skipped") is not None:
+            continue
+        # A name repeated (a dispatched child's) is red when any of its runs is.
+        out[name] = out.get(name, False) or c.find("failure") is not None or c.find("error") is not None
+    return out
+
+
+def _gate(ctx: Context, *, tests: bool, prover: build_server.Session | None = None) -> None:
     # The static gates first, then the question only they raise, so a fixer's rewrite stops ship before the test tail runs.
     if _dev(ctx, "check", "--fix", "--no-test") != 0:
         ctx.die("ship: the gate failed; nothing was pushed (the bump commit, if any, stays local)")
     if dirty := _dirty(ctx.root):
         ctx.die(_changed_during_gate(dirty, "commit them and ship again"))
+    if not tests:
+        return
+    # The server's proof stands in for the build and test steps; a server that cannot prove leaves them to run.
+    proven = _prove(ctx, prover) if prover is not None else None
+    if proven is False:
+        ctx.die("ship: the proof does not hold; nothing was pushed (the bump commit, if any, stays local)")
     # --memo, so a test binary that already passed on these exact bytes is not run again.
-    if tests and _dev(ctx, "check", "test", "--memo") != 0:
+    if proven is None and _dev(ctx, "check", "test", "--memo") != 0:
         ctx.die("ship: the tests failed; nothing was pushed (the bump commit, if any, stays local)")
 
 
@@ -190,6 +408,8 @@ def _is_rejected(text: str) -> bool:
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    # The gates run in child dev.py processes, the submodules' own among them, and read the flags from the environment.
+    build_server.export(a.server_flag(args))
     branch = _branch_of(ctx.root)
     if branch is None:
         ctx.die("ship needs a checked-out branch here")
@@ -220,8 +440,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         ctx.die(f"ship --bump: not a submodule: {', '.join(sorted(unknown))}")
 
     _say(f"submodules with unpushed work: {', '.join(s.path for s in shipping) or 'none'}")
+    prover = _prover(ctx, args.proof)
     if args.dry_run:
         _say(f"would bump: {', '.join(s.path for s in bumping) or 'nothing'}; would push {branch} and those submodules")
+        _say("would prove the build and the tests through the build server" if prover is not None
+             else "would run the full gate's build and test steps")
         return
 
     for s in shipping:
@@ -239,7 +462,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for round_no in range(1, _ROUNDS + 1):
         # A later round follows a merge the remote forced: the static gates see what it broke, and the tests ran on this change already.
-        _gate(ctx, tests=round_no == 1)
+        _gate(ctx, tests=round_no == 1, prover=prover)
         # Submodules first, so the pointers the parent pushes always name commits their remotes have.
         # One whose remote moved merges what came in, gates it statically and is bumped again, and the round starts over.
         moved = None

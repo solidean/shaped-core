@@ -130,6 +130,7 @@ cc::hash128 shader_cache::compute_key(shader_description const& desc, compile_op
 
     // Apple ships the toolchain as an updatable component, so an upgrade must not keep serving the old one's metallib.
     b.add_string(comp != nullptr ? cc::string_view(comp->toolchain().version) : cc::string_view());
+    b.add_string(impl::source_fingerprint());
 
     return cc::hash128::create(b.written_bytes(), 0);
 }

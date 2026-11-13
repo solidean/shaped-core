@@ -85,6 +85,7 @@ ASYNC_INVOCABLE_TEST("sr - an NRD frame's dispatches build and run", (sg::contex
         auto const frame = sr::impl::nrd_frame{.frame_index = frame_index, .reset = frame_index == 0};
         CHECK(session.execute(*cmd, frame, resources)).context(cc::format("frame {}", frame_index));
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
     }
 
@@ -237,6 +238,7 @@ constexpr auto k_specular_albedo = 0.04f;
             ++denoised_frames;
 
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         cc::async_backlog const* const backlogs[] = {&ctx.backlog};
@@ -476,6 +478,7 @@ constexpr auto k_motion_albedo = 0.5f;
             ++denoised_frames;
 
         ctx.submit_command_list(cc::move(cmd));
+        co_await ctx.epochs_in_flight_completion(2);
         ctx.advance_epoch();
 
         cc::async_backlog const* const backlogs[] = {&ctx.backlog};

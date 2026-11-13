@@ -28,6 +28,12 @@ A `use` brings in the module's name only, so a foreign name is always written qu
 It is the file's own, as an import is in most languages: a file's dependencies read from its head, and deleting a `use` cannot break a sibling.
 Both are the strict end of their choice: a wildcard import, and a `use` shared across a module's files, would each add to what compiles and break nothing.
 
+*Decided with the maintainer on 2026-11-09:* a dotted module name is flat.
+`sv.scene` is one name, which keeps two libraries' `scene` modules apart and nests nothing.
+So a module `sv` and its declarations are no part of `sv.scene`, and a module's place in a directory says nothing of its name.
+`use sv.scene` binds `scene` because code names the module it uses by its own name, as it did before names had dots; `as` is there for the clash.
+Nesting modules was set aside: it raises what `use sv` checks and reaches, which nothing so far needs.
+
 ## CHK-349
 
 Within one pass a loop of modules would check, since compilation is demand-driven per symbol.
@@ -617,8 +623,7 @@ The footprint and the bound resources would then be the union of every variant, 
 A switch that changes an image's format specializes on no target at all.
 A preprocessor would break what the syntax is built on: local errors, lossless parsing, and one tree for the language server.
 
-An option naming another would make the named one a second way to set it, and a host that set only the first would not see the second follow.
-No use asks for that chain yet, so it is refused rather than given a meaning that would have to be kept.
+A float option is a compile per value like any other, and whether a host can afford that is the host's to judge, not the language's.
 
 ## CHK-354
 
@@ -642,6 +647,13 @@ It leaves the text, so the target compiler never sees it, and the footprint, so 
 Leaving it to the target compiler would strip the code and still leave the footprint covering it, which is the cost FSR's permutations exist to avoid.
 The guarantee holds for any constant, so a helper called with a literal flag sheds its other side too.
 
+
+## CHK-519
+
+A default computed from another option is how a derived permutation is written once, where it is defined, rather than at every host that sets the first.
+Following is what makes that worth having: a host that sets the first and not the second sees the second change with it.
+A value given for the second still stands, so a host that needs another value says so, and nothing it set is overridden.
+The options struct holds the second unset, since a field at its default would send that default and keep it from following.
 ## CHK-357
 
 `1u` and `0.5f` port as written, and the width defaults to 32 because that is what every target's own short suffix means.
@@ -798,6 +810,12 @@ A generic `mat3x4` would carry the shape's two names along, since GLSL calls the
 The type decides the `w` instead: a position is translated and a direction is not, so no caller writes the `1.0` or the `0.0`.
 Three rows of four is how DXR, Vulkan and Metal hand a hit's transform over, so a hit's placement needs no conversion to become one.
 
+## CHK-518
+
+Three rows of 16 bytes is the layout D3D12's and Vulkan's instance descriptions already give a transform, so a scene's instances and a shader's buffer can share one.
+WGSL's `mat3x4f` and MSL's `float3x4` place their three columns of four exactly so, which makes the rows their columns at no cost.
+HLSL's `float3x4` is three rows, which only `row_major` keeps in that order, and DXC honours the qualifier on a field but not in a buffer's template (EMIT-259).
+
 ## CHK-404
 
 An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.
@@ -811,3 +829,13 @@ Every target compiles the atomic itself in all six stages, so the refusal is SGL
 An inline trace runs the same two decisions inside a loop of its own stage, as often as the same traversal asks, so the rule follows the decision rather than the entry point.
 What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
 Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.
+
+## CHK-522
+
+The rule that a struct has one layout (EMIT-114) is there so a program's C++ side is the same on every backend: the struct a package generates is what every target reads.
+A record a GPU API reads, such as a partitioned TLAS's write-instance argument, has no such layout: D3D12 and Vulkan hold the same fields in different orders.
+So a struct with a target layout gives up the host mirror and keeps the portability.
+The shader writes its fields by name, each target lays them out natively, and the host only sizes the buffer, through sg.
+Nothing translates the records at run time, which is what the GPU-written tier of a build exists to avoid.
+The first branch is the one the check judges, so a field read, a default and a constructor mean one thing on every compile, and only the bytes move.
+It stays in the modules SGL ships, since a program's own struct is one the host writes too, and one layout is what lets the host write it.

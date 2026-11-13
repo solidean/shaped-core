@@ -1,6 +1,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
@@ -101,68 +102,16 @@ void loaded(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
 
 // ---- LEGAL-69: the shadow of workgroup memory ----------------------------------------------------------------------
 
-// One bit per scalar of the entry point's workgroup memory, which the text declares as `sgl_written` and clears before
-// the body (EMIT-229); a robustness profile sets a scalar's bit where it is stored and tests it where it is read.
+// One bit per scalar of the entry point's workgroup memory, which a robustness profile sets where a scalar is stored
+// and tests where it is read.
+// The guards write a read and a mark as these calls, and the last step of legalize makes each the atomic on its word
+// of the shadow (LEGAL-71), so no target writes one.
 // The interpreter never runs these: it reports such a read itself (EVAL-92), so to it every bit is set.
 
-constexpr cc::string_view k_written_names[] = {"sgl_written", "sgl_written_bits", "InterlockedOr"};
-constexpr cc::string_view k_written_wgsl_names[] = {"sgl_written", "sgl_written_bits", "atomicLoad", "atomicOr"};
-constexpr cc::string_view k_written_msl_names[]
-    = {"sgl_written", "sgl_written_bits", "atomic_load_explicit", "atomic_fetch_or_explicit", "memory_order_relaxed"};
-
-written write_written_word(call_context const& ctx)
+/// Nothing: legalize rewrites every call of the shadow before a target writes one (LEGAL-71).
+written never_written(call_context const&)
 {
-    auto const& word = ctx.arguments[0].text;
-    switch (ctx.target)
-    {
-    case language::hlsl:
-        return {.text = cc::format("sgl_written[{}]", word)};
-    case language::wgsl:
-        return {.text = cc::format("atomicLoad(&sgl_written[{}])", word)};
-    case language::msl:
-        return {.text = cc::format("atomic_load_explicit(&sgl_written[{}], memory_order_relaxed)", word)};
-    }
     return {};
-}
-
-written write_mark_written(call_context const& ctx)
-{
-    auto const& word = ctx.arguments[0].text;
-    auto const& bits = ctx.arguments[1].text;
-    switch (ctx.target)
-    {
-    case language::hlsl:
-        return {.text = cc::format("InterlockedOr(sgl_written[{}], {})", word, bits)};
-    case language::wgsl:
-        return {.text = cc::format("atomicOr(&sgl_written[{}], {})", word, bits)};
-    case language::msl:
-        return {.text = cc::format("atomic_fetch_or_explicit(&sgl_written[{}], {}, memory_order_relaxed)", word, bits)};
-    }
-    return {};
-}
-
-/// The bits of word `word` that the scalars `first ..< first + count` take.
-cc::string written_bits_helper(helper_context const& c)
-{
-    if (c.target == language::wgsl)
-        return "fn sgl_written_bits(word: u32, first: u32, count: u32) -> u32\n"
-               "{\n"
-               "    let lo = max(first, word * 32u);\n"
-               "    let hi = min(first + count, word * 32u + 32u);\n"
-               "    if (hi <= lo) { return 0u; }\n"
-               "    var mask = 0xffffffffu;\n"
-               "    if (hi - lo < 32u) { mask = (1u << (hi - lo)) - 1u; }\n"
-               "    return mask << (lo - word * 32u);\n"
-               "}\n";
-    return "uint sgl_written_bits(uint word, uint first, uint count)\n"
-           "{\n"
-           "    uint lo = max(first, word * 32u);\n"
-           "    uint hi = min(first + count, word * 32u + 32u);\n"
-           "    if (hi <= lo)\n"
-           "        return 0u;\n"
-           "    uint mask = hi - lo < 32u ? (1u << (hi - lo)) - 1u : 0xffffffffu;\n"
-           "    return mask << (lo - word * 32u);\n"
-           "}\n";
 }
 
 void every_bit_written(cc::span<check::scalar const>, cc::vector<check::scalar>& out)
@@ -170,21 +119,6 @@ void every_bit_written(cc::span<check::scalar const>, cc::vector<check::scalar>&
     out.push_back(scalar::of_uint(0xffffffffu));
 }
 
-void written_bits(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
-{
-    auto const word = u64(in[0].as_uint());
-    auto const first = u64(in[1].as_uint());
-    auto const count = u64(in[2].as_uint());
-    auto const lo = first > word * 32 ? first : word * 32;
-    auto const hi = first + count < word * 32 + 32 ? first + count : word * 32 + 32;
-    if (hi <= lo)
-    {
-        out.push_back(scalar::of_uint(0));
-        return;
-    }
-    auto const mask = hi - lo < 32 ? (u64(1) << (hi - lo)) - 1 : u64(0xffffffffu);
-    out.push_back(scalar::of_uint(u32(mask << (lo - word * 32))));
-}
 // ---- atomics ------------------------------------------------------------------------------------------------------
 
 enum class atomic_op : u8
@@ -812,7 +746,8 @@ written write_texel_atomic(call_context const& ctx)
         case atomic_op::load:
             return {.text = cc::format("{}.atomic_load({}).x", image, coordinate)};
         case atomic_op::store:
-            return {.text = cc::format("{}.atomic_store({}, {}({}))", image, coordinate, vector, v)};
+            // the value first, as `write` takes it, where every other texel atomic takes the coordinate first
+            return {.text = cc::format("{}.atomic_store({}({}), {})", image, vector, v, coordinate)};
         case atomic_op::exchange:
             return {.text = cc::format("{}.atomic_exchange({}, {}({})).x", image, coordinate, vector, v)};
         default:
@@ -845,6 +780,27 @@ written write_stream(call_context const& ctx)
 written write_mesh_output(call_context const& ctx)
 {
     auto const& o = ctx.arguments[0].text;
+    // EMIT-206: Metal's mesh object takes the primitives' count alone, and a primitive's corners index by index
+    if (ctx.target == language::msl)
+    {
+        if (ctx.data == 0)
+            return {.text = cc::format("{}.set_primitive_count({})", o, ctx.arguments[2].text)};
+        if (ctx.data == 1)
+            return {.text = cc::format("{}.set_vertex({}, {})", o, ctx.arguments[1].text, ctx.arguments[2].text)};
+        if (ctx.data == 3)
+            return {.text = cc::format("{}.set_primitive({}, {})", o, ctx.arguments[1].text, ctx.arguments[2].text)};
+        auto const corners = ctx.data == 2 ? 3 : 2;
+        auto const mint = [&](cc::string_view name) { return ctx.mint.is_valid() ? ctx.mint(name) : cc::string(name); };
+        auto const first = mint("sgl_first");
+        auto const indices = mint("sgl_indices");
+        auto result = written();
+        result.lines.push_back(cc::format("const uint {} = ({}) * {}u;", first, ctx.arguments[1].text, corners));
+        result.lines.push_back(cc::format("const uint{} {} = {};", corners, indices, ctx.arguments[2].text));
+        constexpr char lanes[] = {'x', 'y', 'z'};
+        for (auto c = 0; c < corners; ++c)
+            result.lines.push_back(cc::format("{}.set_index({} + {}u, {}.{});", o, first, c, indices, lanes[c]));
+        return result;
+    }
     if (ctx.data == 0)
         return {.text = cc::format("SetMeshOutputCounts({}, {})", ctx.arguments[1].text, ctx.arguments[2].text)};
     auto const array = ctx.data == 1 ? "vertices"
@@ -857,9 +813,21 @@ written write_mesh_output(call_context const& ctx)
 /// EMIT-207: HLSL hands a payload over from groupshared memory alone, so the call stores it there first.
 written write_dispatch_mesh(call_context const& ctx)
 {
+    // EMIT-207: Metal's object stage writes its payload and its grid, once, from its first invocation
+    if (ctx.target == language::msl)
+    {
+        auto result = written();
+        result.lines.push_back("if (sgl_thread == 0u)");
+        result.lines.push_back("{");
+        result.lines.push_back(cc::format("    sgl_payload = {};", ctx.arguments[3].text));
+        result.lines.push_back(cc::format("    sgl_grid.set_threadgroups_per_grid(uint3({}, {}, {}));",
+                                          ctx.arguments[0].text, ctx.arguments[1].text, ctx.arguments[2].text));
+        result.lines.push_back("}");
+        return result;
+    }
     auto result = written{.text = cc::format("DispatchMesh({}, {}, {}, sgl_payload)", ctx.arguments[0].text,
                                              ctx.arguments[1].text, ctx.arguments[2].text)};
-    // no WGSL or MSL text writes a task stage, which the feature refuses
+    // no WGSL text writes a task stage, which the feature refuses
     if (ctx.target == language::hlsl)
         result.lines.push_back(cc::format("sgl_payload = {};", ctx.arguments[3].text));
     return result;
@@ -877,6 +845,16 @@ bool is_hlsl_text(language l)
 {
     return l == language::hlsl;
 }
+
+bool is_hlsl_or_msl_text(language l)
+{
+    return l == language::hlsl || l == language::msl;
+}
+
+bool is_msl_text(language l)
+{
+    return l == language::msl;
+}
 } // namespace
 
 void sgl::builtins::register_sync(registry& r)
@@ -892,7 +870,7 @@ void sgl::builtins::register_sync(registry& r)
         .write = {.kind = spelling_kind::custom,
                   .custom = write_dispatch_mesh,
                   .helper = dispatch_mesh_helper,
-                  .writes_lines = is_hlsl_text,
+                  .writes_lines = is_hlsl_or_msl_text,
                   .hlsl_names = k_dispatch_mesh_hlsl,
                   .wgsl_names = k_dispatch_mesh_hlsl,
                   .msl_names = k_dispatch_mesh_hlsl},
@@ -911,7 +889,7 @@ void sgl::builtins::register_sync(registry& r)
         .write = {.kind = spelling_kind::custom,
                   .custom = write_mesh_output,
                   .data = 0,
-                  // no WGSL or MSL text writes a mesh stage, and the name stays the target's alike
+                  // no WGSL text writes a mesh stage, and the name stays the target's alike
                   .hlsl_names = k_mesh_output_hlsl,
                   .wgsl_names = k_mesh_output_hlsl,
                   .msl_names = k_mesh_output_hlsl},
@@ -936,13 +914,13 @@ void sgl::builtins::register_sync(registry& r)
         .signature = "@stages(.mesh) fun triangle(o: mut mesh_output, i: uint, t: uint3)",
         .doc = "/// Writes the triangle at `i`, of the three vertices `t` indexes.",
         .evaluate = nothing,
-        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 2},
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .writes_lines = is_msl_text, .data = 2},
     });
     r.add(function_record{
         .signature = "@stages(.mesh) fun line(o: mut mesh_output, i: uint, l: uint2)",
         .doc = "/// Writes the line at `i`, of the two vertices `l` indexes, in a mesh stage of `lines = M`.",
         .evaluate = nothing,
-        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 4},
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .writes_lines = is_msl_text, .data = 4},
     });
 
     r.add_comment("// A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which "
@@ -1007,40 +985,24 @@ void sgl::builtins::register_sync(registry& r)
         .signature = "@internal @stages(.compute) fun workgroup_written_word(word: uint) -> uint",
         .doc = "/// Word `word` of the shadow, one bit per scalar some invocation stored.",
         .evaluate = every_bit_written,
-        .write = {.kind = spelling_kind::custom,
-                  .custom = write_written_word,
-                  .hlsl_names = k_written_names,
-                  .wgsl_names = k_written_wgsl_names,
-                  .msl_names = k_written_msl_names},
+        .write = {.kind = spelling_kind::custom, .custom = never_written},
         .reads_only = true,
     });
     r.add(function_record{
         .signature = "@internal @stages(.compute) fun workgroup_mark_written(word: uint, bits: uint)",
         .doc = "/// Sets `bits` of word `word` of the shadow, in one step.",
         .evaluate = nothing,
-        .write = {.kind = spelling_kind::custom,
-                  .custom = write_mark_written,
-                  .hlsl_names = k_written_names,
-                  .wgsl_names = k_written_wgsl_names,
-                  .msl_names = k_written_msl_names},
-    });
-    r.add(function_record{
-        .signature = "@internal @pure fun workgroup_written_bits(word: uint, first: uint, count: uint) -> uint",
-        .doc = "/// The bits of word `word` that the scalars `first ..< first + count` take; 0 where it holds none.",
-        .evaluate = written_bits,
-        .write = {.hlsl = "sgl_written_bits",
-                  .wgsl = "sgl_written_bits",
-                  .msl = "sgl_written_bits",
-                  .helper = written_bits_helper,
-                  .hlsl_names = k_written_names,
-                  .wgsl_names = k_written_wgsl_names,
-                  .msl_names = k_written_msl_names},
+        .write = {.kind = spelling_kind::custom, .custom = never_written},
     });
 
     r.add_comment("// What a weak compare-exchange gives, a struct of fields every target declares as a program's "
                   "own.\n"
                   "// The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it "
                   "stored (EMIT-161).");
+    r.add_comment("// What sg binds itself: an entry of `check::k_reserved_bindings`, which legalize alone reaches.");
+    for (auto const& b : check::k_reserved_bindings)
+        if (!b.declaration.empty())
+            r.add_declaration(b.declaration);
     r.add_declaration("/// What a weak compare-exchange read, and whether it stored `desired`.\n"
                       "struct exchange_result[T]:\n"
                       "    old: T\n"

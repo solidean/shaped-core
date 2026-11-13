@@ -16,9 +16,9 @@ require raytracing_pipeline
 /// `scene.camera` as the frame constants carry it, 64 bytes; the host fills it through `sv::camera_record_of`.
 struct camera_record:
     position: float3
-    pad0: float
+    orthographic: float
     forward: float3
-    pad1: float
+    far_plane: float
     right_scaled: float3
     pad2: float
     up_scaled: float3
@@ -96,6 +96,9 @@ struct instance_record:
     to_world_x: float4
     to_world_y: float4
     to_world_z: float4
+    previous_to_world_x: float4
+    previous_to_world_y: float4
+    previous_to_world_z: float4
 
 /// What next-event estimation reads of one emissive instance beyond its light record, as `traced.emitters` holds it, 80 bytes.
 /// The host fills it in `sv::view_renderer` through `sv::emitter_record_of`, one per record of path `scene.light_path_mesh`, in the order those records stand.
@@ -151,7 +154,9 @@ struct frame_constants:
     light_count: uint
     /// Where the emissive instances' records start in `traced.lights`: they follow every analytic light, and `traced.emitters` is indexed from here.
     emitter_offset: uint
-    pad0: uint2
+    /// `environment_estimate_exact` where the environment's light is estimated against its exact unshadowed part, `sv::render_settings::environment_estimate`
+    environment_estimate: uint
+    pad0: uint
     path_offset: uint4
     path_count: uint4
 
@@ -168,6 +173,9 @@ struct frame_constants:
 
     /// whether the hybrid's deferred kernel writes `guide_hit_distance` for a temporal member that reads it, without the split
     write_hit_distance: uint
+
+    /// how many samples per pixel a hybrid frame lights, `render_settings::hybrid_moving_samples` while the image moves; 0 is 1
+    hybrid_samples: int
     /// whether to write `primary_depth`, at the camera's `near_plane`
     write_primary_depth: uint
     near_plane: float
@@ -181,6 +189,11 @@ struct frame_constants:
     decal_count: uint
     /// The angle one pixel spans at the image's center, in radians: a hit's footprint is this times its distance.
     pixel_spread: float
+    /// The width one pixel spans at the image plane, in meters: an orthographic camera's footprint, which is its whole; 0 for a pinhole.
+    pixel_width: float
+    /// What a primary ray's cone is narrowed to of a pixel's footprint, 1 for all of it: less where the image averages
+    /// many jittered samples, since that average already filters a pixel (`render_settings::expected_samples_per_pixel`).
+    primary_scale: float
     /// the frame's one sub-pixel offset while `fixed_jitter` is set, in [0, 1)
     jitter: float2
 
@@ -191,6 +204,10 @@ struct frame_constants:
     wavefront_flags: uint
     permutation_count: uint
     roulette_after: uint
+
+    /// The channels every primary hit adds to its pixel's sums beside the image, `channel_*` bits; 0 for none.
+    /// The wavefront tracer's alone: `sv::render_settings::channels`.
+    channel_mask: uint
 
 /// One decal as `traced.decals` holds it, 96 bytes; the host fills it through `sv::impl::decal_record_of`.
 ///
@@ -248,6 +265,9 @@ struct path_state:
     jitter: float2
     /// how many fill draws the slot has made since its sample last started, which keeps each of them fresh
     fill_draws: uint
+    /// the ray cone at the path ray's origin, as `surface_payload` carries it
+    cone_width: float
+    cone_spread: float
 
 /// The medium a path's next segment travels through, and the wavelength it has collapsed onto (3 while it carries all three).
 struct path_medium:
@@ -306,6 +326,8 @@ struct pixel_tally:
     hit_specular: float2
     /// every path's first secondary ray that escaped since the restart, per lobe
     escaped: float2
+    /// x: the samples' luminance squared since the restart, summed as `sum` is, `pt.moment_of`; y: unused, for the packing
+    moment_sum: float2
 
 /// The workgroup counts an indirect dispatch reads, `sg::dispatch_args`.
 struct dispatch_args:
@@ -324,6 +346,7 @@ binding traced:
     world: acceleration_structure[.mixed]
 
     /// The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into at the dispatch's own pixel.
+    /// Its alpha is the mean of those samples' luminance squared, `pt.moment_of`, which à-trous measures each pixel's variance from.
     output: mut image_2d[.rgba32_float]
 
     /// One element, the frame constants.
@@ -378,7 +401,6 @@ binding traced:
     /// two per slot: the light's sample at 2 * slot, the environment's at 2 * slot + 1
     shadow_rays: mut buffer[shadow_ray]
     tallies: mut buffer[pixel_tally]
-
     /// The queues of slots between stages: two that alternate as a round's input and output, then the hits waiting to shade,
     /// the same sorted by permutation, the slots with shadow rays to test, and the paths that finished.
     queue_a: mut buffer[uint]
@@ -392,6 +414,10 @@ binding traced:
     counters: mut buffer[atomic[uint]]
     /// Where each permutation's range of `queue_sorted` starts.
     shade_offsets: mut buffer[uint]
+
+    /// Per pixel, its count of primary samples since the restart in the first float4's .x, then one float4 a channel
+    /// `frame.channel_mask` names, in the order of their bits: their sums over the primary hits, so a mean is a sum over the count.
+    channel_sums: mut buffer[float4]
 
 /// The manager's bindless tables — group 1, which the host binds as the manager's own group.
 ///
@@ -459,38 +485,47 @@ binding bindless:
         address_v = .clamp_edge
     sampler palette_linear_repeat_repeat:
         filter = .linear
+        max_anisotropy = 16
         address_u = .repeat
         address_v = .repeat
     sampler palette_linear_repeat_mirror:
         filter = .linear
+        max_anisotropy = 16
         address_u = .repeat
         address_v = .mirror_repeat
     sampler palette_linear_repeat_clamp:
         filter = .linear
+        max_anisotropy = 16
         address_u = .repeat
         address_v = .clamp_edge
     sampler palette_linear_mirror_repeat:
         filter = .linear
+        max_anisotropy = 16
         address_u = .mirror_repeat
         address_v = .repeat
     sampler palette_linear_mirror_mirror:
         filter = .linear
+        max_anisotropy = 16
         address_u = .mirror_repeat
         address_v = .mirror_repeat
     sampler palette_linear_mirror_clamp:
         filter = .linear
+        max_anisotropy = 16
         address_u = .mirror_repeat
         address_v = .clamp_edge
     sampler palette_linear_clamp_repeat:
         filter = .linear
+        max_anisotropy = 16
         address_u = .clamp_edge
         address_v = .repeat
     sampler palette_linear_clamp_mirror:
         filter = .linear
+        max_anisotropy = 16
         address_u = .clamp_edge
         address_v = .mirror_repeat
     sampler palette_linear_clamp_clamp:
         filter = .linear
+        max_anisotropy = 16
         address_u = .clamp_edge
         address_v = .clamp_edge
 
@@ -510,8 +545,8 @@ struct surface_payload:
     /// which wavelength the path has been collapsed onto, or 3 while it still carries all three
     channel: uint
 
-    /// whether this is the path's last surface hit, so no bounce ray follows it — written by the caller only
-    last_bounce: uint
+    /// whether the path has spent its bounces, so this hit only adds the emission the last one reached and samples no light — written by the caller only
+    emission_only: uint
     /// whether the ray is a pixel's guide ray: only a full coverage stops it, and its hit is shaded for the guides alone, without visibility tests — written by the caller only
     guide: uint
 
@@ -540,6 +575,8 @@ struct surface_payload:
     bsdf_pdf: float
     /// below 0 where the ray escaped
     hit_t: float
+    /// how far the point `origin + direction * hit_t` may lie off the surface, `pt.hit_rounding`, which a continuation is lifted by; 0 on an escape
+    rounding: float
     /// 1 where `direction` lies above the shading frame's horizon, the only directions next-event estimation samples.
     /// Where it is 0, a light or the sky the continuation reaches is the BSDF's alone, at full weight.
     nee_reachable: uint
@@ -547,6 +584,10 @@ struct surface_payload:
     /// Negative where the instance is no light of the trace, and 0 where it is but next-event estimation cannot draw this point.
     /// What the caller weighs `emission` by past the camera's ray.
     light_pdf: float
+    /// The ray cone at the ray's origin, which picks a texture's level at the hit: its width in meters, and the angle
+    /// it widens by per meter — written by the caller only; 0 and 0 sample every texture's base level.
+    cone_width: float
+    cone_spread: float
 
 /// The wavefront's indirect-dispatch arguments, a group of their own: a dispatch may not read its counts from a buffer it binds writable.
 /// Only the small kernels that turn counts into arguments list it — `dispatch_*` name its records.
@@ -578,13 +619,14 @@ rays path_rays:
     occlusion: shadow_payload
 
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
-fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
+fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, emission_only: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, emission_only, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0.0, 0u, -1.0, 0.0, 0.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:
     let mut sh = float4[16].filled(float4(0.0))
+    @unroll
     for k in 0 ..< 16:
         sh[k] = traced.background[k]
     return sh
@@ -592,6 +634,7 @@ fun background_sh(){traced} -> float4[16]:
 /// The whole environment, copied out of its buffer into the array `scene.environment_*` take.
 fun background_lanes(){traced} -> float4[28]:
     let mut env = float4[28].filled(float4(0.0))
+    @unroll
     for k in 0 ..< 28:
         env[k] = traced.background[k]
     return env

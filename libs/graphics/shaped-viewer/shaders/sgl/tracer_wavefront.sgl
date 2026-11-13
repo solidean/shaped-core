@@ -60,6 +60,56 @@ const dispatch_shade = 4
 
 /// `frame_constants::wavefront_flags`: every path and every tally starts over, since the image describes something else now.
 const wavefront_flag_restart = 1u
+
+// The channels a primary hit adds to its pixel beside the image, as `frame.channel_mask` names them; `sv::render_channel` mirrors them.
+/// The hit's world position, and 1 in .w, so a pixel's mean .w is how much of it a surface covers.
+const channel_position = 1u
+/// The hit's depth along the camera's forward axis, in .x.
+const channel_view_depth = 2u
+/// The surface's normal, turned toward the ray.
+const channel_geometric_normal = 4u
+/// The normal its material shades with, its normal map applied.
+const channel_shading_normal = 8u
+/// The material's base color.
+const channel_base_color = 16u
+/// The material's specular roughness, base metalness and micro-occlusion, and its opacity in .w.
+const channel_material = 32u
+/// The hit instance's index in .x, and a number in [0, 1) of it in .y, the same for every hit on it.
+const channel_instance = 64u
+
+/// How many float4 a pixel's channel sums take: its count of primary samples, then one a channel `mask` names.
+fun channel_slots(mask: uint) -> int:
+    return count_bits(mask as int) + 1
+
+/// Where pixel slot `s`'s channel sums start: its count, then the channels.
+fun channel_base(s: int, mask: uint) -> int:
+    return s * channel_slots(mask)
+
+/// Adds a primary hit's channels to slot `s`'s sums, each `mask` names in the order of its bits, and counts it.
+fun add_channels(s: int, mask: uint, p: float3, view_depth: float, n: float3, shading_n: float3, surface: openpbr.surface, instance: uint){traced}:
+    let mut at = channel_base(s, mask)
+    traced.channel_sums[at] += float4(1.0, 0.0, 0.0, 0.0)
+    at += 1
+    if (mask & channel_position) != 0u:
+        traced.channel_sums[at] += float4(..p, 1.0)
+        at += 1
+    if (mask & channel_view_depth) != 0u:
+        traced.channel_sums[at] += float4(view_depth, 0.0, 0.0, 0.0)
+        at += 1
+    if (mask & channel_geometric_normal) != 0u:
+        traced.channel_sums[at] += float4(..n, 0.0)
+        at += 1
+    if (mask & channel_shading_normal) != 0u:
+        traced.channel_sums[at] += float4(..shading_n, 0.0)
+        at += 1
+    if (mask & channel_base_color) != 0u:
+        traced.channel_sums[at] += float4(..surface.base_color, 0.0)
+        at += 1
+    if (mask & channel_material) != 0u:
+        traced.channel_sums[at] += float4(surface.specular_roughness, surface.base_metalness, surface.micro_occlusion, surface.geometry_opacity)
+        at += 1
+    if (mask & channel_instance) != 0u:
+        traced.channel_sums[at] += float4(instance as float, ((pt.hash(instance) >> 8u) as float) / 16777216.0, 0.0, 0.0)
 /// `frame_constants::wavefront_flags`: the guides come from guide rays rather than the samples' camera rays, set where the trace writes guides and holds a partial coverage.
 /// A sample's camera ray takes or skips a partial coverage at random, so guides of its hit would flicker with the cutout, and a temporal denoiser keeps what its guides explain.
 const wavefront_flag_guide_rays = 2u
@@ -168,7 +218,7 @@ fun lane_of(v: float3, i: uint) -> float:
 fun empty_tally() -> pixel_tally:
     let z3 = float3(0.0)
     let z2 = float2(0.0)
-    return pixel_tally(z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, -1.0, z2, z2, z2, z2)
+    return pixel_tally(z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, -1.0, z2, z2, z2, z2, z2)
 
 // ---- Instances ------------------------------------------------------------------------------------------------------
 
@@ -204,8 +254,8 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
     let dir = normalize(scene.camera_ray_offset(cam, pixel, image_size()))
 
     let s = slot as int
-    traced.path_rays[s] = path_ray(cam.position, dir)
-    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u)
+    traced.path_rays[s] = path_ray(scene.camera_origin(cam, pixel, image_size()), dir)
+    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u, f.pixel_width * f.primary_scale, f.pixel_spread * f.primary_scale)
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
 
@@ -221,8 +271,9 @@ fun start_guide(slot: uint, rng: uint){traced, wavefront_step}:
     let jitter_y = pt.rand(mut jitter_rng)
     let jitter = if f.fixed_jitter != 0u => f.jitter else float2(jitter_x, jitter_y)
     let cam = scene.camera(..f.camera)
-    let dir = normalize(scene.camera_ray_offset(cam, float2(px.x as float, px.y as float) + jitter, image_size()))
-    traced.path_rays[s] = path_ray(cam.position, dir)
+    let at = float2(px.x as float, px.y as float) + jitter
+    let dir = normalize(scene.camera_ray_offset(cam, at, image_size()))
+    traced.path_rays[s] = path_ray(scene.camera_origin(cam, at, image_size()), dir)
     let mut st = traced.path_states[s]
     st.rng = rng
     st.jitter = jitter
@@ -262,6 +313,10 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
     let restart = (f.wavefront_flags & wavefront_flag_restart) != 0u
 
     let mut tally = if restart => empty_tally() else traced.tallies[s]
+    // the channels' sums are counted by the tally's guide count, so they restart with it
+    if restart and f.channel_mask != 0u:
+        for k in 0 ..< channel_slots(f.channel_mask):
+            traced.channel_sums[channel_base(s, f.channel_mask) + k] = float4(0.0)
     tally.frame_count = 0.0
     tally.frame_sum = float3(0.0)
     tally.frame_sum_specular = float3(0.0)
@@ -374,6 +429,8 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
         // An escaped primary ray describes no surface, which the guides read as zeros: counted, nothing summed.
         if hit_t < 0.0:
             tally.guide_count += 1.0
+            // counted beside the channels too, which an escaped sample adds nothing to
+            if f.channel_mask != 0u => traced.channel_sums[channel_base(s, f.channel_mask)] += float4(1.0, 0.0, 0.0, 0.0)
             st.flags = st.flags & ~path_flag_primary
             // The depth raster sees where the first primary ray since the restart landed; one that escaped is the far plane.
             if tally.primary_view_depth < 0.0 => tally.primary_view_depth = escaped_view_depth
@@ -423,6 +480,9 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
             let u_phase_2 = pt.rand(mut rng)
             let scattered = pt.sample_hg(dir, md.g, u_phase_1, u_phase_2)
             st.prev_pdf = pt.hg_phase(dot(dir, scattered), md.g)
+            // A scattering medium blurs about as a diffuse bounce does.
+            st.cone_width += st.cone_spread * t
+            st.cone_spread += 1.0
             st.flags = (st.flags & ~path_flag_prev_nee_reachable) & ~path_flag_primary
             dir = scattered
             st.scatters += 1u
@@ -549,7 +609,21 @@ fun stored_triangle_context(slot: uint){traced, bindless, wavefront_step} -> mat
     let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
     let indices = inst.indices as int
-    return material.make_context(inst, bindless.buffers[nonuniform indices], hit.primitive, hit.barycentrics)
+    let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], hit.primitive, hit.barycentrics)
+    let st = traced.path_states[slot as int]
+    let g = stored_hit_geometry(slot, ctx)
+    return with_cone(ctx, g.e1, g.e2, g.dir, g.t, st.cone_width, st.cone_spread)
+
+/// The geometry of the triangle hit `slot` recorded, its edges through the instance's record.
+fun stored_hit_geometry(slot: uint, ctx: material.shading_context){traced, bindless, wavefront_step} -> hit_geometry:
+    let hit = stored_hit(slot)
+    let inst = scene.instance(..traced.instances[hit.instance as int])
+    let r = traced.path_rays[slot as int]
+    let v0 = instance_position(inst, ctx.corner.x)
+    let e1 = instance_to_world(inst, instance_position(inst, ctx.corner.y) - v0)
+    let e2 = instance_to_world(inst, instance_position(inst, ctx.corner.z) - v0)
+    let len = length(r.direction)
+    return hit_geometry(r.direction / len, hit.t * len, e1, e2)
 
 /// The shading context of the quadric hit `slot` recorded.
 fun stored_quadric_context(slot: uint){traced, wavefront_step} -> material.shading_context:
@@ -567,13 +641,14 @@ fun shade_stored_triangle(slot: uint, ctx: material.shading_context, surface: op
     // The density next-event estimation draws this point with, which the emission of an emitter the ray reached is weighed by.
     let r = traced.path_rays[slot as int]
     let light_pdf = emitter_pdf(inst, hit.primitive, instance_to_world(inst, v1 - v0), instance_to_world(inst, v2 - v0), normalize(r.direction), hit.t * length(r.direction))
-    shade_stored(slot, inst, normalize(cross(v1 - v0, v2 - v0)), surface, supplied_tangent_frame, light_pdf)
+    let reach = pt.corner_reach(r.origin, instance_point_to_world(inst, v0), instance_point_to_world(inst, v1), instance_point_to_world(inst, v2))
+    shade_stored(slot, inst, pt.triangle_normal(v1 - v0, v2 - v0, float3(0.0, 0.0, 1.0)), reach, surface, supplied_tangent_frame, light_pdf)
 
 /// Shades the quadric hit of `slot` from the normal its intersection reported — the wavefront's `shade_quadric`.
 fun shade_stored_quadric(slot: uint, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:
     let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
-    shade_stored(slot, inst, hit.normal, surface, supplied_tangent_frame, -1.0)
+    shade_stored(slot, inst, hit.normal, 0.0, surface, supplied_tangent_frame, -1.0)
 
 /// Writes one next-event sample of `slot`: a shadowless one counts now, one with a shadow ray waits for connect.
 /// `j` is which of the slot's two shadow rays it is.
@@ -592,7 +667,7 @@ fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b
 
 /// The tail both geometry kinds share: the hit faced toward its ray, shaded, and the path moved on.
 /// `light_pdf` is what `emitter_pdf` made of the hit, negative where the instance is no light of the trace.
-fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openpbr.surface, supplied_tangent_frame: bool, light_pdf: float){traced, bindless, slug.tables, wavefront_step}:
+fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, reach: float, surface: openpbr.surface, supplied_tangent_frame: bool, light_pdf: float){traced, bindless, slug.tables, wavefront_step}:
     let s = slot as int
     let f = traced.frame[0]
     let hit = traced.hits[s]
@@ -614,11 +689,12 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(instance_to_world(inst, local.t)), normalize(instance_to_world(inst, local.b)), normalize(instance_to_world(inst, local.n)))
 
-    let last_bounce = if spent_bounces(st) + 1u >= (f.max_bounces as uint) => 1u else 0u
-    let mut p = surface_payload_for(st.rng, md.sigma_t, md.albedo, md.g, md.channel, last_bounce)
+    // Past the last bounce a path traces one segment more, which only gathers the lights it reaches: the BSDF half of the last hit's light sample.
+    let emission_only = spent_bounces(st) >= (f.max_bounces as uint)
+    let mut p = surface_payload_for(st.rng, md.sigma_t, md.albedo, md.g, md.channel, if emission_only => 1u else 0u)
     let mut light_s = no_light_sample()
     let mut env_s = no_light_sample()
-    shade_sampled(mut p, surface, n, v, exiting, ray_origin, ray_dir, hit.t, authored, supplied_tangent_frame, mut light_s, mut env_s)
+    shade_sampled(mut p, surface, n, v, exiting, ray_origin, ray_dir, hit.t, reach, authored, supplied_tangent_frame, mut light_s, mut env_s)
 
     let b = st.bounce
     let throughput = st.throughput
@@ -647,6 +723,13 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
             tally.primary_view_depth = t_forward * dot(center, normalize(cam.forward))
         traced.tallies[s] = tally
 
+        // Beside the image, the channels the layer asks for, summed over the same hits the guide count counts.
+        if f.channel_mask != 0u:
+            let world = ray_origin + ray_dir * hit.t
+            let mut shaded = surface
+            let shading_n = openpbr.shading_frame(mut shaded, n, v, authored, supplied_tangent_frame).n
+            add_channels(s, f.channel_mask, world, dot(world - cam.position, normalize(cam.forward)), n, shading_n, surface, hit.instance)
+
     // A guide ray gathers nothing and ends here, its stream untouched, and finalize starts the sample it stood in for.
     // It still leaves through the tail's one push_finished, since each queue is appended from one place (docs/wavefront.md).
     let gathers = not guide
@@ -670,6 +753,12 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         light.radiance += c
         if path_is_specular => light.specular += c
 
+    // The environment's variate, added whatever the shadow rays find.
+    if gathers:
+        let c = throughput * p.direct_diffuse
+        light.radiance += c
+        if b > 0u and path_is_specular => light.specular += c
+
     // Seeded from the stream where shade left it, as the megakernel's closest hit seeds its own two shadow rays.
     if gathers:
         let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, cutout_seed(p.rng, cutout_ray_light), mut light)
@@ -677,7 +766,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         if light_waits or env_waits => push_shadow(slot)
 
     let mut rng = if gathers => p.rng else st.rng
-    let mut continues = gathers and not all(p.throughput <= float3(0.0))
+    let mut continues = gathers and not (emission_only or all(p.throughput <= float3(0.0)))
     if continues:
         let mut next_throughput = throughput * p.throughput
         st.prev_pdf = p.bsdf_pdf
@@ -687,17 +776,20 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         else:
             st.flags = st.flags & ~path_flag_prev_nee_reachable
         st.bounce = b + 1u
+        // The cone reached this hit, and leaves it as wide as the lobe the continuation was drawn from.
+        st.cone_width += st.cone_spread * hit.t * length(ray_dir)
+        st.cone_spread += bounce_spread(p.lobe, p.roughness)
         let free = (st.flags & path_free_mask) >> path_free_shift
         if is_free_refraction(p.lobe, p.roughness) and free < free_refraction_cap:
             st.flags = (st.flags & ~path_free_mask) | ((free + 1u) << path_free_shift)
 
         // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
         let leaving = if dot(p.direction, p.normal) < 0.0 => -p.normal else p.normal
-        traced.path_rays[s] = path_ray(pt.offset_ray(ray_origin + ray_dir * hit.t, leaving), p.direction)
+        traced.path_rays[s] = path_ray(pt.offset_hit(ray_origin + ray_dir * hit.t, leaving, p.rounding), p.direction)
         traced.path_media[s] = path_medium(p.medium_sigma_t, p.medium_albedo, p.medium_g, p.channel)
 
         let spent = spent_bounces(st)
-        if spent >= (f.max_bounces as uint):
+        if spent > (f.max_bounces as uint):
             continues = false
         else if f.roulette_after > 0u and spent > f.roulette_after:
             // Russian roulette ends a path that carries little, without taking its energy with it.
@@ -769,6 +861,7 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
         let mut tally = traced.tallies[s]
         tally.sum += radiance
         tally.sum_specular += specular
+        tally.moment_sum.x += pt.moment_of(radiance)
         tally.count += 1.0
         tally.frame_sum += radiance
         tally.frame_sum_specular += specular
@@ -799,22 +892,23 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
     let tally = traced.tallies[slot as int]
 
     let mean = if tally.count > 0.0 => tally.sum / tally.count else float3(0.0)
-    traced.output[xy] = float4(..mean, 1.0)
+    let moment = if tally.count > 0.0 => tally.moment_sum.x / tally.count else 0.0
+    traced.output[xy] = float4(..mean, moment)
     traced.counters[counter_sample_floor].min(tally.count as uint)
     if wavefront_step.sample_target != 0u and wants_sample(tally.count) => traced.counters[counter_samples_short].add(1u)
 
     if f.write_temporal != 0u:
         // A pixel that finished no path this frame has no estimate of its own, so it hands the denoiser its mean.
         let frame = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
-        traced.frame_output[xy] = float4(..frame, 1.0)
+        traced.frame_output[xy] = float4(..half_safe(frame), 1.0)
         traced.guide_motion[xy] = if tally.frame_primary_count > 0.0 => tally.frame_motion / tally.frame_primary_count else float2(0.0)
 
     if f.write_split != 0u:
         // The specular share was clamped to the total per path, so the difference is never negative.
         let frame_specular = if tally.frame_count > 0.0 => tally.frame_sum_specular / tally.frame_count else (if tally.count > 0.0 => tally.sum_specular / tally.count else float3(0.0))
         let frame = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
-        traced.frame_specular[xy] = float4(..frame_specular, 1.0)
-        traced.frame_diffuse[xy] = float4(..(frame - frame_specular), 1.0)
+        traced.frame_specular[xy] = float4(..half_safe(frame_specular), 1.0)
+        traced.frame_diffuse[xy] = float4(..half_safe(frame - frame_specular), 1.0)
 
         // A mean over the paths of each kind: some path hit, every path escaped (the ray's own `t_max`), or no path of this lobe (0).
         let escaped_distance = 1e4
@@ -825,8 +919,8 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
         traced.guide_hit_distance[xy] = float2(diffuse, specular)
 
     // The near plane is applied here rather than stored, since a drawing that starts needing depth changes it without a restart.
-    // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
-    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_view_depth < 0.0 => 1.0 else max(1.0 - f.near_plane / tally.primary_view_depth, 0.0)
+    // It is the depth the projection sv::matrices_of builds gives: 1 - near / depth for a pinhole, linear for an orthographic camera.
+    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_view_depth < 0.0 => 1.0 else scene.camera_primary_depth(scene.camera(..f.camera), f.near_plane, tally.primary_view_depth)
 
     if f.write_guides != 0u:
         traced.sample_counts[xy] = tally.count

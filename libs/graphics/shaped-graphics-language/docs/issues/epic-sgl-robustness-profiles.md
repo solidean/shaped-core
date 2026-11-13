@@ -38,21 +38,24 @@ And [bug-sv-guarded-raster-pipeline-stalls-intel-driver](../../../shaped-viewer/
 
 LEGAL-69 shadows a compute stage's workgroup memory with a bit per scalar, set by a store and tested by a read, under `abort` and `report`.
 `report` names the place and its indices, and a GPU test reports a read of what no invocation stored on dx12, vulkan and webgpu.
-`define` zeroes workgroup memory before the body instead, as WGSL does; the text writes both prologues (EMIT-229).
+`define` zeroes workgroup memory before the body instead, as WGSL does; legalize writes both prologues as statements every route lowers (LEGAL-71).
 
 ## Binding arrays and memory that holds nothing (2026-11-06)
 
-A binding array's own index is guarded by its `N`, or by CHK-491's length where the shader reads it, and an element of one has its own `length`.
+A binding array's own index is guarded by its `N`, or by CHK-491's length, and an element of one has its own `length`.
 An access through an element is a block that pins that index once, tests the buffer index against that element, and then runs (LEGAL-66).
 `define` needs the same shape for every buffer access, since no index is safe in memory too short for the access: a read is zero, a store is dropped, and an atomic gives zero (LEGAL-68).
+
+## Task and mesh stages, and the depth a guard needs (2026-11-09)
+
+A task and a mesh stage shadow their workgroup memory as a compute stage does, which a mesh pipeline's GPU test reports on dx12 and vulkan (LEGAL-69).
+A shadow that would not fit beside its memory in 16 KiB is left out with the warning `workgroup-unshadowed`, rather than in silence.
+The later passes walk 44 levels against a program's 40 (CHK-268), so a guard's 4 levels always fit: a site at a program's deepest was left unguarded before, two of shaped-viewer's among them.
 
 ## Left
 
 The children, and:
 
-- A site nested past the legalizer's depth limit is left unguarded, silently.
-- A task and a mesh stage's workgroup memory is not shadowed yet, and a shadow that would pass the 16 KiB budget is left out.
-- An unbounded binding array's index is guarded only where the shader reads its length, since that is what gives the binding the constant (CHK-491).
 
 - Turning `report` on by default in a dev build, once the suite has run under it.
 - Range facts that drop a guard proven to hold, such as a `for` index into an array of its own length.

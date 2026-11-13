@@ -247,6 +247,13 @@ checker::local_only_found checker::local_only_path(type_id type, bool in_memory,
         return {.path = cc::format(": {}", out.name_of(type)),
                 .reason = "a compile may spell it in its target's own text",
                 .type = type};
+    // CHK-522: a struct with a target layout is a buffer's element, laid out as the compile's branch, and nothing else
+    if (t.kind == type_kind::buffer && has_target_layout(t.element))
+        return {};
+    if (t.kind == type_kind::structure && t.has_target_layout)
+        return {.path = cc::format(": {}", out.name_of(type)),
+                .reason = "it stands in each target's own order, which only a buffer's element follows",
+                .type = type};
     if (t.kind == type_kind::array || t.kind == type_kind::buffer)
     {
         // an array of one is named whole, `ms: mat3[2]`, so the path keeps the length the member was declared with
@@ -306,7 +313,7 @@ void checker::mark_requires_used(cc::span<symbol_id const> functions, feature_se
 void checker::report_unused_requires()
 {
     for (auto const& line : require_lines)
-        if (!line.is_used)
+        if (!line.is_used && out.is_reached_file(line.file))
             report(diagnostic_kind::unused_require, line.file, line.where,
                    cc::format("nothing in {} needs {} of it",
                               out.at(line.owner).name.empty() ? cc::string_view("the test")

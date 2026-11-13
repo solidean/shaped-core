@@ -152,7 +152,8 @@ Narrowing is not a constructor at all: it is lossy, and letting it into overload
 
 The transform holds exactly **one** member, a representation type selected by a small trait.
 A representation base class would have been the obvious alternative, but it loses standard-layout the moment both halves carry members — which is every common case.
-`[[no_unique_address]]` was likewise rejected: it is a no-op under the MSVC ABI, i.e. under both Windows compilers this repo targets.
+`[[no_unique_address]]` was likewise rejected, while it was a no-op under the MSVC ABI, i.e. under both Windows compilers this repo targets.
+clean-core's `CC_NO_UNIQUE_ADDRESS` now takes effect there too, and this choice has not been revisited since.
 A pure translation gets its own layout instead of an identity linear part next to a vector, since an empty member still occupies a byte that alignment then rounds up to a whole scalar.
 
 Every representation member carries an explicit default initializer, because `vec`, `mat` and `quat` all default to **zero**.

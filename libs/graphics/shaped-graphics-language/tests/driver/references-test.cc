@@ -100,6 +100,18 @@ TEST("sgl references - a call names the function it resolved to, with its signat
     CHECK(decl.reference().value().doc == "Half of `x`.");
 }
 
+TEST("sgl references - an alias names its declaration, and its signature says the type it stands for")
+{
+    auto const m = marked("/// A linear color.\n"
+                          "type color = float3\n"
+                          "fun f(c: col|or) -> float => c.x\n");
+    auto const r = m.reference();
+    REQUIRE(r.has_value());
+    CHECK(r.value().signature == "type color = float3");
+    CHECK(r.value().doc == "A linear color.");
+    CHECK(m.declared(r.value()) == "color@user");
+}
+
 TEST("sgl references - a builtin names its declaration in the prelude, doc comment included")
 {
     auto const m = marked("fun f(a: float, b: float) -> float => mi|x(a, b, 0.5)\n");

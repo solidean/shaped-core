@@ -119,69 +119,12 @@ void metal_raster_pipeline::release_backend_objects()
         });
 }
 
-cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipeline(
-    sg::raster_pipeline_description const& desc,
-    sg::lifetime_scope)
+namespace
 {
-    // Refused rather than ignored: a pipeline built without the stage a caller asked for draws something plausible
-    // and wrong, and there is no later point at which the omission surfaces.
-    if (desc.geometry_shader.has_value())
-        return cc::error("raster_pipeline: the metal backend has no geometry stage");
-    if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value())
-        return cc::error("raster_pipeline: the metal backend has no tessellation stages");
-    if (desc.mesh_shader.has_value())
-        return cc::error("raster_pipeline: the metal backend does not wire up object and mesh stages yet");
-
-    auto const scope = autorelease_scope();
-
-    auto vertex = load_stage(_device, desc.vertex_shader, "vertex");
-    if (vertex.has_error())
-        return cc::error(vertex.error().to_string());
-
-    auto fragment = cc::result<loaded_stage>(loaded_stage{});
-    if (desc.fragment_shader.has_value())
-    {
-        fragment = load_stage(_device, desc.fragment_shader.value(), "fragment");
-        if (fragment.has_error())
-        {
-            vertex.value().function->release();
-            vertex.value().library->release();
-            return cc::error(fragment.error().to_string());
-        }
-    }
-
-    auto const release_stages = [&]
-    {
-        if (fragment.value().function != nullptr)
-        {
-            fragment.value().function->release();
-            fragment.value().library->release();
-        }
-        vertex.value().function->release();
-        vertex.value().library->release();
-    };
-
-    auto vertex_descriptor = build_vertex_descriptor(desc.vertex_input);
-    if (vertex_descriptor.has_error())
-    {
-        release_stages();
-        return cc::error(vertex_descriptor.error().to_string());
-    }
-
-    auto* const descriptor = MTL4::RenderPipelineDescriptor::alloc()->init();
-    descriptor->setVertexFunctionDescriptor(vertex.value().function);
-    if (fragment.value().function != nullptr)
-        descriptor->setFragmentFunctionDescriptor(fragment.value().function);
-    if (vertex_descriptor.value() != nullptr)
-        descriptor->setVertexDescriptor(vertex_descriptor.value());
-
-    descriptor->setInputPrimitiveTopology(topology_class_of(desc.topology));
-    descriptor->setRasterSampleCount(NS::UInteger(desc.sample_count < 1 ? 1 : desc.sample_count));
-
-    // Rasterization is left on with no fragment stage: that is a depth-only pass, and Metal runs one correctly from
-    // the vertex stage alone.
-    // Disabling it there discards every primitive before the depth test, so the pass writes nothing at all.
-
+/// The pipeline's color targets: their formats, write masks and blending, which a vertex and a mesh pipeline set alike.
+template <class Descriptor>
+void configure_color_targets(Descriptor* descriptor, sg::raster_pipeline_description const& desc)
+{
     for (auto i = isize(0); i < desc.color_targets.size(); ++i)
     {
         auto const& target = desc.color_targets[i];
@@ -205,18 +148,170 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
             attachment->setBlendingState(MTL4::BlendStateDisabled);
         }
     }
+}
+
+/// Metal's ceiling on an object stage's payload: nothing hands sg the payload's size, and a larger reservation than
+/// the struct costs the object stage occupancy and nothing else.
+constexpr isize k_mesh_payload_bytes = 16384;
+
+[[nodiscard]] MTL::Size threads_of(sg::compiled_shader const& shader)
+{
+    auto const size = shader.workgroup_size.value_or(sg::compute_dimensions{.x = 1, .y = 1, .z = 1});
+    return MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z));
+}
+
+/// A mesh pipeline's state: its object stage where it has one, its mesh stage and its fragment stage (EMIT-206).
+[[nodiscard]] cc::result<MTL::RenderPipelineState*> build_mesh_state(MTL::Device* device,
+                                                                     MTL4::Compiler* compiler,
+                                                                     sg::raster_pipeline_description const& desc)
+{
+    auto stages = cc::vector<loaded_stage>();
+    auto const release_stages = [&]
+    {
+        for (auto& stage : stages)
+        {
+            stage.function->release();
+            stage.library->release();
+        }
+    };
+    auto const load = [&](sg::compiled_shader const& shader, cc::string_view what) -> MTL4::LibraryFunctionDescriptor*
+    {
+        auto loaded = load_stage(device, shader, what);
+        if (loaded.has_error())
+            return nullptr;
+        stages.push_back(loaded.value());
+        return loaded.value().function;
+    };
+
+    auto* const descriptor = MTL4::MeshRenderPipelineDescriptor::alloc()->init();
+    auto* const mesh = load(desc.mesh_shader.value(), "mesh");
+    auto* const object = desc.task_shader.has_value() ? load(desc.task_shader.value(), "task") : nullptr;
+    auto* const fragment = desc.fragment_shader.has_value() ? load(desc.fragment_shader.value(), "fragment") : nullptr;
+    if (mesh == nullptr || (desc.task_shader.has_value() && object == nullptr)
+        || (desc.fragment_shader.has_value() && fragment == nullptr))
+    {
+        descriptor->release();
+        release_stages();
+        return cc::error("raster_pipeline: a stage of the mesh pipeline did not load");
+    }
+    descriptor->setMeshFunctionDescriptor(mesh);
+    auto const mesh_threads = threads_of(desc.mesh_shader.value());
+    descriptor->setMaxTotalThreadsPerMeshThreadgroup(mesh_threads.width * mesh_threads.height * mesh_threads.depth);
+    if (object != nullptr)
+    {
+        descriptor->setObjectFunctionDescriptor(object);
+        auto const object_threads = threads_of(desc.task_shader.value());
+        descriptor->setMaxTotalThreadsPerObjectThreadgroup(object_threads.width * object_threads.height
+                                                           * object_threads.depth);
+        descriptor->setPayloadMemoryLength(NS::UInteger(k_mesh_payload_bytes));
+    }
+    if (fragment != nullptr)
+        descriptor->setFragmentFunctionDescriptor(fragment);
+    descriptor->setRasterSampleCount(NS::UInteger(desc.sample_count < 1 ? 1 : desc.sample_count));
+    configure_color_targets(descriptor, desc);
 
     NS::Error* pipeline_error = nullptr;
     auto const compile_guard = std::lock_guard(pipeline_compilation_lock());
-    auto* const state = _compiler->newRenderPipelineState(descriptor, nullptr, &pipeline_error);
-
+    auto* const state = compiler->newRenderPipelineState(descriptor, nullptr, &pipeline_error);
     descriptor->release();
-    if (vertex_descriptor.value() != nullptr)
-        vertex_descriptor.value()->release();
     release_stages();
-
     if (state == nullptr)
-        return metal_error(pipeline_error, "raster_pipeline: the pipeline could not be built");
+        return metal_error(pipeline_error, "raster_pipeline: the mesh pipeline could not be built");
+    return state;
+}
+} // namespace
+
+cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipeline(
+    sg::raster_pipeline_description const& desc,
+    sg::lifetime_scope)
+{
+    // Refused rather than ignored: a pipeline built without the stage a caller asked for draws something plausible
+    // and wrong, and there is no later point at which the omission surfaces.
+    if (desc.geometry_shader.has_value())
+        return cc::error("raster_pipeline: the metal backend has no geometry stage");
+    if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value())
+        return cc::error("raster_pipeline: the metal backend has no tessellation stages");
+    if (desc.view_count > 1 && !_device->supportsVertexAmplificationCount(NS::UInteger(desc.view_count)))
+        return cc::error(
+            cc::format("raster_pipeline: this metal device amplifies no draw into {} views", desc.view_count));
+
+    auto const scope = autorelease_scope();
+
+    auto* state = static_cast<MTL::RenderPipelineState*>(nullptr);
+    if (desc.mesh_shader.has_value())
+    {
+        auto built = build_mesh_state(_device, _compiler, desc);
+        if (built.has_error())
+            return cc::error(cc::move(built.error()));
+        state = built.value();
+    }
+    else
+    {
+        auto vertex = load_stage(_device, desc.vertex_shader, "vertex");
+        if (vertex.has_error())
+            return cc::error(vertex.error().to_string());
+
+        auto fragment = cc::result<loaded_stage>(loaded_stage{});
+        if (desc.fragment_shader.has_value())
+        {
+            fragment = load_stage(_device, desc.fragment_shader.value(), "fragment");
+            if (fragment.has_error())
+            {
+                vertex.value().function->release();
+                vertex.value().library->release();
+                return cc::error(fragment.error().to_string());
+            }
+        }
+
+        auto const release_stages = [&]
+        {
+            if (fragment.value().function != nullptr)
+            {
+                fragment.value().function->release();
+                fragment.value().library->release();
+            }
+            vertex.value().function->release();
+            vertex.value().library->release();
+        };
+
+        auto vertex_descriptor = build_vertex_descriptor(desc.vertex_input);
+        if (vertex_descriptor.has_error())
+        {
+            release_stages();
+            return cc::error(vertex_descriptor.error().to_string());
+        }
+
+        auto* const descriptor = MTL4::RenderPipelineDescriptor::alloc()->init();
+        descriptor->setVertexFunctionDescriptor(vertex.value().function);
+        if (fragment.value().function != nullptr)
+            descriptor->setFragmentFunctionDescriptor(fragment.value().function);
+        if (vertex_descriptor.value() != nullptr)
+            descriptor->setVertexDescriptor(vertex_descriptor.value());
+
+        descriptor->setInputPrimitiveTopology(topology_class_of(desc.topology));
+        // several views per draw are vertex amplification, one amplification a view
+        if (desc.view_count > 1)
+            descriptor->setMaxVertexAmplificationCount(NS::UInteger(desc.view_count));
+        descriptor->setRasterSampleCount(NS::UInteger(desc.sample_count < 1 ? 1 : desc.sample_count));
+
+        // Rasterization is left on with no fragment stage: that is a depth-only pass, and Metal runs one correctly from
+        // the vertex stage alone.
+        // Disabling it there discards every primitive before the depth test, so the pass writes nothing at all.
+
+        configure_color_targets(descriptor, desc);
+
+        NS::Error* pipeline_error = nullptr;
+        auto const compile_guard = std::lock_guard(pipeline_compilation_lock());
+        state = _compiler->newRenderPipelineState(descriptor, nullptr, &pipeline_error);
+
+        descriptor->release();
+        if (vertex_descriptor.value() != nullptr)
+            vertex_descriptor.value()->release();
+        release_stages();
+
+        if (state == nullptr)
+            return metal_error(pipeline_error, "raster_pipeline: the pipeline could not be built");
+    }
 
     // The depth and stencil test are a separate object here, bound on the encoder rather than baked into the pipeline.
     auto* const ds_descriptor = MTL::DepthStencilDescriptor::alloc()->init();
@@ -261,7 +356,13 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
     for (auto const& slot : desc.vertex_input.slots)
         strides.push_back(slot.stride);
 
-    return std::make_shared<metal_raster_pipeline>(*this, state, depth_stencil, desc.rasterization, desc.topology,
-                                                   desc.depth_stencil_format, cc::move(strides), desc.layout);
+    auto pipeline
+        = std::make_shared<metal_raster_pipeline>(*this, state, depth_stencil, desc.rasterization, desc.topology,
+                                                  desc.depth_stencil_format, cc::move(strides), desc.layout);
+    if (desc.mesh_shader.has_value())
+        pipeline->set_mesh_threads(threads_of(desc.mesh_shader.value()), desc.task_shader.has_value()
+                                                                             ? threads_of(desc.task_shader.value())
+                                                                             : MTL::Size(1, 1, 1));
+    return pipeline;
 }
 } // namespace sg::backend::metal

@@ -42,7 +42,7 @@ struct sgl::text_request
     /// `report` prints through the debug buffer, and so is `abort` without `diagnostics`.
     check::undefined_guard guards_undefined = check::undefined_guard::none;
     /// Writes an inline trace as its emulated form on HLSL too, reading sg's acceleration pool (EMIT-135).
-    /// A package's `SOFTWARE_TRACE` asks for it; WGSL has no other form, and MSL keeps its native one.
+    /// A package's `SOFTWARE_TRACE` asks for it, so an inline trace sees what moves wherever it runs; WGSL has no other form.
     bool software_trace = false;
     /// Compiles an entry point whose `@float` WGSL cannot keep at `fast`, with a warning, rather than refusing it (EMIT-185).
     /// The host's to give, since only the code that picked WebGPU knows whether running without the guarantee will do.
@@ -51,6 +51,23 @@ struct sgl::text_request
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.
     check::feature_set device_features;
+    /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
+    emit::native_route native = emit::native_route::text;
+    /// Writes the `.sgl` line of each operation into what the native route writes, for a debugger to read (EMIT-257).
+    /// Off, the binary is byte for byte what it would be without this option; the text route has `line_directives`.
+    bool native_line_table = false;
+    /// A mesh or geometry entry point as one half of its polyfill (CHK-524, CHK-525), which
+    /// `emitted_source::mesh_layout` then describes.
+    emit::mesh_form mesh = emit::mesh_form::native;
+    /// The vertex stage a geometry or tessellation control entry point's compute half runs (CHK-525, CHK-527): its
+    /// pipeline's.
+    cc::string_view polyfill_vertex;
+    /// The tessellation control stage before a tessellation evaluation entry point whose compute half is asked for
+    /// (CHK-527): its pipeline's.
+    cc::string_view polyfill_control;
+    /// The task stage that launches a mesh entry point whose compute half or scan is asked for (CHK-524): its
+    /// pipeline's, where it has one.
+    cc::string_view polyfill_task;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
@@ -99,6 +116,16 @@ struct sgl::interface_binding
 struct sgl::emitted_source
 {
     cc::string text;
+    /// The SPIR-V `text_request::native` asked for; empty where the text is what was written.
+    cc::vector<u32> spirv;
+    /// The DXIL container the same request asked for on dx12.
+    cc::vector<byte> dxil;
+    /// What kept a `prefer` from writing either, for a reader.
+    cc::string native_gap;
+    /// Where DXIL's packer places what crosses the entry point's edge, wherever a dx12 request took the native route.
+    /// It stands beside `native_gap`, since a signature needs no lowering of the body.
+    cc::vector<ir::dxil::signature_element> signature;
+    check::stage stage = check::stage::none;
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;
@@ -108,6 +135,8 @@ struct sgl::emitted_source
     cc::vector<interface_binding> bindings;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// A bare @compute's: the compile chose `workgroup`, so the host dispatches it by threads alone (CHK-520).
+    bool is_dispatched_by_threads = false;
     /// The subgroup size a compute entry point prefers, which the host asks the device for; 0 where it prefers none.
     i32 preferred_subgroup_size = 0;
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
@@ -119,6 +148,8 @@ struct sgl::emitted_source
     check::float_level float_guarantee = check::float_level::fast;
     /// The function that raised the entry point's guarantee, by name; empty at `fast`.
     cc::string float_raised_by;
+    /// LEGAL-69: the bytes of workgroup memory the profile could not shadow, whose reads it tests not; 0 where it did.
+    i32 unshadowed_bytes = 0;
     /// The options the entry point reaches, by name, in declaration order (CHK-355).
     cc::vector<cc::string> options;
     /// What the entry point's code does to each binding it lists, keyed by host name; a slot it never touches is absent.
@@ -131,6 +162,15 @@ struct sgl::emitted_source
     cc::vector<cc::string> line_files;
     /// Every print and assert the text writes into sg's debug buffer; empty without `text_request::diagnostics`.
     cc::vector<emit::debug_site> debug_sites;
+    /// The slots a polyfilled mesh or geometry entry point's halves agree on (CHK-524, CHK-525); empty unless
+    /// `text_request::mesh` asked.
+    cc::optional<check::mesh_polyfill_layout> mesh_layout;
+    /// The records a polyfilled task stage's forms agree on (CHK-524): the task entry point's compute form, and a mesh
+    /// entry point's compute half and scan where `text_request::polyfill_task` named the task; empty otherwise.
+    cc::optional<check::task_polyfill_layout> task_layout;
+    /// What a polyfilled tessellation's forms agree on (CHK-527): the control stage's compute half, and the evaluation
+    /// stage's compute and vertex halves; empty otherwise.
+    cc::optional<check::tessellation_polyfill_layout> tessellation_layout;
     /// The names of the library files the source reached through `use`, which an edit of any of them changes the text of.
     cc::vector<cc::string> library_files;
     /// One entry per warning, `cube.sgl:12:5: warning: no-effect: ...` and its notes on the lines under it.

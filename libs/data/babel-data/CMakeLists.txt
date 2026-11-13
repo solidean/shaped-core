@@ -21,6 +21,12 @@ add_library(babel-data
     src/babel-data/data/json.cc
     src/babel-data/data/json_writer.cc
     src/babel-data/data/markdown.cc
+
+    src/babel-data/shader/spirv.cc
+    src/babel-data/shader/llvm_bitstream.cc
+    src/babel-data/shader/llvm37.cc
+    src/babel-data/shader/dxil_container.cc
+    src/babel-data/shader/spirv_opcode_table.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -37,13 +43,18 @@ target_sources(babel-data
     src/babel-data/data/base64.hh
     src/babel-data/data/json.hh
     src/babel-data/data/markdown.hh
+
+    src/babel-data/shader/spirv.hh
+    src/babel-data/shader/llvm_bitstream.hh
+    src/babel-data/shader/llvm37.hh
+    src/babel-data/shader/dxil_container.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
 target_compile_features(babel-data PUBLIC cxx_std_23)
 
 # Expose "src" so '#include <babel-data/...>' works for consumers.
-target_include_directories(babel-data PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(babel-data PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 
 # clean-core and nothing else, and that is the library's whole contract.
 # A format needing more does not go here.
@@ -51,8 +62,6 @@ target_link_libraries(babel-data PUBLIC clean-core)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(babel-data PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
-
-sc_target_pch(babel-data CC_ALL) # the same measured tier as babel-serializer
 
 # Test executable
 if(SC_BUILD_TESTS)
@@ -64,16 +73,20 @@ if(SC_BUILD_TESTS)
         tests/data/base64-test.cc
         tests/data/json-test.cc
         tests/data/markdown-test.cc
+
+        tests/shader/spirv-test.cc
+        tests/shader/dxil-test.cc
     )
     sc_nexus_binary(babel-data-test KINDS tests)
+
+    # the shader readers' binaries, DXC's output committed beside the tests that read it
+    sc_target_source_paths(babel-data-test PRIVATE BABEL_DATA_TEST_DIR tests)
 
     target_link_libraries(babel-data-test
         PRIVATE
         babel-data
         nexus
     )
-
-    sc_target_pch(babel-data-test CC_ALL NEXUS) # inherits the library's measured tier
 
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(babel-data-test)

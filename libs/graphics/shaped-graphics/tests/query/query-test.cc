@@ -42,3 +42,39 @@ ASYNC_INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::conte
     REQUIRE(t1.is_ready());
     CHECK(t1.try_get_seconds().has_value());
 }
+
+// More lists in flight at once than a device has query heaps: metal grants a process 32 counter heaps, so a list that
+// held one of its own for its two timestamps ran out after 32, and every later timestamp was invalid.
+ASYNC_INVOCABLE_TEST("sg - timestamps from hundreds of lists in flight at once all read back",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::timestamp_query))
+        SKIP("this context has no timestamp queries");
+
+    auto spans = cc::vector<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp>>();
+    for (auto i = 0; i < 256; ++i)
+    {
+        auto cmd = ctx->create_command_list();
+        auto const from = cmd->query.record_gpu_timestamp();
+        auto const to = cmd->query.record_gpu_timestamp();
+        ctx->submit_command_list(cc::move(cmd));
+        ctx->advance_epoch();
+        spans.push_back({from, to});
+    }
+
+    auto invalid = 0;
+    for (auto const& [from, to] : spans)
+    {
+        if (!from.is_valid() || !to.is_valid())
+        {
+            ++invalid;
+            continue;
+        }
+        auto const tick_from = co_await from.ticks();
+        auto const tick_to = co_await to.ticks();
+        CHECK(tick_from > 0u);
+        CHECK(tick_to >= tick_from);
+    }
+    CHECK(invalid == 0);
+}

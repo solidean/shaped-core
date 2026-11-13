@@ -308,7 +308,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
 | filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
 | `T[N]` of a resource | `sg::feature::binding_arrays`, which WebGPU lacks ([Binding arrays](#binding-arrays)) |
-| `T[]` of a resource | `sg::feature::unbounded_binding_arrays`, which WebGPU lacks and sg's metal backend does not grant yet |
+| `T[]` of a resource | `sg::feature::unbounded_binding_arrays`, which WebGPU lacks |
 | `acceleration_structure[.geometry]` | `sg::feature::ray_query`, or `raytracing_pipeline` in a file that grants that one |
 | a call that traces inline, `world.trace(r)` | `sg::feature::ray_query`, emulated on WebGPU; counted where the entry point reaches the call (CHK-322) |
 | a ray-tracing stage, a trace of a ray type, a callable's call | `sg::feature::raytracing_pipeline`, which WebGPU lacks |
@@ -427,7 +427,7 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
   A helper that one call reaches with a uniform index and another with a varying one is split in two, or marked `nonuniform` and pays on both.
 * `T[]` is an unbounded array, whose length each binding group decides by the views the host gives it (CHK-490).
   It needs `unbounded_binding_arrays` beside `binding_arrays`, and is its binding's last member, since both APIs size only a group's last binding.
-  Its `length` is the views the group was given, held as a constant of the binding that the generated host code fills (CHK-491).
+  Its `length` is the views the group was given, a staging group's capacity, which sg writes per dispatch or draw and no host sets (CHK-491).
   A binding whose code reads it gains that constant, and with it a constant block, so a group built by hand binds and fills one; a staging group's is its capacity.
 * An element of a buffer or `bytes` array has its own `length`, how many elements or bytes that view holds (CHK-460).
 * `sampler[N]` and `comparison_sampler[N]` are arrays of samplers, read by element and handed to a sample as the member would be.
@@ -676,6 +676,7 @@ The syntax above is what the AST builds; the check pass is what limits it.
 Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out at natural alignment (EMIT-111), or as C++ lays it out under `@padding(.none)` (EMIT-167).
+  A `T` with a target layout, such as `accel.ptlas_write`, is laid out in the order of the branch the compile takes (CHK-522), and has no C++ struct.
 * `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)).
@@ -685,6 +686,8 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
   The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
+* Any resource handed to a function of the program, which takes it as a parameter of exactly its type ([CHK-366](semantics/checking.md#bindings)).
+  A buffer parameter is subscripted as its member is, `values[i]`, and a body in a target's own text names it as `$values`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
 * Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform` and `uniform`.
@@ -709,8 +712,6 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 
 ## Open
 
-* `values.length` on metal: HLSL and WGSL read it (CHK-460, EMIT-195), and a Metal buffer argument is a pointer that carries no length.
-  sg would pass the lengths in, as a buffer of sizes beside the argument table; until it does, a metal compile that reads one is refused.
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).

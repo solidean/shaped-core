@@ -38,6 +38,7 @@
 #include <nexus/tests/check.hh>
 #include <nexus/tests/check_divert.hh>
 #include <nexus/tests/entry.hh>
+#include <nexus/tests/export/runner_report.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/invoke_tests.hh>
 #include <nexus/tests/section.hh>
@@ -148,6 +149,8 @@ struct nx::impl::test_context
 
     // This test's entry in the in-flight table, or -1 when the table was full.
     int in_flight_slot = -1;
+    // Started under no other test: neither a dispatched child nor a nested run's test, so it bounds the report's coverage.
+    bool top_level = false;
     nx::test_schedule_config const* config = nullptr;
     cc::unique_ptr<test_section> root_section;
     cc::vector<test_section*> curr_section;
@@ -583,6 +586,9 @@ cc::unique_ptr<test_context> test_execute_begin(nx::test_execution& execution,
     // So a nested execution inherits its ancestor's sink, and only a top-level one owns a buffer.
     auto const* const parent = current_context();
     ctx.verbose_sink = parent != nullptr ? parent->verbose_sink : &execution.verbose_output;
+    ctx.top_level = parent == nullptr && is_outermost_execution();
+    if (ctx.top_level)
+        nx::impl::note_coverage_begin(execution.instance.declaration);
 
     // Pinned when the declaration says so; otherwise from the name, never the position, so a filtered re-run reproduces it.
     // A dispatched child derives from its driver's seed and its group, since the same invocable may run under several drivers.
@@ -638,6 +644,8 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     ctx.execution->skip_reason = ctx.unskipped_passes == 0 ? cc::move(reason) : cc::string();
 
     ctx.is_finished.store(true, cc::memory_order_release);
+    if (ctx.top_level)
+        nx::impl::note_coverage_end();
     if (ctx.in_flight_slot >= 0)
         g_in_flight_tests[ctx.in_flight_slot].store(nullptr, cc::memory_order_relaxed);
     nx::impl::watchdog_heartbeat();
@@ -652,6 +660,11 @@ void begin_pass(test_context& ctx)
 {
     ctx.exec_count++;
     ctx.pass_owner = u64(nx::impl::new_pass_owner());
+    // The scheduled test this pass counts for, as a file access's context does: a dispatched child counts for its driver.
+    auto const* const exec = ctx.execution;
+    nx::impl::note_pass_owner(ctx.pass_owner, exec != nullptr && exec->invocation_group.empty()
+                                                  ? exec->instance.declaration
+                                                  : nx::impl::current_slot_declaration());
     ctx.log_declarations.lock([](cc::vector<impl::log_declaration>& d) { d.clear(); });
     ctx.leaf_section = nullptr;
     ctx.root_section->next_open_section = nullptr;
@@ -1192,6 +1205,8 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
     }
     catch (std::exception const& e)
     {
+        if (is_outermost_execution())
+            CC_LOG_ERROR("uncaught exception: {} at {}", e.what(), nx::impl::site_text(decl.location));
         ctx.errors.push_back(test_error{
             .expr = cc::format("uncaught exception: {}", e.what()),
             .location = decl.location,
@@ -1201,6 +1216,8 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
     }
     catch (cc::exception const& e)
     {
+        if (is_outermost_execution())
+            CC_LOG_ERROR("uncaught exception: {} at {}", e.message(), nx::impl::site_text(decl.location));
         ctx.errors.push_back(test_error{
             .expr = cc::format("uncaught exception: {}", e.message()),
             .location = decl.location,
@@ -1310,13 +1327,18 @@ void start_async_pass(async_test_state& state)
         if (auto const* const code = state.command_root->try_value(); code != nullptr)
             state.execution->exit_code = *code;
         else if (auto const* const err = state.command_root->try_error(); err != nullptr && !aborted)
+        {
+            auto const what = err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string();
+            // Logged as a failed check is, since the summary names only the test, and a page has no results file.
+            if (is_outermost_execution())
+                CC_LOG_ERROR("the command's async graph failed: {} at {}", what, nx::impl::site_text(decl.location));
             ctx.errors.push_back(test_error{
-                .expr = cc::format("the command's async graph failed: {}",
-                                   err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string()),
+                .expr = cc::format("the command's async graph failed: {}", what),
                 .location = decl.location,
                 .extra_lines = {},
                 .expanded = "the command resolved to an error instead of an exit status",
             });
+        }
     }
 
     if (state.root != nullptr && !aborted)
@@ -1324,6 +1346,8 @@ void start_async_pass(async_test_state& state)
         if (auto const* const err = state.root->try_error(); err != nullptr)
         {
             auto const what = err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string();
+            if (is_outermost_execution())
+                CC_LOG_ERROR("the test's async graph failed: {} at {}", what, nx::impl::site_text(decl.location));
             ctx.errors.push_back(test_error{
                 .expr = cc::format("the test's async graph failed: {}", what),
                 .location = decl.location,
@@ -1790,6 +1814,19 @@ void nx::impl::report_invocation_cycle(nx::test_declaration const* decl)
 bool nx::impl::has_current_test()
 {
     return current_context() != nullptr;
+}
+
+bool nx::impl::is_parked(nx::test_declaration const& decl,
+                         nx::test_schedule_config const& config,
+                         cc::span<cc::vector<cc::string> const> child_scopes,
+                         int consumed)
+{
+    if (decl.test_config.enabled || config.run_disabled_tests)
+        return false;
+    for (auto const& s : child_scopes)
+        if (consumed + 1 < int(s.size()) && cc::string_view(s[consumed + 1]) == decl.name)
+            return false;
+    return true;
 }
 
 nx::test_execution* nx::impl::current_execution()
@@ -2691,7 +2728,7 @@ cc::shared_async<cc::unit> make_test_node(nx::test_execution* execution,
 
     return cc::make_async_lazy<cc::unit>(
         [execution, &config, &locks, &main_bodies, tag_locks = cc::move(tag_locks),
-         exclusive = test_config.exclusive_global, main_thread = test_config.main_thread,
+         exclusive = test_config.exclusive_global || config.one_at_a_time, main_thread = test_config.main_thread,
          pending_exclusive = cc::shared_async<cc::async_mutex_guard<cc::unit>>(),
          pending_shared = cc::shared_async<cc::async_shared_guard<cc::unit>>(),
          pending_tag = cc::shared_async<cc::async_mutex_guard<cc::unit>>(),
@@ -3220,12 +3257,14 @@ struct planned_child
 };
 } // namespace
 
-cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::string name,
-                                                                          cc::vector<std::type_index> signature,
-                                                                          cc::vector<nx::typed_value> boxes,
-                                                                          bool in_parallel,
-                                                                          isize max_concurrent,
-                                                                          cc::thread_bound_scheduler* home)
+cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(
+    cc::string name,
+    cc::vector<std::type_index> signature,
+    cc::vector<nx::typed_value> boxes,
+    bool in_parallel,
+    isize max_concurrent,
+    cc::thread_bound_scheduler* home,
+    cc::unique_function<cc::shared_async<cc::unit>()> after_each)
 {
     // Everything below runs on first poll, which inherits the awaiting body's ambient — so this is the driver's context.
     auto* const parent_ctx = current_context();
@@ -3311,6 +3350,14 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
                 continue;
         }
 
+        if (is_parked(*decl, config, child_scopes, consumed))
+            continue;
+
+        // --shard: a driver that runs in every shard dispatches only this shard's children
+        if (parent->instance.shards_children
+            && !config.in_shard(cc::format("{} / {} / {}", parent->instance.declaration->name, name, decl->name)))
+            continue;
+
         if (is_declaration_active(decl))
         {
             report_invocation_cycle(decl);
@@ -3383,7 +3430,11 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
 
         runs.push_back(run_invoked_child(cc::move(node), &child.decl->test_config, locks, permits.get()));
         if (!in_parallel)
+        {
             co_await runs.back();
+            if (after_each.is_valid())
+                co_await after_each();
+        }
     }
 
     if (in_parallel && !runs.empty())

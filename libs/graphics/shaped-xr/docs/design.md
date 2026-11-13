@@ -15,6 +15,7 @@ The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first protot
   `sxr::standard_controller_actions()` is the usual set for Quest Touch and the simple controller, and poses come back in tg's frame.
 - **Capabilities** are named in `system_description::wants`, and `system::offers` answers whether the headset has one.
   What is missing is left out rather than failing the system, and `session::availability_of` is what a session may use.
+- **`sxr::controller_routine`** draws each hand as a plain box and its aim ray as a thin one, inside the frame's own pass.
 - **`sxr::inspect_runtime`** reports what the active runtime lists and what the system says it supports, with no graphics binding and no session; `xr-probe` prints it.
 - **`sxr::blend_mode`** is how a frame meets the room: opaque, alpha blend or additive, and `session::blend` says what came up.
   A camera layer serves alpha blend ahead of the runtime's own, since that layer under an opaque frame is what ran over Quest Link.
@@ -62,6 +63,6 @@ The order is depth, hit sources, scene, anchors, and `question-xr-link-ar-probe`
 
 ## Planned
 
-- Drawing the controllers, an sr-backed routine (`feat-xr-controller-actions`), and hand tracking (`feat-xr-hand-tracking`).
+- Hand tracking (`feat-xr-hand-tracking`).
 - Quest standalone: the same code in an APK (`feat-android-apk`).
 - Headless CI against Monado (`chore-xr-monado-ci`).

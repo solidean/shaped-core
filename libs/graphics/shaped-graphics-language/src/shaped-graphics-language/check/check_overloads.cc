@@ -17,6 +17,9 @@ void checker::note_near_misses(i32 file,
                                cc::span<symbol_id const> candidates,
                                call_arguments const& arguments)
 {
+    // CHK-338: a call in a generic body with its type parameters open is no miss, since each instance checks it again
+    if (generic_passes > 0)
+        return;
     for (auto const candidate : candidates)
     {
         if (out.at(candidate).state != symbol_state::checked)

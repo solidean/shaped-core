@@ -24,6 +24,8 @@ from .lib.core.process import (
     run_step,
 )
 from .lib.pipeline.build import build
+from .lib.pipeline.build_server import BuildServer
+from .lib.pipeline.build_server import from_dev_toml as build_server_from_dev_toml
 from .lib.pipeline.cmake import remove_build_dir
 from .lib.pipeline.configure import configure, ensure_configured
 from .lib.pipeline.diagjobs import BuildMark
@@ -33,7 +35,7 @@ from .lib.pipeline.eligibility import select_eligible_binaries
 from .lib.pipeline.examples import drop_testless_examples
 from .lib.pipeline.test import test
 from .lib.project.companions import Companion
-from .lib.project.compdb import find_entry, load_entries, split_command, strip_pch_flags, suggest_files
+from .lib.project.compdb import find_entry, load_entries, split_command, suggest_files
 from .lib.project.flags import extract_flags
 from .lib.project.presets import (
     DEFAULT_BUILD_PRESETS, PresetError, load_presets, resolve_cache_variable, resolve_presets,
@@ -181,7 +183,6 @@ __all__ = [
     "load_entries",
     "find_entry",
     "split_command",
-    "strip_pch_flags",
     "suggest_files",
     "extract_flags",
     "Preset",

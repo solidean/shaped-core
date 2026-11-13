@@ -194,7 +194,7 @@ void webgpu_command_list::apply_raster_state()
     {
         for (auto i = s.groups.size(); i < sg::reserved_binding_group; ++i)
             wgpuRenderPassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
-        u32 offsets[2] = {};
+        u32 offsets[3] = {};
         auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
         auto window = sg::raw_buffer_handle();
         if (sg::impl::debug_windows::k_enabled)

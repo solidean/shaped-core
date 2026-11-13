@@ -45,6 +45,30 @@ def build_overrides(p: argparse.ArgumentParser) -> None:
              "'auto' takes each example's own first choice, so this is how the other arms are "
              "reached. Auto-redirects the build dir, like --toolset.",
     )
+    p.add_argument(
+        "--agility-preview", action="store_true",
+        help="Build dx12 against the pre-release Agility SDK (SC_AGILITY_PREVIEW), for clustered geometry and "
+             "partitioned TLAS. Development only, and it needs `uv run extern/agility/fetch-agility.py --preview "
+             "--accept-license`. Auto-redirects the build dir, like --toolset.",
+    )
+
+
+def server(p: argparse.ArgumentParser) -> None:
+    """The optional build server's flags (lib/pipeline/build_server.py); `--no-server` wins over every other opt-in."""
+    p.add_argument(
+        "--server", action="store_true",
+        help="Build through the optional local build server; when it is not installed or cannot serve, warn and "
+             "build as without it. Also SC_BUILD_SERVER=1, or the project's own default.",
+    )
+    p.add_argument(
+        "--no-server", action="store_true",
+        help="Never use the build server, whatever opted in (SC_BUILD_SERVER, the project's default, --server).",
+    )
+
+
+def server_flag(args: argparse.Namespace) -> bool | None:
+    """The build server flags' answer: False for `--no-server`, True for `--server`, None when neither was passed."""
+    return False if getattr(args, "no_server", False) else True if getattr(args, "server", False) else None
 
 
 def profile(p: argparse.ArgumentParser) -> None:

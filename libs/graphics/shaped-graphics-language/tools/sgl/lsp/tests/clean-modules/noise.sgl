@@ -1,0 +1,4 @@
+// A second module that checks, which `shading` uses and a document may use alone.
+module noise
+
+fun grain(x: float) -> float => x * 0.25

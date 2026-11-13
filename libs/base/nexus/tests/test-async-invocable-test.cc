@@ -162,6 +162,25 @@ cc::shared_async<cc::unit> drive_in_parallel(probe_key k)
     k.p->result = co_await nx::async_invoke_tests_in_parallel("g", k);
 }
 
+/// Suspends before it notes, so a child that started before it resolved would be noted ahead of it.
+cc::shared_async<cc::unit> note_after_each(probe_key k)
+{
+    (void)co_await a_moment_later();
+    note(k, "after");
+}
+
+cc::shared_async<cc::unit> drive_with_after_each_in_sequence(probe_key k)
+{
+    k.p->result = co_await nx::async_invoke_tests_in_sequence(
+        "g", nx::invocation_options{.after_each = [k] { return note_after_each(k); }}, k);
+}
+
+cc::shared_async<cc::unit> drive_with_after_each_in_parallel(probe_key k)
+{
+    k.p->result = co_await nx::async_invoke_tests_in_parallel(
+        "g", nx::invocation_options{.after_each = [k] { return note_after_each(k); }}, k);
+}
+
 template <class F>
 void add_async_child(nx::test_registry& reg, cc::string name, F* fn, nx::config::cfg cfg = {})
 {
@@ -204,6 +223,33 @@ bool any_error_mentions(nx::test_execution const& e, cc::string_view text)
 }
 } // namespace
 
+TEST("async invocables - a disabled child is parked unless named, as a disabled test is", no_scheduler)
+{
+    for (auto const named : {false, true})
+    {
+        probe p;
+        nx::test_registry reg;
+        add_async_child(reg, "a", &child_a, nx::config::cfg{.enabled = false});
+        add_async_child(reg, "c", &child_c);
+
+        auto const exec = run_driver(reg, p, &drive_in_sequence, 1, {},
+                                     named ? cc::vector<cc::string>{"g", "a"} : cc::vector<cc::string>{});
+
+        CHECK(exec.count_failed_tests() == 0);
+        auto const order = p.order.lock([](cc::vector<cc::string>& o) { return o; });
+        if (named)
+        {
+            REQUIRE(order.size() == 1);
+            CHECK(order[0] == "a");
+        }
+        else
+        {
+            REQUIRE(order.size() == 1);
+            CHECK(order[0] == "c");
+        }
+    }
+}
+
 TEST("async invocables - in_sequence runs sync and async children in match order, nested under the driver", no_scheduler)
 {
     for (auto const jobs : {1, 4})
@@ -239,6 +285,35 @@ TEST("async invocables - in_sequence runs sync and async children in match order
         CHECK(driver.nested[2].invocation_group == "g");
         CHECK(!driver.root.is_considered_failing); // its checks live in its children
     }
+}
+
+TEST("async invocables - after_each is awaited after every child of a sequence, and never in parallel", no_scheduler)
+{
+    for (auto const jobs : {1, 4})
+    {
+        probe p;
+        nx::test_registry reg;
+        add_async_child(reg, "a", &child_a);
+        add_async_child(reg, "c", &child_c);
+
+        auto const exec = run_driver(reg, p, &drive_with_after_each_in_sequence, jobs);
+        CHECK(exec.count_failed_tests() == 0);
+        auto const order = p.order.lock([](cc::vector<cc::string>& o) { return o; });
+        REQUIRE(order.size() == 4);
+        CHECK(order[0] == "a");
+        CHECK(order[1] == "after");
+        CHECK(order[2] == "c");
+        CHECK(order[3] == "after");
+    }
+
+    probe p;
+    nx::test_registry reg;
+    add_async_child(reg, "a", &child_a);
+    add_async_child(reg, "c", &child_c);
+    auto const exec = run_driver(reg, p, &drive_with_after_each_in_parallel, 4);
+    CHECK(exec.count_failed_tests() == 0);
+    auto const order = p.order.lock([](cc::vector<cc::string>& o) { return o; });
+    CHECK(order.size() == 2);
 }
 
 TEST("async invocables - in_parallel starts every child before awaiting any, and reports in match order", no_scheduler)

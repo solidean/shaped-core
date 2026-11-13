@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/metal/metal_staging_binding_group.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 // Building binding group layouts, pipeline layouts and binding groups.
 //
@@ -49,11 +50,14 @@ cc::result<metal_binding_group_layout_handle> metal_context::create_metal_bindin
                                             "within its group",
                                             bindings[i].name, bindings[j].name, bindings[i].index));
 
+    // an unbounded binding takes the last slot, which holds the address of its per-group table
     for (auto const& b : bindings)
-    {
         if (b.count == 0)
-            return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array, which sg rejects", b.name));
-    }
+            for (auto const& other : bindings)
+                if (&other != &b && other.index + cc::max(1u, other.count) > b.index)
+                    return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array, which metal takes "
+                                                "only as the layout's last slot, and '{}' reaches past it",
+                                                b.name, other.name));
 
     auto const hash = sg::impl::binding_group_layout_hash(bindings, static_samplers);
     return std::make_shared<metal_binding_group_layout const>(
@@ -99,7 +103,8 @@ cc::result<metal_pipeline_layout_handle> metal_context::create_metal_pipeline_la
 
 cc::result<sg::staging_binding_group_handle> metal_context::create_metal_staging_binding_group(
     sg::binding_group_layout_handle layout,
-    sg::lifetime_scope)
+    sg::lifetime_scope,
+    int unbounded_capacity)
 {
     CC_ASSERT(layout != nullptr, "staging_binding_group requires a binding_group_layout");
     auto const& typed_layout = static_cast<metal_binding_group_layout const&>(*layout);
@@ -123,8 +128,12 @@ cc::result<sg::staging_binding_group_handle> metal_context::create_metal_staging
         offsets[i] = is_static ? -1 : int(bindings[i].index);
     }
 
+    // an unbounded binding's elements are staged behind its slot, which the mint moves into its table
+    auto slot_count = typed_layout.argument_slot_count();
+    if (typed_layout.unbounded_slot() >= 0)
+        slot_count = cc::max(slot_count, typed_layout.unbounded_slot() + isize(unbounded_capacity));
     return sg::staging_binding_group_handle(std::make_shared<metal_staging_binding_group>(
-        *this, cc::move(layout), cc::move(offsets), typed_layout.argument_slot_count()));
+        *this, cc::move(layout), cc::move(offsets), slot_count, unbounded_capacity));
 }
 
 cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group(
@@ -137,7 +146,14 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto typed_layout = std::static_pointer_cast<metal_binding_group_layout const>(layout);
 
     auto const bindings = typed_layout->bindings();
-    auto const slot_count = typed_layout->argument_slot_count();
+    // an unbounded binding's elements follow its slot, so slot_of addresses them as any array's
+    auto const unbounded_at = typed_layout->unbounded_slot();
+    auto slot_count = typed_layout->argument_slot_count();
+    if (unbounded_at >= 0)
+        for (auto const& nv : views)
+            for (auto const& b : bindings)
+                if (b.count == 0 && b.name == nv.name)
+                    slot_count = cc::max(slot_count, unbounded_at + nv.view.span().size());
 
     auto const scope = autorelease_scope();
 
@@ -148,7 +164,9 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto bound_textures = cc::vector<metal_binding_group::bound_texture>();
     auto bound_tlases = cc::vector<sg::tlas_handle>();
     auto tlas_at_slot = cc::vector<sg::tlas_handle>::create_defaulted(slot_count);
+    auto lengths = cc::vector<u32>::create_filled(slot_count, u32(0));
     auto array_bindings = cc::vector<metal_binding_group::array_binding>();
+    auto acceleration_roots = cc::vector<u32>();
 
     auto const find_binding = [&](cc::string_view name) -> isize
     {
@@ -170,7 +188,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 cc::format("binding_group: '{}' is a sampler binding and takes a sampler, not a view", b.name));
 
         auto const provided = nv.view.span();
-        auto const expected = isize(b.count < 1 ? 1 : b.count);
+        auto const expected = b.count == 0 ? provided.size() : isize(b.count);
         if (provided.size() != expected)
             return cc::error(
                 cc::format("binding_group: '{}' takes {} view(s), {} provided", b.name, expected, provided.size()));
@@ -224,6 +242,25 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                     return cc::error(
                         cc::format("binding_group: '{}' — the bound acceleration structure has expired", b.name));
 
+                // An inline trace sees motion only through the software walk, and a pipeline's trace only with the
+                // motion tags, which SGL writes into a package that takes SOFTWARE_TRACE alone.
+                auto const software = sg::impl::software_region_of(mtl_tlas);
+                if ((software.is_moving || mtl_tlas.reaches_motion()) && !b.traced_in_software)
+                    return cc::error(cc::format("binding_group: '{}' binds a tlas that moves, which only a shader "
+                                                "whose package takes SOFTWARE_TRACE in sc_add_shader_package traces",
+                                                b.name));
+                if (b.traced_in_software)
+                {
+                    if (software.pool == nullptr)
+                        return cc::error(cc::format("binding_group: '{}' is traced in software, so its tlas is built "
+                                                    "with accel_build_flag::software_trace",
+                                                    b.name));
+                    auto const position = sg::impl::acceleration_position(bindings, b.index);
+                    while (acceleration_roots.size() <= position)
+                        acceleration_roots.push_back(0);
+                    acceleration_roots[position] = software.unit;
+                }
+
                 slots[slot_of(b, element)] = mtl_tlas.storage().resource_id()._impl;
                 tlas_at_slot[slot_of(b, element)] = tlas_view->tlas;
                 bound_tlases.push_back(tlas_view->tlas);
@@ -259,6 +296,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             // The address the shader reads through, already offset: MSL indexes from the pointer it is given, so the
             // view's offset has to be folded in here rather than carried alongside.
             slots[slot_of(b, element)] = mtl_buffer.gpu_address() + u64(buffer_view->offset_in_bytes);
+            lengths[slot_of(b, element)] = metal_binding_group::byte_length_of(*buffer_view);
             if (is_array)
                 array.elements.push_back({.buffer = buffer_view->buffer});
             else
@@ -334,28 +372,19 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
         if (filled[i] == char(0))
             return cc::error(cc::format("binding_group: binding '{}' was not provided", bindings[i].name));
 
-    // An empty layout still gets a buffer: an argument table binds an address, and a null one is not a legal binding.
-    // The hit-offsets mirror rides in its tail, so a group holding a TLAS allocates nothing more.
-    auto const mirror = metal_binding_group::hit_offsets_mirror(tlas_at_slot);
-    auto const hit_offsets_at = mirror.empty() ? isize(-1) : slot_count * k_argument_slot_size;
-    auto const byte_size
-        = cc::max(isize(k_argument_slot_size), slot_count * k_argument_slot_size + mirror.size() * isize(sizeof(u64)));
-    auto* const arguments = _device->newBuffer(
-        NS::UInteger(byte_size), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
-    if (arguments == nullptr)
-        return cc::error("binding_group: the metal device refused the argument buffer");
+    // The lengths, the hit-offsets mirror and an unbounded binding's table ride behind the slots, so a group
+    // allocates one buffer whatever it holds.
+    auto const layout_slots = typed_layout->argument_slot_count();
+    auto const mirror
+        = metal_binding_group::hit_offsets_mirror(cc::span<sg::tlas_handle const>(tlas_at_slot).first_n(layout_slots));
+    auto arguments = metal_binding_group::create_arguments(
+        *this, "sg binding group", {.slots = slots, .lengths = lengths, .unbounded_at = unbounded_at, .mirror = mirror});
+    if (arguments.has_error())
+        return cc::error(cc::move(arguments.error()));
 
-    arguments->setLabel(ns_string("sg binding group"));
-    if (slot_count > 0)
-        cc::memcpy(arguments->contents(), slots.data(), size_t(slot_count * k_argument_slot_size));
-    if (hit_offsets_at >= 0)
-        cc::memcpy(static_cast<byte*>(arguments->contents()) + hit_offsets_at, mirror.data(),
-                   size_t(mirror.size() * isize(sizeof(u64))));
-
-    _residency.add(arguments);
-
-    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments,
+    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments.value().buffer,
                                                        cc::move(bound_buffers), cc::move(bound_textures),
-                                                       cc::move(bound_tlases), cc::move(array_bindings), hit_offsets_at);
+                                                       cc::move(bound_tlases), cc::move(array_bindings),
+                                                       arguments.value().hit_offsets_at, cc::move(acceleration_roots));
 }
 } // namespace sg::backend::metal

@@ -40,8 +40,10 @@ add_library(shaped-viewer
     src/shaped-viewer/refs.cc
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/capture.cc
+    src/shaped-viewer/settled.cc
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/impl/wavefront_pacing.cc
+    src/shaped-viewer/impl/web_page.cc
     src/shaped-viewer/resources/resource_managers.cc
     src/shaped-viewer/resources/impl/range_allocator.cc
     src/shaped-viewer/resources/value_summary.cc
@@ -52,6 +54,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/wavefront_routine.cc
     src/shaped-viewer/rendering/hybrid_routine.cc
     src/shaped-viewer/rendering/raster_routine.cc
+    src/shaped-viewer/rendering/raster_bound_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/depth_fill_routine.cc
@@ -140,6 +143,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/stand_in_report.hh
     src/shaped-viewer/rendering/hybrid_routine.hh
     src/shaped-viewer/rendering/raster_routine.hh
+    src/shaped-viewer/rendering/raster_bound_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
     src/shaped-viewer/rendering/depth_fill_routine.hh
@@ -154,7 +158,7 @@ target_compile_features(shaped-viewer PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-viewer/...>' works for consumers.
 target_include_directories(shaped-viewer
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # babel-serializer is what reads the asset formats sv imports (glTF, OBJ, STL, FBX) and decodes their images.
@@ -163,19 +167,26 @@ target_include_directories(shaped-viewer
 # A legal direction — data/ sits below graphics/ — and the first time sv links anything below shaped-rendering.
 target_link_libraries(shaped-viewer PUBLIC shaped-rendering babel-serializer)
 
+# On the web, `asset_loader::load_async` fetches over the page's `fetch` through clean-net, since a page has no files.
+if(EMSCRIPTEN)
+    target_link_libraries(shaped-viewer PRIVATE clean-net)
+endif()
+
 # sv brings its own context up when a caller sets no sv::acquire_context, so it needs one backend to fall back on.
 # PRIVATE: the fallback is an implementation detail, and a consumer that wants a different backend overrides the hook
 # rather than inheriting this one.
-# dx12 on Windows and metal on Apple platforms; anywhere else a caller supplies the context.
+# dx12 on Windows, metal on Apple platforms and webgpu on the web; anywhere else a caller supplies the context.
+# webgpu's device is requested rather than created, so only `acquire_viewer_context_async` reaches that default.
 if(WIN32 AND TARGET shaped-graphics-dx12)
     target_link_libraries(shaped-viewer PRIVATE shaped-graphics-dx12)
     target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_DX12=1)
 elseif(APPLE AND TARGET shaped-graphics-metal)
     target_link_libraries(shaped-viewer PRIVATE shaped-graphics-metal)
     target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_METAL=1)
+elseif(EMSCRIPTEN AND TARGET shaped-graphics-webgpu)
+    target_link_libraries(shaped-viewer PRIVATE shaped-graphics-webgpu)
+    target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_WEBGPU=1)
 endif()
-
-sc_target_pch(shaped-viewer SG)
 
 target_compile_options(shaped-viewer
     PUBLIC
@@ -187,6 +198,8 @@ target_compile_options(shaped-viewer
 # Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
 # Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
 # Module `hybrid` is exported because the forward hybrid's pixel shader is generated too, and lists its inline constants.
+# Module `raster_bound` is exported because the bound raster mode's pixel shader is generated too, and lists its group 0.
+# Modules `raster_bound_shadows` and `raster_bound_shadow_maps` are exported so the host can bind their passes' groups.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
 # Must be declared here, in the CMakeLists that defines the target — the generated sources are added as
 # PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped. Deliberately not gated on a compiler:
@@ -202,9 +215,18 @@ sc_add_shader_package(
         module:tracer
         module:raster
         module:hybrid
+        module:raster_bound
+        module:raster_bound_shadows
+        module:raster_bound_shadow_maps
+        module:raster_bound_reflections
+        module:raster_bound_indirect
         tracer_pipeline.sgl:*
         wavefront.sgl:*
         raster_pass.sgl:*
+        raster_bound_pass.sgl:*
+        raster_bound_shadow_pass.sgl:*
+        raster_bound_shadow_map_pass.sgl:*
+        raster_bound_indirect_pass.sgl:*
         raster_cull.sgl:*
         hybrid_pass.sgl:*
         layout.sgl:*
@@ -226,7 +248,6 @@ if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-d
     )
     sc_nexus_binary(shaped-view KINDS tool)
     target_link_libraries(shaped-view PRIVATE shaped-viewer nexus)
-    sc_target_pch(shaped-view SG NEXUS)
 
     # A windowed program: opened from Explorer, a console subsystem binary would bring a console window up beside it.
     set_target_properties(shaped-view PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -298,7 +319,11 @@ if(SC_BUILD_TESTS)
     # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the import test that reads the real scene when present.
     sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR ../../../extern/bistro/.install)
 
-    sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
+    # Where the glTF Research Scenes land (extern/gltf-research-scenes/fetch-research-scenes.py), for the tests that draw one when present.
+    sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_RESEARCH_SCENES_DIR ../../../extern/gltf-research-scenes/.install)
+
+    # The pbr shade kernel the generator writes, committed for native-parity.py's size gate; a test keeps it current.
+    sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_DATA_DIR tests/data)
 
     # The GPU tests run once per backend this build has: an entry driver per backend invokes every
     # `INVOCABLE_TEST(..., (sg::context_handle const&))` in the binary against one context of it.
@@ -329,14 +354,29 @@ if(SC_BUILD_TESTS)
             tests/cutout-trace-test.cc
             tests/guide-ray-test.cc
             tests/emitter-trace-test.cc
+            tests/deterministic-seed-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc
             tests/hybrid-test.cc
             tests/studio-test.cc
             tests/auto-exposure-test.cc
+            tests/bloom-view-test.cc
             tests/mode-switch-test.cc
             tests/restart-energy-test.cc
+            tests/mode-agreement-test.cc
+            tests/material-agreement-test.cc
+            tests/denoiser-agreement-test.cc
+            tests/denoiser-stream-test.cc
+            tests/mode-switch-fuzz-test.cc
+            tests/furnace-test.cc
+            tests/temporal-stability-test.cc
+            tests/convergence-test.cc
+            tests/backend-agreement-test.cc
+            tests/content-agreement-test.cc
+            tests/invariant-test.cc
+            tests/image-size-test.cc
+            tests/environment-estimate-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
             tests/moving-view-motion-test.cc
@@ -380,7 +420,9 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-viewer-test PRIVATE
             tests/dx12-entry.cc
             tests/raster-without-raytracing-test.cc
+            tests/raster-bound-test.cc
             tests/wavefront-benchmark.cc
+            tests/native-route-benchmark.cc
             tests/raster-benchmark.cc
             tests/hybrid-benchmark.cc
             tests/viewer-window-manual-test.cc

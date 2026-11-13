@@ -110,6 +110,59 @@ sg's own tracking meanwhile records the buffers as acceleration-structure access
 A geometry naming one becomes DXR's OMM triangles, linking its index buffer and the array's address.
 metal and webgpu have no equivalent — [feat-sg-opacity-micromaps](../issues/feat-sg-opacity-micromaps.md).
 
+## Partitioned TLAS
+
+**A `partitioned_tlas` is a `tlas` of fixed capacity, updated in place** rather than rebuilt from an instance list.
+`ctx.persistent.create_partitioned_tlas` allocates it empty from its capacities, recording nothing, and `cmd.raytracing.update` fills it.
+- **An update writes, updates and clears slots, and translates partitions**, and only the partitions it touches are rebuilt.
+  The global partition, `sg::global_partition`, treats each of its instances as a partition of its own, for what moves every frame.
+- **The slots are the ownership edge**: a partitioned tlas holds every blas a slot names, and the list of an update keeps the ones it replaced until it has run.
+- **It binds and traces as any tlas does**, `as_view()`, so a shader never knows which kind it traces.
+- **Requires `sg::feature::partitioned_tlas`**, which vulkan grants with `VK_NV_partitioned_acceleration_structure`.
+  dx12 grants it on the preview Agility SDK alone (`SC_AGILITY_PREVIEW`), where the device reports `ClustersAndPTLASSupported`, and binds it as a tlas.
+
+**On vulkan it has no descriptor**: `VK_EXT_descriptor_buffer` can name only a `VkAccelerationStructureKHR`, which a partitioned tlas is not.
+So every vulkan trace SGL writes takes its structure by device address, from the reserved `sg_acceleration_addresses`.
+[reserved-bindings](../../../shaped-graphics-language/docs/reserved-bindings.md) is that block's contract.
+That holds on both routes: SGL's own SPIR-V converts it, and the HLSL a DXC route compiles converts it through inline SPIR-V.
+Only a package's own HLSL still reads the descriptor, where a partitioned tlas writes the null structure, which every ray misses.
+[plans/clusters-and-partitioned-tlas.md](../plans/clusters-and-partitioned-tlas.md) is the design, and dx12's half.
+
+### Updates a compute pass wrote
+
+**`cmd.raytracing.update_indirect` builds from records a shader wrote**, so an update never visits the CPU.
+- **The records are SGL's `accel` module's**, which a shader writes by field name: `accel.ptlas_write`, `accel.ptlas_update` and `accel.ptlas_translation`.
+  Each backend lays them out natively, so nothing translates them before the build.
+- **The shader writes the records and bumps a count; sg writes the operation array** and copies each count into it, so no shader writes an operation.
+  `indirect_records` names a buffer of records, its `max_count`, and where the count is; a count past `max_count` is a caller bug.
+- **A record names a BLAS by an address only a `blas_table` hands out**: `ctx.persistent.create_blas_table(blases)` holds them, and a shader binds `table->view()` as `buffer[accel.blas_ref]`.
+  An update's `tables` are every table a record may name afterwards, which the structure holds in place of the earlier update's.
+- **`accel.ptlas_write` is opaque on the host**: `sg::gpu_ptlas_write` sizes a buffer of them, since only a shader fills one.
+  SGL's `@target_layout` is why: its fields stand in another order on dx12 and on vulkan.
+- **No check follows the records**, so `hit_record_checks` stops checking a partitioned tlas from its first such update, and logs that once.
+
+## Clustered geometry
+
+**A cluster BLAS is built from clusters rather than from triangles**: up to 256 triangles over up to 256 vertices each.
+- **`cmd.raytracing.build_clusters` builds a `cluster_set`**, immutable like a blas, cluster k at position k.
+- **`build_cluster_blas(set, ranges)` builds one blas per range** of the set's clusters, and each holds its set.
+  A range is contiguous because a cluster's address exists only on the GPU, in the set's address array, which the BLAS build reads in place.
+- **A cluster BLAS is a blas like any other**: a tlas or a partitioned tlas places it, and a trace meets its triangles.
+  A hit's `cluster_id` in SGL is the cluster's `cluster_id`, and its `primitive_index` the triangle's within the cluster.
+
+**A `cluster_pool` is the GPU-written tier**: `cmd.raytracing.build_clusters_indirect` replaces its clusters in place, from `accel.clas_triangles` records a shader wrote.
+- **A record names its buffers by address**, which only a `buffer_table` hands out: `ctx.persistent.create_buffer_table(buffers)`, bound as `buffer[accel.buffer_ref]`.
+  The build names the tables, so their buffers are what it declares it reads.
+- **A pool has a generation, which each build bumps**, and a cluster BLAS records the one it was built from.
+  A stale one, `blas.is_stale()`, lists clusters that are gone: a tlas or a partitioned tlas build asserts on it.
+  A structure built from it earlier must not be traced after the rebuild, and under `context::hit_record_checks` a dispatch or draw binding one asserts.
+  A tlas updated from GPU-written records is not checked, since sg never sees its instances.
+- **A rebuild waits behind every earlier trace, with one global barrier**, since a trace declares only its tlas's storage and reads the pool's clusters through it.
+- **`accel.clas_triangles` differs in shape per backend**, so its host type `sg::gpu_clas_triangles` is opaque and sized for the larger record; each backend strides by its own.
+- **Requires `sg::feature::clustered_geometry`**, which vulkan grants with `VK_NV_cluster_acceleration_structure`.
+  dx12 grants it on the preview Agility SDK alone, with the partitioned tlas, and takes one index format per build.
+  A dx12 shader reads -1 for `cluster_id` until the preview DXC is pinned, since Shader Model 6.10 has the name and slib masks the feature off.
+
 ## Invariants
 
 Preserve these; the rest is tuning:
@@ -162,6 +215,9 @@ Preserve these; the rest is tuning:
 - **A TLAS also keeps each instance's `hit_group_offset` in a buffer of its own**, `metal_tlas::hit_group_offsets()`, one `u32` per instance.
   A pipeline's kernel reads it to find a closest hit's record, since Metal's intersection result names the instance and not its offset.
   [raytracing-pipeline](raytracing-pipeline.md#metal-maps-it-onto-a-compute-pipeline-because-a-raygen-shader-is-the-kernel) says how it is bound.
+- **A structure that moves is a motion structure**, which a pipeline's trace reads natively and an inline query cannot read at all.
+  Only a shader whose package takes `SOFTWARE_TRACE` is bound one: SGL writes the motion tags there alone, since they double a static scene's traversal.
+  Its inline traces take the walk below, from builds with `accel_build_flag::software_trace`; its pipeline traces need no flag.
 
 ## dx12 and vulkan: the software walk, on request
 
@@ -191,10 +247,10 @@ The layout is a contract with SGL, and [raytracing-polyfill.md](../../../shaped-
 
 - **Every BLAS and TLAS is a region of one storage buffer per context**, the acceleration pool, suballocated in 16-byte units.
   A structure's handle is its offset there, so `size_in_bytes()` is its region's size.
-- **The tree follows the primitive order, with no spatial sort.**
-  Leaves are consecutive runs of up to four primitives and each level pairs consecutive nodes, so the CPU writes the topology and compute kernels fill in the boxes.
-  A mesh in a coherent triangle order traces well, and a triangle soup traces slowly.
-- **The build flags are checked and otherwise change nothing**: one build path serves them all, with no refit or compaction behind it.
+- **The records are sorted by the Morton code of their centers, on the GPU, and the tree follows that order.**
+  Leaves are consecutive runs of up to four records and each level pairs consecutive nodes, so the CPU writes the topology and compute kernels fill in the boxes.
+  So a mesh traces about as fast in any triangle order; unsorted, a shuffled one traced up to 2500 times slower.
+- **`fast_build` skips the sort**, which leaves the caller's order; every other flag is checked and changes nothing, with no refit or compaction behind it.
 - **A pipeline layout binds at most 16 acceleration structures**, the size of the roots block the pool is traced from.
 - **All structures together fit in 128 MiB**, WebGPU's default largest storage binding, since the pool is bound whole.
   A build past it throws `sg::allocation_exception`.

@@ -87,7 +87,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
     auto set = sv::quadric_set();
     set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
 
-    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set));
+    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set), resources.meshes);
     resources.wait_for_pending_uploads();
 
     auto const* const record = resources.quadrics.get_ptr(batch);
@@ -123,17 +123,17 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
 
     auto const trace = [&](sg::command_list& cmd, sg::data_future<tg::vec4f>& readback)
     {
-        // The intersection shader reaches the batch's primitives through the instance's `vertices`, which for a quadric
-        // batch names the primitive buffer rather than a position buffer.
-        auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
+        // The intersection reaches the batch's records through the instance's `vertices`, the vertex pool, starting at
+        // `base_vertex`; its boxes start at `first_index` of the same pool.
+        auto const primitives = u32(resources.acquire_buffer(resources.meshes.vertex_pool().raw()->as_raw_readonly()));
 
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back({.param_buffer = primitives, // the fallback reads no parameter block, so any valid index serves
                            .param_offset = 0,
                            .vertices = primitives,
                            .indices = primitives,
-                           .base_vertex = 0,
-                           .first_index = 0,
+                           .base_vertex = u32(record->primitives.offset),
+                           .first_index = u32(record->aabbs.offset),
                            .link_mask = ~0u});
 
         auto const frame = ctx.transient.create_buffer_from_pod(
@@ -493,7 +493,7 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
         set.add(hemi);
     }
 
-    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set));
+    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set), resources.meshes);
     resources.wait_for_pending_uploads();
 
     auto const* const record = resources.quadrics.get_ptr(batch);
@@ -516,15 +516,15 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
 
     auto const trace = [&](sg::command_list& cmd, sg::data_future<tg::vec4f>& readback)
     {
-        auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
+        auto const primitives = u32(resources.acquire_buffer(resources.meshes.vertex_pool().raw()->as_raw_readonly()));
 
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back({.param_buffer = primitives,
                            .param_offset = 0,
                            .vertices = primitives,
                            .indices = primitives,
-                           .base_vertex = 0,
-                           .first_index = 0,
+                           .base_vertex = u32(record->primitives.offset),
+                           .first_index = u32(record->aabbs.offset),
                            .link_mask = ~0u});
 
         auto const frame
@@ -724,7 +724,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     auto set = sv::quadric_set();
     set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
 
-    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set));
+    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set), resources.meshes);
     resources.wait_for_pending_uploads();
 
     auto const* const record = resources.quadrics.get_ptr(batch);
@@ -778,15 +778,15 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
     auto const trace = [&](sg::command_list& cmd, sg::data_future<tg::vec4f>& readback)
     {
-        auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
+        auto const primitives = u32(resources.acquire_buffer(resources.meshes.vertex_pool().raw()->as_raw_readonly()));
 
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back({.param_buffer = primitives,
                            .param_offset = 0,
                            .vertices = primitives,
                            .indices = primitives,
-                           .base_vertex = 0,
-                           .first_index = 0,
+                           .base_vertex = u32(record->primitives.offset),
+                           .first_index = u32(record->aabbs.offset),
                            .link_mask = ~0u});
 
         auto const frame

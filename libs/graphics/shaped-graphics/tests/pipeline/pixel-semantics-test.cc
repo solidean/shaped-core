@@ -417,6 +417,211 @@ ASYNC_INVOCABLE_TEST("sg - a vertex stage sends each instance to its own layer o
     CHECK(texel(layer_1, 1, 1) == tg::vec4f(17, 1, 0, 1));
 }
 
+ASYNC_INVOCABLE_TEST("sg - one draw of two views puts the same geometry somewhere else in each",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::view_instancing))
+        SKIP("this context renders one view per draw");
+
+    // a full-screen rect the vertex stage squeezes into the left half of view 0 and the right half of view 1
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 7);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::moved_views);
+    auto const target = ctx->persistent.create_texture_2d_array(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = 4,
+         .height = 2,
+         .array_layers = 2,
+         .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(-1, -1, -1, -1))},
+                                     .view_count = 2,
+                                     .target_set = shaders::pixel_semantics::viewed_ps_target::name});
+        scope.bind_pipeline(*pipeline);
+        scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+        scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+    }
+    auto const first = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 0});
+    auto const second = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 1});
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const texel = [](cc::span<byte const> bytes, int x, int y)
+    {
+        auto value = tg::vec4f();
+        cc::memcpy(&value, bytes.data() + (isize(y) * 4 + x) * isize(sizeof(tg::vec4f)), sizeof(tg::vec4f));
+        return value;
+    };
+    auto const view_0 = co_await first.bytes();
+    auto const view_1 = co_await second.bytes();
+    CHECK(texel(view_0, 0, 0) == tg::vec4f(7, 0, 0, 1));
+    CHECK(texel(view_0, 3, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 0, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 3, 0) == tg::vec4f(7, 1, 0, 1));
+}
+
+ASYNC_INVOCABLE_TEST("sg - one draw of two views moves geometry with only the vertex stage reading which",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::view_instancing))
+        SKIP("this context renders one view per draw");
+    auto const& adapter = ctx->metrics.adapter();
+    if (ctx->backend() == sg::backend_kind::dx12 && adapter.vendor_id == 0x8086 && !adapter.is_software)
+        SKIP("Intel's dx12 driver draws nothing here; see "
+             "docs/bugs-external/intel-d3d12-view-instancing-draws-nothing");
+
+    nx::allow_warnings("takes no `@view_index`", "slib");
+
+    // a full-screen rect the vertex stage squeezes into the left half of view 0 and the right half of view 1
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 7);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::view_unread::moved_vertex_stage_only);
+    auto const target = ctx->persistent.create_texture_2d_array(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = 4,
+         .height = 2,
+         .array_layers = 2,
+         .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(-1, -1, -1, -1))},
+                                     .view_count = 2,
+                                     .target_set = shaders::view_unread::plain_tag_ps_target::name});
+        scope.bind_pipeline(*pipeline);
+        scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+        scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+    }
+    auto const first = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 0});
+    auto const second = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 1});
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const texel = [](cc::span<byte const> bytes, int x, int y)
+    {
+        auto value = tg::vec4f();
+        cc::memcpy(&value, bytes.data() + (isize(y) * 4 + x) * isize(sizeof(tg::vec4f)), sizeof(tg::vec4f));
+        return value;
+    };
+    auto const view_0 = co_await first.bytes();
+    auto const view_1 = co_await second.bytes();
+    CHECK(texel(view_0, 0, 0) == tg::vec4f(7, 0, 0, 1));
+    CHECK(texel(view_0, 3, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 0, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 3, 0) == tg::vec4f(7, 0, 0, 1));
+}
+
+ASYNC_INVOCABLE_TEST("sg - one draw of two views puts geometry from its vertex index somewhere else in each",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::view_instancing))
+        SKIP("this context renders one view per draw");
+
+    // no vertex buffer: the vertex stage places a strip in the left half of view 0 and the right half of view 1
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::moved_index_views);
+    auto const target = ctx->persistent.create_texture_2d_array(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = 4,
+         .height = 2,
+         .array_layers = 2,
+         .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(-1, -1, -1, -1))},
+                                     .view_count = 2,
+                                     .target_set = shaders::pixel_semantics::viewed_ps_target::name});
+        scope.bind_pipeline(*pipeline);
+        scope.draw({.vertex_range = {.offset = 0, .size = 4}});
+    }
+    auto const first = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 0});
+    auto const second = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 1});
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const texel = [](cc::span<byte const> bytes, int x, int y)
+    {
+        auto value = tg::vec4f();
+        cc::memcpy(&value, bytes.data() + (isize(y) * 4 + x) * isize(sizeof(tg::vec4f)), sizeof(tg::vec4f));
+        return value;
+    };
+    auto const view_0 = co_await first.bytes();
+    auto const view_1 = co_await second.bytes();
+    CHECK(texel(view_0, 0, 0) == tg::vec4f(7, 0, 0, 1));
+    CHECK(texel(view_0, 3, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 0, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 3, 0) == tg::vec4f(7, 1, 0, 1));
+}
+
+ASYNC_INVOCABLE_TEST("sg - one draw of two views puts the same geometry somewhere else in each, over a depth array",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::view_instancing))
+        SKIP("this context renders one view per draw");
+
+    // a full-screen rect the vertex stage squeezes into the left half of view 0 and the right half of view 1
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 7);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::moved_views_depth);
+    auto const target = ctx->persistent.create_texture_2d_array(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = 4,
+         .height = 2,
+         .array_layers = 2,
+         .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto const depth = ctx->persistent.create_texture_2d_array({.format = sg::pixel_format::depth32_float,
+                                                                .width = 4,
+                                                                .height = 2,
+                                                                .array_layers = 2,
+                                                                .usage = sg::texture_usage::depth_stencil});
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(-1, -1, -1, -1))},
+                                     .depth_stencil_target = depth.as_depth_stencil_view().cleared(1.0f),
+                                     .view_count = 2,
+                                     .target_set = shaders::pixel_semantics::viewed_ps_target::name});
+        scope.bind_pipeline(*pipeline);
+        scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+        scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+    }
+    auto const first = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 0});
+    auto const second = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 1});
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const texel = [](cc::span<byte const> bytes, int x, int y)
+    {
+        auto value = tg::vec4f();
+        cc::memcpy(&value, bytes.data() + (isize(y) * 4 + x) * isize(sizeof(tg::vec4f)), sizeof(tg::vec4f));
+        return value;
+    };
+    auto const view_0 = co_await first.bytes();
+    auto const view_1 = co_await second.bytes();
+    CHECK(texel(view_0, 0, 0) == tg::vec4f(7, 0, 0, 1));
+    CHECK(texel(view_0, 3, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 0, 0) == tg::vec4f(-1, -1, -1, -1));
+    CHECK(texel(view_1, 3, 0) == tg::vec4f(7, 1, 0, 1));
+}
+
 ASYNC_INVOCABLE_TEST("sg - one draw of two views renders each into its own layer, and both stages know which",
                      (sg::context_handle const& ctx))
 {

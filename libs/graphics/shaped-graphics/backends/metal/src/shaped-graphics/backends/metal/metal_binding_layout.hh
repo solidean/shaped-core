@@ -7,6 +7,7 @@
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 /// Metal implementation of sg::binding_group_layout.
 ///
@@ -32,6 +33,10 @@ public:
 
     /// Slots the argument buffer needs: one past the highest index any binding occupies.
     [[nodiscard]] isize argument_slot_count() const;
+
+    /// The slot of the unbounded binding, which is the layout's last and takes one slot holding its table's address;
+    /// -1 where the layout has none.
+    [[nodiscard]] isize unbounded_slot() const;
 };
 
 /// Metal implementation of sg::pipeline_layout.
@@ -42,9 +47,22 @@ class sg::backend::metal::metal_pipeline_layout final : public sg::pipeline_layo
 {
 public:
     metal_pipeline_layout(cc::hash128 structural_hash, sg::pipeline_layout_description desc)
-      : sg::pipeline_layout(structural_hash, desc.groups, desc.inline_constants), _desc(cc::move(desc))
+      : sg::pipeline_layout(structural_hash, desc.groups, desc.inline_constants, desc.dispatch_grid, desc.static_samplers),
+        _desc(cc::move(desc))
     {
+        auto members = isize(0);
+        for (auto const& g : _desc.groups)
+        {
+            _acceleration_bases.push_back(members);
+            members += g != nullptr ? sg::impl::acceleration_count(g->bindings()) : 0;
+            _traces_in_software = _traces_in_software || (g != nullptr && sg::impl::traces_in_software(g->bindings()));
+        }
     }
+
+    /// Where each group's acceleration members start among the roots a dispatch binds (EMIT-135).
+    [[nodiscard]] cc::span<isize const> acceleration_bases() const { return _acceleration_bases; }
+    /// A group's binding is traced in software, so a dispatch binds sg's pool and the roots beside the groups.
+    [[nodiscard]] bool traces_in_software() const { return _traces_in_software; }
 
     [[nodiscard]] sg::pipeline_layout_description const& description() const { return _desc; }
 
@@ -69,5 +87,7 @@ private:
     friend class metal_context;
 
     sg::pipeline_layout_description _desc;
+    cc::vector<isize> _acceleration_bases;
+    bool _traces_in_software = false;
     cc::vector<bound_sampler_state> _bound_samplers;
 };

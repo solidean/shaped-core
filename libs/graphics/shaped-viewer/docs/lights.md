@@ -221,7 +221,7 @@ While its kernels compile an instance is camera-only, and the frame its CDF land
 Its solid-angle density, `pt.mesh_light_pdf`, is the record's pick probability times the triangle's width over its world area, times the squared distance over the cosine at the light.
 The emission at the point is read from data by one reader for every material, `tracer.emitter_radiance`, and scaled by the instance's cutout opacity there.
 It reads a constant out of the parameter block, interpolates an attribute at the point, and samples a texture through its uv, palette sampler, swizzle and transform.
-**A texture is sampled at level 0 on both sides**: a closest hit and a shade kernel have no derivatives, so the generated material samples level 0 too.
+**An emission's texture is sampled at level 0 on both sides**: the generated material keeps an emission and an opacity at level 0 whatever a hit's ray cone, as the reader does.
 The two strategies weighed against each other thus read one value, which the balance heuristic needs.
 **A bounce ray that meets an emitter** forms the same density at its hit (`tracer.emitter_pdf`) and weighs the emission by the balance heuristic; the camera's own view keeps its full weight.
 

@@ -51,7 +51,7 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     if (found == nullptr)
         return false;
     auto const kind = out.at(found->front()).kind;
-    return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
+    return kind == symbol_kind::structure || kind == symbol_kind::enumeration || kind == symbol_kind::alias;
 }
 
 i32 checker::case_index_of(type_id type, cc::string_view name) const
@@ -162,6 +162,8 @@ type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& no
         report(diagnostic_kind::type_mismatch, file, where, "an array of void holds nothing");
         return checked_module::error_type;
     }
+    if (refuse_held_layout(file, where, element, "an array"))
+        return checked_module::error_type;
 
     auto const arguments = ast.at(node.arguments);
     // CHK-286: `T[]` is a binding array whose length the host binds, which only a binding member may be

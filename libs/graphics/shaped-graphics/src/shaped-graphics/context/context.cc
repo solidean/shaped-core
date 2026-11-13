@@ -647,6 +647,28 @@ cc::result<gpu_memory_usage> context::query_gpu_memory() const
     return cc::error("this backend does not report GPU memory");
 }
 
+cc::result<partitioned_tlas_handle> context::try_create_partitioned_tlas(partitioned_tlas_description const&)
+{
+    return cc::error("this context has no sg::feature::partitioned_tlas");
+}
+
+u64 context::buffer_address_of(raw_buffer const&) const
+{
+    CC_ASSERT(false, "buffer_address_of: this context has no sg::feature::clustered_geometry");
+    return 0;
+}
+
+cc::result<cluster_pool_handle> context::try_create_cluster_pool(cluster_pool_description const&)
+{
+    return cc::error("this context has no sg::feature::clustered_geometry");
+}
+
+u64 context::blas_address_of(blas const&) const
+{
+    CC_ASSERT(false, "blas_address_of: this context has no sg::feature::partitioned_tlas");
+    return 0;
+}
+
 cc::result<gpu_counters> context::read_gpu_counters() const
 {
     // Not an empty counter set, which a sampler would difference into a confident 0% on a pinned GPU.
@@ -660,9 +682,12 @@ context::~context()
     CC_ASSERT(_is_shut_down, "context must be shut down before destruction");
 
     // A resource still alive here releases into this context after it is freed, which hangs or corrupts rather than fails.
-    CC_ASSERTF(_live_resources.load() == 0,
-               "{} textures and buffers outlive their context; release them before it is destroyed",
-               _live_resources.load());
+    // After a device loss it is what the failed work still holds, and an assert in this destructor would terminate the
+    // process instead of letting the loss be reported, so it is logged.
+    if (auto const live = _live_resources.load(); live != 0 && is_device_lost())
+        CC_LOG_ERROR("{} textures and buffers outlive a context whose device was lost", live);
+    else
+        CC_ASSERTF(live == 0, "{} textures and buffers outlive their context; release them before it is destroyed", live);
 }
 
 void context::shutdown()

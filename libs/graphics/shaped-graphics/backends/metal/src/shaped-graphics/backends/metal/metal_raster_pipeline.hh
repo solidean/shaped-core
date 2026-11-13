@@ -65,6 +65,17 @@ public:
     /// The layout every group bound alongside this pipeline is checked against.
     [[nodiscard]] sg::pipeline_layout_handle const& layout() const { return _layout; }
 
+    /// A mesh pipeline draws with drawMeshThreadgroups, whose threadgroup shapes it states, its stages' workgroups.
+    [[nodiscard]] bool is_mesh() const { return _is_mesh; }
+    [[nodiscard]] MTL::Size mesh_threads() const { return _mesh_threads; }
+    [[nodiscard]] MTL::Size object_threads() const { return _object_threads; }
+    void set_mesh_threads(MTL::Size mesh, MTL::Size object)
+    {
+        _is_mesh = true;
+        _mesh_threads = mesh;
+        _object_threads = object;
+    }
+
     /// Metal has no serialized-PSO blob on this path; see metal_compute_pipeline for why.
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override { return {}; }
 
@@ -77,4 +88,7 @@ private:
     sg::pixel_format _depth_stencil_format = sg::pixel_format::undefined;
     cc::small_vector<isize, sg::max_vertex_buffers> _vertex_strides;
     sg::pipeline_layout_handle _layout;
+    bool _is_mesh = false;
+    MTL::Size _mesh_threads = MTL::Size(1, 1, 1);
+    MTL::Size _object_threads = MTL::Size(1, 1, 1);
 };

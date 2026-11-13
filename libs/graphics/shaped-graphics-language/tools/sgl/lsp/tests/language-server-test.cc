@@ -474,6 +474,153 @@ TEST("sgl lsp - an error in a module the document uses is shown on its `use`, po
     CHECK(related["location"]["range"]["start"]["line"].as_double() == 3);
 }
 
+TEST("sgl lsp - every edit of a document continues from one parse and one check of the modules it uses", main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR)});
+    auto const first = sgl_lsp::analyze(document_of("use shading\nfun g() -> float => shading.lit(1.0)\n"));
+    auto const edited = sgl_lsp::analyze(document_of("use shading\nfun g() -> float => shading.lit(2.0)\n"));
+    auto const other = sgl_lsp::analyze(document_of("use noise\nfun h() -> float => noise.grain(1.0)\n"));
+    sgl_lsp::set_module_dirs({});
+
+    REQUIRE(first->layer != nullptr);
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    CHECK(other->diagnostics.empty());
+    CHECK(edited->library == first->library);
+    CHECK(edited->layer == first->layer);
+    CHECK(other->layer == first->layer);
+    // the layer holds both modules, and each document reaches only what it uses
+    CHECK(first->module.reached_library_files.size() == 2);
+    REQUIRE(other->module.reached_library_files.size() == 1);
+    CHECK(other->library->names[other->module.reached_library_files[0]].ends_with("noise.sgl"));
+    CHECK(first->text_of(first->module.prelude_file_count()).contains("module "));
+}
+
+TEST("sgl lsp - an edit of a module checks it and the modules after it again, and keeps the layers of those before",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\nfun g() -> float => shading.lit(1.0)\n");
+    auto const first = sgl_lsp::analyze(doc);
+    // `shading` uses `noise`, so it comes after it in the chain; an unsaved edit of it is a new last layer
+    auto const shading_uri = lsp::uri_of_path(dir + "/shading.sgl");
+    auto const edited_text
+        = cc::string("module shading\n\nuse noise\n\nfun lit(x: float) -> float => noise.grain(x) * 3.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = shading_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(first->layer != nullptr);
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer != first->layer);
+    auto const before_of = [](sgl::shared_library const& library)
+    {
+        return library.checked.lock([](sgl::shared_library::layers& l)
+                                    { return l.library != nullptr ? l.library->before : nullptr; });
+    };
+    auto const kept = before_of(*first->library);
+    REQUIRE(kept != nullptr);
+    CHECK(before_of(*edited->library) == kept);
+}
+
+TEST("sgl lsp - an edit of a module that leaves what it declares alone moves the modules using it rather than checking "
+     "them again",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\ntest shading.lit(4.0) == 2.0\n");
+    auto const first = sgl_lsp::analyze(doc);
+    // `noise` comes first, since `shading` uses it; its body changes, and nothing it declares
+    auto const noise_uri = lsp::uri_of_path(dir + "/noise.sgl");
+    auto const edited_text
+        = cc::string("module noise\n\n// a line more\nfun grain(x: float) -> float => x * 0.25 + 0.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = noise_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(first->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer != first->layer);
+    CHECK(edited->layer->module == "shading");
+    CHECK(edited->layer->layer->is_relocated());
+    CHECK(!edited->layer->before->layer->is_relocated());
+    // the document's test reads the module as it moved, and still passes
+    CHECK(edited->module.tests.size() == first->module.tests.size());
+}
+
+TEST("sgl lsp - an edit moves the modules after it from the library last used, though another edit was made since",
+     main_thread)
+{
+    auto const document_of = [](cc::string text)
+    {
+        auto d = cc::make_shared<lsp::document>();
+        d->uri = "file:///t.sgl";
+        d->version = 1;
+        d->text = cc::move(text);
+        d->index = lsp::text_index(d->text);
+        return d;
+    };
+    auto const dir = nx::source_path(SGL_LSP_TEST_CLEAN_MODULES_DIR);
+    sgl_lsp::set_module_dirs({dir});
+    auto const doc = document_of("use shading\ntest shading.lit(4.0) == 2.0\n");
+    auto const clean = sgl_lsp::analyze(doc);
+    // an edit of `shading` that makes `lit` triple, then the clean files again: found in the library cache, or made
+    // again where other tests' libraries pushed it out, and the last library either way
+    auto const shading_uri = lsp::uri_of_path(dir + "/shading.sgl");
+    auto const tripled
+        = cc::string("module shading\n\nuse noise\n\nfun lit(x: float) -> float => noise.grain(x) * 3.0\n");
+    auto const other_edit = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = shading_uri, .text = tripled}});
+    auto const found_again = sgl_lsp::analyze(doc);
+    // an edit of `noise` starts from the clean library, so `shading` moves as the clean text, never as the tripled one
+    auto const noise_uri = lsp::uri_of_path(dir + "/noise.sgl");
+    auto const edited_text
+        = cc::string("module noise\n\n// a line more\nfun grain(x: float) -> float => x * 0.25 + 0.0\n");
+    auto const edited = sgl_lsp::analyze(doc, cc::vector<sgl_lsp::open_text>{{.uri = noise_uri, .text = edited_text}});
+    sgl_lsp::set_module_dirs({});
+
+    CHECK(found_again->diagnostics.empty());
+    CHECK(edited->diagnostics.empty());
+    REQUIRE(edited->layer != nullptr);
+    CHECK(edited->layer->module == "shading");
+    CHECK(edited->layer->layer->is_relocated());
+    // the document's test reads `shading` as it is on disk: `lit` doubles, where the other edit's tripled
+    REQUIRE(edited->module.tests.size() == clean->module.tests.size());
+    for (auto t = isize(0); t < edited->module.tests.size(); ++t)
+        if (edited->module.tests[t].file == edited->user_file())
+            CHECK(sgl::test::run_test(edited->module, edited->module_files(), i32(t), {}).is_passed());
+    CHECK(other_edit->diagnostics.empty());
+}
+
 TEST("sgl lsp - a module file open in the editor is what the documents using it are checked against", main_thread)
 {
     sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_MODULES_DIR)});
@@ -570,7 +717,7 @@ TEST("sgl lsp - a hover on an overloaded function lists the rest of the set afte
              "float\n```");
 }
 
-TEST("sgl lsp - formatting replaces the whole document, edits nothing where it is formatted, and refuses errors",
+TEST("sgl lsp - formatting replaces the whole document, edits nothing where it is formatted, and skips around errors",
      main_thread)
 {
     auto const doc = R"({"textDocument":{"uri":"file:///t.sgl"},"options":{"tabSize":4,"insertSpaces":true}})";
@@ -584,8 +731,11 @@ TEST("sgl lsp - formatting replaces the whole document, edits nothing where it i
     auto tidy = session("fun f(a: float, b: float) -> float => a * b\n");
     CHECK(tidy.ask(5, "textDocument/formatting", doc)["result"].size() == 0);
 
-    auto broken = session("fun f() -> float:\n    return (1.0\n");
-    CHECK(broken.ask(5, "textDocument/formatting", doc)["error"]["message"].as_string().contains("syntax errors"));
+    // the block around a syntax error stays as written, and the rest is formatted
+    auto broken = session("fun f(a:float) -> float:\n    return (1.0\n");
+    auto const edits = broken.ask(5, "textDocument/formatting", doc)["result"];
+    REQUIRE(edits.size() == 1);
+    CHECK(edits[0]["newText"].as_string() == "fun f(a: float) -> float:\n    return (1.0\n");
 }
 
 TEST("sgl lsp - the outline is the document's declarations, each holding its members, with its first line as detail",

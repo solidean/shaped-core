@@ -1,6 +1,7 @@
 #include "../check/check-test-support.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/platform/file_access.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
 #include <shaped-graphics-language/emit/emit.hh>
@@ -40,8 +41,12 @@ cc::vector<sgl_corpus_file> corpus_files()
     auto out = cc::vector<sgl_corpus_file>();
     auto const root = fs::path(nx::source_path(SGL_CORPUS_DIR).c_str_materialize());
     auto ec = std::error_code();
+    // Listed past clean-core, so declared for file-access recording (cc::file_access); the files are read through clean-core.
+    cc::file_access::note_list(root.string().c_str());
     for (auto const& e : fs::recursive_directory_iterator(root, ec))
     {
+        if (e.is_directory())
+            cc::file_access::note_list(e.path().string().c_str());
         if (!e.is_regular_file() || e.path().extension() != ".sgl")
             continue;
         // lexical: every entry lies under root, and canonicalizing breaks where wasm reads a Windows host's paths

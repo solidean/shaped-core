@@ -21,7 +21,7 @@ sg sizes it per binding group by the views it is given: dx12 at resource binding
 HLSL writes `name[]` (EMIT-210), slib's generated field is a `cc::vector` of views, and sg's compute test reads five buffers through one on both.
 Left:
 
-* metal, through an argument buffer, which sg's metal backend does not lay out yet (EMIT-211).
+* ~~metal~~: landed 2026-11-09, as a table each group sizes behind its argument buffer, since MSL takes no unsized argument buffer member (EMIT-211).
 * A binding array of more than one dimension, and an unbounded array of samplers.
 
 ## Also done on 2026-11-05
@@ -32,5 +32,6 @@ sg's compute test sets five buffers of a capacity of 16, replaces one in place, 
 An array of samplers on dx12, vulkan and metal: `sampler[N]` in SGL, `named_sampler::element` and `set_sampler_element` in sg, and a `cc::fixed_array<sg::sampler, N>` field in the generated host code.
 sg's sampler test reads one texture through three samplers, through a group and through a staging group whose element 0 it replaces.
 
-`xs.length` of an unbounded array (CHK-491): a constant of its binding, which the generated host code writes from the views it binds.
+`xs.length` of an unbounded array (CHK-491): the views its group binds, which sg writes per dispatch or draw.
+dx12 and vulkan read it from the reserved `sg_array_lengths`, and metal from the array's table.
 sg's compute test wraps its index by it with three views and then four, on dx12 and vulkan.

@@ -16,6 +16,7 @@
 #include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh> // impl::mesh_polyfill_state
 #include <shaped-graphics/raster/raster_target_formats.hh>
 #include <shaped-graphics/resource/subresource.hh> // subresource_range (the open rendering's targets)
 
@@ -80,6 +81,10 @@ public:
 
 protected:
     command_list(sg::context& ctx, epoch created_in);
+
+    /// The threads of the `dispatch_threads` being recorded, which a backend writes where the bound layout holds the
+    /// grid and metal dispatches exactly; zero for a dispatch by groups.
+    int _dispatch_grid[3] = {};
 
     // Backend seams the seven scopes forward to; each op's contract is documented on its scope.
     // They are friends so the scopes can reach these.
@@ -210,6 +215,25 @@ protected:
     virtual void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
     // The same for a mesh draw, whose records are `dispatch_args`; a mesh-shaded pipeline is bound.
     virtual void raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
+    // A mesh draw of a pipeline that polyfills its mesh stage, bound, with every count positive: dispatch `polyfill`'s
+    // compute half over the bound groups, then draw what it wrote (libs/graphics/shaped-graphics/docs/concepts/mesh-polyfill.md).
+    // Reached only on a context whose `draws_mesh_polyfill` says so.
+    virtual void raster_draw_mesh_polyfilled(impl::mesh_polyfill_state const& polyfill, int x, int y, int z);
+    // The same for `count` indirect draws, whose grids are the records of `dispatch_args` from `offset_in_bytes`;
+    // `polyfill.scan` is non-null.
+    virtual void raster_draw_mesh_polyfilled_indirect(impl::mesh_polyfill_state const& polyfill,
+                                                      raw_buffer_handle const& args,
+                                                      isize offset_in_bytes,
+                                                      isize count);
+    // Reached only on a context whose `draws_geometry_polyfill` says so, for a draw of at least one primitive.
+    virtual void raster_draw_geometry_polyfilled(impl::mesh_polyfill_state const& polyfill,
+                                                 impl::geometry_polyfill_draw const& draw);
+    // Reached only on a context whose `draws_geometry_mesh_route` says so, for a draw of at least one primitive.
+    virtual void raster_draw_geometry_meshed(impl::geometry_polyfill_draw const& draw);
+    // Reached only on a context whose `draws_tessellation_polyfill` says so, for a draw of at least one patch; `draw`'s
+    // primitives are its patches.
+    virtual void raster_draw_tessellation_polyfilled(impl::tessellation_polyfill_state const& polyfill,
+                                                     impl::geometry_polyfill_draw const& draw);
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing).
     // Split by geometry family, since a BLAS is triangles or AABBs and span-element overloads cannot
@@ -228,6 +252,28 @@ protected:
                                                                   int hit_record_stride) = 0;
     [[nodiscard]] virtual tlas_handle raytracing_build_tlas(cc::span<tlas_instance const> instances,
                                                             accel_build_flags flags) = 0;
+    // Reached only where the context reports sg::feature::partitioned_tlas, after the scope validated `ops`.
+    // `is_first` says the structure has no contents yet; `released` are the blases no slot holds any more, which the
+    // list keeps until it has run.
+    virtual void raytracing_update_partitioned_tlas(partitioned_tlas const& ptlas,
+                                                    ptlas_operations const& ops,
+                                                    bool is_first,
+                                                    cc::vector<blas_handle>&& released);
+    // The GPU-written form, after the scope validated `ops`: the backend writes the operation array, copies each count
+    // into it, and declares every buffer and blas the build reads; `released` are the tables the structure let go of.
+    // Reached only where the context reports sg::feature::clustered_geometry, after the scope validated the inputs.
+    [[nodiscard]] virtual cluster_set_handle raytracing_build_clusters(cc::span<cluster_triangles const> clusters,
+                                                                       accel_build_flags flags);
+    // `stride` is the backend's own record, which the scope does not know; the pool was bumped already.
+    virtual void raytracing_build_clusters_indirect(cluster_pool const& pool, cluster_indirect_build const& build);
+    [[nodiscard]] virtual cc::vector<blas_handle> raytracing_build_cluster_blas(cluster_set_handle const& clusters,
+                                                                                cc::span<cluster_range const> ranges,
+                                                                                accel_build_flags flags,
+                                                                                int hit_record_stride);
+    virtual void raytracing_update_partitioned_tlas_indirect(partitioned_tlas const& ptlas,
+                                                             ptlas_indirect_operations const& ops,
+                                                             bool is_first,
+                                                             cc::vector<blas_table_handle>&& released);
 
     // Ray-tracing dispatch (reached through cmd.raytracing).
     // bind_pipeline sets the DXR state object + global root signature, and bind_group binds through that root signature, like compute.
@@ -260,6 +306,9 @@ protected:
         record_outside_scope,
         /// Nothing outside the scope helps — the hazard is between two of its own draws, so the scope itself splits.
         split_scope_between_draws,
+        /// The draw itself splits the scope, as a polyfilled mesh stage's does, so there is nothing to advise: counted,
+        /// never warned about.
+        none,
     };
 
     /// A backend closed the open rendering scope's pass and reopened it, forced by `cause`: "a copy", "a barrier", ….
@@ -296,9 +345,14 @@ private:
     void check_raster_aliasing(bool indexed);
     // Whether any bound tlas reaches a hit record past the end of `table`, which dispatch_rays must not submit.
     bool check_hit_records(raytracing_shader_table const& table);
+    // Under context::hit_record_checks, asserts no tlas `groups` bind reaches a cluster pool rebuilt since it was built.
+    void check_cluster_pools(cc::span<binding_group const* const> groups, cc::string_view what) const;
 
-    cc::string _rendering_target_set;                       // of the open rendering, or empty
-    bool _raster_is_mesh_shaded = false;                    // of the bound raster pipeline
+    cc::string _rendering_target_set;                              // of the open rendering, or empty
+    bool _raster_is_mesh_shaded = false;                           // of the bound raster pipeline
+    cc::optional<impl::mesh_polyfill_state> _raster_mesh_polyfill; // of the bound raster pipeline, where it polyfills
+    cc::optional<impl::tessellation_polyfill_state> _raster_tessellation_polyfill; // likewise, for its tessellation
+    int _raster_geometry_mesh_corners = 0; // of the bound raster pipeline, where it is a geometry stage's mesh route
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
 
     // One entry per color and depth-stencil target of the open rendering, the subresources a copy inside the scope

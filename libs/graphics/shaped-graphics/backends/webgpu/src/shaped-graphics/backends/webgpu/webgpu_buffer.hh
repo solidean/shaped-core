@@ -16,7 +16,7 @@
 class sg::backend::webgpu::webgpu_buffer final : public sg::raw_buffer
 {
 public:
-    webgpu_buffer(webgpu_context& ctx, isize size_in_bytes, sg::buffer_usages usage, wgpu_buffer buffer);
+    webgpu_buffer(webgpu_context& ctx, isize size_in_bytes, sg::buffer_usages usage, wgpu_buffer buffer, u64 serial);
     ~webgpu_buffer() override;
 
     /// The WebGPU buffer, null once expired.
@@ -24,6 +24,12 @@ public:
 
     /// Bytes actually allocated: the logical size rounded up to a whole word.
     [[nodiscard]] isize allocated_bytes() const { return align_up(_size_in_bytes, buffer_word_bytes); }
+
+    /// Identifies the WebGPU buffer across every handle it passes through, as webgpu_texture_storage::serial does a texture.
+    [[nodiscard]] u64 serial() const { return _serial; }
+
+    /// Marks this handle transient, so its WebGPU buffer is offered for reuse when it expires rather than destroyed.
+    void mark_transient() { _transient = true; }
 
 protected:
     void on_expired() const override;
@@ -35,4 +41,6 @@ private:
     webgpu_context& _ctx;
     sg::context::live_resource _live; // counts this resource alive against _ctx, construction to destruction
     mutable wgpu_buffer _buffer;      // mutable: expiry is a const lifetime hook
+    u64 _serial = 0;
+    bool _transient = false;
 };

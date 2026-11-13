@@ -40,6 +40,10 @@ struct vulkan_descriptor_functions; // the VK_EXT_descriptor_buffer entry points
 struct vulkan_raytracing_functions; // the acceleration-structure + ray-tracing-pipeline entry points
 class vulkan_blas;
 class vulkan_tlas;
+class vulkan_partitioned_tlas;
+class vulkan_cluster_set;
+class vulkan_cluster_pool;
+struct vulkan_clusters;
 class vulkan_micromap;
 struct vulkan_descriptor_range;    // one allocated range within the descriptor heap
 class vulkan_descriptor_heap;      // host-visible memory descriptors are written into
@@ -87,4 +91,5 @@ using vulkan_texture_handle = std::shared_ptr<vulkan_texture const>;
 /// It shadows sg's, so a backend message is never mistaken for a portable one.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 class vulkan_software_pool;
+struct vulkan_trace_target;
 } // namespace sg::backend::vulkan

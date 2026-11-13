@@ -434,7 +434,21 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
                 if (demand(id, file, where) == symbol_state::checked)
                     result = out.at(id).type;
             }
-            else if (kind != symbol_kind::unsupported)
+            else if (kind == symbol_kind::alias)
+            {
+                // CHK-14: the type it names; a function type stands where a parameter's whole type does alone (CHK-317)
+                if (demand(id, file, where) == symbol_state::checked)
+                    result = out.at(id).type;
+                if (result != checked_module::error_type && out.at(result).kind == type_kind::function
+                    && !is_whole_parameter_type)
+                {
+                    report(diagnostic_kind::wrong_kind_of_name, file, where,
+                           cc::format("{} names a function type, which is the type of a parameter, and of nothing else",
+                                      text));
+                    result = checked_module::error_type;
+                }
+            }
+            else
                 report(diagnostic_kind::wrong_kind_of_name, file, where,
                        cc::format("{} is a {}, and a type stands here", text,
                                   kind == symbol_kind::function   ? "function"
@@ -604,7 +618,7 @@ type_id checker::resolve_value_type(i32 file,
         unsupported(file, span_of(file, expr), "an array of resources as a value; a binding array is a binding member");
         return checked_module::error_type;
     }
-    if (allows_resource && out.at(type).kind != type_kind::buffer)
+    if (allows_resource)
         return type;
     unsupported(file, span_of(file, expr),
                 out.at(type).kind == type_kind::buffer
@@ -648,8 +662,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                                                     bool is_struct,
                                                     bool is_target_struct,
                                                     bool is_vertex_struct,
-                                                    bool is_workgroup,
-                                                    cc::string_view binding_name)
+                                                    bool is_workgroup)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -715,8 +728,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position",    "layer",    "per_instance", "stream",
-                                                  "interpolate", "per_draw", "edge_factors", "inside_factors"};
+        cc::string_view const known_on_field[] = {"position", "layer",        "per_instance",   "stream", "interpolate",
+                                                  "per_draw", "edge_factors", "inside_factors", "bits",   "absent"};
         // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
         cc::string_view const known_on_pixel_field[]
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
@@ -1030,6 +1043,23 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_coherent = is_coherent,
             .padding = member_padding,
         });
+        // CHK-526: where a field stands in one target's record, which a struct with a target layout alone says
+        if (auto const* const bits = is_struct ? find_attribute(file, f.attributes, "bits") : nullptr)
+        {
+            auto const arguments = ast.at(bits->arguments);
+            auto const count = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                 ? constant_count(file, arguments[0].value)
+                                 : cc::optional<i32>();
+            if (!count.has_value() || count.value() < 1 || count.value() > 32)
+                report(diagnostic_kind::invalid_attribute_arguments, file, bits->name,
+                       "@bits takes how many bits of a 32-bit word the field takes, 1 to 32: `@bits(9)`");
+            else if (type != checked_module::error_type && out.name_of(type) != "uint")
+                report(diagnostic_kind::invalid_attribute_arguments, file, bits->name,
+                       cc::format("@bits packs a uint, and {} is {}", name, out.name_of(type)));
+            else
+                collected.back().layout_bits = count.value();
+        }
+        collected.back().is_absent = is_struct && find_attribute(file, f.attributes, "absent") != nullptr;
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(
                 {.member = collected.size() - 1, .attribute = named, .name = name_argument_of(file, named)});
@@ -1086,64 +1116,6 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         m.default_sampler = i32(found);
     }
 
-    // CHK-491: an unbounded array's length is the host's per group, which no target reads back, so it rides in the
-    // binding's constants, where some `b.name.length` or `m.b.name.length` of the module reads it.
-    // A binding array is named only as its binding's member, so the scan cannot miss a read; a binding of the same
-    // name in another module costs this one an unread constant.
-    auto const names_binding = [&](i32 f, ast::expr_id e)
-    {
-        if (!ast::is_valid(e))
-            return false;
-        auto const& node = ast_of(f).at(e).node;
-        if (auto const* const n = node.try_as<ast::name>())
-            return text_of(f, n->where) == binding_name;
-        if (auto const* const m = node.try_as<ast::member>())
-            return text_of(f, m->name) == binding_name;
-        return false;
-    };
-    auto const reads_length_of = [&](cc::string_view name)
-    {
-        for (auto f = i32(0); f < i32(files.size()); ++f)
-        {
-            auto const& a = ast_of(f);
-            for (auto const& e : a.exprs)
-            {
-                auto const* const outer = e.node.try_as<ast::member>();
-                if (outer == nullptr || text_of(f, outer->name) != "length" || !ast::is_valid(outer->object))
-                    continue;
-                auto const* const inner = a.at(outer->object).node.try_as<ast::member>();
-                if (inner != nullptr && text_of(f, inner->name) == name && names_binding(f, inner->object))
-                    return true;
-            }
-        }
-        return false;
-    };
-    if (!is_struct && !is_workgroup)
-    {
-        auto const declared = collected.size();
-        for (auto i = isize(0); i < declared; ++i)
-        {
-            auto const type = collected[i].type;
-            if (type == checked_module::error_type || out.at(type).kind != type_kind::array || out.at(type).count != 0)
-                continue;
-            if (!reads_length_of(collected[i].name))
-                continue;
-            auto const name = collected[i].name + "_length";
-            auto is_taken = false;
-            for (auto const& other : collected)
-                is_taken = is_taken || other.name == name;
-            if (is_taken)
-            {
-                report(diagnostic_kind::duplicate_declaration, file, ast.at(collected[i].field).name,
-                       cc::format("{} is an unbounded binding array, whose length the binding holds as {}",
-                                  collected[i].name, name));
-                continue;
-            }
-            collected.push_back({.name = name,
-                                 .type = type_of_builtin(builtins::k_int, file, ast.at(collected[i].field).name),
-                                 .length_of = i32(i)});
-        }
-    }
 
     auto const range = ast::range_of<member_info>{.first = u32(out.members.size()), .count = u32(collected.size())};
     out.members.push_back_range(collected);
@@ -1161,7 +1133,8 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle"};
+    cc::string_view const known[]
+        = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle", "target_layout"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -1196,6 +1169,16 @@ void checker::compile_struct(symbol_id id)
     }
     auto const members = compile_members(file, s.members, true, is_pixel, is_vertex);
     type_parameter_names.resize_down_to(type_parameter_names.size() - parameters.size());
+    for (auto const& m : out.at(members))
+        (void)refuse_held_layout(file, span_of(file, ast_of(file).at(m.field).type), m.type, "a struct field");
+    // CHK-526: a field's place in a target's record is a branch's of a struct with a target layout
+    if (find_attribute(file, d.attributes, "target_layout") == nullptr)
+        for (auto const& m : out.at(members))
+            if (m.layout_bits != 0 || m.is_absent)
+                report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, ast_of(file).at(m.field).type),
+                       cc::format("{} is placed by @bits or @absent, which a branch of a @target_layout struct alone "
+                                  "says",
+                                  m.name));
     // CHK-328: a ray type's member is the payload its stages take, which is a struct
     if (s.is_ray_set)
         for (auto const& m : out.at(members))
@@ -1278,6 +1261,20 @@ void checker::compile_struct(symbol_id id)
     out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
 
+    // CHK-522: a struct SGL ships may stand in each target's own order, a branch of fields per target
+    auto const* const layout = find_attribute(file, d.attributes, "target_layout");
+    if (layout != nullptr && !is_shipped_module_file(file))
+        unsupported(file, layout->name, "@target_layout on a struct outside the modules SGL ships");
+    else if (layout != nullptr && (s.branches.empty() || !parameters.empty()))
+        report(diagnostic_kind::invalid_attribute_arguments, file, layout->name,
+               "@target_layout lays a struct out per target, so its body is a const if chain of fields, and it is no "
+               "generic");
+    else if (layout != nullptr)
+    {
+        out.types.own(index_of(type)).has_target_layout = true;
+        compile_layout_branches(id, type, file, s, members);
+        return;
+    }
     // CHK-432: a body that is one `const if` chain spells the type per compile, and its SGL branch is its fields
     if (!s.branches.empty())
     {
@@ -1287,6 +1284,36 @@ void checker::compile_struct(symbol_id id)
         out.types.own(index_of(type)).is_text_type = true;
         out.types.own(index_of(type)).is_opaque = !has_fields;
     }
+}
+
+void checker::compile_alias(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const decl = out.at(id).declaration;
+    auto const& ast = ast_of(file);
+    cc::string_view const known[] = {"shadowable", "internal"};
+    judge_attributes(file, ast.at(decl).attributes, known, "a type alias");
+    // the value may be a function type, which each use of the alias then judges as CHK-317 does
+    allows_function_type = true;
+    auto const type = resolve_type(file, ast.at(decl).node.as<ast::type_decl>().value, nullptr);
+    auto& s = out.symbols.own(index_of(id));
+    if (type == checked_module::error_type)
+        s.state = symbol_state::failed;
+    else
+        s.type = type;
+}
+
+symbol_id checker::declared_type_of(symbol_id id, i32 file, source_span where)
+{
+    auto const kind = out.at(id).kind;
+    if (kind == symbol_kind::structure || kind == symbol_kind::enumeration)
+        return id;
+    if (kind != symbol_kind::alias || demand(id, file, where) != symbol_state::checked)
+        return symbol_id::none;
+    auto const& type = out.at(out.at(id).type);
+    if (type.kind != type_kind::structure && type.kind != type_kind::enumeration)
+        return symbol_id::none;
+    return type.symbol;
 }
 
 void checker::compile_enum(symbol_id id)
@@ -1361,8 +1388,8 @@ void checker::compile_enum(symbol_id id)
                     : cc::optional<i32>();
             if (written.has_value())
                 value = written.value();
-            else
-                unsupported(file, where_value, "a case value that is no int literal");
+            else if (auto const computed = compute_case_value(file, member, c->value); computed.has_value())
+                value = computed.value();
         }
         // An implicit value follows the one before it, and `int` has no value after its last.
         if (value == 2147483647)
@@ -1407,6 +1434,50 @@ void checker::judge_shadowing(i32 file, cc::string_view name, source_span where)
             report(diagnostic_kind::shadows_unshadowable, file, where, cc::format("{} is @shadowable(false)", name));
             return;
         }
+}
+
+symbol_id checker::add_value_scope(i32 file, ast::decl_id decl, cc::string name)
+{
+    auto const scope = symbol_id(out.symbols.size());
+    out.symbols.push_back({.file = file,
+                           .declaration = decl,
+                           .kind = symbol_kind::test,
+                           .state = symbol_state::checked,
+                           .name = cc::move(name),
+                           .info = i32(out.functions.size())});
+    out.functions.push_back({.symbol = scope,
+                             .parameters = {.first = u32(out.parameters.size()), .count = 0},
+                             .result = checked_module::error_type,
+                             .bindings = {.first = u32(out.binding_lists.size()), .count = 0}});
+    notes.push_back({});
+    return scope;
+}
+
+cc::optional<i32> checker::compute_case_value(i32 file, ast::decl_id member, ast::expr_id value)
+{
+    auto const where = span_of(file, value);
+    auto const& c = ast_of(file).at(member).node.as<ast::enum_case_decl>();
+    auto const scope_symbol = add_value_scope(file, member, cc::format("case {}", text_of(file, c.name)));
+    auto scope = function_scope{.function = scope_symbol, .file = file};
+    auto const int_type = prelude_type(builtins::k_int);
+    if (check_expected(scope, value, int_type, "a case value") == checked_module::error_type)
+        return cc::nullopt;
+    // an enum is one type for every compile, so a case cannot follow what a compile sets
+    if (!options_reached(scope_symbol, symbol_id::none).empty())
+    {
+        unsupported(file, where, "a case value that reaches an option");
+        return cc::nullopt;
+    }
+    auto e = evaluate_const(scope_symbol, file, value, int_type);
+    if (!e.is_ok)
+    {
+        if (e.kind == diagnostic_kind::unsupported_yet)
+            unsupported(file, where, e.detail);
+        else
+            report(e.kind, file, where, cc::format("case {} {}", text_of(file, c.name), e.detail));
+        return cc::nullopt;
+    }
+    return i32(e.leaves[0].as_int());
 }
 
 void checker::compile_const(symbol_id id)
@@ -1465,20 +1536,7 @@ void checker::compile_const(symbol_id id)
     auto const value_scope = [&]
     {
         if (!is_valid(scope_symbol))
-        {
-            scope_symbol = symbol_id(out.symbols.size());
-            out.symbols.push_back({.file = file,
-                                   .declaration = decl,
-                                   .kind = symbol_kind::test,
-                                   .state = symbol_state::checked,
-                                   .name = cc::format("const {}", out.at(id).name),
-                                   .info = i32(out.functions.size())});
-            out.functions.push_back({.symbol = scope_symbol,
-                                     .parameters = {.first = u32(out.parameters.size()), .count = 0},
-                                     .result = error_type,
-                                     .bindings = {.first = u32(out.binding_lists.size()), .count = 0}});
-            notes.push_back({});
-        }
+            scope_symbol = add_value_scope(file, decl, cc::format("const {}", out.at(id).name));
         auto scope = function_scope{.function = scope_symbol, .file = file};
         // CHK-413: a function's own `const` reads the ones its body declared before it
         for (auto const& local : local_constants)
@@ -1675,20 +1733,17 @@ void checker::compile_const(symbol_id id)
         }
     }
 
-    // CHK-353: an option is a bool, an int or an enum case, and the compile may give it another value of its type
+    // CHK-353: an option is a scalar or an enum case, and the compile may give it another value of its type
     if (find_attribute(file, d.attributes, "option") != nullptr)
     {
-        if (info.kind == constant_kind::real || info.kind == constant_kind::composite || info.is_unsigned)
+        if (info.kind == constant_kind::composite)
         {
-            unsupported(file, c.name, "an option of float or uint; an option is a bool, an int or an enum case");
+            unsupported(file, c.name, "an option of this type; an option is a bool, a scalar or an enum case");
             return fail();
         }
-        // the host would set the named option and not see this one follow it
-        if (is_valid(info.option) || !info.computed_options.empty())
-        {
-            unsupported(file, where, "an option whose value names another option");
-            return fail();
-        }
+        // CHK-519: a default that names another option follows the value this compile gives it, so this one reaches it
+        if (is_valid(info.option))
+            info.computed_options.push_back(info.option);
         info.option = id;
         apply_option_value(id, info);
     }
@@ -1706,7 +1761,7 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "padding"};
+    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "padding", "internal"};
     judge_attributes(file, d.attributes, known, "a binding");
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
     auto const* const padded = find_attribute(file, d.attributes, "padding");
@@ -1744,7 +1799,7 @@ void checker::compile_binding(symbol_id id)
     auto used = feature_set();
     granted = declared;
     used_features = &used;
-    auto const members = compile_members(file, b.members, false, false, false, is_workgroup, out.at(id).name);
+    auto const members = compile_members(file, b.members, false, false, false, is_workgroup);
     granted = {};
     used_features = nullptr;
 
@@ -1877,8 +1932,7 @@ cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argu
         }
         else
         {
-            if (out.at(binding).kind != symbol_kind::unsupported)
-                report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no binding", text));
+            report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no binding", text));
             is_failed = true;
         }
     }
@@ -2073,16 +2127,18 @@ void checker::compile_function(symbol_id id)
                            || is_evaluation || mesh != nullptr || task != nullptr
                            || find_attribute(file, d.attributes, "compute") != nullptr;
         auto const takes_resources = !is_builtin && !is_entry && !is_prelude_file(file);
-        // `mut image_2d[…]` is the access of an image, and no place
-        auto const names_image = [&](ast::expr_id t)
+        // `mut image_2d[…]`, `mut buffer[…]` and `mut bytes` are the access of a resource, and no place
+        auto const names_resource = [&](ast::expr_id t)
         {
+            if (auto const* const n = ast.at(t).node.try_as<ast::name>())
+                return text_of(file, n->where) == "bytes";
             auto const* const i = ast.at(t).node.try_as<ast::index>();
             auto const* const n = i != nullptr ? ast.at(i->object).node.try_as<ast::name>() : nullptr;
-            return n != nullptr && text_of(file, n->where).starts_with("image_");
+            return n != nullptr && (text_of(file, n->where).starts_with("image_") || text_of(file, n->where) == "buffer");
         };
         if (auto const* const q = ast::is_valid(p.type) ? ast.at(p.type).node.try_as<ast::qualified_type>() : nullptr;
             q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr
-            && mesh == nullptr && !(takes_resources && names_image(q->type)))
+            && mesh == nullptr && !(takes_resources && names_resource(q->type)))
         {
             is_mut_parameter = true;
             // a function is no place, so a function type is not the whole type here (CHK-317)
@@ -2192,7 +2248,14 @@ void checker::compile_function(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     auto const* const compute = find_attribute(file, d.attributes, "compute");
     auto const mesh_limits = mesh != nullptr ? mesh_of(file, *mesh) : mesh_shape();
-    auto const workgroup = mesh != nullptr ? mesh_limits.workgroup : workgroup_of(file, task != nullptr ? task : compute);
+    auto const task_limits = task != nullptr ? task_of(file, *task) : task_shape();
+    // CHK-520: a bare `@compute` leaves its size to the compile, which flattening chooses from the body's indexing
+    auto const is_auto_workgroup
+        = compute != nullptr && task == nullptr && mesh == nullptr && ast_of(file).at(compute->arguments).empty();
+    auto const workgroup = mesh != nullptr   ? mesh_limits.workgroup
+                         : task != nullptr   ? task_limits.workgroup
+                         : is_auto_workgroup ? cc::fixed_array<i32, 3>{64, 1, 1}
+                                             : workgroup_of(file, compute);
     auto const preferred_subgroup_size = preferred_subgroup_size_of(
         file, find_attribute(file, d.attributes, "preferred_subgroup_size"), compute != nullptr);
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : mesh_limits.vertices;
@@ -2209,6 +2272,7 @@ void checker::compile_function(symbol_id id)
                          : stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr, control != nullptr,
                                     is_evaluation, mesh != nullptr, task != nullptr),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
+        .is_auto_workgroup = is_auto_workgroup,
         .preferred_subgroup_size = preferred_subgroup_size,
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .is_barrier = find_attribute(file, d.attributes, "barrier") != nullptr,
@@ -2218,8 +2282,10 @@ void checker::compile_function(symbol_id id)
         .max_vertices = max_vertices,
         .max_primitives = mesh_limits.triangles,
         .is_line_mesh = mesh_limits.is_lines,
+        .max_meshes = task_limits.meshes,
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,
+        .max_factor = tessellation.max_factor,
         .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),
         .type_parameters = {.first = u32(out.type_lists.size()), .count = u32(type_parameters.size())},
     });
@@ -2378,7 +2444,7 @@ type_id checker::pixel_targets_of(symbol_id entry, type_id color)
     {
         auto is_taken = false;
         for (auto const& s : out.symbols)
-            is_taken = is_taken || s.name == name;
+            is_taken = is_taken || (s.name == name && out.is_reached_file(s.file));
         if (!is_taken)
             break;
         name = cc::format("{}_target{}", out.at(entry).name, n);
@@ -2436,6 +2502,22 @@ void checker::judge_entry_point(symbol_id id)
     if (workgroup_bytes > k_portable_workgroup_bytes)
         invalid(cc::format("its @workgroup bindings hold {} bytes, and a workgroup has {} on every target",
                            workgroup_bytes, k_portable_workgroup_bytes));
+
+    // CHK-520: a bare @compute reads nothing of the group it runs in, whose size the compile chooses
+    if (info.is_auto_workgroup)
+    {
+        auto const stated = cc::string_view("so it states its size, `@compute(64)`");
+        for (auto const binding : out.at(info.bindings))
+            if (out.bindings[out.at(binding).info].is_workgroup)
+                invalid(cc::format("a bare @compute chooses its own workgroup size, and {} is memory of the workgroup, "
+                                   "{}",
+                                   out.at(binding).name, stated));
+        for (auto const& parameter : parameters)
+            if (reads_group(parameter.input))
+                invalid(cc::format("a bare @compute chooses its own workgroup size, and @{} reads where an invocation "
+                                   "stands in it, {}",
+                                   info_of(parameter.input).name, stated));
+    }
 
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
     // CHK-397 first: a value of function bodies alone is what the detail names, rather than an array holding it

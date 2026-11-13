@@ -6,6 +6,8 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
+#include <shaped-graphics-language/ir/dxil/signature.hh>
+#include <shaped-graphics-language/legalize/legalize.hh>
 
 /// The text a graphics API compiles, written from one flat entry point of a checked module.
 ///
@@ -18,6 +20,28 @@ enum class sgl::emit::target : sgl::u8
     hlsl_vulkan,
     wgsl,
     msl,
+};
+
+/// What a mesh entry point is written as (CHK-524): the stage itself, or one half of its polyfill.
+enum class sgl::emit::mesh_form : sgl::u8
+{
+    native,
+    /// The compute entry point that writes its workgroups' slots of `sg_mesh_output`.
+    compute,
+    /// Between a polyfilled task stage's compute entry point and a mesh stage's: the one that numbers the launched mesh
+    /// workgroups in order; written from the mesh entry point, since the draw's vertex count is its.
+    /// With no task stage, it numbers the one record an indirect draw writes.
+    scan,
+    /// The compute entry point an indirect draw of a pipeline with no task stage dispatches: `compute`, its workgroups
+    /// launched by that one record.
+    launched,
+    /// The vertex entry point that draws those slots from `sg_mesh_input`.
+    /// A pixel entry point is then its polyfilled pipeline's, which takes what the mesh stage wrote per primitive from
+    /// the vertex half.
+    vertex_fetch,
+    /// A geometry entry point's mesh route on a target with mesh shaders: its pipeline's vertex stage and itself as one
+    /// mesh entry point, which the pipeline draws with no buffer of its own (CHK-525).
+    mesh,
 };
 
 /// What keeps an entry point from being written, as a closed set with stable kebab-case names.
@@ -107,63 +131,15 @@ struct sgl::emit::emitted_layout
     }
 };
 
-/// A line of an SGL source: a position in `checked_module::files`, and the line there, counted from 1.
-struct sgl::emit::source_line
+/// Whether a target's own binary is written in place of its text.
+enum class sgl::emit::native_route : sgl::u8
 {
-    /// -1 for no line at all.
-    i32 file = -1;
-    i32 line = 0;
-
-    constexpr bool operator==(source_line const&) const = default;
-};
-
-/// Where one line of the text came from (EMIT-181).
-struct sgl::emit::line_origin
-{
-    /// The line of the text, counted from 1.
-    i32 emitted = 0;
-    /// The innermost source line outside the prelude: a prelude function's body maps to the line that called it.
-    source_line at;
-    /// The calls `at` was inlined through, innermost first, the prelude's left out; empty for the entry point's own body.
-    cc::vector<source_line> inlined_from;
-
-    bool operator==(line_origin const& rhs) const
-    {
-        return emitted == rhs.emitted && at == rhs.at && ast::impl::is_equal(inlined_from, rhs.inlined_from);
-    }
-};
-
-/// One value a debug record holds: its scalar family and its lanes, each lane one 32-bit word.
-struct sgl::emit::debug_value
-{
-    /// `float`, `half`, `int`, `uint` or `bool`; an enum is `int`, and `type` names it.
-    cc::string family;
-    i32 lanes = 1;
-    /// The value's type as the program names it: `float3`, `material_kind`.
-    cc::string type;
-
-    bool operator==(debug_value const&) const = default;
-};
-
-/// One print or assert the text writes into sg's debug buffer (EMIT-183).
-/// Its record is `id`, the record's word count, then each value's lanes in order, one word each.
-struct sgl::emit::debug_site
-{
-    /// What the record starts with, stable for one source line and message wherever the text is written.
-    u32 id = 0;
-    /// An assert's, which writes only where its condition was false.
-    bool is_assert = false;
-    /// The message around its values, one piece more than `values`; empty for a print of one bare value.
-    cc::vector<cc::string> pieces;
-    cc::vector<debug_value> values;
-    /// Where the print or assert stands; empty without the source files (EMIT-181).
-    line_origin origin;
-
-    bool operator==(debug_site const& rhs) const
-    {
-        return id == rhs.id && is_assert == rhs.is_assert && ast::impl::is_equal(pieces, rhs.pieces)
-            && ast::impl::is_equal(values, rhs.values) && origin == rhs.origin;
-    }
+    /// The text, for the compiler behind the target.
+    text,
+    /// The binary, or the text where the entry point holds something the native layer has no lowering for yet.
+    prefer,
+    /// The binary, or an error `unsupported` that names what is missing.
+    require,
 };
 
 /// What an emit writes beside the text itself; the default writes no line table, no `#line` and no diagnostics.
@@ -182,13 +158,30 @@ struct sgl::emit::options
     check::feature_set device_features;
     /// The tree was legalized to its emulated traces where the target has native ones (`text_request::software_trace`).
     bool software_trace = false;
+    /// How `hlsl-vulkan` and `hlsl-dx12` are written: the text for DXC, or SPIR-V and DXIL from SGL's own layer (ir/ir.hh),
+    /// with no compiler behind it.
+    native_route native = native_route::text;
+    /// Writes each operation's `.sgl` line into the native route's binary (EMIT-257); `files` must hold the sources.
+    bool native_line_table = false;
+    /// A mesh entry point as one half of its polyfill rather than as a mesh stage, and a pixel entry point as the one
+    /// that follows the vertex half; every other entry ignores it.
+    mesh_form mesh = mesh_form::native;
 };
 
 /// Either the text or the reasons there is none.
 struct sgl::emit::emitted_text
 {
-    /// Empty when `errors` is not.
+    /// Empty when `errors` is not; where `spirv` is written, the program it was written from, for a reader.
     cc::string text;
+    /// The module, where `options::native` wrote one for vulkan; empty otherwise.
+    cc::vector<u32> spirv;
+    /// The container, where `options::native` wrote one for dx12; empty otherwise.
+    cc::vector<byte> dxil;
+    /// What kept a `prefer` from writing `spirv`, for a reader; empty otherwise.
+    cc::string native_gap;
+    /// Where DXIL's packer places what crosses the entry point's edge, wherever `options::native` asked for dx12.
+    /// It stands even where `native_gap` does, since a signature needs no lowering of the body.
+    cc::vector<ir::dxil::signature_element> signature;
     /// The name the text actually declares the entry point under, which is the source's unless this target reserves it.
     /// A caller compiling the text has to ask for THIS name, not the one it requested.
     cc::string entry_point;
@@ -204,16 +197,24 @@ struct sgl::emit::emitted_text
     cc::vector<line_origin> lines;
     /// Every print and assert the text writes into sg's debug buffer, which it declares when this is not empty (EMIT-183).
     cc::vector<debug_site> debug_sites;
+    /// The slots a polyfilled mesh entry point's two halves agree on, which sg sizes its buffer and its draw by;
+    /// empty for every other emit.
+    cc::optional<check::mesh_polyfill_layout> mesh_layout;
+    /// The records a polyfilled task stage's forms agree on, which sg sizes their buffer by; empty for every other emit.
+    cc::optional<check::task_polyfill_layout> task_layout;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
 
     [[nodiscard]] bool operator==(emitted_text const& rhs) const
     {
-        return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
+        return text == rhs.text && ast::impl::is_equal(spirv, rhs.spirv) && ast::impl::is_equal(dxil, rhs.dxil)
+            && native_gap == rhs.native_gap && ast::impl::is_equal(signature, rhs.signature)
+            && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
             && color_targets == rhs.color_targets && target_struct == rhs.target_struct
             && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
-            && ast::impl::is_equal(debug_sites, rhs.debug_sites) && ast::impl::is_equal(errors, rhs.errors);
+            && ast::impl::is_equal(debug_sites, rhs.debug_sites) && mesh_layout == rhs.mesh_layout
+            && task_layout == rhs.task_layout && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

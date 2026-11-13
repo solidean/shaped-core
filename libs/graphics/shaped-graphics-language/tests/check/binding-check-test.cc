@@ -279,9 +279,9 @@ TEST("sgl check - a buffer is a resource and never a value")
     constexpr auto members = "    src: buffer[float]\n    dst: mut buffer[float]\n";
     constexpr auto value = "a buffer as a value";
 
-    // Read through a subscript and nowhere else: not bound to a local, not passed, not returned.
+    // Read through a subscript, or handed to a parameter that stands for it (CHK-366): not bound to a local, not returned.
     CHECK(reports_for(listing(members, "    let b = work.src\n")).contains(value));
-    CHECK(reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
+    CHECK(!reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
     CHECK(reports_for(cc::string("fun pass(x: float) -> buffer[float] => x\n\n") + listing(members)).contains(value));
     CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n")).contains(value));
 
@@ -329,8 +329,13 @@ TEST("sgl check - a compute entry point takes the thread id and returns nothing"
                         "    return 1\n")
               .contains("a @compute fun returns nothing"));
 
+    // CHK-520: a bare @compute chooses its own size, and more than three are none
     CHECK(reports_for(cc::string(work)
                       + "@compute fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+          == "");
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(4, 4, 4, 4) fun go(@thread_id id: int3){work}:\n"
                         "    work.values[0] = 1.0\n")
               .contains("@compute takes one to three workgroup sizes"));
 
@@ -493,7 +498,7 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                  "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
                                  granted))
           == "");
-    // that constant is reached through `.length` alone, and takes a name no member may take beside it
+    // the length is sg's, which no member of the binding holds, so a member may take any name beside it
     CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n\n"
                                  "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t_length\n",
                                  granted))
@@ -502,7 +507,7 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                  "    t: texture_2d[float4][]\n\n"
                                  "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
                                  granted))
-              .contains("duplicate-declaration"));
+          == "");
     // an array of samplers is a binding array like any other, bound per group element by element
     CHECK(reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)) == "");
     // `sampler` is a keyword, and subscripted in a type position it reads as the name does (AST-135)

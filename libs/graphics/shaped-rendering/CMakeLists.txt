@@ -10,12 +10,14 @@ add_library(shaped-rendering
     src/shaped-rendering/capture.cc
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
+    src/shaped-rendering/taa_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
     src/shaped-rendering/display.cc
     src/shaped-rendering/reconstruct.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/bloom_routine.cc
     src/shaped-rendering/exposure_meter_routine.cc
     src/shaped-rendering/micromap_bake_routine.cc
     src/shaped-rendering/dlss_rr_routine.cc
@@ -56,12 +58,14 @@ target_sources(shaped-rendering
     src/shaped-rendering/all.hh
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
+    src/shaped-rendering/taa_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
     src/shaped-rendering/display.hh
     src/shaped-rendering/reconstruct.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/bloom_routine.hh
     src/shaped-rendering/exposure_meter_routine.hh
     src/shaped-rendering/micromap_bake_routine.hh
     src/shaped-rendering/dlss_rr_routine.hh
@@ -97,7 +101,7 @@ target_compile_features(shaped-rendering PUBLIC cxx_std_23)
 # Expose "src" so '#include <shaped-rendering/...>' works for consumers.
 target_include_directories(shaped-rendering
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 # sr depends on slib because concrete routines acquire their shaders through it (a routine-author dependency).
@@ -113,8 +117,6 @@ target_link_libraries(shaped-rendering PUBLIC shaped-graphics shaped-shader-libr
 # babel owns image encoding, which capture writes with, and font reading, which Slug's glyph compilation reads from.
 # PUBLIC because slug_shape.hh and slug_font.hh take a babel::font::face.
 target_link_libraries(shaped-rendering PUBLIC babel-serializer)
-
-sc_target_pch(shaped-rendering SG)
 
 target_compile_options(shaped-rendering
     PUBLIC
@@ -289,6 +291,7 @@ sc_add_shader_package(
     SHADERS
         module:slug
         blit.sgl:*
+        taa.sgl:*
         imgui.sgl:*
         compression/bc.sgl:*
         raster_box_filter_mipmap.sgl:*
@@ -298,6 +301,7 @@ sc_add_shader_package(
         nn_io.sgl:*
         slug_quads.sgl:*
         mix.sgl:*
+        bloom.sgl:*
         exposure_meter.sgl:*
         micromap_bake.sgl:*
         atrous_denoise.sgl:*
@@ -368,8 +372,6 @@ if(SC_BUILD_TESTS)
     sc_target_source_paths(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR "${SR_SGL_MODULE_DIR}")
     target_include_directories(shaped-rendering-test PRIVATE "${BABEL_TEST_DIR}") # font/font_builder.hh, for crafted fonts
 
-    sc_target_pch(shaped-rendering-test SG NEXUS) # 0.44
-
     if(SC_HAS_SDL3)
         # These two reach into impl/ and see SDL headers directly, so they exist only with a backend.
         target_sources(shaped-rendering-test
@@ -394,6 +396,7 @@ if(SC_BUILD_TESTS)
     set(_sr_test_backends "")
     if(TARGET shaped-graphics-dx12)
         target_sources(shaped-rendering-test PRIVATE tests/backends/dx12-entry.cc)
+        target_compile_definitions(shaped-rendering-test PRIVATE SR_TEST_HAS_DX12)
         list(APPEND _sr_test_backends shaped-graphics-dx12)
     endif()
     if(TARGET shaped-graphics-vulkan)
@@ -416,6 +419,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE
             tests/backends/backends.cc
             tests/shader_fixtures.cc
+            tests/bloom-test.cc
             tests/compression/bc-compress-test.cc
             tests/blit-routine-test.cc
             tests/debug-output-test.cc
@@ -494,7 +498,10 @@ if(SC_BUILD_TESTS)
     # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device and a vulkan one.
     # The HLSL is kept under tests/bench/shaders as it stood before the port, and nothing but the benchmark reads it.
     if(_sr_test_backends AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
-        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-hlsl-benchmark.cc)
+        target_sources(shaped-rendering-test PRIVATE
+            tests/bench/sgl-against-hlsl-benchmark.cc
+            tests/bench/sgl-routes-benchmark.cc
+        )
         target_compile_definitions(shaped-rendering-test PRIVATE SR_BENCH_HAS_VULKAN=$<TARGET_EXISTS:shaped-graphics-vulkan>)
         sc_add_shader_package(
             TARGET     shaped-rendering-test
@@ -532,6 +539,24 @@ if(SC_BUILD_TESTS)
         )
     endif()
 
+    # SGL against the same three kernels written by hand in MSL, timed on metal.
+    # Each MSL file declares SGL's argument buffer and inline constants slot for slot, so one binding group serves both.
+    # APPLE stands for slib's metal compiler, whose target is added after this directory and so is not one to test for.
+    if(APPLE AND TARGET shaped-graphics-metal)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-msl-benchmark.cc)
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_msl_shaders
+            NAMESPACE  sr_bench::msl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   msl
+            SHADERS
+                atrous_denoise.metal:compute:main_cs
+                svgf_atrous.metal:compute:atrous_cs
+                nn_conv.metal:compute:main_cs
+        )
+    endif()
+
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.
     # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
     # The probes' shader package stages them itself where it exists, and a second staging is a configure error.
@@ -558,6 +583,14 @@ if(SC_BUILD_TESTS)
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-rendering-test)
+endif()
+
+# The link option a web page embeds the vendored UI font with, at the path `sr::system_ui_font_path` looks first under
+# Emscripten: a page opens no system font file.
+# For a page's own link alone, since a node binary reads the real filesystem.
+if(EMSCRIPTEN AND SC_UI_FONT_FILE)
+    set(SR_WEB_UI_FONT_LINK_OPTION "SHELL:--embed-file ${SC_UI_FONT_FILE}@/sc-fonts/Inter-Regular.ttf"
+        CACHE INTERNAL "embeds the UI font into a web page")
 endif()
 
 add_subdirectory(examples)

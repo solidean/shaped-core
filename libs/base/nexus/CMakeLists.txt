@@ -48,6 +48,8 @@ add_library(nexus
     src/nexus/tests/export/pgo_json.cc
     src/nexus/tests/export/timings_json.cc
     src/nexus/tests/export/listing_json.cc
+    src/nexus/tests/export/runner_report.cc
+    src/nexus/tests/export/runner_coverage.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/generator.cc
     src/nexus/fuzz/minimizer.cc
@@ -125,6 +127,7 @@ target_sources(nexus
     src/nexus/tests/export/timings_json.hh
     src/nexus/tests/thorough.hh
     src/nexus/tests/export/listing_json.hh
+    src/nexus/tests/export/runner_report.hh
 
     src/nexus/fuzz/fwd.hh
     src/nexus/fuzz/async.hh
@@ -152,7 +155,7 @@ target_compile_features(nexus
 # Expose "src" so '#include <nexus/dummy.hh>' works for consumers.
 target_include_directories(nexus
     PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 )
 
 target_link_libraries(nexus
@@ -193,13 +196,6 @@ else()
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=0)
 endif()
 
-# EXTENDS CC rather than a higher rung: nexus/test.hh reaches only CC-tier clean-core headers plus <typeindex>,
-# so a pure clean-core test binary can take `CC NEXUS` without paying for the STL block.
-# Naming CC as the parent is also what keeps clean-core at the front of the list when NEXUS is applied alongside a taller tier.
-sc_declare_pch_tier(NEXUS EXTENDS CC HEADERS <nexus/test.hh>)
-
-sc_target_pch(nexus CC)
-
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(nexus-test
@@ -231,11 +227,13 @@ if(SC_BUILD_TESTS)
         tests/test-seed-test.cc
         tests/test-entry-test.cc
         tests/test-export-test.cc
+        tests/test-runner-report-test.cc
         tests/test-thorough-test.cc
         tests/test-registry-test.cc
         tests/test-section-test.cc
         tests/test-invocable-test.cc
         tests/test-alias-test.cc
+        tests/test-shard-test.cc
         tests/test-typed-value-test.cc
         tests/test-watchdog-test.cc
         tests/bench-barriers-test.cc
@@ -257,10 +255,6 @@ if(SC_BUILD_TESTS)
         nexus
         babel-data # the export tests read the listing JSON back rather than matching its text
     )
-
-    # CC rather than a bigger tier, and measured: nexus-test goes 0.63 at CC but 0.84 once the heavy STL block is added.
-    # It is the counterexample that keeps NEXUS an explicit keyword rather than something inferred from a `-test` suffix.
-    sc_target_pch(nexus-test CC)
 
     # Browser test runner (Emscripten only): nexus-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(nexus-test)

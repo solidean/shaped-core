@@ -19,6 +19,11 @@ struct nx::test_instance
     // Aliases are pure filters, not additive schedule entries.
     cc::vector<cc::vector<cc::string>> section_scopes;
 
+    // Under --shard, this instance is a driver that runs in every shard and dispatches only the children of this one.
+    // Set for a driver some alias names, the one kind of test whose children the schedule can know about before they run.
+    // Only its direct children are sharded: they are new instances, so a subtree is never filtered twice.
+    bool shards_children = false;
+
     // What nx::test_args() answers inside this test's body.
     // Tokenized once here rather than per query, and carried per instance because tests run concurrently.
     // The run's --test-args replaces whatever nx::config::args declared; see test_schedule::create.
@@ -71,6 +76,10 @@ struct nx::test_schedule_config
     // A real run goes the other way: create_from_args starts at 0, so `nx::run` with no --jobs uses every core.
     // A test asking for own_pool(n) names its own width instead, and is unaffected.
     int jobs = 1;
+
+    // Every test runs alone, as if it were exclusive(), own_pool phases included; work inside a test still fans out.
+    // What process-wide per-test measurement needs: the runner report's coverage sets it.
+    bool one_at_a_time = false;
 
     // The command line did not parse, and nx::run reports it and exits rather than running a subset.
     // Running "most of" what was asked for is the one outcome a mistyped flag must never produce.
@@ -125,6 +134,16 @@ struct nx::test_schedule_config
     // Let a heavy test narrow to its smallest case, as `check` asks of every preset but its default one.
     // Read from a test body through nx::is_smoke(); set via --smoke.
     bool smoke = false;
+
+    // Run only shard `shard_index` of `shard_count`, 0-based; set via --shard K/N, and 1 shard is the whole run.
+    // A test belongs to one shard by a hash of its name, so the same test lands in the same shard on every run and machine.
+    // A driver an alias names runs in every shard and shards its children instead, by driver, invocation group and child.
+    // So the shards partition the leaves: the ordinary tests, and the children of those drivers.
+    int shard_index = 0;
+    int shard_count = 1;
+
+    // Whether the test or dispatched child named `key` belongs to this run's shard; always true without --shard.
+    [[nodiscard]] bool in_shard(cc::string_view key) const;
 
     // When non-empty, run() writes a JUnit XML report to this path, additionally to the normal console output.
     // Set via --junit-xml <file>.

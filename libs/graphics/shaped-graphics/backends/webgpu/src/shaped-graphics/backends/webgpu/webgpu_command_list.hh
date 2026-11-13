@@ -135,6 +135,13 @@ public:
                                     u32 item_count,
                                     cc::span<acceleration_kernel_input const> inputs = {});
 
+    /// Reorders a region's `record_count` records of `record_units` each by the Morton code of their box centers, so
+    /// the tree built over them next groups primitives that lie together.
+    /// `record_kind` is what write_leaves calls them: 0 triangles, 1 boxes, 2 instances.
+    /// Records carry their own indices, so a hit reports the same ones whatever order the sort leaves.
+    /// A count below a small threshold, or past what one scratch binding holds, keeps the caller's order.
+    void record_spatial_sort(u32 record_kind, u32 first_record_unit, u32 record_units, u32 record_count);
+
     /// The first unit of a new pool region of `units`, with this list's older writes already brought forward.
     [[nodiscard]] u32 allocate_acceleration_region(isize units);
 
@@ -315,6 +322,11 @@ protected:
     void raster_draw(sg::draw_config const& config) override;
     // webgpu builds no mesh-shaded pipeline, so none is ever bound to draw
     void raster_draw_mesh_tasks(int, int, int) override { CC_UNREACHABLE("webgpu has no mesh stage"); }
+    void raster_draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill, int x, int y, int z) override;
+    void raster_draw_mesh_polyfilled_indirect(sg::impl::mesh_polyfill_state const& polyfill,
+                                              sg::raw_buffer_handle const& args,
+                                              isize offset_in_bytes,
+                                              isize count) override;
     void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const&, isize, isize) override
     {
         CC_UNREACHABLE("webgpu has no mesh stage");
@@ -349,4 +361,10 @@ protected:
 private:
     /// Stages `data` in the ring and holds the ring until this list submits or drops.
     [[nodiscard]] webgpu_upload_span stage_upload(cc::span<byte const> data, isize staged_size);
+    /// One polyfilled mesh draw, of the grid `x, y, z`, or of the record of `dispatch_args` at `offset_in_bytes` of
+    /// `args` where it is non-null.
+    void draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                              cc::fixed_array<int, 3> grid,
+                              webgpu_buffer const* args,
+                              isize offset_in_bytes);
 };

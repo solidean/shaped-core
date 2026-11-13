@@ -201,6 +201,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL hit object says what its closest hit is then h
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
+    auto const& adapter = ctx->metrics.adapter();
+    if (ctx->backend() == sg::backend_kind::dx12 && adapter.vendor_id == 0x8086 && !adapter.is_software
+        && ctx->supports(sg::feature::shader_execution_reordering))
+        SKIP("Intel's dx12 driver removes the device creating this pipeline; see "
+             "docs/bugs-external/intel-d3d12-hit-object-pipeline-removes-device");
 
     auto const desc = co_await shaders::raytracing_pipeline::inspected_path.description(*ctx);
     REQUIRE(desc.raygen_shaders.size() == 1);
@@ -1167,4 +1172,75 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline finds each traced TLAS's 
     CHECK(got[0][0] == 1);
     CHECK(got[0][1] == 2);
     CHECK(got[0][2] == 3);
+}
+
+// `asserted_path` over the same scene: every ray-tracing stage writes into sg's debug window, metal's through the
+// context its raygen hands each stage it calls (EMIT-183).
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's raygen, closest hit and miss each report a failed assert",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+    nx::expect_error("assert failed: the first launch", nx::exactly(1));
+    nx::expect_error("assert failed: the first closest hit", nx::exactly(1));
+    nx::expect_error("assert failed: the first miss", nx::exactly(1));
+
+    using asserted_t = shaders::raytracing_pipeline::asserted_path_t;
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
+        co_await shaders::raytracing_pipeline::asserted_path.description(*ctx));
+    REQUIRE(pipeline != nullptr);
+    auto table_desc = asserted_t::table_description(pipeline);
+    auto const row = asserted_t::add_row(table_desc, asserted_t::hit_groups_t::asserted);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+    auto const counts = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(4 + grid), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                 sg::accel_build_flag::fast_trace, asserted_t::ray_count);
+    auto const offset = table->offset_of(row);
+    sg::tlas_instance const instances[] = {
+        {.blas = blas, .instance_id = 10, .hit_group_offset = offset},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20, .hit_group_offset = offset},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+    auto const traced = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::traced>(),
+        shaders::raytracing_pipeline::traced{.world = tlas->as_view(),
+                                             .hits = hits.as_readwrite_buffer(),
+                                             .ids = ids.as_readwrite_buffer()});
+    auto const tallies = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::tallies>(),
+        shaders::raytracing_pipeline::tallies{.counts = counts.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *traced);
+    cmd->raytracing.bind_group(1, *tallies);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const back = cmd->download.data_from_buffer(counts);
+    ctx->submit_command_list(cc::move(cmd));
+    ctx->advance_epoch();
+
+    // the first launch ends before it traces, and every other one traces
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 4 + grid);
+    CHECK(got[0] == u32(grid * grid));
+    CHECK(got[1] + got[2] == u32(grid * grid) - 1u);
+    CHECK(got[1] >= 1u);
+    CHECK(got[2] >= 1u);
+
+    // the window is read back once its epoch retires, and its reset lands before the test ends
+    co_await ctx->idle_completion();
+    ctx->process_completed_epochs();
+    co_await ctx->idle_completion();
 }

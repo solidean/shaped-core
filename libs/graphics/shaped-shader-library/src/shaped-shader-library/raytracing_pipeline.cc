@@ -302,8 +302,11 @@ cc::shared_async<sg::compiled_shader> slib::compile_callable(sg::context* ctx,
     auto const format = sgl_format_for(*ctx, *library);
     if (!format.has_value())
         throw fail("no registered compiler builds SGL into a format this context accepts");
-    co_return co_await library->compile_source(source, sg::shader_stage::callable, entry, format.value(),
-                                               {.language = shader_language::sgl, .label = label});
+    auto context_options = cc::vector<shader_option>();
+    add_context_options(context_options, *ctx);
+    co_return co_await library->compile_source(
+        source, sg::shader_stage::callable, entry, format.value(),
+        {.language = shader_language::sgl, .label = label, .options = context_options, .software_trace = d.software_trace});
 }
 
 cc::shared_async<cc::vector<sg::hit_shader>> slib::compile_hit_group(sg::context* ctx,
@@ -351,7 +354,12 @@ cc::shared_async<cc::vector<sg::hit_shader>> slib::compile_hit_group(sg::context
     if (!format.has_value())
         throw fail("no registered compiler builds SGL into a format this context accepts");
 
-    auto const options = compile_source_options{.language = shader_language::sgl, .label = label};
+    auto context_options = cc::vector<shader_option>();
+    add_context_options(context_options, *ctx);
+    auto const options = compile_source_options{.language = shader_language::sgl,
+                                                .label = label,
+                                                .options = context_options,
+                                                .software_trace = d.software_trace};
     auto const is_metal = format.value() == sg::shader_format::msl || format.value() == sg::shader_format::metal_lib;
     auto empty_closest_hit = cc::optional<sg::compiled_shader>();
     if (is_metal)

@@ -14,6 +14,8 @@
 // "Parallel loops" in libs/base/clean-core/docs/systems/async.md is the model; the measurements behind it in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 // Cold like every async: nothing runs until it is awaited, required or scheduled.
 // The body is owned, moved in, so a loop held across a suspension cannot dangle; capture by reference what it works on.
+// That is safe only while the awaiting frame is awaited to the end: dropped parked, the frame dies and chunks still
+// running write freed memory, so a loop that may be dropped shares its outputs instead ("Work that outlives its frame").
 // A body that throws fails the loop, as async_all fails on a failed member: the remaining chunks are dropped, the ones running finish.
 
 /// How a parallel loop splits its range.

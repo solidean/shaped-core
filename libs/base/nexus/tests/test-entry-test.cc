@@ -53,6 +53,27 @@ TEST("entry - a command named first runs with the rest of the line")
     CHECK(r.entry_args[0] == "--in-place");
 }
 
+TEST("entry - a pool size before a command's name is the run's, and the command's line starts after the name")
+{
+    auto const reg = tool_registry();
+    for (auto const& line : {cc::vector<cc::string_view>{"--jobs", "24", "format", "a.cc"},
+                             cc::vector<cc::string_view>{"--jobs=24", "format", "a.cc"},
+                             cc::vector<cc::string_view>{"-j", "24", "format", "a.cc"},
+                             cc::vector<cc::string_view>{"-j24", "format", "a.cc"}})
+    {
+        auto const r = route(reg, line);
+        REQUIRE(r.kind == route_kind::entry);
+        CHECK(r.entry->name == "format");
+        CHECK(r.jobs == 24);
+        REQUIRE(r.entry_args.size() == 1);
+        CHECK(r.entry_args[0] == "a.cc");
+    }
+    // after the name it is the command's own
+    auto const own = route(reg, {"format", "-j", "4"});
+    CHECK(own.jobs == 0);
+    CHECK(own.entry_args.size() == 2);
+}
+
 TEST("entry - with a default, a line naming nothing is the default's, flags and all")
 {
     auto const reg = tool_registry();

@@ -32,6 +32,13 @@ struct auto_exposure_state
 
     /// The partials of the meter last started, which a later frame polls; invalid once read.
     sg::data_future<tg::vec2f> pending;
+
+    /// How many meters have started and landed, in order, one in flight at a time.
+    u32 meters_started = 0;
+    u32 meters_landed = 0;
+
+    /// The meter `is_auto_exposure_read` waits for; 0 while nothing waits, which a restart returns it to.
+    u32 meter_awaited = 0;
 };
 
 /// One temporal resource a view keeps across frames, and how far whatever writes it has run.
@@ -114,6 +121,15 @@ struct temporal_slot
     shaders::tracer::camera_record last_camera = {};
     bool has_last_camera = false;
 
+    /// What a `temporal_id::raster_bound_camera` slot remembers of its layer's last frame besides the camera and
+    /// `last_jitter`: each instance's placement, the three rows of its transform, by instance id.
+    cc::map<u32, cc::fixed_array<tg::vec4f, 3>> last_placements;
+
+    /// How many frames a `temporal_id::raster_bound_camera` slot's layer was drawn: its parity picks which of each
+    /// history's two slots a frame writes.
+    /// The layer's own count rather than the context's epoch, which a frame may advance more than once.
+    u32 raster_bound_frames = 0;
+
     /// The wavefront tracer's paths, held only by a `temporal_id::accumulation` slot whose layer it traces.
     ///
     /// Here because `texture` is the mean of exactly these paths' tallies: the two restart together, and one without the other is a mean of nothing.
@@ -131,12 +147,9 @@ struct temporal_slot
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
 
-    /// How many runs of this accumulation slot's mean drew samples before a different image restarted it, which keeps each run's random sequence apart.
-    /// A run ended only because its last frame traced through something still loading is not counted, so the run after it repeats its sequence.
-    u32 restarts = 0;
-
-    /// Whether a full-size frame traced through the sequence `restarts` picks, so the next restart for a different image moves on from it.
-    bool drew_since_restart = false;
+    /// What the mean's random sequence is drawn from: the image hashed over inputs that are equal on any machine.
+    /// So a run repeats its sequence whatever restarted it, and a capture is one image whatever its restarts were.
+    u64 seed_key = 0;
 
     /// How many frames of this slot traced through a stand-in or an emitter still loading, each of which restarts the mean behind it.
     /// Nothing decides by it: it is how a test tells a mean that waited on a compile from one that did not.
@@ -145,7 +158,8 @@ struct temporal_slot
     /// When the image last changed, on the steady clock; a move lasts `render_settings::motion_hold_ms` past it.
     f64 last_change_seconds = -1e30;
 
-    /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's.
+    /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's; a
+    /// `temporal_id::raster_bound_camera` slot's, the one its layer was last drawn at.
     tg::vec2f last_jitter = tg::vec2f(0, 0);
 
     /// What a round of those paths costs, as the frames' own timestamps measured it; a frame budget picks rounds from it.
@@ -295,4 +309,8 @@ void restart_accumulation(view_state& state);
 /// was already as converged as it gets.
 /// False for a view with no traced layer at all, since nothing there has converged.
 [[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> samples);
+
+/// Whether a meter that started after the first call has landed on every automatic layer of `state`.
+/// Called once the image holds still, that says the exposure is a reading of the finished image.
+[[nodiscard]] bool is_auto_exposure_read(view_state& state);
 } // namespace sv::impl

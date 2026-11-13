@@ -7,6 +7,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/micromap.hh> // blas_triangles::micromap
 #include <shaped-graphics/resource/views.hh>      // tlas_view (tlas::as_view)
@@ -201,14 +202,32 @@ struct tlas_instance_record
 /// Records what the build took, as the structure comes back from its backend and before anyone else holds it.
 void set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
 
-/// Records every instance of `tlas`, which only a build under `context::hit_record_checks` does.
+/// Records every instance of `tlas`, which only a build or a partitioned update under `context::hit_record_checks` does.
+/// A later call replaces the snapshot, and one a check already holds stays as it was.
 void set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records);
 
 /// Records the micromaps a BLAS was built from, which it then holds.
 void set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
 
-/// What `set_instance_records` recorded, which is empty where it never ran.
-[[nodiscard]] cc::span<tlas_instance_record const> instance_records_of(tlas const& tlas);
+/// Records the cluster set a cluster BLAS was built from, which it then holds.
+void set_clusters(blas const& blas, cluster_set_handle clusters);
+
+/// Drops every instance record of `tlas`, so no check reads it; a snapshot a check already holds stays as it was.
+void clear_instance_records(tlas const& tlas);
+
+/// A cluster pool the recorded instances of a tlas reach, at the generation their BLASes were built from.
+struct reached_pool
+{
+    cluster_set_handle pool;
+    u64 generation = 0;
+};
+
+/// Whether a pool the recorded instances of `tlas` reach was rebuilt since, so a trace would meet clusters that are gone.
+/// Always false where `set_instance_records` never ran.
+[[nodiscard]] bool reaches_rebuilt_pool(tlas const& tlas);
+
+/// What `set_instance_records` recorded last, which is null where it never ran.
+[[nodiscard]] std::shared_ptr<cc::vector<tlas_instance_record> const> instance_records_of(tlas const& tlas);
 
 /// Records the region a build wrote, which the structure then releases.
 void set_software_region(blas const& blas, software_region region);
@@ -241,6 +260,9 @@ public:
 
     /// Whether the build took triangles or AABBs.
     [[nodiscard]] blas_geometry geometry() const { return _geometry; }
+
+    /// Whether this is a cluster BLAS whose pool was rebuilt since, so the clusters it lists are gone.
+    [[nodiscard]] bool is_stale() const;
 
     /// The shader-table records one geometry of this BLAS takes, as build_blas was given it.
     /// It is the ray count of the pipelines that trace it, and only metal bakes it into the structure.
@@ -283,6 +305,8 @@ protected:
 private:
     friend void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
     friend void impl::set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
+    friend void impl::set_clusters(blas const& blas, cluster_set_handle clusters);
+    friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
     friend void impl::set_software_region(blas const& blas, impl::software_region region);
     friend impl::software_region const& impl::software_region_of(blas const& blas);
 
@@ -290,6 +314,8 @@ private:
     blas_geometry _geometry = blas_geometry::triangles;
     int _hit_record_stride = 1;
     cc::vector<micromap_handle> _micromaps; // the ownership edge: keeps every micromap a geometry named alive
+    cluster_set_handle _clusters;           // the ownership edge of a cluster BLAS: keeps the clusters it lists alive
+    u64 _cluster_generation = 0;            // the generation of `_clusters` the BLAS was built from
 };
 
 /// A top-level acceleration structure: an opaque index over a set of instances, each placing a blas with a transform.
@@ -344,10 +370,14 @@ protected:
 
 private:
     friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
-    friend cc::span<impl::tlas_instance_record const> impl::instance_records_of(tlas const& tlas);
+    friend std::shared_ptr<cc::vector<impl::tlas_instance_record> const> impl::instance_records_of(tlas const& tlas);
+    friend void impl::clear_instance_records(tlas const& tlas);
+    friend bool impl::reaches_rebuilt_pool(tlas const& tlas);
     friend void impl::set_software_region(tlas const& tlas, impl::software_region region);
     friend impl::software_region const& impl::software_region_of(tlas const& tlas);
 
     impl::software_region _software;
-    cc::vector<impl::tlas_instance_record> _instance_records; // set once, as the tlas is made
+    // mutable: a partitioned tlas replaces the snapshot at each update, through a const handle
+    mutable cc::mutex<std::shared_ptr<cc::vector<impl::tlas_instance_record> const>> _instance_records;
+    mutable cc::mutex<cc::vector<impl::reached_pool>> _reached_pools; // of the records, set and cleared with them
 };

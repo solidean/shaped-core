@@ -66,7 +66,9 @@ ASYNC_INVOCABLE_TEST("sg - an opted-in package's inline trace meets what moves, 
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::ray_tracing_motion_blur))
         SKIP("this context has no ray-traced motion");
-    CHECK(ctx->implementation_of(sg::feature::ray_tracing_motion_blur) == sg::feature_implementation::emulated);
+    // metal's pipeline traces take motion natively, and its inline traces walk in software as every other backend's
+    if (ctx->backend() != sg::backend_kind::metal)
+        CHECK(ctx->implementation_of(sg::feature::ray_tracing_motion_blur) == sg::feature_implementation::emulated);
 
     auto const pipeline = co_await shaders::software_trace::trace_midway.acquire_pipeline(*ctx);
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
@@ -250,5 +252,114 @@ ASYNC_INVOCABLE_TEST("sg - a package that did not opt in is refused a tlas that 
     }
     CHECK(refused.contains("SOFTWARE_TRACE"));
     ctx->submit_command_list(cc::move(cmd));
-    co_return;
+    co_await ctx->idle_completion();
+}
+
+// A pipeline's trace sees native motion only with the motion tags, which SGL writes into an opted-in package alone.
+ASYNC_INVOCABLE_TEST("sg - a package that did not opt in is refused a tlas that moves natively",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (ctx->implementation_of(sg::feature::ray_tracing_motion_blur) != sg::feature_implementation::native)
+        SKIP("a structure that moves without the software walk is built where motion is native");
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    auto cmd = ctx->create_command_list();
+    auto const scene = build_scene(*ctx, *cmd, {});
+    auto const usage = sg::buffer_usage::readwrite_buffer;
+    auto const hits = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(1), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(1), usage);
+
+    namespace native = sg::test::sgl_shaders::raytracing;
+    auto const layout = ctx->cached.acquire_binding_group_layout<native::scene>();
+    auto refused = cc::string();
+    try
+    {
+        (void)ctx->transient.create_binding_group(*cmd, layout,
+                                                  native::scene{.world = scene.tlas->as_view(),
+                                                                .hits = hits.as_readwrite_buffer(),
+                                                                .ids = ids.as_readwrite_buffer()});
+    }
+    catch (sg::binding_group_exception const& e)
+    {
+        refused = cc::string(e.message());
+    }
+    CHECK(refused.contains("SOFTWARE_TRACE"));
+    ctx->submit_command_list(cc::move(cmd));
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pipeline's trace meets what moves at its ray's time, where motion is native",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline) || !ctx->supports(sg::feature::ray_tracing_motion_blur)
+        || ctx->implementation_of(sg::feature::ray_tracing_motion_blur) != sg::feature_implementation::native)
+        SKIP("this context traces no motion through a pipeline");
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    using pipeline_t = shaders::pipeline_motion::midway_path_t;
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
+        co_await shaders::pipeline_motion::midway_path.description(*ctx));
+    REQUIRE(pipeline != nullptr);
+    auto table_desc = pipeline_t::table_description(pipeline);
+    auto const row = pipeline_t::add_row(table_desc, pipeline_t::hit_groups_t::midway_hits);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    auto const usage = sg::buffer_usage::accel_structure_build_input;
+    auto const start = ctx->persistent.create_buffer_from_data(start_pose, usage);
+    auto const end = ctx->persistent.create_buffer_from_data(end_pose, usage);
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid),
+                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    // the package opts in, so its inline traces could walk the scene too: the builds write the walk's structure
+    auto cmd = ctx->create_command_list();
+    auto triangles = sg::blas_triangles{.vertices = start.raw(), .vertex_count = 6};
+    triangles.cpu_vertices = cc::as_bytes(cc::span<float const>(start_pose));
+    triangles.later_poses.push_back(
+        {.vertices = end.raw(), .cpu_vertices = cc::as_bytes(cc::span<float const>(end_pose))});
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                 sg::accel_build_flag::software_trace, pipeline_t::ray_count);
+    auto const offset = table->offset_of(row);
+    sg::tlas_instance instances[] = {
+        {.blas = blas, .instance_id = 10, .hit_group_offset = offset},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20, .hit_group_offset = offset},
+    };
+    instances[1].transform_at_end = cc::fixed_array<float, 12>{1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 4};
+    auto const tlas = cmd->raytracing.build_tlas(instances, sg::accel_build_flag::software_trace);
+
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::pipeline_motion::moving>(),
+        shaders::pipeline_motion::moving{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const hits_back = cmd->download.data_from_buffer(hits);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // at time 0.5 the first square stands at z = 1 and the second, whose vertices and instance both move, at z = 4
+    auto const got = co_await hits_back.data();
+    REQUIRE(got.size() == grid * grid);
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto const where = cc::format("cell ({}, {})", x, y);
+            auto const at = y * grid + x;
+            if (y >= 4)
+            {
+                CHECK(got[at][0] == -1.0f).context(where);
+                continue;
+            }
+            auto const is_first = x < 4;
+            CHECK(tg::abs(got[at][0] - (is_first ? 2.0f : 5.0f)) < 1e-4f).context(where);
+            CHECK(got[at][1] == (is_first ? 10.0f : 20.0f)).context(where);
+        }
 }

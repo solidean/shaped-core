@@ -55,17 +55,15 @@ public:
 
     /// True where the target's compiler reads `#line 12 "file.sgl"` (EMIT-182).
     [[nodiscard]] virtual bool has_line_directives() const { return false; }
+    /// Whether a ray query is written to see micromaps on a device that has them, by its constant flags, none where
+    /// they are no constant (EMIT-184).
+    [[nodiscard]] virtual bool flags_query_for_micromaps(cc::optional<u32>) const { return true; }
 
-    // ---- EMIT-183: sg's debug buffer, a header of a cursor, a capacity and a dropped count, then 32-bit words ----
-
-    /// False where a stage cannot write the buffer, which drops its prints: WGSL's vertex stage, MSL's ray-tracing stages.
-    [[nodiscard]] virtual bool writes_debug_in(check::stage, check::feature_set) const { return true; }
-    /// The buffer's declaration at file scope, followed by an empty line.
-    virtual void write_debug_buffer(cc::string& out) const = 0;
     /// What an emulated trace reads, for a dialect whose `write_declarations` does not write it: WGSL's does.
     virtual void write_acceleration_pool(cc::string&) const {}
-    /// The declaration of `at` on a line of its own, where the reservation cannot declare it; empty where it can.
-    [[nodiscard]] virtual cc::string debug_declare(cc::string_view) const { return {}; }
+    /// How a trace names acceleration member `resource` where the target traces by address; empty where it names the
+    /// resource itself, as every target but vulkan's does.
+    [[nodiscard]] virtual cc::string acceleration_by_address(plan const&, i32 /*resource*/) const { return {}; }
     /// The length of the buffer or `bytes` declared as `name`, in elements or bytes (CHK-460); MSL has none.
     [[nodiscard]] virtual cc::string buffer_length(cc::string_view name, bool is_bytes) const = 0;
     /// What the text declares before the entry point for `buffer_length` of `name`, empty where nothing.
@@ -73,17 +71,11 @@ public:
     /// `buffer_length` of the element `index` of the binding array `name`; only HLSL reaches this, since WGSL has no
     /// binding arrays and MSL no lengths.
     [[nodiscard]] virtual cc::string buffer_length_at(cc::string_view, cc::string_view, bool) const { return "0u"; }
-    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool) const { return {}; }
-    /// The statement that reserves `count` words and leaves the first one's index in `at`.
-    [[nodiscard]] virtual cc::string debug_reserve(cc::string_view at, isize count) const = 0;
-    /// The condition under which `count` words from `at` fit.
-    [[nodiscard]] virtual cc::string debug_fits(cc::string_view at, isize count) const = 0;
-    /// The statement that stores `word` at word `at + i`.
-    [[nodiscard]] virtual cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const = 0;
-    /// The statement that counts a record the buffer had no room for.
-    [[nodiscard]] virtual cc::string debug_drop() const = 0;
-    /// `value`, a scalar of `family` (`float`, `half`, `int`, `uint`, `bool`), as one 32-bit word.
-    [[nodiscard]] virtual cc::string debug_word(cc::string_view value, cc::string_view family) const = 0;
+    /// Its helper, for an array of `count` elements, 0 where unbounded; `may_waterfall` where the stage has subgroup operations.
+    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool, i32, bool) const
+    {
+        return {};
+    }
 
     /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
     [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }
@@ -154,7 +146,6 @@ struct written_text
 {
     cc::string text;
     cc::vector<line_origin> lines;
-    cc::vector<debug_site> debug_sites;
 };
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.

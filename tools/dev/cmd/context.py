@@ -18,7 +18,10 @@ from pathlib import Path
 from tools import dev
 from tools.dev import console
 from tools.dev.lib.core import disk_guard, memory_guard
+from tools.dev.lib.pipeline import build_server
 from tools.dev.lib.project.targets import carries_examples, carries_tests, is_stub, is_tool
+
+from . import args as a
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,8 @@ class Policy:
     default_branch: str
     # The opt-in repositories `companions` clones into gitignored paths (lib/project/companions.py).
     companions: tuple[dev.Companion, ...] = ()
+    # The optional local build server `build` and `test` build through when opted in (lib/pipeline/build_server.py).
+    build_server: dev.BuildServer | None = None
 
 
 @dataclass
@@ -72,6 +77,15 @@ class Context:
         """Report a failed build phase and exit(1) (for the build/test commands)."""
         dev.report.print_build_failure(results, presets, self.root)
         sys.exit(1)
+
+    def build_server(self, args: argparse.Namespace | None = None, *, gate: bool = False) -> build_server.Session | None:
+        """The build server to build through, or None: `--no-server` / `--server` in `args`, then SC_BUILD_SERVER, then the Policy.
+
+        A gate build (`check`, so `ship`) passes `gate=True` and no `args`: its `--server` / `--no-server` reach it as SC_BUILD_SERVER,
+        which `check` sets, so the ship that runs `check` in a child process passes them on too.
+        """
+        del gate  # the gate builds through the server like any other command; the keyword stays for the projects that pass it
+        return build_server.session(self.policy.build_server, flag=a.server_flag(args) if args is not None else None)
 
     def is_test_target(self, target: dev.Target) -> bool:
         """A nexus binary carrying tests, as the build's nexus-binaries.json records it."""
@@ -106,7 +120,7 @@ class Context:
             self.die(str(e))
 
     def resolve_build_presets(self, args: argparse.Namespace) -> list[dev.Preset]:
-        """Resolve --preset and apply the --toolset / --build-suffix / --build-dir / --example-backend overrides.
+        """Resolve --preset and apply the --toolset / --build-suffix / --build-dir / --example-backend / --agility-preview overrides.
 
         Used by the configure/build/test commands; validates a pinned toolset eagerly so an
         unresolvable one fails fast with a clean message instead of mid-build.
@@ -117,6 +131,7 @@ class Context:
                 presets, root=self.root,
                 toolset=args.toolset, build_suffix=args.build_suffix, build_dir=args.build_dir,
                 example_backend=getattr(args, "example_backend", None),
+                agility_preview=getattr(args, "agility_preview", False),
             )
         except dev.ToolsetError as e:
             self.die(str(e))

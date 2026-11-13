@@ -142,6 +142,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
     for (auto const& nv : views)
         if (layout->view_slots[nv.slot_index].binding.is_unbounded())
             unbounded_count = int(nv.view->span().size());
+    group->unbounded_length = u32(unbounded_count);
     {
         auto r = alloc_table(ctx._descriptor_heap, layout->descriptor_count + unbounded_count);
         CC_RETURN_IF_ERROR(r);
@@ -214,17 +215,11 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
 
                 // A null handle is the null acceleration structure, not a mistake: it binds a valid descriptor that
                 // every ray misses, so there is no storage to keep alive and nothing to declare a hazard on.
-                auto dx_tlas = std::shared_ptr<dx12_tlas const>();
-                if (av->tlas != nullptr)
-                {
-                    dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
-                    CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
-                }
-
-                create_accel_view(ctx._device.Get(), dx_tlas.get(), dst);
+                auto const storage = av->tlas != nullptr ? trace_storage_of(*av->tlas) : dx12_buffer_handle();
+                create_accel_view(ctx._device.Get(), storage.get(), dst);
 
                 auto const software
-                    = dx_tlas != nullptr ? sg::impl::software_region_of(*dx_tlas) : sg::impl::software_region{};
+                    = av->tlas != nullptr ? sg::impl::software_region_of(*av->tlas) : sg::impl::software_region{};
                 if (software.is_moving && !s.binding.traced_in_software)
                     return cc::error(
                         cc::format("binding_group: '{}' binds a tlas that moves, which only the software walk "
@@ -232,7 +227,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                                    nv.name));
                 if (s.binding.traced_in_software)
                 {
-                    if (dx_tlas != nullptr && software.pool == nullptr)
+                    if (av->tlas != nullptr && software.pool == nullptr)
                         return cc::error(cc::format("binding_group: '{}' is traced in software, so its tlas is built "
                                                     "with accel_build_flag::software_trace",
                                                     nv.name));
@@ -244,12 +239,11 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                         group->software_tlases.push_back(av->tlas);
                 }
 
-                if (dx_tlas != nullptr)
+                if (storage != nullptr)
                 {
                     // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
-                    group->referenced.push_back(dx_tlas->_dx12_storage);
-                    group->hazard_views.push_back(
-                        {dx_tlas->_dx12_storage, sg::view_class::acceleration_structure, binding});
+                    group->referenced.push_back(storage);
+                    group->hazard_views.push_back({storage, sg::view_class::acceleration_structure, binding});
                 }
             }
             else if (auto const* tv = sg::try_as_texture_view(view))

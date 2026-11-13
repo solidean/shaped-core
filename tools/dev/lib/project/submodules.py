@@ -11,7 +11,8 @@ The fast-forward leaves the tracked branch checked out wherever the branch can r
 Everything else is reported and left alone: uncommitted changes, another branch checked out, a history that diverged from the target, and for `tip` unpushed commits.
 So nothing is ever reset, rebased, merged or rewritten, and no commit can be stranded.
 A submodule `.gitmodules` declares but that is not checked out yet, say one a pull just added, is initialized first at the recorded commit, which leaves it detached within its branch.
-So is a missing submodule of a submodule, at any depth; one already checked out there is left where it is.
+A submodule of a submodule, at any depth, goes to the commit its parent records under the same rules, initialized first when missing.
+That is so with `tip` too: the parent's fast-forward moved the nested pointers, and its checkouts follow them.
 """
 
 from __future__ import annotations
@@ -93,13 +94,22 @@ def init(root: Path, sub: Submodule, *, dry_run: bool = False) -> Outcome:
     return Outcome(sub.path, "initialized", detail, at, at)
 
 
-def init_nested(root: Path, sub: Submodule, *, dry_run: bool = False) -> list[Outcome]:
-    """Initialize the submodules `sub` declares but has not checked out, at any depth; paths in the outcomes are relative to `root`."""
+def sync_nested(root: Path, sub: Submodule, *, dry_run: bool = False, fetch: bool = True) -> list[Outcome]:
+    """Bring the submodules `sub` declares to the commits `sub` records, at any depth: init the missing ones, sync the rest.
+
+    Always to the recorded commit, never to a tip: a nested pointer is the parent's to move.
+    Outcome paths are relative to `root`, and a nested submodule already at its pointer is left out of them.
+    """
     repo = root / sub.path
-    outcomes = [dataclasses.replace(init(repo, n, dry_run=dry_run), path=f"{sub.path}/{n.path}")
-                for n in list_submodules(repo, missing=True)]
+    outcomes = []
+    for n in list_submodules(repo, missing=True):
+        o = init(repo, n, dry_run=dry_run)
+        outcomes.append(dataclasses.replace(o, path=f"{sub.path}/{n.path}"))
     for n in list_submodules(repo):
-        outcomes += init_nested(root, dataclasses.replace(n, path=f"{sub.path}/{n.path}"), dry_run=dry_run)
+        o = sync(repo, n, dry_run=dry_run, fetch=fetch)
+        if o.status != "up-to-date":
+            outcomes.append(dataclasses.replace(o, path=f"{sub.path}/{n.path}"))
+        outcomes += sync_nested(root, dataclasses.replace(n, path=f"{sub.path}/{n.path}"), dry_run=dry_run, fetch=fetch)
     return outcomes
 
 

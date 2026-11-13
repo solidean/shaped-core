@@ -27,6 +27,9 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
 * **LEGAL-63** (V0) Asked to, legalization drops every `print` with its values too, which is how a text is written without diagnostics.
 * **LEGAL-64** (V0) Asked to, it lowers each `assert` instead: its body, then `if not condition`, a print of its message and the end of the invocation.
+* **LEGAL-70** Asked to, the last step writes each `print` of the finished core tree as statements over the reserved binding `sg_debug`, for every target ([the contract](../../reserved-bindings.md)).
+  Each value is bound once, ahead of the reservation, and the site table is built here, so what folding removed has no site and no route can differ.
+  Left unasked, a print stays a statement, which only the interpreter runs.
   A compute, a geometry or a ray-tracing stage that returns nothing returns, and a pixel stage discards.
   A vertex and a tessellation evaluation stage return their result at a NaN position, which culls every primitive the vertex is part of.
   A tessellation control stage returns its edge factors at 0, which culls the patch.
@@ -36,7 +39,6 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort`, `report` or `define` (LEGAL-68).
   That is an integer `/` or `%` whose divisor is no literal that cannot fail (EVAL-84), and an array index that is no literal (EVAL-90).
   A binding array's own index is one, whatever element it names, a mark staying on the index: by its `N`, or where it is unbounded by CHK-491's length.
-  That constant exists only where the shader reads it, so an unbounded array whose length no code reads is not guarded.
   The guard is a block in the operation's place that binds the operands, tests them, and only then runs the operation, so every later rule keeps its order and its short circuits.
   A failed test ends the invocation as an `assert` of LEGAL-64 does, and `report` first prints the operation and its operands as that `assert`'s message.
   Where a barrier, a derivative or a subgroup operation may still follow, every invocation must reach it, so the end waits:
@@ -67,16 +69,23 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   Memory too short for the access has no index or offset that is safe, so the access does not run.
   A read and a `bytes` load are zero of their type, a store is dropped, and an atomic gives zero and changes nothing.
   Its operands still run, in their order, as WGSL's bounded access evaluates them.
-* **LEGAL-69** (G1) Those profiles shadow a compute stage's workgroup memory with a bit per scalar, set where one is stored and tested where one is read (EVAL-92).
+* **LEGAL-69** (G1) Those profiles shadow a compute, task or mesh stage's workgroup memory with a bit per scalar, set where one is stored and tested where one is read (EVAL-92).
   A scalar is a leaf of a member's type, counted in the order the members are listed: a `float3` is three, an atomic one, whatever its width.
   A store and an atomic set the bits of the scalars they reach once they ran; every read, an atomic's but a store's included, tests them first.
   A uniform load tests them after its barrier, which is what makes another invocation's store visible to it.
   A failed test ends the invocation as a guard does, and `report` names the place with its indices: ``workgroup memory `tile.values[2]` is read before any invocation stored it``.
   A swizzle tests each field it reads, and each index of the place is pinned once, so the test and the access read the same element.
   A read that races a store, with no barrier between, may or may not be reported.
-  The shadow takes a word per 32 scalars beside the memory it shadows, in CHK-294's 16384 bytes; where it would not fit, no read is tested.
-  The profile `define` shadows nothing and zeroes workgroup memory before the body instead, WGSL's value (EMIT-229).
-  A task and a mesh stage's workgroup memory is not shadowed yet.
+  The shadow takes a word per 32 scalars beside the memory it shadows, in CHK-294's 16384 bytes.
+  Where it would not fit no read is tested, and the compile warns `workgroup-unshadowed`, naming the bytes it left out.
+  The profile `define` shadows nothing and zeroes workgroup memory before the body instead, WGSL's value (LEGAL-71).
+* **LEGAL-71** The last step writes the shadow and its prologue as statements of the finished core tree, so no route knows of either.
+  A read of the shadow is an atomic `load` of its word, and a mark an atomic `bit_or`, each on a place no source can name, which the target declares `sgl_written` (EMIT-229).
+  Which bits a range of scalars takes is arithmetic in the tree, a whole word its own case, since no target shifts by 32.
+  Ahead of the body, each invocation stores 0 to the words its index in the workgroup strides to.
+  Under `define` it zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0, and an atomic by its store.
+  A `workgroup_barrier` follows either, so no mark lands before a clear and no read before the zero.
+  A target whose workgroup memory starts at zero, as WebGPU's does, gets no prologue.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

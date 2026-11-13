@@ -4,6 +4,7 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -197,6 +198,133 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh traces in the frame it is placed, and ke
                                                        cmd, view_with(moved_cloud(0.001f * f32(i))), resources, store);
                                                    return sg::routine_outcome::executed;
                                                }));
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv - a frame mesh that deforms or moves restarts the mean but keeps the temporal history",
+                     (sg::context_handle const& ctx_h))
+{
+    // A simulation draws its body anew every frame, and the temporal denoiser is what keeps that image stable.
+    // Restarting its history on every frame threw away the whole view's, the static ground with it, and the image flickered.
+    auto& ctx = *ctx_h;
+    if (!supports_tracing(ctx))
+        SKIP("device reports no ray tracing support");
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler for this backend to build the shaders");
+
+    // recolored per triangle, as a simulation's drawn attributes are, and moved by `dx`
+    auto const body = [](f32 dx, f32 shade)
+    {
+        auto m = moved_cloud(dx);
+        auto colors = cc::vector<tg::vec3f>();
+        for (auto t = 0; t < 32; ++t)
+            colors.push_back(tg::vec3f(shade, 0.5f, f32(t) / 32));
+        m.attributes.push_back(
+            sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
+        return m;
+    };
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto store = sv::view_store{};
+    auto const id = sv::view_id::from_string("deforming");
+    auto const output_size = tg::vec2i(64, 64);
+    auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                          .width = output_size[0],
+                                                          .height = output_size[1],
+                                                          .usage = sg::texture_usage::render_target});
+    // down the plan path, which declares the temporal slots a layer's denoiser needs
+    auto const definition_with = [&](cc::span<sv::mesh const> meshes, tg::vec3f offset)
+    {
+        auto def = sv::viewer_definition{};
+        auto v = sv::view_data{};
+        v.id = id;
+        v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)};
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.settings.mode = sv::render_mode::hybrid; // what the viewer resolves `automatic` to on a device that traces
+        scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
+        for (auto const& m : meshes)
+        {
+            auto item = resources.acquire_frame_scene_item(m);
+            item.transform = tg::affine_transform3f::make_trs(offset, tg::quat_f::identity, tg::vec3f(1, 1, 1));
+            scene.items.push_back(item);
+        }
+        def.views.push_back(cc::move(v));
+
+        auto const root_node = def.nodes.add_container(sv::invalid_node);
+        auto leaf = sv::layout_leaf{};
+        leaf.views.push_back(sv::view_index(0));
+        def.nodes.add_leaf(root_node, cc::move(leaf));
+        auto root = sv::view_data{};
+        root.id = sv::view_id::from_string("root");
+        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+        def.root_view = sv::view_index(def.views.size());
+        def.views.push_back(cc::move(root));
+        return def;
+    };
+    auto index = u64(0);
+    auto const execute = [&](sg::command_list& cmd, sv::viewer_definition const& def)
+    {
+        resources.advance_to(ctx.current_epoch());
+        store.begin_frame(u64(ctx.current_epoch()));
+        auto const plan = sv::build_render_plan(def, output_size, index++, sv::view_history{});
+        (void)sv::viewer_renderer::execute(cmd, def, plan, resources, store,
+                                           output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+    };
+    auto const slot = [&](u64 t) -> sv::impl::temporal_slot const*
+    {
+        auto const* const rec = store.peek_ptr(id);
+        return rec == nullptr ? nullptr : rec->temporal.get_ptr(t);
+    };
+    // where the mean is: (the image it averages, frames), which every traced frame moves, a restart included
+    auto const progress = [&]
+    {
+        auto const* const s = slot(sv::temporal_id::accumulation(0));
+        return s == nullptr ? cc::pair<u64, u32>{0, 0} : cc::pair<u64, u32>{s->reset_hash, s->accum_frame};
+    };
+    auto const trace = [&](sv::viewer_definition const& def)
+    {
+        auto const before = progress();
+        return sv_test::frames_until_executed(ctx,
+                                              [&](sg::command_list& cmd)
+                                              {
+                                                  execute(cmd, def);
+                                                  return progress() != before ? sg::routine_outcome::executed
+                                                                              : sg::routine_outcome::declined;
+                                              });
+    };
+
+    // the denoisers and the shaders built first, so no frame below shades through a stand-in
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba16_float); // the format a denoised slot declares
+    (void)co_await ctx.routines.idle_completion();
+    auto const still = definition_with(cc::vector<sv::mesh>{body(0, 0)}, tg::vec3f(0, 0, 0));
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               execute(cmd, still);
+                                               return progress().second >= 2 ? sg::routine_outcome::executed
+                                                                             : sg::routine_outcome::declined;
+                                           }));
+    auto const* const frame = slot(sv::temporal_id::frame_samples(0));
+    REQUIRE(frame != nullptr); // a layer that may denoise temporally declares its frame samples
+    auto const history = frame->reset_hash;
+
+    // deformed, recolored and moved every frame: the mean restarts each time, the history's rule holds
+    for (auto i = 1; i <= 8; ++i)
+    {
+        auto const image = progress().first;
+        auto const deformed = cc::vector<sv::mesh>{body(0.05f * f32(i), i <= 4 ? 0.0f : 0.1f * f32(i))};
+        REQUIRE(trace(definition_with(deformed, tg::vec3f(0.02f * f32(i), 0, 0))));
+        CHECK(progress().first != image);
+        CHECK(progress().second == 1);
+        CHECK(slot(sv::temporal_id::frame_samples(0))->reset_hash == history).context(cc::format("frame {}", i));
+    }
+
+    // another object is another scene, which the history restarts on
+    auto const two = cc::vector<sv::mesh>{body(0, 0), body(1, 0)};
+    REQUIRE(trace(definition_with(two, tg::vec3f(0, 0, 0))));
+    CHECK(slot(sv::temporal_id::frame_samples(0))->reset_hash != history);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

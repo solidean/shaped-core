@@ -4,6 +4,7 @@
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/alias.hh> // nx::setup
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_expected_messages.hh>
 
@@ -39,7 +40,8 @@ ASYNC_TEST("sr dx12 - warp")
     else
     {
         (void)sr_test::shader_fixtures(); // alive before any child acquires through it
-        co_await nx::async_invoke_tests_in_sequence("dx12-warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "dx12-warp", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -52,9 +54,30 @@ ASYNC_TEST("sr dx12 - warp")
     }
 }
 
+// Every routine through SGL's own DXIL where it has a lowering, and DXC's elsewhere.
+ASYNC_TEST("sr dx12 - native-dxil")
+{
+    auto ctx = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .native_dxil = true, .adapter = dx12::dx12_adapter::hardware});
+    if (ctx.has_error())
+        SKIP("no dx12 hardware device");
+    else
+    {
+        (void)sr_test::shader_fixtures();
+        co_await nx::async_invoke_tests_in_sequence(
+            "dx12-native-dxil", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())},
+            ctx.value());
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
+    }
+}
+
 ASYNC_TEST("sr dx12 - hardware")
 {
-    auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
+    // the text route, SGL's HLSL through DXC; `sr dx12 - native-dxil` is the default's
+    auto ctx = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .native_dxil = false, .adapter = dx12::dx12_adapter::hardware});
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
     if (ctx.has_error() && dx12::has_hardware_adapter())
         FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
@@ -63,7 +86,8 @@ ASYNC_TEST("sr dx12 - hardware")
     else
     {
         (void)sr_test::shader_fixtures();
-        co_await nx::async_invoke_tests_in_sequence("dx12-hw", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence(
+            "dx12-hw", nx::invocation_options{.after_each = sr_test::sweep_after_each(ctx.value())}, ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the

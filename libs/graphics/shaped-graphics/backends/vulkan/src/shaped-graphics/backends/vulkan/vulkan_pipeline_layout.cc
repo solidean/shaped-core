@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/raytracing/impl/software_trace.hh>
 
@@ -45,7 +46,21 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         acceleration_members += sg::impl::acceleration_count(g->bindings());
         traces_in_software = traces_in_software || sg::impl::traces_in_software(g->bindings());
     }
-    auto const has_regions = has_debug_window || traces_in_software;
+    // the unbounded arrays' lengths, in the order of the groups that hold one, which sg writes from the bound groups
+    auto length_bases = cc::vector<isize>();
+    auto lengths = isize(0);
+    for (auto const& g : desc.groups)
+        length_bases.push_back(sg::impl::has_unbounded_array(g->bindings()) ? lengths++ : isize(-1));
+    CC_ASSERT(lengths <= sg::impl::array_lengths_capacity, "a pipeline binds at most 16 unbounded binding arrays");
+    auto const has_array_lengths = lengths > 0;
+    // SGL's own SPIR-V traces every acceleration member by its address, which any package may compile to on any context
+    auto const traces_by_address = acceleration_members > 0;
+    CC_ASSERT(acceleration_members <= sg::impl::acceleration_address_capacity,
+              "a vulkan pipeline binds at most 16 acceleration structures, whose addresses set 3 holds");
+    auto const polyfill_slots = sg::impl::polyfill_slots_of(desc.mesh_polyfill);
+    auto const has_mesh_slots = !polyfill_slots.empty();
+    auto const has_regions = has_debug_window || traces_in_software || has_array_lengths || desc.dispatch_grid
+                          || traces_by_address || has_mesh_slots;
     if (!desc.static_samplers.empty() || has_regions)
     {
         auto reserved_bindings = cc::vector<VkDescriptorSetLayoutBinding>();
@@ -75,7 +90,7 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
             });
         if (has_debug_window)
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
-                .binding = 19,
+                .binding = u32(sg::reserved_debug_window.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
@@ -84,18 +99,47 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         if (traces_in_software)
         {
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
-                .binding = 17,
+                .binding = u32(sg::reserved_acceleration_pool.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
             });
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
-                .binding = 18,
+                .binding = u32(sg::reserved_acceleration_roots.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
             });
         }
+        if (has_array_lengths)
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = u32(sg::reserved_array_lengths.vulkan_binding),
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
+        if (desc.dispatch_grid)
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = u32(sg::reserved_dispatch_grid.vulkan_binding),
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
+        if (traces_by_address)
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = u32(sg::reserved_acceleration_addresses.vulkan_binding),
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
+        // a polyfill's slots and records, each written by one half and read by another
+        for (auto const& slot : polyfill_slots)
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = u32(slot.address->vulkan_binding),
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
 
         auto const reserved_info = VkDescriptorSetLayoutCreateInfo{
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -179,11 +223,15 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     }
 
     auto result = std::make_shared<vulkan_pipeline_layout>(ctx, hash, layout, cc::move(groups), desc.inline_constants,
-                                                           inline_bytes);
+                                                           inline_bytes, desc.dispatch_grid, desc.static_samplers,
+                                                           desc.mesh_polyfill);
     result->_reserved_set_layout = reserved_set_layout;
     result->_empty_set_layout = empty_set_layout;
     result->_acceleration_bases = cc::move(acceleration_bases);
     result->_traces_in_software = traces_in_software;
+    result->_traces_by_address = traces_by_address;
+    result->_has_array_lengths = has_array_lengths;
+    result->_length_bases = cc::move(length_bases);
     if (has_regions && reserved_set_layout != VK_NULL_HANDLE)
     {
         auto size = VkDeviceSize(0);
@@ -211,6 +259,31 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
             ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout, 18, &offset);
             result->_roots_offset = isize(offset);
         }
+        if (has_array_lengths)
+        {
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout,
+                                                         u32(sg::reserved_array_lengths.vulkan_binding), &offset);
+            result->_lengths_offset = isize(offset);
+        }
+        if (desc.dispatch_grid)
+        {
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout,
+                                                         u32(sg::reserved_dispatch_grid.vulkan_binding), &offset);
+            result->_grid_offset = isize(offset);
+        }
+        if (traces_by_address)
+        {
+            ctx._descriptor_functions.get_binding_offset(
+                ctx._device, reserved_set_layout, u32(sg::reserved_acceleration_addresses.vulkan_binding), &offset);
+            result->_addresses_offset = isize(offset);
+        }
+        for (auto const& slot : polyfill_slots)
+        {
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout,
+                                                         u32(slot.address->vulkan_binding), &offset);
+            (slot.is_task ? result->_task_slots_offset : result->_mesh_slots_offset) = isize(offset);
+            (slot.is_task ? result->_holds_task_slots : result->_holds_mesh_slots) = true;
+        }
     }
     return vulkan_pipeline_layout_handle(cc::move(result));
 }
@@ -219,8 +292,8 @@ void vulkan_pipeline_layout::bind_reserved(VkCommandBuffer buffer,
                                            VkPipelineBindPoint bind_point,
                                            sg::raw_buffer_handle const& debug_window) const
 {
-    // a software trace's set 3 holds that op's roots, so each op binds it (bind_software_trace)
-    if (_reserved_set_layout == VK_NULL_HANDLE || _traces_in_software)
+    // a set 3 holding the op's roots or lengths is the op's to bind (bind_software_trace)
+    if (_reserved_set_layout == VK_NULL_HANDLE || binds_set_per_op())
         return;
     if (!_reserved_has_regions)
     {
@@ -277,13 +350,24 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
                                                  VkPipelineBindPoint bind_point,
                                                  sg::raw_buffer_handle const& debug_window,
                                                  sg::impl::software_pool_storage const& pool,
-                                                 cc::span<u32 const> roots) const
+                                                 cc::span<u32 const> roots,
+                                                 cc::span<u32 const> lengths,
+                                                 cc::span<u32 const> grid,
+                                                 cc::span<u32 const> addresses,
+                                                 VkDeviceAddress mesh_slots,
+                                                 isize mesh_slots_bytes,
+                                                 VkDeviceAddress task_slots,
+                                                 isize task_slots_bytes) const
 {
-    // The set and the roots it names, in one transient range of the heap, which is a uniform buffer for this.
+    // The set and the values it names, in one transient range of the heap, each a uniform buffer behind the set.
     // 256 is the largest minUniformBufferOffsetAlignment Vulkan allows.
-    constexpr auto roots_alignment = isize(256);
-    auto const roots_bytes = roots.size() * isize(sizeof(u32));
-    auto range = _ctx._descriptor_heap.allocate_transient(_reserved_size + roots_alignment + roots_bytes);
+    constexpr auto uniform_alignment = isize(256);
+    auto const roots_bytes = _traces_in_software ? roots.size() * isize(sizeof(u32)) : isize(0);
+    auto const lengths_bytes = _has_array_lengths ? lengths.size() * isize(sizeof(u32)) : isize(0);
+    auto const grid_bytes = has_dispatch_grid() ? grid.size() * isize(sizeof(u32)) : isize(0);
+    auto const addresses_bytes = _traces_by_address ? addresses.size() * isize(sizeof(u32)) : isize(0);
+    auto range = _ctx._descriptor_heap.allocate_transient(_reserved_size + 4 * uniform_alignment + roots_bytes
+                                                          + lengths_bytes + grid_bytes + addresses_bytes);
     CC_ASSERT(range.size > 0, "the descriptor heap has no room for set 3");
     auto* const base = _ctx._descriptor_heap.mapped_at(range);
     for (isize i = 0; i < _reserved_samplers.size(); ++i)
@@ -291,23 +375,55 @@ void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
     if (debug_window != nullptr)
         write_storage_descriptor(static_cast<vulkan_buffer const&>(*debug_window)._device_address,
                                  debug_window->size_in_bytes(), base + _debug_window_offset);
-    write_storage_descriptor(pool.gpu_address, pool.size_in_bytes, base + _pool_offset);
 
-    auto const roots_at = cc::align_up(range.offset + _reserved_size, roots_alignment);
-    cc::memcpy(base + (roots_at - range.offset), roots.data(), size_t(roots_bytes));
-    auto uniform = VkDescriptorAddressInfoEXT{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
-        .address = _ctx._descriptor_heap.device_address() + VkDeviceAddress(roots_at),
-        .range = VkDeviceSize(roots_bytes),
-        .format = VK_FORMAT_UNDEFINED,
+    // `values` copied behind the set at `at`, and the uniform buffer naming them written at `descriptor`
+    auto const write_uniform = [&](cc::span<u32 const> values, isize at, isize descriptor)
+    {
+        auto const bytes = values.size() * isize(sizeof(u32));
+        cc::memcpy(base + (at - range.offset), values.data(), size_t(bytes));
+        auto uniform = VkDescriptorAddressInfoEXT{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
+            .address = _ctx._descriptor_heap.device_address() + VkDeviceAddress(at),
+            .range = VkDeviceSize(bytes),
+            .format = VK_FORMAT_UNDEFINED,
+        };
+        auto const info = VkDescriptorGetInfoEXT{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .data = {.pUniformBuffer = &uniform},
+        };
+        _ctx._descriptor_functions.get_descriptor(
+            _ctx._device, &info, size_t(descriptor_size_of(_ctx, sg::binding_type::constants_buffer)), base + descriptor);
     };
-    auto const info = VkDescriptorGetInfoEXT{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
-        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .data = {.pUniformBuffer = &uniform},
-    };
-    _ctx._descriptor_functions.get_descriptor(
-        _ctx._device, &info, size_t(descriptor_size_of(_ctx, sg::binding_type::constants_buffer)), base + _roots_offset);
+    auto next = cc::align_up(range.offset + _reserved_size, uniform_alignment);
+    if (_traces_in_software)
+    {
+        write_storage_descriptor(pool.gpu_address, pool.size_in_bytes, base + _pool_offset);
+        write_uniform(roots, next, _roots_offset);
+        next = cc::align_up(next + roots_bytes, uniform_alignment);
+    }
+    if (_has_array_lengths)
+    {
+        write_uniform(lengths, next, _lengths_offset);
+        next = cc::align_up(next + lengths_bytes, uniform_alignment);
+    }
+    if (has_dispatch_grid())
+    {
+        write_uniform(grid, next, _grid_offset);
+        next = cc::align_up(next + grid_bytes, uniform_alignment);
+    }
+    if (_traces_by_address)
+        write_uniform(addresses, next, _addresses_offset);
+    if (_holds_mesh_slots)
+    {
+        CC_ASSERT(mesh_slots != 0, "a polyfilled mesh stage's set 3 names the draw's slot buffer");
+        write_storage_descriptor(mesh_slots, mesh_slots_bytes, base + _mesh_slots_offset);
+    }
+    if (_holds_task_slots)
+    {
+        CC_ASSERT(task_slots != 0, "a polyfilled task stage's set 3 names the draw's record buffer");
+        write_storage_descriptor(task_slots, task_slots_bytes, base + _task_slots_offset);
+    }
 
     u32 const buffer_index = 0;
     auto const vk_offset = VkDeviceSize(range.offset);

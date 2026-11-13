@@ -9,6 +9,7 @@
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/driver/library_file.hh>
 
 cc::span<sgl::prelude_file const> sgl::prelude_files()
 {
@@ -18,6 +19,15 @@ cc::span<sgl::prelude_file const> sgl::prelude_files()
         {.name = "builtins.sgl", .source = builtins_text},
         {.name = "core.sgl", .source = impl::embedded_core_prelude()},
         {.name = "raytracing.sgl", .source = impl::embedded_raytracing_prelude()},
+        {.name = "tessellation.sgl", .source = impl::embedded_tessellation_prelude()},
+    };
+    return files;
+}
+
+cc::span<sgl::library_file const> sgl::shipped_library()
+{
+    static library_file const files[] = {
+        {.name = "accel.sgl", .source = impl::embedded_accel_module()},
     };
     return files;
 }
@@ -114,6 +124,16 @@ sgl::i32 sgl::prelude_file_of(cc::string_view path)
 {
     auto const given = normalized(path);
     auto const files = prelude_files();
+    for (auto i = isize(0); i < files.size(); ++i)
+        if (given.ends_with(normalized(cc::format("/shaped-graphics-language/prelude/{}", files[i].name))))
+            return i32(i);
+    return -1;
+}
+
+sgl::i32 sgl::shipped_library_file_of(cc::string_view path)
+{
+    auto const given = normalized(path);
+    auto const files = shipped_library();
     for (auto i = isize(0); i < files.size(); ++i)
         if (given.ends_with(normalized(cc::format("/shaped-graphics-language/prelude/{}", files[i].name))))
             return i32(i);
