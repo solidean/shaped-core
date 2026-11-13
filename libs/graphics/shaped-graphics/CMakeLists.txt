@@ -621,6 +621,29 @@ if(SC_BUILD_TESTS)
                 software_trace.sgl:*
                 pipeline_motion.sgl:*
         )
+
+        # The differential corpus: every file in it is an entry, so adding a shader is adding a file.
+        # Its setups' modules are the contract between a corpus file and the C++ beside them (docs/differential-testing.md).
+        target_sources(shaped-graphics-test PRIVATE
+            tests/differential/differential.cc
+            tests/differential/differential-test.cc
+            tests/differential/setups/setups.cc
+        )
+        file(GLOB _sg_differential_corpus CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/corpus
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/corpus/*.sgl)
+        list(TRANSFORM _sg_differential_corpus APPEND ":*")
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_differential
+            NAMESPACE  sg::test::differential
+            SOURCE_DIR tests/differential/corpus
+            LANGUAGE   sgl
+            MODULE_DIRS tests/differential/setups
+            SHADERS
+                module:diff_words
+                module:diff_floats
+                ${_sg_differential_corpus}
+        )
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.
