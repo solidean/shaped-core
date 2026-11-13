@@ -262,6 +262,9 @@ ctx.is_shut_down()                                 // bool
 // SC_GPU=intel|amd|nvidia|<name substring>  every hardware dx12 and vulkan context of the process on that GPU; none matching fails, never falls back
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
+// vulkan_config { adapter_luid  (optional<u64>; in place of sg's ranking, fails rather than falling back)
+//                 correct_anisotropic_lod=true  (anisotropic samplers pick dx12's level; off only to measure the driver) }
+sg::enumerate_vulkan_adapters()                    // -> cc::vector<adapter_info>; every device with a graphics queue, no device created
 //   vulkan_config { bool capture_driver_statistics=false; }   VK_KHR_pipeline_executable_properties: each compute and raster pipeline keeps what the driver reports of it
 //   vulkan_config { bool capture_driver_representations=false; }   the driver's forms of each pipeline's code too, AMD's ISA among them; implies the statistics
 //   vulkan_config { bool native_spirv=true; }   SGL shaders take SGL's own SPIR-V where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_spirv()
@@ -286,6 +289,7 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 // dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware hides WARP — every Microsoft-vendor adapter, flagged or not —, =none hides both); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
 // dx12_config { adapter_luid  (optional<u64>; overrides `adapter`, fails rather than falling back; SC_DX12_ADAPTER still hides it)
 //               minimum_feature_level=11_0  (a runtime may demand more, never less) }
+sg::enumerate_dx12_adapters()                      // -> cc::vector<adapter_info>; every FL 11_0 adapter, WARP included; pass .luid to adapter_luid
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>  // ONE D3D12 runtime per process, settled by its first use
 dx12::choose_d3d12_runtime(d3d12_runtime::system)  // before any device; wins over SC_DX12_RUNTIME=system|agility; default agility where fetched, system on an Intel GPU
 dx12::requested_d3d12_runtime() / runs_agility_runtime()  // what was asked for / whether the Agility SDK actually loaded
@@ -701,6 +705,8 @@ sg::sampler                 // { min/mag/mip_filter; address_u/v/w; mip_lod_bias
 sg::sampler_filter          // nearest | linear
 sg::sampler_address_mode    // repeat | mirror_repeat | clamp_edge   — no border / mirror-once: WebGPU has neither
 sg::compare_op              // never|less|equal|less_equal|greater|not_equal|greater_equal|always (comparison/shadow sampler)
+// mip_lod_bias and max_anisotropy pick dx12's level on every backend: NVIDIA's vulkan driver blends anisotropic mips up
+//   to 1/4 level later, and sg's vulkan backend biases that away (docs/concepts/anisotropic-lod.md)
 // two ways in (see the bind path): STATIC = named_sampler on create_binding_group_layout (baked into the pipeline layout's root sig);
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
 // per backend: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set

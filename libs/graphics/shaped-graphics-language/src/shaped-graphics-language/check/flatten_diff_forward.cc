@@ -38,11 +38,13 @@ auto differentiator::derive(flat_expr_id id) -> dual
     // a constant block's member is a constant: a camera, a setting, what the host hands every invocation alike
     if (auto const* const member = x.node.try_as<flat_binding_member>(); member != nullptr && !member->is_workgroup)
         return {id, flat_expr_id::none};
+    if (auto const* const n = x.node.try_as<flat_buffer_element>())
+        return derive_buffer_read(id, x.type, *n);
     // a buffer holds what a gradient would have to be written back into, which a derivative never does silently
-    if (x.node.is<flat_buffer_element>() || x.node.is<flat_binding_member>())
+    if (x.node.is<flat_binding_member>())
     {
         failed("a read of a buffer, whose gradient it cannot write back; read it as `no_diff(…)` to hold it "
-               "constant, or give the function that reads it a @backward that writes the gradient");
+               "constant, or give the buffer a @gradient");
         return {id, flat_expr_id::none};
     }
     if (auto const* const n = x.node.try_as<flat_member>())
@@ -474,6 +476,99 @@ auto differentiator::forward_stmt(flat_stmt_id id) -> void
         return restate(id, result);
     }
     f.block.push_back(id);
+}
+
+auto differentiator::resolve_paired(cc::string_view text, cc::string_view which, type_id element)
+    -> cc::optional<paired_buffer>
+{
+    // PROTOTYPE: matched by name, as `@forward(f)` is, since an attribute's argument is no expression resolved yet
+    auto const dot = text.find('.');
+    auto const binding_name = dot < 0 ? cc::string_view() : text.subview({.offset = 0, .size = dot});
+    auto const member_name = dot < 0 ? cc::string_view() : text.subview(dot + 1);
+    for (auto i = isize(0); i < m().symbols.size(); ++i)
+    {
+        auto const& s = m().symbols[i];
+        if (s.kind != symbol_kind::binding || s.name != binding_name)
+            continue;
+        auto const members = m().at(m().bindings[s.info].members);
+        for (auto k = isize(0); k < members.size(); ++k)
+        {
+            if (members[k].name != member_name)
+                continue;
+            auto const& t = m().at(members[k].type);
+            auto const& held = t.kind == type_kind::buffer ? m().at(t.element) : t;
+            auto const fits = which == "gradient" ? t.kind == type_kind::buffer && t.is_mut
+                                                        && held.kind == type_kind::atomic && held.element == element
+                                                  : t.kind == type_kind::buffer && t.element == element;
+            if (!fits)
+            {
+                failed(cc::format("@{}({}) names a {}, where it takes a {} of {}", which, text,
+                                  m().name_of(members[k].type),
+                                  which == "gradient" ? "mut buffer of atomics" : "buffer", m().name_of(element)));
+                return {};
+            }
+            // the derivative reads or writes a binding the function never named, so the entry point must list it
+            auto is_listed = false;
+            for (auto const b : f.entry.bindings)
+                is_listed = is_listed || b == symbol_id(i);
+            if (!is_listed)
+            {
+                failed(cc::format("@{}({}) names a buffer of {}, which the entry point does not list; list {{{}}} "
+                                  "beside the bindings it reads",
+                                  which, text, binding_name, binding_name));
+                return {};
+            }
+            return paired_buffer{.binding = symbol_id(i), .member = i32(k), .type = members[k].type};
+        }
+    }
+    failed(cc::format("@{}({}) names no buffer of a binding", which, text));
+    return {};
+}
+
+auto differentiator::derive_buffer_read(flat_expr_id id, type_id type, flat_buffer_element const& n) -> dual
+{
+    auto const* const member = node(n.buffer).node.try_as<flat_binding_member>();
+    auto const* const info
+        = member != nullptr ? &m().at(m().bindings[m().at(member->binding).info].members)[member->member] : nullptr;
+    if (info == nullptr || (info->gradient.empty() && info->tangent.empty()))
+    {
+        failed("a read of a buffer, whose gradient it cannot write back; read it as `no_diff(…)` to hold it "
+               "constant, or give the buffer a @gradient");
+        return {id, flat_expr_id::none};
+    }
+    if (m().name_of(type) != builtins::k_float)
+    {
+        failed(cc::format("a read of a buffer of {}, where a gradient is added by an atomic of a float alone",
+                          m().name_of(type)));
+        return {id, flat_expr_id::none};
+    }
+    auto const index = share(n.index, "index");
+    auto const primal = add(type, flat_buffer_element{.buffer = n.buffer, .index = use(index)});
+    if (!is_reverse)
+    {
+        // without a @tangent, the buffer holds still in every direction a forward derivative follows
+        if (info->tangent.empty())
+            return {primal, flat_expr_id::none};
+        auto const tangents = resolve_paired(info->tangent, "tangent", type);
+        if (!tangents.has_value())
+            return {primal, flat_expr_id::none};
+        auto const& t = tangents.value();
+        auto const buffer = add(t.type, flat_binding_member{.binding = t.binding, .member = t.member});
+        return {primal, add(tangent(type), flat_buffer_element{.buffer = buffer, .index = use(index)})};
+    }
+    if (info->gradient.empty())
+    {
+        failed("a read of a buffer with a @tangent and no @gradient, where a backward derivative adds the read's "
+               "adjoint");
+        return {primal, flat_expr_id::none};
+    }
+    auto const gradients = resolve_paired(info->gradient, "gradient", type);
+    if (!gradients.has_value())
+        return {primal, flat_expr_id::none};
+    auto const placeholder = f.add_local(local_kind::temporary, "t_read", tangent(type));
+    linear_locals.insert(i32(placeholder));
+    gradient_reads.push_back({.placeholder = placeholder, .gradients = gradients.value(), .index = index});
+    return {primal, ref(placeholder)};
 }
 
 } // namespace sgl::check::impl

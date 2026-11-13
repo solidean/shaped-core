@@ -103,17 +103,25 @@ A read whose gradient went nowhere would be a silent wrong answer, the one failu
 What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buffers.sgl):
 
 * A constant block's member is a constant: a camera, a setting, what the host hands every invocation alike.
-* A buffer's element read inside a function being differentiated is `unsupported-yet`, and the diagnostic says what to do instead.
+* **A buffer is differentiable by its attributes**: `@gradient(training.gradients) @tangent(training.tangents) weights: buffer[float]`.
+  Going backward, a read's adjoint is added to the `@gradient`'s element at the read's index, a `mut buffer[atomic[float]]`.
+  Going forward, a read changes by the `@tangent`'s element, a `buffer[float]`; without one it holds still.
+  The pairs are buffers the program declares and the host binds, so neither sg nor slib knows a derivative exists.
+  The entry point lists the paired bindings, since the derivative reaches what the function never named.
+  [autodiff-buffer-test.cc](../../../tests/interpret/autodiff-buffer-test.cc) runs both on buffers a driver binds.
+  sg's [compute-differentiable-buffers-test.cc](../../../../shaped-graphics/tests/compute/compute-differentiable-buffers-test.cc) runs them on dx12, vulkan and webgpu.
+  That includes both native routes, and webgpu on Dawn and on wgpu.
+* A read of any other buffer is `unsupported-yet`, and the diagnostic says what to do instead.
+  So is a read of a buffer of anything but floats, whose gradient needs an atomic per component.
 * `no_diff(x)` reads anything as a constant, which is the opt-out at an expression where `@no_diff` is the one at a parameter.
-* A function that reads an element can carry its own derivatives: `@forward` reads the element's tangent from a tangent buffer, and `@backward` adds its adjoint into a gradient buffer.
-  That is a differentiable buffer written by hand, and it works today.
-
-What a differentiable buffer would be, once it is the language's:
-
-* **A binding member says it is one**, as `weights: diff_buffer[float]`, and sg binds it as three buffers: the values, their tangents and their gradients.
-  A read of it then is what the hand-written pair above writes, with no function around it.
+* A function that reads an element can carry its own derivatives instead: `@forward` reads the tangent, and `@backward` adds the adjoint.
 * **An adjoint from many invocations is a float atomic add**: `atomic[float].add`, a compare-exchange loop on the bits on every target ([bindings.md](../bindings.md#atomics)).
   It is the device's own add where it has one, vulkan with VK_EXT_shader_atomic_float and metal.
+
+What is left of a differentiable buffer:
+
+* **A pairing is matched by its text**, as `@forward(f)` is, until an attribute's argument is an expression the check pass resolves.
+* **A buffer of vectors or structs**, whose gradient is an atomic per float leaf.
 * **An index every invocation of a subgroup shares is reduced first**, one subgroup sum and one atomic in place of thirty-two.
   A tiled splat rasterizer is that case: every pixel of a tile walks the same splats at once, which is the optimization 3DGS's CUDA backward relies on.
 * **A texture's sample scatters its adjoint to the texels it filtered**, four atomic adds at the bilinear weights, one level for a sample at a level.
@@ -151,11 +159,12 @@ What it found in SGL itself:
 ## The order to build it in
 
 The prototype has done forward mode, reverse mode, loops of constant bounds over a tape, derivatives written by hand, `@no_diff`, and the tangent types of the builtin geometry types.
+It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
 
 1. A loop whose bound is stated rather than constant, as Slang's `[MaxIters]` is, which a `while` needs.
 2. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
 3. The rules as registry records.
-4. Differentiable buffers as binding members, over `atomic[float]`, with a subgroup reduction first where the index is uniform.
+4. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
 
 ## Open
 

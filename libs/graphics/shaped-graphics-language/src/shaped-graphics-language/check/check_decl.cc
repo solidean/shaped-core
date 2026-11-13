@@ -736,7 +736,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
         cc::string_view const known_on_member[]
-            = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic", "padding"};
+            = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic", "padding", "gradient", "tangent"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -1060,6 +1060,29 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 collected.back().layout_bits = count.value();
         }
         collected.back().is_absent = is_struct && find_attribute(file, f.attributes, "absent") != nullptr;
+        // PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): kept as written, and resolved where a derivative reads the buffer, since the
+        // binding it names may come later in the file
+        for (auto const which : {cc::string_view("gradient"), cc::string_view("tangent")})
+        {
+            auto const* const a = is_struct ? nullptr : find_attribute(file, f.attributes, which);
+            if (a == nullptr)
+                continue;
+            auto const arguments = ast.at(a->arguments);
+            if (arguments.size() != 1 || !arguments[0].name.empty() || !ast::is_valid(arguments[0].value))
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                       cc::format("@{0} takes the buffer it pairs with: `@{0}(training.{0}s)`", which));
+                continue;
+            }
+            if (auto const& r = out.at(innermost); type != checked_module::error_type && r.kind != type_kind::buffer)
+            {
+                report(diagnostic_kind::wrong_kind_of_name, file, a->name,
+                       cc::format("only a buffer's read is differentiated, so only a buffer takes a @{}", which));
+                continue;
+            }
+            (which == "gradient" ? collected.back().gradient : collected.back().tangent)
+                = cc::string(text_of(file, span_of(file, arguments[0].value)));
+        }
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(
                 {.member = collected.size() - 1, .attribute = named, .name = name_argument_of(file, named)});

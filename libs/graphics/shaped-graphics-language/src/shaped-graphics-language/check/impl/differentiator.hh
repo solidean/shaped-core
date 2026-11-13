@@ -79,6 +79,23 @@ struct differentiator
     /// The local a lifted block's value is assigned to, by the block's label.
     cc::map<i32, local_id> lifted;
 
+    /// A buffer a `@gradient` or `@tangent` names: a binding's member.
+    struct paired_buffer
+    {
+        symbol_id binding = symbol_id::none;
+        i32 member = -1;
+        type_id type = type_id::none;
+    };
+    /// Reverse: a read of a buffer with a `@gradient`, in the statement being transposed.
+    /// Its placeholder's adjoint is added to the gradient's element at the read's index, shared.
+    struct gradient_read
+    {
+        local_id placeholder = local_id::none;
+        paired_buffer gradients;
+        flat_expr_id index = flat_expr_id::none;
+    };
+    cc::vector<gradient_read> gradient_reads;
+
     [[nodiscard]] checked_module const& m() const { return f.c.out; }
     [[nodiscard]] flat_expr const& node(flat_expr_id id) const { return f.entry.at(id); }
     [[nodiscard]] type_id type_of(flat_expr_id id) const { return f.entry.at(id).type; }
@@ -209,6 +226,16 @@ struct differentiator
 
     /// `id`, consumed, as its value and its tangent, each to be placed once.
     dual derive(flat_expr_id id);
+
+    /// The buffer `text`, `binding.member`, that the `@<which>` of a buffer of `element`s names, checked for its role.
+    cc::optional<paired_buffer> resolve_paired(cc::string_view text, cc::string_view which, type_id element);
+    /// A read of a buffer element: its tangent from the buffer's `@tangent` going forward, and a placeholder whose
+    /// adjoint goes to its `@gradient` going backward; refused without either.
+    dual derive_buffer_read(flat_expr_id id, type_id type, flat_buffer_element const& n);
+    /// Reverse: each gradient read of the statement just transposed, added to its gradient at its index.
+    void add_gradient_reads();
+    /// The prelude's `add` of an atomic of `element`s; none where there is none.
+    [[nodiscard]] symbol_id atomic_add_of(type_id element) const;
 
     /// The name a call's rule is chosen by: an operator's spelling, a function's name.
     [[nodiscard]] cc::string_view rule_name(symbol_id callee) const;
