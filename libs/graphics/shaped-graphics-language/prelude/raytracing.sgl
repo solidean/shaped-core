@@ -1084,8 +1084,10 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     if found.w == 0.0 or not (found.x >= r.t_min and found.x <= t_far) => return walk_step(t_far, false)
 
     let instance_flags = space.instance.z >> 24
-    // cull mode 1 is front: that instance flips its winding, as every native backend does
-    let is_front = (found.w < 0.0) != (((instance_flags >> 2) & 3) == 1)
+    // A front face turns its counterclockwise side to the ray, as dx12 and vulkan hardware report it.
+    // That is DXR's "clockwise from the ray's origin", which DXR states in a left-handed space.
+    // Cull mode 1 is front: that instance flips its winding, as every native backend does.
+    let is_front = (found.w > 0.0) != (((instance_flags >> 2) & 3) == 1)
     let is_opaque = is_opaque_candidate(c.w == 1, instance_flags, flags)
     if is_culled(is_opaque, is_front, instance_flags, flags) => return walk_step(t_far, false)
 

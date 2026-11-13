@@ -205,6 +205,9 @@ const light_kind_sun: i32 = 2;
 * **EMIT-206** MSL writes a mesh entry point as a `[[mesh]]` function of a `metal::mesh<V, F, N, M, topology>` output, F `void` where nothing is written per primitive.
   It writes a task entry point as an `[[object]]` function; WGSL refuses both by EMIT-109.
 * **EMIT-261** WGSL refuses a pixel entry point that takes a mesh stage's per-primitive struct (CHK-489) as `target-lacks-feature`, naming `mesh_shader`.
+* **EMIT-262** MSL states its entry point's math mode above its includes: `#pragma METAL fp math_mode(fast)` at `.fast`, and `#pragma METAL fp math_mode(safe)` at any stricter level (EMIT-185).
+  The Metal compiler takes the text's pragma over its own `-fmetal-math-mode` and `MTLCompileOptions::mathMode`, so a metallib and a source compile keep the same level whatever they were handed.
+  A compile of any other MSL keeps the safe math sg and ssc::msl hand it.
   Only the pipeline of a polyfilled mesh stage hands it one there, and that pipeline's pixel stage is written in the form CHK-524 gives it, which takes no such struct.
   Metal counts the primitives alone, so `set_counts` is `set_primitive_count` of its second argument, and `triangle` and `line` set one index per corner.
   The object stage writes its payload and its grid of mesh workgroups from its first invocation, and a pixel stage's per-primitive struct arrives in one `[[stage_in]]` beside the link.
@@ -370,7 +373,7 @@ binding affine:
   On dx12 a pixel stage writing `.greater_equal` or `.less_equal` takes its `@position` as `noperspective centroid`, which DXIL requires of one.
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
-* **EMIT-262** A signed integer `%` is `a - (a / b) * b` wherever it becomes SPIR-V, since Vulkan leaves `OpSRem` undefined for a negative operand and defines `OpSDiv`.
+* **EMIT-263** A signed integer `%` is `a - (a / b) * b` wherever it becomes SPIR-V, since Vulkan leaves `OpSRem` undefined for a negative operand and defines `OpSDiv`.
   The native route writes those three operations, and HLSL for vulkan calls the helper `sgl_srem<T>`; every other target's `%` already means EVAL-83's remainder.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL, with a scalar `t` or a vector one alike.
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
@@ -647,7 +650,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   HLSL for dx12 writes Shader Model 6.10's `CandidateClusterID`, `CommittedClusterID` and `ClusterID`, and DXIL refuses it as `unsupported-yet` until then.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
-  `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order, and is not known to keep denormals.
+  `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order and flushes denormals, read and written (measured on an M4).
   `hlsl-vulkan` keeps every level through the same flags: DXC writes `SignedZeroInfNanPreserve` and `NoContraction` on every float operation for `-Gis`, and `DenormPreserve` for `-denorm preserve`.
   Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
   `wgsl` keeps `.fast` alone.

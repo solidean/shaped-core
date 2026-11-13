@@ -1,0 +1,21 @@
+// The `scene` setup's contract, which setups.cc fills: 256 threads trace `world` and write `hits` and `ids`, two float4 a thread each.
+// It runs where the context has ray queries, natively or through webgpu's polyfill, and is skipped elsewhere.
+//
+// The world, every coordinate in world space:
+// - Instance id 1 is a terrain over [0, 8] by [0, 8], its heights hashed per grid vertex between z = 0 and z = 1.
+//   One BLAS of two geometries over one indexed vertex grid, two triangles a cell, the diagonal alternating cell by cell.
+//   Geometry 0 is the cells with x < 4 and is opaque; geometry 1 the cells with x >= 4, and is not, so a decision is asked there.
+// - Instances 10 to 13 are one octahedron of radius 0.6, opaque, eight triangles, its front faces outward.
+//   10 stands at (2, 2, 2.5).
+//   11 at (6, 2, 2.5), turned a quarter about z.
+//   12 at (2, 6, 2), scaled by (1.5, 0.5, 1).
+//   13 at (6, 6, 2.5), mirrored in x, so its winding flips and so does what a trace calls its front.
+// No triangle stands above z = 3.2, and nothing but the terrain stands below z = 1.4.
+module diff_scene
+
+require ray_query
+
+binding io:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+    ids: mut buffer[float4]

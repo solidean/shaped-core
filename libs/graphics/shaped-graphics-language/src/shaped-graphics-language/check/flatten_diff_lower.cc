@@ -254,7 +254,26 @@ auto differentiator::lower_stmt(flat_stmt_id id) -> void
     if (auto const* const n = s.node.try_as<flat_var>())
         return restate(id, flat_var{.local = n->local, .value = lift(n->value)});
     if (auto const* const n = s.node.try_as<flat_assign>())
-        return restate(id, flat_assign{.place = n->place, .value = lift(n->value)});
+    {
+        auto const value = lift(n->value);
+        // `v.xz = e` writes each field it names, which both modes follow as any assignment to a field
+        auto const* const m = node(n->place).node.try_as<flat_member>();
+        if (m == nullptr || !m->is_swizzle() || !is_valid(root_of(m->object, nullptr)))
+            return restate(id, flat_assign{.place = n->place, .value = value});
+        auto const swizzle = *m;
+        auto const written = f.add_local(local_kind::let, "swizzled", type_of(value));
+        restate(id, flat_let{.local = written, .value = value});
+        for (auto k = 0; k < swizzle.letters.count; ++k)
+        {
+            auto const object = clone(swizzle.object);
+            auto const field = swizzle.letters.fields[k];
+            auto const place = add(f.field_type(type_of(object), field), flat_member{.object = object, .member = field});
+            emit(flat_assign{
+                .place = place,
+                .value = add(f.field_type(type_of(value), k), flat_member{.object = ref(written), .member = k})});
+        }
+        return;
+    }
     if (auto const* const n = s.node.try_as<flat_eval>())
     {
         auto const value = lift(n->value);

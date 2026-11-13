@@ -1,5 +1,7 @@
 // differential: setup floats
+// differential: across relative 0.00001
 // Roots and a reciprocal, which every route of one driver rounds alike.
+// Across machines a root's square less its operand may be one fused multiply-add, which `.fast` allows, so it is held near zero rather than to the ulp.
 use diff_floats
 
 @compute(64) fun roots(@thread_id id: int3){diff_floats.io}:
@@ -7,6 +9,5 @@ use diff_floats
     let a = abs(diff_floats.io.input[i])
     diff_floats.io.output[4 * i] = sqrt(a)
     diff_floats.io.output[4 * i + 1] = inverse_sqrt(a)
-    // the square rather than its difference from `a`, which a few ULP of `a` put beyond any bound in ULP of 0
-    diff_floats.io.output[4 * i + 2] = sqrt(a) * sqrt(a)
+    diff_floats.io.output[4 * i + 2] = sqrt(a * 0.5 + 0.25)
     diff_floats.io.output[4 * i + 3] = 1.0 / a

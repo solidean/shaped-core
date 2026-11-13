@@ -81,3 +81,65 @@ TEST("sgl autodiff buffers - two reads of one element in one statement each add 
     CHECK(float_at(gradients, 2) == 9.0f);
     CHECK(float_at(gradients, 0) == 0.0f);
 }
+
+TEST("sgl autodiff buffers - a buffer of vectors takes an atomic per component, element i's k-th at i * 2 + k")
+{
+    // the gradient of dot(w_i, w_i) is 2 w_i
+    auto const gradients = floats(0.0f, 0.0f, 0.0f, 0.0f);
+    auto const source = cc::string("binding params:\n"
+                                   "    @gradient(training.gradients) weights: buffer[float2]\n"
+                                   "binding training:\n"
+                                   "    gradients: mut buffer[atomic[float]]\n"
+                                   "\n"
+                                   "fun norm(k: int){params} => dot(params.weights[k], params.weights[k])\n"
+                                   "test {params, training}:\n"
+                                   "    bwd_diff(norm, 0, 1.0)\n"
+                                   "    bwd_diff(norm, 1, 1.0)\n"
+                                   "    true\n");
+    auto const bindings = sgl::check::driver_bindings{
+        .groups = {
+            {.name = "params", .members = {{.name = "weights", .bytes = floats(1.0f, 2.0f, 3.0f, 4.0f)}}},
+            {.name = "training", .members = {{.name = "gradients", .mutable_bytes = gradients}}},
+        }};
+    CHECK(driven_failures_of(source, bindings) == "");
+    CHECK(float_at(gradients, 0) == 2.0f);
+    CHECK(float_at(gradients, 1) == 4.0f);
+    CHECK(float_at(gradients, 2) == 6.0f);
+    CHECK(float_at(gradients, 3) == 8.0f);
+}
+
+TEST("sgl autodiff buffers - a buffer of structs takes an atomic per float of its tangent, and its int none")
+{
+    // pair = (a = (1, 2), s = 3, n = 7): the loss (|a|^2 + s^2) n has the gradient 2 a n and 2 s n, three floats
+    constexpr cc::string_view source_text
+        = "struct pair:\n"
+          "    a: float2\n"
+          "    s: float\n"
+          "    n: int\n"
+          "binding params:\n"
+          "    @gradient(training.gradients) @tangent(training.tangents) pairs: buffer[pair]\n"
+          "binding training:\n"
+          "    gradients: mut buffer[atomic[float]]\n"
+          "    tangents: buffer[tangent[pair]]\n"
+          "\n"
+          "fun loss(k: int){params} -> float:\n"
+          "    let p = params.pairs[k]\n"
+          "    return (dot(p.a, p.a) + p.s * p.s) * float(p.n)\n"
+          "test {params, training}:\n"
+          "    bwd_diff(loss, 0, 1.0)\n"
+          "    fwd_diff(loss, 0) == 14.0\n";
+    auto const gradients = floats(0.0f, 0.0f, 0.0f);
+    u32 const pair_words[] = {bits_of(1.0f), bits_of(2.0f), bits_of(3.0f), 7u};
+    auto const bindings = sgl::check::driver_bindings{
+        .groups = {
+            {.name = "params", .members = {{.name = "pairs", .bytes = bytes_of(pair_words)}}},
+            // the tangent moves a.x by 1
+            {.name = "training",
+             .members = {{.name = "gradients", .mutable_bytes = gradients},
+                         {.name = "tangents", .bytes = floats(1.0f, 0.0f, 0.0f)}}},
+        }};
+    CHECK(driven_failures_of(cc::string(source_text), bindings) == "");
+    CHECK(float_at(gradients, 0) == 14.0f);
+    CHECK(float_at(gradients, 1) == 28.0f);
+    CHECK(float_at(gradients, 2) == 42.0f);
+}

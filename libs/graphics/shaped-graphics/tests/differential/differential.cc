@@ -236,6 +236,8 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
 
+    if (w->setup->required.has_value() && !ctx->supports(w->setup->required.value()))
+        co_return run_result{.skipped = cc::format("this context lacks what the {} setup requires", w->setup->name)};
     auto const shader = co_await compiled_on(*ctx, r, *w->asset);
     if (r.native && shader.compiler.name != "sgl")
         co_return run_result{.skipped = cc::format("SGL writes no {} of it yet, so {} compiled it",
@@ -280,6 +282,7 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
             continue;
         }
 
+        auto const kept = x.is_exact || y.is_exact ? tolerance{} : t;
         auto const count = x.bytes.size() / 4;
         auto const* const xs = reinterpret_cast<u32 const*>(x.bytes.data());
         auto const* const ys = reinterpret_cast<u32 const*>(y.bytes.data());
@@ -287,15 +290,16 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
         auto differing = isize(0);
         for (auto e = isize(0); e < count; ++e)
         {
-            if (within(xs[e], ys[e], t))
+            if (within(xs[e], ys[e], kept))
                 continue;
             if (differing < k_named_elements)
-                named.appendf("{}[{}] {} against {}", named.empty() ? "" : ", ", e, text_of(ys[e], t), text_of(xs[e], t));
+                named.appendf("{}[{}] {} against {}", named.empty() ? "" : ", ", e, text_of(ys[e], kept),
+                              text_of(xs[e], kept));
             ++differing;
         }
         if (differing > 0)
-            lines.push_back(cc::format("{}: {} of {} elements beyond {}: {}{}", x.name, differing, count, t.to_string(),
-                                       named, differing > k_named_elements ? ", ..." : ""));
+            lines.push_back(cc::format("{}: {} of {} elements beyond {}: {}{}", x.name, differing, count,
+                                       kept.to_string(), named, differing > k_named_elements ? ", ..." : ""));
     }
     return lines;
 }
@@ -373,7 +377,7 @@ cc::string sg_diff::reference_lines(workload const& w, run_result const& r)
     auto text = cc::string();
     for (auto const& o : r.outputs)
     {
-        if (w.across.kind == tolerance::measure::exact)
+        if (w.across.kind == tolerance::measure::exact || o.is_exact)
         {
             text.appendf("{} {} bytes {} fnv1a 0x{:016x}\n", w.entry, o.name, o.bytes.size(), fnv1a(o.bytes));
             continue;

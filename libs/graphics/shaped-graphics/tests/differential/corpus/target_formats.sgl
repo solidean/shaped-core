@@ -1,0 +1,16 @@
+// differential: setup targets
+// A pixel stage writing five formats at once, as a G-buffer does: sRGB encoding, half floats, packed unorm, packed small floats and an integer.
+// Its values reach each format's edges: half floats past a thousand and below a thousandth, and unorm values across [0, 1].
+use diff_targets
+
+@pixel fun formats_ps(p: diff_targets.varyings){diff_targets.io} -> diff_targets.target:
+    let cell = (p.position.x as int) + 16 * (p.position.y as int)
+    let v = diff_targets.io.input[cell & 255]
+    let s = fract(abs(v) * 0.37)
+    return {
+        srgb = float4(p.uv.x, p.uv.y, s, 0.25 + 0.5 * p.layer)
+        hdr = float4(v, v * 900.0, 1.0 / v, s * 0.001)
+        packed = float4(p.uv.x, s, 1.0 - p.uv.y, p.layer)
+        small = float3(abs(v), s * 0.01, p.uv.x * 100.0)
+        word = ((cell as uint) * 2654435761u) ^ (p.layer as uint)
+    }

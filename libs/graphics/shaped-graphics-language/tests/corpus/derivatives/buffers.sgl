@@ -112,3 +112,10 @@ fun forward_only_read(i: int){forward_only} => forward_only.weights[i] * 2.0
 @expect(error = "unsupported-yet")
 @compute(64) fun refuses_an_unlisted_gradient(@thread_id id: int3){fitted}:
     bwd_diff(fitted_loss, id.x, 1.0)
+
+// an entry point that declares `subgroups` shares a gradient's atomic through the subgroup where every invocation that
+// reaches it adds to one element, in divergent control flow too, since the sum is over the invocations that reach it
+@compute(64) fun fitted_backward_shared(@thread_id id: int3){fitted, training}:
+    require subgroups
+    if id.x % 3 != 0:
+        bwd_diff(fitted_loss, id.x / 64, 1.0)

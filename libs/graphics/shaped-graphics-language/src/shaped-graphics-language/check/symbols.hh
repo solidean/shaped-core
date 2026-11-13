@@ -438,6 +438,8 @@ struct sgl::check::member_info
     padding_kind padding = padding_kind::natural;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
+    /// PROTOTYPE (autodiff): `@no_diff` on a texture, whose texels a derivative holds constant.
+    bool is_no_diff = false;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
     /// one reads (CHK-279); -1 without one.
     i32 default_sampler = -1;

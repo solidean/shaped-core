@@ -2016,7 +2016,7 @@ outcome run_lane(checked_module const& m,
     // A test has no parameter, and its first local is one of its own; an entry point may have stage inputs alone.
     if (is_valid(e.input) && !e.locals.empty() && e.locals[0].kind == local_kind::parameter)
     {
-        run.locals[0] = inputs.parameter;
+        run.locals[0] = lane < inputs.lane_parameters.size() ? inputs.lane_parameters[lane] : inputs.parameter;
         run.is_set[0] = true;
     }
     // A stage input the caller did not state is zero, which is what one invocation of a draw or a dispatch would read.
@@ -2085,7 +2085,8 @@ outcome merged(checked_module const& m,
             out.detail = lanes > 1 ? cc::format("in lane {} of {}: {}", lane, lanes, r.detail) : cc::move(r.detail);
         }
         if (lane == 0)
-            out.result = cc::move(r.result);
+            out.result = r.result;
+        out.lane_results.push_back(cc::move(r.result));
         out.trace.push_back_range(r.trace);
         out.printed.push_back_range(r.printed);
         for (auto& f : r.failures)

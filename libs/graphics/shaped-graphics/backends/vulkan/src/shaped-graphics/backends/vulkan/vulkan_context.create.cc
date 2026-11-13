@@ -794,15 +794,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         picked = pick_physical_device(instance, config.prefer_software_device, selector);
     if (!picked.has_value())
     {
-        auto message = config.choose_physical_device
-                         ? cc::string("vulkan_config::choose_physical_device chose no device, or one without a graphics "
-                                      "queue")
-                     : config.adapter_luid.has_value()
-                         ? cc::format("no Vulkan device with a graphics queue has the LUID {:x}", config.adapter_luid.value())
-                     : selector.empty()
-                         ? cc::string("no Vulkan device with a graphics queue found")
-                         : cc::format("SC_GPU='{}' matches no Vulkan device with a graphics queue; the devices are: {}",
-                                      selector, physical_device_names(instance));
+        auto message
+            = config.choose_physical_device
+                ? cc::string("vulkan_config::choose_physical_device chose no device, or one without a graphics "
+                             "queue")
+            : config.adapter_luid.has_value()
+                ? cc::format("no Vulkan device with a graphics queue has the LUID {:x}", config.adapter_luid.value())
+            : selector.empty()
+                ? cc::string("no Vulkan device with a graphics queue found")
+                : cc::format("SC_GPU='{}' matches no Vulkan device with a graphics queue; the devices are: {}",
+                             selector, physical_device_names(instance));
         destroy_debug_messenger(instance, messenger);
         vkDestroyInstance(instance, nullptr);
         return cc::error(cc::move(message));
@@ -1151,12 +1152,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
     // `drawIndirectFirstInstance` too, without which an indirect record's `first_instance` must be 0.
+    // `independentBlend` too, without which every color target of a pipeline must blend alike, as dx12, metal and webgpu never ask.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .pNext = &vk11_features,
         .features = {.imageCubeArray = supported.imageCubeArray,
+                     .independentBlend = supported.independentBlend,
                      .geometryShader = supported.geometryShader,
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,

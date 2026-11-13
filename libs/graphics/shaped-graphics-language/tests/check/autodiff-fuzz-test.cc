@@ -316,7 +316,7 @@ struct program_writer
 
     void statement(i32 indent, i32 nesting)
     {
-        auto const kind = pick(18);
+        auto const kind = pick(20);
         if (kind <= 1)
         {
             auto const n = name("s");
@@ -477,6 +477,24 @@ struct program_writer
             else
                 line(indent,
                      cc::format("{0}.at = {0}.at + vec3(tanh({1}), 0.5 * sin({2}), 0.25)", n, scalar(1), scalar(1)));
+        }
+        else if (kind == 18 && !mut_vectors.empty())
+        {
+            // an assignment through a swizzle, which writes two fields and keeps the third
+            cc::string_view const pairs[] = {"xy", "zx", "yz", "xz"};
+            line(indent, cc::format("{}.{} = float2(tanh({}), tanh({}))", mut_vectors[pick(i32(mut_vectors.size()))],
+                                    pairs[pick(4)], scalar(2), scalar(2)));
+        }
+        else if (kind == 19 && nesting < 3)
+        {
+            // a case on an int, an arm of its own per value and the rest
+            line(indent, cc::format("case {}:", index()));
+            line(indent + 1, "0 =>:");
+            block(indent + 2, rng.uniform(1, 2), nesting + 1);
+            line(indent + 1, "1 or 2 =>:");
+            block(indent + 2, rng.uniform(1, 2), nesting + 1);
+            line(indent + 1, "_ =>:");
+            block(indent + 2, rng.uniform(1, 2), nesting + 1);
         }
         else
         {

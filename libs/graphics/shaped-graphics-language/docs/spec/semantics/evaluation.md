@@ -351,6 +351,8 @@ A subgroup operation and a derivative exchange values between invocations, so a 
   A run of fewer than four lanes has no quad, and its derivatives are 0.
 * **EVAL-145** A run ends as its first lane that does not end normally, in lane order, and normally where every lane does.
   A `discard` ends its own lane, so the run is `discarded` (EVAL-89); a lane after it runs to its end, and reads zero where it exchanges a value with the discarded one.
+* **EVAL-148** A driver may give each lane a stage struct of its own, as a pixel quad's four pixels each have their position and varyings, and a lane it gives none takes the run's.
+  Each lane's result is kept, in lane order, so a driver running a quad reads all four pixels from one run and their derivatives are those of the quad.
 ## Open
 
 * Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.

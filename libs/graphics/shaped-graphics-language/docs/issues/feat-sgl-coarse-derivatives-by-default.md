@@ -20,3 +20,11 @@ A pixel stage writing `ddx(x * y)` and `ddy(x * y)` at pixel centers over a 4x4 
 So the two rows of a quad differ, 0.5 and 1.5, where a coarse derivative would give both the same.
 `ddx_fine` and `ddy_fine` are therefore `dfdx` and `dfdy` on metal, and the coarse default wants the quad's own lanes: `quad_shuffle` of one row's or column's pair, a hypothesis not yet tried.
 That probe, written as a test beside `sg - a discarded pixel still takes part in its quad's derivatives`, is what would pin the coarse default on every backend.
+
+## Log
+
+2026-11-13: under fast math, which an entry point at `.fast` compiles with on metal since EMIT-262, Apple's backend writes `dfdx` and `dfdy` coarse.
+The AIR is the same in both modes but for the float flags, so the choice is the backend's; the differential corpus's `pixel_derivatives` sees it as about 0.023 on its bent value.
+So metal's default derivatives are coarse wherever no `@float` is stated, which is EVAL-144's meaning, and fine at any stricter level.
+`pixel_derivatives` holds them loosely across machines until every target writes coarse.
+A `ddx_fine` on metal needs a guarantee above `.fast`, or a probe that pins what fast math does to `dfdx` at all.

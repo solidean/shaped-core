@@ -75,6 +75,7 @@ They must agree even beside a kink, and both match a central difference wherever
 * **Reverse mode runs on straight structured code.**
   Every declaration is hoisted, every early leave becomes a flag that guards what follows it, and every condition is recorded.
   The backward sweep restores what each statement overwrote from a save, and transposes that statement's tangent.
+  A `case` is the chain of `if` it means, its scrutinee held once, and an assignment through a swizzle writes each field it names.
 * **A loop of constant bounds stays a loop, over a tape.**
   Inside it, each save and each recorded condition is a local array with one slot per iteration, of every kept loop around it.
   The backward sweep walks the loop down from its last iteration, and every read of its index in what it clones reads the index reversed.
@@ -97,6 +98,8 @@ They must agree even beside a kink, and both match a central difference wherever
   [written-derivatives.sgl](../../../tests/corpus/derivatives/written-derivatives.sgl) composites front to back until almost nothing shows through, and walks back without a tape.
   The attribute names `f` by its text for now, which a resolved expression would replace.
 * **A position's tangent is its direction**: a `pos3`'s is a `vec3`, an `hpos4`'s a `float4`, and `mat4 * pos3` moves a change of the position without the translation.
+  An `affine3`'s products are a dot of each row with `(p, 1)`, `(v, 0)` or the `float4`, so the matrix and what it moves are both differentiable.
+  [cases-swizzles-affine.sgl](../../../tests/corpus/derivatives/cases-swizzles-affine.sgl) holds the three to central differences.
 * **A type's tangent is `tangent[T]`**, which a caller names to declare the place `bwd_diff` adds to.
   A struct's is a struct of its differentiable fields' tangents, under their names: `tangent[splat]` holds `at: vec3` and `weight: float`, and no `count: int`.
   A struct whose fields are all their own tangents is its own, and so is a float or a vector; an array's is an array of its element's.
@@ -122,21 +125,39 @@ What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buff
   That includes both native routes, and webgpu on Dawn and on wgpu.
   Its [compute-splat-fitting-test.cc](../../../../shaped-graphics/tests/compute/compute-splat-fitting-test.cc) fits sixteen 2D Gaussians to an image with Adam, every gradient one `bwd_diff` a pixel.
   In 200 rounds the loss falls to a fortieth, the same on every backend to five digits.
-* A read of any other buffer is `unsupported-yet`, and the diagnostic says what to do instead.
-  So is a read of a buffer of anything but floats, whose gradient needs an atomic per component.
+* **A buffer of vectors or structs takes an atomic per float of its element's tangent**, in order: element `i`'s `k`-th at `i * n + k`.
+  So a `buffer[mark]` of a `pos3` and a `float` adds four floats per element, and a struct's int field adds none.
+  Its `@tangent` is a `buffer[tangent[T]]`, read at the read's index.
+  sg runs a buffer of such structs on every backend, in the same test as the floats.
+* **A texture_2d is differentiable by the same attributes**: `@gradient` names a `mut buffer[atomic[float]]` of its level 0, texel `(x, y)`'s channels at `(y * width + x) * channels`.
+  A `load` adds its adjoint to the texel it read, and a `sample` at level 0 to the texels it weighs, at their weights.
+  A linear sample changes with its coordinate too, by the slope between those texels; a nearest one does not, between texels.
+  Its `@tangent` is a texture of its type, whose read at the same place is the read's change.
+  The derivative reads the taps again, by `load`, so a GPU's filtering at a few bits of weight does not enter it.
+  How it filters is known at compile time from a static sampler alone, so a sample through a sampler bound at run time is refused.
+  So is a sample at another level, with a bias or an offset, and one through an anisotropic sampler.
+  `@no_diff` on a texture holds its texels constant, and its sample still changes with its coordinate: an environment map.
+  [textures.sgl](../../../tests/corpus/derivatives/textures.sgl) holds what every target writes and refuses.
+  [autodiff-texture-test.cc](../../../tests/interpret/autodiff-texture-test.cc) runs it on textures a driver binds, and sg on every backend.
+* A read of any other buffer or texture is `unsupported-yet`, and the diagnostic says what to do instead.
+  So is a read of a buffer whose tangent holds a half, since an atomic holds a float or an integer alone.
 * `no_diff(x)` reads anything as a constant, which is the opt-out at an expression where `@no_diff` is the one at a parameter.
 * A function that reads an element can carry its own derivatives instead: `@forward` reads the tangent, and `@backward` adds the adjoint.
+* **An entry point that declares `subgroups` shares a gradient's atomic through the subgroup first.**
+  Where every invocation that reaches the add adds to one element, the subgroup sums its adjoints and its first invocation adds them: one atomic in place of thirty-two.
+  A tiled splat rasterizer is that case, every pixel of a tile walking the same splats, and it is what 3DGS's CUDA backward relies on.
+  Where the invocations add to different elements, each adds its own, so the test is at run time and the result is the same either way.
+  The sum is over the invocations that reach it, which every target defines, so the add may stand in divergent control flow.
+  Those calls alone are exempt from CHK-377, by a flag on the call that only the derivative sets.
+  A test has no device, so it never shares.
+  sg's [compute-differentiable-buffers-test.cc](../../../../shaped-graphics/tests/compute/compute-differentiable-buffers-test.cc) shares with a third of the invocations away.
 * **An adjoint from many invocations is a float atomic add**: `atomic[float].add`, a compare-exchange loop on the bits on every target ([bindings.md](../bindings.md#atomics)).
   It is the device's own add where it has one, vulkan with VK_EXT_shader_atomic_float and metal.
 
 What is left of a differentiable buffer:
 
 * **A pairing is matched by its text**, as `@forward(f)` is, until an attribute's argument is an expression the check pass resolves.
-* **A buffer of vectors or structs**, whose gradient is an atomic per float leaf.
-* **An index every invocation of a subgroup shares is reduced first**, one subgroup sum and one atomic in place of thirty-two.
-  A tiled splat rasterizer is that case: every pixel of a tile walks the same splats at once, which is the optimization 3DGS's CUDA backward relies on.
-* **A texture's sample scatters its adjoint to the texels it filtered**, four atomic adds at the bilinear weights, one level for a sample at a level.
-  A texture that is trained is an image with a gradient image beside it.
+* **A texture's levels past 0**: a sample at a level, or between two, adds to a level's texels, which a gradient of every level would hold.
 
 What it found in SGL itself:
 
@@ -170,17 +191,15 @@ What it found in SGL itself:
 ## The order to build it in
 
 The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and `tangent[T]` for the geometry types and for structs.
-It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
+It has buffers of floats, vectors and structs differentiable by their `@gradient` and `@tangent` too.
 
 1. The rules as registry records.
-2. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
 
 ## Open
 
 * **Whether a call may mark a parameter it does not differentiate**, beside `@no_diff` on the declaration, which the prototype has.
 * **Whether a tape may spill** to a buffer for a long bounded loop, or the bound is limited to what fits in registers and the rest needs a `@backward`.
-* **Accumulation across invocations**: a float atomic add behind a feature, a compare-exchange loop on the bits as a polyfill, or a subgroup reduction first and one atomic per subgroup.
-  The last is what makes any of them fast, and it may want to be a prelude function rather than something the transform writes.
+* **Whether sharing a gradient's atomic wants a spelling of its own**, beside declaring `subgroups`, for an entry point that declares it for another reason and would rather not share.
 * **User-declared tangent types**, which wait for interfaces, and with them `tangent[T]` of a type parameter.
 * **Whether `tangent[S](…)` constructs from fields**, as `S(…)` does, and whether a field marked `@no_diff` drops out of it as an int does.
 * **Higher-order derivatives** (`fwd_diff` of a `bwd_diff`), which nothing has asked for yet.
