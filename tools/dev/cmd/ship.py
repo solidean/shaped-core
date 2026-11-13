@@ -306,6 +306,9 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
             whole = len(mine) > 1 or any(_binary_red(r) for r in mine)
             rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"]]))
             found = _cases_red(xml)
+            # a binary that wrote no report of its own gets dev.py's stand-in, one case named after the binary
+            if set(found) == {binary}:
+                found = {}
             ended_without_report = rc != 0 and not found
             for r, key in zip(mine, keys):
                 out[key] = True if _binary_red(r) and ended_without_report else found.get(r["test"])
