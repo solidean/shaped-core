@@ -39,3 +39,11 @@ fun mark_loss(k: int){marked} -> float:
 
 @compute(64) fun marks_backward(@thread_id id: int3){marked, mark_training}:
     bwd_diff(mark_loss, id.x % 2, 1.0)
+
+// the same gradient, shared through the subgroup first: an entry point that declares `subgroups` sums a subgroup's
+// adjoints where every invocation that reaches the add adds to one element, and only its first adds them
+@compute(64) fun marks_backward_reduced(@thread_id id: int3){marked, mark_training}:
+    require subgroups
+    // a third of the invocations never reach the add, so the sum is over those that do
+    if id.x % 3 != 0:
+        bwd_diff(mark_loss, (id.x / 64) % 2, 1.0)
