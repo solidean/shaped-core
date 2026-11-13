@@ -498,6 +498,7 @@ if(SC_BUILD_TESTS)
         tests/check/test-check-test.cc
         tests/check/source-flat-test-support.hh
 
+        tests/interpret/autodiff-buffer-test.cc
         tests/interpret/check-run-test.cc
         tests/interpret/driver-bindings-test.cc
         tests/interpret/driver-test-support.hh
