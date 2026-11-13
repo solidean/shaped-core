@@ -15,7 +15,9 @@ What they do not do yet, in the order it pays off:
   They were all written on one Arc B580; what is left is a run on an NVIDIA and an AMD GPU, and on metal, and an issue for whatever they disagree on.
 - **More setups.**
   `texels` and `raster` exist since 2026-11-13; per-texel `relative` turned out to be enough for both at 16 by 16.
-  A trace over a fixed scene is the next, then render targets of other formats and a depth test.
+  `scene` exists since 2026-11-13: inline traces over a fixed TLAS, ids exact by value and hits within relative 0.0001 across APIs.
+  Render targets of other formats and a depth test are next.
+  The scene's interpreter half would build with `accel_build_flag::software_trace` and bind the pool that writes, which the interpreter reads.
   Each is one C++ setup and one SGL module, and every corpus file naming it is free after that.
 - **The interpreter as a third opinion.**
   Since 2026-11-13 a fourth test holds every configuration to SGL's interpreter: 11 of the 12 entry points run there, and all agree.

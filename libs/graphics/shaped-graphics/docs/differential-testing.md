@@ -48,6 +48,7 @@ Its contract with a corpus file is an SGL module in [tests/differential/setups/]
 So a shader that binds the wrong thing does not compile, rather than failing on one backend at bind time.
 The setup fills the module's generated binding type, so the two sides cannot drift apart.
 A setup registers itself with `sg_diff::register_setup`, naming the stage it runs, its run, its default tolerances, and its interpreter half where it has one.
+One that needs a feature names it, as `scene` names `ray_query`, and a context without it skips the setup's files rather than failing them.
 Its run is handed the entry point compiled on the route, and builds the pipeline itself.
 A stage the setup brings, as the raster setup brings its vertex stage, compiles on the same route through `sg_diff::compiled_on`.
 Those stages live in [tests/differential/setups/shaders/](../tests/differential/setups/shaders/), a package of their own.
@@ -58,6 +59,7 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 | `floats` | compute | 256 ordinary floats, -64 to 64, no zero | four floats a thread | 2 ulps | 16 ulps | yes |
 | `texels` | compute | a 16 by 16 rgba8 texture with its mip chain, a nearest and a trilinear sampler | four float4 a thread | exact | relative 0.005 | yes |
 | `raster` | pixel | one triangle over a 16 by 16 rgba32_float target, interpolated `uv` and `weight`, the `floats` input and the `texels` texture | the target | 2 ulps | relative 0.005 | yes |
+| `scene` | compute | a TLAS of a two-geometry terrain and four placed octahedra, one mirrored | two float4 a thread, `hits` and `ids` | exact | relative 0.0001 | not yet |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
@@ -123,7 +125,8 @@ A machine whose GPU disagrees beyond `across` is a finding: who is right is a qu
 
 ## Not yet
 
-- **More setups:** a trace over a fixed scene, render targets of other formats, and a depth test.
+- **More setups:** render targets of other formats, and a depth test.
+- **The scene on the interpreter:** sg's software trace builds the pool the interpreter reads, which an interpreter half would bind.
 - **Workgroups on the interpreter:** a workgroup's invocations run together up to each barrier, a change to the interpreter itself.
 
 [feat-sg-differential-references-and-setups](issues/feat-sg-differential-references-and-setups.md) tracks them.

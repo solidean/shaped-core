@@ -236,6 +236,8 @@ cc::shared_async<sg_diff::run_result> sg_diff::run(sg::context* ctx, workload co
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
 
+    if (w->setup->required.has_value() && !ctx->supports(w->setup->required.value()))
+        co_return run_result{.skipped = cc::format("this context lacks what the {} setup requires", w->setup->name)};
     auto const shader = co_await compiled_on(*ctx, r, *w->asset);
     if (r.native && shader.compiler.name != "sgl")
         co_return run_result{.skipped = cc::format("SGL writes no {} of it yet, so {} compiled it",
