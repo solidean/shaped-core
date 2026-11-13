@@ -3,6 +3,8 @@ created: 2026-11-13
 refs:
   - file: libs/graphics/shaped-viewer/tests/headless-viewer-test.cc:1200
   - test: "sv - a guest settled render advances no epoch of its own, and settles in its host's frames"
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-13T10:50Z
 ---
 
 # A guest settled render draws nothing on metal, and the run then hangs
