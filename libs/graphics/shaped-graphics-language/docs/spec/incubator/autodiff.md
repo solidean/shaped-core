@@ -97,7 +97,12 @@ They must agree even beside a kink, and both match a central difference wherever
   [written-derivatives.sgl](../../../tests/corpus/derivatives/written-derivatives.sgl) composites front to back until almost nothing shows through, and walks back without a tape.
   The attribute names `f` by its text for now, which a resolved expression would replace.
 * **A position's tangent is its direction**: a `pos3`'s is a `vec3`, an `hpos4`'s a `float4`, and `mat4 * pos3` moves a change of the position without the translation.
-  A struct's tangent is the struct itself for now, so a position in one holds its direction, which every target writes alike.
+* **A type's tangent is `tangent[T]`**, which a caller names to declare the place `bwd_diff` adds to.
+  A struct's is a struct of its differentiable fields' tangents, under their names: `tangent[splat]` holds `at: vec3` and `weight: float`, and no `count: int`.
+  A struct whose fields are all their own tangents is its own, and so is a float or a vector; an array's is an array of its element's.
+  `tangent[T]()` is its zero, and a direction is that zero with its fields assigned, since nothing else constructs it yet.
+  Targets write it as a struct of its own, `tangent_splat`, beside the struct it changes.
+  [struct-tangents.sgl](../../../tests/corpus/derivatives/struct-tangents.sgl) holds both modes to central differences through a struct of an array of them.
 
 ## Buffers and textures
 
@@ -143,7 +148,7 @@ What it found in SGL itself:
 * **Types**: which types are differentiable, and each one's **tangent type**.
   `float`, the float vectors and matrices and `half` are their own.
   The geometry types are not: the tangent of a `pos3` is a `vec3`, and of an `hpos4` a `vec4`, which typed geometry gives for free where other languages spell it out.
-  A struct is differentiable member-wise, its integer and `no_diff` members carried as they are.
+  A struct is differentiable member-wise, and its tangent `tangent[S]` holds no field for an integer member.
 * **The check pass**: `@differentiable`, `no_diff`, `@forward(f)` and `@backward(f)`, and a diagnostic for each construct the transform refuses.
   A call inside a differentiable body that reaches a non-differentiable builtin is a diagnostic, never a zero derivative.
 * **The flattener or a pass after it**: the forward transform (a dual value per node) and the reverse transform (the primal, then the adjoints in reverse).
@@ -164,12 +169,11 @@ What it found in SGL itself:
 
 ## The order to build it in
 
-The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and the tangent types of the builtin geometry types.
+The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and `tangent[T]` for the geometry types and for structs.
 It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
 
-1. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
-2. The rules as registry records.
-3. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
+1. The rules as registry records.
+2. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
 
 ## Open
 
@@ -177,6 +181,7 @@ It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
 * **Whether a tape may spill** to a buffer for a long bounded loop, or the bound is limited to what fits in registers and the rest needs a `@backward`.
 * **Accumulation across invocations**: a float atomic add behind a feature, a compare-exchange loop on the bits as a polyfill, or a subgroup reduction first and one atomic per subgroup.
   The last is what makes any of them fast, and it may want to be a prelude function rather than something the transform writes.
-* **User-declared tangent types**, which wait for interfaces.
+* **User-declared tangent types**, which wait for interfaces, and with them `tangent[T]` of a type parameter.
+* **Whether `tangent[S](…)` constructs from fields**, as `S(…)` does, and whether a field marked `@no_diff` drops out of it as an int does.
 * **Higher-order derivatives** (`fwd_diff` of a `bwd_diff`), which nothing has asked for yet.
 * **Prior art**: Slang has the same surface (`fwd_diff`, `bwd_diff`, `no_diff`, custom derivatives), and its choices on each open question are worth reading before deciding.

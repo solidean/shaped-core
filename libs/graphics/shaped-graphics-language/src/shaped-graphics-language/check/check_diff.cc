@@ -25,16 +25,100 @@ bool checker::is_differentiable_type(type_id type) const
     return false;
 }
 
-type_id checker::tangent_type(type_id type) const
+type_id checker::tangent_type(type_id type)
 {
-    if (out.builtin_type_of(type) == nullptr)
+    if (!is_valid(type) || type == checked_module::error_type || type == checked_module::void_type)
         return type;
-    auto const name = out.name_of(type);
-    if (name == "pos3")
-        return prelude_type("vec3");
-    if (name == builtins::k_hpos4)
-        return prelude_type("float4");
-    return type;
+    if (out.builtin_type_of(type) != nullptr)
+    {
+        auto const name = out.name_of(type);
+        if (name == "pos3")
+            return prelude_type("vec3");
+        if (name == builtins::k_hpos4)
+            return prelude_type("float4");
+        return type;
+    }
+    // by value: minting below moves `types`
+    auto const info = out.at(type);
+    if (info.kind == type_kind::array)
+    {
+        auto const element = tangent_type(info.element);
+        return element == info.element || is_valid(info.count_parameter) ? type : array_type(element, info.count);
+    }
+    if (info.kind != type_kind::structure || is_open(type) || is_valid(info.tangent_of))
+        return type;
+    if (auto const* const known = tangent_types.get_ptr(i32(type)))
+        return *known;
+
+    auto members = cc::vector<member_info>();
+    auto is_own = true;
+    for (auto const& m : cc::vector<member_info>::create_copy_of(out.at(info.members)))
+    {
+        if (!is_differentiable_type(m.type))
+        {
+            is_own = false;
+            continue;
+        }
+        auto const t = tangent_type(m.type);
+        is_own = is_own && t == m.type;
+        members.push_back({.name = m.name, .type = t});
+    }
+    if (is_own)
+    {
+        tangent_types[i32(type)] = type;
+        return type;
+    }
+    // its own type, which no declaration names: the planner spells it from `spelled`, and nothing constructs it but
+    // `tangent[S]()`, so it carries none of the declared fields' attributes or defaults
+    auto const id = type_id(out.types.size());
+    out.types.push_back({
+        .kind = type_kind::structure,
+        .symbol = info.symbol,
+        .members = {.first = u32(out.members.size()), .count = u32(members.size())},
+        .spelled = cc::format("tangent[{}]", out.name_of(type)),
+        .tangent_of = type,
+    });
+    out.members.push_back_range(members);
+    tangent_types[i32(type)] = id;
+    return id;
+}
+
+type_id checker::resolve_tangent(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
+{
+    auto const arguments = ast_of(file).at(node.arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr), "tangent takes one type: `tangent[pos3]`");
+        return checked_module::error_type;
+    }
+    auto const of = resolve_value_type(file, arguments[0].value, scope);
+    if (of == checked_module::error_type)
+        return of;
+    if (is_open(of))
+    {
+        unsupported(file, span_of(file, expr), "the tangent of a type parameter, which waits for interfaces");
+        return checked_module::error_type;
+    }
+    if (!is_differentiable_type(of))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+               cc::format("{} holds no float, so nothing of it changes and it has no tangent", out.name_of(of)));
+        return checked_module::error_type;
+    }
+    return tangent_type(of);
+}
+
+i32 checker::tangent_member(type_id primal, i32 member)
+{
+    auto const t = tangent_type(primal);
+    if (t == primal)
+        return member;
+    auto const name = out.at(out.at(primal).members)[member].name;
+    auto const members = out.at(out.at(t).members);
+    for (auto i = isize(0); i < members.size(); ++i)
+        if (members[i].name == name)
+            return i32(i);
+    return -1;
 }
 
 bool checker::takes_tangent(symbol_id function, isize parameter) const

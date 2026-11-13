@@ -318,8 +318,11 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
         if (!tracked.contains(i32(root)) || !is_differentiable(type_of(n->place)))
             return;
         auto const adjoint = adjoint_of_local(root);
-        auto const g = share(place_of(ref(adjoint), steps), "g");
-        emit(flat_assign{.place = place_of(ref(adjoint), steps), .value = zero(tangent(type_of(n->place)))});
+        auto const read = tangent_place_of(ref(adjoint), steps);
+        if (!is_valid(read))
+            return;
+        auto const g = share(read, "g");
+        emit(flat_assign{.place = tangent_place_of(ref(adjoint), steps), .value = zero(tangent(type_of(n->place)))});
         linear_lets.clear();
         gradient_reads.clear();
         auto const t = tangent_of_value(n->value);

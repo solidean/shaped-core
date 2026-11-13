@@ -477,6 +477,8 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
                            cc::format("{} is no vector or matrix, so it has no scalar_of", out.name_of(of)));
             }
         }
+        else if (is_named(file, applied->object, "tangent"))
+            result = resolve_tangent(file, expr, *applied, scope);
         else if (auto const generic = generic_named(file, applied->object); is_valid(generic))
         {
             // CHK-339: `ring[4, float]`, an instance of a generic struct, one argument per parameter and of its kind

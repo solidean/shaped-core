@@ -474,6 +474,10 @@ struct flattener
     /// elements.
     flat_expr_id value_of(type_id type, ast::expr_id from, cc::span<scalar const> leaves, isize& at);
 
+    /// The scalars of a value of `t` that is `v` in every float and zero, the first case, or false everywhere else;
+    /// false for a type that holds a resource.
+    bool leaves_of(type_id t, f32 v, cc::vector<scalar>& out) const;
+
     /// A number literal as the type it was checked as, which a conversion may have made other than its default.
     flat_expr_id flatten_number(ast::expr_id id, type_id type);
 
