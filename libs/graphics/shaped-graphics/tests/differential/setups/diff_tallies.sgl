@@ -1,0 +1,8 @@
+// The `tallies` setup's contract, which setups.cc fills: 256 threads read `input` and update `totals` atomically.
+// `input` is the `words` setup's 256 words; `totals` is 64 words, the first 48 starting at 0 and the last 16 at all ones.
+// The setup reads `totals` back alone, so only what does not depend on the order the threads ran in may be stored there.
+module diff_tallies
+
+binding io:
+    input: buffer[uint]
+    totals: mut buffer[atomic[uint]]

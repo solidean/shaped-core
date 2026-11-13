@@ -1,0 +1,4 @@
+# The differential reference of atomics.sgl: what one machine computed, which every other is held to.
+# Rewritten by `SC_DIFFERENTIAL_REFRESH=1 uv run dev.py test "sg differential - every corpus entry point computes what its committed reference says"`; review the diff like code.
+# tallied written on dx12 (Intel(R) Arc(TM) B580 Graphics) dxc
+tallied totals bytes 256 fnv1a 0xd5a134783327af06

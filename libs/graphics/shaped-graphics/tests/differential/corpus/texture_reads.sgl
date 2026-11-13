@@ -1,0 +1,16 @@
+// differential: setup texels
+// Texture reads beside sampling: a texel loaded at a level, a gather of one channel, a sample at explicit gradients, and an offset sample.
+// Every coordinate sits a quarter texel off an edge, so no footprint is a tie a device may break either way.
+use diff_texels
+
+@compute(64) fun reads(@thread_id id: int3){diff_texels.io}:
+    let i = id.x
+    let level = i % 5
+    let xy = int2((i % 16) >> level, (i / 16) >> level)
+    let uv = float2((((i % 16) as float) + 0.25) / 16.0, (((i / 16) as float) + 0.75) / 16.0)
+    diff_texels.io.output[4 * i] = diff_texels.io.source.load(xy, level)
+    diff_texels.io.output[4 * i + 1] = diff_texels.io.source.gather(uv, diff_texels.io.nearest, component = texel_component.y)
+    diff_texels.io.output[4 * i + 2] = diff_texels.io.source.sample(uv, diff_texels.io.linear, grad_x = float2(0.07, 0.0), grad_y = float2(0.0, 0.02))
+    let size = diff_texels.io.source.size(level)
+    let offset = diff_texels.io.source.sample(uv, diff_texels.io.nearest, level = 0.0, offset = int2(-1, 2))
+    diff_texels.io.output[4 * i + 3] = offset + float4((size.x as float) / 64.0, (size.y as float) / 64.0, 0.0, 0.0)

@@ -1,0 +1,19 @@
+// differential: setup tallies
+// Atomics as a histogram, a bounds pass or a visibility mask write them: every thread updates slots it hashes to, in no order.
+// Add, max, or and xor start from 0, and min and and from all ones, so each total is the same whatever order the threads ran in.
+use diff_tallies
+
+fun mixed(x: uint) -> uint:
+    let mut h = x ^ (x >> 16u)
+    h = h * 0x45d9'f3bu
+    return h ^ (h >> 16u)
+
+@compute(64) fun tallied(@thread_id id: int3){diff_tallies.io}:
+    let x = diff_tallies.io.input[id.x]
+    let slot = (mixed(x) & 15u) as int
+    diff_tallies.io.totals[slot].add(1u)
+    diff_tallies.io.totals[16 + slot].max(x)
+    diff_tallies.io.totals[32 + (slot & 7)].bit_or(1u << (x & 31u))
+    diff_tallies.io.totals[40 + (slot & 7)].bit_xor(x)
+    diff_tallies.io.totals[48 + (slot & 7)].min(x)
+    diff_tallies.io.totals[56 + (slot & 7)].bit_and(x | 0x0101'0101u)

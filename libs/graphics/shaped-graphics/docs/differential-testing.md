@@ -64,6 +64,7 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 | `targets` | pixel | two depth-tested triangles over a 16 by 16 set of rgba8 sRGB, rgba16_float, rgb10a2, rg11b10_float and r32_uint targets | each target, decoded to a float a channel; `word` as its integers | exact | relative 0.005 | not yet |
 | `blended` | pixel | the same two triangles blended over a cleared rgba8 sRGB, two rgba16_float and an rgb10a2 target: alpha over, added, subtracted and min | each target, decoded to a float a channel | exact | relative 0.005 | not yet |
 | `samples` | pixel | the same two triangles over a cleared 4-sample rgba16_float target | every sample of every pixel, read back by a compute stage on the same route | exact | relative 0.005 | not yet |
+| `tallies` | compute | the `words` input, and 64 atomic totals starting at 0 or all ones | the totals, which no thread order may change | exact | exact | yes |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 The `targets` bound allows a step of the coarsest format, since an implementation may round a float into one either way.
