@@ -21,7 +21,6 @@ What is left, each a child issue when it is taken up:
 - **The forward-only builtins going backward**: `ddx`, `ddy`, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and the shuffles, whose transposes need which lane each invocation is.
 - **A texture's levels past 0**, and a sample through a sampler bound at run time.
 - **`tangent[S](…)` built from its fields** for a minted tangent; a declared one (DIFF-37) builds as any struct.
-- **A tape past 1024 slots**, which would spill to memory or ask for a `@backward`.
 - **Higher-order derivatives**, which nothing has asked for yet.
 
 ## Compared with Slang (2026-11-13)
@@ -46,7 +45,7 @@ What follows was read from its user guide, its SLANG.D paper and the SlangPy doc
    SGL has no interfaces by design ([generics.md](../spec/incubator/generics.md)): a generic body is checked per instance.
    So differentiating a generic is differentiating its instance, and `tangent[T]` of a type parameter resolves per instance as `scalar_of[V]` does.
    A type declaring its own tangent has no interface to declare it against, which is a design question of its own.
-2. **Loops past what a tape holds.**
+2. **Loops past what a tape holds** (done: checkpointed in segments, DIFF-21).
    Slang bounds a loop with `[MaxIters]`, and its paper describes choosing between storing and recomputing; SGL stores every iteration in a tape of at most 1024 slots.
 3. **Higher-order derivatives**, `fwd_diff` of a `bwd_diff`, which Slang has and some differentiable rendering needs.
 4. **The host side**: SlangPy injects kernels into PyTorch's autograd, so a training loop is Python.

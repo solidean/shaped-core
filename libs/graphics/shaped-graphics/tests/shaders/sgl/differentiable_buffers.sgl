@@ -80,3 +80,19 @@ fun energy(x: float) -> float => subgroup_add(x * x)
     let mut g = 0.0
     bwd_diff(energy, x, mut g, 1.0)
     lanes.ratios[id.x] = g / (2.0 * x * subgroup_add(1.0))
+
+// a loop too long to keep whole is walked back in segments: each thread's backward derivative meets its forward one
+binding longs:
+    differences: mut buffer[float]
+
+fun long_sum(x: float2) -> float:
+    let mut acc = 0.0
+    for i in 0 ..< 2000:
+        acc = acc * 0.999 + sin(float(i) * 0.01 * x.y) * x.x * 0.01
+    return acc
+
+@compute(64) fun long_backward(@thread_id id: int3){longs}:
+    let x = float2(0.5 + float(id.x % 8) * 0.05, 0.4)
+    let mut g = float2(0.0)
+    bwd_diff(long_sum, x, mut g, 1.0)
+    longs.differences[id.x] = g.y - fwd_diff(long_sum, x, float2(0.0, 1.0))

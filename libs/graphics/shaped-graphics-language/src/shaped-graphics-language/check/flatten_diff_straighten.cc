@@ -223,6 +223,53 @@ auto differentiator::constant_bounds(flat_for const& n) const -> cc::optional<lo
     return loop_bounds{.first = first.value(), .count = end.value() > first.value() ? end.value() - first.value() : 0};
 }
 
+auto differentiator::bytes_of(type_id t) const -> i32
+{
+    auto leaves = cc::vector<scalar>();
+    return leaves_of(t, 0.0f, leaves) ? i32(leaves.size()) * 4 : 4;
+}
+
+auto differentiator::segment_of(flat_for const& n, loop_bounds const& bounds) const -> i32
+{
+    // a tape's slots per iteration of this loop are the iterations of the kept loops inside, and its widest value
+    // decides its bytes
+    auto inner = 1;
+    auto widest = 4;
+    auto const scan = [&](auto const& self, ast::range_of<flat_stmt_id> body, i32 within) -> void
+    {
+        for (auto const id : f.entry.at(body))
+        {
+            auto const& s = f.entry.at(id);
+            if (auto const* const a = s.node.try_as<flat_assign>())
+                widest = cc::max(widest, bytes_of(f.entry.at(a->place).type));
+            else if (auto const* const b = s.node.try_as<flat_if>())
+            {
+                self(self, b->then_body, within);
+                self(self, b->else_body, within);
+            }
+            else if (auto const* const b = s.node.try_as<flat_block>())
+                self(self, b->body, within);
+            else if (auto const* const loop = s.node.try_as<flat_for>())
+            {
+                auto const inside = constant_bounds(*loop);
+                auto const times = within * (inside.has_value() && inside.value().count > 0 ? inside.value().count : 1);
+                inner = cc::max(inner, times);
+                self(self, loop->body, times);
+            }
+        }
+    };
+    scan(scan, n.body, 1);
+    auto const per_iteration = i64(inner) * widest;
+    if (i64(bounds.count) * per_iteration <= k_max_tape_bytes)
+        return 0;
+    // about the square root of the iterations, so the saves at the segments' starts and a segment's tapes balance
+    auto root = 1;
+    while (i64(root) * root < bounds.count)
+        ++root;
+    auto const fits = i32(k_max_tape_bytes / per_iteration);
+    return fits < 1 ? -1 : cc::min(root, fits);
+}
+
 auto differentiator::tape(cc::string_view name, type_id type, flat_expr_id initial) -> local_id
 {
     if (kept_loops.empty())
@@ -230,14 +277,19 @@ auto differentiator::tape(cc::string_view name, type_id type, flat_expr_id initi
     auto size = 1;
     for (auto const& l : kept_loops)
         size *= l.count > 0 ? l.count : 1;
-    if (size > k_max_tape)
+    if (i64(size) * bytes_of(type) > k_max_tape_bytes)
     {
-        failed(cc::format("loops that run {} times between them, more than a tape holds ({})", size, k_max_tape));
+        failed(cc::format("loops that run {} times between them, whose tape of {} would take {} bytes, more than a "
+                          "tape "
+                          "holds ({})",
+                          size, m().name_of(type), i64(size) * bytes_of(type), k_max_tape_bytes));
         return hoist(name, type, initial);
     }
     // PROTOTYPE: the flattener is always made from a checker it may change, and an array type is interned there
     auto const array = const_cast<checker&>(f.c).array_type(type, size);
-    return hoist(name, array, zero(array));
+    auto const local = hoist(name, array, zero(array));
+    tapes.insert(i32(local));
+    return local;
 }
 
 auto differentiator::slot(local_id tape) -> flat_expr_id
@@ -247,7 +299,10 @@ auto differentiator::slot(local_id tape) -> flat_expr_id
     auto index = flat_expr_id::none;
     for (auto const& l : kept_loops)
     {
-        auto const offset = l.first == 0 ? ref(l.index) : call("-", ref(l.index), integer(l.first));
+        auto offset = l.first == 0 ? ref(l.index) : call("-", ref(l.index), integer(l.first));
+        // a checkpointed loop's tape holds one segment, which runs again before it is walked back
+        if (l.segment > 0)
+            offset = call("%", offset, integer(l.segment));
         index = is_valid(index) ? call("+", call("*", index, integer(l.count)), offset) : offset;
     }
     auto const element = m().at(f.entry.at(tape).type).element;
@@ -309,13 +364,21 @@ auto differentiator::straighten_into(cc::span<flat_stmt_id const> statements, is
         else if (auto const* const n = s.node.try_as<flat_for>())
         {
             auto const bounds = constant_bounds(*n).value();
+            // DIFF-21: an outermost loop whose tapes would pass what a tape holds is walked back in segments
+            auto const segment = kept_loops.empty() ? segment_of(*n, bounds) : 0;
+            if (segment < 0)
+                return (void)failed("a loop each iteration of which keeps more than a tape holds, which only a "
+                                    "@backward can walk back");
             auto left = cc::set<i32>();
             for (auto const x : f.entry.at(n->body))
                 escapes(x, left);
             // a break leaves to the loop, whose flag starts false each time the loop does
             if (left.contains(i32(n->label)))
                 emit(flat_assign{.place = ref(flag_of(n->label)), .value = boolean(false)});
-            kept_loops.push_back({.index = n->index, .first = bounds.first, .count = bounds.count});
+            kept_loops.push_back({.index = n->index,
+                                  .first = bounds.first,
+                                  .count = segment > 0 ? segment : bounds.count,
+                                  .segment = segment});
             auto body = straighten(copy_of(n->body));
             if (!left.empty())
                 body = collect(
@@ -333,6 +396,79 @@ auto differentiator::straighten_into(cc::span<flat_stmt_id const> statements, is
                                      .else_body = f.add_list(cc::span<flat_stmt_id const>())});
                     });
             kept_loops.remove_back();
+            if (segment > 0)
+            {
+                auto loop = checkpointed_loop{.first = bounds.first,
+                                              .count = bounds.count,
+                                              .segment = segment,
+                                              .segments = (bounds.count + segment - 1) / segment,
+                                              .body = body};
+                // its state is what its body assigns but its tapes, which running a segment again writes again
+                auto const assigned = [&](auto const& self, cc::span<flat_stmt_id const> statements) -> void
+                {
+                    for (auto const x : statements)
+                    {
+                        auto const& st = f.entry.at(x);
+                        if (auto const* const a = st.node.try_as<flat_assign>())
+                        {
+                            auto const root = root_of(a->place, nullptr);
+                            auto is_known = false;
+                            for (auto const k : loop.state)
+                                is_known = is_known || k == root;
+                            if (is_valid(root) && !tapes.contains(i32(root)) && !is_known)
+                                loop.state.push_back(root);
+                        }
+                        else if (auto const* const b = st.node.try_as<flat_if>())
+                        {
+                            self(self, copy_of(b->then_body));
+                            self(self, copy_of(b->else_body));
+                        }
+                        else if (auto const* const b = st.node.try_as<flat_block>())
+                            self(self, copy_of(b->body));
+                        else if (auto const* const b = st.node.try_as<flat_for>())
+                            self(self, copy_of(b->body));
+                    }
+                };
+                assigned(assigned, body);
+                auto saves = cc::vector<flat_stmt_id>();
+                for (auto const k : loop.state)
+                {
+                    auto const type = f.entry.at(k).type;
+                    if (i64(loop.segments) * bytes_of(type) > k_max_tape_bytes)
+                        return (void)failed(cc::format("a loop of {} iterations, whose {} saved at each of its {} "
+                                                       "segments would take more than a tape holds ({} bytes)",
+                                                       bounds.count, m().name_of(type), loop.segments, k_max_tape_bytes));
+                    auto const array = const_cast<checker&>(f.c).array_type(type, loop.segments);
+                    auto const saved = hoist("checkpoint", array, zero(array));
+                    bookkeeping.insert(i32(saved));
+                    loop.saved.push_back(saved);
+                }
+                // at each segment's start, the state it starts from
+                body = collect(
+                    [&]
+                    {
+                        auto const offset
+                            = bounds.first == 0 ? ref(n->index) : call("-", ref(n->index), integer(bounds.first));
+                        auto const writes = collect(
+                            [&]
+                            {
+                                for (auto k = isize(0); k < loop.state.size(); ++k)
+                                {
+                                    auto const slot
+                                        = add(m().at(f.entry.at(loop.saved[k]).type).element,
+                                              flat_element{.object = ref(loop.saved[k]),
+                                                           .index = call("/", clone(offset), integer(segment))});
+                                    emit(flat_assign{.place = slot, .value = ref(loop.state[k])});
+                                }
+                            });
+                        emit(flat_if{.condition = call("==", call("%", offset, integer(segment)), integer(0)),
+                                     .then_body = f.add_list(writes),
+                                     .else_body = f.add_list(cc::span<flat_stmt_id const>())});
+                        for (auto const x : loop.body)
+                            f.block.push_back(x);
+                    });
+                checkpointed[i32(n->label)] = cc::move(loop);
+            }
             restate(
                 id,
                 flat_for{.label = n->label, .index = n->index, .first = n->first, .end = n->end, .body = f.add_list(body)});
