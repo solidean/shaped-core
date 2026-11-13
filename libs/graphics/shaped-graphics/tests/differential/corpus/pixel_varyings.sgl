@@ -1,0 +1,9 @@
+// differential: setup raster
+// A pixel stage as most are: interpolated varyings, the pixel's position, a buffer read by it, and a sample at the level its derivatives pick.
+use diff_raster
+
+@pixel fun shaded_ps(p: diff_raster.varyings){diff_raster.io} -> diff_raster.target:
+    let cell = (p.position.x as int) + 16 * (p.position.y as int)
+    let v = diff_raster.io.input[cell & 255]
+    let texel = diff_raster.io.source.sample(p.uv, diff_raster.io.linear)
+    return {color = float4(p.uv.x * v, p.uv.y + p.weight, texel.x * texel.y, dot(texel, float4(0.25, 0.5, 0.125, 1.0)))}

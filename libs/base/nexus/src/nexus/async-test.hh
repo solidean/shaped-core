@@ -69,6 +69,13 @@ struct nx::invocation_options
     /// Children sharing one subject leave it what they did not clean up, so this is where a driver bounds that: a GPU context sweeping the epochs a test left in flight.
     /// Ignored by a parallel invocation, whose children have no "after" to speak of.
     cc::unique_function<cc::shared_async<cc::unit>()> after_each;
+
+    /// Awaited as each child's last step, inside that child: what it logs, records or checks is billed to the child.
+    /// It runs whether the body passed, failed, threw or skipped, once per section pass, in sequence and in parallel alike.
+    /// It is for a subject that reports a child's effects late: a GPU context logs a shader's failed assert only once its epoch retires, and this is where that lands in the test that dispatched it.
+    /// A synchronous child blocks on it; in a parallel invocation it must be safe to call from several children at once.
+    /// Empty awaits nothing.
+    cc::unique_function<cc::shared_async<cc::unit>()> finish_each;
 };
 
 namespace nx::impl
@@ -86,7 +93,8 @@ cc::shared_async<invocation_result> async_invoke_tests_impl(cc::string name,
                                                             bool in_parallel,
                                                             isize max_concurrent,
                                                             cc::thread_bound_scheduler* home,
-                                                            cc::unique_function<cc::shared_async<cc::unit>()> after_each);
+                                                            cc::unique_function<cc::shared_async<cc::unit>()> after_each,
+                                                            cc::unique_function<cc::shared_async<cc::unit>()> finish_each);
 
 // The home the calling body runs in, for invocation_options::inherit_home; asserts there is one.
 [[nodiscard]] cc::thread_bound_scheduler* invoking_home();
@@ -107,7 +115,8 @@ cc::shared_async<invocation_result> async_invoke_tests_boxed(cc::string_view nam
     boxes.reserve(sizeof...(Args));
     (boxes.push_back(typed_value::create(cc::move(args))), ...);
     return async_invoke_tests_impl(cc::string(name), cc::arg_types_of(cc::signature<void(Args...)>{}), cc::move(boxes),
-                                   in_parallel, options.max_concurrent, home, cc::move(options.after_each));
+                                   in_parallel, options.max_concurrent, home, cc::move(options.after_each),
+                                   cc::move(options.finish_each));
 }
 
 template <class... A, std::size_t... I>

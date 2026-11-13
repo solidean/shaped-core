@@ -30,7 +30,17 @@ struct sg_test::backend_entry
 struct sg_test::context_factory
 {
     cc::string backend; ///< e.g. "dx12"
+    /// A context as a benchmark wants it, with no validation slowing it down.
     cc::unique_function<cc::result<sg::context_handle>()> create;
+    /// A context as a test running beside the drivers needs it: validated as theirs are.
+    /// The dx12 debug layer is process-wide and must be on before the first device, so a test that created one without it
+    /// first would fail every dx12 driver after it; empty where `create` already serves.
+    cc::unique_function<cc::result<sg::context_handle>()> create_validated;
+
+    [[nodiscard]] cc::result<sg::context_handle> create_for_test() const
+    {
+        return create_validated.is_valid() ? create_validated() : create();
+    }
 };
 
 namespace sg_test
@@ -51,9 +61,13 @@ inline bool register_backend(cc::string driver, cc::string invoke)
 cc::vector<context_factory>& context_factories();
 
 // Appends a factory; returns true so it can seed a static-init bool.
-inline bool register_context_factory(cc::string backend, cc::unique_function<cc::result<sg::context_handle>()> create)
+inline bool register_context_factory(cc::string backend,
+                                     cc::unique_function<cc::result<sg::context_handle>()> create,
+                                     cc::unique_function<cc::result<sg::context_handle>()> create_validated = {})
 {
-    context_factories().push_back(context_factory{.backend = cc::move(backend), .create = cc::move(create)});
+    context_factories().push_back(context_factory{.backend = cc::move(backend),
+                                                  .create = cc::move(create),
+                                                  .create_validated = cc::move(create_validated)});
     return true;
 }
 
@@ -71,5 +85,12 @@ inline cc::unique_function<cc::shared_async<cc::unit>()> sweep_after_each(sg::co
         seen = submitted;
         return ctx->epochs_in_flight_completion(2);
     };
+}
+
+/// What a driver awaits as each test's last step, inside that test: the shader print and assert records it left in flight, decoded and logged.
+/// A shader's failed assert is then the error of the test that dispatched it, rather than of whichever test or driver next retires its epoch.
+inline cc::unique_function<cc::shared_async<cc::unit>()> settle_each(sg::context_handle ctx)
+{
+    return [ctx = cc::move(ctx)] { return ctx->diagnostics_settled(); };
 }
 } // namespace sg_test

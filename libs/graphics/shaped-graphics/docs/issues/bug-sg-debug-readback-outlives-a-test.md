@@ -13,3 +13,7 @@ They differ run to run, and none of them logs a guard report.
 The hypothesis, not yet traced, is sg's readback of a debug window, queued when an epoch retires, carrying the context of whichever test advanced it.
 Without guards no package shader writes records, which is why no default run shows it.
 It blocks `report` as a dev default: either the readback holds no test's context, or retiring an epoch drains it.
+
+- **2026-11-12: the sg, sr and sv drivers settle each test's records inside it.**
+  `nx::invocation_options::finish_each` awaits `ctx.diagnostics_settled()` as each child's last step, so the readback a test's shader caused completes before its leak check counts.
+  Not rechecked under `report` yet: that rerun is what closes this.

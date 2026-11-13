@@ -1,0 +1,8 @@
+// The `words` setup's contract, which words.cc fills: 256 threads read `input` and write `output`, both 32-bit words.
+// `input` holds the edges first (0, 1, the top bit, every bit, the int extremes), then hashed bits.
+// `output` holds four words a thread, all zero, so a word nobody writes compares as zero on every run.
+module diff_words
+
+binding io:
+    input: buffer[uint]
+    output: mut buffer[uint]

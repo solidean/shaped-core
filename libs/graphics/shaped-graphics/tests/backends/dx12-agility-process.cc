@@ -245,7 +245,10 @@ cc::shared_async<cc::unit> agility_sweep(cc::string invoke, bool native_dxil)
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true);
         co_await nx::async_invoke_tests_in_sequence(
-            invoke, nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())}, ctx.value());
+            invoke,
+            nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sg_test::settle_each(ctx.value())},
+            ctx.value());
         auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
         dx.poll_device_removal();
         CHECK(!dx.is_device_lost())

@@ -95,6 +95,10 @@ It becomes runnable against each backend by two pieces working together:
   A readback awaits its own result: `auto const data = co_await future.data();`.
   `co_await ctx->idle_completion()` is for a test that needs the whole GPU and every actor drained.
   `co_await ctx->routines.idle_completion()` is for one that needs every registered routine up.
+  **A shader's failed assert fails the test that dispatched it**, though its record reaches the log only once its epoch retires.
+  A driver passes `.finish_each = sg_test::settle_each(ctx)`, which awaits `ctx->diagnostics_settled()` as each test's last step, inside that test.
+  So a test need not drain its own epochs to be judged on its shaders; it drains them only to read a record mid-test, or to count one before it ends.
+  `sg - a shader's undeclared failed assert fails the test that dispatched it, and no other` pins that, on a nested run.
   A blocking wait in a library's tests is a `blocking-wait` lint finding, allowed by file in that library's `.shaped-lint.yml` where the wait is what the test checks.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.

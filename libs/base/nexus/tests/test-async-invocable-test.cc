@@ -181,6 +181,39 @@ cc::shared_async<cc::unit> drive_with_after_each_in_parallel(probe_key k)
         "g", nx::invocation_options{.after_each = [k] { return note_after_each(k); }}, k);
 }
 
+/// Suspends, then notes and checks what `pass` says, so a failure it reports reaches its child from another thread.
+cc::shared_async<cc::unit> note_finish(probe_key k, bool pass)
+{
+    (void)co_await a_moment_later();
+    note(k, "finish");
+    CHECK(pass);
+}
+
+cc::shared_async<cc::unit> drive_finishing_in_sequence(probe_key k)
+{
+    k.p->result = co_await nx::async_invoke_tests_in_sequence(
+        "g", nx::invocation_options{.finish_each = [k] { return note_finish(k, false); }}, k);
+}
+
+cc::shared_async<cc::unit> drive_finishing_in_parallel(probe_key k)
+{
+    k.p->result = co_await nx::async_invoke_tests_in_parallel(
+        "g", nx::invocation_options{.finish_each = [k] { return note_finish(k, false); }}, k);
+}
+
+cc::shared_async<cc::unit> drive_finishing_cleanly(probe_key k)
+{
+    k.p->result = co_await nx::async_invoke_tests_in_sequence(
+        "g", nx::invocation_options{.finish_each = [k] { return note_finish(k, true); }}, k);
+}
+
+cc::shared_async<cc::unit> child_requires(probe_key const& k)
+{
+    note(k, "requires");
+    REQUIRE(false);
+    co_return;
+}
+
 template <class F>
 void add_async_child(nx::test_registry& reg, cc::string name, F* fn, nx::config::cfg cfg = {})
 {
@@ -314,6 +347,57 @@ TEST("async invocables - after_each is awaited after every child of a sequence, 
     CHECK(exec.count_failed_tests() == 0);
     auto const order = p.order.lock([](cc::vector<cc::string>& o) { return o; });
     CHECK(order.size() == 2);
+}
+
+TEST("async invocables - finish_each runs inside every child, after its body, a failed one too", no_scheduler)
+{
+    for (auto const driver : {&drive_finishing_in_sequence, &drive_finishing_in_parallel})
+        for (auto const jobs : {1, 4})
+        {
+            probe p;
+            nx::test_registry reg;
+            add_async_child(reg, "a", &child_a);
+            add_sync_child(reg, "b",
+                           [](probe_key const& k)
+                           {
+                               note(k, "b");
+                               CHECK(true);
+                           });
+            add_async_child(reg, "c", &child_requires);
+
+            auto const exec = run_driver(reg, p, driver, jobs);
+
+            // the failing check is the finisher's, and each child carries its own, the driver none
+            REQUIRE(exec.executions.size() == 1);
+            auto const& d = exec.executions[0];
+            CHECK(!d.root.is_considered_failing);
+            REQUIRE(d.nested.size() == 3);
+            for (auto const& child : d.nested)
+                CHECK(child.is_considered_failing()).context(child.instance.declaration->name);
+
+            auto const order = p.order.lock([](cc::vector<cc::string>& o) { return o; });
+            auto finishes = 0;
+            for (auto const& o : order)
+                finishes += o == "finish" ? 1 : 0;
+            CHECK(finishes == 3);
+            if (driver == &drive_finishing_in_sequence)
+            {
+                REQUIRE(order.size() == 6);
+                CHECK(order[0] == "a");
+                CHECK(order[1] == "finish");
+                CHECK(order[2] == "b");
+                CHECK(order[3] == "finish");
+                CHECK(order[4] == "requires");
+                CHECK(order[5] == "finish");
+            }
+        }
+
+    probe p;
+    nx::test_registry reg;
+    add_async_child(reg, "a", &child_a);
+    add_async_child(reg, "c", &child_c);
+    auto const exec = run_driver(reg, p, &drive_finishing_cleanly, 4);
+    CHECK(exec.count_failed_tests() == 0);
 }
 
 TEST("async invocables - in_parallel starts every child before awaiting any, and reports in match order", no_scheduler)

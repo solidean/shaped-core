@@ -3,8 +3,6 @@ created: 2026-11-13
 refs:
   - file: libs/graphics/shaped-viewer/tests/headless-viewer-test.cc:1200
   - test: "sv - a guest settled render advances no epoch of its own, and settles in its host's frames"
-claimed-by: Claude (for Julius Nehring-Wirxel)
-claimed-at: 2026-11-13T10:50Z
 ---
 
 # A guest settled render draws nothing on metal, and the run then hangs
@@ -28,3 +26,23 @@ Ruled out: the readback's ordering and copy-out, residency, the download ring's 
 Also ruled out: the view store's and resource pools' idle clocks; ticking them by guest frames instead changed nothing.
 Not found yet: what in the display pass of a frame after a long epoch gap reads nothing; a GPU capture of that frame is the next step.
 The metal staging rings keep one checkpoint per epoch and compact the vector from the front, so a host this fast also makes the run slow to end; that is the hang after the failure.
+
+2026-11-13, later, the same way:
+Raster mode fails too, so it is not the ray-tracing path: no BLAS, TLAS or wavefront state is needed.
+Every routine is ready by the fourth frame in both runs; raster declines only while its depth and surface pipelines compile.
+A frame that then executes (7 draws, 9 dispatches, 0.8 ms on the GPU, no feedback error) leaves the target all zero in some runs and right in others.
+The accumulator of a wavefront run under the spinning host is all zero in every frame, while a slow host's holds the quad; samples still count up in both.
+Also ruled out: the stream and off-frame transfer staging, which live until their own commit's feedback, and the overflow staging, which is made resident.
+The working hypothesis is a resource a frame reads or writes being released or recycled by an epoch's retirement before the GPU runs that frame, since Metal 4 retains nothing; which one is not found.
+A GPU capture in Xcode of a frame that executes and leaves nothing is the next step; it needs someone at the machine.
+
+2026-11-13, a GPU capture tried:
+Apple's capture layer hangs on `resolveCounterHeap`, sg's timestamp queries, so a capture needs them switched off; the bug does not need them.
+With them off, every run that captured passed, even one capturing only the frames after the first 18 submissions: starting a capture drains the GPU, which hides the bug.
+So an Xcode capture of the failing frame is not to be had either; the bug needs the GPU lagging behind the epochs.
+Also ruled out by switching it off under the spinning host: aliasing in the transient bump heap, which resets its head every epoch; dedicated transients still fail.
+And two guest frames in flight at once: one at a time still fails.
+
+2026-11-13: the test's host is paced now, an advance every 4 ms as an app's frame loop would, and the test passes; this issue is the behavior under a host that is not.
+To reproduce, put the host loop back to `pump_for(1.0)` then `advance_epoch()` with nothing between.
+What a fix has to explain: a frame that runs on the GPU without error and leaves its target empty, once the host is thousands of epochs ahead of it.
