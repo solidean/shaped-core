@@ -1170,7 +1170,7 @@ void checker::compile_struct(symbol_id id)
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
     cc::string_view const known[]
-        = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle", "target_layout"};
+        = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle", "target_layout", "tangent"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -1296,6 +1296,10 @@ void checker::compile_struct(symbol_id id)
     });
     out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
+
+    // DIFF-37: a struct may say which struct its change is, whose fields name the fields they change
+    if (auto const* const declared = find_attribute(file, d.attributes, "tangent"))
+        declare_tangent(file, type, *declared, !parameters.empty());
 
     // CHK-522: a struct SGL ships may stand in each target's own order, a branch of fields per target
     auto const* const layout = find_attribute(file, d.attributes, "target_layout");

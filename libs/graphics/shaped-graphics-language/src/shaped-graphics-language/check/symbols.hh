@@ -60,6 +60,8 @@ enum class sgl::check::type_kind : sgl::u8
     constant,
     /// `scalar_of[V]` of an open `V`, which is its `element`: an instance makes it `V`'s scalar (CHK-423).
     scalar_of,
+    /// `tangent[T]` of an open `T`, which is its `element`: an instance makes it `T`'s tangent (DIFF-7).
+    tangent_of,
     // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 

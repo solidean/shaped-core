@@ -161,9 +161,17 @@ auto sgl::check::impl::flattener::flatten_diff(ast::expr_id id, type_id type, ca
         identity.push_back(i32(i));
         no_closures.push_back(-1);
     }
-    auto const result_type = c.out.functions[c.out.at(signature->function).info].result;
+    auto const result_type = signature->result;
     ++diff_depth;
-    auto const inlined = call_closure(id, result_type, handed[function_slot], references, identity, no_closures);
+    // a generic's instance, by the bindings the check deduced
+    auto const inlined = signature->bindings.empty()
+                           ? call_closure(id, result_type, handed[function_slot], references, identity, no_closures)
+                           : [&]
+    {
+        auto const body = inline_bound(id, signature->function, references, identity, no_closures, signature->bindings);
+        return is_valid(body.label) ? add_expr(result_type, id, flat_block{.label = body.label, .body = body.body})
+                                    : flat_expr_id::none;
+    }();
     --diff_depth;
     if (!is_valid(inlined))
         return give_up("the function, which did not inline");

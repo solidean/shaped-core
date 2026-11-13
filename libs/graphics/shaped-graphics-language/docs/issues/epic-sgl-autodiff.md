@@ -20,7 +20,7 @@ What is left, each a child issue when it is taken up:
 
 - **The forward-only builtins going backward**: `ddx`, `ddy`, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and the shuffles, whose transposes need which lane each invocation is.
 - **A texture's levels past 0**, and a sample through a sampler bound at run time.
-- **`tangent[S](…)` built from its fields**, user-declared tangent types, and `tangent[T]` of a type parameter.
+- **`tangent[S](…)` built from its fields** for a minted tangent; a declared one (DIFF-37) builds as any struct.
 - **A tape past 1024 slots**, which would spill to memory or ask for a `@backward`.
 - **Higher-order derivatives**, which nothing has asked for yet.
 
@@ -42,7 +42,7 @@ What follows was read from its user guide, its SLANG.D paper and the SlangPy doc
 
 **Where Slang is ahead**, in the order worth closing:
 
-1. **Differentiable generic and interface code**: `IDifferentiable`, a type's own `Differential`, differentiable member functions.
+1. **Differentiable generic and interface code** (generics and declared tangents now done, DIFF-4 and DIFF-37): `IDifferentiable`, a type's own `Differential`, differentiable member functions.
    SGL has no interfaces by design ([generics.md](../spec/incubator/generics.md)): a generic body is checked per instance.
    So differentiating a generic is differentiating its instance, and `tangent[T]` of a type parameter resolves per instance as `scalar_of[V]` does.
    A type declaring its own tangent has no interface to declare it against, which is a design question of its own.

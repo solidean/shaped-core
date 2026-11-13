@@ -207,7 +207,6 @@ It has buffers of floats, vectors and structs differentiable by their `@gradient
 * **Whether a call may mark a parameter it does not differentiate**, beside `@no_diff` on the declaration, which the prototype has.
 * **Whether a tape may spill** to a buffer for a long bounded loop, or the bound is limited to what fits in registers and the rest needs a `@backward`.
 * **Whether sharing a gradient's atomic wants a spelling of its own**, beside declaring `subgroups`, for an entry point that declares it for another reason and would rather not share.
-* **User-declared tangent types**, which wait for interfaces, and with them `tangent[T]` of a type parameter.
-* **Whether `tangent[S](…)` constructs from fields**, as `S(…)` does, and whether a field marked `@no_diff` drops out of it as an int does.
+* **Whether `tangent[S](…)` constructs from fields** for a minted tangent, as a declared one's `T(…)` does (DIFF-37), and whether a field marked `@no_diff` drops out of it as an int does.
 * **Higher-order derivatives** (`fwd_diff` of a `bwd_diff`), which nothing has asked for yet.
 * **Prior art**: Slang has the same surface (`fwd_diff`, `bwd_diff`, `no_diff`, custom derivatives), and its choices on each open question are worth reading before deciding.
