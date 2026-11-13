@@ -527,7 +527,8 @@ struct planner
         p.struct_of_type[index_of(type)] = i32(p.structs.size());
         p.structs.push_back({
             .type = type,
-            .name = is_valid(info.generic) ? instance_name(type) : spell_type(p.m.at(info.symbol).name),
+            .name = is_valid(info.generic) || is_valid(info.tangent_of) ? instance_name(type)
+                                                                        : spell_type(p.m.at(info.symbol).name),
             .role = role,
             .members = members_of(written, role != struct_role::plain,
                                   role == struct_role::patch_constants  ? patch_location_base

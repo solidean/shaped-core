@@ -507,6 +507,24 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             auto const is_function = scope.find_local(name) == nullptr && !is_type_parameter_name(name)
                                   && found != nullptr && !found->empty()
                                   && out.at(found->front()).kind == symbol_kind::function;
+            // PROTOTYPE (autodiff): `tangent[T]()` is the zero of that tangent type, whose fields are then assigned
+            if (name == "tangent" && scope.find_local(name) == nullptr && (found == nullptr || found->empty()))
+            {
+                auto const type = resolve_value_type(file, call.callee, &scope);
+                if (!ast.at(call.arguments).empty())
+                {
+                    (void)check_arguments(scope, call.arguments, false);
+                    if (type != error_type)
+                        unsupported(file, callee_where,
+                                    "a tangent built from its fields: `tangent[T]()` is its zero, whose fields are "
+                                    "then "
+                                    "assigned");
+                    return error_type;
+                }
+                if (type != error_type)
+                    set_target(file, id, {.kind = target_kind::zero_value});
+                return type;
+            }
             // CHK-339: `ring[4, float](…)` constructs that instance, which binds every parameter its constructor has
             if (scope.find_local(name) == nullptr && !is_type_parameter_name(name)
                 && is_valid(generic_named(file, index->object)))

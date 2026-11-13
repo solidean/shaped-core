@@ -451,11 +451,76 @@ auto sgl::check::impl::flattener::flatten_filled(ast::expr_id id, type_id type, 
     return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
 }
 
+auto sgl::check::impl::flattener::leaves_of(type_id t, f32 v, cc::vector<scalar>& out) const -> bool
+{
+    if (auto const* const r = c.out.builtin_type_of(t))
+    {
+        for (auto i = 0; i < r->leaf_count; ++i)
+        {
+            switch (r->leaf_kind)
+            {
+            case value_kind::scalar_float:
+                out.push_back(scalar::of(v));
+                break;
+            case value_kind::scalar_half:
+                out.push_back(scalar::of_half(f64(v)));
+                break;
+            case value_kind::scalar_uint:
+                out.push_back(scalar::of_uint(0));
+                break;
+            case value_kind::boolean:
+                out.push_back(scalar::of(false));
+                break;
+            case value_kind::none:
+                return false;
+            default:
+                out.push_back({.kind = r->leaf_kind, .bits = 0});
+                break;
+            }
+        }
+        return true;
+    }
+    auto const& info = c.out.at(t);
+    if (info.kind == type_kind::enumeration)
+    {
+        auto const cases = c.out.at(info.cases);
+        if (cases.empty())
+            return false;
+        out.push_back(scalar::of(cases[0].value));
+        return true;
+    }
+    if (info.kind == type_kind::array)
+    {
+        for (auto i = 0; i < info.count; ++i)
+            if (!leaves_of(info.element, v, out))
+                return false;
+        return info.count > 0;
+    }
+    if (info.kind != type_kind::structure)
+        return false;
+    for (auto const& member : c.out.at(info.members))
+        if (!leaves_of(member.type, v, out))
+            return false;
+    return true;
+}
+
 auto sgl::check::impl::flattener::flatten_call(ast::expr_id id, type_id type, target const& where, ast::call const& call)
     -> flat_expr_id
 {
     if (where.kind == target_kind::array_filled)
         return flatten_filled(id, type, call);
+    // PROTOTYPE (autodiff): `tangent[T]()`, a zero in every leaf
+    if (where.kind == target_kind::zero_value)
+    {
+        auto leaves = cc::vector<scalar>();
+        if (!leaves_of(type, 0.0f, leaves))
+        {
+            mark_failed();
+            return flat_expr_id::none;
+        }
+        auto at = isize(0);
+        return value_of(type, id, leaves, at);
+    }
     // CHK-341: `undefined()` is a local declared and never assigned, whose value nobody reads
     if (where.kind == target_kind::undefined_value)
     {

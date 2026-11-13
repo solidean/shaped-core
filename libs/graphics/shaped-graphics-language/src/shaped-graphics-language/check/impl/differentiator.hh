@@ -110,7 +110,17 @@ struct differentiator
 
     [[nodiscard]] bool is_differentiable(type_id t) const { return f.c.is_differentiable_type(t); }
     /// What a change of a value of `t` is: a position's is a direction.
-    [[nodiscard]] type_id tangent(type_id t) const { return f.c.tangent_type(t); }
+    // PROTOTYPE: the flattener is always made from a checker it may change, and a tangent struct is minted there
+    [[nodiscard]] type_id tangent(type_id t) const { return const_cast<checker&>(f.c).tangent_type(t); }
+    /// The field of `t`'s tangent that its field `member` changes, -1 where none does; a vector's is its own.
+    [[nodiscard]] i32 tangent_member(type_id t, i32 member) const
+    {
+        if (record_of(t) != nullptr || m().at(t).kind != type_kind::structure)
+            return member;
+        return const_cast<checker&>(f.c).tangent_member(t, member);
+    }
+    /// Whether part `i` of a value of `t` has a part of `t`'s tangent: an element or a vector's field always does.
+    [[nodiscard]] bool is_part_kept(type_id t, isize i) const { return tangent_member(t, i32(i)) >= 0; }
 
     [[nodiscard]] i32 leaf_count(type_id t) const;
     [[nodiscard]] bool is_scalar(type_id t) const { return leaf_count(t) == 1; }
@@ -272,6 +282,10 @@ struct differentiator
 
     /// `steps` below a fresh read of `root`.
     flat_expr_id place_of(flat_expr_id root, cc::span<place_step const> steps);
+
+    /// `steps` of a primal place below a fresh read of `root`, its tangent, whose struct fields `tangent_member` maps;
+    /// none where a step reaches a field no tangent holds.
+    flat_expr_id tangent_place_of(flat_expr_id root, cc::span<place_step const> steps);
 
     /// `place += g`, field by field for a struct or an array, which has no `+`.
     template <class Root>

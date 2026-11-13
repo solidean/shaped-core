@@ -83,8 +83,12 @@ They must agree even beside a kink, and both match a central difference wherever
   A loop whose body is a few operations is the exception, 57 kept against 24 unrolled, and `@unroll` on it unrolls it going backward too.
   A `continue` leaves a block around the body, and a `break` or a `return` from inside the loop sets a flag.
   The iterations after it run as nothing, each one's guard recorded on the tape, so going backward they are skipped alike.
-  A tape holds at most 1024 slots, and a loop of any other bound is `unsupported-yet`.
+  A tape holds at most 1024 slots.
   Forward mode follows every loop.
+* **A loop of any other bound states one**: `@max_iterations(n)` on a `while` or a `for` ([CHK-528](../semantics/checking.md#control-flow)), as Slang's `[MaxIters]` is.
+  The bound holds in every compile, so the loop is a `for` of n iterations whose body leaves once the loop is done, and it is walked back like any other.
+  [bounded-loops.sgl](../../../tests/corpus/derivatives/bounded-loops.sgl) marches until a sum passes a threshold, the step count following the input.
+  A loop that states no bound is `unsupported-yet` going backward, unless its function has a `@backward`.
 * **A derivative written by hand is two attributes.**
   `@forward(f)` stands on a function of each parameter and its tangent, which gives the result's tangent.
   `@backward(f)` stands on a function of each parameter and its adjoint as `mut`, then the result's adjoint.
@@ -93,7 +97,12 @@ They must agree even beside a kink, and both match a central difference wherever
   [written-derivatives.sgl](../../../tests/corpus/derivatives/written-derivatives.sgl) composites front to back until almost nothing shows through, and walks back without a tape.
   The attribute names `f` by its text for now, which a resolved expression would replace.
 * **A position's tangent is its direction**: a `pos3`'s is a `vec3`, an `hpos4`'s a `float4`, and `mat4 * pos3` moves a change of the position without the translation.
-  A struct's tangent is the struct itself for now, so a position in one holds its direction, which every target writes alike.
+* **A type's tangent is `tangent[T]`**, which a caller names to declare the place `bwd_diff` adds to.
+  A struct's is a struct of its differentiable fields' tangents, under their names: `tangent[splat]` holds `at: vec3` and `weight: float`, and no `count: int`.
+  A struct whose fields are all their own tangents is its own, and so is a float or a vector; an array's is an array of its element's.
+  `tangent[T]()` is its zero, and a direction is that zero with its fields assigned, since nothing else constructs it yet.
+  Targets write it as a struct of its own, `tangent_splat`, beside the struct it changes.
+  [struct-tangents.sgl](../../../tests/corpus/derivatives/struct-tangents.sgl) holds both modes to central differences through a struct of an array of them.
 
 ## Buffers and textures
 
@@ -139,12 +148,12 @@ What it found in SGL itself:
 * **Types**: which types are differentiable, and each one's **tangent type**.
   `float`, the float vectors and matrices and `half` are their own.
   The geometry types are not: the tangent of a `pos3` is a `vec3`, and of an `hpos4` a `vec4`, which typed geometry gives for free where other languages spell it out.
-  A struct is differentiable member-wise, its integer and `no_diff` members carried as they are.
+  A struct is differentiable member-wise, and its tangent `tangent[S]` holds no field for an integer member.
 * **The check pass**: `@differentiable`, `no_diff`, `@forward(f)` and `@backward(f)`, and a diagnostic for each construct the transform refuses.
   A call inside a differentiable body that reaches a non-differentiable builtin is a diagnostic, never a zero derivative.
 * **The flattener or a pass after it**: the forward transform (a dual value per node) and the reverse transform (the primal, then the adjoints in reverse).
 * **Control flow**: an `if` records its condition for the reverse pass.
-  A loop with a constant bound keeps a local tape sized by the bound.
+  A loop with a constant or a stated bound keeps a local tape sized by the bound.
   Any other loop is refused unless its function has a `@backward`.
 * **The builtin registry**: a derivative rule per differentiable record, and `prelude/builtins.sgl` regenerated with them.
 * **Atomics**: an adjoint added from many invocations, which [Buffers and textures](#buffers-and-textures) describes.
@@ -160,13 +169,11 @@ What it found in SGL itself:
 
 ## The order to build it in
 
-The prototype has done forward mode, reverse mode, loops of constant bounds over a tape, derivatives written by hand, `@no_diff`, and the tangent types of the builtin geometry types.
+The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and `tangent[T]` for the geometry types and for structs.
 It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
 
-1. A loop whose bound is stated rather than constant, as Slang's `[MaxIters]` is, which a `while` needs.
-2. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
-3. The rules as registry records.
-4. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
+1. The rules as registry records.
+2. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
 
 ## Open
 
@@ -174,6 +181,7 @@ It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
 * **Whether a tape may spill** to a buffer for a long bounded loop, or the bound is limited to what fits in registers and the rest needs a `@backward`.
 * **Accumulation across invocations**: a float atomic add behind a feature, a compare-exchange loop on the bits as a polyfill, or a subgroup reduction first and one atomic per subgroup.
   The last is what makes any of them fast, and it may want to be a prelude function rather than something the transform writes.
-* **User-declared tangent types**, which wait for interfaces.
+* **User-declared tangent types**, which wait for interfaces, and with them `tangent[T]` of a type parameter.
+* **Whether `tangent[S](…)` constructs from fields**, as `S(…)` does, and whether a field marked `@no_diff` drops out of it as an int does.
 * **Higher-order derivatives** (`fwd_diff` of a `bwd_diff`), which nothing has asked for yet.
 * **Prior art**: Slang has the same surface (`fwd_diff`, `bwd_diff`, `no_diff`, custom derivatives), and its choices on each open question are worth reading before deciding.

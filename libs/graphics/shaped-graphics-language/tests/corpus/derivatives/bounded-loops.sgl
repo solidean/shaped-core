@@ -1,0 +1,107 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): loops whose bound is stated rather than constant (CHK-528).
+// `@max_iterations(n)` makes any `while` or `for` a loop of n iterations whose body starts by leaving once the loop is
+// done, so going backward it is walked back over a tape of n slots, as a loop of constant bounds is.
+
+// a march whose step count follows the input: 6 steps here, the count changing only at x.x = 0 and x.x = 1
+fun marched(x: float2) -> float:
+    let mut t = 0.0
+    let mut acc = 0.0
+    @max_iterations(16)
+    while t < 3.0:
+        t += 0.5 + 0.1 * x.x
+        acc = acc * 0.9 + sin(t * x.y)
+    return acc + t
+
+// a loop whose end only a `let` knows, so it is no constant
+fun powered(x: float2, n: int) -> float:
+    let end = n
+    let mut y = x.x
+    @max_iterations(8)
+    for i in 1 ..< end:
+        y = y * x.y + 0.1 * sin(y * float(i))
+    return y
+
+fun powered_of(x: float2) => powered(x, 5)
+
+// a `break` out of a bounded loop leaves its later iterations as nothing, going backward too
+fun searched(x: float2) -> float:
+    let mut y = x.x
+    let mut k = 0
+    @max_iterations(20)
+    while true:
+        y = y * 0.8 + x.y * 0.3
+        k += 1
+        if k == 7 => break
+    return y * y
+
+fun marched_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (marched(x + axis * h) - marched(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(marched, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(marched, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test marched_agrees(float2(0.7, 0.4), float2(1.0, 0.0))
+test marched_agrees(float2(0.7, 0.4), float2(0.0, 1.0))
+
+fun powered_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (powered_of(x + axis * h) - powered_of(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(powered_of, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(powered_of, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test powered_agrees(float2(0.6, 0.9), float2(1.0, 0.0))
+test powered_agrees(float2(0.6, 0.9), float2(0.0, 1.0))
+
+fun searched_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (searched(x + axis * h) - searched(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(searched, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(searched, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test searched_agrees(float2(0.5, -0.4), float2(1.0, 0.0))
+test searched_agrees(float2(0.5, -0.4), float2(0.0, 1.0))
+
+binding results:
+    values: mut buffer[float]
+
+// a kernel holds the bounded loop and its tape on every target
+@compute(64) fun marched_backward(@thread_id id: int3){results}:
+    let mut gradient = float2(0.0)
+    bwd_diff(marched, float2(float(id.x) * 0.01, 0.4), mut gradient, 1.0)
+    results.values[id.x] = gradient.x + gradient.y
+
+// a bound is a tape's length, so one past what a tape holds is refused
+fun long_march(x: float) -> float:
+    let mut t = 0.0
+    @max_iterations(5000)
+    while t < 3.0:
+        t += 0.001 + x * x
+    return t
+
+@expect(error = "unsupported-yet")
+@compute(1) fun refuses_a_bound_past_a_tape(){results}:
+    let mut dx = 0.0
+    bwd_diff(long_march, results.values[0], mut dx, 1.0)
+    results.values[1] = dx
+
+// without a bound a `while` still has no tape, and only a @backward walks it back
+fun unbounded(x: float) -> float:
+    let mut t = 0.0
+    while t < 3.0:
+        t += 0.5 + x * x
+    return t
+
+@expect(error = "unsupported-yet")
+@compute(1) fun refuses_an_unbounded_while(){results}:
+    let mut dx = 0.0
+    bwd_diff(unbounded, results.values[0], mut dx, 1.0)
+    results.values[1] = dx
