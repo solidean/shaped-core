@@ -91,7 +91,7 @@ They must agree even beside a kink, and both match a central difference wherever
   A loop whose body is a few operations is the exception, 57 kept against 24 unrolled, and `@unroll` on it unrolls it going backward too.
   A `continue` leaves a block around the body, and a `break` or a `return` from inside the loop sets a flag.
   The iterations after it run as nothing, each one's guard recorded on the tape, so going backward they are skipped alike.
-  A tape holds at most 1024 slots.
+  A tape holds at most 4096 bytes; a loop whose tapes would pass that is walked back in segments, each starting from a save and run again (DIFF-21).
   Forward mode follows every loop.
 * **A loop of any other bound states one**: `@max_iterations(n)` on a `while` or a `for` ([CHK-528](../semantics/checking.md#control-flow)), as Slang's `[MaxIters]` is.
   The bound holds in every compile, so the loop is a `for` of n iterations whose body leaves once the loop is done, and it is walked back like any other.
@@ -205,7 +205,6 @@ It has buffers of floats, vectors and structs differentiable by their `@gradient
 ## Open
 
 * **Whether a call may mark a parameter it does not differentiate**, beside `@no_diff` on the declaration, which the prototype has.
-* **Whether a tape may spill** to a buffer for a long bounded loop, or the bound is limited to what fits in registers and the rest needs a `@backward`.
 * **Whether sharing a gradient's atomic wants a spelling of its own**, beside declaring `subgroups`, for an entry point that declares it for another reason and would rather not share.
 * **Whether `tangent[S](…)` constructs from fields** for a minted tangent, as a declared one's `T(…)` does (DIFF-37), and whether a field marked `@no_diff` drops out of it as an int does.
 * **Higher-order derivatives** (`fwd_diff` of a `bwd_diff`), which nothing has asked for yet.

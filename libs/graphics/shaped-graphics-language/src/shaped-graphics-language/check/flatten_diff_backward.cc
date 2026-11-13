@@ -395,6 +395,8 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
     // a kept loop is walked back from its last iteration, its index read reversed by every clone of its body
     if (auto const* const n = s.node.try_as<flat_for>())
     {
+        if (auto const* const loop = checkpointed.get_ptr(i32(n->label)))
+            return backward_checkpointed(*n, *loop);
         auto const bounds = constant_bounds(*n).value();
         auto const back = f.add_local(local_kind::index, "back", f.int_type());
         auto const index = n->index;
@@ -421,6 +423,106 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
         auto const body = collect([&] { backward(copy_of(n->body)); });
         emit(flat_block{.label = f.add_label("back"), .body = f.add_list(body)});
     }
+}
+
+auto differentiator::run_again(cc::span<flat_stmt_id const> statements) -> cc::vector<flat_stmt_id>
+{
+    auto const copy = cc::vector<flat_stmt_id>::create_copy_of(statements);
+    return collect(
+        [&]
+        {
+            for (auto const id : copy)
+            {
+                auto const s = f.entry.at(id);
+                if (auto const* const n = s.node.try_as<flat_assign>())
+                {
+                    if (is_buffer_place(n->place) || f.calls_impure(n->value, 0))
+                        return (void)failed("a loop too long to keep whole, whose segments run again, and one with an "
+                                            "effect would repeat it; a @backward walks such a loop back");
+                    emit(flat_assign{.place = clone(n->place), .value = clone(n->value)});
+                }
+                else if (auto const* const n = s.node.try_as<flat_if>())
+                {
+                    auto const condition = clone(n->condition);
+                    auto const then_body = f.add_list(run_again(copy_of(n->then_body)));
+                    auto const else_body = f.add_list(run_again(copy_of(n->else_body)));
+                    emit(flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
+                }
+                else if (auto const* const n = s.node.try_as<flat_block>();
+                         n != nullptr && !f.custom_calls.contains(i32(n->label)))
+                    emit(flat_block{.label = f.add_label("again"), .body = f.add_list(run_again(copy_of(n->body)))});
+                else if (auto const* const n = s.node.try_as<flat_for>())
+                {
+                    auto const index = f.add_local(local_kind::index, f.entry.at(n->index).name, f.int_type());
+                    auto const outer = substitution.get_ptr(i32(n->index)) != nullptr ? substitution.get(i32(n->index))
+                                                                                      : local_id::none;
+                    substitution[i32(n->index)] = index;
+                    auto const body = f.add_list(run_again(copy_of(n->body)));
+                    if (is_valid(outer))
+                        substitution[i32(n->index)] = outer;
+                    else
+                        substitution.erase(i32(n->index));
+                    emit(flat_for{.label = f.add_label("again"),
+                                  .index = index,
+                                  .first = clone(n->first),
+                                  .end = clone(n->end),
+                                  .body = body});
+                }
+                else
+                    return (void)failed("a loop too long to keep whole, whose segments run again, holding what it "
+                                        "cannot run again; a @backward walks such a loop back");
+            }
+        });
+}
+
+auto differentiator::backward_checkpointed(flat_for const& n, checkpointed_loop const& loop) -> void
+{
+    // each segment, last first: from its start's state, run again to write its tapes, then walked back
+    auto const back = f.add_local(local_kind::index, "segment_back", f.int_type());
+    auto const segment_body = collect(
+        [&]
+        {
+            auto const segment = f.add_local(local_kind::let, "segment", f.int_type());
+            emit(flat_let{.local = segment, .value = call("-", integer(loop.segments - 1), ref(back))});
+            for (auto k = isize(0); k < loop.state.size(); ++k)
+            {
+                auto const slot = add(m().at(f.entry.at(loop.saved[k]).type).element,
+                                      flat_element{.object = ref(loop.saved[k]), .index = ref(segment)});
+                emit(flat_assign{.place = ref(loop.state[k]), .value = slot});
+            }
+            // the iteration a step of a segment is, first + segment * size + step, and whether the loop has it
+            auto const iteration_at = [&](flat_expr_id step)
+            { return call("+", integer(loop.first), call("+", call("*", ref(segment), integer(loop.segment)), step)); };
+            auto const stepped = [&](cc::string_view name, bool is_backward)
+            {
+                auto const step = f.add_local(local_kind::index, name, f.int_type());
+                auto const body = collect(
+                    [&]
+                    {
+                        auto const iteration = f.add_local(local_kind::let, f.entry.at(n.index).name, f.int_type());
+                        auto const offset = is_backward ? call("-", integer(loop.segment - 1), ref(step)) : ref(step);
+                        emit(flat_let{.local = iteration, .value = iteration_at(offset)});
+                        substitution[i32(n.index)] = iteration;
+                        auto const inside = is_backward ? collect([&] { backward(loop.body); }) : run_again(loop.body);
+                        substitution.erase(i32(n.index));
+                        emit(flat_if{.condition = call("<", ref(iteration), integer(loop.first + loop.count)),
+                                     .then_body = f.add_list(inside),
+                                     .else_body = f.add_list(cc::span<flat_stmt_id const>())});
+                    });
+                emit(flat_for{.label = f.add_label(name),
+                              .index = step,
+                              .first = integer(0),
+                              .end = integer(loop.segment),
+                              .body = f.add_list(body)});
+            };
+            stepped("again", false);
+            stepped("back", true);
+        });
+    emit(flat_for{.label = f.add_label("segments"),
+                  .index = back,
+                  .first = integer(0),
+                  .end = integer(loop.segments),
+                  .body = f.add_list(segment_body)});
 }
 
 auto differentiator::parameters_of(symbol_id function) const -> cc::span<parameter const>

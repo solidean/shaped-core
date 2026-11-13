@@ -85,7 +85,11 @@ A derivative is never silently zero where the function changes.
 * **DIFF-20** Forward mode follows every loop.
 * **DIFF-21** Reverse mode follows a `for` over constant bounds, and a loop with `@max_iterations(n)` (CHK-528), which is a `for` over `0 ..< n` by EVAL-147.
   It keeps what each iteration overwrites and decides on a tape, one slot per iteration of every such loop around it, and walks the loop back from its last iteration.
-  Loops whose iterations between them pass 1024 slots are `unsupported-yet`.
+  A tape holds at most 4096 bytes, 1024 floats.
+  An outermost loop whose tapes would pass that is walked back in segments of about the square root of its iterations, each segment's tapes holding one segment.
+  Going forward it saves what its body assigns at each segment's start; going backward each segment, last first, starts from its save, runs again to write its tapes, and is walked back.
+  So it runs its body about twice, and keeps about twice the square root of its iterations in place of all of them.
+  A segmented loop whose body has an effect is `unsupported-yet`, since running a segment again would repeat it, and so is one a single iteration of which keeps more than a tape holds.
 * **DIFF-22** Any other loop is `unsupported-yet` in reverse mode, unless a function around it has a derivative written by hand (DIFF-24).
 * **DIFF-23** A `@unroll` loop is followed as its copies, in both modes.
 
