@@ -1200,6 +1200,37 @@ bool sgl::check::impl::flattener::could_take(flat_expr_id condition, isize first
     // past a handful, every grant is too many to try, and the side is probed
     if (literals.size() > 10)
         return true;
+    // a `has` a constant decision inside the condition folded away, a value `if` or a callee's `const if`, is no longer
+    // in it, so flipping it flips nothing here; what the side consults may still be a variant, so it is probed
+    struct reacher
+    {
+        flat_entry_point const& e;
+        cc::vector<bool> reached;
+
+        void expr(flat_expr_id id)
+        {
+            if (!is_valid(id) || isize(index_of(id)) >= reached.size() || reached[index_of(id)])
+                return;
+            reached[index_of(id)] = true;
+            auto const& x = e.at(id);
+            if (auto const* const b = x.node.try_as<flat_block>())
+                body(b->body);
+            for_each_operand(e, x, [&](flat_expr_id operand) { expr(operand); });
+        }
+        void body(ast::range_of<flat_stmt_id> range)
+        {
+            for (auto const st : e.at(range))
+            {
+                for_each_expr_of(e, e.at(st), [&](flat_expr_id inner) { expr(inner); });
+                for_each_body_of(e, e.at(st), [&](ast::range_of<flat_stmt_id> nested) { body(nested); });
+            }
+        }
+    };
+    auto r = reacher{.e = entry, .reached = cc::vector<bool>::create_filled(entry.exprs.size(), false)};
+    r.expr(condition);
+    for (auto const l : literals)
+        if (!r.reached[index_of(l)])
+            return true;
     auto saved = cc::vector<bool>();
     for (auto const l : literals)
         saved.push_back(entry.exprs[index_of(l)].node.as<flat_bool_literal>().value);

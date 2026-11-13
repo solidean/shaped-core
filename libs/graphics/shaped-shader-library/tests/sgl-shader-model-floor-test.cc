@@ -219,7 +219,7 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
     auto const stride = nx::is_thorough() ? 1 : 4;
     auto stages = cc::vector<sgl::check::stage>();
     auto compiled = 0;
-    auto listed_seen = isize(0);
+    auto listed_seen = cc::vector<bool>::create_filled(isize(sizeof(k_not_compiled) / sizeof(k_not_compiled[0])), false);
     auto const has = [](cc::span<sgl::check::stage const> stages, sgl::check::stage s)
     {
         for (auto const t : stages)
@@ -298,7 +298,7 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
                         .dump("issue", l->issue)
                         .dump("dxc", refused.has_error() ? refused.error().to_string() : cc::string("compiled"));
                 }
-                ++listed_seen;
+                listed_seen[l - k_not_compiled] = true;
                 continue;
             }
             auto const built = at(ssc::dxc::shader_model::sm_6_6);
@@ -321,7 +321,8 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
     CC_LOG_INFO("{} dx12 texts compiled at Shader Model 6.6, of {}", compiled, stage_names);
     // the whole sweep meets every entry the list names, so none stands there that no longer fails
     if (nx::is_thorough())
-        CHECK(listed_seen == isize(sizeof(k_not_compiled) / sizeof(k_not_compiled[0])));
+        for (auto i = isize(0); i < listed_seen.size(); ++i)
+            CHECK(listed_seen[i]).dump("file", k_not_compiled[i].file).dump("entry", k_not_compiled[i].entry);
     for (auto const s :
          {sgl::check::stage::vertex, sgl::check::stage::pixel, sgl::check::stage::compute, sgl::check::stage::geometry,
           sgl::check::stage::tessellation_control, sgl::check::stage::tessellation_evaluation,
