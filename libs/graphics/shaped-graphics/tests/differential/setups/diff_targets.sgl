@@ -1,7 +1,9 @@
-// The `targets` setup's contract, which setups.cc fills: two triangles over a 16 by 16 target set of five formats, depth tested.
+// The `targets` and `blended` setups' contract, which setups.cc fills: two triangles over a 16 by 16 target set.
+// `targets` writes `target`'s five formats behind a depth test; `blended` blends `blend_target` over a cleared set, with no depth.
 // The setup's own vertex stage (shaders/layered.sgl) writes `varyings`; a corpus pixel stage takes them and writes `target`.
 // Layer 0 covers the whole target at depth 0.5; layer 1, drawn after it, is a smaller triangle whose depth runs 0.2 to 0.8 left to right.
 // So the depth test keeps layer 1 on the left of its triangle and layer 0 on the right, and no pixel center ties.
+// Blended, layer 1 lands on layer 0 wherever it covers it, primitive order being an API's promise.
 // `uv` runs 0 to 1 across the target, row 0 at the top.
 // Each target is read back decoded to floats, a channel each, but `word`, which is compared as the integer it is.
 module diff_targets
@@ -17,6 +19,14 @@ struct varyings:
     packed: float4
     small: float3
     word: uint
+
+// What `blended` blends, each over the clear color (0.2, 0.4, 0.6, 0.5):
+// `over` is rgba8 sRGB under straight alpha, `sum` rgba16_float added, `darkest` rgb10a2 under min, and `difference` rgba16_float subtracted from.
+@pixel struct blend_target:
+    over: float4
+    sum: float4
+    darkest: float4
+    difference: float4
 
 binding io:
     input: buffer[float]

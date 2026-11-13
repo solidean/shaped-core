@@ -17,7 +17,7 @@ What they do not do yet, in the order it pays off:
   `texels` and `raster` exist since 2026-11-13; per-texel `relative` turned out to be enough for both at 16 by 16.
   `scene` exists since 2026-11-13: inline traces over a fixed TLAS, ids exact by value and hits within relative 0.0001 across APIs.
   `targets` exists since 2026-11-13: five formats at once behind a depth test, decoded to floats, the integer one exact.
-  Blending into them and a multisampled resolve are next.
+  `blended` blends into them over a clear, sRGB in linear space included; a multisampled resolve is next.
   Its interpreter half binds the software pool a `software_trace` build writes, so 12 of the 13 entry points now run on the interpreter.
   Each is one C++ setup and one SGL module, and every corpus file naming it is free after that.
 - **The interpreter as a third opinion.**

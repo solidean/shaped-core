@@ -553,11 +553,72 @@ bool const scene_registered = sg_diff::register_setup({
     .interpreted = &scene_for_interpreter,
 });
 
+cc::shared_async<cc::vector<sg_diff::output>> run_blended(sg::context* ctx, sg_diff::shaders_on_route on)
+{
+    using io = sgl_modules::diff_targets::io;
+    using target = sgl_modules::diff_targets::blend_target;
+    constexpr auto add = sg::blend_component{.source = sg::blend_factor::one, .target = sg::blend_factor::one};
+    auto const vertex
+        = co_await sg_diff::compiled_on(*ctx, on.route, *sg::test::differential_setups::layered::layered.asset);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
+        .layout = ctx->cached.acquire_pipeline_layout<io>(),
+        .vertex_shader = vertex,
+        .fragment_shader = on.entry,
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets
+        = target::states{.over = {.format = sg::pixel_format::rgba8_unorm_srgb, .blend = sg::blend_alpha},
+                         .sum = {.format = sg::pixel_format::rgba16_float,
+                                 .blend = sg::blend_state{.color = add, .alpha = add}},
+                         .darkest
+                         = {.format = sg::pixel_format::rgb10a2_unorm,
+                            .blend = sg::blend_state{.color = {.target = sg::blend_factor::one, .op = sg::blend_op::min},
+                                                     .alpha = {.target = sg::blend_factor::one, .op = sg::blend_op::min}}},
+                         .difference = {.format = sg::pixel_format::rgba16_float,
+                                        .blend = sg::blend_state{.color = {.target = sg::blend_factor::one,
+                                                                           .op = sg::blend_op::subtract},
+                                                                 .alpha = add}}},
+        .target_set = target::name,
+    });
+    auto const input = ctx->persistent.create_buffer_from_data(float_inputs(), sg::buffer_usage::readonly_buffer);
+    auto const group = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<io>(),
+                                                            io{.input = input.as_readonly_buffer()});
+
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = k_extent,
+         .height = k_extent,
+         .colors = {sg::pixel_format::rgba8_unorm_srgb, sg::pixel_format::rgba16_float, sg::pixel_format::rgb10a2_unorm,
+                    sg::pixel_format::rgba16_float},
+         .target_set = target::name,
+         .clear_color = tg::vec4f(0.2f, 0.4f, 0.6f, 0.5f)},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.bind_group(0, *group);
+            scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+        });
+    auto result = cc::vector<sg_diff::output>();
+    cc::string_view const names[] = {"over", "sum", "darkest", "difference"};
+    for (auto i = 0; i < 4; ++i)
+        result.push_back(decoded(names[i], pixels[i]));
+    co_return result;
+}
+
 // One driver encodes both routes' writes alike; two implementations round a float into a format each their own way, by a step of it.
 bool const targets_registered = sg_diff::register_setup({
     .name = "targets",
     .stage = sg::shader_stage::fragment,
     .run = &run_targets,
+    .routes = {},
+    .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
+});
+
+// Blending into an sRGB target runs in linear space, and an implementation rounds the encode either way, so the bound is the targets' step.
+bool const blended_registered = sg_diff::register_setup({
+    .name = "blended",
+    .stage = sg::shader_stage::fragment,
+    .module = "diff_targets",
+    .run = &run_blended,
     .routes = {},
     .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
 });

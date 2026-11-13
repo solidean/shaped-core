@@ -12,7 +12,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// Every setup's module, `diff_<setup>.sgl`, as the library a corpus file is checked against.
+/// Every setup's module, once each, as the library a corpus file is checked against.
 struct setup_library
 {
     cc::vector<cc::string> names;
@@ -28,7 +28,12 @@ struct setup_library
         auto result = setup_library();
         for (auto const& s : sg_diff::setups())
         {
-            auto const name = cc::format("diff_{}.sgl", s.name);
+            auto const name = s.module.empty() ? cc::format("diff_{}.sgl", s.name) : cc::format("{}.sgl", s.module);
+            auto is_read = false;
+            for (auto const& known : result.names)
+                is_read = is_read || known == name;
+            if (is_read)
+                continue;
             auto const path = cc::format("{}/{}", nx::source_path(SG_DIFFERENTIAL_SETUPS_DIR), name);
             auto file = cc::file_read_stream_adapter::open(path);
             auto bytes = file.has_value() ? file.value().stream().read_all() : cc::error("cannot open it");
