@@ -32,6 +32,10 @@ constexpr u32 k_uavs_of_every_device = 8;
 constexpr u32 k_kind_acceleration_structure = 16;
 /// `DXIL::ComponentType::I32`, the element DXC states of a structure.
 constexpr u32 k_component_i32 = 4;
+/// PSV's `UAVStructuredWithCounter`.
+constexpr u32 k_psv_uav_with_counter = 9;
+/// `NvShaderExtnStruct`, a record of NVAPI's protocol (EMIT-263).
+constexpr u32 k_nvapi_record_bytes = 256;
 
 /// What a binding is to DXIL, per `global_kind`; the row of a new kind is what adds it.
 struct resource_rule
@@ -224,8 +228,47 @@ void writer::declare_handles()
                              .component = component,
                              .psv_type = cls == 1 ? rule.psv_write : rule.psv_read,
                              .is_comparison = global.is_comparison,
+                             .name = _p.name_at(global.name_first, global.name_size),
+                             .is_coherent = global.is_coherent,
                              .upper = upper,
                              .range = range});
+    }
+    // EMIT-263: `RWStructuredBuffer<NvShaderExtnStruct> g_NvidiaExt` at `u0, space13`, as `nvHLSLExtns.h` declares it,
+    // through which the program talks to NVIDIA's driver; no global of the program, so its handle stands past theirs
+    if (_p.reorders_through_nvapi)
+    {
+        auto const space = u32(check::k_nvapi_space);
+        auto const lower = u32(check::k_nvapi_register);
+        auto entry = handle_entry{.lower = lower,
+                                  .upper = lower,
+                                  .space = space,
+                                  .cls = 1,
+                                  // bit 15 of a UAV is its counter
+                                  .word0 = k_kind_structured_buffer | (1u << 12) | (1u << 15),
+                                  .word1 = k_nvapi_record_bytes};
+        if (is_library())
+        {
+            entry.variable_type = handle_type();
+            entry.variable = _m.add_external_constant("g_NvidiaExt", entry.variable_type, 4);
+        }
+        entry.annotated = made_handle(entry, ll_value::none, false);
+        _nvapi = entry.annotated;
+        _handles.push_back(entry);
+        _uses.structured = true;
+        uav_count += 1;
+        _uses.many_uavs = _uses.many_uavs || uav_count > k_uavs_of_every_device;
+        _bindings.push_back({.global = u32(_handles.size() - 1),
+                             .cls = 1,
+                             .id = next_id[1]++,
+                             .space = space,
+                             .lower = lower,
+                             .kind = k_kind_structured_buffer,
+                             .stride = k_nvapi_record_bytes,
+                             .psv_type = k_psv_uav_with_counter,
+                             .name = "g_NvidiaExt",
+                             .has_counter = true,
+                             .upper = lower,
+                             .range = 1});
     }
 }
 

@@ -51,6 +51,12 @@ struct sgl::text_request
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.
     check::feature_set device_features;
+    /// How each granted feature is written, which `emit::fills_of` offers per target (EMIT-263).
+    /// A granted feature named here not is `native`, so a compile that names none writes what it always wrote.
+    cc::span<check::feature_fill const> fills;
+    /// How the core constructs are written (EMIT-263); `native` for both is the default, at Shader Model 6.8 on dx12.
+    /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`.
+    check::core_fills core;
     /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
     emit::native_route native = emit::native_route::text;
     /// Writes the `.sgl` line of each operation into what the native route writes, for a debugger to read (EMIT-257).
@@ -70,6 +76,38 @@ struct sgl::text_request
     cc::string_view polyfill_task;
 };
 
+/// A feature an entry point consults and the fills a target offers for it, most demanding first (EMIT-264).
+/// Not granting the feature is the axis's last value, which `fills` does not list.
+struct sgl::variant_axis
+{
+    check::feature f = check::feature::binding_arrays;
+    cc::vector<check::fill> fills;
+
+    [[nodiscard]] bool operator==(variant_axis const& rhs) const
+    {
+        return f == rhs.f && ast::impl::is_equal(fills, rhs.fills);
+    }
+};
+
+/// One variant a bake compiles: each granted feature with its fill, and the core constructs' fills (EMIT-264).
+/// A feature absent from `fills` is not granted.
+struct sgl::variant_key
+{
+    cc::vector<check::feature_fill> fills;
+    check::core_fills core;
+
+    /// `shader_execution_reordering=nvapi;draw_start=root_constant;wave_size=none`: the granted features in feature
+    /// order, then each core construct whose fill is not `native`; empty for nothing granted and both native.
+    [[nodiscard]] cc::string to_string() const;
+    /// What `text_request::device_features` grants for it.
+    [[nodiscard]] check::feature_set granted() const;
+
+    [[nodiscard]] bool operator==(variant_key const& rhs) const
+    {
+        return ast::impl::is_equal(fills, rhs.fills) && core == rhs.core;
+    }
+};
+
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
 struct sgl::all_text_request
 {
@@ -79,6 +117,10 @@ struct sgl::all_text_request
     /// The files whose modules the source may `use`.
     cc::span<library_file const> library;
     cc::span<emit::target const> targets;
+    /// What the device has and how it is filled, for every target alike, as `text_request`'s.
+    check::feature_set device_features;
+    cc::span<check::feature_fill const> fills;
+    check::core_fills core;
 };
 
 /// One slot the text declares for the host to bind: a block of constants or a resource, with every fact its API needs.
@@ -95,8 +137,12 @@ struct sgl::interface_binding
     bool is_inline = false;
     /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
     bool is_file_sampler = false;
+    /// A slot the host reserves rather than binds: the counter UAV an `nvapi` fill talks to NVIDIA's driver through
+    /// (EMIT-263), at the register `slot` of the space `group`, which the host enables on its device and holds clear.
+    bool is_reserved = false;
     /// The group it is listed at, counted without the `@inline` binding, and its slot there.
-    /// -1 and 0 for the `@inline` block, and -1 and its index for a file-scope sampler.
+    /// -1 and 0 for the `@inline` block, -1 and its index for a file-scope sampler, and the dx12 space and register of
+    /// a reserved slot.
     i32 group = -1;
     i32 slot = 0;
     /// A binding array's length, taking `count` consecutive slots from `slot`; 1 for everything else.
@@ -144,6 +190,19 @@ struct sgl::emitted_source
     cc::string target_struct;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
+    /// A `hlsl-dx12` compile's: the DXIL shader model the output needs, which a host compiles the text at (EMIT-262).
+    /// It is the highest `check::dxil_shader_model_of` of each feature of `features` in its fill, and of each core
+    /// construct the output wrote natively; 6.6 where none needs more.
+    /// SGL's own DXIL states it.
+    check::dxil_shader_model dxil_shader_model;
+    /// What the host hands DXC beside the text for that model: `-enable-payload-qualifiers` where the text states a
+    /// payload's access qualifiers below Shader Model 6.7 (EMIT-262).
+    cc::vector<cc::string> dxc_args;
+    /// The text includes `nvHLSLExtns.h`, which the host puts on DXC's include path: an `nvapi` fill wrote it (EMIT-263).
+    bool needs_nvapi_header = false;
+    /// Every feature the entry point consulted, each with the fills the target offers, in feature order (EMIT-264).
+    /// Granted or not, so one compile tells a bake every variant there is.
+    cc::vector<variant_axis> axes;
     /// The float guarantee the text keeps (CHK-435, EMIT-185): the entry point's, or `fast` where it was weakened.
     check::float_level float_guarantee = check::float_level::fast;
     /// The function that raised the entry point's guarantee, by name; empty at `fast`.

@@ -61,6 +61,8 @@ struct sgl::builtins::call_context
     language target = language::hlsl;
     /// HLSL for vulkan, whose DXC lowers some of HLSL's calls to no SPIR-V, which the text then states itself.
     bool is_vulkan = false;
+    /// HLSL for dx12 that reorders through NVAPI's shader extensions, the `nvapi` fill (EMIT-263).
+    bool reorders_through_nvapi = false;
     cc::span<written const> arguments;
     /// Each argument's type as the target spells it, for a record with a `helper`; empty for any other.
     cc::span<cc::string const> argument_types;
@@ -222,6 +224,8 @@ struct sgl::builtins::type_record
     cc::string hlsl;
     /// HLSL for vulkan, where it is not `hlsl`: a type DXC has no SPIR-V for, which the text spells as SPIR-V's own.
     cc::string hlsl_vulkan;
+    /// HLSL for dx12 under an `nvapi` fill, where it is not `hlsl`: the type as `nvHLSLExtns.h` declares it (EMIT-263).
+    cc::string hlsl_nvapi;
     cc::string wgsl;
     cc::string msl;
     /// The HLSL spelling of a local whose flags are known constants, as `RayQuery<RAY_FLAG_FORCE_OPAQUE>`; none where its type takes none.

@@ -161,8 +161,221 @@ void writer::ray_element(u32 index, stage_element const& e, instruction const& i
     define_one(index, call(found->op, scalar_type(i.type), args));
 }
 
+// ---- EMIT-263: the nvapi fill, NVIDIA's placeholder protocol as nvHLSLExtns.h writes it ----
+//
+// What follows encodes the protocol of NVAPI's HLSL shader extensions, R615, as `nvHLSLExtns.h` and
+// `nvHLSLExtnsInternal.h` write it, so that SGL's DXIL says to NVIDIA's driver what DXC's compile of that header says.
+// The opcodes and the record's layout below are those headers', which carry this notice, a sentence a line:
+//
+//   SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES.
+//   All rights reserved.
+//   SPDX-License-Identifier: MIT
+//
+//   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+//   documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+//   the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+//   permit persons to whom the Software is furnished to do so, subject to the following conditions:
+//
+//   The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+//   the Software.
+//
+//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+//   THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+//   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+//   AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+//   OTHER DEALINGS IN THE SOFTWARE.
+namespace
+{
+/// `nvShaderExtnEnums.h`'s opcodes of the hit object.
+constexpr u32 k_nv_trace_ray = 67;
+constexpr u32 k_nv_reorder_thread = 71;
+constexpr u32 k_nv_invoke = 72;
+constexpr u32 k_nv_is_miss = 73;
+constexpr u32 k_nv_get_instance_id = 74;
+constexpr u32 k_nv_get_instance_index = 75;
+constexpr u32 k_nv_get_primitive_index = 76;
+constexpr u32 k_nv_get_geometry_index = 77;
+constexpr u32 k_nv_get_ray_desc = 79;
+constexpr u32 k_nv_is_hit = 83;
+/// `NvShaderExtnStruct`'s fields by their byte offset: `opcode`, `src0u` and `numOutputsForIncCounter`.
+constexpr u32 k_nv_opcode = 0;
+constexpr u32 k_nv_src0 = 76;
+constexpr u32 k_nv_outputs = 144;
+/// What `GetRayDesc` reads back after its record, of which `TMax` is the second: TMin, TMax, origin, direction.
+constexpr u32 k_nv_ray_desc_words = 8;
+} // namespace
+
+ll_value writer::nvapi_increment()
+{
+    ll_value const args[]
+        = {_m.constant_i32(k_dx_ops[isize(dx_op::buffer_update_counter)].number), _nvapi, _m.constant_i8(1)};
+    return call(dx_op::buffer_update_counter, _m.int_type(), args);
+}
+
+void writer::nvapi_store(ll_value record, u32 offset, ll_value value)
+{
+    auto const undefined = _m.constant_undef(_m.int_type());
+    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::raw_buffer_store)].number),
+                             _nvapi,
+                             record,
+                             _m.constant_i32(offset),
+                             value,
+                             undefined,
+                             undefined,
+                             undefined,
+                             _m.constant_i8(1),
+                             _m.constant_i32(4)};
+    (void)call(dx_op::raw_buffer_store, _m.int_type(), args);
+}
+
+void writer::nvapi_hit_object_op(u32 index, instruction const& i)
+{
+    auto const operands = _p.operands_of(i);
+    auto const at = [&](isize k) { return leaf_at(value_ref(operands[k])); };
+    auto const word = [&](u32 v) { return _m.constant_i32(v); };
+    auto const number = [&](dx_op code) { return _m.constant_i32(k_dx_ops[isize(code)].number); };
+    /// A record of `opcode` about the hit object `hit`, as each of NvHitObject's members starts.
+    auto const asked = [&](u32 opcode, ll_value hit)
+    {
+        auto const record = nvapi_increment();
+        nvapi_store(record, k_nv_opcode, word(opcode));
+        nvapi_store(record, k_nv_src0, hit);
+    };
+    /// `NvReorderThread`: by the hit object where there is one, then by the hint and its bits.
+    auto const reorder = [&](ll_value hit, ll_value hint, ll_value bits)
+    {
+        auto const record = nvapi_increment();
+        nvapi_store(record, k_nv_opcode, word(k_nv_reorder_thread));
+        nvapi_store(record, k_nv_src0, word(hit != ll_value::none ? 1 : 0));
+        nvapi_store(record, k_nv_src0 + 4, hit != ll_value::none ? hit : word(0));
+        nvapi_store(record, k_nv_src0 + 8, hint);
+        nvapi_store(record, k_nv_src0 + 12, bits);
+        (void)nvapi_increment();
+    };
+    /// DXIL's `TraceRay`, which the driver takes for the hit object's call by the miss index the protocol handed it.
+    auto const trace = [&](ll_value structure, ll_value const(&ray)[12], ll_value handle, payload_root const& root)
+    {
+        ll_value const args[] = {number(dx_op::trace_ray),
+                                 structure,
+                                 ray[0],
+                                 ray[1],
+                                 ray[2],
+                                 ray[3],
+                                 handle,
+                                 ray[4],
+                                 ray[5],
+                                 ray[6],
+                                 ray[7],
+                                 ray[8],
+                                 ray[9],
+                                 ray[10],
+                                 ray[11],
+                                 root.pointer};
+        (void)call(dx_op::trace_ray, root.type, args);
+    };
+    /// `NvTraceRayHitObject`: its record names the miss shader, and hands back the hit object and the trace's handle.
+    auto const traced = [&](payload_root const& root)
+    {
+        auto const origin = value_ref(operands[6]);
+        auto const direction = value_ref(operands[8]);
+        auto const record = nvapi_increment();
+        nvapi_store(record, k_nv_opcode, word(k_nv_trace_ray));
+        nvapi_store(record, k_nv_outputs, word(2));
+        nvapi_store(record, k_nv_src0, at(5));
+        auto const hit = nvapi_increment();
+        auto const handle = nvapi_increment();
+        ll_value const ray[] = {at(1),
+                                at(2),
+                                at(3),
+                                at(4),
+                                leaf_at(origin, 0),
+                                leaf_at(origin, 1),
+                                leaf_at(origin, 2),
+                                at(7),
+                                leaf_at(direction, 0),
+                                leaf_at(direction, 1),
+                                leaf_at(direction, 2),
+                                at(9)};
+        trace(at(0), ray, handle, root);
+        return hit;
+    };
+    switch (i.code)
+    {
+    case op::hit_object_trace:
+        return define_one(index, traced(_payload_roots[index_of(value_ref(operands[10]))]));
+    case op::trace_reorder_execute:
+    {
+        auto const& root = _payload_roots[index_of(value_ref(operands[10]))];
+        auto const hit = traced(root);
+        if (operands.size() > 11)
+            reorder(hit, at(11), at(12));
+        else
+            reorder(hit, word(0), word(0));
+        // `NvInvokeHitObject`: a trace of no ray through the same structure, by the handle its record hands back
+        auto const record = nvapi_increment();
+        nvapi_store(record, k_nv_opcode, word(k_nv_invoke));
+        nvapi_store(record, k_nv_src0, hit);
+        auto const handle = nvapi_increment();
+        auto const zero = word(0);
+        auto const none = _m.constant_float(_m.float_type(), 0);
+        ll_value const ray[] = {zero, zero, zero, zero, none, none, none, none, none, none, none, none};
+        trace(at(0), ray, handle, root);
+        return define_one(index, hit);
+    }
+    case op::hit_object_reorder:
+        if (operands.size() > 1)
+            return reorder(at(0), at(1), at(2));
+        return reorder(at(0), word(0), word(0));
+    case op::reorder_thread:
+        return reorder(ll_value::none, at(0), at(1));
+    case op::hit_object_invoke:
+        // the emit refuses it under this fill: NVAPI invokes through the structure its trace took
+        return unsupported("a hit object invoked apart from its trace, through NVAPI");
+    default:
+        break;
+    }
+    auto const hit = at(0);
+    switch (hit_object_value(i.sub))
+    {
+    case hit_object_value::is_hit:
+    case hit_object_value::is_miss:
+    {
+        asked(hit_object_value(i.sub) == hit_object_value::is_hit ? k_nv_is_hit : k_nv_is_miss, hit);
+        return define_one(index, _m.compare(predicate::i_ne, nvapi_increment(), word(0)));
+    }
+    case hit_object_value::t:
+    {
+        // `GetRayDesc().TMax`, the hit's distance as vulkan's instruction reads it; every word is read back regardless
+        asked(k_nv_get_ray_desc, hit);
+        auto t_max = ll_value::none;
+        for (auto w = u32(0); w < k_nv_ray_desc_words; ++w)
+        {
+            auto const read = nvapi_increment();
+            if (w == 1)
+                t_max = read;
+        }
+        return define_one(index, _m.cast(cast_op::bitcast, t_max, _m.float_type()));
+    }
+    case hit_object_value::instance_id:
+        asked(k_nv_get_instance_id, hit);
+        break;
+    case hit_object_value::instance_index:
+        asked(k_nv_get_instance_index, hit);
+        break;
+    case hit_object_value::geometry_index:
+        asked(k_nv_get_geometry_index, hit);
+        break;
+    case hit_object_value::primitive_index:
+        asked(k_nv_get_primitive_index, hit);
+        break;
+    }
+    return define_one(index, nvapi_increment());
+}
+
 void writer::hit_object_op(u32 index, instruction const& i)
 {
+    if (_p.reorders_through_nvapi)
+        return nvapi_hit_object_op(index, i);
     /// Parallel to `hit_object_value`.
     constexpr dx_op k_reads[] = {
         dx_op::hit_object_is_hit,          dx_op::hit_object_is_miss,        dx_op::hit_object_t,

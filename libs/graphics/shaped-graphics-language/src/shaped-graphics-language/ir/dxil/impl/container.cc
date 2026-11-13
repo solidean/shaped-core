@@ -402,7 +402,7 @@ struct container_part
         resources.u32_le(r.lower);
         resources.u32_le(r.upper);
         resources.u32_le(add_string(r.name));
-        resources.u32_le(0);
+        resources.u32_le(r.flags);
     }
     auto const name = add_string(s.entry_name);
     pad_to_word(strings);

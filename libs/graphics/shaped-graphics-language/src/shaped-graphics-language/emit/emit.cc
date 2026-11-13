@@ -4,6 +4,7 @@
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
+#include <shaped-graphics-language/emit/impl/payload_access.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 #include <shaped-graphics-language/ir/pipeline.hh>
@@ -22,6 +23,26 @@ constexpr sgl::emit::target k_all_targets[] = {
 cc::span<sgl::emit::target const> sgl::emit::all_targets()
 {
     return k_all_targets;
+}
+
+cc::span<sgl::check::fill const> sgl::emit::fills_of(target t, check::feature f)
+{
+    static constexpr check::fill k_native[] = {check::fill::native};
+    static constexpr check::fill k_or_nvapi[] = {check::fill::native, check::fill::nvapi};
+    auto const has_nvapi = f == check::feature::shader_execution_reordering || f == check::feature::opacity_micromap;
+    return t == target::hlsl_dx12 && has_nvapi ? cc::span<check::fill const>(k_or_nvapi)
+                                               : cc::span<check::fill const>(k_native);
+}
+
+cc::span<sgl::check::fill const> sgl::emit::fills_of(target t, check::core_construct c)
+{
+    static constexpr check::fill k_native[] = {check::fill::native};
+    static constexpr check::fill k_draw_start[] = {check::fill::native, check::fill::root_constant};
+    static constexpr check::fill k_wave_size[] = {check::fill::native, check::fill::none};
+    if (t != target::hlsl_dx12)
+        return k_native;
+    return c == check::core_construct::draw_start ? cc::span<check::fill const>(k_draw_start)
+                                                  : cc::span<check::fill const>(k_wave_size);
 }
 
 cc::string_view sgl::emit::to_string(target t)
@@ -427,6 +448,84 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     plan.diagnostics = sources.diagnostics;
     plan.sees_motion = sources.software_trace;
     plan.compiled_for = compile_target_of(t, sources.device_features);
+    // EMIT-263: a fill the target does not offer is no output of it
+    auto const offers = [](cc::span<check::fill const> offered, check::fill how)
+    {
+        for (auto const f : offered)
+            if (f == how)
+                return true;
+        return false;
+    };
+    for (auto const& asked : sources.fills)
+        if (!offers(fills_of(t, asked.f), asked.how))
+        {
+            result.errors.push_back(
+                {.kind = error_kind::unsupported,
+                 .symbol = e.function,
+                 .detail = cc::format("a {} fill of {}, which {} does not offer", check::name_of(asked.how),
+                                      check::name_of(asked.f), to_string(t))});
+            return result;
+        }
+    for (auto const c : {check::core_construct::draw_start, check::core_construct::wave_size})
+        if (auto const how = c == check::core_construct::draw_start ? sources.core.draw_start : sources.core.wave_size;
+            !offers(fills_of(t, c), how))
+        {
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("a {} fill of {}, which {} does not offer",
+                                                          check::name_of(how), check::name_of(c), to_string(t))});
+            return result;
+        }
+    // EMIT-128: dx12 reads where the draw started natively through Shader Model 6.8's system values; the root-constant
+    // fill is not written yet, so an entry that takes the draw's start is refused under it
+    if (t == target::hlsl_dx12)
+        for (auto const& input : e.stage_inputs)
+        {
+            if (input.input != check::stage_input::vertex_index && input.input != check::stage_input::instance_index
+                && input.input != check::stage_input::first_instance)
+                continue;
+            if (sources.core.draw_start == check::fill::native)
+            {
+                plan.reads_draw_start = true;
+                result.reads_draw_start = true;
+                continue;
+            }
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} takes @{}, which dx12 reads natively from Shader Model "
+                                                          "6.8's "
+                                                          "system values, and this compile asks the root-constant fill "
+                                                          "of draw_start, which is not written yet",
+                                                          e.name, check::info_of(input.input).name)});
+            return result;
+        }
+    // EMIT-148: dx12 states a preferred subgroup size as a range, Shader Model 6.8's, where the compile asks it natively
+    plan.states_wave_size_range
+        = t == target::hlsl_dx12 && e.preferred_subgroup_size > 0 && sources.core.wave_size == check::fill::native;
+    // EMIT-263: an nvapi fill on dx12; opacity micromaps are then the driver's, and the text states none (EMIT-184)
+    auto const nvapi = [&](check::feature f)
+    { return t == target::hlsl_dx12 && check::fill_of(sources.fills, f) == check::fill::nvapi; };
+    plan.reorders_through_nvapi = e.features.has(check::feature::shader_execution_reordering)
+                               && nvapi(check::feature::shader_execution_reordering);
+    plan.states_micromaps = e.features.has(check::feature::opacity_micromap) && !nvapi(check::feature::opacity_micromap);
+    result.writes_nvapi = plan.reorders_through_nvapi;
+    // NVAPI invokes a hit object by tracing through it again, which takes the structure its trace took: a step that
+    // invokes one apart from its trace has no structure to name
+    if (plan.reorders_through_nvapi)
+        for (auto const& x : e.exprs)
+            if (auto const* const call = x.node.try_as<check::flat_call>())
+                if (auto const* const record = m.builtin_function(call->intrinsic);
+                    record != nullptr && record->name == "hit_object_invoke")
+                {
+                    result.errors.push_back({.kind = error_kind::unsupported,
+                                             .symbol = e.function,
+                                             .detail = cc::format("{} invokes a hit object apart from its trace, which "
+                                                                  "the nvapi fill of shader_execution_reordering "
+                                                                  "cannot: NVAPI invokes one by tracing it again "
+                                                                  "through its acceleration structure",
+                                                                  e.name)});
+                    return result;
+                }
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
         for (auto const& s : plan.samplers)
@@ -486,6 +585,11 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         auto written = impl::write_text(plan, impl::dialect_of(t), sources);
         result.text = cc::move(written.text);
         result.lines = cc::move(written.lines);
+        // the DXIL writer states no subgroup size, so the range is the text's alone
+        result.states_wave_size_range = plan.states_wave_size_range;
+        if (t == target::hlsl_dx12)
+            for (auto const& s : plan.structs)
+                result.states_payload_qualifiers = result.states_payload_qualifiers || impl::is_payload(plan, s.type);
     }
     result.debug_sites = e.debug_sites;
     result.entry_point = plan.entry_name;

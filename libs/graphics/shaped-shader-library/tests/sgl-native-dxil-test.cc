@@ -568,3 +568,212 @@ TEST("slib - a task stage's payload DXC's own task stage cannot write passes the
         CHECK(text.value().contains("i32 72}")).dump("text", text.value());
     }
 }
+
+namespace
+{
+/// A raygen that reorders as it traces, then traces a hit object, reads all of it and regroups by it, in one block.
+constexpr cc::string_view k_reordering
+    = "require raytracing_pipeline\n"
+      "binding frame:\n"
+      "    world: acceleration_structure[.triangles]\n"
+      "    seen: mut buffer[float]\n"
+      "    kinds: mut buffer[int]\n"
+      "struct radiance:\n"
+      "    color: float3\n"
+      "rays path_rays:\n"
+      "    surface: radiance\n"
+      "@raygen fun shoot(@launch_id id: int3){frame}:\n"
+      "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+      "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+      "    trace(frame.world, r, path_rays.surface, mut p, reorder = id.x as uint, reorder_bits = 4)\n"
+      "    const if has(.shader_execution_reordering):\n"
+      "        let h = trace_hit(frame.world, r, path_rays.surface, mut p)\n"
+      "        let t = h.t\n"
+      "        let instance_id = h.instance_id\n"
+      "        let instance_index = h.instance_index\n"
+      "        let primitive_index = h.primitive_index\n"
+      "        let geometry_index = h.geometry_index\n"
+      "        let is_hit = h.is_hit\n"
+      "        let is_miss = h.is_miss\n"
+      "        h.reorder(instance_index as uint, 4)\n"
+      "        h.reorder()\n"
+      "        maybe_reorder(id.x as uint, 2)\n"
+      "        frame.seen[id.x] = t + p.color.x\n"
+      "        frame.kinds[id.x] = instance_id + instance_index + primitive_index + geometry_index\n"
+      "        frame.kinds[id.x + 1] = (is_hit as int) + (is_miss as int)\n"
+      "@miss fun on_miss(p: mut radiance):\n"
+      "    p.color = float3(1.0, 0.0, 0.0)\n"
+      "@closest_hit fun on_hit(h: triangle_hit, p: mut radiance):\n"
+      "    p.color = float3(0.0, 1.0, 0.0)\n"
+      "hit_group hits for path_rays:\n"
+      "    surface = (closest_hit = on_hit)\n"
+      "@raytracing pipeline path:\n"
+      "    rays = path_rays\n"
+      "    raygen = shoot\n"
+      "    miss.surface = on_miss\n"
+      "    hit_groups = (hits)\n";
+
+/// `k_reordering`'s raygen on dx12 under the nvapi fill of shader execution reordering, by `route`.
+[[nodiscard]] cc::result<sgl::emitted_source, cc::string> through_nvapi(sgl::emit::native_route route)
+{
+    sgl::check::feature_fill const fills[]
+        = {{.f = sgl::check::feature::shader_execution_reordering, .how = sgl::check::fill::nvapi}};
+    return sgl::compile_to_text({.source = k_reordering,
+                                 .entry_point = "shoot",
+                                 .target = sgl::emit::target::hlsl_dx12,
+                                 .device_features = sgl::check::feature::shader_execution_reordering,
+                                 .fills = fills,
+                                 .native = route});
+}
+
+/// `text` with every SSA name and type name of LLVM's, `%` and what follows it, cut down to its `%`.
+[[nodiscard]] cc::string without_names(cc::string_view text)
+{
+    auto const is_name = [](char c)
+    { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'; };
+    auto result = cc::string();
+    for (auto i = isize(0); i < text.size(); ++i)
+    {
+        result += text[i];
+        if (text[i] == '%')
+            while (i + 1 < text.size() && is_name(text[i + 1]))
+                ++i;
+    }
+    return result;
+}
+
+/// The protocol of NVAPI's shader extensions in a disassembled module: each counter bump, each store into its record
+/// and each trace, in order, with every name dropped, so two writers' modules compare by what they say.
+/// A trace's payload drops its `nonnull`, which DXC states of the pointer and SGL's writer does not.
+[[nodiscard]] cc::vector<cc::string> protocol_of(cc::string_view disassembly)
+{
+    auto result = cc::vector<cc::string>();
+    auto at = isize(0);
+    while (at < disassembly.size())
+    {
+        auto end = disassembly.find('\n', at);
+        if (end < 0)
+            end = disassembly.size();
+        auto line = disassembly.subview({.offset = at, .size = end - at});
+        at = end + 1;
+        if (!line.contains("@dx.op.bufferUpdateCounter") && !line.contains("@dx.op.rawBufferStore")
+            && !line.contains("@dx.op.traceRay"))
+            continue;
+        if (line.starts_with("declare"))
+            continue;
+        if (auto const comment = line.find(';'); comment >= 0)
+            line = line.subview({.offset = 0, .size = comment});
+        if (auto const call = line.find("call "); call >= 0)
+            line = line.subview({.offset = call, .size = line.size() - call});
+        auto plain = without_names(line);
+        plain.replace_all(" nonnull", "");
+        result.push_back(cc::move(plain));
+    }
+    return result;
+}
+
+/// `<root>/<name>`, as std::filesystem takes it.
+[[nodiscard]] std::filesystem::path path_of(cc::string_view root, cc::string_view name)
+{
+    return std::filesystem::path(root.data(), root.data() + root.size())
+         / std::filesystem::path(name.data(), name.data() + name.size());
+}
+
+/// `extern/nvapi/.install`, where `uv run extern/nvapi/fetch-nvapi.py` puts the pinned NVAPI headers; empty where absent.
+[[nodiscard]] cc::string nvapi_headers()
+{
+    auto const dir = nx::source_path("extern/nvapi/.install");
+    auto ec = std::error_code();
+    return std::filesystem::is_regular_file(path_of(dir, "nvHLSLExtns.h"), ec) ? dir : cc::string();
+}
+
+/// DXC's compile of an nvapi fill's text at Shader Model 6.6, as a host makes it: NVAPI's header on its include path,
+/// and the compile's own arguments unchanged; its disassembly, or DXC's error.
+[[nodiscard]] cc::result<cc::string, cc::string> dxc_of(ssc::dxc::compiler& compiler,
+                                                        sgl::emitted_source const& e,
+                                                        cc::string_view headers)
+{
+    auto options = ssc::dxc::compile_options{.warnings_as_errors = false};
+    for (auto const& arg : e.dxc_args)
+        options.extra_args.push_back(arg);
+    auto desc = ssc::dxc::shader_description{.source = e.text,
+                                             .entry_point = e.entry_point,
+                                             .stage = sg::shader_stage::raygen,
+                                             .model = ssc::dxc::shader_model::sm_6_6};
+    auto const resolve = [&](cc::string_view path) -> cc::optional<cc::string>
+    {
+        auto ec = std::error_code();
+        auto const file = path_of(headers, path);
+        if (!std::filesystem::is_regular_file(file, ec))
+            return {};
+        return read_file(cc::string(file.generic_string().c_str()));
+    };
+    auto flat = compiler.preprocess(desc, resolve, options);
+    if (flat.has_error())
+        return cc::error(flat.error().to_string());
+    desc.source = cc::move(flat.value().source);
+    auto const built = compiler.compile(desc, options);
+    if (built.has_error())
+        return cc::error(built.error().to_string());
+    auto text = compiler.disassemble(built.value().bytecode);
+    if (text.has_error())
+        return cc::error(text.error().to_string());
+    return cc::move(text.value());
+}
+} // namespace
+
+TEST("slib - an nvapi fill's text compiles at 6.6 through DXC on NVAPI's pinned header (EMIT-263)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const headers = nvapi_headers();
+    if (headers.empty())
+        SKIP("the pinned NVAPI headers are not fetched: uv run extern/nvapi/fetch-nvapi.py");
+    auto const e = through_nvapi(sgl::emit::native_route::text);
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    REQUIRE(e.value().needs_nvapi_header);
+    REQUIRE(e.value().dxil_shader_model == sgl::check::dxil_shader_model{});
+    auto const theirs = dxc_of(compiler.value(), e.value(), headers);
+    REQUIRE(theirs.has_value()).dump("dxc", theirs.has_error() ? theirs.error() : cc::string());
+    CHECK(theirs.value().contains("@dx.op.bufferUpdateCounter"));
+    CHECK(!theirs.value().contains("dx.types.HitObject"));
+}
+
+TEST("slib - SGL's DXIL of an nvapi fill passes the validator, and says to the driver what DXC's compile of its text "
+     "says")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const native = through_nvapi(sgl::emit::native_route::require);
+    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    auto const refused = compiler.value().validate(native.value().dxil);
+    CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+    auto const ours = compiler.value().disassemble(native.value().dxil);
+    REQUIRE(ours.has_value());
+    // the counter UAV at u0, space13, with its counter, and no hit object of Shader Model 6.9
+    CHECK(ours.value().contains("!\"g_NvidiaExt\", i32 13, i32 0, i32 1, i32 12, i1 false, i1 true, i1 false"))
+        .dump("ours", ours.value());
+    CHECK(!ours.value().contains("dx.types.HitObject"));
+
+    // the same protocol as DXC's compile of the text through NVAPI's header, call by call
+    auto const headers = nvapi_headers();
+    if (headers.empty())
+        SKIP("the pinned NVAPI headers are not fetched: uv run extern/nvapi/fetch-nvapi.py");
+    auto const text = through_nvapi(sgl::emit::native_route::text);
+    REQUIRE(text.has_value());
+    auto const theirs = dxc_of(compiler.value(), text.value(), headers);
+    REQUIRE(theirs.has_value()).dump("dxc", theirs.has_error() ? theirs.error() : cc::string());
+    auto const listing = [](cc::span<cc::string const> calls)
+    {
+        auto out = cc::string();
+        for (auto const& c : calls)
+            out.appendf("{}\n", c);
+        return out;
+    };
+    auto const expected = protocol_of(theirs.value());
+    auto const written = protocol_of(ours.value());
+    CHECK(!expected.empty());
+    CHECK(listing(written) == listing(expected)).dump("theirs", listing(expected)).dump("ours", listing(written));
+}

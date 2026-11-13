@@ -132,6 +132,7 @@ enum class dx_class_id : u8
     maybe_reorder_thread,
     hit_object_make_nop,
     hit_object_state_scalar,
+    buffer_update_counter,
 };
 
 // clang-format off
@@ -239,6 +240,7 @@ inline constexpr dx_class k_dx_classes[] = {
     {"maybeReorderThread", "v:Hii"},
     {"hitObject_MakeNop", "H:", dx_class::read_none},
     {"hitObject_StateScalar", "o:H", dx_class::read_none},
+    {"bufferUpdateCounter", "i:hb"},
 };
 // clang-format on
 
@@ -426,6 +428,7 @@ enum class dx_op : u8
     hit_object_instance_index,
     hit_object_geometry_index,
     hit_object_primitive_index,
+    buffer_update_counter,
 };
 
 struct dx_op_info
@@ -602,10 +605,11 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {282, dx_class_id::hit_object_state_scalar, k_i32},
     {281, dx_class_id::hit_object_state_scalar, k_i32},
     {284, dx_class_id::hit_object_state_scalar, k_i32},
+    {70, dx_class_id::buffer_update_counter, k_no_overload},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::hit_object_primitive_index) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::buffer_update_counter) + 1]));
 static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
-              == sizeof(char[isize(dx_class_id::hit_object_state_scalar) + 1]));
+              == sizeof(char[isize(dx_class_id::buffer_update_counter) + 1]));
 } // namespace sgl::ir::dxil::impl

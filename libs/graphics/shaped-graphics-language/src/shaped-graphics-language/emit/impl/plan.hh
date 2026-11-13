@@ -247,6 +247,17 @@ struct plan
     bool sees_motion = false;
     /// The target and the device the compile writes for, which a preamble's condition reads (CHK-528).
     check::compile_target compiled_for;
+    /// dx12: the compile fills the draw's start natively, so the text reads it as Shader Model 6.8's system values
+    /// (EMIT-128); under any other fill no entry that takes the draw's start reaches the writer.
+    bool reads_draw_start = false;
+    /// dx12: the compile fills the subgroup size natively, so the text states a preferred one as a range (EMIT-148).
+    bool states_wave_size_range = false;
+    /// dx12: the entry point reorders through NVAPI's shader extensions, the `nvapi` fill of shader execution
+    /// reordering (EMIT-263): its hit objects are `NvHitObject`s, which talk to the driver through `u0, space13`.
+    bool reorders_through_nvapi = false;
+    /// The entry point's traces see opacity micromaps: it holds the feature, and its fill writes them (EMIT-184).
+    /// The `nvapi` fill writes nothing, since NVIDIA's driver applies them to every trace of a structure that has them.
+    bool states_micromaps = false;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;

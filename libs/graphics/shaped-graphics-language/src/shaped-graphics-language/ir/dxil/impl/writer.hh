@@ -28,10 +28,11 @@ struct resource_record
     u32 upper = 0;
     u32 kind = 0;
     u32 psv_flags = 0;
-    /// What `RDAT` adds: its class, its id in that class, and its name.
+    /// What `RDAT` adds: its class, its id in that class, its name, and its `DxilResourceFlag`s.
     u32 cls = 0;
     u32 id = 0;
     cc::string name;
+    u32 flags = 0;
 };
 
 /// All the container's parts need of the program, which the module alone does not say.
@@ -222,6 +223,10 @@ private:
         /// The PSV's class of it.
         u32 psv_type = 0;
         bool is_comparison = false;
+        /// As the metadata and `RDAT` name it, and whether it is globally coherent or has a counter.
+        cc::string_view name;
+        bool is_coherent = false;
+        bool has_counter = false;
         /// A 64-bit atomic reaches it, which its metadata and the PSV both say.
         bool used_by_atomic64 = false;
         /// The last slot it takes, and how many: all ones for an unbounded array.
@@ -400,6 +405,11 @@ private:
     void ray_stage_op(u32 index, instruction const& i);
     void end_of_hit(dx_op code);
     void hit_object_op(u32 index, instruction const& i);
+    /// EMIT-263: a hit object's operation through NVAPI's shader extensions, as `nvHLSLExtns.h` writes it.
+    void nvapi_hit_object_op(u32 index, instruction const& i);
+    /// One call of NVAPI's protocol: the counter bumped, the record at that index filled, as `nvHLSLExtns.h` does.
+    [[nodiscard]] ll_value nvapi_increment();
+    void nvapi_store(ll_value record, u32 offset, ll_value value);
     [[nodiscard]] ll_value atomic_on_buffer(place const& p, u32 op, ll_value value, ll_type t);
 
     // ---- writer_stage.cc
@@ -502,6 +512,8 @@ private:
     cc::vector<u32> _signature_ids;
 
     cc::vector<binding_record> _bindings;
+    /// EMIT-263: the handle of the nvapi fill's counter UAV, past the program's own in `_handles`; none without it.
+    ll_value _nvapi = ll_value::none;
     cc::vector<row_entry> _rows;
     /// The operations' functions this module declared; a few dozen at most.
     cc::vector<function_entry> _functions;

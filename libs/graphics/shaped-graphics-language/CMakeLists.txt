@@ -534,6 +534,7 @@ if(SC_BUILD_TESTS)
         tests/emit/texture-emit-test.cc
         tests/emit/auto-workgroup-test.cc
         tests/emit/compute-emit-test.cc
+        tests/emit/shader-model-emit-test.cc
         tests/emit/subgroup-emit-test.cc
         tests/emit/image-emit-test.cc
         tests/emit/case-emit-test.cc

@@ -149,6 +149,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  bool asks_software_trace,
                                                  bool weakens_float,
                                                  check::feature_set device_features,
+                                                 cc::span<check::feature_fill const> fills,
+                                                 check::core_fills core,
                                                  emit::native_route native = emit::native_route::text,
                                                  bool native_line_table = false,
                                                  emit::mesh_form mesh = emit::mesh_form::native,
@@ -368,6 +370,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                            .write_directives = line_directives,
                                            .diagnostics = diagnostics,
                                            .device_features = device_features,
+                                           .fills = fills,
+                                           .core = core,
                                            .software_trace = software_trace,
                                            .native = native,
                                            .native_line_table = native_line_table});
@@ -410,6 +414,42 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         result.workgroup[axis] = form.workgroup[axis];
     result.is_dispatched_by_threads = form.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
+    // EMIT-262: the model is the most any feature needs in its fill, and either core construct written natively
+    for (auto i = isize(0); i < check::k_feature_count; ++i)
+        if (auto const f = check::feature(i); result.features.has(f))
+            if (auto const needs = check::dxil_shader_model_of(f, check::fill_of(fills, f));
+                result.dxil_shader_model < needs)
+                result.dxil_shader_model = needs;
+    if (emitted.reads_draw_start
+        && result.dxil_shader_model < check::dxil_shader_model_of(check::core_construct::draw_start, check::fill::native))
+        result.dxil_shader_model = check::dxil_shader_model_of(check::core_construct::draw_start, check::fill::native);
+    if (emitted.states_wave_size_range
+        && result.dxil_shader_model < check::dxil_shader_model_of(check::core_construct::wave_size, check::fill::native))
+        result.dxil_shader_model = check::dxil_shader_model_of(check::core_construct::wave_size, check::fill::native);
+    if (emitted.states_payload_qualifiers && result.dxil_shader_model < check::dxil_shader_model{.minor = 7})
+        result.dxc_args.push_back(cc::string("-enable-payload-qualifiers"));
+    // EMIT-263: an nvapi fill talks to NVIDIA's driver through a counter UAV at a slot the host enables, never binds
+    if (emitted.writes_nvapi)
+    {
+        result.needs_nvapi_header = result.dxil.empty();
+        result.bindings.push_back({.name = "nvapi_extension",
+                                   .emitted = "g_NvidiaExt",
+                                   .kind = described_member_kind::buffer,
+                                   .is_reserved = true,
+                                   .group = check::k_nvapi_space,
+                                   .slot = check::k_nvapi_register,
+                                   .is_used = true,
+                                   .access = "read_write"});
+    }
+    // EMIT-264: what the entry consulted, each with what this target offers for it
+    for (auto i = isize(0); i < check::k_feature_count; ++i)
+        if (auto const f = check::feature(i); e.consulted.has(f))
+        {
+            auto axis = sgl::variant_axis{.f = f};
+            for (auto const how : emit::fills_of(target, f))
+                axis.fills.push_back(how);
+            result.axes.push_back(cc::move(axis));
+        }
     result.unshadowed_bytes = legal.unshadowed_bytes;
     result.float_guarantee = float_guarantee;
     if (float_guarantee != check::float_level::fast)
@@ -523,10 +563,10 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
             return cc::error(cc::format("{}: error: no tessellation control entry point named '{}'\n",
                                         request.source_name, request.polyfill_control));
     }
-    auto result
-        = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.guards_undefined,
-                    request.software_trace, request.weakens_float, request.device_features, request.native,
-                    request.native_line_table, request.mesh, polyfill_vertex, polyfill_task, polyfill_control);
+    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
+                            request.guards_undefined, request.software_trace, request.weakens_float,
+                            request.device_features, request.fills, request.core, request.native,
+                            request.native_line_table, request.mesh, polyfill_vertex, polyfill_task, polyfill_control);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(
@@ -550,7 +590,7 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
     for (auto const t : request.targets)
     {
         fronts.push_back(driver::impl::run_front_end(request.source, request.source_name, request.library, {},
-                                                     emit::compile_target_of(t)));
+                                                     emit::compile_target_of(t, request.device_features)));
         if (!fronts.back().errors.empty())
             return cc::error(fronts.back().errors);
     }
@@ -564,11 +604,33 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
             auto const& e = front.module.entry_points[i];
             // CHK-402: an entry point's own errors are that element's, and leave the others built
             auto own = front.errors_of(e.function);
-            auto text = own.empty() ? emit_text(front, e, request.targets[k], false, false,
-                                                check::undefined_guard::none, false, false, {})
+            auto text = own.empty() ? emit_text(front, e, request.targets[k], false, false, check::undefined_guard::none,
+                                                false, false, request.device_features, request.fills, request.core)
                                     : cc::result<emitted_source, cc::string>(cc::error(own));
             add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = request.targets[k], .text = cc::move(text)});
         }
+    return result;
+}
+
+cc::string sgl::variant_key::to_string() const
+{
+    auto text = cc::string();
+    for (auto i = isize(0); i < check::k_feature_count; ++i)
+        for (auto const& entry : fills)
+            if (entry.f == check::feature(i))
+                text.appendf("{}{}={}", text.empty() ? "" : ";", check::name_of(entry.f), check::name_of(entry.how));
+    if (core.draw_start != check::fill::native)
+        text.appendf("{}draw_start={}", text.empty() ? "" : ";", check::name_of(core.draw_start));
+    if (core.wave_size != check::fill::native)
+        text.appendf("{}wave_size={}", text.empty() ? "" : ";", check::name_of(core.wave_size));
+    return text;
+}
+
+sgl::check::feature_set sgl::variant_key::granted() const
+{
+    auto result = check::feature_set();
+    for (auto const& entry : fills)
+        result.set(entry.f);
     return result;
 }

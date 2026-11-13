@@ -664,6 +664,22 @@ written write_trace_ray_reordered(call_context const& ctx)
     auto const payload = ctx.arguments[ctx.arguments.size() - 1].text;
     auto result = written();
     ray_desc_lines(ctx, desc, result);
+    // EMIT-263: NVAPI's hit object, which it invokes by tracing it again through the same structure
+    if (ctx.reorders_through_nvapi)
+    {
+        result.lines.push_back(
+            cc::format("NvHitObject {} = NvTraceRayHitObject({}, uint({}), uint({}), {}, {}, {}, {}, "
+                       "{});",
+                       hit, ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
+                       ctx.arguments[8].text, ctx.arguments[9].text, desc, payload));
+        if (ctx.data == 1)
+            result.lines.push_back(cc::format("NvReorderThread({}, uint({}), uint({}));", hit, ctx.arguments[10].text,
+                                              ctx.arguments[11].text));
+        else
+            result.lines.push_back(cc::format("NvReorderThread({});", hit));
+        result.text = cc::format("NvInvokeHitObject({}, {}, {})", ctx.arguments[0].text, hit, payload);
+        return result;
+    }
     result.lines.push_back(
         cc::format("dx::HitObject {} = dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {});", hit,
                    ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
@@ -695,9 +711,11 @@ written write_trace_hit_ray(call_context const& ctx)
     auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
     auto result = written();
     ray_desc_lines(ctx, desc, result);
-    result.text = cc::format("dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})", ctx.arguments[0].text,
-                             ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text, ctx.arguments[8].text,
-                             ctx.arguments[9].text, desc, ctx.arguments[ctx.arguments.size() - 1].text);
+    result.text
+        = cc::format("{}({}, uint({}), uint({}), {}, {}, {}, {}, {})",
+                     ctx.reorders_through_nvapi ? "NvTraceRayHitObject" : "dx::HitObject::TraceRay",
+                     ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
+                     ctx.arguments[8].text, ctx.arguments[9].text, desc, ctx.arguments[ctx.arguments.size() - 1].text);
     return result;
 }
 
@@ -761,6 +779,9 @@ written write_hit_object_read(call_context const& ctx)
         return {.text = cc::format("int(sgl_hit_object_{}({}))", read.name, ctx.arguments[0].text)};
     if (ctx.is_vulkan)
         return {.text = cc::format("sgl_hit_object_{}({})", read.name, ctx.arguments[0].text)};
+    // EMIT-263: NVAPI reads the hit's distance as its ray's t_max, as vulkan's instruction does
+    if (ctx.reorders_through_nvapi && read.name == "t")
+        return {.text = cc::format("{}.GetRayDesc().TMax", ctx.arguments[0].text)};
     if (read.type == "int")
         return {.text = cc::format("int({}.{}())", ctx.arguments[0].text, read.hlsl)};
     return {.text = cc::format("{}.{}()", ctx.arguments[0].text, read.hlsl)};
@@ -771,10 +792,11 @@ written write_hit_object_step(call_context const& ctx)
 {
     if (ctx.target != language::hlsl)
         return {};
+    auto const reorder = ctx.is_vulkan              ? cc::string_view("sgl_reorder_thread")
+                       : ctx.reorders_through_nvapi ? cc::string_view("NvReorderThread")
+                                                    : cc::string_view("dx::MaybeReorderThread");
     if (ctx.data == 3)
-        return {.text
-                = cc::format("{}(uint({}), uint({}))", ctx.is_vulkan ? "sgl_reorder_thread" : "dx::MaybeReorderThread",
-                             ctx.arguments[0].text, ctx.arguments[1].text)};
+        return {.text = cc::format("{}(uint({}), uint({}))", reorder, ctx.arguments[0].text, ctx.arguments[1].text)};
     if (ctx.is_vulkan && ctx.data == 2)
     {
         auto const global = spirv_payload_name(ctx.argument_types[1]);
@@ -790,9 +812,9 @@ written write_hit_object_step(call_context const& ctx)
     if (ctx.data == 2)
         return {.text = cc::format("dx::HitObject::Invoke({}, {})", ctx.arguments[0].text, ctx.arguments[1].text)};
     if (ctx.data == 1)
-        return {.text = cc::format("dx::MaybeReorderThread({}, uint({}), uint({}))", ctx.arguments[0].text,
-                                   ctx.arguments[1].text, ctx.arguments[2].text)};
-    return {.text = cc::format("dx::MaybeReorderThread({})", ctx.arguments[0].text)};
+        return {.text = cc::format("{}({}, uint({}), uint({}))", reorder, ctx.arguments[0].text, ctx.arguments[1].text,
+                                   ctx.arguments[2].text)};
+    return {.text = cc::format("{}({})", reorder, ctx.arguments[0].text)};
 }
 
 constexpr cc::string_view k_trace_ray_hlsl[] = {"RayDesc", "TraceRay"};
@@ -812,9 +834,19 @@ constexpr cc::string_view k_hit_object_hlsl[] = {
     "GetInstanceIndex",
     "GetGeometryIndex",
     "GetPrimitiveIndex",
+    // the nvapi fill's, and the counter UAV `nvHLSLExtns.h` declares (EMIT-263)
+    "NvHitObject",
+    "NvTraceRayHitObject",
+    "NvReorderThread",
+    "NvInvokeHitObject",
+    "GetRayDesc",
+    "TMax",
+    "g_NvidiaExt",
 };
 constexpr cc::string_view k_trace_ray_reordered_hlsl[]
-    = {"RayDesc", "dx", "HitObject", "TraceRay", "MaybeReorderThread", "Invoke", "vk", "SpirvOpaqueType"};
+    = {"RayDesc",         "dx",          "HitObject",        "TraceRay",    "MaybeReorderThread",
+       "Invoke",          "vk",          "SpirvOpaqueType",  "NvHitObject", "NvTraceRayHitObject",
+       "NvReorderThread", "g_NvidiaExt", "NvInvokeHitObject"};
 constexpr cc::string_view k_trace_ray_msl[] = {
     "sgl_configure",
     "sgl_record_of",
@@ -1063,6 +1095,7 @@ void sgl::builtins::register_raytracing(registry& r)
         .doc = "/// A trace whose shaders have not run yet: `let h = trace_hit(...)`, then `h.invoke(mut p)`.",
         .hlsl = "dx::HitObject",
         .hlsl_vulkan = cc::string(k_spirv_hit_object),
+        .hlsl_nvapi = "NvHitObject",
         .features = ser,
         .local_only_reason = "it is a trace in flight, which only its invocation completes",
     });

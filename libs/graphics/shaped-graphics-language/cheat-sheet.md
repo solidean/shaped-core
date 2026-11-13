@@ -25,6 +25,16 @@ r.value().text                             // the emitter's text, unchanged
 r.value().entry_point                      // the name the text declares, which is the one to compile: `main` is `main_` in MSL
 r.value().bound_names                      // { emitted, host } per resource: `work_values` is what the host binds as `work.values`
 r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
+r.value().features                         // check::feature_set the device needs: the entry's, plus what the output used of the grant
+r.value().dxil_shader_model                // { major, minor }: the DXIL shader model a dx12 output needs in its fills (EMIT-262)
+r.value().dxc_args                         // what DXC takes beside the text at that model: -enable-payload-qualifiers below 6.7
+r.value().axes                             // variant_axis {f, fills} per feature the entry consulted, granted or not (EMIT-264)
+r.value().needs_nvapi_header               // an nvapi fill's text includes nvHLSLExtns.h; its UAV is a binding with is_reserved
+// fills (EMIT-263): .fills = {{.f = feature::shader_execution_reordering, .how = fill::nvapi}} on the text_request
+//   .core = {.draw_start = fill::root_constant, .wave_size = fill::none} is what a dx12 host targeting 6.6 asks
+sgl::emit::fills_of(target, f)             // what a target offers, most demanding first: dx12 SER/micromaps native, nvapi
+sgl::check::dxil_shader_model_of(f, how)   // native SER, micromaps 6.9, clustered_geometry 6.10, draw_start/wave_size 6.8; else 6.6
+sgl::variant_key{.fills, .core}.to_string()// "shader_execution_reordering=nvapi;draw_start=root_constant;wave_size=none"
 r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes
                                            // a member never named is absent — sg skips its barrier; see spec/bindings.md "Footprint"
 r.value().warnings                         // cc::vector<cc::string>, one per warning: `cube.sgl:7:14: warning: unroll-too-long: ...`
@@ -738,6 +748,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   It must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
   A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a body `require` nothing needed is the WARNING `unused-require`; a file's or a binding's never is.
   WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` or `tessellation_shader` as `target-lacks-feature`.
+- **A dx12 output's shader model is what its fills need (EMIT-262, EMIT-263).** The `root_constant` fill of `draw_start` and the `none` of `wave_size` keep it at 6.6.
+  Under `root_constant` an entry point taking `@vertex_index`, `@instance_index` or `@first_instance` is `unsupported` for now (EMIT-128); vulkan reads them as its builtins.
   It writes `ray_query` through the emulated trace instead (EMIT-135).
   MSL refuses one needing `geometry_shader` or `tessellation_shader` the same way.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.

@@ -513,6 +513,11 @@ public:
         // optimization rather than an error
         if (p.e.entry_stage >= stage::raygen)
             out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
+        // EMIT-263: NVAPI's shader extensions, at the slot the host enables; `nvHLSLExtns.h` is on its include path
+        if (p.reorders_through_nvapi)
+            out.appendf("#define NV_SHADER_EXTN_SLOT u{}\n#define NV_SHADER_EXTN_REGISTER_SPACE space{}\n"
+                        "#include \"nvHLSLExtns.h\"\n\n",
+                        check::k_nvapi_register, check::k_nvapi_space);
         write_enum_constants(out, p, *this);
         for (auto const& access : p.accesses)
             if (access.held == held_as::vector_mat2)
@@ -740,20 +745,31 @@ public:
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
             if (!spelled.hlsl_read.empty())
                 continue;
-            parameters.push_back(
-                cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
-            // EMIT-128: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
+            auto const input = p.e.stage_inputs[i].input;
+            // EMIT-128: where the draw started is vulkan's `BaseInstance`, which every shader model reads
+            if (_is_vulkan && input == check::stage_input::first_instance)
+                parameters.push_back(cc::format("[[vk::builtin(\"BaseInstance\")]] uint {} : SGL_BASE_INSTANCE",
+                                                p.stage_input_names[i]));
+            else
+                parameters.push_back(
+                    cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
+            // EMIT-128: HLSL counts from the draw's base, so the text adds where the draw started.
+            // dx12 reads it as Shader Model 6.8's system values, and vulkan as its builtins.
             // An instance's base is `@first_instance` itself where the entry takes that, since a semantic is taken once.
             auto takes_first_instance = false;
             for (auto const& other : p.e.stage_inputs)
                 takes_first_instance = takes_first_instance || other.input == check::stage_input::first_instance;
-            auto const base_is_shared
-                = p.e.stage_inputs[i].input == check::stage_input::instance_index && takes_first_instance;
-            if (has_base(p, p.e.stage_inputs[i].input) && !base_is_shared)
+            auto const base_is_shared = input == check::stage_input::instance_index && takes_first_instance;
+            if (!has_base(p, input) || base_is_shared)
+                continue;
+            auto const is_vertex = input == check::stage_input::vertex_index;
+            if (_is_vulkan)
+                parameters.push_back(cc::format("[[vk::builtin(\"{}\")]] uint {} : {}",
+                                                is_vertex ? "BaseVertex" : "BaseInstance", p.stage_input_bases[i],
+                                                is_vertex ? "SGL_BASE_VERTEX" : "SGL_BASE_INSTANCE"));
+            else if (p.reads_draw_start)
                 parameters.push_back(cc::format("uint {} : {}", p.stage_input_bases[i],
-                                                p.e.stage_inputs[i].input == check::stage_input::vertex_index
-                                                    ? "SV_StartVertexLocation"
-                                                    : "SV_StartInstanceLocation"));
+                                                is_vertex ? "SV_StartVertexLocation" : "SV_StartInstanceLocation"));
         }
         auto list = cc::string();
         for (auto const& parameter : parameters)
@@ -784,8 +800,8 @@ public:
         if (p.e.entry_stage == stage::compute || p.e.entry_stage == stage::task)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
-            // EMIT-148: the range form, which every dx12 device runs, prefers the size where the device has it
-            if (!_is_vulkan && p.e.preferred_subgroup_size > 0)
+            // EMIT-148: the range form, Shader Model 6.8's, prefers the size where the device has it
+            if (p.states_wave_size_range)
                 out.appendf("[WaveSize(4, 128, {})]\n", p.e.preferred_subgroup_size);
             out.appendf("void {}({})\n{{\n", p.entry_name, list);
         }

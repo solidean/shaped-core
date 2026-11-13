@@ -129,3 +129,90 @@ TEST("sgl ir - every entry point of the repo's SGL goes down both native routes"
     CHECK(spirv >= (nx::is_thorough() ? 260 : 24));
     CHECK(dxil >= (nx::is_thorough() ? 230 : 20));
 }
+
+// EMIT-262: with no feature granted and the 6.6 core fills, nothing SGL writes for dx12 needs more than 6.6, either route.
+// An entry that takes the draw's start is refused instead, until the root-constant fill is written.
+// SGL's own DXIL states its model in the container; the text's is checked by DXC at the 6.6 profiles in slib's tests.
+TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of the repo's SGL stays at Shader Model 6.6",
+     nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/**"))
+{
+    auto files = sources_under(nx::source_path(SGL_SG_SHADERS_DIR));
+    files.push_back_range(sources_under(nx::source_path(SGL_SR_SHADERS_DIR)));
+    files.push_back_range(sources_under(nx::source_path(SGL_CORPUS_DIR)));
+    REQUIRE(!files.empty());
+
+    auto const six_six = sgl::check::dxil_shader_model{.major = 6, .minor = 6};
+    auto const stride = nx::is_thorough() ? 1 : 4;
+    auto native_stages = cc::vector<sgl::check::stage>();
+    auto text_stages = cc::vector<sgl::check::stage>();
+    auto refused = 0;
+    auto const has = [](cc::span<sgl::check::stage const> stages, sgl::check::stage s)
+    {
+        for (auto const t : stages)
+            if (t == s)
+                return true;
+        return false;
+    };
+    for (auto i = isize(0); i < files.size(); i += stride)
+    {
+        auto const& file = files[i];
+        auto const source = read_all(file);
+        auto const all = sgl::compile_all_to_text({.source = source, .targets = {sgl::emit::target::hlsl_dx12}});
+        if (all.has_error())
+            continue;
+        for (auto const& entry : all.value())
+            for (auto const native : {sgl::emit::native_route::text, sgl::emit::native_route::prefer})
+            {
+                auto const e = sgl::compile_to_text(
+                    {.source = source,
+                     .entry_point = entry.entry_point,
+                     .target = sgl::emit::target::hlsl_dx12,
+                     .core = {.draw_start = sgl::check::fill::root_constant, .wave_size = sgl::check::fill::none},
+                     .native = native});
+                if (e.has_error())
+                {
+                    // the one refusal of a device that grants nothing, which a root constant lowering replaces later
+                    CHECK(e.error().contains("asks the root-constant fill of draw_start, which is not written yet"))
+                        .dump("file", file)
+                        .dump("entry", entry.entry_point)
+                        .dump("error", e.error());
+                    ++refused;
+                    continue;
+                }
+                CHECK(e.value().dxil_shader_model == six_six).dump("file", file).dump("entry", entry.entry_point);
+                auto& stages = e.value().dxil.empty() ? text_stages : native_stages;
+                if (!has(stages, e.value().stage))
+                    stages.push_back(e.value().stage);
+                if (!e.value().dxil.empty())
+                {
+                    auto const c = babel::dxil::read(e.value().dxil);
+                    REQUIRE(c.has_value());
+                    auto const* const part = c.value().part_named("DXIL");
+                    REQUIRE(part != nullptr);
+                    auto const p = babel::dxil::program_of(*part);
+                    REQUIRE(p.has_value());
+                    CHECK(p.value().model_major == 6u).dump("file", file).dump("entry", entry.entry_point);
+                    CHECK(p.value().model_minor == 6u).dump("file", file).dump("entry", entry.entry_point);
+                    continue;
+                }
+                CHECK(!e.value().text.contains("SV_StartVertexLocation")).dump("entry", entry.entry_point);
+                CHECK(!e.value().text.contains("SV_StartInstanceLocation")).dump("entry", entry.entry_point);
+                CHECK(!e.value().text.contains("[WaveSize(")).dump("entry", entry.entry_point);
+            }
+    }
+    auto const names_of = [](cc::span<sgl::check::stage const> stages)
+    {
+        auto names = cc::string();
+        for (auto const s : stages)
+            names.appendf("{}{}", names.empty() ? "" : ", ", sgl::check::stage_name(s));
+        return names;
+    };
+    CC_LOG_INFO("at Shader Model 6.6: SGL's DXIL of {}; the text of {}; {} refused for the draw's start",
+                names_of(native_stages), names_of(text_stages), refused);
+    // the stages every sampled run reaches on both routes
+    for (auto const s : {sgl::check::stage::vertex, sgl::check::stage::pixel, sgl::check::stage::compute})
+    {
+        CHECK(has(native_stages, s)).dump("stage", sgl::check::stage_name(s));
+        CHECK(has(text_stages, s)).dump("stage", sgl::check::stage_name(s));
+    }
+}

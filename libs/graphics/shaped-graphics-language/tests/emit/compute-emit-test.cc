@@ -148,11 +148,20 @@ TEST("sgl emit - HLSL counts a vertex and an instance from the draw's base, so t
                             "\n"
                             "@vertex fun vs(@vertex_index v: int, @instance_index i: int) -> varyings:\n"
                             "    return { position = hpos4(v as float, i as float, 0.0, 1.0) }\n";
-    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    // dx12's native fill of the draw's start, the default, reads it as Shader Model 6.8's system values
+    auto const dx12 = emit_source(source, 0, target::hlsl_dx12);
+    CHECK(sgl::emit::dump_errors(dx12) == "");
+    CHECK(dx12.text.contains("varyings vs(uint v_in : SV_VertexID, uint v_base : SV_StartVertexLocation, uint i_in : "
+                             "SV_InstanceID, uint i_base : SV_StartInstanceLocation)\n"));
+    CHECK(dx12.reads_draw_start);
+    // vulkan reads it as its builtins, which every shader model has
+    auto const vulkan = text_of(source, target::hlsl_vulkan);
+    CHECK(vulkan.contains("varyings vs(uint v_in : SV_VertexID, [[vk::builtin(\"BaseVertex\")]] uint v_base : "
+                          "SGL_BASE_VERTEX, uint i_in : SV_InstanceID, [[vk::builtin(\"BaseInstance\")]] uint i_base : "
+                          "SGL_BASE_INSTANCE)\n"));
+    CHECK(!vulkan.contains("SV_Start"));
+    for (auto const& hlsl : {dx12.text, vulkan})
     {
-        auto const hlsl = text_of(source, t);
-        CHECK(hlsl.contains("varyings vs(uint v_in : SV_VertexID, uint v_base : SV_StartVertexLocation, uint i_in : "
-                            "SV_InstanceID, uint i_base : SV_StartInstanceLocation)\n"));
         CHECK(hlsl.contains("    const int v = int(v_in + v_base);\n"));
         CHECK(hlsl.contains("    const int i = int(i_in + i_base);\n"));
     }
@@ -171,12 +180,12 @@ TEST("sgl emit - @first_instance is the draw's first instance on its own")
                             "\n"
                             "@vertex fun vs(@first_instance f: int) -> varyings:\n"
                             "    return { position = hpos4(f as float, 0.0, 0.0, 1.0) }\n";
-    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
-    {
-        auto const hlsl = text_of(source, t);
-        CHECK(hlsl.contains("varyings vs(uint f_in : SV_StartInstanceLocation)\n"));
+    auto const dx12 = emit_source(source, 0, target::hlsl_dx12);
+    CHECK(dx12.text.contains("varyings vs(uint f_in : SV_StartInstanceLocation)\n"));
+    auto const vulkan = text_of(source, target::hlsl_vulkan);
+    CHECK(vulkan.contains("varyings vs([[vk::builtin(\"BaseInstance\")]] uint f_in : SGL_BASE_INSTANCE)\n"));
+    for (auto const& hlsl : {dx12.text, vulkan})
         CHECK(hlsl.contains("    const int f = int(f_in);\n"));
-    }
     auto const msl = text_of(source, target::msl);
     CHECK(msl.contains("vertex varyings vs(uint f_in [[base_instance]])\n"));
     // EMIT-109: WGSL has no builtin for it on any device

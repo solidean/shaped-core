@@ -499,6 +499,9 @@ private:
         }
         for (auto const& b : emitted.bindings)
         {
+            // a reserved slot is an nvapi fill's (EMIT-263), which slib never asks for and sg holds no slot of
+            if (b.is_reserved)
+                continue;
             auto binding = binding_of(b, shader.format, shader.stage);
             if (b.is_used)
                 shader.bindings.push_back(binding);

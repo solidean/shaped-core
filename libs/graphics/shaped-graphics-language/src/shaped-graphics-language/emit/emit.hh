@@ -156,6 +156,10 @@ struct sgl::emit::options
     bool diagnostics = false;
     /// What the device has; with `float_atomic_add`, vulkan and metal write the target's own float atomics.
     check::feature_set device_features;
+    /// How each granted feature is written (EMIT-263); one it names no fill for is `native`.
+    cc::span<check::feature_fill const> fills;
+    /// How the core constructs are written (EMIT-263): `native` for both is what every compile wrote before fills.
+    check::core_fills core;
     /// The tree was legalized to its emulated traces where the target has native ones (`text_request::software_trace`).
     bool software_trace = false;
     /// How `hlsl-vulkan` and `hlsl-dx12` are written: the text for DXC, or SPIR-V and DXIL from SGL's own layer (ir/ir.hh),
@@ -202,6 +206,16 @@ struct sgl::emit::emitted_text
     cc::optional<check::mesh_polyfill_layout> mesh_layout;
     /// The records a polyfilled task stage's forms agree on, which sg sizes their buffer by; empty for every other emit.
     cc::optional<check::task_polyfill_layout> task_layout;
+    /// What the output wrote of the core constructs natively, which a dx12 output needs Shader Model 6.8 for (EMIT-262):
+    /// the draw's start as system values, and the preferred subgroup size as a range.
+    bool reads_draw_start = false;
+    bool states_wave_size_range = false;
+    /// `hlsl-dx12` text: it states a payload's access qualifiers, which DXC takes below Shader Model 6.7 only with
+    /// `-enable-payload-qualifiers` (EMIT-262).
+    bool states_payload_qualifiers = false;
+    /// The output talks to NVIDIA's driver through NVAPI's shader extensions at `u0, space13`: an `nvapi` fill wrote it
+    /// (EMIT-263), and the text includes `nvHLSLExtns.h`.
+    bool writes_nvapi = false;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -214,7 +228,10 @@ struct sgl::emit::emitted_text
             && color_targets == rhs.color_targets && target_struct == rhs.target_struct
             && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
             && ast::impl::is_equal(debug_sites, rhs.debug_sites) && mesh_layout == rhs.mesh_layout
-            && task_layout == rhs.task_layout && ast::impl::is_equal(errors, rhs.errors);
+            && task_layout == rhs.task_layout && reads_draw_start == rhs.reads_draw_start
+            && states_wave_size_range == rhs.states_wave_size_range
+            && states_payload_qualifiers == rhs.states_payload_qualifiers && writes_nvapi == rhs.writes_nvapi
+            && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 
@@ -222,6 +239,14 @@ namespace sgl::emit
 {
 /// Every target there is, in the order of the enum.
 [[nodiscard]] cc::span<target const> all_targets();
+
+/// The fills `t` offers for a granted feature `f`, most demanding first (EMIT-263): `native` everywhere, and `nvapi` too
+/// for `shader_execution_reordering` and `opacity_micromap` on `hlsl-dx12`.
+[[nodiscard]] cc::span<check::fill const> fills_of(target t, check::feature f);
+
+/// The fills `t` offers for a core construct, most demanding first: on `hlsl-dx12`, `native` and the backport
+/// (`root_constant` for the draw's start, `none` for the subgroup size); `native` alone elsewhere.
+[[nodiscard]] cc::span<check::fill const> fills_of(target t, check::core_construct c);
 
 /// `hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`.
 [[nodiscard]] cc::string_view to_string(target t);

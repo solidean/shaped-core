@@ -310,9 +310,16 @@ A struct of the program is a struct in every target and no vector, so it keeps t
 
 ## EMIT-148
 
-A text is per target, never per device (EMIT-13), so dx12's has to be right on every device, NVIDIA's included, which runs 32 alone.
+dx12's text has to be right on every device that runs it, NVIDIA's included, which runs 32 alone.
 The exact form, `[WaveSize(64)]`, fails the pipeline on such a device; the range form runs everywhere and prefers `n` where it can.
-SM 6.8, which the range form needs, is already the profile SGL's DXC edge compiles.
+The range form is Shader Model 6.8's, past the 6.6 a host may target (EMIT-262), so a host targeting 6.6 asks the `none` fill of `wave_size`.
+A preference is only a hint then, which the host still has beside the text.
+
+## EMIT-263
+
+What a shader model adds is often what a device has some other way, so a target's form of a construct is a choice beside whether the device has it.
+NVIDIA's devices reorder and see micromaps through NVAPI at 6.6, and a draw's start can arrive in a root constant, so a fill names that choice per construct.
+A feature stays what the device can do, and its fill how this compile writes it, which keeps the features one list across every target.
 
 ## EMIT-149
 

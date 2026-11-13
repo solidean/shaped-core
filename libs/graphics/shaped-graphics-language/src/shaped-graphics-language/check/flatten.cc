@@ -72,9 +72,11 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
             within.push_back(fr.function);
         // EMIT-184: an HLSL ray query sees the micromaps of a device that has them, which the compile states for it
         auto const target = compiled_for();
-        if (record->declares_only && record->features.has(feature::ray_query)
-            && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan)
-            && target.device_features.has(feature::opacity_micromap))
+        auto const may_see_micromaps = record->declares_only && record->features.has(feature::ray_query)
+                                    && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan);
+        if (may_see_micromaps)
+            entry.consulted.set(feature::opacity_micromap); // EMIT-264
+        if (may_see_micromaps && target.device_features.has(feature::opacity_micromap))
         {
             auto const sees = feature_set(feature::opacity_micromap);
             feature_uses.push_back({.file = file(), .call = call, .features = sees, .within = within, .granted = sees});

@@ -840,6 +840,10 @@ struct sgl::check::flat_entry_point
     i32 preferred_subgroup_size = 0;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// Every feature whose grant the compile consulted, granted or not: a `has(.f)` it reached, a trace's `reorder`
+    /// (CHK-433) and a ray query's micromaps (EMIT-184), each before the branch it decided was discarded.
+    /// These are a bake's variant axes (EMIT-264).
+    feature_set consulted;
     /// The strictest `@float` of every function it reaches, itself included (CHK-435), and the first function that
     /// stated it; `none` at `fast`.
     float_level float_guarantee = float_level::fast;
@@ -917,10 +921,10 @@ struct sgl::check::flat_entry_point
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
             && is_auto_workgroup == rhs.is_auto_workgroup && preferred_subgroup_size == rhs.preferred_subgroup_size
-            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
-            && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
-            && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
-            && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
+            && consulted == rhs.consulted && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals)
+            && is_equal(labels, rhs.labels) && root == rhs.root && is_equal(exprs, rhs.exprs)
+            && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists)
+            && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
             && is_equal(check_nodes, rhs.check_nodes) && is_equal(messages, rhs.messages) && body == rhs.body
             && names == rhs.names && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
             && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee

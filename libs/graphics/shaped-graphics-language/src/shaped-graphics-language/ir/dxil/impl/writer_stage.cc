@@ -663,9 +663,7 @@ void writer::write_entry_metadata()
             auto fields = cc::vector<u32>();
             fields.push_back(_m.md_i32(b.id));
             fields.push_back(type);
-            fields.push_back(
-                _m.md_string(is_library() ? _p.name_at(_p.globals[b.global].name_first, _p.globals[b.global].name_size)
-                                          : cc::string_view("")));
+            fields.push_back(_m.md_string(is_library() ? b.name : cc::string_view("")));
             fields.push_back(_m.md_i32(b.space));
             fields.push_back(_m.md_i32(b.lower));
             fields.push_back(_m.md_i32(b.range));
@@ -688,8 +686,8 @@ void writer::write_entry_metadata()
                 break;
             case 1: // a UAV: kind, coherent, counter, rasterizer order, extra
                 fields.push_back(_m.md_i32(b.kind));
-                fields.push_back(_m.md_i1(_p.globals[b.global].is_coherent));
-                fields.push_back(_m.md_i1(false));
+                fields.push_back(_m.md_i1(b.is_coherent));
+                fields.push_back(_m.md_i1(b.has_counter));
                 fields.push_back(_m.md_i1(false));
                 fields.push_back(extra);
                 break;
@@ -820,16 +818,17 @@ void writer::write_entry_metadata()
         for (auto const cls : {2u, 3u, 0u, 1u})
             for (auto const& b : _bindings)
                 if (b.cls == cls)
-                    _summary.resources.push_back(
-                        {.psv_type = b.psv_type,
-                         .space = b.space,
-                         .lower = b.lower,
-                         .upper = b.upper,
-                         .kind = b.kind,
-                         .psv_flags = b.used_by_atomic64 ? k_psv_used_by_atomic64 : 0,
-                         .cls = cls,
-                         .id = b.id,
-                         .name = _p.name_at(_p.globals[b.global].name_first, _p.globals[b.global].name_size)});
+                    _summary.resources.push_back({.psv_type = b.psv_type,
+                                                  .space = b.space,
+                                                  .lower = b.lower,
+                                                  .upper = b.upper,
+                                                  .kind = b.kind,
+                                                  .psv_flags = b.used_by_atomic64 ? k_psv_used_by_atomic64 : 0,
+                                                  .cls = cls,
+                                                  .id = b.id,
+                                                  .name = cc::string(b.name),
+                                                  // `DxilResourceFlag::UAVHasCounter`
+                                                  .flags = b.has_counter ? 2u : 0u});
         return;
     }
 

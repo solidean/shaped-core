@@ -129,7 +129,8 @@ void lowering::run()
         // what crosses its edge stands on its own, and DXIL's packer reads it ahead of any lowering of the body
         return declare_stage_elements();
     }
-    _out.sees_micromaps = _e.features.has(check::feature::opacity_micromap);
+    _out.sees_micromaps = _plan.states_micromaps;
+    _out.reorders_through_nvapi = _plan.reorders_through_nvapi;
 
     open_block(new_block());
     if (is_raster)

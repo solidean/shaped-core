@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/flags.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/fwd.hh>
 
@@ -138,6 +139,118 @@ inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(
         if (k_feature_names[i] == name)
             return i32(i);
     return -1;
+}
+} // namespace sgl::check
+
+/// A DXIL shader model, which a dx12 host compiles SGL's text at and states for SGL's own DXIL.
+/// 6.6 is the floor: a compile that asks no fill past it writes nothing for dx12 that needs more (EMIT-262).
+struct sgl::check::dxil_shader_model
+{
+    i32 major = 6;
+    i32 minor = 6;
+
+    [[nodiscard]] constexpr bool operator==(dxil_shader_model const&) const = default;
+    [[nodiscard]] constexpr bool operator<(dxil_shader_model const& rhs) const
+    {
+        return major < rhs.major || (major == rhs.major && minor < rhs.minor);
+    }
+};
+
+/// How a compile writes a granted feature or a core construct for its target (EMIT-263).
+/// `emit::fills_of` says which ones a target offers, most demanding first.
+enum class sgl::check::fill : sgl::u8
+{
+    /// The target's own form, at the shader model `dxil_shader_model_of` gives: SER's `HitObject` is 6.9 on dx12.
+    native,
+    /// D3D12 on NVIDIA through NVAPI's shader extensions, which `nvHLSLExtns.h` declares; the host enables them.
+    /// `shader_execution_reordering` is `NvHitObject` and `NvReorderThread`, and `opacity_micromap` writes nothing.
+    nvapi,
+    /// The draw's start handed over in a root constant, which no compile writes yet (EMIT-128).
+    root_constant,
+    /// The construct left out: no `WaveSize` at all (EMIT-148).
+    none,
+};
+
+/// A construct every device runs whose target forms differ by shader model, which a compile fills like a feature.
+enum class sgl::check::core_construct : sgl::u8
+{
+    /// Where a draw started, which `@vertex_index`, `@instance_index` and `@first_instance` read (EMIT-128).
+    draw_start,
+    /// A compute entry point's `@preferred_subgroup_size` stated in the text (EMIT-148).
+    wave_size,
+};
+
+/// The fill a compile asks for one granted feature; a granted feature it names none for is `native`.
+struct sgl::check::feature_fill
+{
+    feature f = feature::binding_arrays;
+    fill how = fill::native;
+
+    [[nodiscard]] constexpr bool operator==(feature_fill const&) const = default;
+};
+
+/// The fill a compile asks for each core construct; `native` for both is what every compile wrote before fills existed.
+struct sgl::check::core_fills
+{
+    /// `native` or `root_constant`.
+    fill draw_start = fill::native;
+    /// `native` or `none`.
+    fill wave_size = fill::native;
+
+    [[nodiscard]] constexpr bool operator==(core_fills const&) const = default;
+};
+
+namespace sgl::check
+{
+inline constexpr cc::string_view k_fill_names[] = {"native", "nvapi", "root_constant", "none"};
+inline constexpr cc::string_view k_core_construct_names[] = {"draw_start", "wave_size"};
+
+[[nodiscard]] constexpr cc::string_view name_of(fill f)
+{
+    return k_fill_names[isize(f)];
+}
+[[nodiscard]] constexpr cc::string_view name_of(core_construct c)
+{
+    return k_core_construct_names[isize(c)];
+}
+
+/// The DXIL shader model a dx12 output needs where it writes `f` as `how` (EMIT-262).
+/// 6.6 for every feature whose form needs no more, and for every fill but `native`.
+[[nodiscard]] constexpr dxil_shader_model dxil_shader_model_of(feature f, fill how = fill::native)
+{
+    if (how != fill::native)
+        return {};
+    switch (f)
+    {
+    case feature::shader_execution_reordering:
+    case feature::opacity_micromap:
+        return {.major = 6, .minor = 9};
+    case feature::clustered_geometry:
+        return {.major = 6, .minor = 10};
+    default:
+        return {};
+    }
+}
+
+/// The DXIL shader model a dx12 output needs where it writes `c` as `how`: 6.8 for either native form, 6.6 otherwise.
+[[nodiscard]] constexpr dxil_shader_model dxil_shader_model_of(core_construct c, fill how)
+{
+    (void)c;
+    return how == fill::native ? dxil_shader_model{.major = 6, .minor = 8} : dxil_shader_model{};
+}
+
+/// The register and space of the counter UAV through which an `nvapi` fill talks to NVIDIA's driver, `u0, space13`.
+/// The text defines `NV_SHADER_EXTN_SLOT` and `NV_SHADER_EXTN_REGISTER_SPACE` to it, and the host enables that slot.
+inline constexpr i32 k_nvapi_register = 0;
+inline constexpr i32 k_nvapi_space = 13;
+
+/// The fill `fills` asks for `f`, `native` where it names none.
+[[nodiscard]] constexpr fill fill_of(cc::span<feature_fill const> fills, feature f)
+{
+    for (auto const& entry : fills)
+        if (entry.f == f)
+            return entry.how;
+    return fill::native;
 }
 } // namespace sgl::check
 

@@ -342,6 +342,11 @@ fun total(v: float) -> float:
     work.values[id.x] = total(work.values[id.x])
 ```
 
+**A dx12 output names the shader model it needs, which its fills decide** (EMIT-262, EMIT-263).
+`emitted_source::dxil_shader_model` is that model, and `check::dxil_shader_model_of` the model of each feature and core construct in each fill.
+A host targeting 6.6 asks the `root_constant` fill of `draw_start` and the `none` fill of `wave_size`, and an entry point that takes the draw's start is refused there for now (EMIT-128).
+An `nvapi` fill lists one slot no binding declares, `g_NvidiaExt`, as `is_reserved` at space 13 and register 0: NVAPI's, which the host enables on its device and binds nothing at.
+
 **`acceleration_structure[.geometry]` is a binding member: the TLAS a trace runs against** (CHK-320).
 Its argument is required and names what it holds, `.triangles`, `.procedural` or `.mixed`.
 It is `sg::binding_type::acceleration_structure`, a resource like a texture, never a value, and a host binds an `sg::tlas_view` to it.

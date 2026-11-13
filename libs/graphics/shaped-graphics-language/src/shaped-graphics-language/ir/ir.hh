@@ -850,6 +850,9 @@ struct sgl::ir::program
     primitive_stage primitive;
     /// EMIT-184: the device has opacity micromaps, so a trace sees them, which each target states.
     bool sees_micromaps = false;
+    /// EMIT-263: DXIL writes the hit objects through NVAPI's shader extensions, the `nvapi` fill of shader execution
+    /// reordering, rather than as Shader Model 6.9's own.
+    bool reorders_through_nvapi = false;
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;
     /// The `.sgl` lines each writer states beside its operations, where the compile asked for them.

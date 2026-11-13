@@ -1323,6 +1323,7 @@ struct writer
                                    : cc::string();
             auto result = how.custom({.target = d.language(),
                                       .is_vulkan = p.which == emit::target::hlsl_vulkan,
+                                      .reorders_through_nvapi = p.reorders_through_nvapi,
                                       .arguments = arguments,
                                       .argument_types = types,
                                       .builtins = *p.m.builtins,
@@ -1628,8 +1629,7 @@ struct writer
         auto const* const type_record = p.m.builtin_type_of(local.type);
         auto const& flags = p.local_flags[index_of(id)];
         // EMIT-184: forcing micromaps to 2 states is a name of Shader Model 6.9 alone, and the template only a hint
-        auto const sees_micromaps
-            = p.e.features.has(check::feature::opacity_micromap) && d.flags_query_for_micromaps(flags);
+        auto const sees_micromaps = p.states_micromaps && d.flags_query_for_micromaps(flags);
         auto type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
                          && type_record->hlsl_flagged != nullptr && flags.has_value()
                       ? type_record->hlsl_flagged(sees_micromaps ? flags.value() : flags.value() & ~1024u)
@@ -1909,7 +1909,8 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     if (type == check::checked_module::void_type)
         return "void";
     if (auto const* const record = p.m.builtin_type_of(type))
-        return p.which == emit::target::hlsl_vulkan && !record->hlsl_vulkan.empty()
+        return p.reorders_through_nvapi && !record->hlsl_nvapi.empty() ? cc::string_view(record->hlsl_nvapi)
+             : p.which == emit::target::hlsl_vulkan && !record->hlsl_vulkan.empty()
                  ? cc::string_view(record->hlsl_vulkan)
                  : record->spelled_in(d.language());
     // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.
