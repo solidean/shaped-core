@@ -671,6 +671,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 fullscreen.sgl:*
                 layered.sgl:*
+                read_samples.sgl:*
         )
     endif()
 

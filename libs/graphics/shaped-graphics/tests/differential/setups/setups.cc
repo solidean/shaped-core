@@ -604,6 +604,63 @@ cc::shared_async<cc::vector<sg_diff::output>> run_blended(sg::context* ctx, sg_d
     co_return result;
 }
 
+cc::shared_async<cc::vector<sg_diff::output>> run_samples(sg::context* ctx, sg_diff::shaders_on_route on)
+{
+    using io = sgl_modules::diff_targets::io;
+    using samples = sgl_modules::diff_targets::samples;
+    using target = sgl_modules::diff_targets::sampled_target;
+    constexpr int sample_count = 4;
+    auto const vertex
+        = co_await sg_diff::compiled_on(*ctx, on.route, *sg::test::differential_setups::layered::layered.asset);
+    auto const read_stage = co_await sg_diff::compiled_on(
+        *ctx, on.route, *sg::test::differential_setups::read_samples::read_samples.asset);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
+        .layout = ctx->cached.acquire_pipeline_layout<io>(),
+        .vertex_shader = vertex,
+        .fragment_shader = on.entry,
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets = target::states{.color = {.format = sg::pixel_format::rgba16_float}},
+        .sample_count = sample_count,
+        .target_set = target::name,
+    });
+    auto const read = co_await ctx->cached.acquire_compute_pipeline(
+        {.shader = read_stage, .layout = ctx->cached.acquire_pipeline_layout<samples>()});
+
+    auto const input = ctx->persistent.create_buffer_from_data(float_inputs(), sg::buffer_usage::readonly_buffer);
+    auto const group = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<io>(),
+                                                            io{.input = input.as_readonly_buffer()});
+    auto const drawn
+        = ctx->persistent.create_texture_2d_ms({.format = sg::pixel_format::rgba16_float,
+                                                .width = k_extent,
+                                                .height = k_extent,
+                                                .sample_count = sample_count,
+                                                .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<tg::vec4f>::create_defaulted(k_extent * k_extent * sample_count),
+        sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto scope = cmd->raster.render_to(
+            {.color_targets = {drawn.as_render_target_view().cleared(tg::vec4f(0.2f, 0.4f, 0.6f, 0.5f))},
+             .target_set = target::name});
+        scope.bind_pipeline(*pipeline);
+        scope.bind_group(0, *group);
+        scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+    }
+    auto const read_group = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<samples>(),
+        samples{.target = drawn.as_texture_view(), .values = values.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*read);
+    cmd->compute.bind_group(0, *read_group);
+    cmd->compute.dispatch_threads(k_extent * k_extent);
+    auto const back = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    co_return one_output("samples", cc::span<tg::vec4f const>(got).as_bytes());
+}
+
 // One driver encodes both routes' writes alike; two implementations round a float into a format each their own way, by a step of it.
 bool const targets_registered = sg_diff::register_setup({
     .name = "targets",
@@ -619,6 +676,16 @@ bool const blended_registered = sg_diff::register_setup({
     .stage = sg::shader_stage::fragment,
     .module = "diff_targets",
     .run = &run_blended,
+    .routes = {},
+    .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
+});
+
+// Coverage at the standard sample positions is the same on every device; a sample's value is a half float, written alike everywhere.
+bool const samples_registered = sg_diff::register_setup({
+    .name = "samples",
+    .stage = sg::shader_stage::fragment,
+    .module = "diff_targets",
+    .run = &run_samples,
     .routes = {},
     .across = {.kind = sg_diff::tolerance::measure::relative, .amount = 0.005},
 });
