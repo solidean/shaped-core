@@ -7,7 +7,7 @@ using namespace cc::primitive_defines;
 #include <shaped-graphics-language/driver/test_source.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 
-// PROTOTYPE (docs/spec/incubator/autodiff.md): random programs, each function's two derivatives held to each other and to
+// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): random programs, each function's two derivatives held to each other and to
 // central differences on the interpreter.
 // Forward and backward are both exact at a point, so they must agree even beside a kink; a central difference is
 // compared only where two step sizes agree on it, which a kink within a step breaks.
