@@ -719,7 +719,7 @@ sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
         return impl::combine_digests(shape, attributes_digest(data.attributes));
     }();
 
-    if (data.cache.manager == this && data.cache.content == content && _is_live(data.cache.resources))
+    if (data.cache.manager == _owner && data.cache.content == content && _is_live(data.cache.resources))
     {
         data.cache.resources.transform = data.transform;
         data.cache.resources.material = data.material;
@@ -767,7 +767,7 @@ sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
                                              .swizzle = t.source.swizzle,
                                              .transform = t.source.transform}});
 
-    data.cache = {.manager = this,
+    data.cache = {.manager = _owner,
                   .resources = {.name = data.name,
                                 .geometry = geometry,
                                 .attributes = cc::move(bindings),
@@ -942,7 +942,7 @@ sv::resident_quadric_set const& gpu_resource_manager::create_quadric_set(sv::qua
     // `clear()` plus a refill is the documented per-frame pattern, and it changes both without touching the slot.
     auto const content = impl::combine_digests(data.hash(), attributes_digest(data.attributes));
 
-    if (data.cache.manager == this && data.cache.content == content && _is_live(data.cache.resources))
+    if (data.cache.manager == _owner && data.cache.content == content && _is_live(data.cache.resources))
     {
         data.cache.resources.transform = data.transform;
         data.cache.resources.material = data.material;
@@ -960,7 +960,7 @@ sv::resident_quadric_set const& gpu_resource_manager::create_quadric_set(sv::qua
         bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
     }
 
-    data.cache = {.manager = this,
+    data.cache = {.manager = _owner,
                   .resources = {.name = data.name,
                                 .geometry = geometry,
                                 .attributes = cc::move(bindings),

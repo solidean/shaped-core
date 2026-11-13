@@ -453,6 +453,10 @@ public:
     /// Call this on a teleport, a camera switch, or a jump to a bookmarked pose; ordinary orbiting and flying need it
     /// no more than a scene edit does.
     ///
+    /// **It is also how a view learns the scene was replaced**, a different model loaded in place of the last.
+    /// Nothing restarts the history on its own: meshes and lights coming and going, edits and animation are all followed per pixel.
+    /// The denoiser rebuilds it only for a new resolution or member, which a stream cannot carry across.
+    ///
     /// It leaves the progressive mean untouched, since that already restarts on any camera change.
     /// What it drops even when the camera does not move is every slot's denoise history and the motion guide's previous
     /// camera, so the next move starts SVGF cold.

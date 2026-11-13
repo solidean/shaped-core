@@ -43,6 +43,8 @@ enum class rule_kind : u8
     set_mesh_counts,
     write_primitive,
     derivative,
+    /// `a - (a / b) * b`: Vulkan leaves `OpSRem` undefined where an operand is negative, and `OpSDiv` defines it.
+    signed_remainder,
     sample_lod,
     sample_implicit,
     sample_bias,
@@ -79,7 +81,7 @@ constexpr op_rule k_rules[] = {
     {op::imul, rule_kind::plain, spv::IMul},
     {op::sdiv, rule_kind::plain, spv::SDiv},
     {op::udiv, rule_kind::plain, spv::UDiv},
-    {op::srem, rule_kind::plain, spv::SRem},
+    {op::srem, rule_kind::signed_remainder, spv::SDiv},
     {op::urem, rule_kind::plain, spv::UMod},
     {op::ineg, rule_kind::plain, spv::SNegate},
     {op::bit_and, rule_kind::plain, spv::BitwiseAnd},
@@ -624,11 +626,36 @@ void writer::instruction_of(u32 index)
         require(spv::CapDemoteToHelperInvocation);
         return emit(_code, rule.opcode, {});
     case rule_kind::derivative:
-        return emit(_code,
-                    derivative(i.sub) == derivative::x   ? spv::DPdx
-                    : derivative(i.sub) == derivative::y ? spv::DPdy
-                                                         : spv::Fwidth,
-                    {id_of(i.type), id, id_of_raw(operands[0])});
+    {
+        // OpDPdx and its siblings leave coarse or fine to the implementation
+        require(spv::CapDerivativeControl);
+        auto const opcode = [&]
+        {
+            switch (derivative(i.sub))
+            {
+            case derivative::x:
+                return spv::DPdxCoarse;
+            case derivative::y:
+                return spv::DPdyCoarse;
+            case derivative::width:
+                return spv::FwidthCoarse;
+            case derivative::x_fine:
+                return spv::DPdxFine;
+            case derivative::y_fine:
+                return spv::DPdyFine;
+            }
+            return spv::FwidthCoarse;
+        }();
+        return emit(_code, opcode, {id_of(i.type), id, id_of_raw(operands[0])});
+    }
+    case rule_kind::signed_remainder:
+    {
+        auto const quotient = _bound++;
+        emit(_code, spv::SDiv, {id_of(i.type), quotient, id_of_raw(operands[0]), id_of_raw(operands[1])});
+        auto const product = _bound++;
+        emit(_code, spv::IMul, {id_of(i.type), product, quotient, id_of_raw(operands[1])});
+        return emit(_code, spv::ISub, {id_of(i.type), id, id_of_raw(operands[0]), product});
+    }
     case rule_kind::atomic:
         return atomic(rule.opcode, i, id);
     case rule_kind::atomic_fadd:

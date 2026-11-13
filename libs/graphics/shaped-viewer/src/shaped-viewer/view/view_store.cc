@@ -139,6 +139,13 @@ void view_store::restart_accumulation(view_id id)
         impl::restart_accumulation(*st);
 }
 
+void view_store::restart_means(view_id id)
+{
+    auto* const st = _entries.get_ptr(id);
+    if (st != nullptr)
+        impl::restart_means(*st);
+}
+
 namespace impl
 {
 // Defined here rather than in a translation unit of their own: `view_state` is a header-only aggregate, and one fold
@@ -150,21 +157,27 @@ void restart_accumulation(temporal_slot& slot)
     slot.samples = 0;
     slot.pixels_short = 0;
     slot.sample_floors.clear();
+    slot.noise_settled = false;
 }
 
-void restart_accumulation(view_state& state)
+void restart_means(view_state& state)
 {
     // cc::map yields a proxy by value; its members are the live references
     for (auto [slot_id, slot] : state.temporal)
         if (temporal_id::is_accumulation(slot_id))
             restart_accumulation(slot);
 
-    // A cut is what throws the rest away on the view's next trace: the temporal histories and the reprojection camera.
-    state.camera_cut_pending = true;
-
     // The image a meter was awaited for is gone with its samples.
     for (auto& exposure : state.auto_exposure)
         exposure.meter_awaited = 0;
+}
+
+void restart_accumulation(view_state& state)
+{
+    restart_means(state);
+
+    // A cut is what throws the rest away on the view's next trace: the temporal histories and the reprojection camera.
+    state.camera_cut_pending = true;
 }
 
 bool is_auto_exposure_read(view_state& state)
@@ -229,12 +242,12 @@ bool is_accumulation_converged(view_state const& state, cc::optional<u32> sample
     return any;
 }
 
-f32 wavefront_budget_of(viewer_config const& config)
+f32 still_budget_of(viewer_config const& config)
 {
     return config.headless ? 0.0f : cc::max(0.0f, config.frame_budget_ms);
 }
 
-f32 wavefront_budget_share(f32 budget_ms, isize still_layers)
+f32 still_budget_share(f32 budget_ms, isize still_layers)
 {
     return budget_ms / f32(cc::max(isize(1), still_layers));
 }

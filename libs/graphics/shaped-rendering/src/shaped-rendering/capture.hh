@@ -57,6 +57,13 @@ inline constexpr cc::string_view capture_iterations_env_var = "SC_CAPTURE_ITERAT
 /// How long a capture may take before it gives up, in seconds; for a sequence, how long each of its frames may take.
 inline constexpr cc::string_view capture_timeout_env_var = "SC_CAPTURE_TIMEOUT";
 
+/// The time the whole capture may take, in seconds: a final render's budget, in place of a quality bar.
+///
+/// Each frame of a sequence gets what is left of it over the frames still to come, so a frame that finishes early leaves its time to the later ones.
+/// A frame then ends when the program says its image is done or its share runs out, whichever comes first, and either is a finished frame.
+/// What the program does with the time is its own; a path tracer traces until its noise target or its share.
+inline constexpr cc::string_view capture_budget_env_var = "SC_CAPTURE_BUDGET";
+
 /// How many frames to capture as a sequence; unset or 0 takes a single still.
 ///
 /// A sequence writes each frame to `SC_CAPTURE_OUT` with the frame's index substituted, see `capture_frame_path`.
@@ -106,6 +113,9 @@ struct sr::capture_request
     /// The time a capture may spend before it gives up and writes what it has, measured on `clock_seconds`.
     /// A sequence spends it per frame, starting over at each.
     double timeout_seconds = 60.0;
+
+    /// The time the whole run may take, or 0 for none; see `capture_budget_env_var`.
+    double budget_seconds = 0.0;
 
     /// How many frames to capture; 0 is a single still, written to `output_path` as it stands.
     i32 frames = 0;

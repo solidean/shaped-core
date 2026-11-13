@@ -11,6 +11,10 @@ namespace
 /// sRGB 122 of 255 decoded to linear: what the card must read on screen.
 constexpr f32 card_display_linear = 0.19461f;
 
+/// How many lines of the studio floor's grid lie on each side of the origin, each half as far out as the one beyond it.
+/// 18 take a kilometer down to below 8 mm, which is finer than any hit's error near an asset of ordinary size.
+constexpr int floor_grid_levels = 18;
+
 [[nodiscard]] tg::angle_f degrees(f32 d)
 {
     return tg::angle_f::make_from_degree(d);
@@ -57,11 +61,39 @@ mesh studio_floor(f32 height, f32 half_extent)
                               "base_color", tg::vec3f(studio_floor_albedo, studio_floor_albedo, studio_floor_albedo)),
                           material_attribute_binding::of("specular_weight", 0.0f)}));
 
-    auto const e = half_extent;
+    // A grid whose lines halve toward the origin, so the cells near the asset are small and their corners exact.
+    // A hit on a triangle is only as precise as its corners' coordinates, and one pair of triangles a kilometer across put the
+    // hit's height off by more than a continuation's offset everywhere, which then struck the floor again in bands.
+    auto lines = cc::vector<f32>();
+    auto extent = half_extent;
+    for (auto i = 0; i < floor_grid_levels; ++i)
+    {
+        lines.push_back(-extent);
+        extent *= 0.5f;
+    }
+    lines.push_back(0.0f);
+    for (auto i = isize(floor_grid_levels) - 1; i >= 0; --i)
+        lines.push_back(-lines[i]);
+
+    auto const n = lines.size();
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const z : lines)
+        for (auto const x : lines)
+            positions.push_back(tg::pos3f(x, height, z));
+    // wound so each faces +y: (x0, z0), (x1, z1), (x1, z0) and (x0, z0), (x0, z1), (x1, z1)
+    auto indices = cc::vector<u32>();
+    for (auto j = isize(0); j + 1 < n; ++j)
+        for (auto i = isize(0); i + 1 < n; ++i)
+        {
+            auto const c00 = u32(j * n + i);
+            auto const c10 = u32(j * n + i + 1);
+            auto const c01 = u32((j + 1) * n + i);
+            auto const c11 = u32((j + 1) * n + i + 1);
+            for (auto const v : {c00, c11, c10, c00, c01, c11})
+                indices.push_back(v);
+        }
     return mesh{.name = "studio floor",
-                .geometry = triangle_geometry::create_from_positions(cc::vector<tg::pos3f>{
-                    tg::pos3f(-e, height, -e), tg::pos3f(e, height, e), tg::pos3f(e, height, -e),
-                    tg::pos3f(-e, height, -e), tg::pos3f(-e, height, e), tg::pos3f(e, height, e)}),
+                .geometry = triangle_geometry::create_from_indexed_triangles(positions, indices),
                 .material = material};
 }
 

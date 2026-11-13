@@ -5,17 +5,13 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/register_math.cc
 ---
 
-# `ddx` and `ddy` are coarse on every target, with `_coarse` and `_fine` spelled out
+# `ddx` and `ddy` are coarse on metal too
 
-`ddx` and `ddy` must not be implementation-defined, which they are today on at least one target.
-EMIT-126 writes them as HLSL's `ddx` and `ddy`, MSL's `dfdx` and `dfdy` and WGSL's `dpdx` and `dpdy`, and each of those leaves coarse or fine to the implementation.
+EVAL-144 makes `ddx`, `ddy` and `fwidth` coarse, and `ddx_coarse`, `ddx_fine`, `ddy_coarse` and `ddy_fine` exist explicitly.
+Every target writes that but metal (EMIT-126, EMIT-238): HLSL's `ddx_coarse`, WGSL's `dpdxCoarse`, SPIR-V's `OpDPdxCoarse` and DXIL's `derivCoarseX`.
+MSL has no coarse spelling, so metal still writes `dfdx` and `dfdy` for both, which are fine on Apple GPUs.
 
-- **`ddx` and `ddy` are coarse on every target**: `ddx_coarse` in HLSL and `dpdxCoarse` in WGSL; MSL has no coarse spelling, so metal needs an emulation.
-- **`ddx_coarse`, `ddx_fine`, `ddy_coarse` and `ddy_fine` exist explicitly**, for a shader that needs the per-pixel difference.
-- **That the default is coarse is documented prominently**, in the spec and wherever derivatives are introduced, since a port from HLSL or GLSL may assume fine.
-
-Coarse is the default because it may be faster, above all where a texture is sampled.
-Whether the interpreter (EVAL: a derivative in a run of one invocation is 0) needs to tell the two apart is part of the work.
+What is left is the coarse default on metal, from the quad's own lanes, and the probe below that pins it.
 
 ## Measured on metal
 

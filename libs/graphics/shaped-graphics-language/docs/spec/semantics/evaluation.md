@@ -344,7 +344,9 @@ A subgroup operation and a derivative exchange values between invocations, so a 
   A reduction combines the lanes in lane order, each step rounded as an operation of its type is, and a scan the lanes below this one, from its operation's identity.
   A broadcast, a shuffle and a quad operation give the value of the lane they name, and zero where it names no lane of the subgroup (CHK-376).
   A lane that reaches a call another does not is a `program-error`, which only a call no uniformity is judged of can do, such as one in a check's condition.
-* **EVAL-144** `ddx(v)` is `v` at the quad's `(1, 0)` minus `v` at its `(0, 0)`, and `ddy(v)` at `(0, 1)` minus `(0, 0)`, in every lane of the quad: the coarse derivative, which every target may give.
+* **EVAL-144** `ddx(v)` is `v` at the quad's `(1, 0)` minus `v` at its `(0, 0)`, and `ddy(v)` at `(0, 1)` minus `(0, 0)`, in every lane of the quad: the coarse derivative, on every target.
+  A port from HLSL or GLSL may assume fine derivatives, which these are not: `ddx_coarse` and `ddy_coarse` spell the same, and `ddx_fine` and `ddy_fine` are the per-pixel difference.
+  `ddx_fine(v)` is the difference along the lane's own row of the quad, and `ddy_fine(v)` down its own column.
   `fwidth(v)` is `abs(ddx(v)) + abs(ddy(v))`, and a sample that takes its level from derivatives takes `ddx` and `ddy` of its coordinate as its gradients (EVAL-124).
   A run of fewer than four lanes has no quad, and its derivatives are 0.
 * **EVAL-145** A run ends as its first lane that does not end normally, in lane order, and normally where every lane does.
