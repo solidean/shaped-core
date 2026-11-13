@@ -133,6 +133,108 @@ type_id checker::resolve_tangent(i32 file, ast::expr_id expr, ast::index const& 
     return tangent_type(of);
 }
 
+void checker::declare_tangent(i32 file, type_id primal, ast::attribute const& declared, bool is_generic)
+{
+    auto const arguments = ast_of(file).at(declared.arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat
+        || !ast::is_valid(arguments[0].value))
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, declared.name,
+               "@tangent on a struct names the struct its change is: `@tangent(splat_change)`");
+        return;
+    }
+    if (is_generic)
+    {
+        unsupported(file, declared.name, "@tangent on a generic struct");
+        return;
+    }
+    auto const at = span_of(file, arguments[0].value);
+    // its own name would be a cycle of the struct with itself, which says less than what is wrong
+    if (text_of(file, at) == out.name_of(primal))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, at,
+               cc::format("{0} is no other struct of the program, and the change of {0} is one", out.name_of(primal)));
+        return;
+    }
+    auto const tangent = resolve_value_type(file, arguments[0].value, nullptr);
+    if (tangent == checked_module::error_type)
+        return;
+    auto const primal_name = cc::string(out.name_of(primal));
+    auto const tangent_name = cc::string(out.name_of(tangent));
+    auto const tangent_info = out.at(tangent);
+    if (out.builtin_type_of(tangent) != nullptr || tangent_info.kind != type_kind::structure || tangent_info.is_template
+        || is_valid(tangent_info.generic) || tangent == primal)
+    {
+        report(
+            diagnostic_kind::wrong_kind_of_name, file, at,
+            cc::format("{} is no other struct of the program, and the change of {} is one", tangent_name, primal_name));
+        return;
+    }
+    if (auto const* const other = declared_primals.get_ptr(i32(tangent)))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, at,
+               cc::format("{} is the tangent of {} already, and each struct's tangent is its own", tangent_name,
+                          out.name_of(*other)));
+        return;
+    }
+
+    // each field of the tangent is the change of the field of its name, of that field's tangent type
+    auto const primal_members = cc::vector<member_info>::create_copy_of(out.at(out.at(primal).members));
+    auto is_sound = true;
+    for (auto const& field : cc::vector<member_info>::create_copy_of(out.at(tangent_info.members)))
+    {
+        auto const* changed = static_cast<member_info const*>(nullptr);
+        for (auto const& m : primal_members)
+            if (m.name == field.name)
+                changed = &m;
+        if (changed == nullptr)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, at,
+                   cc::format("{}.{} names no field of {}, and each field of a tangent is the change of the field of "
+                              "its name",
+                              tangent_name, field.name, primal_name));
+            is_sound = false;
+        }
+        else if (!is_differentiable_type(changed->type))
+        {
+            report(diagnostic_kind::type_mismatch, file, at,
+                   cc::format("{}.{} is {}, which holds no float, so nothing changes it and {} holds no change of it",
+                              primal_name, field.name, out.name_of(changed->type), tangent_name));
+            is_sound = false;
+        }
+        else if (auto const expected = tangent_type(changed->type); expected != field.type)
+        {
+            report(diagnostic_kind::type_mismatch, file, at,
+                   cc::format("{}.{} is {}, where a change of {}.{}, {}, is {}", tangent_name, field.name,
+                              out.name_of(field.type), primal_name, field.name, out.name_of(changed->type),
+                              out.name_of(expected)));
+            is_sound = false;
+        }
+    }
+    // a tangent changes by a tangent of its own type, which a position or an int in it would not
+    if (is_sound && tangent_type(tangent) != tangent)
+    {
+        report(diagnostic_kind::type_mismatch, file, at,
+               cc::format("{} is not its own tangent, which a tangent's fields of floats, vectors and directions are",
+                          tangent_name));
+        is_sound = false;
+    }
+    if (!is_sound)
+        return;
+    tangent_types[i32(primal)] = tangent;
+    declared_primals[i32(tangent)] = primal;
+}
+
+type_id checker::primal_of_tangent(type_id tangent) const
+{
+    if (!is_valid(tangent) || tangent == checked_module::error_type)
+        return type_id::none;
+    if (auto const& info = out.at(tangent); is_valid(info.tangent_of))
+        return info.tangent_of;
+    auto const* const declared = declared_primals.get_ptr(i32(tangent));
+    return declared != nullptr ? *declared : type_id::none;
+}
+
 i32 checker::tangent_member(type_id primal, i32 member)
 {
     auto const t = tangent_type(primal);

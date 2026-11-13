@@ -606,7 +606,7 @@ auto differentiator::tangent_place_of(flat_expr_id root, cc::span<place_step con
             x = add(element_type(type_of(x)), flat_element{.object = x, .index = use(s.index)});
             continue;
         }
-        auto const primal = m().at(type_of(x)).tangent_of;
+        auto const primal = f.c.primal_of_tangent(type_of(x));
         auto const member = is_valid(primal) ? tangent_member(primal, s.member) : s.member;
         if (member < 0)
             return flat_expr_id::none;

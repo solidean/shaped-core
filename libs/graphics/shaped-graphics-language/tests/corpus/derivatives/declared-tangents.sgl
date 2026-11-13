@@ -1,0 +1,63 @@
+// DIFF-37: a struct may say which struct its change is.
+// `@tangent(T)` makes `tangent[S]` the struct `T`, each of whose fields is the change of the field of its name.
+// A differentiable field of `S` that `T` names no field for is held constant, as an int is.
+
+struct splat_change:
+    at: vec3
+    weight: float
+
+@tangent(splat_change)
+struct splat:
+    at: pos3
+    weight: float
+    count: int
+
+fun brightness(s: splat) -> float:
+    let d = distance(s.at, pos3(0.2, 0.1, 0.0))
+    return s.weight * exp(-d * d) * float(s.count)
+
+fun moved(s: splat, along: splat_change, h: float) -> splat:
+    return splat(at = s.at + along.at * h, weight = s.weight + along.weight * h, count = s.count)
+
+fun agrees(s: splat, along: splat_change) -> bool:
+    let h = 1e-3
+    let numeric = (brightness(moved(s, along, h)) - brightness(moved(s, along, -h))) / (2.0 * h)
+    let mut gradient = tangent[splat]()
+    bwd_diff(brightness, s, mut gradient, 1.0)
+    let backward = dot(gradient.at, along.at) + gradient.weight * along.weight
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(brightness, s, along), numeric, within = tolerance)
+        and nearly_equal(backward, numeric, within = tolerance)
+
+// the declared tangent is the tangent: built as any struct is, by its fields
+test agrees(splat(at = pos3(0.5, -0.2, 0.3), weight = 0.8, count = 2), splat_change(at = vec3(1.0, 0.0, 0.0), weight = 0.0))
+test agrees(splat(at = pos3(0.5, -0.2, 0.3), weight = 0.8, count = 2), splat_change(at = vec3(0.0, 1.0, 0.5), weight = 1.0))
+test:
+    let zero: splat_change = tangent[splat]()
+    zero.weight == 0.0
+
+// a tangent that names no field for the position holds the position still
+struct glow_change:
+    weight: float
+
+@tangent(glow_change)
+struct glow:
+    at: pos3
+    weight: float
+
+fun shine(g: glow) -> float => distance(g.at, pos3(0.0)) * g.weight
+
+test fwd_diff(shine, glow(at = pos3(3.0, 4.0, 0.0), weight = 2.0), glow_change(weight = 1.0)) == 5.0
+test:
+    let mut d = glow_change(weight = 0.0)
+    bwd_diff(shine, glow(at = pos3(3.0, 4.0, 0.0), weight = 2.0), mut d, 1.0)
+    d.weight == 5.0
+
+// a kernel declares the tangent struct as the program wrote it, on every target
+binding results:
+    values: mut buffer[float]
+
+@compute(64) fun splat_backward(@thread_id id: int3){results}:
+    let mut ds = tangent[splat]()
+    bwd_diff(brightness, splat(at = pos3(float(id.x) * 0.01, 0.0, 0.0), weight = 1.0, count = 1), mut ds, 1.0)
+    results.values[id.x] = ds.at.x + ds.weight

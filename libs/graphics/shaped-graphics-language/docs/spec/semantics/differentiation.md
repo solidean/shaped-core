@@ -37,6 +37,13 @@ A derivative is never silently zero where the function changes.
   `tangent[T](…)` with arguments is `unsupported-yet`.
   `tangent[T]` of a type parameter is what each instance makes of it, as `scalar_of[V]` is (CHK-423).
   `tangent[T]` of a type that holds no float is `wrong-kind-of-name`.
+* **DIFF-37** `@tangent(T)` on a struct `S` makes `tangent[S]` the struct `T`, which the program declares and builds as any struct.
+  Each field of `T` is the change of the field of `S` of its name, of that field's tangent type.
+  A differentiable field of `S` that `T` names no field for is held constant.
+  The declaration is refused at its argument, naming the field, where a field of `T` names no field of `S`.
+  So is one where a field is of another type than its field's tangent, or names a field that holds no float.
+  So is one where `T` is no other struct of the program, is the tangent of another struct already, or is not its own tangent.
+  `@tangent` on a generic struct is `unsupported-yet`.
 
 ## Holding values constant
 

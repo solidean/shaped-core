@@ -1,3 +1,5 @@
+#include "check-test-support.hh"
+
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
@@ -210,4 +212,27 @@ TEST("sgl autodiff rules - every rule and every linear builtin of floats agrees 
     CHECK(tested.errors == "").dump("source", source);
     CHECK(tested.tests_passed == count);
     CHECK(count > 40);
+}
+
+TEST("sgl autodiff rules - a declared tangent that does not mirror its struct is refused at the declaration, naming "
+     "the field")
+{
+    auto const report = [](cc::string_view tangent_fields, cc::string_view declared = "pair_change")
+    {
+        return sgl_test::reports_of(sgl_test::check_sources(
+            sgl_test::read_prelude(), cc::format("struct pair_change:\n{}\n@tangent({})\nstruct pair:\n    at: pos3\n"
+                                                 "    weight: float\n    count: int\n",
+                                                 tangent_fields, declared)));
+    };
+    // a field of the tangent the struct has no field of
+    CHECK(report("    spin: float").contains("pair_change.spin names no field of pair"));
+    // a field of the wrong type: a position's change is a direction
+    CHECK(report("    at: pos3").contains("pair_change.at is pos3, where a change of pair.at, pos3, is vec3"));
+    // a field of what holds no float
+    CHECK(report("    count: int").contains("pair.count is int, which holds no float"));
+    // what names no struct, or the struct itself
+    CHECK(report("    weight: float", "float").contains("float is no other struct of the program"));
+    CHECK(report("    weight: float", "pair").contains("pair is no other struct of the program"));
+    // a tangent that mirrors what it may is accepted, and omits what it holds still
+    CHECK(report("    weight: float") == "");
 }

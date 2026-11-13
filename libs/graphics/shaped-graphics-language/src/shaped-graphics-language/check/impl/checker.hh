@@ -567,6 +567,8 @@ struct checker
     bool is_resolving_derivative = false;
     /// PROTOTYPE (autodiff): `tangent_type` of a struct, by the struct's type.
     cc::map<i32, type_id> tangent_types;
+    /// The struct each declared tangent is the tangent of, by the tangent's type (DIFF-37).
+    cc::map<i32, type_id> declared_primals;
     /// A `const` in a function body (CHK-413): a symbol no file scope sees, with the earlier ones of its body it reads.
     struct local_constant
     {
@@ -1558,6 +1560,10 @@ struct checker
     [[nodiscard]] bool takes_tangent(symbol_id function, isize parameter, type_id type) const;
     /// The field of `tangent_type(primal)` that field `member` of the struct `primal` changes, -1 where it has none.
     [[nodiscard]] i32 tangent_member(type_id primal, i32 member);
+    /// DIFF-37: `@tangent(T)` on the struct `primal`, judged and, where it holds, `primal`'s tangent from then on.
+    void declare_tangent(i32 file, type_id primal, ast::attribute const& declared, bool is_generic);
+    /// The struct whose tangent `tangent` is, minted or declared; none for any other type.
+    [[nodiscard]] type_id primal_of_tangent(type_id tangent) const;
     /// `tangent[T]` written as a type: `tangent_type` of a differentiable `T` that is no type parameter.
     [[nodiscard]] type_id resolve_tangent(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// For a call of the prelude's `fwd_diff` or `bwd_diff`: one overload per function the first argument names, each
