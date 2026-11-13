@@ -25,10 +25,40 @@ bool checker::is_differentiable_type(type_id type) const
     return false;
 }
 
+type_id checker::tangent_type_existing(type_id type) const
+{
+    if (out.builtin_type_of(type) != nullptr)
+    {
+        auto const name = out.name_of(type);
+        if (name == "pos3")
+            return prelude_type("vec3");
+        if (name == builtins::k_hpos4)
+            return prelude_type("float4");
+        return type;
+    }
+    if (out.at(type).kind == type_kind::structure && !is_valid(out.at(type).tangent_of))
+    {
+        auto const* const known = tangent_types.get_ptr(i32(type));
+        return known != nullptr ? *known : type_id::none;
+    }
+    return out.at(type).kind == type_kind::array ? type_id::none : type;
+}
+
 type_id checker::tangent_type(type_id type)
 {
     if (!is_valid(type) || type == checked_module::error_type || type == checked_module::void_type)
         return type;
+    // DIFF-7: a type parameter's tangent is what each instance makes of it
+    if (is_open(type))
+    {
+        for (auto i = isize(0); i < out.types.size(); ++i)
+            if (out.types[i].kind == type_kind::tangent_of && out.types[i].element == type)
+                return type_id(i);
+        auto const id = type_id(out.types.size());
+        out.types.push_back(
+            {.kind = type_kind::tangent_of, .element = type, .spelled = cc::format("tangent[{}]", out.name_of(type))});
+        return id;
+    }
     if (out.builtin_type_of(type) != nullptr)
     {
         auto const name = out.name_of(type);
@@ -94,12 +124,7 @@ type_id checker::resolve_tangent(i32 file, ast::expr_id expr, ast::index const& 
     auto const of = resolve_value_type(file, arguments[0].value, scope);
     if (of == checked_module::error_type)
         return of;
-    if (is_open(of))
-    {
-        unsupported(file, span_of(file, expr), "the tangent of a type parameter, which waits for interfaces");
-        return checked_module::error_type;
-    }
-    if (!is_differentiable_type(of))
+    if (!is_open(of) && !is_differentiable_type(of))
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
                cc::format("{} holds no float, so nothing of it changes and it has no tangent", out.name_of(of)));
@@ -123,9 +148,15 @@ i32 checker::tangent_member(type_id primal, i32 member)
 
 bool checker::takes_tangent(symbol_id function, isize parameter) const
 {
+    auto const own = out.at(out.functions[out.at(function).info].parameters);
+    return parameter < own.size() && takes_tangent(function, parameter, own[parameter].type);
+}
+
+bool checker::takes_tangent(symbol_id function, isize parameter, type_id type) const
+{
     auto const& s = out.at(function);
     auto const own = out.at(out.functions[s.info].parameters);
-    if (parameter >= own.size() || own[parameter].is_mut || !is_differentiable_type(own[parameter].type))
+    if (parameter >= own.size() || own[parameter].is_mut || !is_differentiable_type(type))
         return false;
     auto const* const fun = ast_of(s.file).at(s.declaration).node.try_as<ast::fun_decl>();
     if (fun == nullptr)
@@ -157,36 +188,73 @@ cc::vector<symbol_id> checker::derivative_candidates(cc::span<symbol_id const> g
         if (demand(function, file, where) != symbol_state::checked)
             continue;
         auto const& s = out.at(function);
-        auto const& info = out.functions[s.info];
-        if (info.type_parameters.count > 0 || info.result == checked_module::void_type)
+        auto const info = out.functions[s.info];
+        if (info.result == checked_module::void_type)
             continue;
         auto const own = cc::vector<parameter>::create_copy_of(out.at(info.parameters));
         if (!ast_of(s.file).at(s.declaration).node.is<ast::fun_decl>())
             continue;
 
-        auto types = cc::vector<type_id>();
-        for (auto const& p : own)
-            types.push_back(p.type);
-        auto signature = derivative_signature{.function = function, .is_reverse = is_reverse};
+        // DIFF-4: a generic's instance is the one the call's values say, each bound as a call of it binds it, and a
+        // value that takes a tangent is followed by it
+        auto const is_generic = info.type_parameters.count > 0;
+        auto bindings = cc::vector<type_id>();
+        auto closed = cc::vector<type_id>();
+        auto is_deduced = true;
+        auto k = isize(1);
+        for (auto i = isize(0); i < own.size(); ++i)
+        {
+            if (!is_generic)
+            {
+                closed.push_back(own[i].type);
+                continue;
+            }
+            is_deduced = is_deduced && k < arguments.types.size() && unify(own[i].type, arguments.types[k], bindings);
+            closed.push_back(is_deduced ? substitute(own[i].type, bindings) : checked_module::error_type);
+            k += is_deduced && takes_tangent(function, i, closed.back()) ? 2 : 1;
+        }
+        if (is_generic)
+        {
+            for (auto const q : out.at(info.type_parameters))
+            {
+                auto is_bound = false;
+                for (auto b = isize(0); b + 1 < bindings.size(); b += 2)
+                    is_bound = is_bound || bindings[b] == q;
+                is_deduced = is_deduced && is_bound;
+            }
+            if (!is_deduced)
+                continue;
+            if (instantiate(function, bindings, file, where) < 0)
+                continue;
+        }
+        auto const instance = is_generic ? existing_function_instance(function, bindings) : -1;
+        auto const function_result = instance >= 0 && notes[s.info].infers_result
+                                       ? out.function_instances[instance].result
+                                       : (is_generic ? substitute(info.result, bindings) : info.result);
+
+        auto signature = derivative_signature{.function = function,
+                                              .is_reverse = is_reverse,
+                                              .bindings = bindings,
+                                              .result = function_result};
         auto parameters = cc::vector<parameter>();
-        parameters.push_back({.name = "f", .type = function_type(types, info.result)});
+        parameters.push_back({.name = "f", .type = function_type(closed, function_result)});
         for (auto i = isize(0); i < own.size(); ++i)
         {
             signature.value_slots.push_back(i32(parameters.size()));
-            parameters.push_back({.name = own[i].name, .type = own[i].type});
-            if (!takes_tangent(function, i))
+            parameters.push_back({.name = own[i].name, .type = closed[i]});
+            if (!takes_tangent(function, i, closed[i]))
             {
                 signature.tangent_slots.push_back(-1);
                 continue;
             }
             signature.tangent_slots.push_back(i32(parameters.size()));
             parameters.push_back(
-                {.name = cc::format("d_{}", own[i].name), .type = tangent_type(own[i].type), .is_mut = is_reverse});
+                {.name = cc::format("d_{}", own[i].name), .type = tangent_type(closed[i]), .is_mut = is_reverse});
         }
         if (is_reverse)
         {
             signature.result_slot = i32(parameters.size());
-            parameters.push_back({.name = "dr", .type = tangent_type(info.result)});
+            parameters.push_back({.name = "dr", .type = tangent_type(function_result)});
         }
 
         // of kind `test`, as a const's value scope is: a signature that no pass over the program's functions visits
@@ -199,13 +267,15 @@ cc::vector<symbol_id> checker::derivative_candidates(cc::span<symbol_id const> g
                                .info = i32(out.functions.size())});
         out.functions.push_back({.symbol = overload,
                                  .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
-                                 .result = is_reverse ? checked_module::void_type : tangent_type(info.result),
+                                 .result = is_reverse ? checked_module::void_type : tangent_type(function_result),
                                  .bindings = {.first = u32(out.binding_lists.size()), .count = 0}});
         out.parameters.push_back_range(parameters);
         // it has no body of its own: the flattener writes the derivative where the call stands
         notes.push_back({.is_body_checked = true, .is_body_sound = true});
         derivative_signatures[i32(overload)] = cc::move(signature);
-        derivative_overloads[2 * i64(function) + (is_reverse ? 1 : 0)] = overload;
+        // a generic's overload is its instance's, so each call deduces its own
+        if (!is_generic)
+            derivative_overloads[2 * i64(function) + (is_reverse ? 1 : 0)] = overload;
         result.push_back(overload);
     }
     return result;

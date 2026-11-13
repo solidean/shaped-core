@@ -17,8 +17,9 @@ A derivative is never silently zero where the function changes.
   It adds and does not assign, so places that start at zero hold the gradient, and a second call adds a second one.
 * **DIFF-3** A parameter takes a tangent where its type is differentiable (DIFF-6), it is no `mut` parameter, and it carries no `@no_diff`.
   Any other parameter is passed alone: `fwd_diff(scaled, x, dx, n)` for an `int` `n`.
-* **DIFF-4** `f` names a function of the program that is no generic and gives a value.
-  A call that names anything else matches no overload.
+* **DIFF-4** `f` names a function of the program that gives a value.
+  A generic's derivative is its instance's: each value binds its parameter's type as a call of `f` would (CHK-340), and a value that takes a tangent (DIFF-3) is followed by it.
+  A call whose values bind no instance, or that names anything but a function, matches no overload.
 * **DIFF-5** A test runs both calls on the interpreter, which is how a derivative is held to a central difference.
   `nearly_equal(fwd_diff(f, x, d), (f(x + d * h) - f(x - d * h)) / (2.0 * h), within = …)` is that check.
 
@@ -33,7 +34,8 @@ A derivative is never silently zero where the function changes.
   So `tangent[splat]` of `at: pos3`, `weight: float` and `count: int` holds `at: vec3` and `weight: float`.
   A struct whose fields are all their own tangents is its own; any other struct's tangent is a type of its own, which a target writes beside the struct.
 * **DIFF-9** `tangent[T]()` is the zero of `T`'s tangent, and a direction is that zero with its fields assigned.
-  `tangent[T](…)` with arguments is `unsupported-yet`, and so is `tangent[T]` of a type parameter.
+  `tangent[T](…)` with arguments is `unsupported-yet`.
+  `tangent[T]` of a type parameter is what each instance makes of it, as `scalar_of[V]` is (CHK-423).
   `tangent[T]` of a type that holds no float is `wrong-kind-of-name`.
 
 ## Holding values constant

@@ -1,0 +1,47 @@
+// DIFF-4: a generic function's derivative is its instance's.
+// The call's values say what its type parameters stand for, as a call of it deduces them, and each instance is
+// differentiated as a function of those types is.
+
+fun wobble[T](x: T) -> T => x * x * 0.5 + sin(x)
+
+// one generic, a float's instance and a float3's
+test fwd_diff(wobble, 0.5, 1.0) == 0.5 + cos(0.5)
+test:
+    let d = fwd_diff(wobble, float3(0.5, 1.0, -1.0), float3(1.0, 0.0, 2.0))
+    nearly_equal(d.x, 0.5 + cos(0.5), within = 1e-6) and d.y == 0.0 and nearly_equal(d.z, 2.0 * (-1.0 + cos(-1.0)), within = 1e-6)
+
+test:
+    let mut g = float3(0.0)
+    bwd_diff(wobble, float3(0.5, 1.0, -1.0), mut g, float3(1.0))
+    nearly_equal(g.y, 1.0 + cos(1.0), within = 1e-6)
+
+// two parameters, a position among them: its tangent is a direction, in the instance as anywhere
+fun reach[P, S](p: P, s: S) -> float => distance(p, pos3(0.0)) * s
+
+test:
+    let mut dp = vec3(0.0)
+    let mut ds = 0.0
+    bwd_diff(reach, pos3(3.0, 4.0, 0.0), mut dp, 2.0, mut ds, 1.0)
+    nearly_equal(dp.x, 1.2, within = 1e-6) and nearly_equal(ds, 5.0, within = 1e-6)
+
+// `tangent[T]` in a generic body is what each instance makes of it
+fun nudged[T](x: T, d: tangent[T]) -> T => x + d
+
+test nudged(pos3(1.0, 2.0, 3.0), vec3(1.0, 0.0, 0.0)) == pos3(2.0, 2.0, 3.0)
+test nudged(1.0, 0.5) == 1.5
+
+fun lengthened[T](x: T) -> float => dot(nudged(x, tangent[T]()), x)
+
+test:
+    let mut g = float2(0.0)
+    bwd_diff(lengthened, float2(1.0, 2.0), mut g, 1.0)
+    g == float2(2.0, 4.0)
+
+// values that say two things of one type parameter name no instance, and no overload takes them
+fun paired[T](a: T, b: T) -> T => a * b
+
+test paired(2.0, 3.0) == 6.0
+
+@expect(error = "no-matching-overload")
+test:
+    fwd_diff(paired, 1.0, 1.0, float2(1.0), float2(1.0)).x == 0.0

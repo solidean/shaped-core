@@ -553,11 +553,18 @@ struct checker
         cc::vector<i32> tangent_slots;
         /// Backward: where the result's adjoint stands.
         i32 result_slot = -1;
+        /// A generic's: what its type parameters stand for, two by two, which the call's values deduced (DIFF-4).
+        cc::vector<type_id> bindings;
+        /// What `function` gives, its instance's for a generic.
+        type_id result = type_id::none;
     };
     /// By the overload's symbol.
     cc::map<i32, derivative_signature> derivative_signatures;
     /// The overload of each function and mode, by `2 * symbol + is_reverse`.
     cc::map<i64, symbol_id> derivative_overloads;
+    /// PROTOTYPE (autodiff): a derivative's call is being resolved, whose function argument may be a generic that
+    /// meets the instance the call deduced (DIFF-4); nowhere else does a generic meet a parameter of function type.
+    bool is_resolving_derivative = false;
     /// PROTOTYPE (autodiff): `tangent_type` of a struct, by the struct's type.
     cc::map<i32, type_id> tangent_types;
     /// A `const` in a function body (CHK-413): a symbol no file scope sees, with the earlier ones of its body it reads.
@@ -1545,6 +1552,10 @@ struct checker
     /// its element's, and a struct's a struct of its differentiable fields' tangents, minted once and named
     /// `tangent[S]` where that differs from `S`; any other type is its own.
     [[nodiscard]] type_id tangent_type(type_id type);
+    /// `tangent_type` of a closed `type` where it needs nothing minted; none where a struct's tangent is not minted yet.
+    [[nodiscard]] type_id tangent_type_existing(type_id type) const;
+    /// Parameter `parameter` of `function` takes a tangent where it is of `type`, a generic's once bound.
+    [[nodiscard]] bool takes_tangent(symbol_id function, isize parameter, type_id type) const;
     /// The field of `tangent_type(primal)` that field `member` of the struct `primal` changes, -1 where it has none.
     [[nodiscard]] i32 tangent_member(type_id primal, i32 member);
     /// `tangent[T]` written as a type: `tangent_type` of a differentiable `T` that is no type parameter.
