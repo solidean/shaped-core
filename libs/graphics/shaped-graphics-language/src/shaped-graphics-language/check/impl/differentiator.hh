@@ -253,6 +253,14 @@ struct differentiator
     /// Whether a gradient's atomics are shared through the subgroup first: where the entry point declares `subgroups`,
     /// outside a test, whose run has no device.
     [[nodiscard]] bool reduces_gradients() const;
+    /// The tangent of an affine3's product with a position (`w` 1) or a direction or a float4 (`w` 0), one dot of a
+    /// row per component.
+    flat_expr_id affine_tangent(cc::span<flat_expr_id const> primals,
+                                cc::span<flat_expr_id const> tangents,
+                                type_id type,
+                                f64 w);
+    /// A `case` as the chain of `if` it means, its scrutinee held in a `let` (LEGAL-46).
+    cc::vector<flat_stmt_id> case_as_ifs(flat_case const& n);
     /// `call(name, a)` over the invocations that reach it (`flat_call::is_active_lanes`).
     flat_expr_id active_call(cc::string_view name, flat_expr_id a);
     /// The prelude's `add` of an atomic of `element`s; none where there is none.
@@ -308,6 +316,16 @@ struct differentiator
         {
             auto const read = place_of(root(), steps);
             return emit(flat_assign{.place = place_of(root(), steps), .value = call("+", read, use(g))});
+        }
+        // an affine3 has no `+`, and is added row by row
+        if (place_type == type_of(g) && m().name_of(place_type) == "affine3")
+        {
+            flat_expr_id rows[3] = {};
+            for (auto i = 0; i < 3; ++i)
+                rows[i] = call("+", call("affine3_row", place_of(root(), steps), integer(i)),
+                               call("affine3_row", use(g), integer(i)));
+            return emit(flat_assign{.place = place_of(root(), steps),
+                                    .value = call("affine3_of_rows", rows[0], rows[1], rows[2])});
         }
         auto const& info = m().at(place_type);
         auto const has_parts = info.kind == type_kind::array ? info.count > 0 : info.members.count > 0;

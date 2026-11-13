@@ -248,6 +248,22 @@ auto differentiator::transpose(flat_expr_id t, flat_expr_id g) -> void
             transpose(arguments[2], share(call("select", use(condition), zero(r), use(g))));
         return;
     }
+    // an affine3 is read and built by its rows, each the other's transpose
+    if (name == "affine3_row" && arguments.size() == 2)
+    {
+        auto const i = share(arguments[1]);
+        flat_expr_id rows[3] = {};
+        for (auto row = 0; row < 3; ++row)
+            rows[row] = call("select", call("==", use(i), integer(row)), use(g), zero(r));
+        return transpose(arguments[0], share(call("affine3_of_rows", rows[0], rows[1], rows[2])));
+    }
+    if (name == "affine3_of_rows" && arguments.size() == 3)
+    {
+        for (auto row = 0; row < 3; ++row)
+            if (linear_at(row))
+                transpose(arguments[row], share(call("affine3_row", use(g), integer(row))));
+        return;
+    }
     if (name == "matrix_column" && arguments.size() == 2)
     {
         // the matrix whose column `i` is `g`, and every other column zero
