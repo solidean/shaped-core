@@ -954,3 +954,257 @@ TEST("slib - SGL's DXIL of an nvapi invocation says to the driver what DXC's com
     CHECK(listing(expected).contains("@dx.op.traceRay")).dump("theirs", listing(expected));
     CHECK(listing(written) == listing(expected)).dump("theirs", listing(expected)).dump("ours", listing(written));
 }
+
+namespace
+{
+/// A raygen of `body`, its lines at four spaces, over a pipeline with an array of structures beside its one structure.
+[[nodiscard]] cc::string pinning(cc::string_view declarations, cc::string_view body)
+{
+    auto source = cc::string("require raytracing_pipeline\n"
+                             "require binding_arrays\n"
+                             "binding frame:\n"
+                             "    world: acceleration_structure[.triangles]\n"
+                             "    worlds: acceleration_structure[.triangles][4]\n"
+                             "    seen: mut buffer[float]\n"
+                             "    picks: buffer[int]\n"
+                             "struct radiance:\n"
+                             "    color: float3\n"
+                             "rays path_rays:\n"
+                             "    surface: radiance\n");
+    source += declarations;
+    source += "@raygen fun shoot(@launch_id id: int3){frame}:\n"
+              "    require shader_execution_reordering\n"
+              "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+              "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n";
+    auto is_line_start = true;
+    for (auto const ch : body)
+    {
+        if (is_line_start)
+            source += "    ";
+        source += ch;
+        is_line_start = ch == '\n';
+    }
+    source += "    frame.seen[id.x] = p.color.x\n"
+              "@miss fun on_miss(p: mut radiance):\n"
+              "    p.color = float3(1.0, 0.0, 0.0)\n"
+              "@closest_hit fun on_hit(h: triangle_hit, p: mut radiance):\n"
+              "    p.color = float3(0.0, 1.0, 0.0)\n"
+              "hit_group hits for path_rays:\n"
+              "    surface = (closest_hit = on_hit)\n"
+              "@raytracing pipeline path:\n"
+              "    rays = path_rays\n"
+              "    raygen = shoot\n"
+              "    miss.surface = on_miss\n"
+              "    hit_groups = (hits)\n";
+    return source;
+}
+} // namespace
+
+TEST("slib - the structure an nvapi trace pins compiles through DXC and the validator, in loops, branches and "
+     "inlinings "
+     "(EMIT-263)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    struct pin_case
+    {
+        cc::string_view what;
+        cc::string_view declarations;
+        cc::string_view body;
+    };
+    pin_case const cases[] = {
+        {"two traces, invoked in the other order", "",
+         "let h = trace_hit(frame.world, r, path_rays.surface, mut p)\n"
+         "let g = trace_hit(frame.worlds[1], r, path_rays.surface, mut p)\n"
+         "g.invoke(mut p)\n"
+         "h.invoke(mut p)\n"},
+        {"an index assigned between the trace and the invocation", "",
+         "let mut k = id.x % 4\n"
+         "let h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
+         "k = (k + 1) % 4\n"
+         "h.invoke(mut p)\n"},
+        {"a while loop that moves its index before the invocation", "",
+         "let mut k = 0\n"
+         "while k < 4:\n"
+         "    let h = trace_hit(frame.worlds[k], r, path_rays.surface, mut p)\n"
+         "    k = k + 1\n"
+         "    h.invoke(mut p)\n"},
+        {"a loop's branch", "",
+         "for i in 0 ..< 4:\n"
+         "    if i % 2 == 0:\n"
+         "        let h = trace_hit(frame.worlds[i], r, path_rays.surface, mut p)\n"
+         "        if h.is_hit:\n"
+         "            h.invoke(mut p)\n"},
+        {"a callee inlined twice",
+         "fun run(q: mut radiance, s: ray, k: int){frame}:\n"
+         "    let h = trace_hit(frame.worlds[nonuniform k], s, path_rays.surface, mut q)\n"
+         "    h.invoke(mut q)\n",
+         "run(mut p, r, id.x % 4)\nrun(mut p, r, (id.x + 1) % 4)\n"},
+        {"a callee in a loop",
+         "fun run(q: mut radiance, s: ray, k: int){frame}:\n"
+         "    let h = trace_hit(frame.worlds[k], s, path_rays.surface, mut q)\n"
+         "    h.invoke(mut q)\n",
+         "for i in 0 ..< 3:\n    run(mut p, r, i)\n"},
+        {"an index a branch set", "",
+         "let mut k = 0\n"
+         "if id.x > 3:\n"
+         "    k = 2\n"
+         "let h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
+         "h.invoke(mut p)\n"},
+    };
+    sgl::check::feature_fill const fills[]
+        = {{.f = sgl::check::feature::shader_execution_reordering, .how = sgl::check::fill::nvapi}};
+    auto const headers = nvapi_headers();
+    for (auto const& c : cases)
+    {
+        auto const source = pinning(c.declarations, c.body);
+        auto const of = [&](sgl::emit::native_route route)
+        {
+            return sgl::compile_to_text({.source = source,
+                                         .entry_point = "shoot",
+                                         .target = sgl::emit::target::hlsl_dx12,
+                                         .device_features = sgl::check::feature::shader_execution_reordering,
+                                         .fills = fills,
+                                         .native = route});
+        };
+        // SGL's DXIL passes the validator, and every TraceRay of it takes one handle where the structure is one
+        auto const native = of(sgl::emit::native_route::require);
+        REQUIRE(native.has_value()).dump("case", c.what).dump("error", native.has_error() ? native.error() : cc::string());
+        auto const refused = compiler.value().validate(native.value().dxil);
+        CHECK(!refused.has_value()).dump("case", c.what).dump("validator", refused.value_or(cc::string()));
+        if (headers.empty())
+            continue;
+        // the text, its copy of the structure a local, compiles through DXC on NVAPI's header
+        auto const text = of(sgl::emit::native_route::text);
+        REQUIRE(text.has_value()).dump("case", c.what).dump("error", text.has_error() ? text.error() : cc::string());
+        CHECK(text.value().text.contains("RaytracingAccelerationStructure traced_structure"))
+            .dump("case", c.what)
+            .dump("text", text.value().text);
+        auto const theirs = dxc_of(compiler.value(), text.value(), headers);
+        CHECK(theirs.has_value())
+            .dump("case", c.what)
+            .dump("dxc", theirs.has_error() ? theirs.error() : cc::string())
+            .dump("text", text.value().text);
+    }
+    if (headers.empty())
+        SKIP("the pinned NVAPI headers are not fetched: uv run extern/nvapi/fetch-nvapi.py");
+}
+
+TEST("slib - SGL's DXIL of an nvapi invocation traces through the very handle its trace took (EMIT-263)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    // the index moves between the trace and the invocation, so a structure read again would be another one
+    auto const source = pinning("", "let mut k = id.x % 4\n"
+                                    "let h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
+                                    "k = (k + 1) % 4\n"
+                                    "h.invoke(mut p)\n");
+    sgl::check::feature_fill const fills[]
+        = {{.f = sgl::check::feature::shader_execution_reordering, .how = sgl::check::fill::nvapi}};
+    auto const native = sgl::compile_to_text({.source = source,
+                                              .entry_point = "shoot",
+                                              .target = sgl::emit::target::hlsl_dx12,
+                                              .device_features = sgl::check::feature::shader_execution_reordering,
+                                              .fills = fills,
+                                              .native = sgl::emit::native_route::require});
+    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    auto const ours = compiler.value().disassemble(native.value().dxil);
+    REQUIRE(ours.has_value());
+    // each TraceRay's first operand after its opcode, the structure's handle
+    auto handles = cc::vector<cc::string>();
+    auto const& listing = ours.value();
+    for (auto at = listing.find("@dx.op.traceRay."); at >= 0; at = listing.find("@dx.op.traceRay.", at + 1))
+    {
+        auto const line_end = listing.find('\n', at);
+        auto const line = listing.subview({.offset = at, .size = (line_end < 0 ? listing.size() : line_end) - at});
+        if (line.contains("declare") || !line.contains("%dx.types.Handle %"))
+            continue;
+        auto const from = line.find("%dx.types.Handle %") + 17;
+        auto const comma = line.find(',', from);
+        handles.push_back(cc::string(line.subview({.offset = from, .size = comma - from})));
+    }
+    REQUIRE(handles.size() == 2).dump("ours", listing);
+    CHECK(handles[0] == handles[1]).dump("ours", listing);
+}
+
+TEST("slib - an HLSL pixel stage whose path ends in a discard compiles through DXC, for dx12 and vulkan (EMIT-117)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    struct discard_case
+    {
+        cc::string_view what;
+        cc::string_view source;
+        bool returns_zero;
+    };
+    discard_case const cases[] = {
+        {"a float4",
+         "struct varyings:\n    @position position: hpos4\n\n"
+         "@pixel fun ps(p: varyings) -> float4:\n"
+         "    if p.position.x > 2.0:\n"
+         "        discard\n"
+         "    else:\n"
+         "        return float4(1.0, 1.0, 1.0, 1.0)\n",
+         true},
+        {"an int4",
+         "struct varyings:\n    @position position: hpos4\n\n"
+         "@pixel fun ps(p: varyings) -> int4:\n"
+         "    if p.position.x > 2.0:\n"
+         "        discard\n"
+         "    else:\n"
+         "        return int4(1, 1, 1, 1)\n",
+         true},
+        {"a target with a depth",
+         "struct varyings:\n    @position position: hpos4\n\n"
+         "@pixel struct target:\n    color: float4\n    @depth depth: float\n\n"
+         "@pixel fun ps(p: varyings) -> target:\n"
+         "    if p.position.x > 2.0:\n"
+         "        discard\n"
+         "    else:\n"
+         "        return {color = float4(1.0, 1.0, 1.0, 1.0), depth = 0.5}\n",
+         true},
+        {"a callee's discard",
+         "struct varyings:\n    @position position: hpos4\n\n"
+         "fun maybe(x: float):\n"
+         "    if x > 2.0:\n"
+         "        discard\n\n"
+         "@pixel fun ps(p: varyings) -> float4:\n"
+         "    maybe(p.position.x)\n"
+         "    if p.position.y > 2.0:\n"
+         "        return float4(0.0, 1.0, 1.0, 1.0)\n"
+         "    else:\n"
+         "        return float4(1.0, 1.0, 1.0, 1.0)\n",
+         true},
+        {"a body that ends in a return",
+         "struct varyings:\n    @position position: hpos4\n\n"
+         "@pixel fun ps(p: varyings) -> float4:\n"
+         "    if p.position.x > 2.0:\n"
+         "        discard\n"
+         "    return float4(1.0, 1.0, 1.0, 1.0)\n",
+         false},
+    };
+    for (auto const& c : cases)
+        for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+        {
+            auto const e = sgl::compile_to_text({.source = c.source, .entry_point = "ps", .target = t});
+            REQUIRE(e.has_value()).dump("case", c.what).dump("error", e.has_error() ? e.error() : cc::string());
+            CHECK(e.value().text.contains(")0;\n}") == c.returns_zero).dump("case", c.what).dump("text", e.value().text);
+            auto options = ssc::dxc::compile_options();
+            if (t == sgl::emit::target::hlsl_vulkan)
+                options.target = ssc::dxc::compile_target::spirv;
+            for (auto const& arg : e.value().dxc_args)
+                options.extra_args.push_back(arg);
+            auto const built = compiler.value().compile({.source = e.value().text,
+                                                         .entry_point = e.value().entry_point,
+                                                         .stage = sg::shader_stage::fragment,
+                                                         .model = ssc::dxc::shader_model::sm_6_6},
+                                                        options);
+            CHECK(built.has_value())
+                .dump("case", c.what)
+                .dump("dxc", built.has_error() ? built.error().to_string() : cc::string())
+                .dump("text", e.value().text);
+        }
+}
