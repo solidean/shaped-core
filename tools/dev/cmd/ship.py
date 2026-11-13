@@ -212,8 +212,13 @@ def _prove(ctx: Context, server: build_server.Session) -> bool | None:
     passed, filed, blockers = _settle_at_base(ctx, preset, proof)
     # Reds the change did not cause: flaky, red before it, or red at its base too.
     # The push goes on; each is the session's to file as an issue, after `issues known <test>`.
+    # Past a handful of one binary and reason (a binary that crashes has every case red), they are one line.
+    groups: dict[tuple[str, str, str], list[str]] = {}
     for binary, test, outcome, why in filed:
-        dev.ui.write_line(console.yellow(f"ship: not blocking, file an issue: {binary}: {test}: {outcome} ({why})"))
+        groups.setdefault((binary, outcome, why), []).append(test)
+    for (binary, outcome, why), tests in groups.items():
+        named = tests[0] if len(tests) == 1 else f"{len(tests)} tests" if len(tests) > 5 else ", ".join(tests)
+        dev.ui.write_line(console.yellow(f"ship: not blocking, file an issue: {binary}: {named}: {outcome} ({why})"))
     if filed:
         _say(f"{len(filed)} red test(s) above are not this change's; `uv run dev.py issues known <test>`, then file each that is not known")
     for reason in blockers:
@@ -247,7 +252,9 @@ def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bo
     for r in red:
         key, desc = (r["binary"], r["test"]), f"{r['binary']}: {r['test']}: {r['outcome']}"
         verdict = at_base.get(key)
-        if verdict is True:
+        if verdict is True and _binary_red(r):
+            filed.append((*key, r["outcome"], f"its binary ends without a report at the change's base {base[:12]} too, so the case is unproven"))
+        elif verdict is True:
             filed.append((*key, r["outcome"], f"red at the change's base {base[:12]} too"))
         elif verdict is False:
             blockers.append(f"{desc} (green at the change's base {base[:12]}, red with it)")
@@ -273,20 +280,39 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
     except ValueError:
         _say(f"{preset.build_dir} is outside the checkout, so the base worktree has no build dir to mirror it")
         return {}
-    def run(r: dict) -> bool | None:
-        art = artifacts.get(r["binary"])
-        if art is None:
-            return None
-        rel = Path(art).resolve().relative_to(preset.build_dir.resolve())
-        xml = wt / build_rel / rel.parent / f"{rel.name}.results.xml"
-        xml.unlink(missing_ok=True)
-        subprocess.run(["uv", "run", "dev.py", "test", "--preset", preset.name, "-t", r["binary"], r["test"]], cwd=str(wt),
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return _case_red(xml, r["test"])
+    def dev(*args: str) -> int:
+        return subprocess.run(["uv", "run", "dev.py", *args, "--preset", preset.name], cwd=str(wt),
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
 
-    out = {(r["binary"], r["test"]): run(r) for r in reds}
-    for (b, t), red in out.items():
-        _say(f"  at the base: {b}: {t}: {({True: 'red', False: 'green', None: 'no result'})[red]}")
+    def run(rs: list[dict]) -> dict[tuple[str, str], bool | None]:
+        # One run per binary: a lone red of its own runs alone, anything more runs the whole binary, read from its one report,
+        # since a run per case cost seconds each.
+        by_binary: dict[str, list[dict]] = {}
+        for r in rs:
+            by_binary.setdefault(r["binary"], []).append(r)
+        out: dict[tuple[str, str], bool | None] = {}
+        for binary, mine in by_binary.items():
+            keys = [(binary, r["test"]) for r in mine]
+            art = artifacts.get(binary)
+            # Built on its own first, so a binary that cannot be built at the base reads as no result, never as a crash there.
+            if art is None or dev("build", "-t", binary) != 0:
+                out.update(dict.fromkeys(keys))
+                continue
+            rel = Path(art).resolve().relative_to(preset.build_dir.resolve())
+            xml = wt / build_rel / rel.parent / f"{rel.name}.results.xml"
+            xml.unlink(missing_ok=True)
+            # A binary that ended without a report (a crash, a timeout) has every case red by the binary's ending:
+            # it says nothing of a single case, only the whole binary run again can show whether it ends that way at the base too.
+            whole = len(mine) > 1 or any(_binary_red(r) for r in mine)
+            rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"]]))
+            found = _cases_red(xml)
+            ended_without_report = rc != 0 and not found
+            for r, key in zip(mine, keys):
+                out[key] = True if _binary_red(r) and ended_without_report else found.get(r["test"])
+        return out
+
+    out = run(reds)
+    _say_at_base(out)
     # A red at the base counts only where the worktree reproduces the checkout: red there too at the commit being pushed,
     # which is everything ship pushes, since it refuses uncommitted work.
     # Green there, the worktree differs from the checkout, and its base run says nothing.
@@ -297,28 +323,49 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
         if wt is None:
             _say(f"the worktree could not be moved to {head[:12]} to check it, so the server's judgement stands: {why}")
             return {k: (None if v else v) for k, v in out.items()}
-        for r in reproduce:
-            key = (r["binary"], r["test"])
-            if run(r) is not True:
+        for key, red in run(reproduce).items():
+            if red is not True:
                 _say(f"  but green in the worktree at {head[:12]} too, so the worktree differs from the checkout: {key[0]}: {key[1]}")
                 out[key] = None
     return out
 
 
-def _case_red(xml: Path, test: str) -> bool | None:
-    """Whether a JUnit report has `test` failed (True) or passed (False); None when it does not hold the case."""
+def _say_at_base(out: dict[tuple[str, str], bool | None], listed: int = 10) -> None:
+    """Each red's result at the base; past `listed` of one binary, its counts instead."""
+    word = {True: "red", False: "green", None: "no result"}
+    by_binary: dict[str, list[tuple[str, bool | None]]] = {}
+    for (b, t), red in out.items():
+        by_binary.setdefault(b, []).append((t, red))
+    for b, rs in by_binary.items():
+        if len(rs) <= listed:
+            for t, red in rs:
+                _say(f"  at the base: {b}: {t}: {word[red]}")
+        else:
+            counts = ", ".join(f"{sum(1 for _, r in rs if r is v)} {word[v]}" for v in (True, False, None))
+            _say(f"  at the base: {b}: {len(rs)} red tests: {counts}")
+
+
+def _binary_red(r: dict) -> bool:
+    """Whether a red is its binary's ending (the server's `failed`, `timed out`) rather than the case's own `fail` in a report."""
+    return r.get("outcome") in ("failed", "timed out")
+
+
+def _cases_red(xml: Path) -> dict[str, bool]:
+    """Each case of a JUnit report: failed (True) or passed (False); a skipped case and an unreadable report are absent, saying nothing."""
     import xml.etree.ElementTree as ET
 
     try:
-        cases = ET.parse(xml).getroot().iter("testcase")
+        cases = list(ET.parse(xml).getroot().iter("testcase"))
     except (OSError, ET.ParseError):
-        return None
+        return {}
+    out: dict[str, bool] = {}
     for c in cases:
-        if c.get("name") == test:
-            if c.find("skipped") is not None:
-                return None  # not run at the base: it says nothing either way
-            return c.find("failure") is not None or c.find("error") is not None
-    return None
+        name = c.get("name")
+        if name is None or c.find("skipped") is not None:
+            continue
+        # A name repeated (a dispatched child's) is red when any of its runs is.
+        out[name] = out.get(name, False) or c.find("failure") is not None or c.find("error") is not None
+    return out
 
 
 def _gate(ctx: Context, *, tests: bool, prover: build_server.Session | None = None) -> None:
