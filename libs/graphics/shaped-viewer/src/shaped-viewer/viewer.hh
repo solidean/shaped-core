@@ -3,6 +3,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/function_ref.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -34,6 +35,11 @@ struct sv::viewer_config
     /// a swapchain, so an authoring body cannot tell the difference.
     /// A headless loop is ended by `request_close` alone, since there is no window to close.
     bool headless = false;
+
+    /// A guest renders inside its host's frames: it records and submits, never advances an epoch, and paces on its own
+    /// submissions, so it cannot disturb the host's frame pacing.
+    /// Every call on it is made on the host's home, which the host runs between its frames; a guest is `headless`.
+    bool guest = false;
 
     /// A swapchain to present into, in place of a window the viewer opens: on the web, the page's canvas.
     ///
@@ -322,8 +328,8 @@ private:
     friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config);
     friend frame_range interactive(cc::string_view id, viewer_config config, sr::capture_request capture);
     friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config, sr::capture_request capture);
-    friend cc::result<settled_image> render_settled(sg::context& ctx,
-                                                    cc::string_view id,
-                                                    settled_options const& options,
-                                                    cc::function_ref<void(frame&)> author);
+    friend cc::shared_async<settled_image> render_settled(sg::context& ctx,
+                                                          cc::string id,
+                                                          settled_options options,
+                                                          cc::unique_function<void(frame&)> author);
 };

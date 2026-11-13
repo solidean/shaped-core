@@ -22,6 +22,9 @@ The phase is `forward`: 375 to 531 of its frames are declined while its pipeline
 It failed at 1828c6adf, 695314073 and the sv commits between them, so none of those introduced it.
 Load is not the only cue, then; compiling forward stages during the phase may be, which is unproven.
 
+Seen 2026-11-12 on an RTX 4090 (driver 32.0.16.1088): it fails run alone too, every time, on main as fetched (a7f315776) with no local change.
+The forward phase's darkest pixel is 0.247 against a ceiling of 0.05, at pixel 280 in one run and 4561 in another.
+
 2026-11-12: on metal too, an Apple M4, relwithdebinfo, in two `dev.py ship` checks that ran shaped-viewer-test alone.
 The phase was `forward` both times, 0.237 and 0.247 near black, at frames 0 and 13; the run then hung on the failed test's leftover work until the watchdog.
 The full shaped-viewer-test passed alone in between, 557 tests, so the order a seed draws is a cue too (seed 3166066474908219465 failed).

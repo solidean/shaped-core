@@ -118,11 +118,17 @@ constexpr sr::key_modifiers zoom_modifiers = sr::key_modifiers::ctrl;
 /// It refuses a context that cannot block, whose caller drives the awaited forms instead.
 /// An error is left to the caller, and a device lost mid-wait surfaces again as the next device call's throw.
 template <class T>
-[[nodiscard]] cc::result<T, cc::async_error> block_on(sg::context& ctx, cc::shared_async<T> const& node)
+[[nodiscard]] auto block_on(sg::context& ctx, cc::shared_async<T> const& node)
 {
     auto const may_block = ctx.execution() == sg::execution_model::may_block;
     CC_ASSERT(may_block, "sv::viewer blocks its caller's thread every frame, and this context cannot block");
     return cc::try_async_blocking_get(node);
+}
+
+/// Settles once `node` settles, whatever it settled to: the throttle a guest takes from one of its submissions.
+[[nodiscard]] cc::shared_async<cc::unit> settled_of(cc::shared_async<cc::unit const> node)
+{
+    co_await cc::async_settled(node);
 }
 
 /// Why a capture write failed, or empty when it succeeded — its result is move-only, so it is read where it settled.
@@ -233,6 +239,9 @@ struct viewer::impl
     // end_frame and a frame_scope block on it before returning; end_frame_async hands it to its caller to await.
     cc::shared_async<cc::unit> throttle;
 
+    // A guest's recent submissions, oldest first: its throttle and its finish wait on these rather than on epochs.
+    cc::vector<sg::submission_token> guest_submissions;
+
     // Whether finish() drained the viewer, so its destructor owes nothing more.
     bool finished = false;
 
@@ -326,6 +335,9 @@ cc::result<viewer> viewer::try_create(cc::string_view id_str, viewer_config conf
 
 cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, viewer_config config)
 {
+    if (config.guest && !config.headless)
+        return cc::error("a guest viewer renders inside its host's frames, so it has no window: make it headless");
+
     // Headless brings up neither, so it needs no display and no window backend at all.
     auto ws = cc::unique_ptr<sr::window_system>();
     auto win = cc::unique_ptr<sr::window>();
@@ -441,8 +453,16 @@ viewer::~viewer()
         // A loop that left before its capture finished still owes the images it submitted.
         drain_capture_writes();
 
-        _impl->ctx->advance_epoch();
-        (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
+        if (_impl->config.guest)
+        {
+            if (!_impl->guest_submissions.empty())
+                (void)block_on(*_impl->ctx, _impl->ctx->submission_completion(_impl->guest_submissions.back()));
+        }
+        else
+        {
+            _impl->ctx->advance_epoch();
+            (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
+        }
 
         // What the viewer started and nobody awaits still carries its caller's context.
         (void)block_on(*_impl->ctx, sv::background_work(*_impl->ctx));
@@ -1114,8 +1134,17 @@ cc::shared_async<cc::unit> viewer::finish()
         }
         _impl->capture_writes.clear();
 
-        _impl->ctx->advance_epoch();
-        co_await _impl->ctx->idle_completion();
+        if (_impl->config.guest)
+        {
+            // a guest waits for its own work only; the epochs are its host's to advance
+            if (!_impl->guest_submissions.empty())
+                co_await _impl->ctx->submission_completion(_impl->guest_submissions.back());
+        }
+        else
+        {
+            _impl->ctx->advance_epoch();
+            co_await _impl->ctx->idle_completion();
+        }
         co_await sv::background_work(*_impl->ctx);
     }
     catch (sg::device_lost_exception const&)
@@ -1448,7 +1477,16 @@ void viewer::finish_frame(frame& f)
             im.frame_begin = {};
         }
 
-        if (im.config.headless)
+        if (im.config.guest)
+        {
+            // a guest leaves the epochs to its host: it keeps `buffer_count` of its own frames in flight, waiting on the oldest
+            im.guest_submissions.push_back(im.ctx->submit_command_list(cc::move(im.current_cmd)));
+            if (im.guest_submissions.size() > im.config.buffer_count)
+                im.guest_submissions.remove_at(0);
+            if (im.guest_submissions.size() == im.config.buffer_count)
+                im.throttle = settled_of(im.ctx->submission_completion(im.guest_submissions[0]));
+        }
+        else if (im.config.headless)
         {
             im.ctx->submit_command_list(cc::move(im.current_cmd));
             im.ctx->advance_epoch();
