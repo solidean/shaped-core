@@ -570,9 +570,12 @@ auto differentiator::derive_buffer_read(flat_expr_id id, type_id type, flat_buff
                "constant, or give the buffer a @gradient");
         return {id, flat_expr_id::none};
     }
-    if (m().name_of(type) != builtins::k_float)
+    // a gradient is an atomic per float the element's tangent holds, which no other kind of leaf has
+    auto const stride = float_leaves(tangent(type));
+    if (stride <= 0)
     {
-        failed(cc::format("a read of a buffer of {}, where a gradient is added by an atomic of a float alone",
+        failed(cc::format("a read of a buffer of {}, whose gradient is an atomic float per float it holds, and it "
+                          "holds another kind",
                           m().name_of(type)));
         return {id, flat_expr_id::none};
     }
@@ -583,7 +586,7 @@ auto differentiator::derive_buffer_read(flat_expr_id id, type_id type, flat_buff
         // without a @tangent, the buffer holds still in every direction a forward derivative follows
         if (info->tangent.empty())
             return {primal, flat_expr_id::none};
-        auto const tangents = resolve_paired(info->tangent, "tangent", type);
+        auto const tangents = resolve_paired(info->tangent, "tangent", tangent(type));
         if (!tangents.has_value())
             return {primal, flat_expr_id::none};
         auto const& t = tangents.value();
@@ -596,12 +599,13 @@ auto differentiator::derive_buffer_read(flat_expr_id id, type_id type, flat_buff
                "adjoint");
         return {primal, flat_expr_id::none};
     }
-    auto const gradients = resolve_paired(info->gradient, "gradient", type);
+    auto const gradients = resolve_paired(info->gradient, "gradient", named_type(builtins::k_float));
     if (!gradients.has_value())
         return {primal, flat_expr_id::none};
     auto const placeholder = f.add_local(local_kind::temporary, "t_read", tangent(type));
     linear_locals.insert(i32(placeholder));
-    gradient_reads.push_back({.placeholder = placeholder, .gradients = gradients.value(), .index = index});
+    gradient_reads.push_back(
+        {.placeholder = placeholder, .gradients = gradients.value(), .index = index, .stride = stride});
     return {primal, ref(placeholder)};
 }
 

@@ -20,3 +20,22 @@ fun loss(k: int, x: float){params} -> float:
 
 @compute(64) fun loss_forward(@thread_id id: int3){params, training}:
     training.forward[id.x] = fwd_diff(loss, id.x % 4, 0.5, 0.0)
+
+// a buffer of structs: an atomic per float of the element's tangent, a position's three and the weight's one
+struct mark:
+    at: pos3
+    weight: float
+
+binding marked:
+    @gradient(mark_training.gradients) marks: buffer[mark]
+
+binding mark_training:
+    gradients: mut buffer[atomic[float]]
+
+fun mark_loss(k: int){marked} -> float:
+    let m = marked.marks[k]
+    let d = m.at - pos3(1.0, 0.0, 0.0)
+    return m.weight * dot(d, d)
+
+@compute(64) fun marks_backward(@thread_id id: int3){marked, mark_training}:
+    bwd_diff(mark_loss, id.x % 2, 1.0)
