@@ -1,5 +1,8 @@
 // differential: setup raster
+// differential: across relative 0.05
 // Screen-space derivatives of what is linear across the target, and of what bends, which a quad's coarse and fine differences tell apart.
+// Across machines the bent value's derivative is coarse on one and fine on another until every target writes coarse (feat-sgl-coarse-derivatives-by-default).
+// Metal's is fine under safe math and coarse under fast math, so the reference holds it loosely across machines and exactly across routes.
 use diff_raster
 
 @pixel fun derivatives_ps(p: diff_raster.varyings) -> diff_raster.target:

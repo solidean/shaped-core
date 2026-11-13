@@ -245,6 +245,8 @@ struct plan
     bool diagnostics = false;
     /// MSL: the package takes `SOFTWARE_TRACE`, so a structure that moves may be bound, and a native trace takes motion tags.
     bool sees_motion = false;
+    /// MSL: the entry point's float guarantee, written as the text's math mode (EMIT-262).
+    check::float_level float_guarantee = check::float_level::fast;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;
