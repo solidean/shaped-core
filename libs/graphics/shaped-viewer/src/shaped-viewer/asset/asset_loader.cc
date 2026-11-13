@@ -185,7 +185,7 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
             co_return out;
         };
         auto node = cc::async_start(load(this, cc::move(owned_uri), dropped));
-        return sv::asset(cc::move(node), this, cc::move(dropped));
+        return sv::asset(cc::move(node), this, cc::move(dropped), /*is_page_fetch*/ true);
     }
 #endif
 
