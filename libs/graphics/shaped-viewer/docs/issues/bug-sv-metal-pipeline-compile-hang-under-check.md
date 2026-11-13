@@ -3,6 +3,8 @@ created: 2026-11-12
 refs:
   - test: sv agreement - every kind of content draws the same in every mode
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_raster_pipeline.cc:305
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-13T09:59Z
 ---
 
 # sv's agreement test hung once in Metal's render pipeline compile, in a ship's check
