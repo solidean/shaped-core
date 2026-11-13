@@ -581,6 +581,8 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             preset_records = dev.test(
                 [preset], to_run, root=ctx.root,
                 test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+                # Half of each binary's own timeout, as `dev.py test` gives: nexus's 60 s default ignores a declared one.
+                watchdog_fraction=0.5,
                 extra_args=[] if preset == presets[0] else ["--smoke"], server=ctx.build_server(gate=True),
             )
             records += preset_records
@@ -600,6 +602,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                 presets[:1], [binary], root=ctx.root, test_name=None,
                 extra_args=["--thorough", *(nexus_filter(t) for t in tests)],
                 timeout=60.0 * THOROUGH_TIMEOUT_FACTOR, write_xml=True, mirror=mirror, verbose=verbose,
+                watchdog_fraction=0.5,
                 server=ctx.build_server(gate=True),
             )
             ran = sum(r["junit"]["tests"] for r in thorough_records if r.get("junit"))
