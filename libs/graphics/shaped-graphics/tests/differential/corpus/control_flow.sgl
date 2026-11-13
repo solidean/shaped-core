@@ -1,0 +1,36 @@
+// differential: setup words
+// Divergent control flow: loops that run a different count per thread, an early break and continue, nested branches.
+use diff_words
+
+fun collatz_steps(start: uint) -> uint:
+    let mut n = (start & 0xffffu) + 1u
+    let mut steps = 0u
+    while n != 1u and steps < 500u:
+        n = if (n & 1u) == 0u => n >> 1u else 3u * n + 1u
+        steps += 1u
+    return steps
+
+@compute(64) fun divergent_loops(@thread_id id: int3){diff_words.io}:
+    let i = id.x
+    let x = diff_words.io.input[i]
+    diff_words.io.output[4 * i] = collatz_steps(x)
+
+    // a sum that skips multiples of three and stops at the first bit pattern it is looking for
+    let mut sum = 0u
+    for k in 0 ..< 64:
+        let w = diff_words.io.input[(i + k) & 255]
+        if w % 3u == 0u => continue
+        if (w & 0xf0u) == 0x50u => break
+        sum += w >> 4u
+    diff_words.io.output[4 * i + 1] = sum
+
+    let mut nested = 0u
+    if (x & 1u) != 0u:
+        if (x & 2u) != 0u:
+            nested = x * 5u
+        else:
+            nested = x ^ 0x5555'5555u
+    else if (x & 4u) != 0u:
+        nested = x + 17u
+    diff_words.io.output[4 * i + 2] = nested
+    diff_words.io.output[4 * i + 3] = if x > diff_words.io.input[255 - i] => 1u else 0u

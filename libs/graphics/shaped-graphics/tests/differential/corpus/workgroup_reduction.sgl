@@ -1,0 +1,26 @@
+// differential: setup words
+// A workgroup reduction through workgroup memory and barriers, and atomics into it, as a compaction or a histogram pass does.
+use diff_words
+
+@workgroup binding scratch:
+    partial: uint[64]
+    histogram: atomic[uint][8]
+
+@compute(64) fun reduce(@thread_id id: int3, @local_thread_index local: int){diff_words.io, scratch}:
+    let x = diff_words.io.input[id.x]
+    if local < 8 => scratch.histogram[local].store(0u)
+    scratch.partial[local] = x & 0xffffu
+    workgroup_barrier()
+    scratch.histogram[x & 7u].add(1u)
+
+    // a tree sum, halving the threads that add each step
+    let mut stride = 32
+    while stride > 0:
+        if local < stride => scratch.partial[local] = scratch.partial[local] + scratch.partial[local + stride]
+        workgroup_barrier()
+        stride = stride >> 1
+
+    diff_words.io.output[4 * id.x] = scratch.partial[0]
+    diff_words.io.output[4 * id.x + 1] = scratch.histogram[local & 7].load()
+    diff_words.io.output[4 * id.x + 2] = x
+    diff_words.io.output[4 * id.x + 3] = (local as uint) * 0x0101'0101u

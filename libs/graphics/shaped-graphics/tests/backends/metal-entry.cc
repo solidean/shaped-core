@@ -33,7 +33,10 @@ ASYNC_TEST("sg metal backend")
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
         co_await nx::async_invoke_tests_in_sequence(
-            "metal", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())}, ctx.value());
+            "metal",
+            nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sg_test::settle_each(ctx.value())},
+            ctx.value());
 
         // A device loss during our own tests is a defect rather than an environment quirk to tolerate.
         CHECK(!ctx.value()->is_device_lost())

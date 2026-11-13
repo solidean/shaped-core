@@ -50,4 +50,11 @@ inline cc::unique_function<cc::shared_async<cc::unit>()> sweep_after_each(sg::co
         return ctx->epochs_in_flight_completion(2);
     };
 }
+
+/// What a driver awaits as each test's last step, inside that test: the shader print and assert records it left in flight, decoded and logged.
+/// A shader's failed assert is then the error of the test that dispatched it, rather than of whichever test or driver next retires its epoch.
+inline cc::unique_function<cc::shared_async<cc::unit>()> settle_each(sg::context_handle ctx)
+{
+    return [ctx = cc::move(ctx)] { return ctx->diagnostics_settled(); };
+}
 } // namespace sr_test

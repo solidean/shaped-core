@@ -1,0 +1,27 @@
+// differential: setup words
+// Integer bit work as a hash, a packer or a bitfield decoder writes it: every result is exact on every route and API.
+use diff_words
+
+fun mixed(x: uint) -> uint:
+    let mut h = x ^ (x >> 16u)
+    h = h * 0x45d9'f3bu
+    return h ^ (h >> 16u)
+
+@compute(64) fun bit_operations(@thread_id id: int3){diff_words.io}:
+    let i = id.x
+    let x = diff_words.io.input[i]
+    let y = diff_words.io.input[(i + 7) & 255]
+    diff_words.io.output[4 * i] = (x & y) ^ (x | ~y)
+    diff_words.io.output[4 * i + 1] = (x << (y & 31u)) | (x >> ((32u - (y & 31u)) & 31u))
+    diff_words.io.output[4 * i + 2] = mixed(x) + mixed(y) * 3u
+    diff_words.io.output[4 * i + 3] = count_bits(x) | (reverse_bits(y) & 0xffff'ff00u) | (first_bit_low(x | 1u) << 24u)
+
+// Signed arithmetic and the conversions between int and uint, whose wrapping and arithmetic shift every target must keep.
+@compute(64) fun signed_arithmetic(@thread_id id: int3){diff_words.io}:
+    let i = id.x
+    let x = reinterpret_as_int(diff_words.io.input[i])
+    let d = (reinterpret_as_int(diff_words.io.input[255 - i]) & 0xff) + 1
+    diff_words.io.output[4 * i] = (x / d) as uint
+    diff_words.io.output[4 * i + 1] = (x % d) as uint
+    diff_words.io.output[4 * i + 2] = ((x >> 3) * -5 + d) as uint
+    diff_words.io.output[4 * i + 3] = (clamp(x, -1000, 1000) + abs(d - 128) * sign(x)) as uint

@@ -40,7 +40,10 @@ ASYNC_TEST("sg vulkan backend")
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
         co_await nx::async_invoke_tests_in_sequence(
-            "vulkan", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())}, ctx.value());
+            "vulkan",
+            nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sg_test::settle_each(ctx.value())},
+            ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.
         // Vulkan has no equivalent of dx12's poll, so this sees only a loss some operation already noticed --
@@ -65,7 +68,9 @@ ASYNC_TEST("sg vulkan native-spirv backend")
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true);
         co_await nx::async_invoke_tests_in_sequence(
-            "vulkan-native-spirv", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())},
+            "vulkan-native-spirv",
+            nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sg_test::settle_each(ctx.value())},
             ctx.value());
         CHECK(!ctx.value()->is_device_lost())
             .context(cc::format("the device was lost while running this binary's GPU tests: {}",
@@ -89,7 +94,9 @@ ASYNC_TEST("sg vulkan never-block backend")
         ctx.value()->set_portability_checks(true);
         ctx.value()->set_hit_record_checks(true); // on in a release build too, where it defaults off
         co_await nx::async_invoke_tests_in_sequence(
-            "vulkan-never-block", nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value())},
+            "vulkan-never-block",
+            nx::invocation_options{.after_each = sg_test::sweep_after_each(ctx.value()),
+                                   .finish_each = sg_test::settle_each(ctx.value())},
             ctx.value());
 
         // Nothing here can wait, so what the tests left running is awaited before the context goes.

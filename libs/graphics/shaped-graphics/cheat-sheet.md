@@ -354,6 +354,10 @@ co_await ctx.idle_completion();         // submissions done, every transfer acto
                                         //   A bytes_future SUBMITTED before it is delivered once it settles; one still
                                         //   in an unsubmitted list is yours to submit.
 co_await ctx.epochs_in_flight_completion(N); // the PER-FRAME back-pressure: settles once <= N are in flight
+co_await ctx.diagnostics_settled();     // every shader print / failed assert written so far is decoded and logged;
+                                        //   closes the recording epoch if a shader wrote records in it; ready at once
+                                        //   when nothing is due. The test drivers await it as each test's last step
+                                        //   (nx::invocation_options::finish_each), so an assert fails ITS test.
 // a synchronous caller that may block does so itself: cc::async_blocking_get(ctx.idle_completion())
 future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
 

@@ -202,6 +202,21 @@ void impl::debug_windows::poll()
     }
 }
 
+bool impl::debug_windows::has_records_due() const
+{
+    if (!has_windows())
+        return false;
+    for (auto const& w : _windows)
+        if (w.is_written.load() || w.pending.has_value())
+            return true;
+    return false;
+}
+
+bool impl::debug_windows::is_recording_written() const
+{
+    return has_windows() && _windows[index_of(_ctx.current_epoch())].is_written.load();
+}
+
 void impl::debug_windows::drain()
 {
     if (!has_windows())

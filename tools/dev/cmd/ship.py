@@ -317,9 +317,11 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
             # a binary that wrote no report of its own gets dev.py's stand-in, one case named after the binary
             if set(found) == {binary}:
                 found = {}
-            ended_without_report = rc != 0 and not found
+            # A binary that dies writes the cases it reached first, so a failed run missing one of them ended there too:
+            # what it reached green is no case of a binary whose run ends red by its ending, at the base as with the change.
+            ended_early = rc != 0 and any(r["test"] not in found for r in mine)
             for r, key in zip(mine, keys):
-                out[key] = True if _binary_red(r) and ended_without_report else found.get(r["test"])
+                out[key] = True if _binary_red(r) and ended_early else found.get(r["test"])
         return out
 
     out = run(reds)
