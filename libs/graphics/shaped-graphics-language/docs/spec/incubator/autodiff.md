@@ -2,6 +2,8 @@
 
 *Incubator: not normative.*
 
+**The rules are normative now**, in [semantics/differentiation.md](../semantics/differentiation.md) (`DIFF`); this note keeps the design, its reasons and what is open.
+
 ## The idea
 
 **SGL differentiates a function for you**: `fwd_diff f` and `bwd_diff f` are functions the compiler writes from the body of `f`, so a training kernel runs on sg like any other.
@@ -76,7 +78,7 @@ They must agree even beside a kink, and both match a central difference wherever
   [register_derivatives.cc](../../../src/shaped-graphics-language/builtins/register_derivatives.cc) states it by name or by operator, for every overload.
   A registry test refuses a builtin that gives a float and takes one and states nothing, so a new builtin is decided when it is added.
   Another holds every rule and every linear builtin of floats to a central difference in both modes, one generated call per overload.
-  A builtin stated not yet, such as `smoothstep` or a subgroup's add, is `unsupported-yet` with its name.
+  A builtin stated not yet, such as `determinant` or a subgroup's add, is `unsupported-yet` with its name.
 * **Reverse mode runs on straight structured code.**
   Every declaration is hoisted, every early leave becomes a flag that guards what follows it, and every condition is recorded.
   The backward sweep restores what each statement overwrote from a save, and transposes that statement's tangent.
@@ -198,8 +200,7 @@ What it found in SGL itself:
 The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and `tangent[T]` for the geometry types and for structs.
 It has buffers of floats, vectors and structs differentiable by their `@gradient` and `@tangent` too, and textures, and every builtin states its derivative in the registry.
 
-1. The rules into the normative spec, the prototype's choices with them.
-2. Rules for the builtins stated not yet: `smoothstep`, `reflect`, `refract`, `determinant`, `%`, and the subgroup and quad operations.
+1. Rules for the builtins stated not yet: `determinant`, `refract`, the gathers, `ddx` and `ddy`, and the subgroup and quad operations.
 
 ## Open
 

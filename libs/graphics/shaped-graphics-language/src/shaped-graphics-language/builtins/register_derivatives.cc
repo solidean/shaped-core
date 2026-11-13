@@ -80,6 +80,9 @@ constexpr stated k_stated[] = {
     {"clamp", rule},
     {"mix", rule},
     {"fma", rule},
+    {"%", rule},
+    {"smoothstep", rule},
+    {"reflect", rule},
     {"sample", rule},
     // constant between the points where it jumps
     {"floor", zero},
@@ -93,11 +96,11 @@ constexpr stated k_stated[] = {
     {"exchange", none},
     {"workgroup_uniform_load", none},
     // differentiable, with no rule yet
-    {"%", not_yet},
+
     {"determinant", not_yet},
-    {"reflect", not_yet},
+
     {"refract", not_yet},
-    {"smoothstep", not_yet},
+
     {"gather", not_yet},
     {"gather_compare", not_yet},
     {"sample_compare", not_yet},

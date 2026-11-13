@@ -20,7 +20,7 @@ int width_of(cc::string_view type)
         return 1;
     if (type == "float2")
         return 2;
-    if (type == "float3")
+    if (type == "float3" || type == "vec3")
         return 3;
     if (type == "float4")
         return 4;
@@ -51,18 +51,22 @@ cc::string reduced(cc::string_view type, cc::string_view value, cc::string_view 
 }
 
 /// `name(a0, a1)`, or the operator its record spells.
-cc::string call_of(builtins::function_record const& f, isize arity)
+cc::string call_of(builtins::function_record const& f, isize arity, cc::string_view result)
 {
     auto const at = f.signature.find("@operator(\"");
     if (at >= 0)
     {
         auto const rest = cc::string_view(f.signature).subview(at + 11);
         auto const op = rest.subview({.offset = 0, .size = rest.find('"')});
+        if (op == "as")
+            return cc::format("a0 as {}", result);
         return arity == 1 ? cc::format("{}a0", op) : cc::format("a0 {} a1", op);
     }
     // a clamp whose low bound is above its high one has no value (EVAL), and every argument is positive
     if (f.name == "clamp")
         return "clamp(a0, a1, a1 + a2)";
+    if (f.name == "smoothstep")
+        return "smoothstep(a0, a0 + a1, a2)";
     auto out = cc::format("{}(", f.name);
     for (auto i = isize(0); i < arity; ++i)
         out += cc::format("{}a{}", i == 0 ? "" : ", ", i);
@@ -113,7 +117,8 @@ TEST("sgl autodiff rules - every rule and every linear builtin of floats agrees 
         auto parameters = cc::string();
         for (auto i = isize(0); i < arity; ++i)
             parameters += cc::format("{}a{}: {}", i == 0 ? "" : ", ", i, f.parameters[i]);
-        source += cc::format("// {}\nfun f{}({}) -> {} => {}\n", f.signature, k, parameters, result, call_of(f, arity));
+        source += cc::format("// {}\nfun f{}({}) -> {} => {}\n", f.signature, k, parameters, result,
+                             call_of(f, arity, result));
 
         auto const weights = value_of(result, seed);
         source += cc::format("fun agrees{}() -> bool:\n    let h = 1e-3\n", k);
