@@ -83,8 +83,12 @@ They must agree even beside a kink, and both match a central difference wherever
   A loop whose body is a few operations is the exception, 57 kept against 24 unrolled, and `@unroll` on it unrolls it going backward too.
   A `continue` leaves a block around the body, and a `break` or a `return` from inside the loop sets a flag.
   The iterations after it run as nothing, each one's guard recorded on the tape, so going backward they are skipped alike.
-  A tape holds at most 1024 slots, and a loop of any other bound is `unsupported-yet`.
+  A tape holds at most 1024 slots.
   Forward mode follows every loop.
+* **A loop of any other bound states one**: `@max_iterations(n)` on a `while` or a `for` ([CHK-528](../semantics/checking.md#control-flow)), as Slang's `[MaxIters]` is.
+  The bound holds in every compile, so the loop is a `for` of n iterations whose body leaves once the loop is done, and it is walked back like any other.
+  [bounded-loops.sgl](../../../tests/corpus/derivatives/bounded-loops.sgl) marches until a sum passes a threshold, the step count following the input.
+  A loop that states no bound is `unsupported-yet` going backward, unless its function has a `@backward`.
 * **A derivative written by hand is two attributes.**
   `@forward(f)` stands on a function of each parameter and its tangent, which gives the result's tangent.
   `@backward(f)` stands on a function of each parameter and its adjoint as `mut`, then the result's adjoint.
@@ -144,7 +148,7 @@ What it found in SGL itself:
   A call inside a differentiable body that reaches a non-differentiable builtin is a diagnostic, never a zero derivative.
 * **The flattener or a pass after it**: the forward transform (a dual value per node) and the reverse transform (the primal, then the adjoints in reverse).
 * **Control flow**: an `if` records its condition for the reverse pass.
-  A loop with a constant bound keeps a local tape sized by the bound.
+  A loop with a constant or a stated bound keeps a local tape sized by the bound.
   Any other loop is refused unless its function has a `@backward`.
 * **The builtin registry**: a derivative rule per differentiable record, and `prelude/builtins.sgl` regenerated with them.
 * **Atomics**: an adjoint added from many invocations, which [Buffers and textures](#buffers-and-textures) describes.
@@ -160,13 +164,12 @@ What it found in SGL itself:
 
 ## The order to build it in
 
-The prototype has done forward mode, reverse mode, loops of constant bounds over a tape, derivatives written by hand, `@no_diff`, and the tangent types of the builtin geometry types.
+The prototype has done forward mode, reverse mode, loops of constant or stated bounds over a tape, derivatives written by hand, `@no_diff`, and the tangent types of the builtin geometry types.
 It has buffers of floats differentiable by their `@gradient` and `@tangent` too.
 
-1. A loop whose bound is stated rather than constant, as Slang's `[MaxIters]` is, which a `while` needs.
-2. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
-3. The rules as registry records.
-4. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
+1. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
+2. The rules as registry records.
+3. A subgroup reduction ahead of a gradient's atomic where the index is uniform, and buffers of vectors and structs.
 
 ## Open
 

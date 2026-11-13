@@ -101,6 +101,16 @@ struct flattener
         i32 step = 1;
     };
     cc::optional<walk_mapping> pending_walk;
+    /// A `for` stated to run at most n times over bounds that are no constants (CHK-528): `k` runs over `0 ..< n`,
+    /// and each body starts by leaving once the range is done, the variable being `first + k`.
+    /// `first` is none where the range starts at zero; taken like `pending_walk`.
+    struct range_guard
+    {
+        local_id first = local_id::none;
+        local_id end = local_id::none;
+        bool is_inclusive = false;
+    };
+    cc::optional<range_guard> pending_guard;
     /// A pixel entry point's minted `@pixel struct`, which each of its own returns builds of the one color it gives
     /// (CHK-418); none for every other tree.
     type_id pixel_targets = type_id::none;
@@ -824,6 +834,30 @@ struct flattener
 
     /// `for i in a ..< b` as a loop of the flat tree, whose bounds `first` and `end` are flattened already.
     void flatten_looped_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end);
+
+    /// The n of `@max_iterations(n)` on the loop `id` (CHK-528), none without one.
+    [[nodiscard]] cc::optional<i32> max_iterations_of(ast::stmt_id id);
+
+    /// `end` lowered to `first + n` where both are constants and the range holds more than the stated n.
+    [[nodiscard]] flat_expr_id within_max_iterations(ast::stmt_id id,
+                                                     flat_expr_id first,
+                                                     flat_expr_id end,
+                                                     ast::expr_id where);
+
+    /// A `for` over bounds that are no constants, at most `bound` times: `k` over `0 ..< bound`, behind a guard.
+    void flatten_bounded_for(origin from,
+                             ast::stmt_id id,
+                             ast::for_stmt const& loop,
+                             flat_expr_id first,
+                             flat_expr_id end,
+                             bool is_inclusive,
+                             i32 bound);
+
+    /// Whether the guarded range has a value at `k`, computing no value past its end.
+    [[nodiscard]] flat_expr_id range_continues(range_guard const& guard, local_id k, ast::expr_id where);
+
+    /// `@max_iterations(n) while c`: `for k in 0 ..< n` whose body starts by leaving where `c` is false.
+    void flatten_bounded_while(origin from, ast::while_stmt const& loop, i32 bound);
 
     /// `for i in a ..= b`: the `for` over `a ..< b + 1` where `b` is a constant below the largest int, and otherwise a
     /// loop that tests after its body, so `b + 1` is never computed and a range up to the largest int runs whole.

@@ -302,6 +302,7 @@ void sgl::check::impl::flattener::flatten_unrolled_for(origin from,
         mark_failed();
         return;
     }
+    end = within_max_iterations(id, first, end, loop.iterable);
     auto const low = constant_int(first);
     auto const high = constant_int(end);
     auto const range_file = file();
@@ -430,6 +431,15 @@ void sgl::check::impl::flattener::flatten_looped_for(origin from,
                                                      flat_expr_id first,
                                                      flat_expr_id end)
 {
+    auto const guard = pending_guard;
+    pending_guard = {};
+    if (!guard.has_value())
+        if (auto const bound = max_iterations_of(id); bound.has_value() && is_valid(first) && is_valid(end))
+        {
+            if (!constant_int(first).has_value() || !constant_int(end).has_value())
+                return flatten_bounded_for(from, id, loop, first, end, false, bound.value());
+            end = within_max_iterations(id, first, end, loop.iterable);
+        }
     auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
     auto const int_type = is_valid(first) ? entry.at(first).type : type_id::none;
     auto const walk = take_walk();
@@ -450,11 +460,125 @@ void sgl::check::impl::flattener::flatten_looped_for(origin from,
     if (is_test_loop)
         test_loops.push_back(index);
     current()->loops.push_back({.loop = label});
-    auto const body = flatten_body(loop.body);
+    auto body = flatten_body(loop.body);
     current()->loops.remove_back();
     if (is_test_loop)
         test_loops.remove_back();
+    if (guard.has_value())
+    {
+        auto const outer = cc::move(block);
+        block = {};
+        auto const where = loop.iterable;
+        flat_stmt_id const leave[] = {make_stmt(from, flat_leave{.target = label})};
+        auto const done = add_expr(bool_type(), where, flat_not{.operand = range_continues(guard.value(), index, where)});
+        add_stmt(from, flat_if{.condition = done, .then_body = add_list(leave)});
+        for (auto const s : entry.at(body))
+            block.push_back(s);
+        body = add_list(block);
+        block = cc::move(outer);
+    }
     add_stmt(from, flat_for{.label = label, .index = index, .first = first, .end = end, .body = body});
+}
+
+auto sgl::check::impl::flattener::max_iterations_of(ast::stmt_id id) -> cc::optional<i32>
+{
+    auto const* const a = c.find_attribute(file(), ast().at(id).attributes, "max_iterations");
+    if (a == nullptr)
+        return {};
+    auto const arguments = ast().at(a->arguments);
+    if (arguments.size() != 1 || !ast::is_valid(arguments[0].value))
+        return {};
+    return constant_int(flatten_expr(arguments[0].value));
+}
+
+auto sgl::check::impl::flattener::within_max_iterations(ast::stmt_id id,
+                                                        flat_expr_id first,
+                                                        flat_expr_id end,
+                                                        ast::expr_id where) -> flat_expr_id
+{
+    auto const bound = max_iterations_of(id);
+    auto const low = constant_int(first);
+    auto const high = constant_int(end);
+    if (!bound.has_value() || !low.has_value() || !high.has_value() || i64(high.value()) - low.value() <= bound.value())
+        return end;
+    return add_expr(entry.at(first).type, where, flat_int_literal{.value = low.value() + bound.value()});
+}
+
+void sgl::check::impl::flattener::flatten_bounded_for(origin from,
+                                                      ast::stmt_id id,
+                                                      ast::for_stmt const& loop,
+                                                      flat_expr_id first,
+                                                      flat_expr_id end,
+                                                      bool is_inclusive,
+                                                      i32 bound)
+{
+    auto const where = loop.iterable;
+    auto const type = entry.at(first).type;
+    // both bounds once, first before end, as a `for` evaluates them
+    auto guard = range_guard{.is_inclusive = is_inclusive};
+    if (auto const low = constant_int(first); !low.has_value() || low.value() != 0)
+    {
+        guard.first = add_local(local_kind::temporary, "first", type);
+        add_stmt(from, flat_let{.local = guard.first, .value = first});
+        CC_ASSERT(!pending_walk.has_value(), "a walk counts from zero, so only a plain range is mapped here");
+        pending_walk = walk_mapping{.start = local_ref(guard.first, where), .step = 1};
+    }
+    guard.end = add_local(local_kind::temporary, is_inclusive ? "last" : "end", type);
+    add_stmt(from, flat_let{.local = guard.end, .value = end});
+    pending_guard = guard;
+    auto const literal = [&](i32 v) { return add_expr(type, where, flat_int_literal{.value = v}); };
+    flatten_looped_for(from, id, loop, literal(0), literal(bound));
+}
+
+auto sgl::check::impl::flattener::range_continues(range_guard const& guard, local_id k, ast::expr_id where) -> flat_expr_id
+{
+    auto const type = entry.at(k).type;
+    type_id const ints[] = {type, type};
+    auto const op = [&](cc::string_view spelling, flat_expr_id a, flat_expr_id b)
+    {
+        flat_expr_id const operands[] = {a, b};
+        return builtin_call(where, c.find_operator(file(), spelling, ints), operands);
+    };
+    auto const literal = [&](i32 v) { return add_expr(type, where, flat_int_literal{.value = v}); };
+    auto const value = [&](flat_expr_id offset)
+    { return is_valid(guard.first) ? op("+", local_ref(guard.first, where), offset) : offset; };
+    if (!guard.is_inclusive)
+        return op("<", value(local_ref(k, where)), local_ref(guard.end, where));
+    // the first value where the range holds one, then each while the last was below `last`, so a range up to the
+    // largest int runs whole and no value past `last` is computed
+    auto const b = bool_type();
+    auto const starts = add_expr(b, where,
+                                 flat_and{.lhs = op("==", local_ref(k, where), literal(0)),
+                                          .rhs = op("<=", value(literal(0)), local_ref(guard.end, where))});
+    auto const goes_on = add_expr(
+        b, where,
+        flat_and{.lhs = op(">", local_ref(k, where), literal(0)),
+                 .rhs = op("<", value(op("-", local_ref(k, where), literal(1))), local_ref(guard.end, where))});
+    return add_expr(b, where, flat_or{.lhs = starts, .rhs = goes_on});
+}
+
+void sgl::check::impl::flattener::flatten_bounded_while(origin from, ast::while_stmt const& loop, i32 bound)
+{
+    auto const where = loop.condition;
+    auto const type = int_type();
+    auto const label = add_label("while");
+    auto const k = add_local(local_kind::index, "k", type);
+    current()->loops.push_back({.loop = label});
+    auto const outer = cc::move(block);
+    block = {};
+    // the condition is evaluated before every iteration, inside it, so a `continue` reaches it again
+    auto const condition = flatten_expr(loop.condition);
+    flat_stmt_id const leave[] = {make_stmt(from, flat_leave{.target = label})};
+    add_stmt(from, flat_if{.condition = add_expr(bool_type(), where, flat_not{.operand = condition}),
+                           .then_body = add_list(leave)});
+    auto const inner = flatten_body(loop.body);
+    for (auto const s : entry.at(inner))
+        block.push_back(s);
+    auto const body = add_list(block);
+    block = cc::move(outer);
+    current()->loops.remove_back();
+    auto const literal = [&](i32 v) { return add_expr(type, where, flat_int_literal{.value = v}); };
+    add_stmt(from, flat_for{.label = label, .index = k, .first = literal(0), .end = literal(bound), .body = body});
 }
 
 void sgl::check::impl::flattener::flatten_inclusive_for(origin from,
@@ -477,6 +601,8 @@ void sgl::check::impl::flattener::flatten_inclusive_for(origin from,
             return flatten_unrolled_for(from, id, loop, first, end);
         return flatten_looped_for(from, id, loop, first, end);
     }
+    if (auto const bound = max_iterations_of(id); bound.has_value())
+        return flatten_bounded_for(from, id, loop, first, last, true, bound.value());
     type_id const ints[] = {int_type, int_type};
     auto const at_most = c.find_operator(file(), "<=", ints);
     auto const equals = c.find_operator(file(), "==", ints);
@@ -691,6 +817,8 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
         return flatten_for(from, id, *loop);
     if (auto const* const loop = s.node.try_as<ast::while_stmt>())
     {
+        if (auto const bound = max_iterations_of(id); bound.has_value())
+            return flatten_bounded_while(from, *loop, bound.value());
         auto const label = add_label("while");
         auto const condition = flatten_expr(loop->condition);
         current()->loops.push_back({.loop = label});
