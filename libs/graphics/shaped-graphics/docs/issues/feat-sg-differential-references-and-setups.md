@@ -12,7 +12,8 @@ What they do not do yet, in the order it pays off:
 
 - **References across machines.**
   Since 2026-11-13 every corpus file has a committed reference, refreshed by `SC_DIFFERENTIAL_REFRESH=1` and reviewed in its diff.
-  They were all written on one Arc B580; what is left is a run on an NVIDIA and an AMD GPU, and on metal, and an issue for whatever they disagree on.
+  They were all written on one Arc B580, and on 2026-11-13 they ran on an AMD RDNA 2 iGPU too, which matched all but the two files its issues name.
+  What is left is a run on an NVIDIA GPU, a discrete AMD one and metal, and an issue for whatever they disagree on.
 - **More setups.**
   `texels` and `raster` exist since 2026-11-13; per-texel `relative` turned out to be enough for both at 16 by 16.
   `scene` exists since 2026-11-13: inline traces over a fixed TLAS, ids exact by value and hits within relative 0.0001 across APIs.

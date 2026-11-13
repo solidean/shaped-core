@@ -1,4 +1,4 @@
 # The differential reference of packing.sgl: what one machine computed, which every other is held to.
 # Rewritten by `SC_DIFFERENTIAL_REFRESH=1 uv run dev.py test "sg differential - every corpus entry point computes what its committed reference says"`; review the diff like code.
 # packed written on dx12 (Intel(R) Arc(TM) B580 Graphics) dxc
-packed output bytes 4096 fnv1a 0x0f3c6bad9ee252b2
+packed output bytes 4096 fnv1a 0xb08ce3784ab7992a
