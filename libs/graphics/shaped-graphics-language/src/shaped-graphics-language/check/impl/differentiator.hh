@@ -297,7 +297,8 @@ struct differentiator
     /// The name a call's rule is chosen by: an operator's spelling, a function's name.
     [[nodiscard]] cc::string_view rule_name(symbol_id callee) const;
 
-    [[nodiscard]] static bool is_linear_function(cc::string_view name, isize arity);
+    /// What the registry states of a builtin's derivative; `unstated` for anything else.
+    [[nodiscard]] builtins::derivative_kind derivative_of(symbol_id callee) const;
 
     /// The factor each argument's tangent is multiplied by, for a builtin that acts on each component on its own.
     /// `a` holds the arguments and `r` the result, each shared; none where a rule has no factor for that argument.
