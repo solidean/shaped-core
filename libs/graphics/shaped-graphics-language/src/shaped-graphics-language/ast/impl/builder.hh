@@ -334,6 +334,8 @@ struct builder
         range_of<type_branch> branches;
         range_of<decl_id> members;
     };
+    /// A file-scope `const if` chain of preambles (AST-161), as one `preamble_decl`.
+    [[nodiscard]] decl_id preamble_chain(cc::span<form_id const> chain);
     [[nodiscard]] cc::optional<type_chain> type_branches(form_id block);
     decl_id type_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id const_declaration(statement_head const& head, keyword_parts const& parts);

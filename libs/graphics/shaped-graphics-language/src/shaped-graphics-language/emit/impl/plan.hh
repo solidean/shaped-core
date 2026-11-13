@@ -245,6 +245,8 @@ struct plan
     bool diagnostics = false;
     /// MSL: the package takes `SOFTWARE_TRACE`, so a structure that moves may be bound, and a native trace takes motion tags.
     bool sees_motion = false;
+    /// The target and the device the compile writes for, which a preamble's condition reads (CHK-528).
+    check::compile_target compiled_for;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;

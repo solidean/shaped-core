@@ -559,7 +559,15 @@ struct dumper
             [&](preamble_decl const& n)
             {
                 open("preamble");
-                dump_expr(n.text, depth);
+                if (is_valid(n.text))
+                    dump_expr(n.text, depth);
+                for (auto const& b : ast.at(n.branches))
+                {
+                    if (is_valid(b.condition))
+                        dump_expr(b.condition, depth);
+                    for (auto const d : ast.at(b.members))
+                        dump_decl(d, depth + 1);
+                }
             },
             [&](require_decl const& n)
             {

@@ -426,6 +426,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     auto plan = impl::make_plan(m, e, t, sources.device_features.has(check::feature::float_atomic_add));
     plan.diagnostics = sources.diagnostics;
     plan.sees_motion = sources.software_trace;
+    plan.compiled_for = compile_target_of(t, sources.device_features);
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
         for (auto const& s : plan.samplers)

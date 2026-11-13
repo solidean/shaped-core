@@ -219,14 +219,62 @@ cc::optional<flow> checker::target_text_flow(i32 file, ast::stmt_id stmt)
     return flow::exits;
 }
 
-void checker::declare_preamble(i32 file, ast::preamble_decl const& preamble)
+void checker::declare_preamble(i32 file, ast::preamble_decl const& preamble, cc::span<target_condition const> within)
 {
-    if (!ast::is_valid(preamble.text))
+    if (ast::is_valid(preamble.text))
+    {
+        auto text = plain_target_text(file, preamble.text, "a preamble");
+        if (text.has_value())
+            out.target_preambles.push_back({.file = file,
+                                            .language = text.value().language,
+                                            .text = cc::move(text.value().text),
+                                            .condition = cc::vector<target_condition>::create_copy_of(within)});
         return;
-    auto text = plain_target_text(file, preamble.text, "a preamble");
-    if (text.has_value())
-        out.target_preambles.push_back(
-            {.file = file, .language = text.value().language, .text = cc::move(text.value().text)});
+    }
+    // CHK-528: a branch holds where the chain's condition does, no branch before it held, and its own condition does
+    auto const& ast = ast_of(file);
+    auto earlier = cc::vector<i32>();
+    auto nodes = cc::vector<target_condition>::create_copy_of(within);
+    auto const outer = within.empty() ? -1 : i32(within.size()) - 1;
+    for (auto const& branch : ast.at(preamble.branches))
+    {
+        auto condition = nodes;
+        auto root = outer;
+        auto const both = [&](i32 lhs, i32 rhs)
+        {
+            if (lhs < 0)
+                return rhs;
+            condition.push_back({.kind = target_condition::kind_t::both, .lhs = lhs, .rhs = rhs});
+            return i32(condition.size()) - 1;
+        };
+        for (auto const e : earlier)
+        {
+            condition.push_back({.kind = target_condition::kind_t::negated, .lhs = e});
+            root = both(root, i32(condition.size()) - 1);
+        }
+        if (ast::is_valid(branch.condition))
+        {
+            if (!target_condition_of(file, branch.condition, condition))
+                return;
+            auto const own = i32(condition.size()) - 1;
+            earlier.push_back(own);
+            root = both(root, own);
+        }
+        if (root < 0)
+            condition.clear();
+        else if (root != i32(condition.size()) - 1)
+            condition.push_back({.kind = target_condition::kind_t::both, .lhs = root, .rhs = root});
+        nodes = condition;
+        for (auto const d : ast.at(branch.members))
+        {
+            auto const& inner = ast.at(d);
+            if (auto const* const p = inner.node.try_as<ast::preamble_decl>())
+                declare_preamble(file, *p, condition);
+            else
+                report(diagnostic_kind::invalid_target_text, file, span_of(file, inner.form),
+                       "a file-scope const if holds preambles alone, tagged strings or const if chains of them");
+        }
+    }
 }
 
 cc::optional<checker::plain_text> checker::plain_target_text(i32 file, ast::expr_id expr, cc::string_view what)

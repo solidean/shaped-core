@@ -173,17 +173,6 @@ struct sgl::check::target_text
     }
 };
 
-/// A file's text in a target's own language, written once ahead of an entry point that writes a body of that file in
-/// it (CHK-428).
-struct sgl::check::target_preamble
-{
-    i32 file = 0;
-    shading_language language = shading_language::sgl;
-    /// Whole lines, each ending in `\n`.
-    cc::string text;
-
-    [[nodiscard]] bool operator==(target_preamble const&) const = default;
-};
 
 /// One node of a condition a compile decides from its target and its device alone, a text type's (CHK-432).
 /// A condition is a list of them whose last is the root, and an operand is a position before its node.
@@ -209,6 +198,25 @@ struct sgl::check::target_condition
     i32 rhs = -1;
 
     constexpr bool operator==(target_condition const&) const = default;
+};
+
+/// A file's text in a target's own language, written once ahead of an entry point that writes a body of that file in
+/// it (CHK-428), where the compile meets its condition (CHK-528).
+struct sgl::check::target_preamble
+{
+    i32 file = 0;
+    shading_language language = shading_language::sgl;
+    /// Whole lines, each ending in `\n`.
+    cc::string text;
+    /// The branches of the file-scope `const if` chains it stands in, as one condition whose last node is the root;
+    /// empty for a preamble that stands in none.
+    cc::vector<target_condition> condition;
+
+    [[nodiscard]] bool operator==(target_preamble const& rhs) const
+    {
+        return file == rhs.file && language == rhs.language && text == rhs.text
+            && ast::impl::is_equal(condition, rhs.condition);
+    }
 };
 
 /// Where one field of a struct with a target layout stands in a branch's record (CHK-526).
@@ -579,4 +587,6 @@ namespace sgl::check
 /// The position in `m.target_type_branches` of the branch a compile for `target` takes of text type `type_symbol`, the
 /// first whose condition holds; -1 where none does (CHK-432).
 [[nodiscard]] i32 chosen_type_branch(checked_module const& m, symbol_id type_symbol, compile_target const& target);
+/// Whether `target` meets a condition whose last node is its root; an empty one always holds.
+[[nodiscard]] bool condition_holds(cc::span<target_condition const> condition, compile_target const& target);
 } // namespace sgl::check

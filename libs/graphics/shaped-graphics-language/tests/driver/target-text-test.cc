@@ -298,6 +298,63 @@ TEST("sgl target text - a file's preamble is written once ahead of an entry poin
     CHECK(!dx12.value().text.contains("doubled_spirv"));
 }
 
+TEST("sgl target text - a file-scope const if writes the preambles of the branch the compile takes (CHK-528)")
+{
+    constexpr auto source = "const if target_api == .vulkan:\n"
+                            "    \"hlsl\n"
+                            "        float only_vulkan(float x);\n"
+                            "    \"\n"
+                            "else if has(.subgroups):\n"
+                            "    \"hlsl\n"
+                            "        float with_subgroups(float x);\n"
+                            "    \"\n"
+                            "    const if target_api == .dx12:\n"
+                            "        \"hlsl\n"
+                            "            float dx12_with_subgroups(float x);\n"
+                            "        \"\n"
+                            "else:\n"
+                            "    \"hlsl\n"
+                            "        float neither(float x);\n"
+                            "    \"\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun twice(x: float) -> float:\n"
+                            "    \"hlsl\n"
+                            "        $result = $x * 2.0;\n"
+                            "    \"\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    work.values[id.x] = twice(work.values[id.x])\n";
+    auto const text_of = [&](target t, sgl::check::feature_set device)
+    {
+        auto const e
+            = sgl::compile_to_text({.source = source, .entry_point = "main_cs", .target = t, .device_features = device});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        return cc::string(e.value().text);
+    };
+    auto const vulkan = text_of(target::hlsl_vulkan, sgl::check::feature::subgroups);
+    CHECK(vulkan.contains("float only_vulkan(float x);"));
+    CHECK(!vulkan.contains("with_subgroups"));
+    CHECK(!vulkan.contains("neither"));
+    auto const dx12 = text_of(target::hlsl_dx12, sgl::check::feature::subgroups);
+    CHECK(!dx12.contains("only_vulkan"));
+    CHECK(dx12.contains("float with_subgroups(float x);"));
+    CHECK(dx12.contains("float dx12_with_subgroups(float x);"));
+    CHECK(!dx12.contains("neither"));
+    auto const plain = text_of(target::hlsl_dx12, {});
+    CHECK(plain.contains("float neither(float x);"));
+    CHECK(!plain.contains("with_subgroups"));
+}
+
+TEST("sgl target text - a file-scope const if holds preambles alone (CHK-528)")
+{
+    CHECK(reports_of("const if target_api == .vulkan:\n"
+                     "    const k = 1\n")
+              .contains("a file-scope const if holds preambles alone"));
+}
+
 TEST("sgl target text - a preamble is in a language a target writes, and has no placeholder")
 {
     CHECK(reports_of("\"glsl\n"

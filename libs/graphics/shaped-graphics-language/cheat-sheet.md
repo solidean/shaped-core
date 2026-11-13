@@ -601,6 +601,10 @@ struct hit:                              // a text type (CHK-432): the target's 
 "hlsl                                    // at file scope: a preamble, written once ahead of an entry point that writes
     float helper(float x);               //   a text body of this file in that language (CHK-428); no placeholders
 "
+const if target_api == .vulkan:          // at file scope: a chain of preambles, each written where its branch holds (CHK-528)
+    "hlsl                                //   a branch holds preambles and such chains alone
+        float only_vulkan(float x);
+    "
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
 for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long

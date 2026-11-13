@@ -488,7 +488,8 @@ struct checker
     /// How a tagged string ends its block, where `stmt` is one; none for any other statement.
     [[nodiscard]] cc::optional<flow> target_text_flow(i32 file, ast::stmt_id stmt);
     /// A file's tagged string at file scope, registered in `out.target_preambles` (CHK-428).
-    void declare_preamble(i32 file, ast::preamble_decl const& preamble);
+    /// A chain's branches register theirs under `within` and each branch's condition (CHK-528).
+    void declare_preamble(i32 file, ast::preamble_decl const& preamble, cc::span<target_condition const> within = {});
 
     /// How many of `files` are the prelude's; every other file is a module's.
     i32 prelude_count = 0;

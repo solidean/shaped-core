@@ -1957,7 +1957,8 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
                 text_files.push_back(file);
     for (auto const file : text_files)
         for (auto const& preamble : p.m.target_preambles)
-            if (preamble.file == file && preamble.language == language)
+            if (preamble.file == file && preamble.language == language
+                && check::condition_holds(preamble.condition, p.compiled_for))
                 out.appendf("{}\n", preamble.text);
 
     // EMIT-102: each helper the entry point's builtin calls need, once, in the order first needed.
