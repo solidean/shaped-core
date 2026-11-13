@@ -55,6 +55,17 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
     return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id;
 }
 
+/// Adapter `i` in high-performance order where DXGI offers one, else in its plain enumeration order.
+///
+/// Plain order puts the adapter driving the display first, which on a hybrid laptop is the integrated GPU.
+[[nodiscard]] HRESULT enum_adapter(IDXGIFactory4* factory, UINT i, ComPtr<IDXGIAdapter1>& out)
+{
+    if (ComPtr<IDXGIFactory6> factory6; SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory6))))
+        return factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                                                    IID_PPV_ARGS(out.ReleaseAndGetAddressOf()));
+    return factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf());
+}
+
 /// The name DXGI gives an adapter; Description is a fixed-size WCHAR buffer, NUL-terminated within it.
 [[nodiscard]] cc::string adapter_name(DXGI_ADAPTER_DESC1 const& desc)
 {
@@ -82,6 +93,7 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
 }
 
 /// The first hardware adapter that supports D3D12 and that `selector` asks for (sg::gpu_selector_matches), into `out`.
+/// The discrete GPU comes before an integrated one.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
 ///
 /// **A device-loss HRESULT stops the search rather than skipping the adapter.**
@@ -90,7 +102,7 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
 /// A reset is what `is_device_lost()` exists to report, so it is reported.
 adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out, cc::string_view selector)
 {
-    for (UINT i = 0; factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    for (UINT i = 0; enum_adapter(factory, i, out) != DXGI_ERROR_NOT_FOUND; ++i)
     {
         DXGI_ADAPTER_DESC1 ad = {};
         out->GetDesc1(&ad);
@@ -459,6 +471,23 @@ bool sg::backend::dx12::has_hardware_adapter()
 
 namespace sg
 {
+cc::vector<adapter_info> enumerate_dx12_adapters()
+{
+    auto out = cc::vector<adapter_info>();
+    backend::dx12::ComPtr<IDXGIFactory4> factory;
+    if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
+        return out;
+    backend::dx12::ComPtr<IDXGIAdapter1> adapter;
+    for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    {
+        // A null out-param probes D3D12 support without creating a device.
+        if (SUCCEEDED(backend::dx12::create_d3d12_device(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device),
+                                                         nullptr)))
+            out.push_back(backend::dx12::describe_adapter(adapter.Get()));
+    }
+    return out;
+}
+
 cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config)
 {
     // Adapter selection, device creation and every resource system's setup — tens of milliseconds, and the first

@@ -39,7 +39,7 @@ sc_library(shaped-rendering libs/graphics/shaped-rendering
     DEPENDS shaped-graphics shaped-shader-library babel-serializer
     TEST_DEPENDS shaped-graphics-language)
 sc_library(shaped-xr libs/graphics/shaped-xr DEPENDS shaped-rendering)
-sc_library(shaped-viewer libs/graphics/shaped-viewer DEPENDS shaped-rendering babel-serializer)
+sc_library(shaped-viewer libs/graphics/shaped-viewer DEPENDS shaped-rendering babel-serializer clean-net)
 sc_library(shaped-graphics-language libs/graphics/shaped-graphics-language
     DEPENDS clean-core
     TEST_DEPENDS babel-data babel-serializer)

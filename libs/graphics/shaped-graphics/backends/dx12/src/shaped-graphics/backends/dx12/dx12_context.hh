@@ -900,6 +900,11 @@ namespace sg
 /// Returns an error, never asserts, on environment failure — no adapter, device creation refused, and the like.
 /// Only callers that link the dx12 backend see it.
 [[nodiscard]] cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config = {});
+
+/// Every adapter that supports D3D12 at feature level 11_0, in DXGI's order, WARP included, described as a context on it would describe it.
+/// Pass one's `luid` to `dx12_config::adapter_luid` to create a context on it; `SC_DX12_ADAPTER` is not applied here.
+/// Creates no device.
+[[nodiscard]] cc::vector<adapter_info> enumerate_dx12_adapters();
 } // namespace sg
 
 namespace sg::backend::dx12

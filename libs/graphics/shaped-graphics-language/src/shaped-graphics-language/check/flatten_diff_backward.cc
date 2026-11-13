@@ -321,6 +321,7 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
         auto const g = share(place_of(ref(adjoint), steps), "g");
         emit(flat_assign{.place = place_of(ref(adjoint), steps), .value = zero(tangent(type_of(n->place)))});
         linear_lets.clear();
+        gradient_reads.clear();
         auto const t = tangent_of_value(n->value);
         transpose(t, g);
         // a tangent read twice was bound once; its adjoint is complete only once every read is transposed
@@ -335,6 +336,7 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
                 emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
             }
         }
+        add_gradient_reads();
         return;
     }
     if (auto const* const n = s.node.try_as<flat_if>())
@@ -479,6 +481,48 @@ auto differentiator::backward_custom(flattener::custom_call const& custom, label
     auto const call = inline_derivative(custom, custom.derivatives.backward, arguments);
     if (is_valid(call))
         emit(flat_block{.label = node(call).node.as<flat_block>().label, .body = node(call).node.as<flat_block>().body});
+}
+
+auto differentiator::atomic_add_of(type_id element) const -> symbol_id
+{
+    // the builtin's atomic is a `mut atomic[T]` of its own, so it is matched by what the atomic holds
+    auto const* const found = f.c.prelude_names.get_ptr(cc::string("add"));
+    if (found == nullptr)
+        return symbol_id::none;
+    for (auto const candidate : *found)
+    {
+        auto const& s = m().at(candidate);
+        if (s.kind != symbol_kind::function || s.info < 0)
+            continue;
+        auto const parameters = m().at(m().functions[s.info].parameters);
+        if (parameters.size() == 2 && m().at(parameters[0].type).kind == type_kind::atomic
+            && m().at(parameters[0].type).element == element && parameters[1].type == element)
+            return candidate;
+    }
+    return symbol_id::none;
+}
+
+auto differentiator::add_gradient_reads() -> void
+{
+    for (auto const& r : gradient_reads)
+    {
+        auto const* const a = adjoint_of.get_ptr(i32(r.placeholder));
+        if (a == nullptr)
+            continue;
+        auto const adjoint = *a;
+        auto const buffer
+            = add(r.gradients.type, flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
+        auto const atomic = m().at(r.gradients.type).element;
+        auto const place = add(atomic, flat_buffer_element{.buffer = buffer, .index = use(r.index)});
+        auto const callee = atomic_add_of(m().at(atomic).element);
+        if (!is_valid(callee))
+            return (void)failed(cc::format("an atomic add of {}, which no builtin is", m().name_of(atomic)));
+        flat_expr_id const arguments[] = {place, ref(adjoint)};
+        emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+        // a read in a kept loop is transposed once per iteration, each adjoint its own
+        emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
+    }
+    gradient_reads.clear();
 }
 
 } // namespace sgl::check::impl

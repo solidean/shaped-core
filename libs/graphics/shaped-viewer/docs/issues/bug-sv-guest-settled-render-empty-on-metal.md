@@ -15,3 +15,16 @@ The `settled` and epoch-count checks pass; only the image is empty.
 The run then hangs with no tracked work outstanding, until the watchdog ends it at half sv's timeout, 300 s.
 It came in with 3419bddba on 2026-11-12, which added the guest mode; on dx12 it is unknown.
 Crash reports: `build/macos-arm-llvm-relwithdebinfo/crashes/shaped-viewer-test-20261113-111818-12180` (full suite) and `-112858-13690` (alone).
+
+## Log
+
+2026-11-13, measured with temporary probes, all reverted:
+The test's host turns `pump_for(1.0)`, a millisecond, then advances, so between two guest frames it advances 10^4 to 10^6 epochs.
+With the host sleeping 16 ms a turn the test passes, and still passes at 1000 advances a turn and at 0.5 s a turn.
+At 20,000 advances a turn it fails as the spinning host does; so the trigger is thousands of epochs between guest frames, not wall time.
+Each guest frame read back inside its own command list holds the right image (4864 nonzero bytes) until the settled frame, which writes all zeros, alpha too.
+That frame records 2 draws and no dispatch, as it does in a passing run; its commit reports no feedback error, and the capture readback waits on it correctly.
+Ruled out: the readback's ordering and copy-out, residency, the download ring's reservations, and bindless slots, since frames bind immutable snapshots.
+Also ruled out: the view store's and resource pools' idle clocks; ticking them by guest frames instead changed nothing.
+Not found yet: what in the display pass of a frame after a long epoch gap reads nothing; a GPU capture of that frame is the next step.
+The metal staging rings keep one checkpoint per epoch and compact the vector from the front, so a host this fast also makes the run slow to end; that is the hang after the failure.

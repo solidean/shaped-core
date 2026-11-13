@@ -594,3 +594,8 @@ if(EMSCRIPTEN AND SC_UI_FONT_FILE)
 endif()
 
 add_subdirectory(examples)
+
+# Programs built on sr, shipped as tools rather than run as examples.
+if(SC_BUILD_TOOLS)
+    add_subdirectory(tools/lod-probe)
+endif()

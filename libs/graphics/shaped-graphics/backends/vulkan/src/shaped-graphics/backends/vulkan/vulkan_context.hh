@@ -84,6 +84,16 @@ struct sg::backend::vulkan::vulkan_config
     /// Only a preference: Vulkan has no guaranteed software device, so this still falls back to hardware when none is present.
     bool prefer_software_device = false;
 
+    /// The physical device with this LUID, in place of sg's own ranking: another context's `sg::adapter_info::luid`, or one of `enumerate_vulkan_adapters`.
+    /// Creation fails where no device with a graphics queue has it, rather than falling back to another.
+    /// `choose_physical_device` wins where both are set.
+    cc::optional<u64> adapter_luid;
+
+    /// Whether anisotropic samplers have their LOD bias corrected so they pick the level dx12 picks on the same GPU.
+    /// On by default, which is what lets one sg::sampler look the same on both backends; see `anisotropic_lod_correction`.
+    /// Off is for measuring the driver itself, as lod-probe does.
+    bool correct_anisotropic_lod = true;
+
     /// What `execution()` reports: `may_block` for a real renderer, `never_block` to run this context under a browser's rules on the dev box.
     ///
     /// Test-only in intent.
@@ -271,6 +281,12 @@ public:
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
 
+    /// What every anisotropic sampler's LOD bias gains on this device: `anisotropic_lod_correction` of its adapter, or 0
+    /// where `vulkan_config::correct_anisotropic_lod` was off.
+    [[nodiscard]] float anisotropic_lod_correction(float max_anisotropy) const;
+
+    // Set once by create_vulkan_context, before the first sampler exists; never changes afterwards.
+    void set_correct_anisotropic_lod(bool correct) { _correct_anisotropic_lod = correct; }
     /// Whether VK_NV_cluster_acceleration_structure is enabled, with its entry points loaded: sg::feature::clustered_geometry.
     [[nodiscard]] bool is_clustered_geometry_supported() const { return _clusters.has_value(); }
     /// The device's cluster limits and alignments, which only a context with clustered geometry has.
@@ -1071,6 +1087,7 @@ public:
     subgroup_size_control _subgroup_size_control;
     /// Without it every sampler is created with anisotropy off; with it, maxAnisotropy is clamped to the device limit.
     bool _sampler_anisotropy = false;
+    bool _correct_anisotropic_lod = true;
 
     // The device's memory types, read once at construction: they never change, and a staging ring allocates far too
     // often to re-query them per allocation.
@@ -1125,4 +1142,9 @@ namespace sg
 /// Returns an error (never asserts) on environment failure: no driver, no device with a graphics queue, no timeline-semaphore support, a refused device or semaphore.
 /// Lives in `sg` rather than sg::backend::vulkan so every backend shares the create_*_context prefix; sg itself neither depends on nor knows this backend.
 [[nodiscard]] cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config const& config = {});
+
+/// Every physical device with a graphics queue, in the loader's order, described as a context on it would describe it.
+/// Pass one's `luid` to `vulkan_config::adapter_luid` to create a context on it.
+/// Creates a throwaway instance and no device; empty where there is no Vulkan loader or driver.
+[[nodiscard]] cc::vector<adapter_info> enumerate_vulkan_adapters();
 } // namespace sg

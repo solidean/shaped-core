@@ -1,0 +1,22 @@
+// A buffer differentiable by its @gradient and @tangent, as the GPU runs it: every invocation's `bwd_diff` adds into one
+// gradient buffer through its float atomic, and `fwd_diff` reads each weight's change from the tangent buffer.
+
+binding params:
+    @gradient(training.gradients) @tangent(training.tangents) weights: buffer[float]
+
+binding training:
+    gradients: mut buffer[atomic[float]]
+    tangents: buffer[float]
+    forward: mut buffer[float]
+
+// (w_k x - 1)^2 for one weight k
+fun loss(k: int, x: float){params} -> float:
+    let d = params.weights[k] * x - 1.0
+    return d * d
+
+@compute(64) fun loss_backward(@thread_id id: int3){params, training}:
+    let mut dx = 0.0
+    bwd_diff(loss, id.x % 4, 0.5, mut dx, 1.0)
+
+@compute(64) fun loss_forward(@thread_id id: int3){params, training}:
+    training.forward[id.x] = fwd_diff(loss, id.x % 4, 0.5, 0.0)
