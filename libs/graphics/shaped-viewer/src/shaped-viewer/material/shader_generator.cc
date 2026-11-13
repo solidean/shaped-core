@@ -284,6 +284,45 @@ constexpr auto traced_spelling = body_spelling{};
 /// The spelling a raster pixel stage reads its attributes in.
 constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
 
+/// The statements that sample sampled attribute `index` at a `uv` already in scope, through its swizzle and transform, and return it.
+/// `block` must be in scope too.
+[[nodiscard]] cc::string texture_sample_tail(resolved_material const& r,
+                                             material_parameter_layout const& layout,
+                                             i32 index,
+                                             body_spelling const& spelling)
+{
+    auto const& a = r.attributes[index];
+    auto const components = a.format.component_count();
+    auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
+
+    auto out = cc::string();
+    cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
+                      spelling.mark, tex.offset);
+    // An explicit level where there are no derivatives, at a hit.
+    // The texel is named because a constant selector reads it twice.
+    cc::format_append(out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
+                      spelling.mark, sgl_palette_sampler(a.sample->sampler),
+                      spelling.explicit_level ? ", level = 0.0" : "");
+
+    auto value = texel_expression(a.sample->swizzle, a.format);
+
+    // The scale and the bias are parameters rather than literals, so a material changing only its normal scale re-uses this source.
+    if (!a.sample->transform.is_identity(components))
+    {
+        auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
+        auto const lanes = component_swizzle(components);
+        cc::format_append(out,
+                          "    let scale = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
+                          "ctx.param_offset + {1}u))\n"
+                          "    let bias = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
+                          "ctx.param_offset + {2}u))\n",
+                          spelling.mark, tf.offset, tf.offset + 16);
+        value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
+    }
+    cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));
+    return out;
+}
+
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
                                             material_parameter_layout const& layout,
@@ -335,7 +374,6 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     case material_frequency::material_texture:
     case material_frequency::mesh_texture_binding:
     {
-        auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
         auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
         cc::format_append(out,
                           "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
@@ -344,33 +382,34 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
         // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
         cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
-        cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
-                          spelling.mark, tex.offset);
-        // An explicit level where there are no derivatives, at a hit.
-        // The texel is named because a constant selector reads it twice.
-        cc::format_append(out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
-                          spelling.mark, sgl_palette_sampler(a.sample->sampler),
-                          spelling.explicit_level ? ", level = 0.0" : "");
-
-        auto value = texel_expression(a.sample->swizzle, a.format);
-
-        // The scale and the bias are parameters rather than literals, so a material changing only its normal scale re-uses this source.
-        if (!a.sample->transform.is_identity(components))
-        {
-            auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
-            auto const lanes = component_swizzle(components);
-            cc::format_append(out,
-                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
-                              "ctx.param_offset + {1}u))\n"
-                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
-                              "ctx.param_offset + {2}u))\n",
-                              spelling.mark, tf.offset, tf.offset + 16);
-            value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
-        }
-        cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));
+        out += texture_sample_tail(r, layout, index, spelling);
         break;
     }
     }
+    return out;
+}
+
+/// `fun sv_sample_<name>(ctx, uv)`: attribute `index` read at a uv the fragment chose, rather than at the mesh's own.
+///
+/// A sampled attribute samples its texture there, through the same swizzle and transform; any other attribute has no uv to move and returns its value.
+/// So a fragment written against it compiles whichever frequency the attribute resolved at.
+[[nodiscard]] cc::string sample_function(resolved_material const& r,
+                                         material_parameter_layout const& layout,
+                                         i32 index,
+                                         body_spelling const& spelling)
+{
+    auto const& a = r.attributes[index];
+
+    auto out = cc::string();
+    cc::format_append(out, "fun sv_sample_{}(ctx: material.shading_context, uv: float2){{tracer.bindless}} -> {}:\n",
+                      a.name, sgl_type_of(a.format));
+    if (a.frequency != material_frequency::material_texture && a.frequency != material_frequency::mesh_texture_binding)
+    {
+        cc::format_append(out, "    return sv_attribute_{}(ctx)\n", a.name);
+        return out;
+    }
+    out += "    let block = ctx.param_buffer as int\n";
+    out += texture_sample_tail(r, layout, index, spelling);
     return out;
 }
 
@@ -583,6 +622,8 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     for (auto i = 0; i < r.attributes.size(); ++i)
     {
         src += attribute_function(r, layout, i32(i), spelling);
+        src += "\n";
+        src += sample_function(r, layout, i32(i), spelling);
         src += "\n";
     }
 

@@ -194,4 +194,33 @@ TEST("sv - a hit group compiles at every attribute frequency of the pbr type")
     }
 }
 
+TEST("sv - a fragment resampling its attributes at its own uv compiles, sampled or not")
+{
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the generated hit groups");
+
+    // What a triplanar material does: three samples of one texture at three projected uvs, which the fragment computes.
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(sv::material_signature_entry::of("bumps", tg::vec3f(0.5f, 0.5f, 1.0f)));
+    auto const type = sv::material_type::create(
+        {.name = "resampling",
+         .signature = cc::move(signature),
+         .shader = "let p = float2(ctx.barycentrics.x, ctx.barycentrics.y)\n"
+                   "let b = sv_sample_bumps(ctx, p) + sv_sample_bumps(ctx, p.yx) + sv_sample_bumps(ctx, p * 2.0)\n"
+                   "surface.base_color = saturate(sv_sample_tint(ctx, p) * b.z)\n"});
+    auto const material = sv::material::create("m", sv::material_type_id(0), {});
+
+    auto sampled = make_mesh();
+    sampled.attributes.push_back(make_uvs());
+    sampled.textures.push_back(
+        {.name = "bumps",
+         .source
+         = {.texture = sv::texture_id(1), .uv_attribute = "uv", .transform = sv::sample_transform::of_signed_normal()}});
+    check_compiles(sv::resolve_material(type, material, sampled));
+
+    // Nothing supplied either: both resample to their defaults.
+    check_compiles(sv::resolve_material(type, material, make_mesh()));
+}
+
 #endif // SLIB_HAS_DXC
