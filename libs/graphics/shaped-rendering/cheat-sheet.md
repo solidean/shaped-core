@@ -242,6 +242,7 @@ sr::capture_output_env_var         // "SC_CAPTURE_OUT"        — where the imag
 sr::capture_size_env_var           // "SC_CAPTURE_SIZE"       — "<width>x<height>"
 sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — what to accumulate, in the program's unit (sv: samples per pixel; a raster app: frames)
 sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up; per frame for a sequence
+sr::capture_budget_env_var         // "SC_CAPTURE_BUDGET"     — seconds the whole run may take, replacing accumulate; each frame gets what is left over the frames to come
 sr::capture_frames_env_var         // "SC_CAPTURE_FRAMES"     — a sequence of this many frames; unset or 0 is a still
 sr::capture_fps_env_var            // "SC_CAPTURE_FPS"        — the sequence clock's rate, default 30
 sr::capture_time_env_var           // "SC_CAPTURE_TIME"       — the program clock at the first frame or the still, default 0
@@ -513,6 +514,7 @@ auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct
 out.status                                                 // denoised | pending | unsupported | failed — output untouched unless denoised
 out.denoiser / out.upscaler / out.restarted                // what ran; whether it started from no history
 history.reset()                                            // a camera cut: the denoiser's and the upscaler's history restart
+history.restarts() -> u32                                  // calls that started cold: the first, each reset, each new member or extent
 
 sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd, metalfx_rr, fsr, metalfx}
 sr::resolve_denoise_method(ctx, settings, guides)          // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply

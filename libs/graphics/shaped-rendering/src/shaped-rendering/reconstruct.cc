@@ -182,6 +182,8 @@ bool reconstruct_history::_prepare(denoise_method method, tg::vec2i input_extent
         _frame = 0;
     }
     _reset_requested = false;
+    if (restarted)
+        ++_restarts;
     return restarted;
 }
 

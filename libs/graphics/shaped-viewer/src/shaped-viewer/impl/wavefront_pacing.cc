@@ -63,14 +63,15 @@ void wavefront_pacing::reset()
     in_flight.clear();
 }
 
-isize still_wavefront_traces(viewer_definition const& def, render_plan const& plan, view_store const& store)
+isize still_budgeted_traces(viewer_definition const& def, render_plan const& plan, view_store const& store)
 {
     auto count = isize(0);
     for (auto const& tr : plan.traces)
     {
         // `automatic` is the viewer's to resolve, and one that reaches a plan built by hand is the wavefront.
         auto const mode = def[tr.view].layers[tr.layer].settings.mode;
-        if (!tr.refresh || (mode != render_mode::wavefront && mode != render_mode::automatic))
+        if (!tr.refresh
+            || (mode != render_mode::wavefront && mode != render_mode::hybrid && mode != render_mode::automatic))
             continue;
         auto const* const rec = store.peek_ptr(tr.id);
         auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(temporal_id::accumulation(tr.layer)) : nullptr;

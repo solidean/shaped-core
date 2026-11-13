@@ -186,7 +186,7 @@ The budget is the frame's, split evenly among its still wavefront layers, so fou
 A layer counts as still when its mean held the frame before; one whose image changes this frame drains and leaves its share unspent.
 `rounds_per_frame` is then only where that starts, and stays the count where the device times nothing or the budget is 0.
 A headless viewer, which is what a capture runs in, sets the budget to 0, so a capture's sample count depends on no machine's speed or load.
-So does a plan built by hand, whose `viewer_definition::wavefront_budget_ms` is 0 unless its caller sets it.
+So does a plan built by hand, whose `viewer_definition::still_budget_ms` is 0 unless its caller sets it.
 A frame that restarts is held to neither, since it drains.
 `max_bounces` keeps its name and is the cap.
 

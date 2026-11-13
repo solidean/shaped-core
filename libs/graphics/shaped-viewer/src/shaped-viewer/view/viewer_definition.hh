@@ -22,9 +22,14 @@ struct sv::viewer_definition
     /// 1 for a headless frame, which has no window to ask.
     f32 display_scale = 1.0f;
 
-    /// The GPU milliseconds this frame's still wavefront layers share, which the viewer sets from `viewer_config::frame_budget_ms`.
-    /// 0, the default for a definition built by hand, runs each layer's `render_settings::rounds_per_frame`.
-    f32 wavefront_budget_ms = 0.0f;
+    /// The GPU milliseconds this frame's still wavefront and hybrid layers share, which the viewer sets from `viewer_config::frame_budget_ms`.
+    /// 0, the default for a definition built by hand, runs each wavefront layer's `render_settings::rounds_per_frame`, and packs `still_samples_per_frame` into a hybrid one.
+    f32 still_budget_ms = 0.0f;
+
+    /// The samples a still hybrid layer packs into one frame where no budget decides it, 1 by default.
+    /// A packed sample is the one a frame of its own would draw, so the count changes how fast a mean climbs, never its image.
+    /// A capture raises it: one frame's recording then serves many samples, which is most of a frame's cost in a scene of many instances.
+    u32 still_samples_per_frame = 1;
 
     /// The samples per pixel a traced layer stops at this frame, or 0 for only `sv::accumulation_sample_cap`.
     /// A capture sets it to what it waits for, so a traced layer spends nothing past the image it takes.
@@ -36,6 +41,11 @@ struct sv::viewer_definition
     /// A wavefront frame after the first runs `render_settings::rounds_per_frame` rounds, so the image depends on this count alone.
     /// Never part of a trace's hash, like `sample_target`.
     u32 frame_target = 0;
+
+    /// Whether this frame is the last of its image: every traced layer takes one more frame and stops there, as at a target.
+    /// Under `denoise_at_target_only` that frame denoises too, so an image ends on its last trace rather than a frame after it.
+    /// A capture under a time budget sets it once the next frame would no longer fit the frame's share.
+    bool last_frame_of_image = false;
 
     /// Whether a traced layer's spatial denoiser runs only on the image at `sample_target`, every frame before it presenting the raw mean.
     /// A capture sets it with the target: nothing sees the frames in between, and a spatial member such as OIDN costs several frames' traces.

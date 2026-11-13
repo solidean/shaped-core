@@ -55,8 +55,18 @@ sv::camera_projection            // { kind; angle_d vertical_fov; f64 view_heigh
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; sr::display_transform display; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
-sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
-                                 //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
+sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront and hybrid layers share, split evenly; a wavefront fits its share with whole rounds, then a partial fill
+                                 //   a still hybrid frame packs as many samples as its share holds, from measured GPU time per sample (up to 32)
+                                 //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::still_budget_ms (0)
+settings.noise_target            // (0) the megakernel's per-pixel stop: the standard error a pixel's mean may keep, after a Reinhard curve on the display's scale
+                                 //   0.004 is about one 8-bit step; each pixel keeps its own count and variance, takes 16 frames first, then stops at the target
+                                 //   a layer whose every pixel is down to it is at its target (temporal_slot::noise_settled), so a capture moves on
+                                 //   a capture under SC_CAPTURE_BUDGET is a final render: automatic -> megakernel, >= 8 bounces, noise_target 0.004,
+                                 //   1 spp a frame where budget / frames < 0.15 s, so an image of one traced frame still fits its share,
+                                 //   dlss_rr/metalfx_rr on the mean with its history kept where present, else spatial (per-pixel counts); never OIDN
+def.still_samples_per_frame      // (1) the samples a still hybrid frame packs where no budget decides; a capture sets 16
+                                 //   a packed sample is the one its own frame would draw (seed, jitter, weight), so only the speed changes, never the image
+                                 //   one upload, TLAS and G-buffer per pack; never past sample_target or frame_target; not while a temporal member reads fresh samples
 sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + free_refractions (8) + 1 + medium_roulette_after (16, pt.roulette_after)
 sv::render_mode              // automatic (default) | megakernel | wavefront | raster | hybrid — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
                                  //   automatic: the hybrid (deferred) where the device has raytracing_pipeline and ray_query, raster with one warning where not;
@@ -945,8 +955,8 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **The hand-off is crossfaded**, over `render_settings::temporal_denoise_fade_frames` (8) accumulated frames: both members run and
   `sr::mix_routine` blends one into the other, because the two make visibly different images of the same estimate.
   The fade adds a `temporal_id::denoised_crossfade` slot; 0 hands over in one frame.
-- **`view_ref::camera_cut()`** says the camera jumped rather than moved, so the temporal history and the motion guide's previous camera
-  are dropped — nothing reprojects across a cut.
+- **`view_ref::camera_cut()`** says the camera jumped rather than moved, or the scene was replaced by another.
+  The temporal history and the motion guide's previous camera are dropped, so nothing reprojects across a cut.
   It is sticky until a frame traces the view, and it restarts no accumulation of its own.
 - **The specular guides** `temporal_id::specular_albedo_guide` (F0, blended to the base colour by metalness) and `roughness_guide` (the coat's where a coat covers the base).
   Declared for every member with the other guides: a split member reads them beside the diffuse albedo, and à-trous and SVGF demodulate by the sum of the two, since a metal's diffuse albedo is zero.
@@ -963,8 +973,11 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   `reconstruct_guides::jitter` stays zero at full size for a traced layer: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
   A full-size hybrid frame shifts its whole raster by one Halton (2, 3) offset per sample of the mean, and declares it, since a raster samples only where the projection puts the centers.
   The per-frame offset a temporal upscaler reconstructs from is the other kind: a frame traced at the upscaler's extent takes one, and passes it as `.jitter` beside `.previous_jitter`.
-- **The temporal history restarts on a scene change, never on camera or object motion** — its signal is the trace hash without the camera and without where geometry sits.
-  An instance's transform and a frame mesh's content restart the mean, not the history, so a deforming body keeps the static scene's history.
+- **Samples restart automatically, the temporal history only by hand** — `view.camera_cut()`, or `view.restart_accumulation()`, which restarts both.
+  Motion, deformation, meshes and lights coming and going and material edits all restart the mean and leave the history to follow them per pixel.
+  A caller that replaces the scene outright calls `camera_cut`, which is the only way the viewer learns of it; the denoiser itself rebuilds only on a new extent or member.
+  A capture's drained loads cut the history on the run's first frame only (`capture_session::drain_cuts_history`); later frames restart the means alone.
+  `sr::reconstruct_history::restarts()` counts the calls that started cold, which is how a test sees a history survive.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
   One that cannot run presents the raw mean and logs once.

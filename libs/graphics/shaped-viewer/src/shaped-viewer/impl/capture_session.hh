@@ -40,11 +40,36 @@ public:
     /// The reason this frame was held for, empty when it was not, and clears it for the next frame.
     [[nodiscard]] cc::string take_hold();
 
-    /// Starts the clock, once, when the loop opens.
+    /// Starts the clock when the loop opens, and again as each sequence frame begins; the run's own clock starts once.
     void begin();
 
-    /// Whether the run has spent its whole timeout.
+    /// Whether the frame being rendered has spent its whole timeout, after which it is written as it stands.
+    /// Under a budget it is never before the frame's share plus `budget_grace_seconds`, since spending the share is the plan.
     [[nodiscard]] bool is_out_of_time() const;
+
+    /// How long past its share a budgeted frame may take to finish, its last denoise and write, before it counts as timed out.
+    static constexpr double budget_grace_seconds = 10.0;
+
+    /// Whether the frame being rendered has spent its share of the budget, counting the viewer frame about to run:
+    /// once one more would end past the share, the next is the image's last.
+    /// Unlike a timeout this is the plan rather than a failure: the frame's last denoise runs on what the share bought.
+    [[nodiscard]] bool is_share_spent() const;
+
+    /// Notes that a viewer frame of this capture begins, which keeps a running estimate of what one takes.
+    void note_viewer_frame();
+
+    /// What a viewer frame of this capture takes, as `note_viewer_frame` measured it; 0 before two were noted.
+    [[nodiscard]] double viewer_frame_seconds() const { return _viewer_frame_seconds; }
+
+    /// Whether the run renders against a time budget, `capture_request::budget_seconds`.
+    [[nodiscard]] bool has_budget() const { return _request.budget_seconds > 0.0; }
+
+    /// The seconds the frame being rendered may take under the budget: what was left of it as the frame began, over the frames still to come.
+    /// A frame that ends early leaves its time to the later ones; 0 without a budget.
+    [[nodiscard]] double frame_share_seconds() const { return _frame_share; }
+
+    /// How long the whole run has taken so far, every sequence frame included, in seconds.
+    [[nodiscard]] double run_elapsed_seconds() const;
 
     /// How long the run has taken so far, in seconds.
     [[nodiscard]] double elapsed_seconds() const;
@@ -70,6 +95,12 @@ public:
     /// Starting over once it drains makes the image a function of the final resources alone.
     /// True once per drain, so work that comes and goes restarts the views each time it goes, and the timeout still ends the run.
     [[nodiscard]] bool note_owed_work(isize owed);
+
+    /// Whether that restart also cuts the views' temporal histories: on the run's first frame alone.
+    /// That is where an asset's loads and post-load work land, replacing textures' contents under the same ids,
+    /// and a temporal member carried across that drain hung the GPU on a later viewer of the same context.
+    /// A later frame of a sequence keeps its history, since content streaming in every frame is a video, and a history is what carries one.
+    [[nodiscard]] bool drain_cuts_history() const { return _frame == 0; }
 
     /// Whether the image has already been written, so the run is finishing rather than still converging.
     [[nodiscard]] bool is_done() const { return _done; }
@@ -115,6 +146,16 @@ private:
 
     /// The request's `clock_seconds` as the loop opened, or as the current sequence frame began.
     double _start_seconds = 0.0;
+
+    /// The request's `clock_seconds` as the loop opened, which a budget is spent against; negative until then.
+    double _run_start_seconds = -1.0;
+
+    /// The current frame's share of the budget, as `begin` took it.
+    double _frame_share = 0.0;
+
+    /// When the last viewer frame began on the request's clock, negative before the first, and the smoothed time between two.
+    double _last_viewer_frame = -1.0;
+    double _viewer_frame_seconds = 0.0;
 
     i32 _frame = 0;
     i32 _unsettled_frames = 0;

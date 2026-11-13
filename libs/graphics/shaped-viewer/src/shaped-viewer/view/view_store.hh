@@ -99,6 +99,10 @@ public:
     /// For a change the trace's hash cannot see, such as a texture's contents replaced in place; nothing for a view that is not here.
     void restart_accumulation(view_id id);
 
+    /// Starts every traced layer's mean of `id` over and keeps the denoiser's history; nothing for a view that is not here.
+    /// For a content change the mean must not average across but a history follows per pixel, as each frame of a video brings.
+    void restart_means(view_id id);
+
     [[nodiscard]] isize count() const { return _entries.count(); }
     [[nodiscard]] isize payload_bytes() const { return _entries.payload_bytes(); }
 
