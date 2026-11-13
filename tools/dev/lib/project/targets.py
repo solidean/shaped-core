@@ -112,6 +112,9 @@ def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
 
     models: dict[str, dict] = {}
     for ref in config.get("targets", []):
+        # CMake may list a target with no file of its own (SDL3-shared has been one); there is nothing of it to read
+        if not ref.get("jsonFile"):
+            continue
         target_data = _read_json(reply_dir / ref["jsonFile"])
         name = target_data["name"]
         if name not in models:
