@@ -449,6 +449,9 @@ TEST("slib - SGL's DXIL states each payload field's access, as DXC does for SGL'
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
+#ifndef CC_OS_WINDOWS
+    SKIP("DXC compiles DXIL only on Windows, where its reflection is");
+#endif
     // `value` is the closest hit's alone, and the miss writes `is_hit` too
     constexpr cc::string_view source
         = "require raytracing_pipeline\n"
