@@ -134,4 +134,14 @@ bool register_setup(setup s);
 
 /// Where `b` strays from `a` beyond `t`: one line per output that differs, naming the first elements that do.
 [[nodiscard]] cc::vector<cc::string> differences(run_result const& a, run_result const& b, tolerance t);
+
+/// The name of `w`'s file's committed reference, `integer_bits.ref` for `integer_bits.sgl`.
+[[nodiscard]] cc::string reference_name(workload const& w);
+
+/// What `r` commits as `w`'s reference, one line each: an output `w` holds exactly across APIs as its size and hash,
+/// any other as k_reference_samples of its elements, each its bits and, for a reader, its value.
+[[nodiscard]] cc::string reference_lines(workload const& w, run_result const& r);
+
+/// Where `r` strays from the lines `reference` holds for `w`, at `w`'s `across` bound; one line per difference, or one naming an output it lacks.
+[[nodiscard]] cc::vector<cc::string> against_reference(cc::string_view reference, workload const& w, run_result const& r);
 } // namespace sg_diff

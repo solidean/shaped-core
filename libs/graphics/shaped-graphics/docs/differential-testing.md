@@ -14,7 +14,7 @@ webgpu (`wgsl`) and metal (`msl`) have one each.
 The engine states the route in the compile's options, so a context's own preference does not matter.
 A native compile that fell back to DXC, because SGL has no lowering for it yet, is logged at info and compared with nothing.
 
-Two tests run the corpus:
+Three tests run the corpus:
 
 - `sg differential - every corpus entry point computes alike on each route this context takes` is an invocable, so every driver runs it.
   The validation layers and the never-block mode see both routes there.
@@ -22,7 +22,9 @@ Two tests run the corpus:
   It holds every (backend, route) pair to the first one that ran.
   A software adapter is left out: WARP is no device a shader ships to.
 
-Both run in the default suite; the whole corpus takes about a second.
+- `sg differential - every corpus entry point computes what its committed reference says` holds the same pairs to what another machine computed.
+
+All three run in the default suite; each takes about a second.
 
 ## A corpus file and its setup
 
@@ -77,9 +79,32 @@ Two APIs get the looser `across` bound, since their drivers round transcendental
 
 The first run found one such divergence, [bug-sgl-dxil-division-and-normalize-round-unlike-dxc](../../shaped-graphics-language/docs/issues/bug-sgl-dxil-division-and-normalize-round-unlike-dxc.md).
 
+## References across machines
+
+One machine sees only its own GPUs, so a divergence only another vendor has would never show here.
+So every corpus file has a committed reference in [tests/differential/references/](../tests/differential/references/), `integer_bits.ref` for `integer_bits.sgl`.
+It is plain text, one line per thing it holds, so a diff says exactly what moved:
+
+- An output the file holds `exact` across APIs is its size and a 64-bit FNV-1a hash.
+- Any other output is 64 of its elements, spread through it, each as its bits and, for a reader, its value.
+
+Each entry point's block names the configuration that wrote it.
+Every configuration of every machine is held to it at the file's `across` bound, so a reference written on one GPU checks every other.
+A corpus file without a reference fails, naming how to write one.
+
+To write or rewrite them, run the test with `SC_DIFFERENTIAL_REFRESH=1`:
+
+```bash
+SC_DIFFERENTIAL_REFRESH=1 uv run dev.py test "sg differential - every corpus entry point computes what its committed reference says"
+```
+
+Each entry point is written from the first configuration of this machine that runs it, then every configuration is held to it.
+**A refresh is a change like any other, and its diff is reviewed.**
+A reference that moves is either a fix, said in its commit, or a regression the test was there to catch.
+A machine whose GPU disagrees beyond `across` is a finding: who is right is a question for an issue, not for a refresh.
+
 ## Not yet
 
-- **References across machines.** Exact outputs would commit a hash per (file, entry, output), and float ones a small reference set held to `across`.
 - **More setups:** a trace over a fixed scene, render targets of other formats, and a depth test.
 - **The interpreter as a third opinion.** For compute work SGL's interpreter gives the answer the language means, with no device at all.
 

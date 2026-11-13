@@ -299,3 +299,159 @@ cc::vector<cc::string> sg_diff::differences(run_result const& a, run_result cons
     }
     return lines;
 }
+
+namespace
+{
+/// How many elements of a float output a reference keeps: enough to see a vendor's rounding, few enough to review.
+constexpr isize k_reference_samples = 64;
+
+[[nodiscard]] u64 fnv1a(cc::span<byte const> bytes)
+{
+    auto h = u64(0xcbf2'9ce4'8422'2325ull);
+    for (auto const b : bytes)
+    {
+        h ^= u64(b);
+        h *= 0x0000'0100'0000'01b3ull;
+    }
+    return h;
+}
+
+/// The elements a reference keeps of an output of `count`: spread evenly and walking through every lane of a vector.
+[[nodiscard]] isize sampled_element(isize k, isize count)
+{
+    return (k * count / k_reference_samples + k) % count;
+}
+
+/// The words of a reference line, split at spaces; a name with spaces in it is never one.
+[[nodiscard]] cc::vector<cc::string_view> words_of(cc::string_view line)
+{
+    auto words = cc::vector<cc::string_view>();
+    while (!line.empty())
+    {
+        auto end = isize(0);
+        while (end < line.size() && line[end] != ' ')
+            ++end;
+        if (end > 0)
+            words.push_back(line.subview({.offset = 0, .size = end}));
+        line = end < line.size() ? line.subview(end + 1) : cc::string_view();
+    }
+    return words;
+}
+
+[[nodiscard]] cc::optional<u64> hex_of(cc::string_view text)
+{
+    if (!text.starts_with("0x") || text.size() < 3)
+        return cc::nullopt;
+    auto value = u64(0);
+    for (auto const c : text.subview(2))
+    {
+        auto const digit = c >= '0' && c <= '9' ? int(c - '0') : c >= 'a' && c <= 'f' ? int(c - 'a' + 10) : -1;
+        if (digit < 0)
+            return cc::nullopt;
+        value = value * 16 + u64(digit);
+    }
+    return value;
+}
+} // namespace
+
+cc::string sg_diff::reference_name(workload const& w)
+{
+    auto name = cc::string_view(w.file);
+    for (auto i = name.size() - 1; i >= 0; --i)
+        if (name[i] == '/')
+        {
+            name = name.subview(i + 1);
+            break;
+        }
+    if (name.ends_with(".sgl"))
+        name = name.subview({.offset = 0, .size = name.size() - 4});
+    return cc::format("{}.ref", name);
+}
+
+cc::string sg_diff::reference_lines(workload const& w, run_result const& r)
+{
+    auto text = cc::string();
+    for (auto const& o : r.outputs)
+    {
+        if (w.across.kind == tolerance::measure::exact)
+        {
+            text.appendf("{} {} bytes {} fnv1a 0x{:016x}\n", w.entry, o.name, o.bytes.size(), fnv1a(o.bytes));
+            continue;
+        }
+        auto const count = o.bytes.size() / 4;
+        auto const* const words = reinterpret_cast<u32 const*>(o.bytes.data());
+        for (auto k = isize(0); k < k_reference_samples && count > 0; ++k)
+        {
+            auto const e = sampled_element(k, count);
+            text.appendf("{} {} [{}] 0x{:08x} {}\n", w.entry, o.name, e, words[e], cc::bit_cast<f32>(words[e]));
+        }
+    }
+    return text;
+}
+
+cc::vector<cc::string> sg_diff::against_reference(cc::string_view reference, workload const& w, run_result const& r)
+{
+    auto lines = cc::vector<cc::string>();
+    for (auto const& o : r.outputs)
+    {
+        auto const count = o.bytes.size() / 4;
+        auto const* const words = reinterpret_cast<u32 const*>(o.bytes.data());
+        auto seen = isize(0);
+        auto differing = isize(0);
+        auto named = cc::string();
+
+        auto rest = reference;
+        while (!rest.empty())
+        {
+            auto end = isize(0);
+            while (end < rest.size() && rest[end] != '\n')
+                ++end;
+            auto const line = trimmed(rest.subview({.offset = 0, .size = end}));
+            rest = end < rest.size() ? rest.subview(end + 1) : cc::string_view();
+            if (line.empty() || line.starts_with("#"))
+                continue;
+            auto const words_in = words_of(line);
+            if (words_in.size() < 4 || words_in[0] != w.entry || words_in[1] != o.name)
+                continue;
+            ++seen;
+
+            if (words_in[2] == "bytes" && words_in.size() == 6)
+            {
+                auto const size = cc::from_string<isize>(words_in[3]);
+                auto const hash = hex_of(words_in[5]);
+                if (!size.has_value() || !hash.has_value())
+                    lines.push_back(cc::format("{}: the line '{}' does not parse", o.name, line));
+                else if (size.value() != o.bytes.size() || hash.value() != fnv1a(o.bytes))
+                    lines.push_back(cc::format("{}: {} bytes of hash 0x{:016x} against the reference's {} of 0x{:016x}",
+                                               o.name, o.bytes.size(), fnv1a(o.bytes), size.value(), hash.value()));
+                continue;
+            }
+
+            auto index_text = words_in[2];
+            auto const index
+                = index_text.starts_with("[") && index_text.ends_with("]")
+                    ? cc::from_string<isize>(index_text.subview({.offset = 1, .size = index_text.size() - 2}))
+                    : cc::optional<isize>();
+            auto const bits = hex_of(words_in[3]);
+            if (!index.has_value() || !bits.has_value() || index.value() < 0 || index.value() >= count)
+            {
+                lines.push_back(
+                    cc::format("{}: the line '{}' does not parse, or names no element of {}", o.name, line, count));
+                continue;
+            }
+            if (within(u32(bits.value()), words[index.value()], w.across))
+                continue;
+            if (differing < k_named_elements)
+                named.appendf("{}[{}] {} against {}", named.empty() ? "" : ", ", index.value(),
+                              text_of(words[index.value()], w.across), text_of(u32(bits.value()), w.across));
+            ++differing;
+        }
+
+        if (seen == 0)
+            lines.push_back(cc::format("{}: the reference holds nothing of it", o.name));
+        if (differing > 0)
+            lines.push_back(cc::format("{}: {} of {} referenced elements beyond {}: {}{}", o.name, differing, seen,
+                                       w.across.to_string(), named, differing > k_named_elements ? ", ..." : ""));
+    }
+    return lines;
+}

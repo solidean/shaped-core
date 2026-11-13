@@ -8,14 +8,11 @@ refs:
 # The differential corpus across machines, beyond buffers, and against the interpreter
 
 The differential tests hold every route and backend of one machine to each other ([differential-testing](../differential-testing.md)).
-Three things they do not do yet, in the order they pay off:
+What they do not do yet, in the order it pays off:
 
 - **References across machines.**
-  One machine sees only its own GPUs, so an NVIDIA-only or an AMD-only divergence is invisible on a dev box with an Arc.
-  An exact output can commit a hash per (file, entry point, output), which any machine checks.
-  A float output cannot, since vendors round transcendentals apart; a small committed reference held to the file's `across` bound is the shape.
-  A machine that disagrees should be able to write what it saw, so the question becomes "who is right" rather than "something moved".
-  How a reference is refreshed, and who may refresh it, is the open design question.
+  Since 2026-11-13 every corpus file has a committed reference, refreshed by `SC_DIFFERENTIAL_REFRESH=1` and reviewed in its diff.
+  They were all written on one Arc B580; what is left is a run on an NVIDIA and an AMD GPU, and on metal, and an issue for whatever they disagree on.
 - **More setups.**
   `texels` and `raster` exist since 2026-11-13; per-texel `relative` turned out to be enough for both at 16 by 16.
   A trace over a fixed scene is the next, then render targets of other formats and a depth test.

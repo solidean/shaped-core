@@ -631,6 +631,8 @@ if(SC_BUILD_TESTS)
             tests/differential/differential-test.cc
             tests/differential/setups/setups.cc
         )
+        # What another machine computed, which this one is held to; a refresh rewrites them in the source tree.
+        sc_target_source_paths(shaped-graphics-test PRIVATE SG_DIFFERENTIAL_REFERENCES_DIR tests/differential/references)
         file(GLOB _sg_differential_corpus CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/corpus
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/corpus/*.sgl)
         list(TRANSFORM _sg_differential_corpus APPEND ":*")
