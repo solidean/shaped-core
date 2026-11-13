@@ -62,15 +62,38 @@ struct differentiator
     {
         local_id index = local_id::none;
         i32 first = 0;
+        /// The slots it takes of a tape: its iterations, or a segment's where it is checkpointed.
         i32 count = 0;
+        /// A checkpointed loop's iterations per segment, whose tapes hold one segment; 0 for a loop that stores all.
+        i32 segment = 0;
     };
     cc::vector<kept_loop> kept_loops;
+    /// Reverse: a kept loop too long to store every iteration of, walked back a segment at a time (DIFF-21).
+    /// Going forward it saves its state at each segment's start; going backward each segment, last first, starts from
+    /// its save, runs again to record its tapes, and is walked back.
+    struct checkpointed_loop
+    {
+        i32 first = 0;
+        i32 count = 0;
+        i32 segment = 0;
+        i32 segments = 0;
+        /// What the body assigns, but its tapes, and the array of each one's value at each segment's start.
+        cc::vector<local_id> state;
+        cc::vector<local_id> saved;
+        /// The straightened body, which runs again and is walked back.
+        cc::vector<flat_stmt_id> body;
+    };
+    /// By the loop's label.
+    cc::map<i32, checkpointed_loop> checkpointed;
+    /// Reverse: the tapes, which a checkpointed loop writes again rather than saves.
+    cc::set<i32> tapes;
     /// Reverse: how many loops the declarations being hoisted stand in; a `let` in one is assigned once per iteration.
     i32 loop_depth = 0;
     /// Reverse: a local a clone reads in place of another: a loop's index, going backward, its reversed twin.
     cc::map<i32, local_id> substitution;
-    /// The most slots a tape holds, which bounds what a kept loop keeps per value it overwrites.
-    static constexpr i32 k_max_tape = 1024;
+    /// The most bytes a tape holds, which bounds what a kept loop keeps per value it overwrites, and what a
+    /// checkpointed loop keeps of each value at its segments' starts: 1024 floats.
+    static constexpr i32 k_max_tape_bytes = 4096;
     /// Reverse: the flag a leave of a label sets.
     cc::map<i32, local_id> left_flag;
     /// Reverse: every declaration hoisted to the top of the body.
@@ -293,6 +316,13 @@ struct differentiator
     flat_expr_id prelude_call(cc::string_view name, cc::span<flat_expr_id const> arguments);
     /// Reverse: each texture read of the statement just transposed, its adjoint added to its gradient at each tap.
     void add_texture_reads();
+    /// The bytes a value of `t` takes on a tape, 4 a scalar.
+    [[nodiscard]] i32 bytes_of(type_id t) const;
+    /// The straightened `statements` once more, every read of a substituted local reading its twin; refused where one
+    /// has an effect, which running again would repeat.
+    cc::vector<flat_stmt_id> run_again(cc::span<flat_stmt_id const> statements);
+    /// Reverse: a checkpointed loop, walked back a segment at a time.
+    void backward_checkpointed(flat_for const& n, checkpointed_loop const& loop);
     /// Whether a gradient's atomics are shared through the subgroup first: where the entry point declares `subgroups`,
     /// outside a test, whose run has no device.
     [[nodiscard]] bool reduces_gradients() const;
@@ -427,6 +457,9 @@ struct differentiator
         i32 count = 0;
     };
     [[nodiscard]] cc::optional<loop_bounds> constant_bounds(flat_for const& n) const;
+    /// How many iterations of the outermost kept loop `n` a segment holds: 0 where every iteration fits a tape, and -1
+    /// where no segment does.
+    [[nodiscard]] i32 segment_of(flat_for const& n, loop_bounds const& bounds) const;
 
     /// A value the forward sweep keeps for the backward one: one slot, or one per iteration of the kept loops around.
     local_id tape(cc::string_view name, type_id type, flat_expr_id initial);

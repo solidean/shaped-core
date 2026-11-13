@@ -347,7 +347,8 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
                 return cc::nullopt;
             // CHK-423: `scalar_of[V]` says nothing of `V`, so its argument waits until the rest have bound it
             if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0 || arguments.numbers[i].is_number
-                || out.at(out.at(range)[p].type).kind == type_kind::scalar_of)
+                || out.at(out.at(range)[p].type).kind == type_kind::scalar_of
+                || out.at(out.at(range)[p].type).kind == type_kind::tangent_of)
                 deferred.push_back(p);
             else if (out.at(range)[p].is_mut
                          != (arguments.written[i].is_mut || (arguments.written[i].may_be_mut && out.at(range)[p].is_mut))

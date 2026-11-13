@@ -247,3 +247,31 @@ ASYNC_INVOCABLE_TEST("sg - a subgroup's sum takes its adjoint back across the su
     for (auto i = 0; i < count; ++i)
         CHECK((r[i] > 0.99999f && r[i] < 1.00001f));
 }
+
+ASYNC_INVOCABLE_TEST("sg - a loop too long to keep whole is walked back in segments, and meets forward mode",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    namespace shader = shaders::differentiable_buffers;
+    auto const backward = co_await shader::long_backward.acquire_pipeline(*ctx);
+    constexpr auto count = 64;
+    auto const differences = ctx->persistent.create_buffer_from_data(
+        cc::vector<f32>::create_filled(count, 1.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto cmd = ctx->create_command_list();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shader::longs>(),
+                                              shader::longs{.differences = differences.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*backward);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(differences);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const d = co_await future.data();
+    REQUIRE(d.size() == count);
+    for (auto i = 0; i < count; ++i)
+        CHECK((d[i] > -1e-3f && d[i] < 1e-3f));
+}

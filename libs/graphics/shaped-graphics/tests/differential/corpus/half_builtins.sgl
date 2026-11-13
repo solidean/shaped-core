@@ -1,0 +1,20 @@
+// differential: setup floats
+// differential: routes relative 0.002
+// differential: across relative 0.004
+// The routes' bound is EMIT-254's: a half's fma may round the product first, and on vulkan the native route's does on Intel while DXC's does not.
+// The bound across is the latitude `.fast` and EVAL-96 leave: a division may go through a reciprocal, a root is as precise as its target states,
+// and a dot may sum in more bits or round each step; Intel's division is a step off one time in five, and a dot two steps apart.
+// Half-precision work of several roundings: division, a root, fma, mix, dot and length, their terms all of one sign so no cancellation magnifies a step.
+require shader_f16
+use diff_floats
+
+@compute(64) fun half_builtins(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let a = abs(diff_floats.io.input[i]) as half
+    let b = abs(diff_floats.io.input[(i + 29) & 255]) as half
+    let one = half(1.0)
+    let v = half4(a, b, a * b, a + b)
+    diff_floats.io.output[4 * i] = (fma(a, b, a) + mix(a, b, half(0.375))) as float
+    diff_floats.io.output[4 * i + 1] = (a / (b + one)) as float
+    diff_floats.io.output[4 * i + 2] = dot(v, half4(one, half(0.5), half(0.25), half(0.125))) as float
+    diff_floats.io.output[4 * i + 3] = (sqrt(a * b) + length(half2(a, b))) as float

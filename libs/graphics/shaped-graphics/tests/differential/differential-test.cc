@@ -164,6 +164,8 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
 
     // a refresh writes each file's reference from the first configuration that runs it, then holds every one to it
     auto const refresh = cc::environment_variable(k_refresh_variable) == cc::optional<cc::string>(cc::string("1"));
+    // `SC_DIFFERENTIAL_DUMP=<dir>` writes every configuration's outputs there whole, to compare two machines byte by byte
+    auto const dump = cc::environment_variable("SC_DIFFERENTIAL_DUMP");
     auto written = cc::vector<cc::string>(); // the paths this refresh has started, each rewritten once
     auto texts = cc::vector<cc::string>();   // what each of them holds so far
     for (auto const& w : corpus.workloads)
@@ -208,6 +210,13 @@ ASYNC_TEST("sg differential - every corpus entry point computes what its committ
             auto const result = co_await sg_diff::run(c.ctx.get(), &w, c.route);
             if (result.skipped.has_value())
                 continue;
+            if (dump.has_value() && !dump.value().empty())
+                for (auto const& o : result.outputs)
+                {
+                    auto const name = cc::format("{}/{}.{}.{}.{}.{}.bin", dump.value(), sg_diff::reference_name(w),
+                                                 w.entry, o.name, c.ctx->metrics.adapter().name, c.route.name);
+                    write_text(name, cc::string_view(reinterpret_cast<char const*>(o.bytes.data()), o.bytes.size()));
+                }
             for (auto const& line : sg_diff::against_reference(reference.value(), w, result))
                 CHECK(false).context(cc::format("{} {} on {} against {}: {}", w.file, w.entry, c.label,
                                                 sg_diff::reference_name(w), line));

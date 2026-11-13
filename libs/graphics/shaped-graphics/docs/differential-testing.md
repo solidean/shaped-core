@@ -136,6 +136,14 @@ Each entry point is written from the first configuration of this machine that ru
 A reference that moves is either a fix, said in its commit, or a regression the test was there to catch.
 A machine whose GPU disagrees beyond `across` is a finding: who is right is a question for an issue, not for a refresh.
 
+To run the references on another GPU of the same machine, `SC_GPU` picks it, as `SC_GPU=amd` does an AMD iGPU beside a discrete card.
+Two switches help chase what it finds:
+- `SC_DIFFERENTIAL_ONLY=<text>` narrows the corpus to the files whose name holds it, `SC_DIFFERENTIAL_ONLY=packing.sgl`.
+- `SC_DIFFERENTIAL_DUMP=<dir>` writes every configuration's outputs there whole, one file each, to compare two GPUs byte by byte.
+
+The first run on another vendor's GPU, an AMD RDNA 2 iGPU on 2026-11-13, matched the Arc's references on 20 of 23 files.
+It found that AMD converts a float to a half toward zero, that an inline trace crashes its dx12 compiler, and a negative zero the corpus packed without asking to keep its sign.
+
 ## Not yet
 
 - **A resolve:** sg has no multisample resolve yet, so `samples` reads each sample instead; a resolve setup waits on that API.

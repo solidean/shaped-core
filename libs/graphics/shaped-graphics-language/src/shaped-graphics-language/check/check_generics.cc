@@ -46,6 +46,7 @@ bool checker::is_open(type_id type) const
     case type_kind::image:
         return is_valid(t.count_parameter);
     case type_kind::scalar_of:
+    case type_kind::tangent_of:
         return is_open(t.element);
     case type_kind::function:
     {
@@ -226,6 +227,9 @@ type_id checker::substitute(type_id type, cc::span<type_id const> bindings)
     case type_kind::scalar_of:
         // CHK-423: the scalar of what `V` stands for, or the error type where that is no vector
         return scalar_of_type(substitute(t.element, bindings));
+    case type_kind::tangent_of:
+        // DIFF-7: the tangent of what `T` stands for, which a struct mints once
+        return tangent_type(substitute(t.element, bindings));
     case type_kind::image:
     {
         // CHK-339: `image_2d[f]` with `f` bound to a case is the image of that format
@@ -278,6 +282,11 @@ type_id checker::substitute_existing(type_id type, cc::span<type_id const> bindi
     {
         auto const of = substitute_existing(t.element, bindings);
         return !is_valid(of) || is_open(of) ? type_id::none : scalar_of_closed(of);
+    }
+    case type_kind::tangent_of:
+    {
+        auto const of = substitute_existing(t.element, bindings);
+        return !is_valid(of) || is_open(of) ? type_id::none : tangent_type_existing(of);
     }
     case type_kind::array:
     {

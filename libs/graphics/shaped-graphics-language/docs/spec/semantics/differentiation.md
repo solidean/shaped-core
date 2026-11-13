@@ -17,8 +17,9 @@ A derivative is never silently zero where the function changes.
   It adds and does not assign, so places that start at zero hold the gradient, and a second call adds a second one.
 * **DIFF-3** A parameter takes a tangent where its type is differentiable (DIFF-6), it is no `mut` parameter, and it carries no `@no_diff`.
   Any other parameter is passed alone: `fwd_diff(scaled, x, dx, n)` for an `int` `n`.
-* **DIFF-4** `f` names a function of the program that is no generic and gives a value.
-  A call that names anything else matches no overload.
+* **DIFF-4** `f` names a function of the program that gives a value.
+  A generic's derivative is its instance's: each value binds its parameter's type as a call of `f` would (CHK-340), and a value that takes a tangent (DIFF-3) is followed by it.
+  A call whose values bind no instance, or that names anything but a function, matches no overload.
 * **DIFF-5** A test runs both calls on the interpreter, which is how a derivative is held to a central difference.
   `nearly_equal(fwd_diff(f, x, d), (f(x + d * h) - f(x - d * h)) / (2.0 * h), within = …)` is that check.
 
@@ -33,8 +34,16 @@ A derivative is never silently zero where the function changes.
   So `tangent[splat]` of `at: pos3`, `weight: float` and `count: int` holds `at: vec3` and `weight: float`.
   A struct whose fields are all their own tangents is its own; any other struct's tangent is a type of its own, which a target writes beside the struct.
 * **DIFF-9** `tangent[T]()` is the zero of `T`'s tangent, and a direction is that zero with its fields assigned.
-  `tangent[T](…)` with arguments is `unsupported-yet`, and so is `tangent[T]` of a type parameter.
+  `tangent[T](…)` with arguments is `unsupported-yet`.
+  `tangent[T]` of a type parameter is what each instance makes of it, as `scalar_of[V]` is (CHK-423).
   `tangent[T]` of a type that holds no float is `wrong-kind-of-name`.
+* **DIFF-37** `@tangent(T)` on a struct `S` makes `tangent[S]` the struct `T`, which the program declares and builds as any struct.
+  Each field of `T` is the change of the field of `S` of its name, of that field's tangent type.
+  A differentiable field of `S` that `T` names no field for is held constant.
+  The declaration is refused at its argument, naming the field, where a field of `T` names no field of `S`.
+  So is one where a field is of another type than its field's tangent, or names a field that holds no float.
+  So is one where `T` is no other struct of the program, is the tangent of another struct already, or is not its own tangent.
+  `@tangent` on a generic struct is `unsupported-yet`.
 
 ## Holding values constant
 
@@ -51,7 +60,7 @@ A derivative is never silently zero where the function changes.
   * **zero**: constant between the points where it jumps, so its change is zero everywhere: `floor`, `ceil`, `round`, `trunc`, `sign` and `step`;
   * **none**: its value is no function of its arguments a derivative follows, such as an atomic's update;
   * **forward only**: a rule going forward, whose transpose needs which lane of the quad or the subgroup each invocation is,
-    as for `ddx`, `ddy`, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and every shuffle but `subgroup_shuffle_xor`;
+    as for `ddx` and `ddy` in each of their forms, `fwidth`, `quad_broadcast`, `subgroup_broadcast` and every shuffle but `subgroup_shuffle_xor`;
   * **not yet**: differentiable, with no rule written, which no builtin is today and one added later may be.
 * **DIFF-14** A call of a builtin stated none or not yet, inside a function a derivative is taken of, is `unsupported-yet` and names the builtin.
   So is one stated forward only, in a function reverse mode is taken of.
@@ -76,7 +85,11 @@ A derivative is never silently zero where the function changes.
 * **DIFF-20** Forward mode follows every loop.
 * **DIFF-21** Reverse mode follows a `for` over constant bounds, and a loop with `@max_iterations(n)` (CHK-528), which is a `for` over `0 ..< n` by EVAL-147.
   It keeps what each iteration overwrites and decides on a tape, one slot per iteration of every such loop around it, and walks the loop back from its last iteration.
-  Loops whose iterations between them pass 1024 slots are `unsupported-yet`.
+  A tape holds at most 4096 bytes, 1024 floats.
+  An outermost loop whose tapes would pass that is walked back in segments of about the square root of its iterations, each segment's tapes holding one segment.
+  Going forward it saves what its body assigns at each segment's start; going backward each segment, last first, starts from its save, runs again to write its tapes, and is walked back.
+  So it runs its body about twice, and keeps about twice the square root of its iterations in place of all of them.
+  A segmented loop whose body has an effect is `unsupported-yet`, since running a segment again would repeat it, and so is one a single iteration of which keeps more than a tape holds.
 * **DIFF-22** Any other loop is `unsupported-yet` in reverse mode, unless a function around it has a derivative written by hand (DIFF-24).
 * **DIFF-23** A `@unroll` loop is followed as its copies, in both modes.
 
