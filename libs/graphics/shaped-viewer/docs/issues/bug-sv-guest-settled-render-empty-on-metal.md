@@ -42,3 +42,7 @@ With them off, every run that captured passed, even one capturing only the frame
 So an Xcode capture of the failing frame is not to be had either; the bug needs the GPU lagging behind the epochs.
 Also ruled out by switching it off under the spinning host: aliasing in the transient bump heap, which resets its head every epoch; dedicated transients still fail.
 And two guest frames in flight at once: one at a time still fails.
+
+2026-11-13: the test's host is paced now, an advance every 4 ms as an app's frame loop would, and the test passes; this issue is the behavior under a host that is not.
+To reproduce, put the host loop back to `pump_for(1.0)` then `advance_epoch()` with nothing between.
+What a fix has to explain: a frame that runs on the GPU without error and leaves its target empty, once the host is thousands of epochs ahead of it.
