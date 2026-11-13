@@ -75,3 +75,92 @@ ASYNC_INVOCABLE_TEST("sg - a buffer with a @gradient takes every invocation's ad
         CHECK(c[i] == expected[i % 4]);
     }
 }
+
+// Mark 0 at (2, 0, 0) of weight 1, mark 1 at (1, 2, 0) of weight 0.5, each the loss weight * |at - (1, 0, 0)|^2.
+// Each invocation adds 2 weight (at - (1, 0, 0)) and |at - (1, 0, 0)|^2: (2, 0, 0) and 1, then (0, 2, 0) and 4.
+ASYNC_INVOCABLE_TEST("sg - a buffer of structs with a @gradient takes an atomic per float of its tangent, in order",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    namespace shader = shaders::differentiable_buffers;
+    auto const backward = co_await shader::marks_backward.acquire_pipeline(*ctx);
+    constexpr auto count = 4096;
+    auto const marks = ctx->persistent.create_buffer_from_data(
+        cc::vector<shader::mark>{{.at = tg::pos3f(2.0f, 0.0f, 0.0f), .weight = 1.0f},
+                                 {.at = tg::pos3f(1.0f, 2.0f, 0.0f), .weight = 0.5f}},
+        sg::buffer_usage::readonly_buffer);
+    auto const gradients = ctx->persistent.create_buffer_from_data(
+        cc::vector<f32>::create_filled(8, 0.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const marked
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shader::marked>(),
+                                              shader::marked{.marks = marks.as_readonly_buffer()});
+    auto const training
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shader::mark_training>(),
+                                              shader::mark_training{.gradients = gradients.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*backward);
+    cmd->compute.bind_group(0, *marked);
+    cmd->compute.bind_group(1, *training);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(gradients);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const g = co_await future.data();
+    REQUIRE(g.size() == 8);
+    f32 const expected[] = {4096.0f, 0.0f, 0.0f, 2048.0f, 0.0f, 4096.0f, 0.0f, 8192.0f};
+    for (auto i = 0; i < 8; ++i)
+        CHECK(g[i] == expected[i]);
+}
+
+// As above, where a subgroup sums its adjoints first: the index is one per 64 invocations, so each subgroup adds to
+// one mark, and a third of its invocations never reach the add, which a sum over the subgroup must leave out.
+ASYNC_INVOCABLE_TEST("sg - a declared subgroups shares a gradient's atomic through the subgroup, over the invocations "
+                     "that reach it",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("the device has no subgroup operations");
+
+    namespace shader = shaders::differentiable_buffers;
+    auto const backward = co_await shader::marks_backward_reduced.acquire_pipeline(*ctx);
+    constexpr auto count = 4096;
+    auto const marks = ctx->persistent.create_buffer_from_data(
+        cc::vector<shader::mark>{{.at = tg::pos3f(2.0f, 0.0f, 0.0f), .weight = 1.0f},
+                                 {.at = tg::pos3f(1.0f, 2.0f, 0.0f), .weight = 0.5f}},
+        sg::buffer_usage::readonly_buffer);
+    auto const gradients = ctx->persistent.create_buffer_from_data(
+        cc::vector<f32>::create_filled(8, 0.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const marked
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shader::marked>(),
+                                              shader::marked{.marks = marks.as_readonly_buffer()});
+    auto const training
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shader::mark_training>(),
+                                              shader::mark_training{.gradients = gradients.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*backward);
+    cmd->compute.bind_group(0, *marked);
+    cmd->compute.bind_group(1, *training);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(gradients);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // each reaching invocation of mark 0 adds (2, 0, 0) and 1, of mark 1 (0, 2, 0) and 4
+    f32 reached[2] = {0.0f, 0.0f};
+    for (auto i = 0; i < count; ++i)
+        if (i % 3 != 0)
+            reached[(i / 64) % 2] += 1.0f;
+    auto const g = co_await future.data();
+    REQUIRE(g.size() == 8);
+    f32 const expected[]
+        = {2.0f * reached[0], 0.0f, 0.0f, reached[0], 0.0f, 2.0f * reached[1], 0.0f, 4.0f * reached[1]};
+    for (auto i = 0; i < 8; ++i)
+        CHECK(g[i] == expected[i]);
+}

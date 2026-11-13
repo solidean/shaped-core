@@ -15,11 +15,14 @@ What they do not do yet, in the order it pays off:
   They were all written on one Arc B580; what is left is a run on an NVIDIA and an AMD GPU, and on metal, and an issue for whatever they disagree on.
 - **More setups.**
   `texels` and `raster` exist since 2026-11-13; per-texel `relative` turned out to be enough for both at 16 by 16.
-  A trace over a fixed scene is the next, then render targets of other formats and a depth test.
+  `scene` exists since 2026-11-13: inline traces over a fixed TLAS, ids exact by value and hits within relative 0.0001 across APIs.
+  Render targets of other formats and a depth test are next.
+  The scene's interpreter half would build with `accel_build_flag::software_trace` and bind the pool that writes, which the interpreter reads.
   Each is one C++ setup and one SGL module, and every corpus file naming it is free after that.
 - **The interpreter as a third opinion.**
-  For compute work SGL's interpreter gives the answer the language means, deterministic and with no device.
-  Two routes agreeing with each other and with the interpreter is a stronger statement than two routes agreeing.
-  Which corpus files the interpreter can run is the first thing to measure.
+  Since 2026-11-13 a fourth test holds every configuration to SGL's interpreter: 11 of the 12 entry points run there, and all agree.
+  The pixel stages run as quads, each lane its own pixel (EVAL-148), so derivatives and implicit-level samples are checked too.
+  Left out is `workgroup_reduction`, whose workgroup memory spans invocations the interpreter runs one at a time.
+  A workgroup would need the interpreter to run a workgroup's invocations together, up to each barrier, which is a change to the interpreter itself.
 
 webgpu and metal take part already, where the binary has them: each is one more route of its own.

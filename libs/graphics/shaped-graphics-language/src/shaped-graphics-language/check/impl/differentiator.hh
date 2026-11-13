@@ -93,6 +93,8 @@ struct differentiator
         local_id placeholder = local_id::none;
         paired_buffer gradients;
         flat_expr_id index = flat_expr_id::none;
+        /// The floats an element holds, each an atomic of the gradient: element `i`'s `k`-th at `i * stride + k`.
+        i32 stride = 1;
     };
     cc::vector<gradient_read> gradient_reads;
 
@@ -244,6 +246,15 @@ struct differentiator
     dual derive_buffer_read(flat_expr_id id, type_id type, flat_buffer_element const& n);
     /// Reverse: each gradient read of the statement just transposed, added to its gradient at its index.
     void add_gradient_reads();
+    /// The float leaves of a value of `t`, in the order a gradient buffer holds them; -1 where one is no `float`.
+    [[nodiscard]] i32 float_leaves(type_id t) const;
+    /// Each float leaf of the shared value `g`, in that order.
+    void leaves_into(flat_expr_id g, cc::vector<flat_expr_id>& out);
+    /// Whether a gradient's atomics are shared through the subgroup first: where the entry point declares `subgroups`,
+    /// outside a test, whose run has no device.
+    [[nodiscard]] bool reduces_gradients() const;
+    /// `call(name, a)` over the invocations that reach it (`flat_call::is_active_lanes`).
+    flat_expr_id active_call(cc::string_view name, flat_expr_id a);
     /// The prelude's `add` of an atomic of `element`s; none where there is none.
     [[nodiscard]] symbol_id atomic_add_of(type_id element) const;
 

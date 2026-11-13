@@ -14,7 +14,7 @@ webgpu (`wgsl`) and metal (`msl`) have one each.
 The engine states the route in the compile's options, so a context's own preference does not matter.
 A native compile that fell back to DXC, because SGL has no lowering for it yet, is logged at info and compared with nothing.
 
-Three tests run the corpus:
+Four tests run the corpus:
 
 - `sg differential - every corpus entry point computes alike on each route this context takes` is an invocable, so every driver runs it.
   The validation layers and the never-block mode see both routes there.
@@ -23,8 +23,9 @@ Three tests run the corpus:
   A software adapter is left out: WARP is no device a shader ships to.
 
 - `sg differential - every corpus entry point computes what its committed reference says` holds the same pairs to what another machine computed.
+- `sg differential - every corpus entry point computes on the GPU what SGL's interpreter says` holds them to [the interpreter](#the-interpreter), with no device at all.
 
-All three run in the default suite; each takes about a second.
+All four run in the default suite; each takes about a second.
 
 ## A corpus file and its setup
 
@@ -46,17 +47,19 @@ A **setup** is the C++ that fills the inputs, dispatches and reads back, written
 Its contract with a corpus file is an SGL module in [tests/differential/setups/](../tests/differential/setups/): the file `use`s it and lists its binding.
 So a shader that binds the wrong thing does not compile, rather than failing on one backend at bind time.
 The setup fills the module's generated binding type, so the two sides cannot drift apart.
-A setup registers itself with `sg_diff::register_setup`, naming the stage it runs, its run, and its default tolerances.
+A setup registers itself with `sg_diff::register_setup`, naming the stage it runs, its run, its default tolerances, and its interpreter half where it has one.
+One that needs a feature names it, as `scene` names `ray_query`, and a context without it skips the setup's files rather than failing them.
 Its run is handed the entry point compiled on the route, and builds the pipeline itself.
 A stage the setup brings, as the raster setup brings its vertex stage, compiles on the same route through `sg_diff::compiled_on`.
 Those stages live in [tests/differential/setups/shaders/](../tests/differential/setups/shaders/), a package of their own.
 
-| setup | stage | input | output | routes | across |
-|---|---|---|---|---|---|
-| `words` | compute | 256 32-bit words, the edges first, then hashed bits | four words a thread | exact | exact |
-| `floats` | compute | 256 ordinary floats, -64 to 64, no zero | four floats a thread | 2 ulps | 16 ulps |
-| `texels` | compute | a 16 by 16 rgba8 texture with its mip chain, a nearest and a trilinear sampler | four float4 a thread | exact | relative 0.005 |
-| `raster` | pixel | one triangle over a 16 by 16 rgba32_float target, interpolated `uv` and `weight`, the `floats` input and the `texels` texture | the target | 2 ulps | relative 0.005 |
+| setup | stage | input | output | routes | across | interpreted |
+|---|---|---|---|---|---|---|
+| `words` | compute | 256 32-bit words, the edges first, then hashed bits | four words a thread | exact | exact | yes |
+| `floats` | compute | 256 ordinary floats, -64 to 64, no zero | four floats a thread | 2 ulps | 16 ulps | yes |
+| `texels` | compute | a 16 by 16 rgba8 texture with its mip chain, a nearest and a trilinear sampler | four float4 a thread | exact | relative 0.005 | yes |
+| `raster` | pixel | one triangle over a 16 by 16 rgba32_float target, interpolated `uv` and `weight`, the `floats` input and the `texels` texture | the target | 2 ulps | relative 0.005 | yes |
+| `scene` | compute | a TLAS of a two-geometry terrain and four placed octahedra, one mirrored | two float4 a thread, `hits` and `ids` | exact | relative 0.0001 | not yet |
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 On the Arc B580 sampling and derivatives are bit-exact across dx12 and vulkan, and only a `dot` in a pixel stage moves, by 1 ulp.
@@ -78,6 +81,23 @@ One driver compiles both routes' IR, so a difference there is a difference in wh
 Two APIs get the looser `across` bound, since their drivers round transcendentals and fold expressions as they like.
 
 The first run found one such divergence, [bug-sgl-dxil-division-and-normalize-round-unlike-dxc](../../shaped-graphics-language/docs/issues/bug-sgl-dxil-division-and-normalize-round-unlike-dxc.md).
+
+## The interpreter
+
+SGL's interpreter runs an entry point on the abstract machine: the answer the language means, deterministic and with no device.
+Agreeing with each other, two routes might share a bug; agreeing with the interpreter too, they compute what the source says.
+
+A setup's interpreter half binds the same inputs by the names its module gives them, the way an `sgl test` driver does.
+The engine checks the corpus file against the setups' modules and runs the dispatch one invocation after another, each invocation's stores written back before the next.
+A pixel stage runs as 2 by 2 quads, each pixel a lane with its own interpolated varyings (EVAL-148), so its derivatives and the level a sample picks are a quad's.
+The raster setup's half gives the varyings at each pixel's center, as its vertex stage writes them; the vertex stage itself is not interpreted.
+Every configuration is held to the result at the file's `across` bound, since the interpreter rounds as plain `f32` and models no target.
+
+It cannot run everything, and says so at info rather than failing.
+**Workgroup memory** spans the invocations of a workgroup, which the interpreter runs one at a time, so `workgroup_reduction.sgl` is left out.
+
+The interpreter has already paid for itself in the corpus.
+Its first run found two lines that tested an optimizer rather than SGL: a cancellation that drivers fold to zero, and one whose `across` bound was too tight for any second vendor.
 
 ## References across machines
 
@@ -105,7 +125,8 @@ A machine whose GPU disagrees beyond `across` is a finding: who is right is a qu
 
 ## Not yet
 
-- **More setups:** a trace over a fixed scene, render targets of other formats, and a depth test.
-- **The interpreter as a third opinion.** For compute work SGL's interpreter gives the answer the language means, with no device at all.
+- **More setups:** render targets of other formats, and a depth test.
+- **The scene on the interpreter:** sg's software trace builds the pool the interpreter reads, which an interpreter half would bind.
+- **Workgroups on the interpreter:** a workgroup's invocations run together up to each barrier, a change to the interpreter itself.
 
 [feat-sg-differential-references-and-setups](issues/feat-sg-differential-references-and-setups.md) tracks them.
