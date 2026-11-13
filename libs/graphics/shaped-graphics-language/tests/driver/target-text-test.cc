@@ -663,6 +663,10 @@ TEST("sgl target text - a dx12 ray query sees the opacity micromaps of a device 
     auto const forced_without = compiled(forced, target::hlsl_dx12);
     REQUIRE(forced_without.has_value());
     CHECK(!forced_without.value().text.contains("FORCE_OMM_2_STATE"));
+    // and its trace forces no 2 states either, which DXC refuses without the query's flag and which means nothing there
+    CHECK(forced_without.value().text.contains("TraceRayInline(work_world, (uint(1536) & ~1024u)"))
+        .dump("text", forced_without.value().text);
+    CHECK(forced_with.value().text.contains("TraceRayInline(work_world, uint(1536)")).dump("text", forced_with.value().text);
     // a device without them is asked for nothing
     auto const without = compiled(source, target::hlsl_dx12);
     REQUIRE(without.has_value());
@@ -711,4 +715,35 @@ TEST("sgl target text - a ray query takes the flags its trace hands it through a
     REQUIRE(vulkan.has_value());
     CHECK(!vulkan.value().text.contains("OPACITY_MICROMAPS"));
     CHECK(!vulkan.value().text.contains("ext_capability(5381)"));
+}
+
+TEST("sgl target text - an HLSL entry point whose path ends in a discard still ends in a return (EMIT-117)")
+{
+    // HLSL's discard goes on as a helper, so DXC asks a return of the path that discards, at the function's end
+    constexpr auto source = "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@pixel struct target:\n"
+                            "    color: float4\n"
+                            "\n"
+                            "@pixel fun every_other_ps(p: varyings) -> target:\n"
+                            "    let column = p.position.x as int\n"
+                            "    if column % 2 == 1:\n"
+                            "        discard\n"
+                            "    else:\n"
+                            "        return {color = float4(1.0, 1.0, 1.0, 1.0)}\n"
+                            "\n"
+                            "@pixel fun plain_ps(p: varyings) -> target:\n"
+                            "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = sgl::compile_to_text({.source = source, .entry_point = "every_other_ps", .target = t});
+        REQUIRE(e.has_value());
+        CHECK(e.value().text.contains("        discard;\n"));
+        CHECK(e.value().text.ends_with("    return (target)0;\n}\n")).dump("text", e.value().text);
+        // an entry that discards nowhere is written as before
+        auto const plain = sgl::compile_to_text({.source = source, .entry_point = "plain_ps", .target = t});
+        REQUIRE(plain.has_value());
+        CHECK(!plain.value().text.contains("(target)0"));
+    }
 }

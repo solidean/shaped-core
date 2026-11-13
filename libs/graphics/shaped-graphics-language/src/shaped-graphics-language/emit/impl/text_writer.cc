@@ -64,6 +64,9 @@ struct writer
     bool is_device_coherent = false;
     /// The images the entry point loads a texel of, where the target fences a store before a load (EMIT-151).
     cc::vector<flat_binding_member> fenced_images;
+    /// EMIT-263: each acceleration structure a `trace_hit` under the `nvapi` fill traced through, by the expression it
+    /// was named by there, and the constant local the trace pinned it in, which its hit object's invocation names.
+    cc::vector<cc::pair<flat_expr_id, cc::string>> pinned_structures;
     /// EMIT-174: a member held as pieces that a write reaches into, and the local it is gathered in meanwhile.
     flat_expr_id gathered_member = flat_expr_id::none;
     cc::string gathered_name;
@@ -1321,13 +1324,33 @@ struct writer
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
+            // EMIT-263: a trace whose hit object is invoked pins its structure in a constant local, which the
+            // invocation names, so an index that moves after the trace moves no structure
+            if (p.reorders_through_nvapi && record.name.starts_with("trace_hit_ray") && !arguments.empty())
+            {
+                auto const traced = p.e.at(c.arguments)[0];
+                auto is_invoked = false;
+                for (auto const& entry : p.invoked_structures)
+                    is_invoked = is_invoked || entry.structure == traced;
+                if (is_invoked)
+                {
+                    auto const pinned = p.names.mint("traced_structure");
+                    line(cc::format("RaytracingAccelerationStructure {} = {};", pinned, arguments[0].text));
+                    arguments[0] = {.text = pinned};
+                    pinned_structures.push_back({traced, pinned});
+                }
+            }
             auto const invoked = p.reorders_through_nvapi && !arguments.empty()
                                    ? invoked_structure_of(p, p.e.at(c.arguments)[0])
                                    : check::flat_expr_id::none;
-            auto const structure = check::is_valid(invoked) ? expr(invoked).text : cc::string();
+            auto structure = cc::string();
+            for (auto const& [traced, pinned] : pinned_structures)
+                if (traced == invoked)
+                    structure = pinned;
             auto result = how.custom({.target = d.language(),
                                       .is_vulkan = p.which == emit::target::hlsl_vulkan,
                                       .reorders_through_nvapi = p.reorders_through_nvapi,
+                                      .states_micromaps = p.states_micromaps,
                                       .arguments = arguments,
                                       .argument_types = types,
                                       .builtins = *p.m.builtins,
@@ -2056,6 +2079,19 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
     }
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
+    // EMIT-117: HLSL's discard goes on as a helper rather than ending the function, so a path that discards reaches
+    // its end; a return there, which only such a path reaches past all its work, is what DXC asks of a function with
+    // a value
+    if (d.language() == builtins::language::hlsl && check::is_valid(p.e.result)
+        && p.e.result != check::checked_module::void_type)
+    {
+        auto const body = p.e.at(p.e.body);
+        auto discards = false;
+        for (auto const& st : p.e.stmts)
+            discards = discards || st.node.is<check::flat_discard>();
+        if (discards && (body.empty() || !p.e.at(body[body.size() - 1]).node.is<check::flat_return>()))
+            w.line(cc::format("return ({})0;", type_text(p, d, p.e.result)));
+    }
     w.out += "}\n";
     d.write_function_tail(w.out, p);
     return {.text = cc::move(w.out), .lines = cc::move(w.lines)};

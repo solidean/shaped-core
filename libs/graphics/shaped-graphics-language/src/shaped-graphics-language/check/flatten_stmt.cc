@@ -54,6 +54,7 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
         mark_failed();
         return;
     }
+    auto const first_expr = entry.exprs.size();
     auto const condition = flatten_expr(first.condition);
     auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
     // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
@@ -61,16 +62,20 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
     {
         if (taken.value())
         {
-            // EMIT-264: what the branches after it consult is a variant all the same
+            // EMIT-264: what the branches after it consult is a variant, where a grant can make it false
             auto const after = ast::index_of(first.condition) * 2 + 1;
-            if (!rest.empty() && !ast::is_valid(rest.front().condition))
-                probe_consults(after, [&](flattener& p) { (void)p.flatten_body(rest.front().then); });
-            else if (!rest.empty())
-                probe_consults(after, [&](flattener& p) { p.flatten_if(from, rest, false); });
+            if (!rest.empty() && could_take(condition, first_expr, false))
+            {
+                if (!ast::is_valid(rest.front().condition))
+                    probe_consults(after, [&](flattener& p) { (void)p.flatten_body(rest.front().then); });
+                else
+                    probe_consults(after, [&](flattener& p) { p.flatten_if(from, rest, false); });
+            }
             return add_taken(from, granting(first.condition, [&] { return flatten_body(first.then); }));
         }
-        probe_consults(ast::index_of(first.condition) * 2, [&](flattener& p)
-                       { (void)p.granting(first.condition, [&] { return p.flatten_body(first.then); }); });
+        if (could_take(condition, first_expr, true))
+            probe_consults(ast::index_of(first.condition) * 2, [&](flattener& p)
+                           { (void)p.granting(first.condition, [&] { return p.flatten_body(first.then); }); });
         if (!rest.empty() && !ast::is_valid(rest.front().condition))
             return add_taken(from, flatten_body(rest.front().then));
         return flatten_if(from, rest, is_const);
@@ -1181,4 +1186,32 @@ void sgl::check::impl::flattener::consult_preambles_of(i32 text)
             for (auto const& node : preamble.condition)
                 if (node.kind == target_condition::kind_t::has)
                     entry.consulted.set(feature(node.value));
+}
+
+bool sgl::check::impl::flattener::could_take(flat_expr_id condition, isize first, bool wanted)
+{
+    auto literals = cc::vector<flat_expr_id>();
+    for (auto const l : has_literals)
+        if (isize(index_of(l)) >= first)
+            literals.push_back(l);
+    // decided by the target, an option or a constant alone, which no grant changes
+    if (literals.empty())
+        return false;
+    // past a handful, every grant is too many to try, and the side is probed
+    if (literals.size() > 10)
+        return true;
+    auto saved = cc::vector<bool>();
+    for (auto const l : literals)
+        saved.push_back(entry.exprs[index_of(l)].node.as<flat_bool_literal>().value);
+    auto can = false;
+    for (auto grant = u32(0); !can && grant < (1u << u32(literals.size())); ++grant)
+    {
+        for (auto i = isize(0); i < literals.size(); ++i)
+            entry.exprs[index_of(literals[i])].node.as<flat_bool_literal>().value = ((grant >> u32(i)) & 1u) != 0;
+        auto const value = constant_condition(condition);
+        can = value.has_value() && value.value() == wanted;
+    }
+    for (auto i = isize(0); i < literals.size(); ++i)
+        entry.exprs[index_of(literals[i])].node.as<flat_bool_literal>().value = saved[i];
+    return can;
 }

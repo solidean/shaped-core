@@ -323,7 +323,8 @@ struct plan
 /// has none.
 [[nodiscard]] check::flat_expr_id invoked_structure_of(plan const& p, check::flat_expr_id hit);
 /// The acceleration structure the `trace_hit` that made the hit object `hit` traced, under CHK-434's rule that a hit object
-/// is the `let` its trace gave; or why there is no one structure, for a refusal to name.
+/// is the `let` its trace gave; or why there is no one trace, for a refusal to name.
+/// The trace pins what it took in a constant, which the invocation names, so the expression need not stay one value.
 [[nodiscard]] cc::result<check::flat_expr_id, cc::string> traced_structure(check::checked_module const& m,
                                                                            check::flat_entry_point const& e,
                                                                            check::flat_expr_id hit);

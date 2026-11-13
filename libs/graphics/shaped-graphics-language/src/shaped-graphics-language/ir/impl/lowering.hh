@@ -232,6 +232,9 @@ private:
     program& _out;
 
     cc::string _failure;
+    /// EMIT-263: the structure each `trace_hit` under the `nvapi` fill took, by the expression that named it there, which
+    /// the invocation of its hit object takes as it is, rather than that expression read again.
+    cc::vector<cc::pair<check::flat_expr_id, value_ref>> _traced_structures;
     block_ref _open = block_ref::none;
     /// Past the open block's last operation: what stands after a `break` never runs.
     bool _is_terminated = true;

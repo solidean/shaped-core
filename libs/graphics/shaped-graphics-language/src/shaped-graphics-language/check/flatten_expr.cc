@@ -1379,7 +1379,10 @@ auto sgl::check::impl::flattener::flatten_has(ast::expr_id id, type_id type, cal
     }
     // EMIT-264: what the entry consults is a variant axis, whichever way this compile decides it
     entry.consulted.set(feature(index));
-    return add_expr(type, id, flat_bool_literal{.value = compiled_for().device_features.has(feature(index))});
+    auto const literal
+        = add_expr(type, id, flat_bool_literal{.value = compiled_for().device_features.has(feature(index))});
+    has_literals.push_back(literal);
+    return literal;
 }
 
 auto sgl::check::impl::flattener::grants_of(ast::expr_id condition) -> feature_set

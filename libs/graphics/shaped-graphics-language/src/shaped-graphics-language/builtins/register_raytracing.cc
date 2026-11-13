@@ -288,8 +288,12 @@ written write_query(call_context const& ctx)
             result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[4].text));
             result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[3].text));
             result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[5].text));
-            result.text = cc::format("{}.TraceRayInline({}, uint({}), uint({}), {})", q, ctx.arguments[1].text,
-                                     ctx.arguments[6].text, ctx.arguments[7].text, desc);
+            // EMIT-184: forcing 2 states is meaningless where the query sees no micromaps, and DXC refuses the flag
+            // without the query's own, which only Shader Model 6.9 names, so the trace leaves it out there
+            auto const flags = ctx.states_micromaps ? cc::format("uint({})", ctx.arguments[6].text)
+                                                    : cc::format("(uint({}) & ~1024u)", ctx.arguments[6].text);
+            result.text = cc::format("{}.TraceRayInline({}, {}, uint({}), {})", q, ctx.arguments[1].text, flags,
+                                     ctx.arguments[7].text, desc);
             return result;
         }
         if (is_msl)

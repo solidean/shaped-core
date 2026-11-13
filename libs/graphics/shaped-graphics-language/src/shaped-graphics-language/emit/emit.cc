@@ -541,7 +541,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                              .symbol = e.function,
                              .detail = cc::format("{} invokes a hit object {}, which the nvapi fill of "
                                                   "shader_execution_reordering cannot: NVAPI invokes one by tracing it "
-                                                  "again through the one acceleration structure it was traced through",
+                                                  "again through the acceleration structure its one trace took",
                                                   e.name, found.error())});
                         return result;
                     }
@@ -646,39 +646,13 @@ cc::string sgl::emit::dump_errors(emitted_text const& e)
     return out;
 }
 
-namespace
-{
-/// Whether `x` names one value wherever the entry point reads it: what no statement assigns, and pure work of that.
-[[nodiscard]] bool is_settled(sgl::check::flat_entry_point const& e, sgl::check::flat_expr_id x)
-{
-    using namespace sgl::check;
-    auto const& node = e.at(x).node;
-    if (node.is<flat_literal>() || node.is<flat_int_literal>() || node.is<flat_wide_literal>()
-        || node.is<flat_bool_literal>() || node.is<flat_enum_value>() || node.is<flat_binding_member>())
-        return true;
-    if (auto const* const ref = node.try_as<flat_local_ref>())
-        return !e.at(ref->local).is_mut && e.at(ref->local).kind != local_kind::var;
-    if (auto const* const element = node.try_as<flat_element>())
-        return is_settled(e, element->object) && is_settled(e, element->index);
-    if (auto const* const member = node.try_as<flat_member>())
-        return is_settled(e, member->object);
-    if (auto const* const call = node.try_as<flat_call>(); call != nullptr && call->is_pure)
-    {
-        for (auto const argument : e.at(call->arguments))
-            if (!is_settled(e, argument))
-                return false;
-        return true;
-    }
-    return false;
-}
-} // namespace
 
 cc::result<sgl::check::flat_expr_id, cc::string> sgl::emit::impl::traced_structure(check::checked_module const& m,
                                                                                    check::flat_entry_point const& e,
                                                                                    check::flat_expr_id hit)
 {
     // CHK-434: a hit object is the `let` its `trace_hit` gave, and a call inlined hands that `let` on, so the hit
-    // object names its local, and the local the trace that gave it, wherever it is read: in a loop, in a callee
+    // object names its local, and the local the one trace that gave it, wherever it is read: in a loop, in a callee
     auto const* const ref = e.at(hit).node.try_as<check::flat_local_ref>();
     if (ref == nullptr)
         return cc::error(cc::string("that no let holds"));
@@ -700,10 +674,7 @@ cc::result<sgl::check::flat_expr_id, cc::string> sgl::emit::impl::traced_structu
     }
     if (!check::is_valid(structure))
         return cc::error(cc::string("that no trace_hit made"));
-    // an element of an array of structures is one structure only where its index stays what it was at the trace
-    if (!is_settled(e, structure))
-        return cc::error(cc::string("traced through an element of an array of acceleration structures whose index may "
-                                    "change before the invocation, so it may be another structure there"));
+    // the trace pins the structure it took, so an index that moves after it moves nothing the invocation names
     return structure;
 }
 

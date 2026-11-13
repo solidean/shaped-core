@@ -63,6 +63,8 @@ struct sgl::builtins::call_context
     bool is_vulkan = false;
     /// HLSL for dx12 that reorders through NVAPI's shader extensions, the `nvapi` fill (EMIT-263).
     bool reorders_through_nvapi = false;
+    /// The entry point's traces see opacity micromaps (EMIT-184); where they do not, a trace forces no 2 states.
+    bool states_micromaps = false;
     cc::span<written const> arguments;
     /// Each argument's type as the target spells it, for a record with a `helper`; empty for any other.
     cc::span<cc::string const> argument_types;

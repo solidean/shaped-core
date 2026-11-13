@@ -445,6 +445,18 @@ TEST("sgl emit - every target's compile of a source takes the fills it offers, a
                                                    .fills = nvapi});
     REQUIRE(refused.has_error());
     CHECK(refused.error().contains("a nvapi fill of shader_execution_reordering, which none of the targets offers"));
+    // a fill of a feature not granted, and two of one, are the request's own error, whichever targets offer them
+    target const both[] = {target::hlsl_vulkan, target::hlsl_dx12};
+    auto const ungranted = sgl::compile_all_to_text({.source = k_reordering, .targets = both, .fills = nvapi});
+    REQUIRE(ungranted.has_error());
+    CHECK(ungranted.error()
+          == "<sgl>: error: unsupported: a nvapi fill of shader_execution_reordering, which the compile does not "
+             "grant\n");
+    sgl::check::feature_fill const twice[] = {nvapi[0], {.f = feature::shader_execution_reordering, .how = fill::native}};
+    auto const doubled = sgl::compile_all_to_text(
+        {.source = k_reordering, .targets = both, .device_features = feature::shader_execution_reordering, .fills = twice});
+    REQUIRE(doubled.has_error());
+    CHECK(doubled.error() == "<sgl>: error: unsupported: two fills of shader_execution_reordering\n");
 }
 
 TEST("sgl emit - an entry's axes are every has() it can reach, through branches its compile does not take (EMIT-264)")
@@ -511,6 +523,56 @@ TEST("sgl emit - an entry's axes are every has() it can reach, through branches 
     auto const plain = sgl::compile_to_text({.source = k_plain, .entry_point = "cs", .target = target::hlsl_dx12});
     REQUIRE(plain.has_value());
     CHECK(plain.value().axes.empty());
+}
+
+TEST("sgl emit - a side no grant can take on this target is no axis, and one a grant can take is (EMIT-264)")
+{
+    auto const axes_of = [](cc::string_view source, target t)
+    {
+        auto const e = sgl::compile_to_text({.source = source, .entry_point = "cs", .target = t});
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        auto result = feature_set();
+        for (auto const& a : e.value().axes)
+            result.set(a.f);
+        return result;
+    };
+    // a branch only another target takes
+    constexpr auto by_api = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    const if target_api == .vulkan:\n"
+                            "        const if has(.shader_int64):\n"
+                            "            work.values[id.x] = 1.0\n"
+                            "    work.values[id.x] += 2.0\n";
+    CHECK(axes_of(by_api, target::hlsl_dx12).is_empty());
+    CHECK(axes_of(by_api, target::msl).is_empty());
+    CHECK(axes_of(by_api, target::hlsl_vulkan) == feature_set(feature::shader_int64));
+    // a branch a generic's argument decides
+    constexpr auto by_argument = "binding work:\n"
+                                 "    values: mut buffer[float]\n"
+                                 "\n"
+                                 "fun widened[n: int](x: float) -> float:\n"
+                                 "    const if n > 2:\n"
+                                 "        const if has(.shader_int64):\n"
+                                 "            return x * 2.0\n"
+                                 "    return x\n"
+                                 "\n"
+                                 "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                                 "    work.values[id.x] = widened[1](work.values[id.x])\n";
+    CHECK(axes_of(by_argument, target::hlsl_dx12).is_empty());
+    // what a grant decides is a variant however it is spelled, and so is what it decides inside
+    constexpr auto by_grant = "binding work:\n"
+                              "    values: mut buffer[float]\n"
+                              "\n"
+                              "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                              "    const if target_api == .dx12 and has(.subgroups):\n"
+                              "        const if has(.shader_int64):\n"
+                              "            work.values[id.x] = 1.0\n"
+                              "    work.values[id.x] += 2.0\n";
+    CHECK(axes_of(by_grant, target::hlsl_dx12) == (feature::subgroups | feature::shader_int64));
+    // and where the target alone already decides it, the grant inside it is no variant
+    CHECK(!axes_of(by_grant, target::hlsl_vulkan).has(feature::shader_int64));
 }
 
 TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through nvHLSLExtns.h at 6.6 (EMIT-263)")
@@ -610,6 +672,7 @@ namespace
                              "    world: acceleration_structure[.triangles]\n"
                              "    worlds: acceleration_structure[.triangles][4]\n"
                              "    seen: mut buffer[float]\n"
+                             "    picks: buffer[int]\n"
                              "struct radiance:\n"
                              "    color: float3\n"
                              "rays path_rays:\n"
@@ -654,24 +717,24 @@ TEST("sgl emit - the nvapi fill invokes a hit object through the structure its t
         cc::string_view structure;
     };
     invoked_case const cases[] = {
-        {"its own let", "",
-         "let h = trace_hit(frame.world, r, path_rays.surface, mut p)\nh.reorder()\nh.invoke(mut p)\n", "frame_world"},
+        {"its own let", "", "let h = trace_hit(frame.world, r, path_rays.surface, mut p)\nh.reorder()\nh.invoke(mut p)\n",
+         "traced_structure"},
         {"a callee that traces and invokes",
          "fun run(q: mut radiance, s: ray){frame}:\n"
          "    let h = trace_hit(frame.world, s, path_rays.surface, mut q)\n"
          "    h.invoke(mut q)\n",
-         "run(mut p, r)\n", "frame_world"},
+         "run(mut p, r)\n", "traced_structure"},
         {"a loop's body", "",
          "for i in 0 ..< 2:\n    let h = trace_hit(frame.world, r, path_rays.surface, mut p)\n    h.invoke(mut p)\n",
-         "frame_world"},
+         "traced_structure"},
         {"an element by a let's index", "",
          "let k = id.x % 4\nlet h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\nh.invoke(mut "
          "p)\n",
-         "frame_worlds["},
+         "traced_structure"},
         {"an element by a loop's index", "",
          "for i in 0 ..< 4:\n    let h = trace_hit(frame.worlds[i], r, path_rays.surface, mut p)\n    h.invoke(mut "
          "p)\n",
-         "frame_worlds["},
+         "traced_structure"},
     };
     for (auto const& c : cases)
     {
@@ -695,24 +758,56 @@ TEST("sgl emit - the nvapi fill invokes a hit object through the structure its t
     }
 }
 
-TEST("sgl emit - the nvapi fill refuses a hit object that may be of more than one structure, naming it (EMIT-263)")
+TEST("sgl emit - the nvapi fill pins the structure a trace_hit took, so a moving index moves nothing (EMIT-263)")
 {
-    // its element's index may change between the trace and the invocation
-    auto const source = invoking("", "let mut k = id.x % 4\n"
-                                     "let h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
-                                     "k = (k + 1) % 4\n"
-                                     "h.invoke(mut p)\n");
-    for (auto const route : k_routes)
+    struct pinned_case
     {
-        auto const refused = filled(source, "shoot", feature::shader_execution_reordering, fill::nvapi, route);
-        REQUIRE(refused.has_error());
-        CHECK(refused.error().contains("shoot invokes a hit object traced through an element of an array of "
-                                       "acceleration structures whose index may change before the invocation"))
-            .dump("error", refused.error());
+        cc::string_view what;
+        cc::string_view declarations;
+        cc::string_view body;
+    };
+    pinned_case const cases[] = {
+        {"a while loop over a let mut index", "",
+         "let mut k = 0\n"
+         "while k < 4:\n"
+         "    let h = trace_hit(frame.worlds[k], r, path_rays.surface, mut p)\n"
+         "    h.invoke(mut p)\n"
+         "    k = k + 1\n"},
+        {"a let mut index never assigned again", "",
+         "let mut k = id.x % 4\n"
+         "let h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
+         "h.invoke(mut p)\n"},
+        {"an index read from a buffer", "",
+         "let h = trace_hit(frame.worlds[nonuniform frame.picks[id.x]], r, path_rays.surface, mut p)\n"
+         "h.invoke(mut p)\n"},
+        {"an index assigned between the trace and the invocation", "",
+         "let mut k = id.x % 4\n"
+         "let h = trace_hit(frame.worlds[nonuniform k], r, path_rays.surface, mut p)\n"
+         "k = (k + 1) % 4\n"
+         "h.invoke(mut p)\n"},
+    };
+    for (auto const& c : cases)
+    {
+        auto const source = invoking(c.declarations, c.body);
+        for (auto const route : k_routes)
+        {
+            auto const e = filled(source, "shoot", feature::shader_execution_reordering, fill::nvapi, route);
+            REQUIRE(e.has_value()).dump("case", c.what).dump("error", e.has_error() ? e.error() : cc::string());
+            if (route == native_route::require)
+            {
+                CHECK(!e.value().dxil.empty()).dump("case", c.what);
+                continue;
+            }
+            // the structure is copied once, at the trace, and both the trace and the invocation name the copy
+            auto const& text = e.value().text;
+            auto const at = text.find("RaytracingAccelerationStructure traced_structure");
+            REQUIRE(at >= 0).dump("case", c.what).dump("text", text);
+            auto const name_end = text.find(' ', at + 32);
+            auto const pinned = cc::string(text.subview({.offset = at + 32, .size = name_end - at - 32}));
+            CHECK(text.contains(cc::format("NvTraceRayHitObject({}, ", pinned))).dump("case", c.what).dump("text", text);
+            CHECK(text.contains(cc::format("NvInvokeHitObject({}, ", pinned))).dump("case", c.what).dump("text", text);
+        }
     }
-    // the native fill needs no structure, and takes it
-    auto const native = filled(source, "shoot", feature::shader_execution_reordering, fill::native, native_route::text);
-    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
 }
 
 namespace

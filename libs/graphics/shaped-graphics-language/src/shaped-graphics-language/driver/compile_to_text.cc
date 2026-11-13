@@ -595,6 +595,18 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
                 return true;
         return false;
     };
+    // and what no target could take, as the request's own error whichever targets offer the fill
+    for (auto i = isize(0); i < request.fills.size(); ++i)
+    {
+        auto const& asked = request.fills[i];
+        if (!request.device_features.has(asked.f))
+            return cc::error(cc::format("{}: error: unsupported: a {} fill of {}, which the compile does not grant\n",
+                                        request.source_name, check::name_of(asked.how), check::name_of(asked.f)));
+        for (auto k = isize(0); k < i; ++k)
+            if (request.fills[k].f == asked.f)
+                return cc::error(cc::format("{}: error: unsupported: two fills of {}\n", request.source_name,
+                                            check::name_of(asked.f)));
+    }
     for (auto const& asked : request.fills)
     {
         auto is_offered = false;

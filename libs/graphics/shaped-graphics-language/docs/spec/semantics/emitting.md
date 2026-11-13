@@ -372,6 +372,7 @@ binding affine:
   The conservative forms are `SV_DepthGreaterEqual` / `SV_DepthLessEqual` and `[[depth(greater)]]` / `[[depth(less)]]`; WGSL has none, and drops the promise, which changes no result.
   On dx12 a pixel stage writing `.greater_equal` or `.less_equal` takes its `@position` as `noperspective centroid`, which DXIL requires of one.
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
+  HLSL's goes on as a helper rather than ending the function, so an entry point with a value whose path may end in one ends in `return (T)0;`, which only such a path reaches, past all its work.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL, with a scalar `t` or a vector one alike.
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
@@ -637,7 +638,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   vulkan sees micromaps without the flag, so it writes the flag only on a query whose flags force 2 states or are no constant, since DXC takes a forced ray only beside it.
   An entry point with such a query declares `SPV_EXT_opacity_micromap`'s capability, which DXC leaves out.
   Either one on a query that needs neither makes DXC take minutes over a large kernel and can make it write invalid SPIR-V.
-  `ray_flags.force_omm_2_state` is in a `RayQuery`'s template only there, since only 6.9 names it; elsewhere the template leaves it out, and the trace's flags still carry it.
+  `ray_flags.force_omm_2_state` is in a `RayQuery`'s template only there, since only 6.9 names it; elsewhere the template leaves it out.
+  Elsewhere the trace's flags leave it out too, `& ~1024u` in HLSL, on both routes: a query that sees no micromap has nothing to force, and DXC refuses the flag without the template's.
   A native route states the same: `SPV_EXT_opacity_micromap`'s capability on SPIR-V, whose traces see micromaps with no flag of their own.
   On DXIL `dx.op.allocateRayQuery2` with the flag that allows them, at Shader Model 6.9, a library's function row included.
   dx12's `nvapi` fill of the feature states none of it, at 6.6: NVIDIA's driver applies a structure's micromaps to every trace itself (EMIT-263).
@@ -664,12 +666,14 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   The host covers it in its root signature as a UAV in a descriptor table, since no root descriptor has a counter, binds a null or a valid buffer there, and enables the slot on its device.
   NVAPI invokes a hit object by tracing it again, so `h.invoke(mut p)` names the acceleration structure of the `trace_hit` that made `h`.
   A hit object is the `let` its trace gave (CHK-434), so that holds through a loop and through a call, which is inlined.
-  An element of an array of structures is that structure where its index stays what it was at the trace: a constant, a `let`, a loop's index, or pure work of those.
-  An index a statement may assign in between is `unsupported` under `nvapi`, naming that the hit object may be of another structure there.
+  The trace pins the structure it took in a constant, `RaytracingAccelerationStructure` in the text and the trace's own value in SGL's DXIL, and the invocation names that.
+  So an element of an array of structures is the one the trace took, whatever its index is or does after it: a `let mut`, a buffer's value.
+  A hit object more than one trace may have made is `unsupported` under `nvapi`, naming that.
   The `nvapi` fill of `opacity_micromap` writes nothing: NVIDIA's driver applies a structure's micromaps itself (EMIT-184).
 * **EMIT-264** A compile reports what an entry point's output varies with, `emitted_source::axes`: each feature it consulted, granted or not, with the fills its target offers.
   It consults a feature where `has` asks for it (CHK-426), where a trace may reorder (CHK-433) and where a ray query may see micromaps (EMIT-184).
-  It consults one in a branch its compile does not take too, however deep, as `has` in a `const if` it does not take inside one it does not take.
+  It consults one in a branch its compile does not take too, however deep, where some grant of its target's device would take it.
+  A branch whose condition the target, an option or a constant decides, with no `has` in it, is no variant, nor is anything inside it: `const if target_api == .vulkan` on dx12.
   The flattening records those before it drops the branches, without judging them (CHK-356); a branch is read once per place it is inlined at.
   The conditions of the preambles of each file it writes a body in target text from consult what they name (CHK-528), and so do a text type's (CHK-432).
   So one compile, for its target and its options, tells a bake every variant there is.
