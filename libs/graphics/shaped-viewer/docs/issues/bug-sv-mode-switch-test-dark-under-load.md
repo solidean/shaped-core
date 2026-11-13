@@ -21,3 +21,7 @@ Seen again 2026-11-02 in a consumer's ship gate (relwithdebinfo, full suite besi
 The phase is `forward`: 375 to 531 of its frames are declined while its pipelines compile, and one frame shown in the middle of that is 0.235 near black.
 It failed at 1828c6adf, 695314073 and the sv commits between them, so none of those introduced it.
 Load is not the only cue, then; compiling forward stages during the phase may be, which is unproven.
+
+2026-11-12: on metal too, an Apple M4, relwithdebinfo, in two `dev.py ship` checks that ran shaped-viewer-test alone.
+The phase was `forward` both times, 0.237 and 0.247 near black, at frames 0 and 13; the run then hung on the failed test's leftover work until the watchdog.
+The full shaped-viewer-test passed alone in between, 557 tests, so the order a seed draws is a cue too (seed 3166066474908219465 failed).
