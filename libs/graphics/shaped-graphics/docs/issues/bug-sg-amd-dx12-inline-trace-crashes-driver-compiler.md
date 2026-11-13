@@ -1,18 +1,20 @@
 ---
 created: 2026-11-13
-tags: [amd, dx12, raytracing]
+tags: [amd, dx12, raytracing, dxil]
 refs:
   - test: sg - an inline trace finds the nearest triangle, and the any-hit decision cuts one out
   - file: libs/graphics/shaped-graphics/tests/differential/corpus/scene_traces.sgl
 ---
 
-# On AMD's dx12 driver every inline trace crashes the driver's compiler
+# On AMD's dx12 driver an inline trace of SGL's native DXIL crashes the driver's compiler
 
 On AMD's Radeon iGPU (RDNA 2, dx12 driver 32.0.21042.62), creating a compute pipeline that traces inline ends the process with an access violation inside `amdxc64.dll`.
-It never returns an error.
-Seen 2026-11-13 under `SC_GPU=amd`: sg's own inline trace test and the differential corpus's `scene_traces.sgl` both end there, on the DXC route, which is the first one each creates.
-It is not [amd-d3d12-dxil-without-llvm-ident-crashes](../../../../../docs/bugs-external/amd-d3d12-dxil-without-llvm-ident-crashes/readme.md): DXC's module carries `!llvm.ident`.
+It is SGL's native DXIL that crashes, not DXC's: a native container is unsigned, and AMD's shader cache crashes on an unsigned ray query once an unsigned plain shader is in it.
+[amd-d3d12-inline-ray-query-crashes-compiler](../../../../../docs/bugs-external/amd-d3d12-inline-ray-query-crashes-compiler/readme.md) reproduces it standalone, with DXC's modules stamped unsigned.
 
-Not yet known: whether every RayQuery crashes it or something SGL's HLSL writes around one, and whether the vulkan driver traces where dx12 does not.
-A standalone repro beside the other external bugs is the next step, then upstream.
-Until then a full `shaped-graphics-test` run on that GPU ends at the first inline trace.
+A full `shaped-graphics-test` run on that GPU compiles plain native shaders first, so it ends at its first inline trace.
+Resetting the driver's shader cache helps until the next plain shader.
+
+The fix in our hands is to sign SGL's containers: the digest is DXBC's checksum, which the writer can compute itself.
+Each native container then has its own digest, so no two share the driver's cache entry, and the crash has no unsigned container to meet.
+It would also retire whatever of [amd-d3d12-dxil-without-llvm-ident-crashes](../../../../../docs/bugs-external/amd-d3d12-dxil-without-llvm-ident-crashes/readme.md) was this cache.
