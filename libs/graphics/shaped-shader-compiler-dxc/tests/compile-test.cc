@@ -123,6 +123,41 @@ TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to
     CHECK(out->index == 0u);                     // u0
 }
 
+TEST("ssc::dxc compile - NVAPI's shader extension slot is the driver's, and reflects as no binding")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    // the counter UAV `nvHLSLExtns.h` declares, which a host enables on its device; any other counter buffer is refused
+    constexpr char const* extension_hlsl = R"(
+struct record { uint opcode; uint words[63]; };
+RWStructuredBuffer<record> g_NvidiaExt : register(u0, space13);
+RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    uint index = g_NvidiaExt.IncrementCounter();
+    g_NvidiaExt[index].opcode = 1;
+    Output[tid.x] = g_NvidiaExt.IncrementCounter();
+}
+)";
+    ssc::dxc::shader_description desc;
+    desc.stage = sg::shader_stage::compute;
+    desc.entry_point = "main";
+    desc.model = ssc::dxc::shader_model::sm_6_6;
+    desc.source = extension_hlsl;
+    auto const result = comp.value().compile(desc);
+    REQUIRE(result.has_value()).dump("dxc", result.has_error() ? result.error().to_string() : cc::string());
+    REQUIRE(result.value().bindings.size() == 1);
+    CHECK(result.value().bindings[0].name == cc::string_view("Output"));
+
+    auto other = cc::string(extension_hlsl);
+    other.replace_all("g_NvidiaExt", "counted");
+    desc.source = other;
+    CHECK(comp.value().compile(desc).has_error());
+}
+
 #endif // CC_OS_WINDOWS
 
 TEST("ssc::dxc compile - the SPIR-V flag set applies to every stage")

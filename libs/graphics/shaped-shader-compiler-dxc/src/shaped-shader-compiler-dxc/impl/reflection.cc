@@ -99,6 +99,11 @@ template <class ReflectionT>
         if (HRESULT hr = reflection->GetResourceBindingDesc(i, &bd); FAILED(hr))
             return dxc_error(hr, "GetResourceBindingDesc");
 
+        // NVAPI's shader extension slot, which `nvHLSLExtns.h` declares: NVIDIA's driver takes its accesses as calls,
+        // and the host enables its slot on the device rather than binding anything there
+        if (bd.Type == D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER && cc::string_view(bd.Name) == "g_NvidiaExt")
+            continue;
+
         cc::optional<sg::binding_type> const type = map_binding_type(bd);
         if (!type.has_value())
             return cc::error(cc::format("shaped-shader-compiler-dxc: resource '{}' is a binding kind shaped-graphics "
