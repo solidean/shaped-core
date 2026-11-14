@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/impl/writer.cc
   - file: libs/graphics/shaped-viewer/shaders/hybrid_pass.sgl
   - test: "sv - a frame mesh traces in the frame it is placed, and keeps the image only while its content holds"
+closed: 2026-11-14
+resolution: duplicate
 ---
 
 # Native DXIL's hybrid lighting hangs Intel's dx12 device unless neighboring buffer loads are merged
@@ -32,6 +34,26 @@ It no longer does on main, but only because `merge_buffer_loads` runs: the hang 
 - Measured since: the AMD Radeon iGPU (RDNA 2, driver 32.0.21042.62) does not hang on the unmerged form.
   With the merging skipped, `SC_GPU=amd SC_SG_COLD=all uv run dev.py test "sv - a frame mesh traces in the frame it is placed"` passed on its dx12 context in 7.8 s.
   The same module hangs Intel's, which makes Intel's compiler the likelier culprit; a reduction is still what would settle it.
+
+## Back on main, 2026-11-13
+
+The hang is back with the merging in place: the 7 s reproducer loses the device on the Arc B580, driver 32.0.101.9150, nearly every run.
+**It is not SGL's DXIL: a context with `dx12_config::native_dxil` off, every shader through DXC, hangs the same way.**
+So the title's cause no longer holds, and the merging only moved a threshold.
+
+Measured, each by cutting `light_thin` down and running the reproducer up to five times:
+- DRED, with its newer operations named, shows `light_thin`'s `Dispatch`, then a `Barrier` that never completes.
+- **The hang needs only code to be compiled in, not to run.**
+  `bounce_from` returning first behind a frame constant that is never equal hangs, with its trace and glass walk never executed.
+- No one function carries it: `hybrid.direct` beside `bsdf_sample_direction`, or beside `passage_of`, does not hang, while all three do, and so do `direct`, `bsdf_eval` and `passage_of`.
+  It follows the kernel's size, as the original guess had it.
+- Not the private arrays: the seven `float4[28]` environment copies, 3 KB of scratch, gone with an `@unroll`, still hang.
+- Not the workgroup: 4 by 4 and 16 by 16 hang as 8 by 8 does.
+- `@preferred_subgroup_size(32)` made it rare rather than gone: four clean runs through DXC, and seven then a hang on the native route; 16 hangs at once.
+- Ruled out as triggers: the DXBC checksum of `4c65364c1`, the orthographic camera's changes of `97fe397fe`, and the edge-stop change of `eae3f55a4`.
+
+So the leading reading is Intel's compiler on a kernel of `light_thin`'s size and twelve ray queries, whatever route wrote its DXIL.
+What would settle it: a standalone reproduction through DXC alone, an older or newer Intel driver, or `light_thin` split into two dispatches, which is also the fix it points to.
 
 ## The risk left open
 

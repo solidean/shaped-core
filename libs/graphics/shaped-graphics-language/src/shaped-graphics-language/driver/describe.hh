@@ -238,6 +238,8 @@ struct sgl::described_pipeline
     cc::string pixel;
     /// Empty for a pipeline without the stage; the two tessellation stages are both empty or neither.
     cc::string geometry;
+    /// The corners of what `geometry` appends: 1 points, 2 lines, 3 triangles; 0 without a geometry stage.
+    i32 geometry_corners = 0;
     cc::string tessellation_control;
     cc::string tessellation_evaluation;
     /// The mesh stage, in the vertex stage's place, which is then empty (CHK-483).

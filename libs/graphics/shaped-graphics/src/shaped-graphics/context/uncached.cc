@@ -154,10 +154,13 @@ cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description con
     if (desc.view_count > 1)
         return cc::string("the pipeline renders several views from a polyfilled mesh stage, which sg does not wire up "
                           "yet");
-    if (p.corners != 2 && p.corners != 3)
-        return cc::format("the pipeline's mesh polyfill has {} corners a primitive, and a line has 2, a triangle 3",
+    if (p.corners < 1 || p.corners > 3)
+        return cc::format("the pipeline's mesh polyfill has {} corners a primitive, and a point has 1, a line 2, a "
+                          "triangle 3",
                           p.corners);
-    auto const topology = p.corners == 3 ? sg::primitive_topology::triangle_list : sg::primitive_topology::line_list;
+    auto const topology = p.corners == 3 ? sg::primitive_topology::triangle_list
+                        : p.corners == 2 ? sg::primitive_topology::line_list
+                                         : sg::primitive_topology::point_list;
     if (desc.topology != topology)
         return cc::string("the pipeline's topology is not the list its mesh polyfill's primitives draw as");
     if (p.primitives_per_group <= 0 || p.words_per_group <= 0)

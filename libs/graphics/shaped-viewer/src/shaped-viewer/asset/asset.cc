@@ -8,8 +8,9 @@ namespace sv
 {
 asset::asset(cc::shared_async<impl::imported_asset> node,
              asset_loader const* loader,
-             cc::shared_ptr<cc::atomic<bool>> dropped)
-  : _node(cc::move(node)), _dropped(cc::move(dropped)), _loader(loader)
+             cc::shared_ptr<cc::atomic<bool>> dropped,
+             bool is_page_fetch)
+  : _node(cc::move(node)), _dropped(cc::move(dropped)), _loader(loader), _is_page_fetch(is_page_fetch)
 {
 }
 
@@ -29,6 +30,7 @@ asset& asset::operator=(asset&& rhs) noexcept
         _node = cc::move(rhs._node);
         _dropped = cc::move(rhs._dropped);
         _loader = rhs._loader;
+        _is_page_fetch = rhs._is_page_fetch;
         _data = cc::move(rhs._data);
         _error = cc::move(rhs._error);
         _ready = rhs._ready;
@@ -44,11 +46,8 @@ void asset::_drop()
     // Without the wait the worker would go on reading a loader the caller is free to destroy next.
     if (_dropped != nullptr)
         _dropped->store(true);
-#ifdef __EMSCRIPTEN__
-    // A page cannot wait: its load runs on this one thread, and reads nothing of the loader once it sees the flag.
-#else
-    (void)cc::try_async_blocking_get(_node);
-#endif
+    if (!_is_page_fetch)
+        (void)cc::try_async_blocking_get(_node);
     _node = nullptr;
 }
 

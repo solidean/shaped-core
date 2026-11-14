@@ -1,7 +1,7 @@
 {
  "libs/graphics/shaped-rendering/shaders/atrous_denoise.sgl::main_cs": {
-  "spirv": 904,
-  "dxil": 806
+  "spirv": 914,
+  "dxil": 810
  },
  "libs/graphics/shaped-rendering/shaders/bloom.sgl::down_cs": {
   "spirv": 78,
@@ -60,7 +60,7 @@
   "dxil": 6296
  },
  "libs/graphics/shaped-rendering/shaders/exposure_meter.sgl::main_cs": {
-  "spirv": 85,
+  "spirv": 89,
   "dxil": 62
  },
  "libs/graphics/shaped-rendering/shaders/imgui.sgl::main_ps": {
@@ -100,8 +100,8 @@
   "dxil": 205
  },
  "libs/graphics/shaped-rendering/shaders/svgf.sgl::atrous_cs": {
-  "spirv": 2621,
-  "dxil": 2347
+  "spirv": 2614,
+  "dxil": 2339
  },
  "libs/graphics/shaped-rendering/shaders/svgf.sgl::temporal_cs": {
   "spirv": 307,
@@ -184,11 +184,11 @@
   "dxil": 657
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::connect": {
-  "spirv": 1413,
+  "spirv": 1414,
   "dxil": 985
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::extend": {
-  "spirv": 2171,
+  "spirv": 2172,
   "dxil": 1423
  },
  "libs/graphics/shaped-viewer/shaders/wavefront.sgl::finalize": {
@@ -212,7 +212,7 @@
   "dxil": 40
  },
  "libs/graphics/shaped-viewer/tests/data/pbr_shade_kernel.sgl::sv_shade": {
-  "spirv": 9084,
-  "dxil": 9150
+  "spirv": 9379,
+  "dxil": 8564
  }
 }

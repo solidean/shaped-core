@@ -90,12 +90,15 @@ public:
     /// Wraps a load already in flight — `asset_loader::load_async` is what builds one.
     /// `loader` must outlive the load: its config is what the collecting step reads.
     /// `dropped` is the flag the node checks between its stages.
+    /// `is_page_fetch` is a web page's fetch, which runs on the page's one thread and so is never waited for.
     asset(cc::shared_async<impl::imported_asset> node,
           asset_loader const* loader,
-          cc::shared_ptr<cc::atomic<bool>> dropped);
+          cc::shared_ptr<cc::atomic<bool>> dropped,
+          bool is_page_fetch = false);
 
 private:
     /// Ends a load still in flight: tells the worker to stop at its next stage, then waits for it.
+    /// A page's fetch is not waited for, since it reads nothing of the loader once it sees the flag.
     void _drop();
 
     /// The worker half's result, released once collected.
@@ -105,6 +108,7 @@ private:
     cc::shared_ptr<cc::atomic<bool>> _dropped;
 
     asset_loader const* _loader = nullptr;
+    bool _is_page_fetch = false;
 
     asset_data _data;
     cc::string _error;

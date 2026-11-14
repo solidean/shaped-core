@@ -82,6 +82,9 @@ struct slib::pipeline_definition
     void (*apply)(sg::raster_pipeline_description& desc, cc::span<open_part const> open) = nullptr;
     /// The frozen part as the build saw it: `sgl::described_pipeline::frozen`, one `key = value` line each.
     cc::span<cc::string_view const> frozen;
+    /// The corners of what the geometry stage appends, 1 points, 2 lines, 3 triangles; 0 without a geometry stage.
+    /// A polyfill draws points by its compute route alone.
+    i32 geometry_corners = 0;
 };
 
 /// What a declared pipeline is configured with now, as its source says after the latest reload.
