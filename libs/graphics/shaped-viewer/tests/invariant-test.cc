@@ -189,7 +189,9 @@ ASYNC_INVOCABLE_TEST("sv invariant - the scene turned with its camera is the sam
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-ASYNC_INVOCABLE_TEST("sv invariant - the scene mirrored is the image mirrored", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv invariant - the scene mirrored is the image mirrored",
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

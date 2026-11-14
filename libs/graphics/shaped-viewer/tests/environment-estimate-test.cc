@@ -83,7 +83,8 @@ namespace agreement = sv_test::agreement;
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv environment estimate - exact converges to the sampled image where the sky is partly blocked",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

@@ -69,7 +69,8 @@ ASYNC_INVOCABLE_TEST("sv agreement - the wavefront converges to the megakernel's
 // where MIS hands that light to the BSDF sample the path is quiet, and where a last vertex samples the light alone it is not.
 // Besides how it looks, it is what blunts the comparisons: one firefly in a tile widens its tolerance past a 15% bias.
 ASYNC_INVOCABLE_TEST("sv agreement - no mode draws more than a stray firefly under a lamp hanging below the ceiling",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!can_trace(ctx))
@@ -133,7 +134,8 @@ ASYNC_INVOCABLE_TEST("sv agreement - no mode draws more than a stray firefly und
 
 ASYNC_INVOCABLE_TEST("sv agreement - the hybrid lights the Cornell box as the megakernel's path one bounce longer, "
                      "forward and deferred",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!can_trace(ctx))

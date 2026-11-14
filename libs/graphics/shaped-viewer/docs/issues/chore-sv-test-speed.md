@@ -51,3 +51,9 @@ The gate's GPU contention made each 1.3 to 2.4 times slower than alone.
 - `agreement::converge` neither syncs fully nor reads back every frame.
 - The expensive tests narrow their default run under `nx::is_thorough()`, and the full sweep runs there.
 - shaped-viewer-test stays well inside its budget alone and in a full gate, with that budget enforced.
+
+## Stopgap, 2026-11-14
+
+Every shaped-viewer test over 10 s in that gate is `nx::config::thorough_only` until this is done: the 21 named in the table above and the rest of the list behind it.
+`grep thorough_only libs/graphics/shaped-viewer/tests` finds them; the fix takes each back into the default run, narrowed.
+Measured after: shaped-viewer-test's default run is 99 s alone, against 340 s, and its slowest test 8.6 s.

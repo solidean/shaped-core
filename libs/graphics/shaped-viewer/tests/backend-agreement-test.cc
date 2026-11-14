@@ -95,7 +95,7 @@ cc::shared_async<bool> warmed(sg::context& ctx,
 }
 } // namespace
 
-ASYNC_TEST("sv vulkan - every mode and every denoiser draws the view it draws on dx12")
+ASYNC_TEST("sv vulkan - every mode and every denoiser draws the view it draws on dx12", nx::config::thorough_only)
 {
     auto vulkan = sg::create_vulkan_context({.enable_validation_layers = true});
     if (vulkan.has_error())

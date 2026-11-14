@@ -260,7 +260,8 @@ void check_furnace(cc::string_view name,
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv furnace - a sphere in a uniform environment reflects its albedo at every angle, in every mode",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

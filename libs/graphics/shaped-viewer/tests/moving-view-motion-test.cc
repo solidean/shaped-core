@@ -20,7 +20,8 @@ using namespace cc::primitive_defines;
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv - a view stepping sideways in front of a wall reports the step as every pixel's motion",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
