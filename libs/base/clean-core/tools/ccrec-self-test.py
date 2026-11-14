@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = []
 # ///
 
@@ -135,9 +135,9 @@ def manifest_of(rec: ccrec.Recording, a: ccrec.Analysis) -> list[str]:
                    f"{_bits(b.base_wall_secs)}\t{b.seal_cycles}\t{_bits(b.seal_wall_secs)}\t{_hex(b.thread.name)}\t{len(b)}")
         for e in b:
             d = e.desc
-            out.append(f"event\t{e.cycles}\t{int(d.kind)}\t{int(d.level)}\t{e.flags}\t{e.core}\t{e.payload.nbytes}\t"
+            out.append(f"event\t{e.cycles}\t{int(e.kind)}\t{int(d.level)}\t{e.flags}\t{e.core}\t{e.payload.nbytes}\t"
                        f"{_hex(d.domain_name)}\t{_hex(d.file)}\t{d.line}\t{_hex(e.name)}")
-            for f in d.fields:
+            for f in e.payload_fields:
                 out.append(f"field\t{_hex(f.name)}\t{int(f.type)}\t{_field_value(f, e.field(f.name))}")
 
     # recording::scopes() knows nothing of preambles, so the scopes only a preamble names are left out here.
@@ -300,6 +300,23 @@ def test_fixture_content(rec: ccrec.Recording, a: ccrec.Analysis) -> None:
 #
 
 
+def test_compressed_summaries(data: bytes, a: ccrec.Analysis) -> None:
+    expect(data[:8] == reader.COMPRESSED_MAGIC, "the C++ half writes the fixture compressed")
+    size = struct.unpack_from("<Q", data, 8)[0]
+    try:
+        ccrec.Recording(data[:8] + struct.pack("<Q", size - 1) + data[16:])
+    except ccrec.FormatError as error:
+        expect("size" in str(error), f"a wrong size in the envelope: refused for the wrong reason: {error}")
+    else:
+        raise Failure("a wrong size in the envelope: read rather than refused")
+
+    bytes_summaries = [s for s in a.summaries if s.name == "bytes"]
+    expect_eq(len(bytes_summaries), 1, "the accumulated stat's summary")
+    s = bytes_summaries[0]
+    expect_eq((s.count, s.sum, s.last), (1, 4096.0, 4096.0), "what the summary folds")
+    expect(s.folds == ccrec.EventKind.stat_accumulate, f"a summary names the kind it folds, got {s.folds}")
+
+
 def test_refusals(data: bytes) -> None:
     def refused(bad: bytes, what: str, needle: str) -> None:
         try:
@@ -376,7 +393,9 @@ def main() -> int:
             a = ccrec.analyze(rec)
             run("the reader reads the C++ loader's manifest", test_manifest_matches, rec, a, manifest_path)
             run("the fixture's content reads back through the query layer", test_fixture_content, rec, a)
-            run("a file it cannot read is refused", test_refusals, data)
+            run("the fixture is compressed, and its summaries read as summaries", test_compressed_summaries, data, a)
+            # The refusals edit the recording's own bytes, so they take it out of its envelope first.
+            run("a file it cannot read is refused", test_refusals, reader._decompressed(memoryview(data)))
         else:
             results.append(("the fixture exists", Failure(f"no fixture.ccrec and fixture.manifest in {directory}")))
             print(f"  FAIL  no fixture.ccrec and fixture.manifest in {directory}")

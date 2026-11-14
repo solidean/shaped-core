@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # ///
 
 """Self-test for tools/dev/lib/toolchain/jsruntime.py: the launch prefix each runtime gets, V8 flags included, and where deno is found.

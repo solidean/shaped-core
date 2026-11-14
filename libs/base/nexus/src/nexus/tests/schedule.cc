@@ -249,6 +249,16 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
                       "turns it off",
               .metavar = "SECS",
               .validate = nx::arg::at_least(0.0)});
+    args.arg({"stop-after"}, config.stop_after_secs,
+             {.desc = "start no test once the run has taken this many seconds; the rest are skipped, saying why; 0 "
+                      "runs every test",
+              .metavar = "SECS",
+              .validate = nx::arg::at_least(0.0)});
+    args.arg({"fail-grace"}, config.fail_grace_secs,
+             {.desc = "once a check has failed, start no test after this many seconds more; the rest are skipped, "
+                      "saying why; 0 runs every test",
+              .metavar = "SECS",
+              .validate = nx::arg::at_least(0.0)});
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
     args.arg({"shard"}, state.shard,
              {.desc = "run only shard K of N, 0-based, each test placed by a hash of its name; an aliased driver's "
@@ -258,6 +268,13 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.group("recording");
     args.arg({"record"}, config.record_all, "bucket every test's cc::rec events, whatever its own config says");
     args.arg({"no-recording"}, config.no_recording, "leave cc::rec down for the whole run");
+    args.arg(
+        {"rec"}, config.rec_file,
+        {.desc = "write a .ccrec of the whole run here: every instrumented scope, with no sampling", .metavar = "FILE"});
+    args.arg({"log-rec"}, config.log_rec_file,
+             {.desc = "write a compacted, compressed .ccrec of the whole run here, about a megabyte, for the run's "
+                      "logs",
+              .metavar = "FILE"});
     args.arg({"sample"}, config.sample_file,
              {.desc = "sample the run's threads, write its .ccrec here and print where the busy time went",
               .metavar = "FILE"});
@@ -269,8 +286,6 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
              {.desc = "also write each test's wall-clock interval and thread here", .metavar = "FILE"});
     args.arg({"benchmark-json"}, config.benchmark_json_file,
              {.desc = "also write the full benchmark results here", .metavar = "FILE"});
-    args.arg({"benchmark-rec"}, config.benchmark_rec_file,
-             {.desc = "also write a .ccrec of the whole run here", .metavar = "FILE"});
     args.arg({"benchmark-verbose"}, config.benchmark_verbose, "full statistics under every benchmark row");
     args.arg({"benchmark-pin"}, config.benchmark_pin, "pin the run to one core before benchmarking");
     args.arg({"list-tests-json"}, config.list_tests_json_file,

@@ -1330,6 +1330,12 @@ rec.from_domain(&sg::g_rec_domain); rec.of_kind(cc::rec::event_kind::log);
 rec.in_cycle_range(begin, end);
 rec.filtered([](auto const& chunk, auto const& e) { return e.level() >= cc::rec::level::error; });
 rec.decimated({.keep_from_cycles = cutoff}); // drops old, KEEPS open scopes, leaves a dropped_span saying what went
+rec.scopes_collapsed(below_cycles);          // a short scope -> a summary of its duration (event_kind::summary, its own site)
+rec.stats_summarized(window_cycles);         // a stat lane -> one summary per window, never across its scope
+rec.compacted({.min_scope_secs = 1e-3, .stat_window_secs = 0.1, .target_bytes = 1 << 20}); // both, in coarsening rounds
+rec.without_sampling();                      // drops samples, record.thread_run and the sampler's tick scopes
+e.as_summary();                              // -> optional<rec::summary>: count, sum, min, max, last, begin/end cycles
+cc::rec::compress_serialized(cc::rec::serialize(rec)); // the zstd envelope; load_recording reads either form
 rec.append(other);                           // concatenation
 ```
 

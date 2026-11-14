@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6"]
 # ///
 """Vendor the Dear ImGui bundle in-tree at pinned commits.

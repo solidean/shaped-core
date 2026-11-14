@@ -62,6 +62,7 @@ add_library(clean-core
     src/clean-core/record/event_view.cc
     src/clean-core/record/system.cc
     src/clean-core/record/recording.cc
+    src/clean-core/record/compaction.cc
     src/clean-core/record/pinned_value.cc
     src/clean-core/record/value.cc
     src/clean-core/record/log.cc
@@ -276,6 +277,7 @@ target_sources(clean-core
     src/clean-core/record/scope.hh
     src/clean-core/record/console_listener.hh
     src/clean-core/record/impl/serialized_format.hh
+    src/clean-core/record/impl/block_builder.hh
     src/clean-core/record/serialize.hh
     src/clean-core/record/hot_functions.hh
     src/clean-core/record/splicing_listener.hh
@@ -659,6 +661,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-quantity-format-test.cc
         tests/record/record-stamp-test.cc
         tests/record/record-query-test.cc
+        tests/record/record-compaction-test.cc
         tests/record/record-serialize-test.cc
         tests/record/record-reader-fixture-test.cc
         tests/record/record-trace-test.cc

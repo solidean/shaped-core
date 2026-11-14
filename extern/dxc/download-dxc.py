@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6"]
 # ///
 """Download the pinned DirectX Shader Compiler release binaries into extern/dxc/.install.

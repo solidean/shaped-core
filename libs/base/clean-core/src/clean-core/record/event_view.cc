@@ -183,6 +183,33 @@ cc::optional<u64> cc::rec::event_view::field_as_u64(cc::string_view field_name) 
     }
 }
 
+void cc::rec::summary::merge(cc::rec::summary const& other)
+{
+    if (other.count == 0)
+        return;
+    if (count == 0)
+    {
+        *this = other;
+        return;
+    }
+    count += other.count;
+    sum += other.sum;
+    min = cc::min(min, other.min);
+    max = cc::max(max, other.max);
+    last = other.last;
+    begin_cycles = cc::min(begin_cycles, other.begin_cycles);
+    end_cycles = cc::max(end_cycles, other.end_cycles);
+}
+
+cc::optional<cc::rec::summary> cc::rec::event_view::as_summary() const
+{
+    if (!is_summary() || payload.size() < isize(sizeof(rec::summary)))
+        return {};
+    auto s = rec::summary{};
+    cc::memcpy(&s, payload.data(), sizeof(s));
+    return s;
+}
+
 cc::string_view cc::rec::event_view::name() const
 {
     // The overwhelmingly common case first, and it is a load and a branch: a static name is never empty.

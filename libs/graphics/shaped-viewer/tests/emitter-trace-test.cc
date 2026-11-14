@@ -910,7 +910,8 @@ ASYNC_INVOCABLE_TEST("sv - the Cornell box's per-triangle lamp lights the box as
 // A per-corner read that took the vertex index, or a per-vertex read that took the corner, would light one of them askew.
 // 0.1 for the bounced comparison, as above, since its bounce-ray estimate is the noisier; 0.08 between two sampled images, as elsewhere; both per channel.
 ASYNC_INVOCABLE_TEST("sv - an indexed emitter reads its per-vertex and per-corner emission at the indexed vertex",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (auto const why = skip_reason(ctx); !why.empty())

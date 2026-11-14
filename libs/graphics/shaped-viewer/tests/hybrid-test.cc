@@ -196,7 +196,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
 ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornell box as the tracer's first bounce "
                      "does, "
                      "shadows included",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
     SKIP("known broken on Windows on ARM — the inline readback path fastfails; "

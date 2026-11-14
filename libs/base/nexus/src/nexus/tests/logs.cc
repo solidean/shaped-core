@@ -220,6 +220,11 @@ void nx::impl::register_log_allowance(cc::rec::level level,
         register_log_allowance(level, domain, pattern, location);
 }
 
+bool nx::impl::is_allowed_everywhere(cc::rec::level level, cc::string_view domain, cc::string_view text)
+{
+    return is_allowed({.level = level, .domain = domain, .text = cc::string(text)});
+}
+
 void nx::impl::judge_logs(nx::test_schedule_execution& result, bool outermost)
 {
     if (!nx::impl::run_recording_active())

@@ -99,7 +99,7 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
 }
 } // namespace
 
-TEST("sv - every builtin material type compiles as a hit group, on triangles and on quadrics")
+TEST("sv - every builtin material type compiles as a hit group, on triangles and on quadrics", nx::config::thorough_only)
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the generated hit groups");
@@ -118,7 +118,7 @@ TEST("sv - every builtin material type compiles as a hit group, on triangles and
     }
 }
 
-TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled and cut out")
+TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled and cut out", nx::config::thorough_only)
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the generated hit groups");
@@ -174,7 +174,7 @@ TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled 
     check_compiles(resolved);
 }
 
-TEST("sv - a hit group compiles at every attribute frequency of the pbr type")
+TEST("sv - a hit group compiles at every attribute frequency of the pbr type", nx::config::thorough_only)
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the generated hit groups");
@@ -207,7 +207,7 @@ TEST("sv - a hit group compiles at every attribute frequency of the pbr type")
     }
 }
 
-TEST("sv - a fragment resampling its attributes at its own uv compiles, sampled or not")
+TEST("sv - a fragment resampling its attributes at its own uv compiles, sampled or not", nx::config::thorough_only)
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the generated hit groups");

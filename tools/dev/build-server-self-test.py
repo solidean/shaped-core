@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # ///
 
 """Self-test for tools/dev/lib/pipeline/build_server.py — when a build or test run goes through the optional build server, and when it falls back.
@@ -402,10 +402,11 @@ def test_background_test_runs_are_asked_for_only_when_the_project_says_so(f: Tes
 def test_runs_with_side_outputs_bypass_the_server() -> None:
     native = types.SimpleNamespace(is_cross_compiling=False, is_emscripten=False)
     wasm = types.SimpleNamespace(is_cross_compiling=True, is_emscripten=True)
-    plain = dict(sample=False, write_xml=True, extra_env=False)
+    plain = dict(sample=False, rec=False, write_xml=True, extra_env=False)
     assert pipeline_test._server_bypass(preset=native, **plain) is None
     assert pipeline_test._server_bypass(preset=wasm, **plain)
     assert pipeline_test._server_bypass(preset=native, **{**plain, "sample": True}) == "--sample"
+    assert pipeline_test._server_bypass(preset=native, **{**plain, "rec": True}) == "--rec"
     assert pipeline_test._server_bypass(preset=native, **{**plain, "write_xml": False})
     assert pipeline_test._server_bypass(preset=native, **{**plain, "extra_env": True})
 

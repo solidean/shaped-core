@@ -120,6 +120,16 @@ struct nx::test_schedule_config
     // A test run gets it; an app, command, example or benchmark does not, and neither does a run under a debugger.
     double watchdog_secs = 60.0;
 
+    // --stop-after SECS: no test starts once the run has taken this long; the tests already running finish.
+    // A test not started is skipped, saying why, so the run reports what it covered and its cost has a ceiling.
+    // 0 runs every test.
+    double stop_after_secs = 0.0;
+
+    // --fail-grace SECS: once a check has failed, no test starts after this many seconds more; the rest are skipped.
+    // The grace lets the tests already running, and a few after them, report what else is red, without paying for the whole run.
+    // 0 runs every test whatever fails.
+    double fail_grace_secs = 0.0;
+
     // The run seed every test's seed derives from, and whether this run shuffles its order by it.
     // A real run draws the seed from the clock unless --seed pins it, prints it first, and shuffles both the schedule and every invocation's children.
     // A hand-built config keeps schedule and match order, for the same reason `jobs` defaults to 1 here.
@@ -165,15 +175,22 @@ struct nx::test_schedule_config
     // Set via --benchmark-json <file>.
     cc::string benchmark_json_file;
 
-    // When non-empty, run() writes a .ccrec of the WHOLE run to this path — warmup, scheduling and everything the
-    // code under test recorded, not just the benchmark's own events.
+    // When non-empty, run() writes a .ccrec of the WHOLE run to this path: every instrumented scope and event, with no sampling.
+    // For a test run it is what each test recorded; for a benchmark, warmup and scheduling too, not just its own events.
     //
-    // The harness emits at loop boundaries only, never inside a timed region, so this costs the measurements nothing.
+    // A benchmark's harness emits at loop boundaries only, never inside a timed region, so this costs its measurements nothing.
     // The per-iteration timeline is therefore not in here, and that is the trade rather than an omission.
     //
     // Needs the recorder, so --no-recording turns it off: there is nothing to write a recording out of.
-    // Set via --benchmark-rec <file>.
-    cc::string benchmark_rec_file;
+    // Set via --rec <file>.
+    cc::string rec_file;
+
+    // The same capture made small enough to keep with every run's logs, written compressed.
+    // What a binary-wide NX_ALLOW_LOGS allows is dropped, short scopes become summaries, and stat lanes fold per window,
+    // in rounds that coarsen until the recording fits about a megabyte (rec.cc has the values).
+    // It compacts while the run goes too, so a long binary never holds more than a few chunks' worth.
+    // Set via --log-rec <file>.
+    cc::string log_rec_file;
 
     // Print the full statistics block under every row of a benchmark table.
     // A single-loop benchmark is always drawn in full, so this changes nothing there.

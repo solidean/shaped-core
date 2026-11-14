@@ -390,7 +390,8 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
 // It used to restart its view on every frame: the frame reported a substitution and the next one took that for a changed image.
 // So the view never accumulated, and a capture waiting on it timed out.
 ASYNC_INVOCABLE_TEST("sv - a material that does not compile still accumulates down the plan path",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
 

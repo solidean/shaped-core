@@ -1449,7 +1449,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - an image past one row of groups is
 // sg infers every barrier the round's stages need from their footprints, and this is the oracle that sees one missing:
 // a reported hazard is logged as an error, and fails the test through the log rule.
 // A scattering interior and the Cornell box between them run every stage, the medium walk and the shadow rays included.
-ASYNC_TEST("sv vulkan - the wavefront raises no synchronization hazard")
+ASYNC_TEST("sv vulkan - the wavefront raises no synchronization hazard", nx::config::thorough_only)
 {
     auto created = sg::create_vulkan_context({.enable_validation_layers = true, .enable_sync_validation = true});
     if (created.has_error())

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # ///
 
 """Self-test for `dev.py install android-sdk`: the pin, what counts as installed, and unpacking.

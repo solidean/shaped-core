@@ -17,8 +17,11 @@ from pathlib import Path
 from typing import Iterator
 
 #: The one format version this reader understands; `cc::rec::serialized_version` in serialize.hh.
-VERSION = 4
+VERSION = 5
 MAGIC = b"CCRECORD"
+
+#: The compressed envelope's magic, then the size of the recording inside as a u64, then a zstd frame of it (`cc::rec::compress_serialized`).
+COMPRESSED_MAGIC = b"CCRECZST"
 
 #: `serialized_flag_truncated`: the writer hit its byte cap and stopped early.
 FLAG_TRUNCATED = 1 << 0
@@ -28,6 +31,8 @@ FLAG_HAS_END_CYCLES = 1 << 0
 FLAG_HAS_STACKTRACE = 1 << 1
 FLAG_PAYLOAD_PINNED = 1 << 2
 FLAG_EVENT_TRUNCATED = 1 << 3
+#: The event is a summary of its site: its payload is SUMMARY_FIELDS, whatever its descriptor's fields are.
+FLAG_SUMMARY = 1 << 4
 
 #: `chunk::no_layer`: a block recorded by ordinary code rather than inside a listener.
 NO_LAYER = 0xFFFF
@@ -65,6 +70,8 @@ class EventKind(enum.IntEnum):
     late_event = 16
     dropped_span = 17
     stamp = 18
+    #: No descriptor has this kind: an event with FLAG_SUMMARY reports it, keeping the descriptor of the site it folds.
+    summary = 19
 
 
 class Level(enum.IntEnum):
@@ -226,6 +233,19 @@ class Field:
     size: int
 
 
+#: Every summary event's payload, `cc::rec::summary_fields` in event_view.hh.
+#: A folded scope's values are durations in cycles; a folded stat's are its readings, or its deltas when it accumulates.
+SUMMARY_FIELDS = (
+    Field("count", TypeCode.u64_, 0, 8),
+    Field("sum", TypeCode.f64_, 8, 8),
+    Field("min", TypeCode.f64_, 16, 8),
+    Field("max", TypeCode.f64_, 24, 8),
+    Field("last", TypeCode.f64_, 32, 8),
+    Field("begin_cycles", TypeCode.u64_, 40, 8),
+    Field("end_cycles", TypeCode.u64_, 48, 8),
+)
+
+
 @dataclass(frozen=True, slots=True)
 class Desc:
     """One recording site: everything a reader needs to interpret an event that points at it."""
@@ -304,7 +324,17 @@ class Event:
 
     @property
     def kind(self) -> EventKind | int:
-        return self.desc.kind
+        """The descriptor's kind, or `summary` for a summary event, whose descriptor is the site it folds."""
+        return EventKind.summary if self.is_summary else self.desc.kind
+
+    @property
+    def is_summary(self) -> bool:
+        return (self.flags & FLAG_SUMMARY) != 0
+
+    @property
+    def payload_fields(self) -> tuple[Field, ...]:
+        """The payload's layout: the descriptor's, or SUMMARY_FIELDS for a summary event."""
+        return SUMMARY_FIELDS if self.is_summary else self.desc.fields
 
     @property
     def level(self) -> Level | int:
@@ -339,13 +369,13 @@ class Event:
 
     def field(self, name: str):
         """The named field decoded by its type, or None when the event has no such field or the payload cannot hold it."""
-        f = self.desc.field(name)
+        f = next((f for f in self.payload_fields if f.name == name), None)
         return None if f is None else self.block.recording._read_field(f, self.payload)
 
     def fields(self) -> dict[str, object]:
         """Every field of the payload, decoded."""
         read = self.block.recording._read_field
-        return {f.name: read(f, self.payload) for f in self.desc.fields}
+        return {f.name: read(f, self.payload) for f in self.payload_fields}
 
     def __repr__(self) -> str:
         kind = self.kind.name if isinstance(self.kind, EventKind) else self.kind
@@ -409,6 +439,8 @@ class Recording:
 
     def __init__(self, data: bytes | bytearray | memoryview):
         self._data = memoryview(data).toreadonly() if not isinstance(data, memoryview) else data
+        if bytes(self._data[:8]) == COMPRESSED_MAGIC:
+            self._data = memoryview(_decompressed(self._data)).toreadonly()
         self._parse()
 
     @classmethod
@@ -640,6 +672,24 @@ class Recording:
             return self.descs[index] if index < len(self.descs) else None
 
         return None
+
+
+def _decompressed(data: memoryview) -> bytes:
+    """The recording inside a compressed envelope, capped at the size its header claims, as the C++ loader caps it."""
+    from compression import zstd
+
+    if data.nbytes < 16:
+        raise FormatError("a compressed recording is too short for its header")
+    size = struct.unpack_from("<Q", data, 8)[0]
+    decompressor = zstd.ZstdDecompressor()
+    try:
+        inner = decompressor.decompress(bytes(data[16:]), max_length=size)
+    except zstd.ZstdError as e:
+        raise FormatError(f"a compressed recording does not decompress: {e}") from e
+    # Capped at the claimed size, so a frame holding more stops short of its end rather than growing past the cap.
+    if len(inner) != size or not decompressor.eof:
+        raise FormatError("a compressed recording decompresses to another size than its header says")
+    return inner
 
 
 def _enum(kind: type[enum.IntEnum], value: int):

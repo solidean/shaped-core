@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.14"
 # dependencies = []
 # ///
 """Drive the variable-count descriptor layout size reproduction.

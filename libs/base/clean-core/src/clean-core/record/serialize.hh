@@ -79,7 +79,7 @@ namespace cc::rec
 {
 /// The format version these bytes are written at.
 /// A reader refuses anything else rather than guessing.
-inline constexpr u32 serialized_version = 4;
+inline constexpr u32 serialized_version = 5;
 
 /// Writes `r` to a self-contained buffer.
 [[nodiscard]] cc::vector<byte> serialize(rec::recording const& r);
@@ -93,9 +93,15 @@ inline constexpr u32 serialized_version = 4;
 /// cannot outlive the recorder that owns the pool, while the file it belongs in may not be known until afterwards.
 [[nodiscard]] cc::result<cc::unit> save_serialized_recording(cc::span<byte const> bytes, cc::string_view path);
 
+/// What `serialize` produced, wrapped in the compressed envelope: the magic `CCRECZST`, the size inside, a zstd frame.
+/// The envelope has no version of its own; the recording inside carries one.
+/// `level` is zstd's own scale, 0 its default.
+[[nodiscard]] cc::vector<byte> compress_serialized(cc::span<byte const> bytes, int level = 0);
+
 /// Rebuilds a recording from bytes, owning everything its events point at.
+/// Takes the compressed envelope too, which it recognizes by its magic.
 [[nodiscard]] cc::result<rec::loaded_recording> deserialize(cc::span<byte const> bytes);
 
-/// Reads a file and rebuilds the recording in it.
+/// Reads a file and rebuilds the recording in it, compressed or not.
 [[nodiscard]] cc::result<rec::loaded_recording> load_recording(cc::string_view path);
 } // namespace cc::rec

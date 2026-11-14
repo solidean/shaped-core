@@ -315,6 +315,20 @@ A hung build prints nothing past its `[build] all` banner, so after 5 minutes wi
 
 [stall_report.py](../../tools/dev/lib/core/stall_report.py) has the details, and [its self-test](../../tools/dev/stall-report-self-test.py) runs with `check`.
 
+## Once something is red, the command fails soon after
+
+The first red step of a command, a build, a gate or a test binary, gives everything still running **10 seconds**, then dev.py fails.
+- Within those seconds the rest goes on, so a command that is red for two reasons reports both.
+- Past them every child dev.py runs is killed, saying why in its log, and no step starts; a check names the gates it skipped.
+- A test is red as soon as its output says so, a judged `nexus: check failed` or the build server's verdict on a binary, not only once the binary has ended.
+- A binary dev.py runs itself gets `--fail-grace 10`, so it stops starting tests by then and ends with its report.
+  One the build server runs does not, since the server keys its results on the arguments.
+- `build --keep-going` turns it off, since it asks for every error the build has.
+- `ship`'s proof and its run of red tests at the change's base are exempt: a red there may be the remote's, and telling which is their job.
+  A dev.py that one of them starts runs with `DEV_FAIL_FAST=0` for the same reason.
+
+[fail_fast.py](../../tools/dev/lib/core/fail_fast.py) has the details, and [its self-test](../../tools/dev/fail-fast-self-test.py) runs with `check`.
+
 ## Where a binary finds the source tree
 
 A test, example or tool that reads files of the source tree gets their directory relative to the top-level source directory, never absolute.
@@ -362,7 +376,7 @@ It is opt-in and never required: without it, everything builds and tests exactly
 - **Background test runs are the project's choice**: with `BuildServer.speculative_tests` set, dev.py asks the server (`test --speculate`)
   to rerun the binaries it tested once the server has rebuilt them on its own after an edit, with the same arguments and environment,
   so the next `test` finds their results stored; off by default, and a request without it withdraws it.
-- **Test runs writing what the server does not keep run without it**: `--sample`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
+- **Test runs writing what the server does not keep run without it**: `--sample`, `--rec`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
 - **`check` and `ship` build and test through it too**, under the same opt-in; `check --no-server` and `ship --no-server` keep the whole gate off it.
   The gate's two single-test steps, `shader-grammar` and `ccrec-reader`, always run the plain way, the latter because it writes a fixture the gate reads next.
 - **`ship` can prove instead of gating, when asked**: with the server opted in and `ship --proof` or the project's `BuildServer.ship_proof`,
@@ -936,6 +950,13 @@ A test marked `thorough_only` runs only then, and the per-binary timeout grows t
 `uv run dev.py test "<filter>" --sample` profiles what it runs.
 Each binary samples its threads until the run ends and prints where the busy time went, by self and by total, keeping the recording as `<binary>.ccrec` beside it.
 The table is symbolized at exit, seconds per few thousand distinct addresses, so pair it with a filter; [profiling](../../libs/base/clean-core/docs/profiling.md#sampling) has the rest.
+
+`uv run dev.py test "<filter>" --rec` keeps the instrumented scopes alone, with no sampling: every scope, stat and log, as `<binary>.ccrec` beside the binary.
+dev.py prints where each went and how large it is; the `analyzing-recordings` skill reads one.
+Without `--rec`, every binary still keeps the run at a coarse resolution: `run-logs/<binary>.ccrec`, compressed, about a megabyte at most.
+dev.py asks for it through `NX_LOG_REC_DIR`, so a run through the build server writes one too.
+[nexus' recording doc](../../libs/base/nexus/docs/recording.md#the-whole-runs-recording-kept-with-the-logs) has what it keeps.
+`--stop-after SECS` bounds a run by time: once a binary has run that long, every test it has not started is skipped, saying why, so a slow binary still yields a recording of known length.
 
 ## Examples (`example`)
 

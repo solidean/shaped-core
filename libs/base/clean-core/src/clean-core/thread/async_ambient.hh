@@ -67,10 +67,30 @@ namespace cc::impl
 /// Iterative rather than recursive: chain depth is a consumer's business, not ours.
 void async_ambient_free(async_ambient_link* l);
 
-inline void async_ambient_retain(void* a)
+#if CC_ASYNC_AMBIENT_TRACE
+/// How many links have their holders tracked (cc::async_ambient_track_holders).
+/// Read on every retain and release that names its holder, which is all a trace build pays while none is tracked.
+extern cc::atomic<i32> async_ambient_tracking;
+
+/// Records `holder` taking a reference to `a`, with the stack it took it from, where `a` is or lies beneath a tracked link.
+void async_ambient_note_retain(void const* a, void const* holder);
+
+/// Erases what async_ambient_note_retain recorded for `holder`; called before the reference goes.
+void async_ambient_note_release(void const* holder);
+#endif
+
+/// Takes one reference to `a`; `holder` is the object holding it, so a trace build can say who holds a context.
+inline void async_ambient_retain(void* a, void const* holder = nullptr)
 {
-    if (a != nullptr)
-        static_cast<async_ambient_link*>(a)->refs.fetch_add(1, cc::memory_order_relaxed);
+    if (a == nullptr)
+        return;
+    static_cast<async_ambient_link*>(a)->refs.fetch_add(1, cc::memory_order_relaxed);
+#if CC_ASYNC_AMBIENT_TRACE
+    if (holder != nullptr && async_ambient_tracking.load(cc::memory_order_relaxed) > 0) [[unlikely]]
+        async_ambient_note_retain(a, holder);
+#else
+    (void)holder;
+#endif
 }
 
 #if CC_ASYNC_AMBIENT_TRACE
@@ -92,10 +112,17 @@ extern cc::atomic<async_ambient_link const*> async_ambient_watched;
     return l->refs.fetch_sub(1, cc::memory_order_acq_rel) == 1;
 }
 
-inline void async_ambient_release(void* a)
+/// Drops the reference `holder` took to `a`, freeing what that leaves unreferenced.
+inline void async_ambient_release(void* a, void const* holder = nullptr)
 {
     if (a == nullptr)
         return;
+#if CC_ASYNC_AMBIENT_TRACE
+    if (holder != nullptr && async_ambient_tracking.load(cc::memory_order_relaxed) > 0) [[unlikely]]
+        async_ambient_note_release(holder);
+#else
+    (void)holder;
+#endif
     auto* const l = static_cast<async_ambient_link*>(a);
     if (async_ambient_drop(l))
         async_ambient_free(l);
@@ -127,6 +154,17 @@ using async_ambient_release_hook = void (*)(void const* link, i32 refs_left, voi
 /// Ends the watch on `head`; returns once no hook call for it is still running, so `user` may go.
 /// A no-op unless `head` is the watched link.
 void async_ambient_unwatch_releases(void const* head);
+
+/// Records, for `head` and every link beneath it, each holder that takes a reference from now on and the stack it took it from.
+/// A holder's release erases it, so what is left names what still carries the context: a node, a handle, a child link.
+/// Several heads may be tracked at once; false, tracking nothing, in a build without CC_ASYNC_AMBIENT_TRACE.
+[[nodiscard]] bool async_ambient_track_holders(void const* head);
+
+/// Each holder of `head` or a link beneath it still recorded, as its acquiring stack; empty when untracked.
+[[nodiscard]] cc::vector<cc::string> async_ambient_tracked_holders(void const* head);
+
+/// Stops tracking `head`, forgetting what it recorded; a no-op unless it is tracked.
+void async_ambient_untrack_holders(void const* head);
 } // namespace cc
 
 namespace cc::impl
@@ -214,8 +252,9 @@ inline void async_ambient_store(void*& slot, void* a)
 {
     if (slot == a)
         return;
-    async_ambient_retain(a);
-    async_ambient_release(slot);
+    // released first, so a trace's record for this slot is replaced rather than erased; `a` is the caller's, alive either way
+    async_ambient_release(slot, static_cast<void const*>(&slot));
+    async_ambient_retain(a, static_cast<void const*>(&slot));
     slot = a;
 }
 } // namespace cc::impl
@@ -291,34 +330,44 @@ namespace cc
 struct cc::async_ambient_handle
 {
     /// Capture the calling thread's ambient chain head; null if there is none.
-    async_ambient_handle() : _head(async_current_ambient()) { impl::async_ambient_retain(_head); }
+    async_ambient_handle() : _head(async_current_ambient()) { impl::async_ambient_retain(_head, this); }
 
-    async_ambient_handle(async_ambient_handle const& rhs) : _head(rhs._head) { impl::async_ambient_retain(_head); }
-    async_ambient_handle(async_ambient_handle&& rhs) noexcept : _head(rhs._head) { rhs._head = nullptr; }
+    async_ambient_handle(async_ambient_handle const& rhs) : _head(rhs._head)
+    {
+        impl::async_ambient_retain(_head, this);
+    }
+    async_ambient_handle(async_ambient_handle&& rhs) noexcept : _head(rhs._head)
+    {
+        rhs._head = nullptr;
+        moved_from(rhs);
+    }
     async_ambient_handle& operator=(async_ambient_handle const& rhs)
     {
-        impl::async_ambient_retain(rhs._head); // before the release, so self-assignment is safe
-        impl::async_ambient_release(_head);
+        if (this == &rhs)
+            return *this;
+        impl::async_ambient_release(_head, this);
         _head = rhs._head;
+        impl::async_ambient_retain(_head, this);
         return *this;
     }
     async_ambient_handle& operator=(async_ambient_handle&& rhs) noexcept
     {
         if (this != &rhs)
         {
-            impl::async_ambient_release(_head);
+            impl::async_ambient_release(_head, this);
             _head = rhs._head;
             rhs._head = nullptr;
+            moved_from(rhs);
         }
         return *this;
     }
-    ~async_ambient_handle() { impl::async_ambient_release(_head); }
+    ~async_ambient_handle() { impl::async_ambient_release(_head, this); }
 
     /// Drop the reference now, leaving the handle empty.
     /// `h = {}` is not this: a default-constructed handle captures whatever the calling thread has installed.
     void reset()
     {
-        impl::async_ambient_release(_head);
+        impl::async_ambient_release(_head, this);
         _head = nullptr;
     }
 
@@ -326,6 +375,19 @@ struct cc::async_ambient_handle
     [[nodiscard]] void* head() const { return _head; }
 
 private:
+    /// A move hands `rhs`'s reference to this handle: a trace's record moves with it, and the count does not change.
+    void moved_from([[maybe_unused]] async_ambient_handle const& rhs)
+    {
+#if CC_ASYNC_AMBIENT_TRACE
+        if (impl::async_ambient_tracking.load(cc::memory_order_relaxed) > 0) [[unlikely]]
+        {
+            impl::async_ambient_note_release(&rhs);
+            if (_head != nullptr)
+                impl::async_ambient_note_retain(_head, this);
+        }
+#endif
+    }
+
     void* _head = nullptr;
 };
 

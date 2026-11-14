@@ -292,10 +292,14 @@ nexus uses it when a pass ends with async work still carrying the test's context
 It watches the test's link from just before its count, waits up to a quarter second for the leftover work to let go, and adds the stack of each release to the failure.
 It pumps the calling thread while it waits, so work homed there runs and names itself too, which is all of an unthreaded build's work.
 So the report says whether the work was a straggler that let go a moment later or a real leak, and which code held it.
+A real leak never releases, so the release stacks cannot name it: nexus also tracks the test's holders from its start.
+Each holder that takes a reference to the test's link, or to a link beneath it, is recorded with the stack it took it from, and erased when it lets go.
+What is left at the count is printed, "still held, by what took it here", which names the leak however long it lasts.
 
-Off, the release path is exactly what it is without the feature.
+Off, the retain and release paths are exactly what they are without the feature.
 On, every release of a context link loads the watched link and compares, and only a watched link takes the slow path.
-`cc::async_ambient_watch_releases` is the hook; it returns false in a build without the switch, so a caller needs no `#if`.
+A retain or release that names its holder also loads a count of tracked links, and takes the ledger's lock only while one is tracked.
+`cc::async_ambient_watch_releases` and `cc::async_ambient_track_holders` are the hooks; both return false in a build without the switch, so a caller needs no `#if`.
 
 Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline.
 Every preset leaves it off, as it does `SC_CHECK_WIDE_ARITH`: a build dir configured with `-DSC_ASYNC_AMBIENT_TRACE=ON` is where it runs.

@@ -46,6 +46,8 @@ inline constexpr u16 flag_has_end_cycles = 1 << 0; ///< the payload opens with a
 inline constexpr u16 flag_has_stacktrace = 1 << 1; ///< the payload carries captured return addresses
 inline constexpr u16 flag_payload_pinned = 1 << 2; ///< the payload references bytes held alive by a chunk pin
 inline constexpr u16 flag_truncated = 1 << 3;      ///< the payload did not fit and was cut short
+/// The event is a summary of its site (`event_kind::summary`): its payload is a `rec::summary`, whatever the descriptor's fields say.
+inline constexpr u16 flag_summary = 1 << 4;
 
 /// Whether events carry the core they were recorded on, which costs about ten cycles per event.
 extern cc::atomic<bool> g_capture_core_id;

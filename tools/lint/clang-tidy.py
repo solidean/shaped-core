@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6"]
 # ///
 
@@ -18,7 +18,7 @@ A first-party header still surfaces diagnostics through `--header-filter`, seen 
 Mapping a changed header back to the TUs that include it is future work.
 
 Files are linted in parallel, one clang-tidy invocation per `.cc` across a thread pool (`-j`, default CPU count), because the built-in single-process driver is strictly sequential.
-`--fix` forces one worker, so two TUs cannot rewrite a shared header at once.
+`--fix` lints in parallel too, then fixes only the files found red on one worker, so two TUs cannot rewrite a shared header at once.
 
 Output is bounded: diagnostics print verbatim while under `--limit` lines, and past it they collapse into a grouped-by-check digest so every failing check stays visible even among thousands of hits.
 
@@ -208,8 +208,8 @@ def _sources_in_scope(build_dir: Path, *, scope, explicit: list[str]) -> list[Pa
     return [f for f in files if os.path.normcase(os.path.normpath(str(f))) in known]
 
 
-def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tuple[int, str, str]:
-    """Run clang-tidy once per file across a thread pool; return (returncode, combined_stdout, stderr).
+def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tuple[int, str, str, list[Path]]:
+    """Run clang-tidy once per file across a thread pool; return (returncode, combined_stdout, stderr, the red files).
 
     Each file is an independent invocation: clang-tidy is CPU-bound per translation unit, so fanning out over `jobs` workers scales with cores, where the built-in driver is strictly sequential.
     Its diagnostics land on stdout and its per-file chatter on stderr; both are collected and the exit codes OR'd.
@@ -222,6 +222,7 @@ def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tup
     stderr_parts: list[str] = []
     returncode = 0
     done = 0
+    red: list[Path] = []
 
     def one(f: Path) -> subprocess.CompletedProcess:
         with dev.profile.span(dev.report.rel(f, ROOT), type="clang-tidy"):
@@ -241,7 +242,8 @@ def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tup
                 stderr_parts.append(r.stderr)
             if r.returncode != 0:
                 returncode = 1
-    return returncode, "".join(stdout_parts), "".join(stderr_parts)
+                red.append(f)
+    return returncode, "".join(stdout_parts), "".join(stderr_parts), red
 
 
 def main() -> None:
@@ -271,8 +273,8 @@ def main() -> None:
                         help="Max diagnostic lines to print verbatim; past N, print a grouped-by-check "
                              "digest instead so every failing check stays visible (default: 200)")
     parser.add_argument("-j", "--jobs", type=int, default=None, metavar="N",
-                        help="Parallel clang-tidy invocations (default: CPU count). --fix forces 1 to avoid "
-                             "concurrent edits to a shared header.")
+                        help="Parallel clang-tidy invocations (default: CPU count). --fix fixes the red files on 1 "
+                             "afterwards, to avoid concurrent edits to a shared header.")
     parser.add_argument("files", nargs="*", help="Specific .cc files to lint (default: discover)")
     args = parser.parse_args()
 
@@ -319,15 +321,18 @@ def _lint(clang_tidy: str, files: list[Path], gates: dict, args: argparse.Namesp
         "--warnings-as-errors=*",  # every whitelisted check is a gate: any firing -> non-zero exit
         "--quiet",  # suppress the per-file "N warnings generated" chatter — ×N files is just noise
     ]
-    if args.fix:
-        base_cmd.append("--fix")
-
-    # --fix in parallel would let two TUs rewrite a shared header at once; force one worker there.
-    jobs = 1 if args.fix else (args.jobs or os.cpu_count() or 4)
+    jobs = args.jobs or os.cpu_count() or 4
     print(dev.console.dim(
         f"clang-tidy: {len(files)} file(s) against {dev.report.rel(GATES_CONFIG, ROOT)} ({jobs} job(s))"),
         file=sys.stderr)
-    returncode, out, err = _run_over_files(base_cmd, files, jobs=jobs)
+    returncode, out, err, red = _run_over_files(base_cmd, files, jobs=jobs)
+
+    # --fix in parallel would let two TUs rewrite a shared header at once, so it runs on one worker.
+    # Only over the files the parallel pass found red: most runs have none, and a serial pass over all of them cost a
+    # minute for thirty-six files that needed nothing.
+    if args.fix and red:
+        print(dev.console.dim(f"clang-tidy: fixing {len(red)} file(s) one at a time"), file=sys.stderr)
+        returncode, out, err, _ = _run_over_files([*base_cmd, "--fix"], red, jobs=1)
 
     # Everything the runner emits goes to stderr — the same stream as the per-file progress and the verdict.
     # So ordering stays deterministic even under dev.py's run_step, which pumps stdout and stderr on separate threads.
