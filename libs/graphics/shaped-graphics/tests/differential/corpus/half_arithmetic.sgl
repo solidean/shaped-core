@@ -1,0 +1,16 @@
+// differential: setup floats
+// differential: across relative 0.001
+// EVAL-96 rounds each operation of halves once, to nearest, ties to even; at `.fast` a GPU may keep a float's precision instead (CHK-435).
+// Apple's compiler does under Metal's fast math, so a result lies within about an ulp of binary16's, under 2^-10 relative: hence 0.001.
+// That holds an operation to roughly its rounding, not to the bit; a conversion's direction is half_math.sgl's to hold exactly.
+require shader_f16
+use diff_floats
+
+@compute(64) fun half_operations(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let a = abs(diff_floats.io.input[i]) as half
+    let b = abs(diff_floats.io.input[(i + 29) & 255]) as half
+    diff_floats.io.output[4 * i] = (a * b) as float
+    diff_floats.io.output[4 * i + 1] = (a + b) as float
+    diff_floats.io.output[4 * i + 2] = (a - b) as float
+    diff_floats.io.output[4 * i + 3] = (a * b - a) as float
