@@ -427,6 +427,22 @@ def test_known_matches_refs_and_markers(base: Path):
     assert cli(a, "known", "nothing-like-this")[0] == 1
 
 
+def test_open_issues_naming_test_matches_refs_strictly(base: Path):
+    """What ship acts on unread, so a ref is a glob over the whole name or an invoked test's own, and nothing looser."""
+    a, _ = setup(base)
+    write(a / "docs/issues/bug-flaky.md", issue_text("Flaky", "refs:", "  - test: sg differential - every corpus*"))
+    write(a / "docs/issues/.closed/2026/01/bug-gone.md", issue_text("Gone", "closed: 2026-01-01", "resolution: fixed", "refs:",
+                                                                    "  - test: sg differential - every corpus*"))
+
+    def named(test: str) -> list[str]:
+        return issues.open_issues_naming_test(test, cwd=a)
+
+    assert named("sg differential - every corpus entry point computes alike") == ["bug-flaky"], "a glob ref names it, a closed issue does not"
+    assert named("sg dx12 - hardware / sg differential - every corpus entry point") == ["bug-flaky"], "an invoked test by its own name"
+    assert named("sg differential") == [], "a test whose name the ref merely contains is not named"
+    assert named("t0") == [], "nor one that shares a few letters with it"
+
+
 def test_submodules_are_their_own_repositories(base: Path):
     a, _ = setup(base)
     git(base, "init", "-q", "-b", "main", "lib")

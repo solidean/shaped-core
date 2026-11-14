@@ -7,103 +7,144 @@ docs/dev-py-driver.md is the design behind both.
 
 from __future__ import annotations
 
-from .lib.core import console, profile, report, ui
-from .lib.core.archive import archive_diag, archive_logs
-from .lib.core.layout import DRIVER_ROOT, SHAPED_CORE_LAYOUT, ExtraRoot, Layout
-from .lib.core.logs import merge_junit, ninja_built_count
-from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
-from .lib.core.process import (
-    configure_mirroring,
-    default_emsdk_root,
-    emsdk_env,
-    env_for_preset,
-    find_emsdk_root,
-    installed_emsdk_version,
-    pinned_emsdk_version,
-    response_file,
-    run_step,
-)
-from .lib.pipeline.build import build
-from .lib.pipeline.build_server import BuildServer
-from .lib.pipeline.build_server import from_dev_toml as build_server_from_dev_toml
-from .lib.pipeline.cmake import remove_build_dir
-from .lib.pipeline.configure import configure, ensure_configured
-from .lib.pipeline.diagjobs import BuildMark
-from .lib.pipeline.diagjobs import harvest as harvest_build_jobs
-from .lib.pipeline.diagjobs import mark as mark_build
-from .lib.pipeline.eligibility import select_eligible_binaries
-from .lib.pipeline.examples import drop_testless_examples
-from .lib.pipeline.test import test
-from .lib.project.companions import Companion
-from .lib.project.compdb import find_entry, load_entries, split_command, suggest_files
-from .lib.project.flags import extract_flags
-from .lib.project.presets import (
-    DEFAULT_BUILD_PRESETS, PresetError, load_presets, resolve_cache_variable, resolve_presets,
-)
-from .lib.project.targets import (
-    NotConfiguredError,
-    discover_targets,
-    executables,
-    load_target_models,
-    select_test_binaries,
-    write_query,
-)
-from .lib.quality.changes import (
-    ChangeScope,
-    ChangeScopeError,
-    changed_files,
-    changed_line_ranges,
-    format_changed_line_spec,
-    resolve_range,
-    touched_paths,
-)
-from .lib.project.graph import TargetGraph
-from .lib.quality.checks import Check, CheckRegistryError, list_checks, run_checks, select_checks, validate_checks
-from .lib.quality.memo import CheckMemo
-from .lib.quality.test_selection import TestSelection, select_test_binaries_for_change
-from .lib.quality.watch import Watch, tracked_files
-from .lib.quality.crossrefs import CrossRefResult, check_crossrefs
-from .lib.quality.format import (
-    FormatResult,
-    FormatSetupError,
-    clang_format_version,
-    discover_files,
-    discover_lint_files,
-    expand_lint_paths,
-    find_clang_format,
-    lint_changed_line_ranges,
-    prose_only_lint_files,
-    format_sources,
-    required_major,
-    run_format,
-    source_roots,
-    violating_files,
-)
-from .lib.toolchain import clangd
-from .lib.toolchain.doctor import doctor
-from .lib.toolchain.known_issues import WARN as KNOWN_ISSUE_WARN
-from .lib.toolchain.known_issues import warn_active as warn_known_issues
-from .lib.toolchain.android_sdk import activate as activate_android_sdk
-from .lib.toolchain.vulkan_sdk import activate as activate_vulkan_sdk
-from .lib.toolchain.llvm_tools import resolve_tool
-from .lib.toolchain.toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
-from .lib.perf.coverage import (
-    CoverageToolError,
-    coverage_merge,
-    coverage_report,
-    coverage_run,
-    find_tool,
-)
-from .lib.perf.perf import run_and_collect as perf_run_and_collect
-from .lib.perf.pgo import (
-    PgoError,
-    pgo_instrument,
-    pgo_measure,
-    pgo_optimize,
-    pgo_run,
-    pgo_train,
-    profile_path,
-)
+# Each name is imported on first use rather than with the package, so importing one module of lib/ loads that module
+# and what it imports, and no more: that is what lets check run a self-test only when what it imports changed.
+# The table is what `lib/quality/imports.py` reads to follow a `dev.X` use to the module behind it.
+_LAZY: dict[str, tuple[str, str]] = {
+    'console': ('.lib.core', 'console'),
+    'profile': ('.lib.core', 'profile'),
+    'report': ('.lib.core', 'report'),
+    'ui': ('.lib.core', 'ui'),
+    'archive_diag': ('.lib.core.archive', 'archive_diag'),
+    'archive_logs': ('.lib.core.archive', 'archive_logs'),
+    'DRIVER_ROOT': ('.lib.core.layout', 'DRIVER_ROOT'),
+    'SHAPED_CORE_LAYOUT': ('.lib.core.layout', 'SHAPED_CORE_LAYOUT'),
+    'ExtraRoot': ('.lib.core.layout', 'ExtraRoot'),
+    'Layout': ('.lib.core.layout', 'Layout'),
+    'merge_junit': ('.lib.core.logs', 'merge_junit'),
+    'ninja_built_count': ('.lib.core.logs', 'ninja_built_count'),
+    'CompileGroup': ('.lib.core.models', 'CompileGroup'),
+    'Preset': ('.lib.core.models', 'Preset'),
+    'StepResult': ('.lib.core.models', 'StepResult'),
+    'Target': ('.lib.core.models', 'Target'),
+    'TargetFlags': ('.lib.core.models', 'TargetFlags'),
+    'TestSummary': ('.lib.core.models', 'TestSummary'),
+    'configure_mirroring': ('.lib.core.process', 'configure_mirroring'),
+    'default_emsdk_root': ('.lib.core.process', 'default_emsdk_root'),
+    'emsdk_env': ('.lib.core.process', 'emsdk_env'),
+    'env_for_preset': ('.lib.core.process', 'env_for_preset'),
+    'find_emsdk_root': ('.lib.core.process', 'find_emsdk_root'),
+    'installed_emsdk_version': ('.lib.core.process', 'installed_emsdk_version'),
+    'pinned_emsdk_version': ('.lib.core.process', 'pinned_emsdk_version'),
+    'response_file': ('.lib.core.process', 'response_file'),
+    'run_step': ('.lib.core.process', 'run_step'),
+    'build': ('.lib.pipeline.build', 'build'),
+    'BuildServer': ('.lib.pipeline.build_server', 'BuildServer'),
+    'build_server_from_dev_toml': ('.lib.pipeline.build_server', 'from_dev_toml'),
+    'remove_build_dir': ('.lib.pipeline.cmake', 'remove_build_dir'),
+    'configure': ('.lib.pipeline.configure', 'configure'),
+    'ensure_configured': ('.lib.pipeline.configure', 'ensure_configured'),
+    'BuildMark': ('.lib.pipeline.diagjobs', 'BuildMark'),
+    'harvest_build_jobs': ('.lib.pipeline.diagjobs', 'harvest'),
+    'mark_build': ('.lib.pipeline.diagjobs', 'mark'),
+    'select_eligible_binaries': ('.lib.pipeline.eligibility', 'select_eligible_binaries'),
+    'drop_testless_examples': ('.lib.pipeline.examples', 'drop_testless_examples'),
+    'test': ('.lib.pipeline.test', 'test'),
+    'Companion': ('.lib.project.companions', 'Companion'),
+    'find_entry': ('.lib.project.compdb', 'find_entry'),
+    'load_entries': ('.lib.project.compdb', 'load_entries'),
+    'split_command': ('.lib.project.compdb', 'split_command'),
+    'suggest_files': ('.lib.project.compdb', 'suggest_files'),
+    'extract_flags': ('.lib.project.flags', 'extract_flags'),
+    'DEFAULT_BUILD_PRESETS': ('.lib.project.presets', 'DEFAULT_BUILD_PRESETS'),
+    'PresetError': ('.lib.project.presets', 'PresetError'),
+    'load_presets': ('.lib.project.presets', 'load_presets'),
+    'resolve_cache_variable': ('.lib.project.presets', 'resolve_cache_variable'),
+    'resolve_presets': ('.lib.project.presets', 'resolve_presets'),
+    'NotConfiguredError': ('.lib.project.targets', 'NotConfiguredError'),
+    'discover_targets': ('.lib.project.targets', 'discover_targets'),
+    'executables': ('.lib.project.targets', 'executables'),
+    'load_target_models': ('.lib.project.targets', 'load_target_models'),
+    'select_test_binaries': ('.lib.project.targets', 'select_test_binaries'),
+    'write_query': ('.lib.project.targets', 'write_query'),
+    'ChangeScope': ('.lib.quality.changes', 'ChangeScope'),
+    'ChangeScopeError': ('.lib.quality.changes', 'ChangeScopeError'),
+    'changed_files': ('.lib.quality.changes', 'changed_files'),
+    'changed_line_ranges': ('.lib.quality.changes', 'changed_line_ranges'),
+    'format_changed_line_spec': ('.lib.quality.changes', 'format_changed_line_spec'),
+    'resolve_range': ('.lib.quality.changes', 'resolve_range'),
+    'touched_paths': ('.lib.quality.changes', 'touched_paths'),
+    'TargetGraph': ('.lib.project.graph', 'TargetGraph'),
+    'Check': ('.lib.quality.checks', 'Check'),
+    'CheckRegistryError': ('.lib.quality.checks', 'CheckRegistryError'),
+    'list_checks': ('.lib.quality.checks', 'list_checks'),
+    'run_checks': ('.lib.quality.checks', 'run_checks'),
+    'select_checks': ('.lib.quality.checks', 'select_checks'),
+    'validate_checks': ('.lib.quality.checks', 'validate_checks'),
+    'CheckMemo': ('.lib.quality.memo', 'CheckMemo'),
+    'TestSelection': ('.lib.quality.test_selection', 'TestSelection'),
+    'select_test_binaries_for_change': ('.lib.quality.test_selection', 'select_test_binaries_for_change'),
+    'Watch': ('.lib.quality.watch', 'Watch'),
+    'tracked_files': ('.lib.quality.watch', 'tracked_files'),
+    'CrossRefResult': ('.lib.quality.crossrefs', 'CrossRefResult'),
+    'check_crossrefs': ('.lib.quality.crossrefs', 'check_crossrefs'),
+    'FormatResult': ('.lib.quality.format', 'FormatResult'),
+    'FormatSetupError': ('.lib.quality.format', 'FormatSetupError'),
+    'clang_format_version': ('.lib.quality.format', 'clang_format_version'),
+    'discover_files': ('.lib.quality.format', 'discover_files'),
+    'discover_lint_files': ('.lib.quality.format', 'discover_lint_files'),
+    'expand_lint_paths': ('.lib.quality.format', 'expand_lint_paths'),
+    'find_clang_format': ('.lib.quality.format', 'find_clang_format'),
+    'lint_changed_line_ranges': ('.lib.quality.format', 'lint_changed_line_ranges'),
+    'prose_only_lint_files': ('.lib.quality.format', 'prose_only_lint_files'),
+    'format_sources': ('.lib.quality.format', 'format_sources'),
+    'required_major': ('.lib.quality.format', 'required_major'),
+    'run_format': ('.lib.quality.format', 'run_format'),
+    'source_roots': ('.lib.quality.format', 'source_roots'),
+    'violating_files': ('.lib.quality.format', 'violating_files'),
+    'clangd': ('.lib.toolchain', 'clangd'),
+    'doctor': ('.lib.toolchain.doctor', 'doctor'),
+    'KNOWN_ISSUE_WARN': ('.lib.toolchain.known_issues', 'WARN'),
+    'warn_known_issues': ('.lib.toolchain.known_issues', 'warn_active'),
+    'activate_android_sdk': ('.lib.toolchain.android_sdk', 'activate'),
+    'activate_vulkan_sdk': ('.lib.toolchain.vulkan_sdk', 'activate'),
+    'resolve_tool': ('.lib.toolchain.llvm_tools', 'resolve_tool'),
+    'ToolsetError': ('.lib.toolchain.toolset', 'ToolsetError'),
+    'apply_overrides': ('.lib.toolchain.toolset', 'apply_overrides'),
+    'list_toolsets': ('.lib.toolchain.toolset', 'list_toolsets'),
+    'toolset_hint': ('.lib.toolchain.toolset', 'toolset_hint'),
+    'CoverageToolError': ('.lib.perf.coverage', 'CoverageToolError'),
+    'coverage_merge': ('.lib.perf.coverage', 'coverage_merge'),
+    'coverage_report': ('.lib.perf.coverage', 'coverage_report'),
+    'coverage_run': ('.lib.perf.coverage', 'coverage_run'),
+    'find_tool': ('.lib.perf.coverage', 'find_tool'),
+    'perf_run_and_collect': ('.lib.perf.perf', 'run_and_collect'),
+    'PgoError': ('.lib.perf.pgo', 'PgoError'),
+    'pgo_instrument': ('.lib.perf.pgo', 'pgo_instrument'),
+    'pgo_measure': ('.lib.perf.pgo', 'pgo_measure'),
+    'pgo_optimize': ('.lib.perf.pgo', 'pgo_optimize'),
+    'pgo_run': ('.lib.perf.pgo', 'pgo_run'),
+    'pgo_train': ('.lib.perf.pgo', 'pgo_train'),
+    'profile_path': ('.lib.perf.pgo', 'profile_path'),
+}
+
+
+def __getattr__(name: str):
+    entry = _LAZY.get(name)
+    if entry is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    module, attr = entry
+    owner = importlib.import_module(module, __name__)
+    # A submodule imported by name is an attribute of its package only once imported, which import_module did.
+    value = getattr(owner, attr) if hasattr(owner, attr) else importlib.import_module(f"{module}.{attr}", __name__)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY))
 
 __all__ = [
     "DRIVER_ROOT",
