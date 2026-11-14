@@ -43,10 +43,15 @@ Each route is measured against dx12's native geometry stage on the same scene, w
 The workgroup keeps room for it, `max_vertices = lanes * V + 1`, and the mesh function is a line mesh, so slib draws a line list.
 `sg - a geometry stage that appends lines draws each triangle's outline and nothing inside it` holds both routes to an outline on an M4.
 
+2026-11-14: points out, by the compute route: each appended vertex is a primitive, and the vertex half draws a point list.
+A mesh stage writes lines or triangles alone, so `sgl describe` reports a pipeline's `geometry_corners`, and the generated definition carries it.
+slib then takes the compute route for points, whichever route the context asks for.
+`sg - a geometry stage that appends points draws each corner's pixel and no other` holds both route requests to three pixels on an M4.
+
 ## Still open
 
 - **dx12 and vulkan draw it**, beside their native stage, so the two images can be compared and the benchmark run: a Windows machine's work.
   The compute half's layout twin needs the `sg_geometry_*` slots there, as the mesh polyfill's holds `sg_mesh_output`.
 - **webgpu draws it**, which needs `buffer_usage::readonly_buffer` on a vertex and an index buffer a polyfilled pipeline reads, since WebGPU binds no other as storage.
-- **Strip topologies in**, whose primitives share corners, and points in and out.
+- **Strip topologies in**, whose primitives share corners.
 - Whether `vertex_index` on an indexed draw matches D3D's and vulkan's, which differ on the vertex offset.

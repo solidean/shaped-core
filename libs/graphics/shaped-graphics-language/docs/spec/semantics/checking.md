@@ -1450,8 +1450,10 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   What it appends goes into the primitive's fixed slots, the mesh polyfill's words, so the draw keeps the native order: primitive by primitive, then as appended.
   A strip is cut into primitives as it grows, an odd triangle's first two corners swapped so every one winds alike; what is appended past `max_vertices` is dropped.
   `vertex_index` counts from the draw's first vertex, or is the index an indexed draw read; `instance_index` counts from the draw's first instance, and `primitive_id` within the instance.
-  A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
+  A geometry stage that appends points makes a primitive of each vertex it appends.
+  One that reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers, is `unsupported-yet` there.
   Where the target has mesh shaders, the same body can be a mesh entry point instead, a primitive a lane of a workgroup.
+  One that appends points cannot, since a mesh stage writes lines or triangles alone.
   Each lane writes its slots of the mesh output in lane order, so the draw is one mesh draw.
   A triangle slot a lane leaves unwritten is one vertex thrice, which covers nothing.
   A line slot joins the workgroup's filler vertex to itself: one vertex past the lanes', which lane 0 writes outside the clip volume at (2, 2, 2, 1).

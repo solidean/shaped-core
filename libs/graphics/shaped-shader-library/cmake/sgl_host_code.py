@@ -1578,6 +1578,8 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> st
             out.append(f"        .targets = k_{key}_targets,\n")
         out.append(f"        .apply = &{key}_apply,\n")
         out.append(f"        .frozen = k_{key}_frozen,\n")
+        if p.get("geometry_corners"):
+            out.append(f"        .geometry_corners = {int(p['geometry_corners'])},\n")
         out.append("    };\n    return d;\n}\n")
 
         fields = open_fields(p)

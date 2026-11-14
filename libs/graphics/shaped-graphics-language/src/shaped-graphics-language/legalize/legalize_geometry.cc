@@ -76,8 +76,6 @@ cc::result<mesh_polyfill_layout, cc::string> sgl::check::geometry_polyfill_layou
     if (!is_valid(stream))
         return cc::error(cc::format("{} takes no stream", g.name));
     auto const& t = m.at(g.at(stream).type);
-    if (t.count == 1)
-        return cc::error(cc::format("{} appends points, which the polyfill does not draw yet", g.name));
     auto const leaves = leaves_of(m, t.element);
     if (leaves.has_error())
         return cc::error(cc::format("{}'s vertex holds a '{}', which no word holds", g.name, leaves.error()));
@@ -342,6 +340,11 @@ cc::result<flat_entry_point, cc::string> geometry_as(checked_module const& m,
                 cut.push_back(out.assign(w.at(indices_at, 1), second));
                 cut.push_back(out.assign(w.at(indices_at, 2), out.local(appended)));
             }
+        }
+        else if (layout.corners == 1)
+        {
+            // a point is each vertex as it is appended
+            cut.push_back(out.assign(w.at(indices_at, 0), out.local(appended)));
         }
         else if (is_mesh)
         {

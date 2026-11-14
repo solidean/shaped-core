@@ -428,6 +428,46 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage that appends lines draws each triang
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a geometry stage that appends points draws each corner's pixel and no other",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route asked for" : "the compute route";
+
+        // three corners on three pixels' centres, each drawn as a point of one pixel
+        int const xs[] = {3, 12, 8};
+        int const ys[] = {12, 12, 3};
+        shaders::stages::stage_corner const corners[] = {{.position = centre_of(xs[0], ys[0])},
+                                                         {.position = centre_of(xs[1], ys[1])},
+                                                         {.position = centre_of(xs[2], ys[2])}};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::cornered);
+        // a mesh stage writes lines or triangles alone, so points take the compute route whichever was asked for
+        CHECK(is_built_by(*ctx, *pipeline, sg::geometry_polyfill_route::compute)).context(by);
+
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                             [&](sg::rendering_scope& scope)
+                                                             {
+                                                                 scope.bind_pipeline(*pipeline);
+                                                                 scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                                 scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+                                                             });
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+            {
+                auto const corner
+                    = (x == xs[0] && y == ys[0]) || (x == xs[1] && y == ys[1]) || (x == xs[2] && y == ys[2]);
+                CHECK(drawn(pixels, x, y) == corner).context(cc::format("{}: pixel ({}, {})", by, x, y));
+            }
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id and passes it on flat",
                      (sg::context_handle const& ctx))
 {

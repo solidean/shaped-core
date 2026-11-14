@@ -406,8 +406,10 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                          d.file, d.name)));
 
     // A polyfilled geometry stage's mesh route, where the context asks for it and the device has mesh shaders.
-    auto const meshes_geometry = polyfills_geometry && ctx->geometry_polyfill_route() == sg::geometry_polyfill_route::mesh
-                              && ctx->supports(sg::feature::mesh_shader) && ctx->draws_geometry_mesh_route();
+    // A geometry stage that appends points takes the compute route: a mesh stage writes lines or triangles alone.
+    auto const meshes_geometry
+        = polyfills_geometry && ctx->geometry_polyfill_route() == sg::geometry_polyfill_route::mesh
+       && ctx->supports(sg::feature::mesh_shader) && ctx->draws_geometry_mesh_route() && d.geometry_corners != 1;
 
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
@@ -618,7 +620,8 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     }
     // a polyfilled stage draws its primitives as a list of the kind it writes
     if (desc.mesh_polyfill.has_value())
-        desc.topology = desc.mesh_polyfill.value().corners == 2 ? sg::primitive_topology::line_list
+        desc.topology = desc.mesh_polyfill.value().corners == 1 ? sg::primitive_topology::point_list
+                      : desc.mesh_polyfill.value().corners == 2 ? sg::primitive_topology::line_list
                                                                 : sg::primitive_topology::triangle_list;
     // polyfilled tessellation draws the list its output topology states
     if (desc.tessellation_polyfill.has_value())
