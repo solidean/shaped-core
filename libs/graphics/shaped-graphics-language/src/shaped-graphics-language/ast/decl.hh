@@ -34,12 +34,29 @@ struct sgl::ast::require_decl
     constexpr bool operator==(require_decl const&) const = default;
 };
 
+/// One branch of a struct whose whole body is a `const if` chain (AST-160).
+struct sgl::ast::type_branch
+{
+    form_id form = form_id::none;
+    /// `none` for the closing `else`.
+    expr_id condition = expr_id::none;
+    /// The branch's fields, where it is an SGL branch.
+    range_of<decl_id> members;
+    /// Its tagged strings, one per language, where it spells the type in a target's text.
+    range_of<expr_id> texts;
+
+    constexpr bool operator==(type_branch const&) const = default;
+};
+
 /// A tagged string at file scope: what a target's text needs ahead of the entry point, in the language its tag names
 /// (AST-159).
+/// Or a file-scope `const if` chain of them (AST-161), whose branches each hold preambles, tagged strings or chains.
 struct sgl::ast::preamble_decl
 {
-    /// The quoted literal.
+    /// The quoted literal; `none` for a chain.
     expr_id text = expr_id::none;
+    /// A chain's branches, each holding its preambles in `members`; empty for a tagged string.
+    range_of<type_branch> branches;
 
     constexpr bool operator==(preamble_decl const&) const = default;
 };
@@ -73,19 +90,6 @@ struct sgl::ast::fun_decl
     constexpr bool operator==(fun_decl const&) const = default;
 };
 
-/// One branch of a struct whose whole body is a `const if` chain (AST-160).
-struct sgl::ast::type_branch
-{
-    form_id form = form_id::none;
-    /// `none` for the closing `else`.
-    expr_id condition = expr_id::none;
-    /// The branch's fields, where it is an SGL branch.
-    range_of<decl_id> members;
-    /// Its tagged strings, one per language, where it spells the type in a target's text.
-    range_of<expr_id> texts;
-
-    constexpr bool operator==(type_branch const&) const = default;
-};
 
 struct sgl::ast::struct_decl
 {

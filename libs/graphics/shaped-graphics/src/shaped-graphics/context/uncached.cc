@@ -328,6 +328,8 @@ cc::optional<cc::string> refusal_of(sg::compute_pipeline_description const& desc
     sg::compiled_shader const* const stages[] = {&desc.shader};
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
         return missing;
+    if (auto reserved = sg::impl::find_reserved_slot(stages); reserved.has_value())
+        return reserved;
     return misfit_of(desc.shader, desc.layout);
 }
 
@@ -394,6 +396,8 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
         return conflict;
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
         return missing;
+    if (auto reserved = sg::impl::find_reserved_slot(stages); reserved.has_value())
+        return reserved;
     for (auto const* stage : stages)
         if (stage != nullptr)
             if (auto misfit = misfit_of(*stage, desc.layout); misfit.has_value())
@@ -856,6 +860,8 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
         return cc::error(cc::move(conflict.value()));
     if (auto missing = impl::find_missing_feature(_ctx.supported_features(), stages); missing.has_value())
         return cc::error(cc::move(missing.value()));
+    if (auto reserved = impl::find_reserved_slot(stages); reserved.has_value())
+        return cc::error(cc::move(reserved.value()));
 
     _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);

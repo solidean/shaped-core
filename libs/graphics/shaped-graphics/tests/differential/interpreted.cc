@@ -55,7 +55,7 @@ struct setup_library
 }
 
 /// Sets `v`'s first `parts.size()` scalars, each of the kind its type gives it.
-void fill(sgl::check::value& v, cc::span<i64 const> parts)
+void fill_value(sgl::check::value& v, cc::span<i64 const> parts)
 {
     for (auto i = isize(0); i < parts.size() && i < v.leaves.size(); ++i)
         v.leaves[i] = v.leaves[i].kind == sgl::check::value_kind::scalar_uint
@@ -161,16 +161,16 @@ cc::result<sg_diff::run_result> sg_diff::interpreted(workload const& w, sg::cont
             switch (si.input)
             {
             case stage_input::thread_id:
-                fill(v, cc::span<i64 const>({i, i64(0), i64(0)}));
+                fill_value(v, cc::span<i64 const>({i, i64(0), i64(0)}));
                 break;
             case stage_input::local_thread_id:
-                fill(v, cc::span<i64 const>({i % width, i64(0), i64(0)}));
+                fill_value(v, cc::span<i64 const>({i % width, i64(0), i64(0)}));
                 break;
             case stage_input::local_thread_index:
-                fill(v, cc::span<i64 const>({i % width}));
+                fill_value(v, cc::span<i64 const>({i % width}));
                 break;
             case stage_input::workgroup_id:
-                fill(v, cc::span<i64 const>({i / width, i64(0), i64(0)}));
+                fill_value(v, cc::span<i64 const>({i / width, i64(0), i64(0)}));
                 break;
             default:
                 return run_result{.skipped = "it reads a stage input the interpreter half does not give"};

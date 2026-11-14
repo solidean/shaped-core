@@ -642,9 +642,11 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
     // CHK-433: a raygen of a dx12 or vulkan compile whose device reorders traces through a hit object; every other
     // trace is the plain one, its hint unevaluated, since a hint changes nothing a shader computes
     auto const target = compiled_for();
-    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen
-                       && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan)
-                       && target.device_features.has(feature::shader_execution_reordering);
+    auto const may_reorder = ast::is_valid(reorder) && entry.entry_stage == stage::raygen
+                          && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan);
+    if (may_reorder)
+        entry.consulted.set(feature::shader_execution_reordering); // EMIT-266
+    auto const reorders = may_reorder && target.device_features.has(feature::shader_execution_reordering);
     auto hint = flat_expr_id::none;
     auto hint_bits = flat_expr_id::none;
     auto is_reordered = false;
@@ -1451,7 +1453,12 @@ auto sgl::check::impl::flattener::flatten_has(ast::expr_id id, type_id type, cal
         meets_error = true;
         return flat_expr_id::none;
     }
-    return add_expr(type, id, flat_bool_literal{.value = compiled_for().device_features.has(feature(index))});
+    // EMIT-266: what the entry consults is a variant axis, whichever way this compile decides it
+    entry.consulted.set(feature(index));
+    auto const literal
+        = add_expr(type, id, flat_bool_literal{.value = compiled_for().device_features.has(feature(index))});
+    has_literals.push_back(literal);
+    return literal;
 }
 
 auto sgl::check::impl::flattener::grants_of(ast::expr_id condition) -> feature_set

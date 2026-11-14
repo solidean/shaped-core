@@ -28,3 +28,8 @@ The forward phase's darkest pixel is 0.247 against a ceiling of 0.05, at pixel 2
 2026-11-12: on metal too, an Apple M4, relwithdebinfo, in two `dev.py ship` checks that ran shaped-viewer-test alone.
 The phase was `forward` both times, 0.237 and 0.247 near black, at frames 0 and 13; the run then hung on the failed test's leftover work until the watchdog.
 The full shaped-viewer-test passed alone in between, 557 tests, so the order a seed draws is a cue too (seed 3166066474908219465 failed).
+
+2026-11-14, on an RTX 5080 (driver 32.0.16.1088), the test run alone with `--thorough`, on `sv dx12 - hardware`:
+it failed 10 of 10 runs on origin/main 17dbfe466 alone, and 10 of 10 on jn/sgl-sm66-floor merged with 09432cabb.
+Each failure is the forward phase at darkest 0.24707031, at frames 190 to 200, with 332 to 347 of its about 400 frames declined.
+In whole `shaped-viewer-test` runs on the same tree it passed some times and failed others, then at darkest 0.23676215 at 0.
