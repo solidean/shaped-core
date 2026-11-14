@@ -677,10 +677,16 @@ int nx::run(int argc, char** argv)
 
         // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
         // what happened BEFORE the interesting sample as much as the sample itself.
+        // A driver asks for the compacted recording of every run through NX_LOG_REC_DIR, as it asks for crash reports.
+        auto log_rec_file = config.log_rec_file;
+        if (auto const dir = cc::environment_variable("NX_LOG_REC_DIR");
+            log_rec_file.empty() && dir.has_value() && !dir.value().empty())
+            log_rec_file = cc::format("{}/{}.ccrec", dir.value(), nx::program_name());
+
         if (!config.sample_file.empty())
-            nx::impl::begin_run_capture(config.sample_file, true);
+            nx::impl::begin_run_capture(config.sample_file, log_rec_file, true);
         else
-            nx::impl::begin_run_capture(config.rec_file);
+            nx::impl::begin_run_capture(config.rec_file, log_rec_file);
 
         // A dump the crash handler and the hang watchdog can both write.
         //

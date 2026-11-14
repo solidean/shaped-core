@@ -180,6 +180,13 @@ struct nx::test_schedule_config
     // Set via --rec <file>.
     cc::string rec_file;
 
+    // The same capture made small enough to keep with every run's logs, written compressed.
+    // What a binary-wide NX_ALLOW_LOGS allows is dropped, short scopes become summaries, and stat lanes fold per window,
+    // in rounds that coarsen until the recording fits about a megabyte (rec.cc has the values).
+    // It compacts while the run goes too, so a long binary never holds more than a few chunks' worth.
+    // Set via --log-rec <file>.
+    cc::string log_rec_file;
+
     // Print the full statistics block under every row of a benchmark table.
     // A single-loop benchmark is always drawn in full, so this changes nothing there.
     bool benchmark_verbose = false;

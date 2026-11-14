@@ -115,7 +115,13 @@ def server_env(preset: Preset, root: Path, base: dict[str, str] | None = None,
     return {
         **os.environ, **(base or {}), **(_preset_env(preset) if preset_env is None else preset_env),
         "SC_SOURCE_ROOT": str(root), "NX_CRASH_DIR": str(crash_reports.incoming_dir(preset.build_dir)),
+        "NX_LOG_REC_DIR": str(log_rec_dir(preset)),
     }
+
+
+def log_rec_dir(preset: Preset) -> Path:
+    """Where every nexus binary keeps its compacted recording of the run, `<binary>.ccrec`, beside the run's logs."""
+    return preset.build_dir / "run-logs"
 
 
 def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> None:
@@ -598,6 +604,7 @@ def test(
                 # A native nexus binary keeps every crash or hang report in files too, which collect() files below.
                 if not preset.is_cross_compiling:
                     layered.setdefault("NX_CRASH_DIR", str(crash_reports.incoming_dir(preset.build_dir)))
+                    layered.setdefault("NX_LOG_REC_DIR", str(log_rec_dir(preset)))
                 if layered:
                     run_env = {**os.environ, **(preset_base_env or {}), **layered}
 

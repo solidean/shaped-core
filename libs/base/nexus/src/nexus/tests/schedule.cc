@@ -263,8 +263,12 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.group("recording");
     args.arg({"record"}, config.record_all, "bucket every test's cc::rec events, whatever its own config says");
     args.arg({"no-recording"}, config.no_recording, "leave cc::rec down for the whole run");
-    args.arg({"rec"}, config.rec_file,
-             {.desc = "write a .ccrec of the whole run here: every instrumented scope, with no sampling",
+    args.arg(
+        {"rec"}, config.rec_file,
+        {.desc = "write a .ccrec of the whole run here: every instrumented scope, with no sampling", .metavar = "FILE"});
+    args.arg({"log-rec"}, config.log_rec_file,
+             {.desc = "write a compacted, compressed .ccrec of the whole run here, about a megabyte, for the run's "
+                      "logs",
               .metavar = "FILE"});
     args.arg({"sample"}, config.sample_file,
              {.desc = "sample the run's threads, write its .ccrec here and print where the busy time went",

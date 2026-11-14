@@ -249,6 +249,7 @@ ASYNC_BENCHMARK("sg stream - upload latency")       // benchmark bucket + main_t
 Run them: `uv run dev.py benchmark "<match>"` (no arg lists them all).
 Defaults to a **release** preset — the only `dev.py` subcommand that does, because `relwithdebinfo-*` compiles `CC_ASSERT` in.
 `--json <file>` writes a sidecar carrying every sample; `--rec <file>` writes a `.ccrec` of the whole run.
+`--log-rec <file>` (or `NX_LOG_REC_DIR`) writes it compacted and compressed, about a megabyte; `dev.py test` keeps one per binary in `run-logs/`.
 
 ## PGO benchmarks (PGO metrics)
 

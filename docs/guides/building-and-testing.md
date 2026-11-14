@@ -939,6 +939,9 @@ The table is symbolized at exit, seconds per few thousand distinct addresses, so
 
 `uv run dev.py test "<filter>" --rec` keeps the instrumented scopes alone, with no sampling: every scope, stat and log, as `<binary>.ccrec` beside the binary.
 dev.py prints where each went and how large it is; the `analyzing-recordings` skill reads one.
+Without `--rec`, every binary still keeps the run at a coarse resolution: `run-logs/<binary>.ccrec`, compressed, about a megabyte at most.
+dev.py asks for it through `NX_LOG_REC_DIR`, so a run through the build server writes one too.
+[nexus' recording doc](../../libs/base/nexus/docs/recording.md#the-whole-runs-recording-kept-with-the-logs) has what it keeps.
 `--stop-after SECS` bounds a run by time: once a binary has run that long, every test it has not started is skipped, saying why, so a slow binary still yields a recording of known length.
 
 ## Examples (`example`)

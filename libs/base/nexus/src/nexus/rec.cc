@@ -19,6 +19,7 @@
 #include <nexus/impl/rec_session.hh>
 #include <nexus/rec.hh>
 #include <nexus/tests/export/runner_report.hh>
+#include <nexus/tests/logs.hh>
 
 using namespace cc::primitive_defines;
 
@@ -200,13 +201,63 @@ bool withhold_judged_records(cc::rec::event_view const& e, cc::rec::trace_id own
 /// the bucketing listener above throws away in order to answer a different one.
 cc::mutex<cc::rec::recording> g_capture;
 
+/// What the recording kept with a run's logs is compacted to.
+/// Scopes under a millisecond and stat lanes under a tenth of a second come first, coarsening fourfold a round until it fits.
+constexpr auto log_compaction = cc::rec::compaction_options{
+    .min_scope_secs = 1e-3,
+    .stat_window_secs = 0.1,
+    .growth = 4,
+    .target_bytes = 1 << 20,
+};
+
+/// How much a compacting capture holds before it compacts again: a fraction of the recorder's 64 MB budget, so the
+/// chunks it releases come back before the recorder runs out and drops events the log rule needs.
+constexpr isize compact_while_running_at = 16 << 20;
+
+/// `r` with its instrumentation alone, without what a binary-wide allowance allows, compacted.
+/// A runner report's sampler writes a reading per thread at every tick, which would be most of the file otherwise.
+/// `to_target` runs the rounds down to the target, otherwise one round at the first thresholds, which is what the
+/// capture does while the run goes.
+cc::rec::recording compacted_for_logs(cc::rec::recording const& r, bool to_target)
+{
+    auto const kept = r.without_sampling().filtered(
+        [](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() != cc::rec::event_kind::log || e.level() < cc::rec::level::warning)
+                return true;
+            return !nx::impl::is_allowed_everywhere(e.level(), e.domain()->name(),
+                                                    e.payload.empty() ? e.name() : e.payload_as_text());
+        });
+    auto options = log_compaction;
+    if (!to_target)
+        options.target_bytes = 0;
+    return kept.compacted(options);
+}
+
+/// Set when the capture keeps only the compacted recording, so it may compact while the run goes.
+bool g_compact_while_running = false;
+isize g_held_bytes = 0;
+isize g_compact_at = compact_while_running_at;
+
 struct capture_listener final : cc::rec::listener
 {
     void on_chunk(cc::rec::chunk_view const& view) override
     {
         if (view.bytes.empty())
             return;
-        g_capture.lock([&](cc::rec::recording& r) { r.append(view); });
+        g_capture.lock(
+            [&](cc::rec::recording& r)
+            {
+                r.append(view);
+                g_held_bytes += view.bytes.size();
+                if (!g_compact_while_running || g_held_bytes < g_compact_at)
+                    return;
+
+                // The compacted recording owns its bytes, so the chunks it came from go back to the recorder.
+                r = compacted_for_logs(r, false);
+                g_held_bytes = r.total_bytes();
+                g_compact_at = cc::max(compact_while_running_at, 2 * g_held_bytes);
+            });
     }
 
     [[nodiscard]] cc::string_view listener_name() const override { return "nexus run capture"; }
@@ -215,6 +266,7 @@ struct capture_listener final : cc::rec::listener
 capture_listener g_capture_listener;
 cc::rec::listener_handle g_capture_handle;
 cc::string g_capture_path;
+cc::string g_compacted_path;
 bool g_sampling = false;
 
 /// nexus's own defaults, with `CC_LOG_*` applied over them.
@@ -314,12 +366,16 @@ cc::string nx::impl::run_dump_path()
     return path;
 }
 
-void nx::impl::begin_run_capture(cc::string_view path, bool sample)
+void nx::impl::begin_run_capture(cc::string_view path, cc::string_view compacted_path, bool sample)
 {
-    if (!g_active || path.empty())
+    if (!g_active || (path.empty() && compacted_path.empty()))
         return;
 
     g_capture_path = cc::string(path);
+    g_compacted_path = cc::string(compacted_path);
+    g_compact_while_running = path.empty();
+    g_held_bytes = 0;
+    g_compact_at = compact_while_running_at;
     g_capture_handle = cc::rec::register_listener(g_capture_listener);
 
     // Whole stacks rather than stopping at the innermost scope: the report reads frames alone, and a stack cut at a
@@ -369,7 +425,7 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
 
     // The whole-run capture, under the same constraint and for the same reason: serialize while the pool is still
     // alive, and let go of the recording before shutdown() deletes the chunks it points at.
-    if (!g_capture_path.empty())
+    if (!g_capture_path.empty() || !g_compacted_path.empty())
     {
         // Let go of the listener first: a chunk delivered after the take would land in g_capture again, and that
         // recording would then outlive the pool, released only by static destruction.
@@ -377,6 +433,7 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
         g_capture_handle = {};
 
         auto bytes = cc::vector<byte>();
+        auto compacted_bytes = cc::vector<byte>();
         g_capture.lock(
             [&](cc::rec::recording& r)
             {
@@ -423,15 +480,26 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
                         cc::println("  {:13.3f}  {:5}  {}", scopes[i].secs, scopes[i].count, scopes[i].name);
                     cc::println();
                 }
-                bytes = cc::rec::serialize(r);
+                if (!g_capture_path.empty())
+                    bytes = cc::rec::serialize(r);
+                if (!g_compacted_path.empty())
+                    compacted_bytes = cc::rec::compress_serialized(cc::rec::serialize(compacted_for_logs(r, true)));
                 r = {};
+                g_held_bytes = 0;
             });
 
-        if (auto const written = cc::rec::save_serialized_recording(bytes, g_capture_path); !written.has_value())
-            cc::eprintln("nexus: could not write the run recording to `{}': {}", g_capture_path,
-                         written.error().to_string());
+        if (!g_capture_path.empty())
+            if (auto const written = cc::rec::save_serialized_recording(bytes, g_capture_path); !written.has_value())
+                cc::eprintln("nexus: could not write the run recording to `{}': {}", g_capture_path,
+                             written.error().to_string());
+        if (!g_compacted_path.empty())
+            if (auto const written = cc::rec::save_serialized_recording(compacted_bytes, g_compacted_path);
+                !written.has_value())
+                cc::eprintln("nexus: could not write the compacted run recording to `{}': {}", g_compacted_path,
+                             written.error().to_string());
 
         g_capture_path = {};
+        g_compacted_path = {};
     }
 
     if (!log_dir.empty())
