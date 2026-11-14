@@ -23,5 +23,10 @@ public:
 
     dx12_pipeline_layout_handle layout;
     ComPtr<ID3D12PipelineState> pipeline_state;
+
+    /// Set for a mesh-shaded pipeline, which neither restores from a cached blob nor hands one out.
+    /// Its blob is refused on every restore, a run after the one that stored it, with the debug layer reporting a description that does not match.
+    /// Why is open: bug-sg-dx12-mesh-pipeline-blob-refused.
+    bool skips_cached_blob = false;
     D3D12_PRIMITIVE_TOPOLOGY topology; // set on the IA at bind_pipeline (the PSO records only the family)
 };
