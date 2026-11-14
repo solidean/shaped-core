@@ -45,9 +45,9 @@ def summary(rec: ccrec.Recording) -> None:
 def scopes(rec: ccrec.Recording, top: int) -> None:
     a = ccrec.analyze(rec)
     totals = a.total_cycles_by_name()
-    counts = Counter(s.name for s in a.scopes if not s.is_open)
+    counts = a.counts_by_name()
     for name, cycles in sorted(totals.items(), key=lambda p: -p[1])[:top]:
-        print(f"{rec.secs(cycles) * 1e3:12.3f} ms  {counts[name]:8d}x  {name}")
+        print(f"{rec.secs(cycles) * 1e3:12.3f} ms  {counts.get(name, 0):8d}x  {name}")
 
 
 def events(rec: ccrec.Recording, thread: int | None, limit: int) -> None:

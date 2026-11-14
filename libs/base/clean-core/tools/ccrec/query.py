@@ -192,6 +192,7 @@ class AsyncScopeRow:
     end_cycles: int | None
     begin_thread: Thread
     end_thread: Thread | None
+    owner: int = 0  # the owner in effect where it began, which is how a test harness's scope names its test
 
 
 @dataclass(slots=True)
@@ -236,6 +237,8 @@ class Analysis:
 
     # per thread index, the scopes sorted by begin, for the time lookups
     _by_thread: dict[int, tuple[list[int], list[int]]] = field(default_factory=dict, repr=False)
+    # per async scope begin (thread index, cycles, trace), the owner in effect there
+    _async_begin_owners: dict[tuple[int, int, int], int] = field(default_factory=dict, repr=False)
 
     def scopes_named(self, *names: str) -> list[ScopeInterval]:
         wanted = set(names)
@@ -305,6 +308,10 @@ class Analysis:
             if m.folds == EventKind.scope_begin and (keep is None or m.thread.index in keep):
                 out[m.name] = out.get(m.name, 0) + m.count
         return out
+
+    def values_by_owner(self, name: str) -> dict[int, object]:
+        """The value recorded under `name` per owner, the last one winning; a harness names what each owner is this way."""
+        return {v.owner: v.value for v in self.values if v.name == name and v.owner != 0}
 
     def off_cpu(self, *, max_ran_ratio: float = 0.5) -> list[ThreadRunRow]:
         """The thread_run stretches a thread mostly spent off the CPU, by the threshold babel::chrome_trace draws its off-CPU lanes at."""
@@ -383,6 +390,9 @@ def analyze(recording: Recording) -> Analysis:
                 owner = e.field("owner") or 0
                 continue
 
+            if kind == EventKind.async_scope_begin:
+                a._async_begin_owners[(thread.index, e.cycles, e.field("trace") or 0)] = owner
+
             common = dict(name=e.name, desc=e.desc, thread=thread, layer=layer, cycles=e.cycles, scope=scope,
                           trace=trace, owner=owner)
 
@@ -454,7 +464,9 @@ def _pair_async_scopes(a: Analysis, recording: Recording) -> None:
     pending: dict[tuple[str, int], list[AsyncScopeRow]] = {}
     for e in recording.sorted_events():
         if e.kind == EventKind.async_scope_begin:
-            row = AsyncScopeRow(e.name, e.field("trace") or 0, e.cycles, None, e.block.thread, None)
+            trace = e.field("trace") or 0
+            owner = a._async_begin_owners.get((e.block.thread.index, e.cycles, trace), 0)
+            row = AsyncScopeRow(e.name, trace, e.cycles, None, e.block.thread, None, owner)
             pending.setdefault((row.name, row.trace), []).append(row)
             a.async_scopes.append(row)
         elif e.kind == EventKind.async_scope_end:
