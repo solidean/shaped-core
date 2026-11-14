@@ -9,6 +9,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/rendering/wavefront_routine.hh>
@@ -520,7 +521,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a partial fill starts its share of
     auto const scene = make_scene(resources);
 
     // A quarter fill finishes fewer samples per frame, so it runs twice the frames to reach a comparable count.
-    constexpr int frames = 48;
+    // A default run traces 16 full-fill frames; --thorough traces 48.
+    auto const frames = nx::is_thorough() ? 48 : 16;
     constexpr f32 fill = 0.25f;
     auto full_live = sg::data_future<u32>();
     auto partial_live = sg::data_future<u32>();
@@ -782,12 +784,18 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a pixel's samples are the same wha
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
 
-    constexpr u32 target = 8;
-    auto const full_legs = cc::array<target_leg>{{.target = target, .frames = 16, .rounds = 6, .fill = 1.0f}};
+    // A default run takes every pixel to 2 samples, --thorough to 8; the full and raised legs keep their frames per sample.
+    auto const thorough = nx::is_thorough();
+    auto const target = thorough ? 8u : 2u;
+    auto const full_legs
+        = cc::array<target_leg>{{.target = target, .frames = thorough ? 16 : 4, .rounds = 6, .fill = 1.0f}};
     // A third of the free slots a frame and two rounds: a sample takes several frames, so far more of them, every one seeded apart.
-    auto const sparse_legs = cc::array<target_leg>{{.target = target, .frames = 160, .rounds = 2, .fill = 0.3f}};
-    auto const raised_legs = cc::array<target_leg>{{.target = target / 2, .frames = 12, .rounds = 3, .fill = 1.0f},
-                                                   {.target = target, .frames = 16, .rounds = 3, .fill = 1.0f}};
+    // A default run gives a sample more frames here, since over two samples a pixel's slow starts have less room to average out.
+    auto const sparse_legs
+        = cc::array<target_leg>{{.target = target, .frames = thorough ? 160 : 64, .rounds = 2, .fill = 0.3f}};
+    auto const raised_legs
+        = cc::array<target_leg>{{.target = target / 2, .frames = thorough ? 12 : 3, .rounds = 3, .fill = 1.0f},
+                                {.target = target, .frames = thorough ? 16 : 4, .rounds = 3, .fill = 1.0f}};
 
     auto const full = co_await trace_to_target(ctx, resources, scene, full_legs, 100u);
     auto const sparse = co_await trace_to_target(ctx, resources, scene, sparse_legs, 5000u);
@@ -941,7 +949,9 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
     auto powered = base;
     powered.lights = sv::pt_light_table::grouped(records, sv::light_selection::power);
 
-    constexpr int frames = 48;
+    // A default run traces 16 wavefront frames and 8 megakernel frames each way; --thorough 48 and 16.
+    auto const thorough = nx::is_thorough();
+    auto const frames = thorough ? 48 : 16;
     auto const by_uniform = co_await run_drained(ctx, resources, uniform, frames);
     auto const by_power = co_await run_drained(ctx, resources, powered, frames);
     auto const uniform_mean = mean_luminance_of(by_uniform.mean);
@@ -951,7 +961,6 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
         .context(cc::format("by power: {} against {} uniform", power_mean, uniform_mean));
 
     // Under --thorough each frame is measured against a long reference run on seeds of its own, and otherwise against the two runs' mean.
-    auto const thorough = nx::is_thorough();
     auto reference = cc::vector<tg::vec3f>();
     if (thorough)
         reference = (co_await run_drained(ctx, resources, uniform, 4 * frames, {.seeds = 1})).mean;
@@ -970,13 +979,13 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
     CC_LOG_INFO("D0 through the wavefront: means {} by power, {} uniform; per-frame error {} by power, {} uniform",
                 power_mean, uniform_mean, power_error, uniform_error);
 
-    // The megakernel, 16 frames of 8 samples each way.
+    // The megakernel, frames of 8 samples each way.
     auto const megakernel_mean = [&](cornell_scene const& scene) -> cc::shared_async<f32>
     {
         auto const target = make_target(ctx);
         auto const background = sv::background_gpu::from(sv::background{});
         auto const image = co_await trace_frames(
-            ctx, target, 16,
+            ctx, target, thorough ? 16 : 8,
             [&](sg::command_list& cmd, int f)
             {
                 auto instance_records = cc::vector<sv::shaders::tracer::instance_record>();
@@ -1071,7 +1080,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a dim light near what it lights ke
     }
     REQUIRE(mixed.lights.records[0].select_pdf > 0.25f);
 
-    constexpr int frames = 48;
+    // A default run traces 16 frames of each selection; --thorough 48.
+    auto const frames = nx::is_thorough() ? 48 : 16;
     auto const by_mixed = co_await run_drained(ctx, resources, mixed, frames);
     auto const by_uniform = co_await run_drained(ctx, resources, uniform, frames);
     auto const by_pure = co_await run_drained(ctx, resources, pure, frames);
@@ -1170,7 +1180,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         tg::vec3f half = tg::vec3f(0.6f, 0.6f, 0.6f);
     };
     auto cases = cc::vector<furnace_case>();
-    // A default run keeps refraction, a medium walk and absorption; the clear interior and the rough glass only a thorough one.
+    // A default run traces the thin pane's refraction and a medium walk; --thorough adds the clear, rough glass, glass and absorbing interiors.
     cases.push_back({.name = "clear interior", .bindings = base(), .by_default = false});
     {
         // Rough glass sends the sky through transmitted directions next-event estimation never samples, so they weigh 1.
@@ -1192,7 +1202,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         glass.push_back(binding::of("specular_ior", 1.5f));
         glass.push_back(binding::of("specular_roughness", 0.05f));
         glass.push_back(binding::of("transmission_weight", 1.0f));
-        cases.push_back({.name = "glass interior at index 1.5", .bindings = glass});
+        cases.push_back({.name = "glass interior at index 1.5", .bindings = glass, .by_default = false});
         // Half a millimeter thick, thinner than any fixed distance a continuing ray could be offset by at a scene's largest scale.
         // A ray that steps over the far face escapes still inside the glass, and the pane goes dark.
         cases.push_back({.name = "glass pane half a millimeter thick",
@@ -1211,7 +1221,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         absorbing.push_back(binding::of("transmission_depth", 0.25f));
         absorbing.push_back(binding::of("transmission_color", tg::vec3f(0.5f, 0.5f, 0.5f)));
         absorbing.push_back(binding::of("transmission_scatter", tg::vec3f(0.4f, 0.4f, 0.4f)));
-        cases.push_back({.name = "absorbing interior", .bindings = cc::move(absorbing), .lossless = false});
+        cases.push_back(
+            {.name = "absorbing interior", .bindings = cc::move(absorbing), .lossless = false, .by_default = false});
     }
 
     auto& lib = sv_test::shared_material_library();

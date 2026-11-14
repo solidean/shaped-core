@@ -2,6 +2,7 @@
 
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
@@ -42,12 +43,14 @@ ASYNC_INVOCABLE_TEST("sv size - every mode draws a lit, finite image at sizes no
         {.name = "size forward", .mode = sv::render_mode::hybrid, .lighting = sv::hybrid_lighting::forward},
         {.name = "size deferred", .mode = sv::render_mode::hybrid, .lighting = sv::hybrid_lighting::deferred},
     };
+    // 4 samples a pixel in a default run, 16 under --thorough.
+    auto const samples = nx::is_thorough() ? 16u : 4u;
     for (auto const& m : modes)
         for (auto const size : k_sizes)
         {
             // A pixel or two sees one surface, the same in both halves where it is one the lamp lights directly.
             // A wide sliver sees far past the box at the vertical field of view, mostly into the black around it, so lit means lit at all.
-            auto const c = co_await agreement::converge(ctx, resources, box.items, box.camera, m, 16, 0, size, true);
+            auto const c = co_await agreement::converge(ctx, resources, box.items, box.camera, m, samples, 0, size, true);
             REQUIRE(c.first.size() == isize(size[0]) * size[1]).dump("mode", m.name).dump("width", size[0]);
             auto const brightness = mean_luminance(c.first);
             CHECK(brightness > 0.001).dump("mode", m.name).dump("width", size[0]).dump("height", size[1]).dump("mean", brightness);
@@ -70,7 +73,12 @@ ASYNC_INVOCABLE_TEST("sv size - a moving image upscales from every preset's exte
 
     sr::render_scale_preset const presets[]
         = {sr::render_scale_preset::quality, sr::render_scale_preset::balanced, sr::render_scale_preset::performance};
-    constexpr tg::vec2i outputs[] = {tg::vec2i(97, 13), tg::vec2i(3, 2), tg::vec2i(1, 1)};
+    constexpr tg::vec2i all_outputs[] = {tg::vec2i(97, 13), tg::vec2i(3, 2), tg::vec2i(1, 1)};
+    constexpr tg::vec2i default_outputs[] = {tg::vec2i(97, 13), tg::vec2i(1, 1)};
+    // Two outputs and 3 executed frames a case in a default run; the 3x2 output too and 8 frames under --thorough.
+    auto const outputs
+        = nx::is_thorough() ? cc::span<tg::vec2i const>(all_outputs) : cc::span<tg::vec2i const>(default_outputs);
+    auto const moving_frames = nx::is_thorough() ? 8 : 3;
     for (auto const mode : {sv::render_mode::megakernel, sv::render_mode::hybrid})
         for (auto const preset : presets)
             for (auto const output_size : outputs)
@@ -90,7 +98,7 @@ ASYNC_INVOCABLE_TEST("sv size - a moving image upscales from every preset's exte
                 auto const history = sv::view_history{};
                 auto executed = 0;
                 // Compiles first, then a move: every frame a step to the side, so every one traces at the input extent.
-                for (auto f = 0; f < 16384 && executed < 8; ++f)
+                for (auto f = 0; f < 16384 && executed < moving_frames; ++f)
                 {
                     (void)ctx.routines.tick();
                     if (executed > 0)
@@ -107,7 +115,7 @@ ASYNC_INVOCABLE_TEST("sv size - a moving image upscales from every preset's exte
                     sv_test::drive_ambient_work();
                     executed += outcome == sg::routine_outcome::executed ? 1 : 0;
                 }
-                CHECK(executed == 8)
+                CHECK(executed == moving_frames)
                     .dump("mode", mode == sv::render_mode::hybrid ? "hybrid" : "megakernel")
                     .dump("preset", int(preset))
                     .dump("width", output_size[0])

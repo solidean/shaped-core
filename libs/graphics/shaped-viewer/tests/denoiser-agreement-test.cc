@@ -2,6 +2,7 @@
 
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
@@ -172,10 +173,13 @@ ASYNC_INVOCABLE_TEST("sv agreement - every denoiser keeps the image's brightness
     // Four samples a pixel: a young mean, which is where a denoiser earns its place, and inside the temporal members' window.
     constexpr u32 samples = 4;
 
+    // The reference at 256 samples in a default run, 1024 under --thorough; either is far less noisy than a 4-sample mean.
+    auto const reference_samples = nx::is_thorough() ? 1024u : 256u;
+
     for (auto const& m : modes)
     {
-        auto const reference = co_await agreement::converge(ctx, resources, box.items, box.camera, m.reference, 1024,
-                                                            agreement::k_reference_restarts);
+        auto const reference = co_await agreement::converge(ctx, resources, box.items, box.camera, m.reference,
+                                                            reference_samples, agreement::k_reference_restarts);
         auto reference_mean = cc::vector<tg::vec4f>();
         for (auto i = isize(0); i < reference.first.size(); ++i)
             reference_mean.push_back(reference.mean_at(i));
