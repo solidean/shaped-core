@@ -842,7 +842,7 @@ struct sgl::check::flat_entry_point
     feature_set features;
     /// Every feature whose grant the compile consulted, granted or not: a `has(.f)` it reached, a trace's `reorder`
     /// (CHK-433) and a ray query's micromaps (EMIT-184), each before the branch it decided was discarded.
-    /// These are a bake's variant axes (EMIT-264).
+    /// These are a bake's variant axes (EMIT-266).
     feature_set consulted;
     /// The strictest `@float` of every function it reaches, itself included (CHK-435), and the first function that
     /// stated it; `none` at `fast`.

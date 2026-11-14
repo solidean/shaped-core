@@ -59,7 +59,7 @@ struct sg::compute_dimensions
 /// For HLSL and WGSL the metadata is the compiler's reflection; an SGL shader states all of it itself, and its compiler contributes only `bytecode` and `compiler`.
 /// A pure value; share it via compiled_shader_handle.
 /// A slot a shader declares that no binding group fills: NVAPI's shader extension slot, `g_NvidiaExt`, through which
-/// an `nvapi` fill of shaped-graphics-language talks to NVIDIA's driver (its EMIT-263).
+/// an `nvapi` fill of shaped-graphics-language talks to NVIDIA's driver (its EMIT-265).
 /// It is a structured buffer of `stride` bytes with a counter at register `index` of space `space`, so a root descriptor,
 /// which has no counter, cannot be it: the host covers it in a descriptor table of its root signature as a UAV.
 /// It binds a null descriptor or a valid buffer there, as `nvHLSLExtnsInternal.h` asks, and enables the slot on its device.

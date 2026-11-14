@@ -51,12 +51,12 @@ struct sgl::text_request
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.
     check::feature_set device_features;
-    /// How each granted feature is written, which `emit::fills_of` offers per target (EMIT-263).
+    /// How each granted feature is written, which `emit::fills_of` offers per target (EMIT-265).
     /// A granted feature not named here is `native`, so a compile that names none writes what it always wrote.
     /// A fill of a feature `device_features` does not grant, a feature named twice, and a fill the target does not
     /// offer are each an error of the request.
     cc::span<check::feature_fill const> fills;
-    /// How the core constructs are written (EMIT-263); `native` for both is the default, at Shader Model 6.8 on dx12.
+    /// How the core constructs are written (EMIT-265); `native` for both is the default, at Shader Model 6.8 on dx12.
     /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`.
     check::core_fills core;
     /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
@@ -78,7 +78,7 @@ struct sgl::text_request
     cc::string_view polyfill_task;
 };
 
-/// A feature an entry point consults and the fills a target offers for it, most demanding first (EMIT-264).
+/// A feature an entry point consults and the fills a target offers for it, most demanding first (EMIT-266).
 /// Not granting the feature is the axis's last value, which `fills` does not list.
 struct sgl::variant_axis
 {
@@ -91,7 +91,7 @@ struct sgl::variant_axis
     }
 };
 
-/// One variant a bake compiles: each granted feature with its fill, and the core constructs' fills (EMIT-264).
+/// One variant a bake compiles: each granted feature with its fill, and the core constructs' fills (EMIT-266).
 /// A feature absent from `fills` is not granted.
 /// It is canonical: its fills stand in feature order, each feature at most once, so two keys of one variant are equal.
 class sgl::variant_key
@@ -135,7 +135,7 @@ struct sgl::all_text_request
     /// What the device has, for every target alike, as `text_request`'s.
     check::feature_set device_features;
     /// How it is filled, as `text_request`'s, each fill on the targets that offer it; a target that offers a fill
-    /// writes its feature or construct `native` (EMIT-263).
+    /// writes its feature or construct `native` (EMIT-265).
     /// A fill none of `targets` offers is an error of the request, as `text_request`'s other errors of fills are.
     cc::span<check::feature_fill const> fills;
     check::core_fills core;
@@ -156,7 +156,7 @@ struct sgl::interface_binding
     /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
     bool is_file_sampler = false;
     /// A slot no binding of the program declares, which the host lays out itself: NVAPI's shader extension slot, the
-    /// counter UAV an `nvapi` fill talks to NVIDIA's driver through (EMIT-263), at register `slot` of space `group`.
+    /// counter UAV an `nvapi` fill talks to NVIDIA's driver through (EMIT-265), at register `slot` of space `group`.
     /// It is a structured buffer of `stride` bytes with a counter, which no root descriptor can be: the host covers it
     /// as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot
     /// on its device.
@@ -215,17 +215,17 @@ struct sgl::emitted_source
     cc::string target_struct;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
-    /// A `hlsl-dx12` compile's: the DXIL shader model the output needs, which a host compiles the text at (EMIT-262).
+    /// A `hlsl-dx12` compile's: the DXIL shader model the output needs, which a host compiles the text at (EMIT-264).
     /// It is the highest `check::dxil_shader_model_of` of each feature of `features` in its fill, and of each core
     /// construct the output wrote natively; 6.6 where none needs more.
     /// SGL's own DXIL states it.
     check::dxil_shader_model dxil_shader_model;
     /// What the host hands DXC beside the text for that model: `-enable-payload-qualifiers` where the text states a
-    /// payload's access qualifiers below Shader Model 6.7 (EMIT-262).
+    /// payload's access qualifiers below Shader Model 6.7 (EMIT-264).
     cc::vector<cc::string> dxc_args;
-    /// The text includes `nvHLSLExtns.h`, which the host puts on DXC's include path: an `nvapi` fill wrote it (EMIT-263).
+    /// The text includes `nvHLSLExtns.h`, which the host puts on DXC's include path: an `nvapi` fill wrote it (EMIT-265).
     bool needs_nvapi_header = false;
-    /// Every feature the entry point consulted, each with the fills the target offers, in feature order (EMIT-264).
+    /// Every feature the entry point consulted, each with the fills the target offers, in feature order (EMIT-266).
     /// Granted or not, so one compile tells a bake every variant there is.
     cc::vector<variant_axis> axes;
     /// The float guarantee the text keeps (CHK-435, EMIT-185): the entry point's, or `fast` where it was weakened.

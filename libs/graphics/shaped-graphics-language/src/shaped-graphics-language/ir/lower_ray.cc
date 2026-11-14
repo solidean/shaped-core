@@ -219,7 +219,7 @@ value_ref lowering::hit_object_call(flat_expr const& x, flat_call const& c, buil
         auto const payload = handed_over(arguments[1], storage::ray_output);
         if (!_failure.empty())
             return value_ref::none;
-        // EMIT-263: NVAPI invokes through the structure the hit object's trace took, a third operand under its fill
+        // EMIT-265: NVAPI invokes through the structure the hit object's trace took, a third operand under its fill
         auto const structure = emit::impl::invoked_structure_of(_plan, arguments[0]);
         auto traced = value_ref::none;
         for (auto const& [named, value] : _traced_structures)

@@ -201,7 +201,7 @@ struct sgl::check::target_condition
 };
 
 /// A file's text in a target's own language, written once ahead of an entry point that writes a body of that file in
-/// it (CHK-428), where the compile meets its condition (CHK-528).
+/// it (CHK-428), where the compile meets its condition (CHK-529).
 struct sgl::check::target_preamble
 {
     i32 file = 0;

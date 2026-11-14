@@ -75,7 +75,7 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         auto const may_see_micromaps = record->declares_only && record->features.has(feature::ray_query)
                                     && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan);
         if (may_see_micromaps)
-            entry.consulted.set(feature::opacity_micromap); // EMIT-264
+            entry.consulted.set(feature::opacity_micromap); // EMIT-266
         if (may_see_micromaps && target.device_features.has(feature::opacity_micromap))
         {
             auto const sees = feature_set(feature::opacity_micromap);
@@ -325,7 +325,7 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
     if (auto const* const l = x.node.try_as<flat_bool_literal>())
     {
         auto const copy = add_expr(x.type, from, *l);
-        // EMIT-264: a copy of a `has` literal, as a parameter that stands for one reads, is a `has` literal as well, so
+        // EMIT-266: a copy of a `has` literal, as a parameter that stands for one reads, is a `has` literal as well, so
         // a decision the copy makes is one a grant can turn
         for (auto const h : has_literals)
             if (h == id)

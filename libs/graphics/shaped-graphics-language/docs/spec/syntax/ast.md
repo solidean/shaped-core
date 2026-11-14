@@ -504,7 +504,7 @@ print "total:", total
 * **AST-140** Inside a `test` body, and not inside a function nested in one, AST-61 does not report: a line of type `bool` is a check there, and only the check pass knows a line's type.
 * **AST-158** A tagged string of `"` (STR-46) standing as a statement is a body in a target's own text, which has an effect: AST-61 does not report it.
 * **AST-159** A tagged string of `"` standing at file scope is a declaration, a preamble of the target's text in its language (CHK-428).
-* **AST-161** A `const if` standing at file scope is a chain of preambles with the `else` lines after it, one declaration whose branches each hold declarations (CHK-528).
+* **AST-161** A `const if` standing at file scope is a chain of preambles with the `else` lines after it, one declaration whose branches each hold declarations (CHK-529).
 
 ```sgl
 fun update(state: particle):

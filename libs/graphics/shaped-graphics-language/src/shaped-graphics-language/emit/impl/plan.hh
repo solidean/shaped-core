@@ -245,7 +245,7 @@ struct plan
     bool diagnostics = false;
     /// MSL: the package takes `SOFTWARE_TRACE`, so a structure that moves may be bound, and a native trace takes motion tags.
     bool sees_motion = false;
-    /// The target and the device the compile writes for, which a preamble's condition reads (CHK-528).
+    /// The target and the device the compile writes for, which a preamble's condition reads (CHK-529).
     check::compile_target compiled_for;
     /// dx12: the compile fills the draw's start natively, so the text reads it as Shader Model 6.8's system values
     /// (EMIT-128); under any other fill no entry that takes the draw's start reaches the writer.
@@ -253,10 +253,10 @@ struct plan
     /// dx12: the compile fills the subgroup size natively, so the text states a preferred one as a range (EMIT-148).
     bool states_wave_size_range = false;
     /// dx12: the entry point reorders through NVAPI's shader extensions, the `nvapi` fill of shader execution
-    /// reordering (EMIT-263): its hit objects are `NvHitObject`s, which talk to the driver through `u0, space13`.
+    /// reordering (EMIT-265): its hit objects are `NvHitObject`s, which talk to the driver through `u0, space13`.
     bool reorders_through_nvapi = false;
     /// Under that fill, each `hit_object_invoke`'s hit object, the expression of its first argument, with the
-    /// acceleration structure of the `trace_hit` that made it, which NVAPI invokes it through (EMIT-263).
+    /// acceleration structure of the `trace_hit` that made it, which NVAPI invokes it through (EMIT-265).
     struct invoked_structure
     {
         check::flat_expr_id hit = check::flat_expr_id::none;

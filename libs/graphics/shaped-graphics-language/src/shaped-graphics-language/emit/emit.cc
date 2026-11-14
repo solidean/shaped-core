@@ -448,7 +448,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     plan.diagnostics = sources.diagnostics;
     plan.sees_motion = sources.software_trace;
     plan.compiled_for = compile_target_of(t, sources.device_features);
-    // EMIT-263: a fill the target does not offer is no output of it
+    // EMIT-265: a fill the target does not offer is no output of it
     auto const offers = [](cc::span<check::fill const> offered, check::fill how)
     {
         for (auto const f : offered)
@@ -517,7 +517,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     // EMIT-148: dx12 states a preferred subgroup size as a range, Shader Model 6.8's, where the compile asks it natively
     plan.states_wave_size_range
         = t == target::hlsl_dx12 && e.preferred_subgroup_size > 0 && sources.core.wave_size == check::fill::native;
-    // EMIT-263: an nvapi fill on dx12; opacity micromaps are then the driver's, and the text states none (EMIT-184)
+    // EMIT-265: an nvapi fill on dx12; opacity micromaps are then the driver's, and the text states none (EMIT-184)
     auto const nvapi = [&](check::feature f)
     { return t == target::hlsl_dx12 && check::fill_of(sources.fills, f) == check::fill::nvapi; };
     plan.reorders_through_nvapi = e.features.has(check::feature::shader_execution_reordering)

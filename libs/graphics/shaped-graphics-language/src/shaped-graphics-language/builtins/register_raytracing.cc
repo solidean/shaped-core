@@ -668,7 +668,7 @@ written write_trace_ray_reordered(call_context const& ctx)
     auto const payload = ctx.arguments[ctx.arguments.size() - 1].text;
     auto result = written();
     ray_desc_lines(ctx, desc, result);
-    // EMIT-263: NVAPI's hit object, which it invokes by tracing it again through the same structure
+    // EMIT-265: NVAPI's hit object, which it invokes by tracing it again through the same structure
     if (ctx.reorders_through_nvapi)
     {
         result.lines.push_back(
@@ -783,7 +783,7 @@ written write_hit_object_read(call_context const& ctx)
         return {.text = cc::format("int(sgl_hit_object_{}({}))", read.name, ctx.arguments[0].text)};
     if (ctx.is_vulkan)
         return {.text = cc::format("sgl_hit_object_{}({})", read.name, ctx.arguments[0].text)};
-    // EMIT-263: NVAPI reads the hit's distance as its ray's t_max, as vulkan's instruction does
+    // EMIT-265: NVAPI reads the hit's distance as its ray's t_max, as vulkan's instruction does
     if (ctx.reorders_through_nvapi && read.name == "t")
         return {.text = cc::format("{}.GetRayDesc().TMax", ctx.arguments[0].text)};
     if (read.type == "int")
@@ -813,7 +813,7 @@ written write_hit_object_step(call_context const& ctx)
         return {.text = ctx.data == 1 ? cc::format("sgl_reorder_thread({}, uint({}), uint({}))", ctx.arguments[0].text,
                                                    ctx.arguments[1].text, ctx.arguments[2].text)
                                       : cc::format("sgl_reorder_thread({})", ctx.arguments[0].text)};
-    // EMIT-263: NVAPI invokes through the structure the hit object's trace took, which the emit found for it
+    // EMIT-265: NVAPI invokes through the structure the hit object's trace took, which the emit found for it
     if (ctx.data == 2 && ctx.reorders_through_nvapi)
         return {.text = cc::format("NvInvokeHitObject({}, {}, {})", ctx.invoked_structure, ctx.arguments[0].text,
                                    ctx.arguments[1].text)};
@@ -842,7 +842,7 @@ constexpr cc::string_view k_hit_object_hlsl[] = {
     "GetInstanceIndex",
     "GetGeometryIndex",
     "GetPrimitiveIndex",
-    // the nvapi fill's, and the counter UAV `nvHLSLExtns.h` declares (EMIT-263)
+    // the nvapi fill's, and the counter UAV `nvHLSLExtns.h` declares (EMIT-265)
     "NvHitObject",
     "NvTraceRayHitObject",
     "NvReorderThread",

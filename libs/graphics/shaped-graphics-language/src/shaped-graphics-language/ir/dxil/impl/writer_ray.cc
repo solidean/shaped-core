@@ -161,7 +161,7 @@ void writer::ray_element(u32 index, stage_element const& e, instruction const& i
     define_one(index, call(found->op, scalar_type(i.type), args));
 }
 
-// ---- EMIT-263: the nvapi fill, NVIDIA's placeholder protocol as nvHLSLExtns.h writes it ----
+// ---- EMIT-265: the nvapi fill, NVIDIA's placeholder protocol as nvHLSLExtns.h writes it ----
 //
 // What follows encodes the protocol of NVAPI's HLSL shader extensions, R615, as `nvHLSLExtns.h` and
 // `nvHLSLExtnsInternal.h` write it, so that SGL's DXIL says to NVIDIA's driver what DXC's compile of that header says.

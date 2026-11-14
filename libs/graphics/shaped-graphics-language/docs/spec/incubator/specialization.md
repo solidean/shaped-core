@@ -192,7 +192,7 @@ Left:
 * The attributes' stages: `@derivatives` keeps a call to the pixel stage, and `@subgroup` to a device with subgroups, which `@stages` and `has` say by hand today.
 * Generics: questions of a type beyond its identity, such as whether it is a vector, and its scalar where it is a scalar itself.
 * The emitters: reserved names read from the text.
-  The preamble is done (CHK-428), a file's per language, and per API or device through a file-scope `const if` (CHK-528).
+  The preamble is done (CHK-428), a file's per language, and per API or device through a file-scope `const if` (CHK-529).
 * Text types beyond their first form (CHK-432): a condition on an option.
 * The interpreter: the features a test sets.
 * `sgl describe`: optional features.

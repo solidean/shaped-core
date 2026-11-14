@@ -34,7 +34,7 @@ constexpr u32 k_kind_acceleration_structure = 16;
 constexpr u32 k_component_i32 = 4;
 /// PSV's `UAVStructuredWithCounter`.
 constexpr u32 k_psv_uav_with_counter = 9;
-/// `NvShaderExtnStruct`, a record of NVAPI's protocol (EMIT-263).
+/// `NvShaderExtnStruct`, a record of NVAPI's protocol (EMIT-265).
 constexpr auto k_nvapi_record_bytes = u32(check::k_nvapi_record_bytes);
 
 /// What a binding is to DXIL, per `global_kind`; the row of a new kind is what adds it.
@@ -233,7 +233,7 @@ void writer::declare_handles()
                              .upper = upper,
                              .range = range});
     }
-    // EMIT-263: `RWStructuredBuffer<NvShaderExtnStruct> g_NvidiaExt` at `u0, space13`, as `nvHLSLExtns.h` declares it,
+    // EMIT-265: `RWStructuredBuffer<NvShaderExtnStruct> g_NvidiaExt` at `u0, space13`, as `nvHLSLExtns.h` declares it,
     // through which the program talks to NVIDIA's driver; no global of the program, so its handle stands past theirs
     if (_p.reorders_through_nvapi)
     {

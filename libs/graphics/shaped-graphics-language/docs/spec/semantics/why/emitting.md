@@ -312,10 +312,10 @@ A struct of the program is a struct in every target and no vector, so it keeps t
 
 dx12's text has to be right on every device that runs it, NVIDIA's included, which runs 32 alone.
 The exact form, `[WaveSize(64)]`, fails the pipeline on such a device; the range form runs everywhere and prefers `n` where it can.
-The range form is Shader Model 6.8's, past the 6.6 a host may target (EMIT-262), so a host targeting 6.6 asks the `none` fill of `wave_size`.
+The range form is Shader Model 6.8's, past the 6.6 a host may target (EMIT-264), so a host targeting 6.6 asks the `none` fill of `wave_size`.
 A preference is only a hint then, which the host still has beside the text.
 
-## EMIT-263
+## EMIT-265
 
 What a shader model adds is often what a device has some other way, so a target's form of a construct is a choice beside whether the device has it.
 NVIDIA's devices reorder and see micromaps through NVAPI at 6.6, and a draw's start can arrive in a root constant, so a fill names that choice per construct.

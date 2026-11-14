@@ -156,9 +156,9 @@ struct sgl::emit::options
     bool diagnostics = false;
     /// What the device has; with `float_atomic_add`, vulkan and metal write the target's own float atomics.
     check::feature_set device_features;
-    /// How each granted feature is written (EMIT-263); one it names no fill for is `native`.
+    /// How each granted feature is written (EMIT-265); one it names no fill for is `native`.
     cc::span<check::feature_fill const> fills;
-    /// How the core constructs are written (EMIT-263): `native` for both is what every compile wrote before fills.
+    /// How the core constructs are written (EMIT-265): `native` for both is what every compile wrote before fills.
     check::core_fills core;
     /// The tree was legalized to its emulated traces where the target has native ones (`text_request::software_trace`).
     bool software_trace = false;
@@ -206,15 +206,15 @@ struct sgl::emit::emitted_text
     cc::optional<check::mesh_polyfill_layout> mesh_layout;
     /// The records a polyfilled task stage's forms agree on, which sg sizes their buffer by; empty for every other emit.
     cc::optional<check::task_polyfill_layout> task_layout;
-    /// What the output wrote of the core constructs natively, which a dx12 output needs Shader Model 6.8 for (EMIT-262):
+    /// What the output wrote of the core constructs natively, which a dx12 output needs Shader Model 6.8 for (EMIT-264):
     /// the draw's start as system values, and the preferred subgroup size as a range.
     bool reads_draw_start = false;
     bool states_wave_size_range = false;
     /// `hlsl-dx12` text: it states a payload's access qualifiers, which DXC takes below Shader Model 6.7 only with
-    /// `-enable-payload-qualifiers` (EMIT-262).
+    /// `-enable-payload-qualifiers` (EMIT-264).
     bool states_payload_qualifiers = false;
     /// The output talks to NVIDIA's driver through NVAPI's shader extensions at `u0, space13`: an `nvapi` fill wrote it
-    /// (EMIT-263), and the text includes `nvHLSLExtns.h`.
+    /// (EMIT-265), and the text includes `nvHLSLExtns.h`.
     bool writes_nvapi = false;
     cc::vector<error> errors;
 
@@ -240,7 +240,7 @@ namespace sgl::emit
 /// Every target there is, in the order of the enum.
 [[nodiscard]] cc::span<target const> all_targets();
 
-/// The fills `t` offers for a granted feature `f`, most demanding first (EMIT-263): `native` everywhere, and `nvapi` too
+/// The fills `t` offers for a granted feature `f`, most demanding first (EMIT-265): `native` everywhere, and `nvapi` too
 /// for `shader_execution_reordering` and `opacity_micromap` on `hlsl-dx12`.
 [[nodiscard]] cc::span<check::fill const> fills_of(target t, check::feature f);
 

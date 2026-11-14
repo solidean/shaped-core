@@ -722,7 +722,7 @@ constexpr cc::string_view k_reordering
 }
 } // namespace
 
-TEST("slib - an nvapi fill's text compiles at 6.6 through DXC on NVAPI's pinned header (EMIT-263)")
+TEST("slib - an nvapi fill's text compiles at 6.6 through DXC on NVAPI's pinned header (EMIT-265)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
@@ -876,7 +876,7 @@ TEST("slib - SGL's DXIL of an nvapi fill hands each record and each TraceRay the
 }
 
 TEST("slib - SGL's DXIL of an nvapi invocation says to the driver what DXC's compile of NvInvokeHitObject says "
-     "(EMIT-263)")
+     "(EMIT-265)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
@@ -1002,7 +1002,7 @@ namespace
 
 TEST("slib - the structure an nvapi trace pins compiles through DXC and the validator, in loops, branches and "
      "inlinings "
-     "(EMIT-263)")
+     "(EMIT-265)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
@@ -1091,7 +1091,7 @@ TEST("slib - the structure an nvapi trace pins compiles through DXC and the vali
         SKIP("the pinned NVAPI headers are not fetched: uv run extern/nvapi/fetch-nvapi.py");
 }
 
-TEST("slib - SGL's DXIL of an nvapi invocation traces through the very handle its trace took (EMIT-263)")
+TEST("slib - SGL's DXIL of an nvapi invocation traces through the very handle its trace took (EMIT-265)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())

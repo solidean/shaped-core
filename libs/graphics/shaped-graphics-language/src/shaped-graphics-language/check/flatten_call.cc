@@ -456,7 +456,7 @@ auto sgl::check::impl::flattener::flatten_value_if(ast::expr_id id, type_id type
         auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
         if (taken.value())
         {
-            // EMIT-264: what the branches after it consult is a variant, where a grant can make it false
+            // EMIT-266: what the branches after it consult is a variant, where a grant can make it false
             auto const& first = branches.front();
             auto const after = ast::index_of(first.condition) * 2 + 1;
             if (could_take(decided, first_expr, false))
@@ -556,7 +556,7 @@ void sgl::check::impl::flattener::flatten_if_branches(origin from,
     {
         if (taken.value())
         {
-            // EMIT-264: what the arms after it consult is a variant, where a grant can make it false
+            // EMIT-266: what the arms after it consult is a variant, where a grant can make it false
             auto const after = ast::index_of(head.condition) * 2 + 1;
             if (could_take(condition, first_expr, false))
             {

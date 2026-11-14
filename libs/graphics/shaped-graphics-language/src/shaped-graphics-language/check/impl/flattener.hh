@@ -615,7 +615,7 @@ struct flattener
         granted = outer;
         return result;
     }
-    /// EMIT-264: what a side a constant does not take consults, which is a variant of the entry all the same.
+    /// EMIT-266: what a side a constant does not take consults, which is a variant of the entry all the same.
     /// `flatten_untaken` flattens that side on a copy of this flattener, which is dropped but for what it consulted, so
     /// nothing of it reaches the entry and nothing judges it (CHK-356).
     /// A side is probed once for each place it is inlined at, however often that place repeats, such as in an unrolled
@@ -635,7 +635,7 @@ struct flattener
         flatten_untaken(copy);
         entry.consulted |= copy.entry.consulted;
     }
-    /// EMIT-264: whether some grant of this target's device makes `condition` `wanted`, so the side that value leads to
+    /// EMIT-266: whether some grant of this target's device makes `condition` `wanted`, so the side that value leads to
     /// is a variant: a condition no `has` decides, by the target, an option or a constant alone, is no axis of it.
     /// `first` is the first expression flattening it made, so its `has` literals are those of `has_literals` from it.
     [[nodiscard]] bool could_take(flat_expr_id condition, isize first, bool wanted);
@@ -643,7 +643,7 @@ struct flattener
     cc::vector<flat_expr_id> has_literals;
     /// The sides probed so far, shared by this flattener and the copies its probes make.
     cc::shared_ptr<cc::set<cc::string>> probed;
-    /// EMIT-264: what the conditions of the preambles a body in target text `text` brings consult (CHK-528).
+    /// EMIT-266: what the conditions of the preambles a body in target text `text` brings consult (CHK-529).
     void consult_preambles_of(i32 text);
     /// The case of a feature an argument names as a constant, `.subgroups`; -1 where it names none.
     [[nodiscard]] i32 feature_case_of(ast::expr_id argument);

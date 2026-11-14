@@ -62,7 +62,7 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
     {
         if (taken.value())
         {
-            // EMIT-264: what the branches after it consult is a variant, where a grant can make it false
+            // EMIT-266: what the branches after it consult is a variant, where a grant can make it false
             auto const after = ast::index_of(first.condition) * 2 + 1;
             if (!rest.empty() && could_take(condition, first_expr, false))
             {
@@ -979,7 +979,7 @@ void sgl::check::impl::flattener::judge_text_types()
                 return d.second;
         auto const& name = c.out.name_of(type);
         auto const chosen = chosen_type_branch(c.out, c.out.at(type).symbol, target);
-        // EMIT-264: what every branch's condition consults is a variant of the type, taken or not (CHK-432)
+        // EMIT-266: what every branch's condition consults is a variant of the type, taken or not (CHK-432)
         for (auto const& branch : c.out.target_type_branches)
             if (branch.type_symbol == c.out.at(type).symbol)
                 for (auto const& node : branch.condition)

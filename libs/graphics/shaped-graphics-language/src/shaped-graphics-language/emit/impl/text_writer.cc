@@ -64,7 +64,7 @@ struct writer
     bool is_device_coherent = false;
     /// The images the entry point loads a texel of, where the target fences a store before a load (EMIT-151).
     cc::vector<flat_binding_member> fenced_images;
-    /// EMIT-263: each acceleration structure a `trace_hit` under the `nvapi` fill traced through, by the expression it
+    /// EMIT-265: each acceleration structure a `trace_hit` under the `nvapi` fill traced through, by the expression it
     /// was named by there, and the constant local the trace pinned it in, which its hit object's invocation names.
     cc::vector<cc::pair<flat_expr_id, cc::string>> pinned_structures;
     /// EMIT-174: a member held as pieces that a write reaches into, and the local it is gathered in meanwhile.
@@ -1324,7 +1324,7 @@ struct writer
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
-            // EMIT-263: a trace whose hit object is invoked pins its structure in a constant local, which the
+            // EMIT-265: a trace whose hit object is invoked pins its structure in a constant local, which the
             // invocation names, so an index that moves after the trace moves no structure
             if (p.reorders_through_nvapi && record.name.starts_with("trace_hit_ray") && !arguments.empty())
             {

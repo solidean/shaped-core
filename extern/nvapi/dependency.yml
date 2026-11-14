@@ -18,7 +18,7 @@ upstreams:
     pin_hash: 90458bca7c1cddfd90b8e4dec78e6ebea8783ce80b976c52a9ef24cf99696065
 
     license: MIT
-    used_by: shaped-graphics-language's DXIL writer, which encodes the protocol of its headers (EMIT-263); and shaped-shader-library's tests, which compile an nvapi fill's HLSL with DXC
+    used_by: shaped-graphics-language's DXIL writer, which encodes the protocol of its headers (EMIT-265); and shaped-shader-library's tests, which compile an nvapi fill's HLSL with DXC
     # The notice each of the three headers carries, which SGL's DXIL writer carries beside its encoding of their protocol
     license_text: |
       SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -49,7 +49,7 @@ upstreams:
       - path: nvShaderExtnEnums.h
         sha256: 9e2532fdc36281fd6923084078ad55fd4474337bf1ee3d9e123335d3b5158165
     notes: |
-      NVIDIA's HLSL shader extensions, the three headers an `nvapi` fill's text includes (EMIT-263), and nothing of the API library.
+      NVIDIA's HLSL shader extensions, the three headers an `nvapi` fill's text includes (EMIT-265), and nothing of the API library.
       SGL writes `#include "nvHLSLExtns.h"` and a host puts this folder on DXC's include path; SGL's DXIL writer encodes the same protocol itself.
       Each header carries NVIDIA's MIT notice, which `license_text` repeats.
 

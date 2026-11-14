@@ -414,7 +414,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         result.workgroup[axis] = form.workgroup[axis];
     result.is_dispatched_by_threads = form.is_auto_workgroup;
     result.preferred_subgroup_size = e.preferred_subgroup_size;
-    // EMIT-262: the model is the most any feature needs in its fill, and either core construct written natively
+    // EMIT-264: the model is the most any feature needs in its fill, and either core construct written natively
     for (auto i = isize(0); i < check::k_feature_count; ++i)
         if (auto const f = check::feature(i); result.features.has(f))
             if (auto const needs = check::dxil_shader_model_of(f, check::fill_of(fills, f));
@@ -428,7 +428,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         result.dxil_shader_model = check::dxil_shader_model_of(check::core_construct::wave_size, check::fill::native);
     if (emitted.states_payload_qualifiers && result.dxil_shader_model < check::dxil_shader_model{.minor = 7})
         result.dxc_args.push_back(cc::string("-enable-payload-qualifiers"));
-    // EMIT-263: an nvapi fill talks to NVIDIA's driver through a counter UAV, which the host lays out and binds itself
+    // EMIT-265: an nvapi fill talks to NVIDIA's driver through a counter UAV, which the host lays out and binds itself
     if (emitted.writes_nvapi)
     {
         result.needs_nvapi_header = result.dxil.empty();
@@ -443,7 +443,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                    .has_counter = true,
                                    .access = "read_write"});
     }
-    // EMIT-264: what the entry consulted, each with what this target offers for it
+    // EMIT-266: what the entry consulted, each with what this target offers for it
     for (auto i = isize(0); i < check::k_feature_count; ++i)
         if (auto const f = check::feature(i); e.consulted.has(f))
         {
@@ -587,7 +587,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
 
 cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
 {
-    // EMIT-263: each fill on the targets that offer it, and one none of them offers is the request's error
+    // EMIT-265: each fill on the targets that offer it, and one none of them offers is the request's error
     auto const offers = [](cc::span<check::fill const> offered, check::fill how)
     {
         for (auto const f : offered)

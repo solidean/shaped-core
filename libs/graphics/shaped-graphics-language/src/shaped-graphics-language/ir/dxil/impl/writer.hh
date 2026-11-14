@@ -405,7 +405,7 @@ private:
     void ray_stage_op(u32 index, instruction const& i);
     void end_of_hit(dx_op code);
     void hit_object_op(u32 index, instruction const& i);
-    /// EMIT-263: a hit object's operation through NVAPI's shader extensions, as `nvHLSLExtns.h` writes it.
+    /// EMIT-265: a hit object's operation through NVAPI's shader extensions, as `nvHLSLExtns.h` writes it.
     void nvapi_hit_object_op(u32 index, instruction const& i);
     /// One call of NVAPI's protocol: the counter bumped, the record at that index filled, as `nvHLSLExtns.h` does.
     [[nodiscard]] ll_value nvapi_increment();
@@ -512,7 +512,7 @@ private:
     cc::vector<u32> _signature_ids;
 
     cc::vector<binding_record> _bindings;
-    /// EMIT-263: the handle of the nvapi fill's counter UAV, past the program's own in `_handles`; none without it.
+    /// EMIT-265: the handle of the nvapi fill's counter UAV, past the program's own in `_handles`; none without it.
     ll_value _nvapi = ll_value::none;
     cc::vector<row_entry> _rows;
     /// The operations' functions this module declared; a few dozen at most.

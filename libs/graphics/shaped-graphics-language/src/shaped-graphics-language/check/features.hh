@@ -143,7 +143,7 @@ inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(
 } // namespace sgl::check
 
 /// A DXIL shader model, which a dx12 host compiles SGL's text at and states for SGL's own DXIL.
-/// 6.6 is the floor: a compile that asks no fill past it writes nothing for dx12 that needs more (EMIT-262).
+/// 6.6 is the floor: a compile that asks no fill past it writes nothing for dx12 that needs more (EMIT-264).
 struct sgl::check::dxil_shader_model
 {
     i32 major = 6;
@@ -156,7 +156,7 @@ struct sgl::check::dxil_shader_model
     }
 };
 
-/// How a compile writes a granted feature or a core construct for its target (EMIT-263).
+/// How a compile writes a granted feature or a core construct for its target (EMIT-265).
 /// `emit::fills_of` says which ones a target offers, most demanding first.
 enum class sgl::check::fill : sgl::u8
 {
@@ -214,7 +214,7 @@ inline constexpr cc::string_view k_core_construct_names[] = {"draw_start", "wave
     return k_core_construct_names[isize(c)];
 }
 
-/// The DXIL shader model a dx12 output needs where it writes `f` as `how` (EMIT-262).
+/// The DXIL shader model a dx12 output needs where it writes `f` as `how` (EMIT-264).
 /// 6.6 for every feature whose form needs no more, and for every fill but `native`.
 [[nodiscard]] constexpr dxil_shader_model dxil_shader_model_of(feature f, fill how = fill::native)
 {

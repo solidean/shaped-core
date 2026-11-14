@@ -513,7 +513,7 @@ public:
         // optimization rather than an error
         if (p.e.entry_stage >= stage::raygen)
             out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
-        // EMIT-263: NVAPI's shader extensions, at the slot the host enables; `nvHLSLExtns.h` is on its include path
+        // EMIT-265: NVAPI's shader extensions, at the slot the host enables; `nvHLSLExtns.h` is on its include path
         if (p.reorders_through_nvapi)
             out.appendf("#define NV_SHADER_EXTN_SLOT u{}\n#define NV_SHADER_EXTN_REGISTER_SPACE space{}\n"
                         "#include \"nvHLSLExtns.h\"\n\n",

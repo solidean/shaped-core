@@ -12,8 +12,8 @@ using sgl::check::fill;
 using sgl::emit::native_route;
 using sgl::emit::target;
 
-// What a dx12 output needs of the shader model (EMIT-262), by the fill a compile asks for each feature and core
-// construct (EMIT-263), and the variants an entry point's consults make (EMIT-264).
+// What a dx12 output needs of the shader model (EMIT-264), by the fill a compile asks for each feature and core
+// construct (EMIT-265), and the variants an entry point's consults make (EMIT-266).
 
 namespace
 {
@@ -192,7 +192,7 @@ constexpr auto k_six_six_fills = sgl::check::core_fills{.draw_start = fill::root
 }
 } // namespace
 
-TEST("sgl emit - each feature and core construct names the DXIL shader model its fill needs (EMIT-262)")
+TEST("sgl emit - each feature and core construct names the DXIL shader model its fill needs (EMIT-264)")
 {
     CHECK(sgl::check::dxil_shader_model_of(feature::shader_execution_reordering) == dxil_shader_model{.minor = 9});
     CHECK(sgl::check::dxil_shader_model_of(feature::shader_execution_reordering, fill::nvapi) == k_six_six);
@@ -211,7 +211,7 @@ TEST("sgl emit - each feature and core construct names the DXIL shader model its
     CHECK((dxil_shader_model{.minor = 10} < dxil_shader_model{.major = 7, .minor = 0}));
 }
 
-TEST("sgl emit - each target offers its fills, most demanding first (EMIT-263)")
+TEST("sgl emit - each target offers its fills, most demanding first (EMIT-265)")
 {
     CHECK(same_fills(sgl::emit::fills_of(target::hlsl_dx12, feature::shader_execution_reordering),
                      {fill::native, fill::nvapi}));
@@ -277,7 +277,7 @@ TEST("sgl emit - the root-constant fill of the draw's start refuses an entry tha
     CHECK(vulkan.value().text.contains("[[vk::builtin(\"BaseVertex\")]]"));
 }
 
-TEST("sgl emit - the native fill of the draw's start reads it as system values and states 6.8, the default (EMIT-262)")
+TEST("sgl emit - the native fill of the draw's start reads it as system values and states 6.8, the default (EMIT-264)")
 {
     for (auto const route : k_routes)
     {
@@ -291,7 +291,7 @@ TEST("sgl emit - the native fill of the draw's start reads it as system values a
     }
 }
 
-TEST("sgl emit - a dx12 entry that reads no draw start stays at 6.6 under either core fill (EMIT-262)")
+TEST("sgl emit - a dx12 entry that reads no draw start stays at 6.6 under either core fill (EMIT-264)")
 {
     for (auto const route : k_routes)
         for (auto const entry : {cc::string_view("cs"), cc::string_view("ps")})
@@ -306,7 +306,7 @@ TEST("sgl emit - a dx12 entry that reads no draw start stays at 6.6 under either
             }
 }
 
-TEST("sgl emit - a dx12 geometry or tessellation stage stays at 6.6 under the 6.6 fills (EMIT-262)")
+TEST("sgl emit - a dx12 geometry or tessellation stage stays at 6.6 under the 6.6 fills (EMIT-264)")
 {
     for (auto const entry : {cc::string_view("tc"), cc::string_view("te"), cc::string_view("gs")})
         for (auto const route : {native_route::text, native_route::prefer})
@@ -319,7 +319,7 @@ TEST("sgl emit - a dx12 geometry or tessellation stage stays at 6.6 under the 6.
         }
 }
 
-TEST("sgl emit - an entry's axes are the features it consults, granted or not, with each target's fills (EMIT-264)")
+TEST("sgl emit - an entry's axes are the features it consults, granted or not, with each target's fills (EMIT-266)")
 {
     for (auto const device : {feature_set(), feature_set(feature::subgroups)})
         for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
@@ -338,7 +338,7 @@ TEST("sgl emit - an entry's axes are the features it consults, granted or not, w
 }
 
 TEST("sgl emit - an entry's axes reach through calls and generics, in feature order, and only from that entry "
-     "(EMIT-264)")
+     "(EMIT-266)")
 {
     // `has` in a function the entry calls, in a generic one, and in one only another entry calls, written out of order
     constexpr auto source = "binding work:\n"
@@ -406,7 +406,7 @@ TEST("sgl emit - a variant's key names its granted features with their fills, th
     CHECK(wave.value().to_string() == "wave_size=none");
 }
 
-TEST("sgl emit - a fill of a feature the compile does not grant, or two of one, is the request's error (EMIT-263)")
+TEST("sgl emit - a fill of a feature the compile does not grant, or two of one, is the request's error (EMIT-265)")
 {
     sgl::check::feature_fill const nvapi[] = {{.f = feature::shader_execution_reordering, .how = fill::nvapi}};
     auto const ungranted = sgl::compile_to_text(
@@ -423,7 +423,7 @@ TEST("sgl emit - a fill of a feature the compile does not grant, or two of one, 
     CHECK(doubled.error().contains("two fills of shader_execution_reordering"));
 }
 
-TEST("sgl emit - every target's compile of a source takes the fills it offers, and native for the rest (EMIT-263)")
+TEST("sgl emit - every target's compile of a source takes the fills it offers, and native for the rest (EMIT-265)")
 {
     sgl::check::feature_fill const nvapi[] = {{.f = feature::shader_execution_reordering, .how = fill::nvapi}};
     auto const all = sgl::compile_all_to_text({.source = k_reordering,
@@ -470,7 +470,7 @@ TEST("sgl emit - every target's compile of a source takes the fills it offers, a
     CHECK(doubled.error() == "<sgl>: error: unsupported: two fills of shader_execution_reordering\n");
 }
 
-TEST("sgl emit - an entry's axes are every has() it can reach, through branches its compile does not take (EMIT-264)")
+TEST("sgl emit - an entry's axes are every has() it can reach, through branches its compile does not take (EMIT-266)")
 {
     // nested under a branch this compile does not take, in either order, and in a value if
     constexpr auto nested = "binding work:\n"
@@ -536,7 +536,7 @@ TEST("sgl emit - an entry's axes are every has() it can reach, through branches 
     CHECK(plain.value().axes.empty());
 }
 
-TEST("sgl emit - a side no grant can take on this target is no axis, and one a grant can take is (EMIT-264)")
+TEST("sgl emit - a side no grant can take on this target is no axis, and one a grant can take is (EMIT-266)")
 {
     auto const axes_of = [](cc::string_view source, target t)
     {
@@ -586,7 +586,7 @@ TEST("sgl emit - a side no grant can take on this target is no axis, and one a g
     CHECK(!axes_of(by_grant, target::hlsl_vulkan).has(feature::shader_int64));
 }
 
-TEST("sgl emit - a has() a constant decision folded away inside a condition still makes its side an axis (EMIT-264)")
+TEST("sgl emit - a has() a constant decision folded away inside a condition still makes its side an axis (EMIT-266)")
 {
     // each condition consults subgroups through a decision of its own, which leaves no has() in the condition itself
     struct folded_case
@@ -630,7 +630,7 @@ TEST("sgl emit - a has() a constant decision folded away inside a condition stil
     }
 }
 
-TEST("sgl emit - a has() passed as an argument still makes the side its parameter decides an axis (EMIT-264)")
+TEST("sgl emit - a has() passed as an argument still makes the side its parameter decides an axis (EMIT-266)")
 {
     // the parameter stands for a copy of the has() literal, which no grant flips, while the argument's own literal
     // was flattened before the condition the callee decides
@@ -788,7 +788,7 @@ TEST("sgl emit - the nvapi fill of opacity micromaps refuses a trace that forces
     REQUIRE(plain.has_value()).dump("error", plain.has_error() ? plain.error() : cc::string());
 }
 
-TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through nvHLSLExtns.h at 6.6 (EMIT-263)")
+TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through nvHLSLExtns.h at 6.6 (EMIT-265)")
 {
     auto const e = filled(k_reordering, "shoot", feature::shader_execution_reordering, fill::nvapi, native_route::text);
     REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
@@ -836,7 +836,7 @@ TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through
     CHECK(same_fills(e.value().axes[0].fills, {fill::native, fill::nvapi}));
 }
 
-TEST("sgl emit - the native fill of reordering writes Shader Model 6.9's hit objects, and reserves no slot (EMIT-263)")
+TEST("sgl emit - the native fill of reordering writes Shader Model 6.9's hit objects, and reserves no slot (EMIT-265)")
 {
     auto const e = filled(k_reordering, "shoot", feature::shader_execution_reordering, fill::native, native_route::text);
     REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
@@ -858,7 +858,7 @@ TEST("sgl emit - the native fill of reordering writes Shader Model 6.9's hit obj
     CHECK(same_fills(plain.value().axes[0].fills, {fill::native, fill::nvapi}));
 }
 
-TEST("sgl emit - SGL's DXIL of the nvapi fill talks to the driver through the counter UAV at 6.6 (EMIT-263)")
+TEST("sgl emit - SGL's DXIL of the nvapi fill talks to the driver through the counter UAV at 6.6 (EMIT-265)")
 {
     auto const e
         = filled(k_reordering, "shoot", feature::shader_execution_reordering, fill::nvapi, native_route::require);
@@ -920,7 +920,7 @@ namespace
 } // namespace
 
 TEST("sgl emit - the nvapi fill invokes a hit object through the structure its trace_hit took, wherever it is "
-     "(EMIT-263)")
+     "(EMIT-265)")
 {
     struct invoked_case
     {
@@ -971,7 +971,7 @@ TEST("sgl emit - the nvapi fill invokes a hit object through the structure its t
     }
 }
 
-TEST("sgl emit - the nvapi fill pins the structure a trace_hit took, so a moving index moves nothing (EMIT-263)")
+TEST("sgl emit - the nvapi fill pins the structure a trace_hit took, so a moving index moves nothing (EMIT-265)")
 {
     struct pinned_case
     {
@@ -1073,7 +1073,7 @@ namespace
 } // namespace
 
 TEST("sgl emit - the nvapi fill invokes each hit object through the very structure its trace took, where values move "
-     "(EMIT-263)")
+     "(EMIT-265)")
 {
     // a hit object is invoked through what its own trace was handed, however the source reaches that structure
     struct invoked_case
@@ -1132,7 +1132,7 @@ TEST("sgl emit - the nvapi fill invokes each hit object through the very structu
     }
 }
 
-TEST("sgl emit - the nvapi fill of opacity micromaps writes nothing, at 6.6 (EMIT-263, EMIT-184)")
+TEST("sgl emit - the nvapi fill of opacity micromaps writes nothing, at 6.6 (EMIT-265, EMIT-184)")
 {
     for (auto const route : k_routes)
     {

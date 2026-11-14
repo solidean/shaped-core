@@ -11,7 +11,7 @@
 
 using namespace cc::primitive_defines;
 
-// EMIT-262: with no feature granted and the 6.6 core fills, SGL's dx12 text compiles with DXC at the Shader Model 6.6
+// EMIT-264: with no feature granted and the 6.6 core fills, SGL's dx12 text compiles with DXC at the Shader Model 6.6
 // profiles, every stage, given the arguments the compile reports beside it.
 // SGL's own DXIL states its model in its container, which shaped-graphics-language's sweep reads back; the text needs DXC.
 
@@ -271,7 +271,7 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
             // what slib hands DXC beside SGL's text (EMIT-4, EMIT-185)
             auto options = ssc::dxc::compile_options();
             options.extra_args.push_back(cc::string("-enable-16bit-types"));
-            // and what the compile reports the text needs at its model (EMIT-262)
+            // and what the compile reports the text needs at its model (EMIT-264)
             for (auto const& arg : e.dxc_args)
                 options.extra_args.push_back(arg);
             if (e.float_guarantee != sgl::check::float_level::fast)

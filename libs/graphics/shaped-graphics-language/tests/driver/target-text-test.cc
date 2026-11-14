@@ -298,7 +298,7 @@ TEST("sgl target text - a file's preamble is written once ahead of an entry poin
     CHECK(!dx12.value().text.contains("doubled_spirv"));
 }
 
-TEST("sgl target text - a file-scope const if writes the preambles of the branch the compile takes (CHK-528)")
+TEST("sgl target text - a file-scope const if writes the preambles of the branch the compile takes (CHK-529)")
 {
     constexpr auto source = "const if target_api == .vulkan:\n"
                             "    \"hlsl\n"
@@ -348,7 +348,7 @@ TEST("sgl target text - a file-scope const if writes the preambles of the branch
     CHECK(!plain.contains("with_subgroups"));
 }
 
-TEST("sgl target text - a file-scope const if holds preambles alone (CHK-528)")
+TEST("sgl target text - a file-scope const if holds preambles alone (CHK-529)")
 {
     CHECK(reports_of("const if target_api == .vulkan:\n"
                      "    const k = 1\n")

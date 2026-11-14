@@ -157,7 +157,7 @@ struct module_library
 
 } // namespace
 
-// EMIT-262: with no feature granted and the 6.6 core fills, nothing SGL writes for dx12 needs more than 6.6, either route.
+// EMIT-264: with no feature granted and the 6.6 core fills, nothing SGL writes for dx12 needs more than 6.6, either route.
 // An entry that takes the draw's start is refused instead, until the root-constant fill is written.
 // Every file of sg's, sr's and sv's shaders and of the corpus is swept with the repo's modules, a fourth by default and all
 // under --thorough; every one compiles, so a file that does not fails the sweep.

@@ -1050,7 +1050,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
   It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
   Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
-* **CHK-528** A preamble in a branch of a file-scope `const if` chain (AST-161) is written only by a compile that takes that branch, which its condition decides as CHK-426 does.
+* **CHK-529** A preamble in a branch of a file-scope `const if` chain (AST-161) is written only by a compile that takes that branch, which its condition decides as CHK-426 does.
   A branch holds where the chain's condition holds, no earlier branch held, and its own condition does, so a chain nests.
   A branch that holds anything but preambles and such chains is `invalid-target-text`.
 
@@ -1953,7 +1953,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
-| `invalid-target-text` | CHK-427, CHK-428, CHK-432, CHK-522, CHK-528 |
+| `invalid-target-text` | CHK-427, CHK-428, CHK-432, CHK-522, CHK-529 |
 
 ## Open
 

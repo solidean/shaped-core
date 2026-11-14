@@ -231,7 +231,7 @@ void checker::declare_preamble(i32 file, ast::preamble_decl const& preamble, cc:
                                             .condition = cc::vector<target_condition>::create_copy_of(within)});
         return;
     }
-    // CHK-528: a branch holds where the chain's condition does, no branch before it held, and its own condition does
+    // CHK-529: a branch holds where the chain's condition does, no branch before it held, and its own condition does
     auto const& ast = ast_of(file);
     auto earlier = cc::vector<i32>();
     auto nodes = cc::vector<target_condition>::create_copy_of(within);

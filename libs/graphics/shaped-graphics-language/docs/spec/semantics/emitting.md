@@ -32,7 +32,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's and EMIT-263's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-109's, EMIT-122's, EMIT-128's, EMIT-261's and EMIT-265's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
@@ -360,7 +360,7 @@ binding affine:
   WGSL's `primitive_index` is an extension, which the text enables ahead of every declaration.
 * **EMIT-128** HLSL counts a vertex and an instance from the draw's base, on dx12 and on vulkan through DXC alike, so the text adds where the draw started back.
   vulkan reads it as `[[vk::builtin("BaseVertex")]]` and `[[vk::builtin("BaseInstance")]]`, which every shader model has, and so does `@first_instance`.
-  dx12 reads it as `SV_StartVertexLocation` and `SV_StartInstanceLocation`, Shader Model 6.8's, under the `native` fill of `draw_start`, the default (EMIT-263).
+  dx12 reads it as `SV_StartVertexLocation` and `SV_StartInstanceLocation`, Shader Model 6.8's, under the `native` fill of `draw_start`, the default (EMIT-265).
   Under its `root_constant` fill a dx12 compile of an entry point that takes `@vertex_index`, `@instance_index` or `@first_instance` is `unsupported`, on both routes.
   The detail names the input and the fill.
   That refusal is interim: the fill's lowering, which hands the draw's start over in a root constant, replaces it.
@@ -448,7 +448,7 @@ fn main_ps(p: pixel_input) -> target_ {
   This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
 * **EMIT-234** Where a compile asks, `hlsl-dx12` is written as a DXIL container by SGL itself: `text_request::native`, `sgl emit --target dxil`.
   It takes what EMIT-232 says of a plan, of `require` and `prefer`, and of what a program may do.
-  The container states the shader model EMIT-262 gives, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
+  The container states the shader model EMIT-264 gives, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
   A `fast` float operation carries LLVM's fast flags, and one past it carries none, which is what `-Gis` writes; only a `fast` addition may reorder.
   `ieee` states `fp32-denorm-mode` on the entry point, as `-denorm preserve` does.
 * **EMIT-236** A vertex or pixel entry point of a native route reads each element of its edge ahead of its body, and each `return` stores each output element.
@@ -642,16 +642,16 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Elsewhere the trace's flags leave it out too, `& ~1024u` in HLSL, on both routes: a query that sees no micromap has nothing to force, and DXC refuses the flag without the template's.
   A native route states the same: `SPV_EXT_opacity_micromap`'s capability on SPIR-V, whose traces see micromaps with no flag of their own.
   On DXIL `dx.op.allocateRayQuery2` with the flag that allows them, at Shader Model 6.9, a library's function row included.
-  dx12's `nvapi` fill of the feature states none of it, at 6.6: NVIDIA's driver applies a structure's micromaps to every trace itself (EMIT-263).
+  dx12's `nvapi` fill of the feature states none of it, at 6.6: NVIDIA's driver applies a structure's micromaps to every trace itself (EMIT-265).
   NVAPI has no flag that forces a query's trace to 2 states, so under that fill a trace whose flags force them, or are no constant, is `unsupported`, naming that.
-* **EMIT-262** A `hlsl-dx12` compile reports the DXIL shader model its output needs, `emitted_source::dxil_shader_model`, on both routes.
+* **EMIT-264** A `hlsl-dx12` compile reports the DXIL shader model its output needs, `emitted_source::dxil_shader_model`, on both routes.
   It is the highest that `check::dxil_shader_model_of` gives of each feature the entry point needs in its fill, and of each core construct written natively; 6.6 where none needs more.
   Natively `shader_execution_reordering` and `opacity_micromap` need 6.9 and `clustered_geometry` 6.10, and the `draw_start` and `wave_size` core constructs 6.8; every other fill needs 6.6.
   A host targeting 6.6 asks `core = {.draw_start = root_constant, .wave_size = none}`, and grants a feature past 6.6 in a fill that needs no more, or not at all.
   It compiles the text at that model's profile, and SGL's own DXIL states it in its container.
   `emitted_source::dxc_args` is what DXC needs beside the text at that model, which a host passes on unchanged.
   It is `-enable-payload-qualifiers` where the text states a payload's access qualifiers (EMIT-137) below 6.7, from which DXC takes them by default.
-* **EMIT-263** A compile names how it writes each granted feature and each core construct for its target, its **fill** ([why](why/emitting.md#emit-263)).
+* **EMIT-265** A compile names how it writes each granted feature and each core construct for its target, its **fill** ([why](why/emitting.md#emit-265)).
   `text_request::fills` holds a `check::feature_fill` per feature, and `text_request::core` the fills of `draw_start` (EMIT-128) and `wave_size` (EMIT-148).
   A granted feature that names no fill, and either core construct by default, is `native`: the target's own form.
   `emit::fills_of` lists the fills a target offers, most demanding first, and asking another is `unsupported`, naming the fill.
@@ -671,12 +671,12 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   So an element of an array of structures is the one the trace took, whatever its index is or does after it: a `let mut`, a buffer's value.
   A hit object more than one trace may have made is `unsupported` under `nvapi`, naming that.
   The `nvapi` fill of `opacity_micromap` writes nothing: NVIDIA's driver applies a structure's micromaps itself (EMIT-184).
-* **EMIT-264** A compile reports what an entry point's output varies with, `emitted_source::axes`: each feature it consulted, granted or not, with the fills its target offers.
+* **EMIT-266** A compile reports what an entry point's output varies with, `emitted_source::axes`: each feature it consulted, granted or not, with the fills its target offers.
   It consults a feature where `has` asks for it (CHK-426), where a trace may reorder (CHK-433) and where a ray query may see micromaps (EMIT-184).
   It consults one in a branch its compile does not take too, however deep, where some grant of its target's device would take it.
   A branch whose condition the target, an option or a constant decides, with no `has` in it, is no variant, nor is anything inside it: `const if target_api == .vulkan` on dx12.
   The flattening records those before it drops the branches, without judging them (CHK-356); a branch is read once per place it is inlined at.
-  The conditions of the preambles of each file it writes a body in target text from consult what they name (CHK-528), and so do a text type's (CHK-432).
+  The conditions of the preambles of each file it writes a body in target text from consult what they name (CHK-529), and so do a text type's (CHK-432).
   So one compile, for its target and its options, tells a bake every variant there is.
   A bake compiles a variant per choice on each axis, each fill or the feature not granted, and a host runs the first its device takes, most demanding first.
   `sgl::variant_key::of` names one variant, its fills in feature order whatever order they came in, so two keys of one variant are equal; a feature named twice is an error.
@@ -794,7 +794,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-147** `@subgroup_size` and `@subgroup_invocation_id` are `WaveGetLaneCount()` and `WaveGetLaneIndex()` in HLSL, read into locals at the top of the entry point.
   WGSL takes them as `@builtin(subgroup_size)` and `@builtin(subgroup_invocation_id)`, and MSL as `[[threads_per_simdgroup]]` and `[[thread_index_in_simdgroup]]`.
 * **EMIT-148** `hlsl-dx12` writes `@preferred_subgroup_size(n)` as `[WaveSize(4, 128, n)]`, the range form with `n` preferred, which every dx12 device runs ([why](why/emitting.md#emit-148)).
-  It does so under the `native` fill of `wave_size`, the default, since the range form is Shader Model 6.8's; under its `none` fill the text states nothing (EMIT-263).
+  It does so under the `native` fill of `wave_size`, the default, since the range form is Shader Model 6.8's; under its `none` fill the text states nothing (EMIT-265).
   SGL's own DXIL states no subgroup size under either.
   No other text states it: the preference reaches the host beside the text, as a kernel's shape does in MSL (EMIT-59).
   sg's vulkan backend asks the pipeline for subgroups of `n` where the device runs that size in a compute stage, and WGSL and MSL have no way to ask.
@@ -939,7 +939,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107, EMIT-128, EMIT-154, EMIT-263 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107, EMIT-128, EMIT-154, EMIT-265 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | none: retired by EMIT-41 |
