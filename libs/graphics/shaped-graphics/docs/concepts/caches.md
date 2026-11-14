@@ -40,10 +40,7 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
   A layout carries that hash from creation — `layout->structural_hash()` — computed once by the backend through the same `sg::impl` functions this cache keys with, so the two can never disagree.
 - **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with the **pipeline layout's structural hash**, which transitively covers its group layouts.
 - **raytracing pipeline** = the same, over every shader it names, plus the pipeline limits.
-- **raster pipeline** = every shader plus the vertex input and each baked fixed-function state, over the layout's **address** rather than its structural hash.
-  That one is the odd one out, and deliberately in-memory-only.
-  An address dedups nothing across two identically built layouts, and means nothing at all in the next process.
-  So raster PSOs would have to go structural before they could be persisted.
+- **raster pipeline** = every shader plus the vertex input, each baked fixed-function state and the view count, over the layout's structural hash.
 
 - **compiled shader** = source + entry point + stage + model + every compile option + **the DXC version**.
   The version matters only to a key that outlives the process, and there it is required: without it a DXC upgrade keeps serving the previous compiler's DXIL forever.
@@ -51,13 +48,14 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
 Structural rather than pointer identity is what makes a key mean anything outside the process that made it.
 Two independently created but identical group layouts collapse to one, so for the tiers keyed that way acquiring through the cache is a convenience rather than a precondition for dedup.
 A key computed in one run also still names the same thing in the next — the property the persistent tier needs, and one an address could never have given it.
-Which is exactly why the raster tier's address-keyed layout bounds what that tier can become.
 
 ## The persistent tier
 
-A pipeline that misses in memory consults [blob-cache](../../../../data/blob-cache/docs/design.md) for a serialized PSO blob before building, and stores the one it produced on the way out.
+A pipeline of any kind that misses in memory consults [blob-cache](../../../../data/blob-cache/docs/design.md) for a serialized PSO blob before building, and stores the one it produced on the way out.
 The DXC shader cache does the same with encoded `compiled_shader`s.
 So the in-memory tier holds live handles for this run, and bcache holds bytes for every run after it.
+Compute builds through `build_compute_pipeline`, raster and ray-tracing pipelines through `build_through_store`, since their backends build asynchronously; the rules below are the same for all three.
+A backend that serializes nothing stores an empty placeholder and builds fresh every run: dx12 state objects, and on dx12 any layout with a static sampler ([the driver bug](../../../../../docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/readme.md)).
 
 The two differ in one way that shapes the code.
 For a shader the cacheable product and the expensive product are the same bytes, so it is a plain `acquire`: decode what comes back, compile and encode on a miss.

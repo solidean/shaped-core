@@ -33,10 +33,8 @@ public:
     /// Destroys the backend objects now; see sg::raytracing_pipeline::release_backend_objects.
     void release_backend_objects() override;
 
-    /// Ray-tracing pipelines carry no serialized blob here: VkPipelineCache covers the ordinary tiers, and a
-    /// state-object blob has no Vulkan counterpart.
-    /// dx12 answers the same way, and the answer a caller needs is the same — nothing here is worth persisting.
-    [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override { return {}; }
+    /// The pipeline's own VkPipelineCache, serialized, as the raster pipeline's is: it holds the ray-tracing stages too.
+    [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;
 
     /// The group handle for one registered shader, by the handle sg gave it.
     /// Each is `shaderGroupHandleSize` bytes, which is what a shader-table record holds.
@@ -48,6 +46,8 @@ public:
     vulkan_context& _ctx;
     vulkan_pipeline_layout_handle layout;
     VkPipeline _pipeline = VK_NULL_HANDLE;
+    /// Seeded from the description's blob where it is usable; what cached_pipeline_data serializes.
+    VkPipelineCache _cache = VK_NULL_HANDLE;
 
     /// Every group's opaque handle, concatenated in group order, and where each category's groups start.
     /// One allocation rather than four, since the device hands them back as one block.

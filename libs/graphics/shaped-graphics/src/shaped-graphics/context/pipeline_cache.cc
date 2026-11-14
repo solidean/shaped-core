@@ -126,6 +126,49 @@ cc::shared_async<compute_pipeline_handle> build_compute_pipeline(context* ctx,
     co_return pipeline;
 }
 
+/// The blob `built` hands out once it is done, filling `produced` with the pipeline itself, as the singleflight's winner.
+template <class Handle>
+cc::shared_async<bcache::blob> blob_of(cc::shared_async<Handle> built, std::shared_ptr<cc::optional<Handle>> produced)
+{
+    auto pipeline = co_await built;
+    *produced = pipeline;
+    // Empty where the backend serializes nothing (dx12 state objects, or a layout with static samplers); the entry is
+    // then a tiny placeholder, and every later run builds fresh, as it would have anyway.
+    co_return pipeline->cached_pipeline_data();
+}
+
+/// Builds a pipeline whose backend creates it asynchronously, letting a persistent blob accelerate it: the raster and
+/// ray-tracing counterpart of build_compute_pipeline, with the same singleflight and the same staleness rule.
+///
+/// `build(blob)` starts a build seeded with `blob`, or a fresh one for an empty blob; it is called once or twice.
+template <class Handle, class Build>
+cc::shared_async<Handle> build_through_store(bcache::blob_cache* store, bcache::cache_key key, Build build)
+{
+    if (store == nullptr)
+        co_return co_await build(bcache::blob());
+
+    auto const produced = std::make_shared<cc::optional<Handle>>();
+    auto compute = [build, produced]() -> cc::shared_async<bcache::blob>
+    { return blob_of<Handle>(build(bcache::blob()), produced); };
+    auto const cached = co_await store->acquire(key, cc::move(compute));
+
+    if (produced->has_value())
+        co_return cc::move(produced->value());
+
+    auto pipeline = co_await build(cached);
+    // Stale for this adapter and driver, so replaced: see build_compute_pipeline.
+    if (!cached.empty() && !pipeline->used_cached_pipeline())
+    {
+        auto fresh = pipeline->cached_pipeline_data();
+        if (!fresh.empty())
+        {
+            (void)store->invalidate(key);
+            (void)store->put(key, cc::move(fresh));
+        }
+    }
+    co_return pipeline;
+}
+
 // A shader's content identity: the bytecode plus what the compiler folded into it.
 // `stage` and `format` are implied by the slot the shader sits in and by the bytecode itself.
 void add_shader(cc::byte_stream_builder& b, compiled_shader const& s)
@@ -324,8 +367,9 @@ cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_descri
 cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_description const& desc) const
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
-    // pipeline-layout identity — pointer is stable because cached layouts are shared/persistent
-    b.add_pod(reinterpret_cast<u64>(desc.layout.get()));
+    // Structural, as for compute: this key reaches the persistent tier, where an address names nothing.
+    b.add_pod(desc.layout != nullptr ? desc.layout->structural_hash() : cc::hash128{});
+    b.add_pod(desc.view_count);
 
     add_shader(b, desc.vertex_shader);
     add_optional_shader(b, desc.fragment_shader);
@@ -516,13 +560,22 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
 async_raster_pipeline pipeline_cache::acquire_raster_pipeline(context& ctx, raster_pipeline_description const& desc)
 {
     auto const key = this->compute_raster_pipeline_key(desc);
-    return _raster_cache.acquire(key,
-                                 [&]() -> async_raster_pipeline
-                                 {
-                                     auto node = ctx.uncached.create_raster_pipeline_async(desc);
-                                     ctx.backlog.track(node);
-                                     return node;
-                                 });
+    return _raster_cache.acquire(
+        key,
+        [&]() -> async_raster_pipeline
+        {
+            // As for compute: webgpu has no blob, and the store's path is no help to a backend that never gives one.
+            auto* const store = ctx.backend() == backend_kind::webgpu ? nullptr : this->resolve_blob_cache();
+            auto const build = [ctx_ptr = &ctx, d = raster_pipeline_description(desc)](bcache::blob blob)
+            {
+                auto seeded = d;
+                seeded.cached_pipeline = cc::move(blob);
+                return ctx_ptr->uncached.create_raster_pipeline_async(seeded);
+            };
+            auto node
+                = build_through_store<raster_pipeline_handle>(store, this->persistent_key(ctx, key, "raster"), build);
+            return ctx.backlog.start(cc::move(node));
+        });
 }
 
 async_raytracing_pipeline pipeline_cache::acquire_raytracing_pipeline(context& ctx,
@@ -535,17 +588,24 @@ async_raytracing_pipeline pipeline_cache::acquire_raytracing_pipeline(context& c
         {
             // The build frame runs later, possibly on a worker.
             // So deep-copy the whole description, which owns its shader vectors + layout handle, rather than referencing the caller's.
-            auto node = cc::make_async_scheduled<raytracing_pipeline_handle>(
-                [ctx_ptr = &ctx, d = raytracing_pipeline_description(desc)](
-                    cc::async_context<raytracing_pipeline_handle>& actx) -> cc::async_step_status
-                {
-                    auto res = ctx_ptr->uncached.try_create_raytracing_pipeline(d);
-                    if (res.has_error())
-                        return actx.error(cc::move(res.error()));
-                    return actx.success(cc::move(res.value()));
-                });
-            ctx.backlog.track(node);
-            return node;
+            auto const build = [ctx_ptr = &ctx, d = raytracing_pipeline_description(desc)](bcache::blob blob)
+            {
+                return cc::make_async_scheduled<raytracing_pipeline_handle>(
+                    [ctx_ptr, d,
+                     blob = cc::move(blob)](cc::async_context<raytracing_pipeline_handle>& actx) -> cc::async_step_status
+                    {
+                        auto seeded = d;
+                        seeded.cached_pipeline = blob;
+                        auto res = ctx_ptr->uncached.try_create_raytracing_pipeline(seeded);
+                        if (res.has_error())
+                            return actx.error(cc::move(res.error()));
+                        return actx.success(cc::move(res.value()));
+                    });
+            };
+            auto* const store = ctx.backend() == backend_kind::webgpu ? nullptr : this->resolve_blob_cache();
+            auto node = build_through_store<raytracing_pipeline_handle>(
+                store, this->persistent_key(ctx, key, "raytracing"), build);
+            return ctx.backlog.start(cc::move(node));
         });
 }
 } // namespace sg
