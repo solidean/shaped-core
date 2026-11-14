@@ -150,7 +150,9 @@ cc::rec::recording cc::rec::recording::scopes_collapsed(u64 below_cycles) const
                     auto const begin = open.back();
                     open.remove_back();
                     auto const duration = e.cycles >= begin.cycles ? e.cycles - begin.cycles : u64(0);
-                    if (duration >= below_cycles || !has_static_name(begin.site))
+                    // A scope across a block boundary is kept: the later block's preamble names it open, and a reader
+                    // would otherwise see it open forever.
+                    if (duration >= below_cycles || !has_static_name(begin.site) || begin.block != b)
                         continue;
                     marks[begin.block].push_back({.offset = begin.offset});
                     marks[b].push_back({

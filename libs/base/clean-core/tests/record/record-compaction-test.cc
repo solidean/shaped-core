@@ -88,12 +88,24 @@ struct stream
         return *this;
     }
 
+    /// Ends the block being written, as a sealed chunk would, so what follows goes into the stream's next one.
+    stream& next_block()
+    {
+        blocks.push_back(builder.take());
+        ++metadata.chunk_seq;
+        return *this;
+    }
+
     [[nodiscard]] cc::rec::recording take()
     {
         auto r = cc::rec::recording();
+        for (auto const& b : blocks)
+            r.append_block(b);
         r.append_block(builder.take());
         return r;
     }
+
+    cc::vector<cc::rec::recorded_block> blocks;
 
 private:
     void add(cc::rec::desc const& d, u64 cycles, cc::span<byte const> payload)
@@ -161,6 +173,14 @@ TEST("record/compaction - a scope this recording saw only one end of is kept")
     s.end(work_end, 5).begin(inner_begin, 10);
     auto const r = s.take();
     CHECK(listing(r.scopes_collapsed(1000)) == "work:end inner:begin");
+}
+
+TEST("record/compaction - a short scope across a block boundary is kept, since the later block's preamble names it")
+{
+    auto s = stream();
+    s.begin(work_begin, 0).next_block().end(work_end, 10).begin(inner_begin, 20).end(inner_end, 30);
+    auto const r = s.take();
+    CHECK(listing(r.scopes_collapsed(1000)) == "work:begin work:end inner:sum");
 }
 
 TEST("record/compaction - a stat lane folds into one summary per window")
@@ -264,6 +284,45 @@ TEST("record/compaction - without sampling, what the code recorded about itself 
     s.builder.add({.desc = &cc::rec::impl::thread_run_desc(), .cycles = 3, .payload = run});
     s.stat(bytes_stat, 4, 1).end(work_end, 5);
     CHECK(listing(s.take().without_sampling()) == "work:begin bytes:stat work:end");
+}
+
+TEST("record/compaction - thinned sampling keeps one reading per sampled thread per window")
+{
+    auto s = stream();
+    auto const reading = [&](u32 thread, u64 cycles)
+    {
+        byte run[cc::rec::impl::thread_run_payload_size] = {};
+        cc::memcpy(run, &thread, sizeof(thread));
+        s.builder.add({.desc = &cc::rec::impl::thread_run_desc(), .cycles = cycles, .payload = run});
+    };
+    reading(1, 0);
+    reading(1, 3);
+    reading(2, 4);
+    reading(1, 12);
+    reading(1, 15);
+    reading(1, 25);
+    s.stat(bytes_stat, 26, 1);
+    auto const r = s.take();
+
+    auto const count = [](cc::rec::recording const& rec, u32 thread)
+    {
+        auto n = 0;
+        rec.for_each_event(
+            [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+            {
+                if (e.desc == &cc::rec::impl::thread_run_desc() && e.field_as_u64("thread_index").value_or(0) == thread)
+                    ++n;
+            });
+        return n;
+    };
+    auto const thinned = r.with_sampling_thinned(10, 1);
+    CHECK(count(thinned, 1) == 3);
+    CHECK(count(thinned, 2) == 1);
+    CHECK(summaries(thinned, "bytes").empty()); // the rest is untouched
+    CHECK(listing(thinned).ends_with("bytes:stat"));
+
+    // Aligned windows, so a second pass at the same interval keeps the same events.
+    CHECK(listing(thinned.with_sampling_thinned(10, 1)) == listing(thinned));
 }
 
 TEST("record/compaction - a summary survives a file, compressed or not, with its site")

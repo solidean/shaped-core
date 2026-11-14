@@ -147,6 +147,7 @@ So the mistake is caught rather than reported as a wrong number.
 ```cpp
 CC_RECORD_ASYNC_SCOPE("load-level");                       // follows the work, wherever it resumes
 CC_RECORD_ASYNC_SCOPE_WITH_ID("inbound", id_off_the_wire); // ... under an id from somewhere else
+state.scope = CC_RECORD_ASYNC_SCOPE_OPEN("pass");          // begins now; state.scope.close() ends it, in a later call
 auto const* s = cc::rec::current_async_scope();            // the innermost one, or null
 auto const id = cc::rec::current_trace_id();               // ... and the trace it is
 ```
@@ -154,6 +155,10 @@ auto const id = cc::rec::current_trace_id();               // ... and the trace 
 An async scope is the answer to the restriction above: it is an entry in `cc::async`'s ambient chain rather than a stack frame.
 So a `co_await` carries it along, and every task spawned underneath inherits it.
 That makes it the right tool for a logical operation — a request, a job, a level load — and `CC_RECORD_SCOPE` the right one for a span of one thread's time.
+
+`CC_RECORD_ASYNC_SCOPE_OPEN` is the form for an operation that is no one C++ block: a value, `rec::open_async_scope`, that records the begin when made and the end when closed or destroyed.
+It installs nothing on the ambient chain, so it names a span and attributes nothing recorded inside it; an owner or a trace does that.
+nexus opens one per test pass, beside the pass owner it installs anyway, since a plain scope's depth on the thread does not survive a test that restarts the recorder.
 
 It is also strictly the more expensive of the two.
 Installing one allocates two links and takes their refcounts, where a profiling scope writes two events and touches a counter.
@@ -552,6 +557,7 @@ auto const folded = captured.scopes_collapsed(below_cycles);      // a short sco
 auto const lanes  = folded.stats_summarized(window_cycles);       // a stat lane becomes one summary per window
 auto const small  = captured.compacted({.min_scope_secs = 1e-3, .stat_window_secs = 0.1, .target_bytes = 1 << 20});
 auto const mine   = captured.without_sampling();                  // what the code recorded about itself, alone
+auto const slow   = captured.with_sampling_thinned(0.5);          // a sample per sampled thread per half second
 ```
 
 **A summary is an event of kind `summary` that keeps its site's own descriptor**, so the site's name, domain and source location survive a file.
@@ -562,6 +568,7 @@ A collapsed scope's summary sits where the scope closed, and what the scope encl
 A stat lane is one site on one thread inside one scope, so a summary never moves out of the scope its events were in.
 Windows are aligned to multiples of the window, so summarizing twice at one window changes nothing, and collapsed scopes summarize with each other like any lane.
 A scope whose begin or end the recording lacks, and a site named at runtime, are kept as they are.
+So is a scope whose begin and end sit in different blocks: the later block's preamble names it open, and a reader would otherwise see it open forever.
 
 `compacted` runs both in rounds, the thresholds growing by `growth` each round, until the recording fits `target_bytes`.
 A round that changes nothing below the recording's span does not stop it, since a larger threshold may still fold what it could not; one past the span does.

@@ -1166,6 +1166,8 @@ CC_RECORD_ASYNC_SCOPE("load-level");         // an ambient-chain entry, so it DO
 // Legal both inside a coroutine body and around the code that builds one; pick by what the span should COVER.
 // ... except on MSVC ARM64, where the in-coroutine form loses the scope across a suspend (see docs/profiling.md).
 CC_RECORD_ASYNC_SCOPE_WITH_ID("inbound", wire_id);       // ... under an id from off the wire
+state.scope = CC_RECORD_ASYNC_SCOPE_OPEN("pass");        // -> rec::open_async_scope: begins now, .close() (or dtor) ends it
+// No ambient links, so it attributes nothing under it: for an operation spanning calls, a harness's pass above all.
 cc::rec::current_async_scope();              // -> desc const*, the innermost one; null outside any
 cc::rec::current_trace_id();                 // -> trace_id; an async scope ALWAYS has one (see Tracing below)
 // Pick by unit of work: async scope per logical operation, CC_RECORD_SCOPE per span of one thread's time.
@@ -1180,6 +1182,7 @@ cc::rec::current_owner_id();                 // -> trace_id; the owner in effect
 #include <clean-core/record/sampling.hh>      // what the threads were ACTUALLY doing, beside what they were told to say
 cc::rec::sampling_scope const s({.rate_hz = 1000.0});    // or start_sampling / stop_sampling / is_sampling
 // rate_hz is PER THREAD (a tick covers all of them). Capped ~1.9 kHz by the OS timer — measured, not guessed.
+// .sink takes samples instead of the recording; .recorded_every_secs = 0.5 still records one per thread that often.
 // threads_per_tick = 1 restores a fixed budget split across threads. The sampler logs its own ticks as scopes.
 auto const merged = captured.spliced_samples();          // samples ride the SAMPLER's stream until you splice them
 // A sample carries an ANCHOR (which thread, how far its stream had committed), not a copy of that thread's state —
@@ -1334,6 +1337,7 @@ rec.scopes_collapsed(below_cycles);          // a short scope -> a summary of it
 rec.stats_summarized(window_cycles);         // a stat lane -> one summary per window, never across its scope
 rec.compacted({.min_scope_secs = 1e-3, .stat_window_secs = 0.1, .target_bytes = 1 << 20}); // both, in coarsening rounds
 rec.without_sampling();                      // drops samples, record.thread_run and the sampler's tick scopes
+rec.with_sampling_thinned(0.5);              // one sample and one thread_run per sampled thread per 0.5 s; ticks go
 e.as_summary();                              // -> optional<rec::summary>: count, sum, min, max, last, begin/end cycles
 cc::rec::compress_serialized(cc::rec::serialize(rec)); // the zstd envelope; load_recording reads either form
 rec.append(other);                           // concatenation

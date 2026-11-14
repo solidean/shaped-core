@@ -259,6 +259,35 @@ cc::rec::recording cc::rec::recording::without_sampling() const
         });
 }
 
+cc::rec::recording cc::rec::recording::with_sampling_thinned(f64 interval_secs, f64 cycles_per_second) const
+{
+    auto const run_name = cc::string_view(rec::impl::thread_run_desc().name);
+    auto const tick_name = cc::string_view(rec::impl::sample_tick_scope_name);
+    auto const rate = cycles_per_second > 0 ? cycles_per_second : rec::cycles_per_second();
+    auto const window_cycles = cc::max(u64(1), u64(interval_secs * rate));
+
+    // Per sampled thread and kind (sample or reading), the window whose one event was kept, plus one.
+    cc::map<u64, u64> kept_window;
+    return filtered(
+        [&](rec::chunk_view const&, rec::event_view const& e)
+        {
+            auto const name = cc::string_view(e.desc->name);
+            if (name == tick_name)
+                return false;
+            auto const is_sample = e.kind() == rec::event_kind::sample;
+            if (!is_sample && name != run_name)
+                return true;
+
+            auto const thread = e.field_as_u64("thread_index").value_or(0);
+            auto const window = e.cycles / window_cycles + 1;
+            auto& last = kept_window[thread * 2 + (is_sample ? 0 : 1)];
+            if (last == window)
+                return false;
+            last = window;
+            return true;
+        });
+}
+
 cc::rec::recording cc::rec::recording::in_cycle_range(u64 begin_cycles, u64 end_cycles) const
 {
     return filtered([=](rec::chunk_view const&, rec::event_view const& e)

@@ -255,7 +255,6 @@ cc::atomic<bool> g_worker_running = false;
 void worker_body(double poll_interval_secs)
 {
     cc::set_current_thread_name("cc-record");
-    cc::rec::set_current_thread_record_name("cc-record");
 
     while (!g_worker_stop.load(cc::memory_order_acquire))
     {

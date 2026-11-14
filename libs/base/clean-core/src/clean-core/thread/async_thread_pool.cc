@@ -1,5 +1,6 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/platform/resource_limits.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/impl/async_parker.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
@@ -397,7 +398,7 @@ bool cc::async_thread_pool::idle_scan(worker& w, Stop const& stop)
 
 void cc::async_thread_pool::worker_main(worker& w)
 {
-    cc::set_current_thread_name("async-pool");
+    cc::set_current_thread_name(cc::format("async-pool {}", w.id));
     set_current_worker(&w);
     async_worker_scope const scope(*this);
 

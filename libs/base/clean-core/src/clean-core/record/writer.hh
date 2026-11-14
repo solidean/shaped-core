@@ -301,7 +301,7 @@ namespace cc::rec
 /// Called for you when a thread exits; call it by hand only to bound how long this thread's tail sits unconsumed.
 void seal_current_thread_chunk();
 
-/// Names the calling thread in every recording it appears in.
-/// Independent of cc::set_current_thread_name, which the OS owns; this one is what a trace viewer shows.
+/// Names the calling thread in every recording it appears in, and nowhere else.
+/// cc::set_current_thread_name calls it too, so this alone is for a recording name that differs from the OS one.
 void set_current_thread_record_name(cc::string_view name);
 } // namespace cc::rec
