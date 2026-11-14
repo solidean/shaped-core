@@ -325,6 +325,50 @@ TEST("record/compaction - thinned sampling keeps one reading per sampled thread 
     CHECK(listing(thinned.with_sampling_thinned(10, 1)) == listing(thinned));
 }
 
+TEST("record/compaction - thinned sampling drops a stack its thread repeats, with that window's reading")
+{
+    auto s = stream();
+    auto const sample = [&](u64 cycles, u64 frame)
+    {
+        byte payload[cc::rec::impl::sample_frames_offset + 8] = {};
+        auto const thread = u32(1);
+        auto const count = u32(1);
+        cc::memcpy(payload, &thread, sizeof(thread));
+        cc::memcpy(payload + 24, &count, sizeof(count));
+        cc::memcpy(payload + cc::rec::impl::sample_frames_offset, &frame, sizeof(frame));
+        s.builder.add({.desc = &cc::rec::impl::sample_desc(), .cycles = cycles, .payload = payload});
+    };
+    auto const reading = [&](u64 cycles)
+    {
+        byte run[cc::rec::impl::thread_run_payload_size] = {};
+        auto const thread = u32(1);
+        cc::memcpy(run, &thread, sizeof(thread));
+        s.builder.add({.desc = &cc::rec::impl::thread_run_desc(), .cycles = cycles, .payload = run});
+    };
+    // A thread parked in one wait for three windows, then somewhere else.
+    for (auto const [cycles, frame] : {cc::pair<u64, u64>{0, 0x10}, {10, 0x10}, {20, 0x10}, {30, 0x20}})
+    {
+        reading(cycles);
+        sample(cycles + 1, frame);
+    }
+    auto const thinned = s.take().with_sampling_thinned(10, 1);
+
+    auto samples = cc::vector<u64>();
+    auto readings = 0;
+    thinned.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.desc == &cc::rec::impl::sample_desc())
+                samples.push_back(e.cycles);
+            else if (e.desc == &cc::rec::impl::thread_run_desc())
+                ++readings;
+        });
+    REQUIRE(samples.size() == 2);
+    CHECK(samples[0] == 1);  // the first time it was seen there
+    CHECK(samples[1] == 31); // and once it moved
+    CHECK(readings == 2);
+}
+
 TEST("record/compaction - a summary survives a file, compressed or not, with its site")
 {
     auto s = stream();
