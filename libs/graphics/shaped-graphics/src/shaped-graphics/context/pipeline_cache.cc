@@ -28,7 +28,7 @@ namespace
 /// Bumped when what goes into a persistent pipeline entry changes shape.
 /// The adapter and driver live in the key itself; this is only ever about OUR encoding.
 /// That includes what a backend derives from a layout: a root signature that grew a parameter makes every blob stale.
-constexpr auto k_pipeline_blob_version = bcache::version(3);
+constexpr auto k_pipeline_blob_version = bcache::version(4);
 
 /// The namespace fragment naming a backend, so two backends' blobs can never answer each other's lookups.
 /// backend_kind is explicitly not a closed set, so an unnamed one shares the "unknown" partition rather than silently
@@ -109,11 +109,12 @@ cc::shared_async<compute_pipeline_handle> build_compute_pipeline(context* ctx,
 
     // The driver refused the blob, so the entry is stale for this adapter and driver — replace it rather than pay the
     // rejection on every future run.
+    // So is an empty placeholder once the backend hands out a blob for the pipeline, where it handed out none before.
     // Entries are immutable, so a replacement is invalidate-then-put; both are enqueued on one actor, so they stay ordered.
     //
     // Never decided by comparing bytes: a real driver re-serializes an accepted blob to different bytes, so a byte test
     // would rewrite every entry on every run.
-    if (!cached.empty() && !pipeline->used_cached_pipeline())
+    if (!pipeline->used_cached_pipeline())
     {
         auto fresh = pipeline->cached_pipeline_data();
         if (!fresh.empty())
@@ -132,8 +133,8 @@ cc::shared_async<bcache::blob> blob_of(cc::shared_async<Handle> built, std::shar
 {
     auto pipeline = co_await built;
     *produced = pipeline;
-    // Empty where the backend serializes nothing (dx12 state objects, or a layout with static samplers); the entry is
-    // then a tiny placeholder, and every later run builds fresh, as it would have anyway.
+    // Empty where the backend serializes nothing (dx12 state objects and mesh-shaded pipelines, or a layout whose static
+    // samplers fell back into its root signature); the entry is then a tiny placeholder, and later runs build fresh.
     co_return pipeline->cached_pipeline_data();
 }
 
@@ -156,8 +157,8 @@ cc::shared_async<Handle> build_through_store(bcache::blob_cache* store, bcache::
         co_return cc::move(produced->value());
 
     auto pipeline = co_await build(cached);
-    // Stale for this adapter and driver, so replaced: see build_compute_pipeline.
-    if (!cached.empty() && !pipeline->used_cached_pipeline())
+    // Stale for this adapter and driver, or a placeholder the backend can now fill, so replaced: see build_compute_pipeline.
+    if (!pipeline->used_cached_pipeline())
     {
         auto fresh = pipeline->cached_pipeline_data();
         if (!fresh.empty())
