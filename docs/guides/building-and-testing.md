@@ -329,7 +329,8 @@ On Windows a build directory is configured inside the MSVC developer environment
 CMake re-detects tools at every configure while the cache keeps what it found first, so a switch pairs the two.
 That is how a bare `cmake <build>` from a plain shell once gave SDL3's `version.rc` a rule for llvm-rc that ran rc.exe, which deadlocked the build with no output.
 dev.py enters the environment itself, so configuring through it is always right; a toolset or SDK update inside the environment only warns.
-[ConfigureEnvironment.cmake](../../tools/cmake/ConfigureEnvironment.cmake) is the check.
+[ConfigureEnvironment.cmake](../../tools/cmake/ConfigureEnvironment.cmake) is the check, and it holds in a project consuming shaped-core too.
+Such a project includes it before its own `project()`, which also keeps its `.rc` rule paired with the cached compiler; shaped-core's own include then finds it done.
 
 ## An optional build server
 
