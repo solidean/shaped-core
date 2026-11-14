@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/impl/writer.cc
   - file: libs/graphics/shaped-viewer/shaders/hybrid_pass.sgl
   - test: "sv - a frame mesh traces in the frame it is placed, and keeps the image only while its content holds"
+closed: 2026-11-14
+resolution: duplicate
 ---
 
 # Native DXIL's hybrid lighting hangs Intel's dx12 device unless neighboring buffer loads are merged
