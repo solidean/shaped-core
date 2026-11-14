@@ -240,7 +240,8 @@ TEST("record/compaction - a lane never spans two owners, so each summary belongs
     auto const r = s.take();
 
     // One window covers it all, and still the lane splits where the owner changes, before the delta that changes it.
-    CHECK(listing(r.stats_summarized(1'000'000)) == "async.ambient:stat async.ambient:stat bytes:sum async.ambient:stat bytes:sum");
+    CHECK(listing(r.stats_summarized(1'000'000))
+          == "async.ambient:stat async.ambient:stat bytes:sum async.ambient:stat bytes:sum");
     auto const bytes = summaries(r.stats_summarized(1'000'000), "bytes");
     REQUIRE(bytes.size() == 2);
     CHECK(bytes[0].count == 3);

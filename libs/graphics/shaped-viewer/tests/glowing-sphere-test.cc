@@ -150,7 +150,8 @@ ASYNC_INVOCABLE_TEST("sv - inside a glowing sphere the hybrid sees the emission 
             if (store.min_accumulated_samples(id) < 64 || !accumulated.is_valid())
                 continue;
 
-            auto const& pixels = co_await accumulated.data();
+            auto const pixels_node = accumulated.data();
+            auto const& pixels = co_await pixels_node;
             auto sum = 0.0;
             for (auto const& p : pixels)
                 sum += 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
