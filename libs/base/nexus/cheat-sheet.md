@@ -454,7 +454,7 @@ uv run dev.py test                       # build + run the whole suite
 // --benchmarks (sweep benchmark bucket), --examples (sweep example bucket).
 // --pgo-json <file> (recorded-metric sidecar), --benchmark-json <file> (full results + every sample),
 // --timings-json <file> (every test's wall-clock interval and thread; `dev.py test --profile` draws one slice per test),
-//   --benchmark-rec <file> (a .ccrec of the whole run), --benchmark-verbose, --benchmark-pin.
+//   --rec <file> (a .ccrec of the whole run), --benchmark-verbose, --benchmark-pin.
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
 //   -j1 runs them one at a time in schedule order, exclusive() after the rest of each phase, rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.

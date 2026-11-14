@@ -736,6 +736,19 @@ private:
     void const* _head = nullptr;
 };
 
+/// When the run began, for --stop-after; execute_tests anchors it before any test starts.
+double& run_started_at()
+{
+    static auto started = 0.0;
+    return started;
+}
+
+/// Whether --stop-after's time is up, so no further test starts.
+[[nodiscard]] bool is_past_stop_after(nx::test_schedule_config const& config)
+{
+    return config.stop_after_secs > 0.0 && cc::current_time_steady_secs() - run_started_at() >= config.stop_after_secs;
+}
+
 /// Counts the work still carrying `head` beyond its owner's reference.
 /// With CC_ASYNC_AMBIENT_TRACE, leftover work is watched for leftover_watch_secs, and each release it makes is reported with its stack.
 /// The wait does not change the verdict: work there at the count failed the pass, whether it let go a microsecond later or never.
@@ -1214,6 +1227,8 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
         auto _ = scoped_test_assertion_handler();
         if (decl.test_config.thorough_only && !ctx.config->thorough)
             SKIP("runs only under --thorough");
+        else if (is_past_stop_after(*ctx.config))
+            SKIP("the run had reached its --stop-after time");
         else if (decl.is_invocable())
             decl.async_invocable_function(values, sink);
         else
@@ -2409,6 +2424,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
     execution.started_at_steady_s = cc::current_time_steady_secs();
     execution.thread = u64(cc::current_thread_id());
     auto const skip_as_not_thorough = decl.test_config.thorough_only && !config.thorough;
+    auto const skip_as_stopped = is_past_stop_after(config);
 
     // Set up test context for check reporting
     auto owned_ctx = test_execute_begin(execution, config, section_scopes, filter_offset);
@@ -2463,6 +2479,8 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                     auto _ = scoped_test_assertion_handler(); // a failing CC_ASSERT aborts the body like a REQUIRE
                     if (skip_as_not_thorough)
                         SKIP("runs only under --thorough");
+                    else if (skip_as_stopped)
+                        SKIP("the run had reached its --stop-after time");
                     else
                         body();
                 }
@@ -2900,6 +2918,7 @@ void finish_run(nx::test_schedule_execution& result, nx::test_schedule_config co
 nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, test_schedule_config const& config)
 {
     scoped_execution_depth const depth_guard;
+    run_started_at() = cc::current_time_steady_secs();
 
     test_schedule_execution result;
 

@@ -362,7 +362,7 @@ It is opt-in and never required: without it, everything builds and tests exactly
 - **Background test runs are the project's choice**: with `BuildServer.speculative_tests` set, dev.py asks the server (`test --speculate`)
   to rerun the binaries it tested once the server has rebuilt them on its own after an edit, with the same arguments and environment,
   so the next `test` finds their results stored; off by default, and a request without it withdraws it.
-- **Test runs writing what the server does not keep run without it**: `--sample`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
+- **Test runs writing what the server does not keep run without it**: `--sample`, `--rec`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
 - **`check` and `ship` build and test through it too**, under the same opt-in; `check --no-server` and `ship --no-server` keep the whole gate off it.
   The gate's two single-test steps, `shader-grammar` and `ccrec-reader`, always run the plain way, the latter because it writes a fixture the gate reads next.
 - **`ship` can prove instead of gating, when asked**: with the server opted in and `ship --proof` or the project's `BuildServer.ship_proof`,
@@ -936,6 +936,10 @@ A test marked `thorough_only` runs only then, and the per-binary timeout grows t
 `uv run dev.py test "<filter>" --sample` profiles what it runs.
 Each binary samples its threads until the run ends and prints where the busy time went, by self and by total, keeping the recording as `<binary>.ccrec` beside it.
 The table is symbolized at exit, seconds per few thousand distinct addresses, so pair it with a filter; [profiling](../../libs/base/clean-core/docs/profiling.md#sampling) has the rest.
+
+`uv run dev.py test "<filter>" --rec` keeps the instrumented scopes alone, with no sampling: every scope, stat and log, as `<binary>.ccrec` beside the binary.
+dev.py prints where each went and how large it is; the `analyzing-recordings` skill reads one.
+`--stop-after SECS` bounds a run by time: once a binary has run that long, every test it has not started is skipped, saying why, so a slow binary still yields a recording of known length.
 
 ## Examples (`example`)
 

@@ -75,6 +75,12 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "same on every run, and an aliased driver's children (a backend's context, say) are placed "
                         "one by one. Forwarded to the runner as --shard; the shards partition the run, which is "
                         "what a bisection needs.")
+    p.add_argument("--rec", action="store_true",
+                   help="Keep each binary's recording as <binary>.ccrec beside it: every instrumented scope, with no "
+                        "sampling (nexus --rec). Prints where it went and how large it is.")
+    p.add_argument("--stop-after", type=float, default=None, metavar="SECS",
+                   help="Start no test once a binary's run has taken SECS; the tests already running finish, and the "
+                        "rest are skipped, saying why. Forwarded to the runner as --stop-after.")
     p.add_argument("--sample", action="store_true",
                    help="Profile the run: each binary samples its threads until the run ends, prints where the busy "
                         "time went, and keeps the recording as <binary>.ccrec beside it. "
@@ -148,6 +154,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     if args.shard is not None:
         runner_args = ["--shard", args.shard, *runner_args]
+    if args.stop_after is not None:
+        runner_args = ["--stop-after", f"{args.stop_after:g}", *runner_args]
 
     # The runner's own default is 60 s, which the default timeout would kill it before reaching.
     # Without --watchdog each binary gets half of ITS timeout, since a binary may declare a longer one than the default.
@@ -243,6 +251,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             emsdk_path=args.emsdk_path,
             runtime=jsr.JsRuntimeRequest.from_args(args),
             sample=args.sample,
+            rec=args.rec,
             # A repeat chases a flake, so a stored pass must not answer for it.
             server=server, rerun=repeat > 1,
         )

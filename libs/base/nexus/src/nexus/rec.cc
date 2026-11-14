@@ -194,7 +194,7 @@ bool withhold_judged_records(cc::rec::event_view const& e, cc::rec::trace_id own
     return owner == cc::rec::trace_id::none || !is_judged_record(e);
 }
 
-/// Everything the run recorded, kept whole for `--benchmark-rec`.
+/// Everything the run recorded, kept whole for `--rec`.
 ///
 /// No slicing and no attribution: the question this answers is "what happened during the run", which is exactly what
 /// the bucketing listener above throws away in order to answer a different one.

@@ -680,7 +680,7 @@ int nx::run(int argc, char** argv)
         if (!config.sample_file.empty())
             nx::impl::begin_run_capture(config.sample_file, true);
         else
-            nx::impl::begin_run_capture(config.benchmark_rec_file);
+            nx::impl::begin_run_capture(config.rec_file);
 
         // A dump the crash handler and the hang watchdog can both write.
         //

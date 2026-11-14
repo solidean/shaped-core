@@ -47,7 +47,8 @@ This compatibility layer rests on two properties of the declaration:
 | `--thorough` | Sets `test_schedule_config::thorough`, which a test body reads through `nx::is_thorough()`, and runs the `thorough_only` tests a default run skips (see [test-runtime.md](test-runtime.md)). Not a Catch2 flag |
 | `--watchdog <secs>` | After `<secs>` (default 60) with no test starting or finishing, prints a `[nexus watchdog]` report — outstanding work, running and awaiting tests, every thread's stack and open scopes, where the recording went — and exits with code 4. `0` turns it off, and a run under a debugger never arms it. Test runs only: a run holding nothing but examples and benchmarks, PGO benchmarks included, is unwatched whether swept or named exactly. Not a Catch2 flag |
 | `--benchmark-json <file>` | Writes the full benchmark results — every statistic and every sample — to `<file>` (additive). Not a Catch2 flag |
-| `--benchmark-rec <file>` | Writes a `.ccrec` of the whole run to `<file>`; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
+| `--rec <file>` | Writes a `.ccrec` of the whole run to `<file>`: every instrumented scope, with no sampling, for a test run as for a benchmark; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
+| `--stop-after <secs>` | Starts no test once the run has taken `<secs>`; the tests already running finish, and the rest are skipped, saying why. 0, the default, runs every test. Not a Catch2 flag |
 | `--benchmark-verbose` | Prints the full statistics block under every row of a benchmark table. Not a Catch2 flag |
 | `--benchmark-pin` | Pins the run to one core before the benchmarks, reporting whether the platform allowed it. Not a Catch2 flag |
 | `--record` | Buckets every test's `cc::rec` events and writes a recording for each failing one, whatever the tests' own configs say (see [recording.md](recording.md)). Not a Catch2 flag |
