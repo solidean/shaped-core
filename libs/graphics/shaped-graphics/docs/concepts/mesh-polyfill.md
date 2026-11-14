@@ -164,6 +164,14 @@ metal draws it, `draws_geometry_polyfill`, with the draw's buffers bound past ev
 A slot the draw has no buffer for, the index buffer of a draw that is not indexed, takes the draw's own values, since Metal's validation wants every declared buffer bound.
 dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage that decides `where_missing` has not run.
 
+**A strip is drawn as its windows.**
+A draw of a line or a triangle strip assembles primitive `p` from positions `p` on, a list's from `p * corners`.
+`sg_geometry_draw`'s `[1].w` is the strip's corners, 0 for a list.
+An indexed strip first runs `sg_geometry_strip_scan`, one thread over its indices, outside the pass.
+It writes each window's `id << 1 | parity` to `sg_geometry_strip`, or all ones where a restart index lies in it.
+The stage then makes nothing of such a window, and takes its id and its parity, within its own strip, from the scan.
+A non-indexed strip has no restart, so its window `p` is primitive `p`.
+
 **The mesh route**, where the device has mesh shaders: SGL writes the vertex and geometry stages as one mesh entry point, a primitive a lane.
 slib builds a mesh pipeline of it and the pixel stage, marked by `geometry_mesh_corners`.
 `draw` and `draw_indexed` of it bind the same `sg_geometry_*` entries to the mesh stage and draw `ceil(primitives * instances / lanes)` mesh workgroups, inside the pass.

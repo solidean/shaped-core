@@ -9,6 +9,18 @@
 
 namespace sg
 {
+namespace
+{
+/// The primitives a polyfilled geometry stage assembles from `count` vertices or indices of `corners` each: whole ones of
+/// a list, as the native assembly drops the rest, or each window of a strip.
+[[nodiscard]] isize primitives_of(isize count, int corners, bool strip)
+{
+    if (strip)
+        return count >= corners ? count - (corners - 1) : 0;
+    return count / corners;
+}
+} // namespace
+
 // Color-target builders — the op is the method name, so no op enum appears at the call site.
 
 color_target render_target_view::cleared(tg::vec4f color) const&
@@ -201,22 +213,25 @@ void command_list::draw(draw_config const& config)
     {
         // a polyfilled geometry stage: whole primitives of the draw's vertices, as the native assembly drops the rest
         auto const& p = _raster_mesh_polyfill.value();
-        auto const primitives = config.vertex_range.size / p.input_corners;
+        auto const primitives = primitives_of(config.vertex_range.size, p.input_corners, p.input_strip);
         if (primitives > 0 && config.instance_range.size > 0)
             raster_draw_geometry_polyfilled(p, {.first = u32(config.vertex_range.offset),
                                                 .primitives = u32(primitives),
                                                 .instances = u32(config.instance_range.size),
-                                                .first_instance = u32(config.instance_range.offset)});
+                                                .first_instance = u32(config.instance_range.offset),
+                                                .is_strip = p.input_strip});
         return;
     }
     if (_raster_geometry_mesh_corners > 0)
     {
-        auto const primitives = config.vertex_range.size / _raster_geometry_mesh_corners;
+        auto const primitives
+            = primitives_of(config.vertex_range.size, _raster_geometry_mesh_corners, _raster_geometry_mesh_strip);
         if (primitives > 0 && config.instance_range.size > 0)
             raster_draw_geometry_meshed({.first = u32(config.vertex_range.offset),
                                          .primitives = u32(primitives),
                                          .instances = u32(config.instance_range.size),
-                                         .first_instance = u32(config.instance_range.offset)});
+                                         .first_instance = u32(config.instance_range.offset),
+                                         .is_strip = _raster_geometry_mesh_strip});
         return;
     }
     raster_draw(config);
@@ -243,26 +258,29 @@ void command_list::draw_indexed(draw_indexed_config const& config)
     if (_raster_mesh_polyfill.has_value())
     {
         auto const& p = _raster_mesh_polyfill.value();
-        auto const primitives = config.index_range.size / p.input_corners;
+        auto const primitives = primitives_of(config.index_range.size, p.input_corners, p.input_strip);
         if (primitives > 0 && config.instance_range.size > 0)
             raster_draw_geometry_polyfilled(p, {.first = u32(config.index_range.offset),
                                                 .primitives = u32(primitives),
                                                 .instances = u32(config.instance_range.size),
                                                 .first_instance = u32(config.instance_range.offset),
                                                 .is_indexed = true,
-                                                .vertex_offset = config.vertex_offset});
+                                                .vertex_offset = config.vertex_offset,
+                                                .is_strip = p.input_strip});
         return;
     }
     if (_raster_geometry_mesh_corners > 0)
     {
-        auto const primitives = config.index_range.size / _raster_geometry_mesh_corners;
+        auto const primitives
+            = primitives_of(config.index_range.size, _raster_geometry_mesh_corners, _raster_geometry_mesh_strip);
         if (primitives > 0 && config.instance_range.size > 0)
             raster_draw_geometry_meshed({.first = u32(config.index_range.offset),
                                          .primitives = u32(primitives),
                                          .instances = u32(config.instance_range.size),
                                          .first_instance = u32(config.instance_range.offset),
                                          .is_indexed = true,
-                                         .vertex_offset = config.vertex_offset});
+                                         .vertex_offset = config.vertex_offset,
+                                         .is_strip = _raster_geometry_mesh_strip});
         return;
     }
     raster_draw_indexed(config);
@@ -407,6 +425,7 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
     if (auto const* const polyfill = pipeline.tessellation_polyfill(); polyfill != nullptr)
         _raster_tessellation_polyfill = *polyfill;
     _raster_geometry_mesh_corners = pipeline.geometry_mesh_corners();
+    _raster_geometry_mesh_strip = pipeline.geometry_mesh_strip();
     raster_bind_pipeline(pipeline);
 }
 

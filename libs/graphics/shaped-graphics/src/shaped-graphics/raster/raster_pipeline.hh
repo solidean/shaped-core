@@ -43,6 +43,8 @@ struct sg::mesh_polyfill_description
     /// For a geometry stage drawn this way, the corners of each primitive a draw assembles from the bound buffers, 1, 2
     /// or 3: a primitive's output then takes a workgroup's slots, and the pipeline draws with `draw` (SGL's CHK-525).
     int input_corners = 0;
+    /// Whether a geometry stage's draw is a strip of those primitives rather than a list of them.
+    bool input_strip = false;
 
     /// A task stage before the mesh stage, drawn the same way: its compute form, which writes each task workgroup's
     /// record of `sg_task_output`, and the scan that numbers what they launched; `compute_shader` then reads them.
@@ -75,6 +77,7 @@ struct sg::impl::mesh_polyfill_state
     int words_per_group = 0;
     /// `mesh_polyfill_description::input_corners`: 0 for a mesh stage, the assembled primitive's for a geometry stage.
     int input_corners = 0;
+    bool input_strip = false;
     /// A polyfilled task stage's compute form, null without one; `compute` is then dispatched indirectly.
     compute_pipeline_handle task;
     /// The compute half an indirect draw with no task stage dispatches, null behind a task stage or without one.
@@ -106,13 +109,16 @@ struct sg::impl::geometry_polyfill_draw
 {
     /// The first vertex, or the first index of an indexed draw.
     u32 first = 0;
-    /// The primitives of one instance: the draw's vertices or indices over the assembled primitive's corners.
+    /// The primitives of one instance: the draw's vertices or indices over the assembled primitive's corners, or of a
+    /// strip, its windows of that many.
     u32 primitives = 0;
     u32 instances = 0;
     u32 first_instance = 0;
     bool is_indexed = false;
     /// What an indexed draw adds to each index before the fetch.
     i32 vertex_offset = 0;
+    /// The vertices or indices are a strip: primitive `p` starts at position `p` rather than `p * corners`.
+    bool is_strip = false;
 };
 
 /// The tessellation stages drawn where the device has none (SGL's CHK-527): compute passes write each patch's points
@@ -212,8 +218,13 @@ struct sg::raster_pipeline_description
     cc::optional<tessellation_polyfill_description> tessellation_polyfill;
     /// A geometry stage's mesh route (SGL's CHK-525): `mesh_shader` is the vertex and geometry stages as one, and the
     /// pipeline draws with `draw` or `draw_indexed` over primitives of this many corners, as its geometry stage would.
-    /// 0 for every other pipeline; the stage appends triangles alone so far, so `topology` must be the triangle list.
+    /// 0 for every other pipeline; `topology` is the list of what the stage appends, triangles or lines.
     int geometry_mesh_corners = 0;
+    /// Whether the draw's vertices or indices are a strip of such primitives rather than a list of them.
+    bool geometry_mesh_strip = false;
+    /// A polyfilled geometry stage's strip scan, by either route, where the pipeline draws strips (SGL's CHK-525): an
+    /// indexed draw runs it first, so each window knows what it makes past a restart index.
+    cc::optional<compiled_shader> geometry_strip_scan;
 
     vertex_input_layout vertex_input;
     primitive_topology topology = primitive_topology::triangle_list;
@@ -318,6 +329,10 @@ public:
 
     /// The corners of the primitives a geometry stage's mesh route assembles, or 0 where the pipeline is none.
     [[nodiscard]] int geometry_mesh_corners() const { return _geometry_mesh_corners; }
+    /// Whether that mesh route's draws are strips.
+    [[nodiscard]] bool geometry_mesh_strip() const { return _geometry_mesh_strip; }
+    /// The strip scan an indexed draw of a polyfilled geometry stage over a strip runs first; null for every other pipeline.
+    [[nodiscard]] compute_pipeline_handle const& geometry_strip_scan() const { return _geometry_strip_scan; }
 
     /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
     /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
@@ -338,7 +353,8 @@ private:
     friend void impl::set_footprint(raster_pipeline const& pipeline, impl::pipeline_footprint footprint);
     friend void impl::set_mesh_polyfill(raster_pipeline const& pipeline, impl::mesh_polyfill_state state);
     friend void impl::set_tessellation_polyfill(raster_pipeline const& pipeline, impl::tessellation_polyfill_state state);
-    friend void impl::set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners);
+    friend void impl::set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners, bool strip);
+    friend void impl::set_geometry_strip_scan(raster_pipeline const& pipeline, compute_pipeline_handle scan);
 
     cc::string _target_set;
     cc::optional<raster_target_formats> _target_formats;
@@ -347,4 +363,6 @@ private:
     cc::optional<impl::mesh_polyfill_state> _mesh_polyfill;
     cc::optional<impl::tessellation_polyfill_state> _tessellation_polyfill;
     int _geometry_mesh_corners = 0;
+    bool _geometry_mesh_strip = false;
+    compute_pipeline_handle _geometry_strip_scan;
 };

@@ -3686,6 +3686,10 @@
     words: buffer[uint]
 
 
+@internal binding sg_geometry_strip:
+    words: mut buffer[uint]
+
+
 @internal binding sg_tessellation_draw:
     values: buffer[uint4]
 

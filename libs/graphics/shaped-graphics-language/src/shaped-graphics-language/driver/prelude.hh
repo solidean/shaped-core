@@ -23,7 +23,8 @@ struct sgl::parsed_prelude_file
 
 namespace sgl
 {
-/// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, `raytracing.sgl`, then `tessellation.sgl`.
+/// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, `raytracing.sgl`, `geometry.sgl`,
+/// then `tessellation.sgl`.
 ///
 /// `builtins.sgl` is `builtins::default_registry().prelude_text()`: generated in memory, so the library never opens the committed file.
 /// The committed `prelude/builtins.sgl` is byte-identical, which is why a diagnostic's line and column are right in it.
@@ -72,6 +73,8 @@ namespace sgl::impl
 [[nodiscard]] cc::string_view embedded_raytracing_prelude();
 /// `prelude/tessellation.sgl`: the fixed-function tessellator, for the tessellation polyfill (CHK-527).
 [[nodiscard]] cc::string_view embedded_tessellation_prelude();
+/// `prelude/geometry.sgl`: the passes the geometry polyfill runs before its own, the strip scan (CHK-525).
+[[nodiscard]] cc::string_view embedded_geometry_prelude();
 /// `prelude/accel.sgl`: module `accel`, the records of a GPU-written acceleration structure build.
 [[nodiscard]] cc::string_view embedded_accel_module();
 } // namespace sgl::impl

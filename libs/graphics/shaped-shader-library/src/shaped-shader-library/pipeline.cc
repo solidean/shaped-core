@@ -597,26 +597,41 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     if (polyfills_geometry)
     {
         auto const t = desc.topology;
-        auto const corners = t == sg::primitive_topology::point_list    ? 1
-                           : t == sg::primitive_topology::line_list     ? 2
-                           : t == sg::primitive_topology::triangle_list ? 3
-                                                                        : 0;
+        auto const corners = t == sg::primitive_topology::point_list                                           ? 1
+                           : t == sg::primitive_topology::line_list || t == sg::primitive_topology::line_strip ? 2
+                           : t == sg::primitive_topology::triangle_list || t == sg::primitive_topology::triangle_strip
+                               ? 3
+                               : 0;
+        auto const strip = t == sg::primitive_topology::line_strip || t == sg::primitive_topology::triangle_strip;
         if (corners == 0)
             throw sg::pipeline_creation_exception(cc::string(d.name),
                                                   cc::any_error(cc::format("{}'s {}: the pipeline polyfills its "
-                                                                           "geometry stage over a strip, and the "
-                                                                           "polyfill assembles lists alone so far",
+                                                                           "geometry stage over a topology that is "
+                                                                           "no list or strip of points, lines or "
+                                                                           "triangles",
                                                                            d.file, d.name)));
         if (meshes_geometry)
         {
             // the mesh stage draws the list of the kind the geometry stage writes, which its compile states
             desc.geometry_mesh_corners = corners;
+            desc.geometry_mesh_strip = strip;
             desc.topology = desc.mesh_shader.has_value() && desc.mesh_shader.value().mesh_polyfill_corners == 2
                               ? sg::primitive_topology::line_list
                               : sg::primitive_topology::triangle_list;
         }
         else
+        {
             desc.mesh_polyfill.value().input_corners = corners;
+            desc.mesh_polyfill.value().input_strip = strip;
+        }
+        // a strip's windows past a restart index are the strip scan's to number, which the prelude holds
+        if (strip)
+        {
+            auto with_pass = options;
+            with_pass.push_back(
+                {.name = cc::string(slib::k_polyfill_pass_option), .value = cc::string("sg_geometry_strip_scan")});
+            desc.geometry_strip_scan = co_await (*d.geometry)->acquire(*ctx, with_pass);
+        }
     }
     // a polyfilled stage draws its primitives as a list of the kind it writes
     if (desc.mesh_polyfill.has_value())

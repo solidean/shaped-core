@@ -152,6 +152,35 @@ pipeline cornered:
     cull = .none
     format = .rgba32_float
 
+// Each primitive passed on as the draw's strip assembles it: a strip's odd triangle comes with its first two corners swapped.
+@geometry(max_vertices = 3)
+fun passed_gs(tri: staged[3], stream: mut triangle_stream[staged]):
+    for i in 0 ..< 3:
+        stream.emit(tri[i])
+
+pipeline stripped:
+    vertex = white_vs
+    geometry = passed_gs
+    pixel = staged_ps
+    topology = .triangle_strip
+    cull = .back
+    format = .rgba32_float
+
+
+// Each segment of a line strip passed on.
+@geometry(max_vertices = 2)
+fun segment_gs(seg: staged[2], stream: mut line_stream[staged]):
+    for i in 0 ..< 2:
+        stream.emit(seg[i])
+
+pipeline line_stripped:
+    vertex = white_vs
+    geometry = segment_gs
+    pixel = staged_ps
+    topology = .line_strip
+    cull = .none
+    format = .rgba32_float
+
 // Each triangle carries its primitive id to the pixel stage, flat.
 struct primitive_tagged:
     @position position: hpos4
@@ -170,6 +199,15 @@ pipeline primitive_ids:
     vertex = white_vs
     geometry = tag_gs
     pixel = primitive_ps
+    cull = .none
+    format = .rgba32_float
+
+// The same over a triangle strip, whose primitive ids count the primitives its windows make.
+pipeline strip_primitive_ids:
+    vertex = white_vs
+    geometry = tag_gs
+    pixel = primitive_ps
+    topology = .triangle_strip
     cull = .none
     format = .rgba32_float
 

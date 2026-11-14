@@ -1,0 +1,32 @@
+// The passes a polyfilled geometry stage runs before its own, for a target without a geometry stage (CHK-525).
+//
+// Everything `@internal` here is this file's own, and no program finds it.
+
+/// What a window of an indexed strip makes, in window order: `id << 1 | parity` for the primitive it starts, its id
+/// counting the draw's primitives and its parity its place within its strip, or all ones where a restart index lies in
+/// it and it makes none.
+/// One thread walks the draw's indices, since a window's id and parity follow from every restart before it.
+/// `sg_geometry_draw` is the draw's, its `[1].w` the corners of the strip's primitive.
+@internal @compute(1) fun sg_geometry_strip_scan(@thread_id id: int3){sg_geometry_draw, sg_geometry_indices, sg_geometry_strip}:
+    let draw = sg_geometry_draw.values[0]
+    let more = sg_geometry_draw.values[1]
+    let corners = more.w as int
+    let positions = (draw.y as int) + corners - 1
+    let is_half = draw.z == 1u
+    let restart = if is_half => 65535u else 4294967295u
+    let mut last = -1
+    let mut made = 0u
+    for q in 0 ..< positions:
+        // a 16-bit index is half of a word, the low half first
+        let at = draw.x + (q as uint) + more.y
+        let word = sg_geometry_indices.words[if is_half => at >> 1u else at]
+        let index = if is_half => (word >> ((at & 1u) * 16u)) & 65535u else word
+        if index == restart:
+            last = q
+        let p = q - (corners - 1)
+        if p >= 0:
+            if last >= p:
+                sg_geometry_strip.words[p as uint] = 4294967295u
+            else:
+                sg_geometry_strip.words[p as uint] = (made << 1u) | (((p - last - 1) as uint) & 1u)
+                made += 1u

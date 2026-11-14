@@ -48,10 +48,16 @@ A mesh stage writes lines or triangles alone, so `sgl describe` reports a pipeli
 slib then takes the compute route for points, whichever route the context asks for.
 `sg - a geometry stage that appends points draws each corner's pixel and no other` holds both route requests to three pixels on an M4.
 
+2026-11-14: strips in, by both routes: a line or triangle strip's window `p` is primitive `p`, an odd triangle's first two corners swapped.
+An indexed strip runs `prelude/geometry.sgl`'s `sg_geometry_strip_scan` first, which writes each window's id and parity, or none past a restart, to a new reserved `sg_geometry_strip`.
+sg carries the scan on the pipeline, and metal dispatches it outside the pass before the stage, which splits the mesh route's pass for that draw alone.
+Four GPU tests on an M4: a triangle strip culled to show each triangle winds alike, an indexed strip with a restart in 16 and 32 bits, the primitive ids past it, and a line strip.
+
 ## Still open
 
 - **dx12 and vulkan draw it**, beside their native stage, so the two images can be compared and the benchmark run: a Windows machine's work.
   The compute half's layout twin needs the `sg_geometry_*` slots there, as the mesh polyfill's holds `sg_mesh_output`.
 - **webgpu draws it**, which needs `buffer_usage::readonly_buffer` on a vertex and an index buffer a polyfilled pipeline reads, since WebGPU binds no other as storage.
-- **Strip topologies in**, whose primitives share corners.
+- **The strip scan is one thread**, as the tessellation polyfill's scan is; a parallel scan of the restarts is the faster form, once measured.
+- **WebGPU's storage buffers**: the geometry stage reads `sg_geometry_strip` beside the other seven entries, one more against WebGPU's default of eight a stage.
 - Whether `vertex_index` on an indexed draw matches D3D's and vulkan's, which differ on the vertex offset.
