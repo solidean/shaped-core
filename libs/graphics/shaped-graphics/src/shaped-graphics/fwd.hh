@@ -285,6 +285,7 @@ struct texture_array_binding; // the texture form
 struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
+struct reserved_slot; // a slot a shader declares that no binding group fills: NVAPI's (binding/compiled_shader.hh)
 enum class debug_scalar : u8;
 struct debug_value;
 struct debug_source_line;

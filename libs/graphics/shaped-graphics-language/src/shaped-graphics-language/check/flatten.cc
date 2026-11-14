@@ -72,9 +72,11 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
             within.push_back(fr.function);
         // EMIT-184: an HLSL ray query sees the micromaps of a device that has them, which the compile states for it
         auto const target = compiled_for();
-        if (record->declares_only && record->features.has(feature::ray_query)
-            && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan)
-            && target.device_features.has(feature::opacity_micromap))
+        auto const may_see_micromaps = record->declares_only && record->features.has(feature::ray_query)
+                                    && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan);
+        if (may_see_micromaps)
+            entry.consulted.set(feature::opacity_micromap); // EMIT-266
+        if (may_see_micromaps && target.device_features.has(feature::opacity_micromap))
         {
             auto const sees = feature_set(feature::opacity_micromap);
             feature_uses.push_back({.file = file(), .call = call, .features = sees, .within = within, .granted = sees});
@@ -321,7 +323,18 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
     if (auto const* const l = x.node.try_as<flat_wide_literal>())
         return add_expr(x.type, from, *l);
     if (auto const* const l = x.node.try_as<flat_bool_literal>())
-        return add_expr(x.type, from, *l);
+    {
+        auto const copy = add_expr(x.type, from, *l);
+        // EMIT-266: a copy of a `has` literal, as a parameter that stands for one reads, is a `has` literal as well, so
+        // a decision the copy makes is one a grant can turn
+        for (auto const h : has_literals)
+            if (h == id)
+            {
+                has_literals.push_back(copy);
+                break;
+            }
+        return copy;
+    }
     if (auto const* const v = x.node.try_as<flat_enum_value>())
         return add_expr(x.type, from, *v);
     if (auto const* const m = x.node.try_as<flat_binding_member>())

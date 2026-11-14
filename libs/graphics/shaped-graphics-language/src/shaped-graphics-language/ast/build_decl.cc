@@ -19,6 +19,16 @@ range_of<decl_id> builder::declarations(form_id block, scope_kind scope)
     for (auto i = isize(0); i < lines.size(); ++i)
     {
         auto const head = head_of(lines[i]);
+        // AST-161: a `const if` chain at file scope holds preambles, its `else` lines with it
+        if (scope == scope_kind::file && is_const_if(lines[i]))
+        {
+            auto end = i + 1;
+            while (end < lines.size() && is_keyword_led(head_of(lines[end]).keyword_form, "else"))
+                ++end;
+            collected.push_back(preamble_chain(cc::span<form_id const>(lines).subspan({.offset = i, .size = end - i})));
+            i = end - 1;
+            continue;
+        }
         if (is_valid(head.keyword_form) || scope == scope_kind::file)
             collected.push_back(declaration(head, scope, scope == scope_kind::file && i == 0));
         else
@@ -532,6 +542,35 @@ bool builder::is_tagged_string(form_id line)
     return is_kind(whole, form_kind::quoted) && is_valid(at(whole).token)
         && index_of(at(whole).token) + 1 < file.tokens.size()
         && file.tokens[index_of(at(whole).token) + 1].kind == token_kind::symbol;
+}
+
+decl_id builder::preamble_chain(cc::span<form_id const> chain)
+{
+    auto collected = cc::vector<type_branch>();
+    for (auto i = isize(0); i < chain.size(); ++i)
+    {
+        auto const head = head_of(chain[i]);
+        if (i > 0)
+            reject_attributes(chain[i]);
+        reject_arrow(head);
+        auto const parts = keyword_parts_of(head.keyword_form);
+        auto const is_else = i > 0;
+        auto branch = type_branch{.form = chain[i]};
+        auto const has_condition = !is_else || parts.keywords.size() > 1;
+        if (has_condition && parts.arguments.empty())
+            branch.condition = invalid_expression(head.keyword_form, diagnostic_kind::expected_expression);
+        else if (has_condition)
+            branch.condition = expression(parts.arguments[0]);
+        if (parts.arguments.size() > (has_condition ? 1 : 0))
+            report(diagnostic_kind::too_many_arguments, parts.arguments[has_condition ? 1 : 0]);
+        if (!is_valid(parts.block))
+            report(diagnostic_kind::expected_body, head.whole);
+        else
+            branch.members = declarations(parts.block, scope_kind::file);
+        collected.push_back(branch);
+    }
+    return make_decl(chain[0], attributes_of(chain[0]),
+                     preamble_decl{.branches = append(ast.type_branches, cc::span<type_branch const>(collected))});
 }
 
 auto builder::type_branches(form_id block) -> cc::optional<type_chain>

@@ -164,6 +164,9 @@ value_ref lowering::ray_query_call(flat_call const& c, builtins::function_record
         for (auto i = isize(2); i < 6; ++i)
             operands[i] = u32(expr(arguments[i]));
         operands[6] = u32(converted(expr(arguments[6]), _int, _uint));
+        // EMIT-184: forcing 2 states where the query sees no micromaps is meaningless, and the trace leaves it out
+        if (!_out.sees_micromaps)
+            operands[6] = u32(add(op::bit_and, _uint, {value_ref(operands[6]), uint_constant(~k_force_omm_2_state)}));
         operands[7] = u32(converted(expr(arguments[7]), _int, _uint));
         return add(op::ray_query_trace, type_ref::none, operands);
     }

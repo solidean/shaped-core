@@ -61,6 +61,10 @@ struct sgl::builtins::call_context
     language target = language::hlsl;
     /// HLSL for vulkan, whose DXC lowers some of HLSL's calls to no SPIR-V, which the text then states itself.
     bool is_vulkan = false;
+    /// HLSL for dx12 that reorders through NVAPI's shader extensions, the `nvapi` fill (EMIT-265).
+    bool reorders_through_nvapi = false;
+    /// The entry point's traces see opacity micromaps (EMIT-184); where they do not, a trace forces no 2 states.
+    bool states_micromaps = false;
     cc::span<written const> arguments;
     /// Each argument's type as the target spells it, for a record with a `helper`; empty for any other.
     cc::span<cc::string const> argument_types;
@@ -77,6 +81,9 @@ struct sgl::builtins::call_context
     cc::string_view hit_offsets;
     /// The entry point holds a `@coherent` member, whose writes a barrier publishes to the whole dispatch (EMIT-150).
     bool is_device_coherent = false;
+    /// Under the `nvapi` fill, a hit object's invocation: the acceleration structure its `trace_hit` traced, which NVAPI
+    /// invokes it through (EMIT-265); empty for every other call.
+    cc::string_view invoked_structure;
     /// The entry point is a pixel stage, whose helper invocations run its atomics without effect (EMIT-162).
     bool is_pixel_stage = false;
     /// The entry point's `atomic[float]`s are the target's own float atomics, which add in one instruction: the
@@ -246,6 +253,8 @@ struct sgl::builtins::type_record
     cc::string hlsl;
     /// HLSL for vulkan, where it is not `hlsl`: a type DXC has no SPIR-V for, which the text spells as SPIR-V's own.
     cc::string hlsl_vulkan;
+    /// HLSL for dx12 under an `nvapi` fill, where it is not `hlsl`: the type as `nvHLSLExtns.h` declares it (EMIT-265).
+    cc::string hlsl_nvapi;
     cc::string wgsl;
     cc::string msl;
     /// The HLSL spelling of a local whose flags are known constants, as `RayQuery<RAY_FLAG_FORCE_OPAQUE>`; none where its type takes none.

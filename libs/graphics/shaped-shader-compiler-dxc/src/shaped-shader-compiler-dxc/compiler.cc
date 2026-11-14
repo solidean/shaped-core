@@ -250,6 +250,7 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
         },
         .color_output_count = reflected.value().color_output_count,
         .footprint = cc::move(footprint),
+        .reserved_slots = cc::move(reflected.value().reserved_slots),
     };
 }
 } // namespace ssc::dxc

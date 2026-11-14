@@ -177,6 +177,8 @@ value_ref lowering::hit_object_call(flat_expr const& x, flat_call const& c, buil
             return value_ref::none;
         auto const hit = add(op::hit_object_trace, hit_type, operands);
         handed_back(arguments[arguments.size() - 1], value_ref(operands[10]));
+        if (_plan.reorders_through_nvapi)
+            _traced_structures.push_back({arguments[0], value_ref(operands[0])});
         return hit;
     }
     if (name.starts_with("trace_ray_reordered"))
@@ -217,7 +219,16 @@ value_ref lowering::hit_object_call(flat_expr const& x, flat_call const& c, buil
         auto const payload = handed_over(arguments[1], storage::ray_output);
         if (!_failure.empty())
             return value_ref::none;
-        add(op::hit_object_invoke, type_ref::none, {hit, payload});
+        // EMIT-265: NVAPI invokes through the structure the hit object's trace took, a third operand under its fill
+        auto const structure = emit::impl::invoked_structure_of(_plan, arguments[0]);
+        auto traced = value_ref::none;
+        for (auto const& [named, value] : _traced_structures)
+            if (named == structure)
+                traced = value;
+        if (_plan.reorders_through_nvapi && is_valid(traced))
+            add(op::hit_object_invoke, type_ref::none, {hit, payload, traced});
+        else
+            add(op::hit_object_invoke, type_ref::none, {hit, payload});
         handed_back(arguments[1], payload);
         return value_ref::none;
     }

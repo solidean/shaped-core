@@ -245,8 +245,8 @@ TEST("sv::generate_material_shader - a fragment resamples an attribute at a uv o
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
 
     // A sampled attribute samples the same texture through the same transform, at the uv it is handed rather than the mesh's.
-    CHECK(g.source.contains(
-        "fun sv_base_color_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float3:\n"));
+    CHECK(g.source.contains("fun sv_base_color_at(ctx: material.shading_context, at: float2){tracer.bindless} -> "
+                            "float3:\n"));
     CHECK(g.source.contains("    let uv = at\n"));
     CHECK(g.source.contains("return texel.xyz * scale.xyz + bias.xyz\n"));
 

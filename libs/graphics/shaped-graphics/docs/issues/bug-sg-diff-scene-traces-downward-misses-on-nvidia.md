@@ -26,3 +26,11 @@ Earlier the same day the failing set also named `half_math` and `blend_equations
 ## Done when
 
 The three differential tests pass on this machine, and the cause is pinned by the corpus entry point that caught it.
+
+## Log
+
+2026-11-14, on an RTX 5080, in whole `shaped-graphics-test` runs: the same scene_traces failure, and `blend_equations.sgl` `blended_ps` beside it.
+Against `blend_equations.ref`, "darkest: 16 of 64 referenced elements beyond relative 0.005".
+Each is 0.33333334 (0x3eaaaaab) where the reference holds 0.6666667 (0x3f2aaaab), e.g. elements 51, 119, 187 and 255.
+Both fail on dx12 and vulkan, through DXC and through SGL's binary, with the same values, and at origin/main 09432cabb built alone in a worktree of its own.
+f6e7545c5 says the corpus "runs whole on AMD's iGPU", so it was likely only checked on AMD so far.

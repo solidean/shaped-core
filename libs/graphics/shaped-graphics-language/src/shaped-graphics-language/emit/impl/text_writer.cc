@@ -64,6 +64,9 @@ struct writer
     bool is_device_coherent = false;
     /// The images the entry point loads a texel of, where the target fences a store before a load (EMIT-151).
     cc::vector<flat_binding_member> fenced_images;
+    /// EMIT-265: each acceleration structure a `trace_hit` under the `nvapi` fill traced through, by the expression it
+    /// was named by there, and the constant local the trace pinned it in, which its hit object's invocation names.
+    cc::vector<cc::pair<flat_expr_id, cc::string>> pinned_structures;
     /// EMIT-174: a member held as pieces that a write reaches into, and the local it is gathered in meanwhile.
     flat_expr_id gathered_member = flat_expr_id::none;
     cc::string gathered_name;
@@ -1318,8 +1321,33 @@ struct writer
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
+            // EMIT-265: a trace whose hit object is invoked pins its structure in a constant local, which the
+            // invocation names, so an index that moves after the trace moves no structure
+            if (p.reorders_through_nvapi && record.name.starts_with("trace_hit_ray") && !arguments.empty())
+            {
+                auto const traced = p.e.at(c.arguments)[0];
+                auto is_invoked = false;
+                for (auto const& entry : p.invoked_structures)
+                    is_invoked = is_invoked || entry.structure == traced;
+                if (is_invoked)
+                {
+                    auto const pinned = p.names.mint("traced_structure");
+                    line(cc::format("RaytracingAccelerationStructure {} = {};", pinned, arguments[0].text));
+                    arguments[0] = {.text = pinned};
+                    pinned_structures.push_back({traced, pinned});
+                }
+            }
+            auto const invoked = p.reorders_through_nvapi && !arguments.empty()
+                                   ? invoked_structure_of(p, p.e.at(c.arguments)[0])
+                                   : check::flat_expr_id::none;
+            auto structure = cc::string();
+            for (auto const& [traced, pinned] : pinned_structures)
+                if (traced == invoked)
+                    structure = pinned;
             auto result = writer({.target = d.language(),
                                   .is_vulkan = is_vulkan,
+                                  .reorders_through_nvapi = p.reorders_through_nvapi,
+                                  .states_micromaps = p.states_micromaps,
                                   .arguments = arguments,
                                   .argument_types = types,
                                   .builtins = *p.m.builtins,
@@ -1329,6 +1357,7 @@ struct writer
                                                    ? type_text(p, d, type)
                                                    : cc::string_view(),
                                   .hit_offsets = offsets,
+                                  .invoked_structure = structure,
                                   .is_device_coherent = is_device_coherent,
                                   .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
                                   .native_float_atomics = p.native_float_atomics});
@@ -1635,8 +1664,7 @@ struct writer
         auto const* const type_record = p.m.builtin_type_of(local.type);
         auto const& flags = p.local_flags[index_of(id)];
         // EMIT-184: forcing micromaps to 2 states is a name of Shader Model 6.9 alone, and the template only a hint
-        auto const sees_micromaps
-            = p.e.features.has(check::feature::opacity_micromap) && d.flags_query_for_micromaps(flags);
+        auto const sees_micromaps = p.states_micromaps && d.flags_query_for_micromaps(flags);
         auto type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
                          && type_record->hlsl_flagged != nullptr && flags.has_value()
                       ? type_record->hlsl_flagged(sees_micromaps ? flags.value() : flags.value() & ~1024u)
@@ -1916,7 +1944,8 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     if (type == check::checked_module::void_type)
         return "void";
     if (auto const* const record = p.m.builtin_type_of(type))
-        return p.which == emit::target::hlsl_vulkan && !record->hlsl_vulkan.empty()
+        return p.reorders_through_nvapi && !record->hlsl_nvapi.empty() ? cc::string_view(record->hlsl_nvapi)
+             : p.which == emit::target::hlsl_vulkan && !record->hlsl_vulkan.empty()
                  ? cc::string_view(record->hlsl_vulkan)
                  : record->spelled_in(d.language());
     // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.
@@ -1964,7 +1993,8 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
                 text_files.push_back(file);
     for (auto const file : text_files)
         for (auto const& preamble : p.m.target_preambles)
-            if (preamble.file == file && preamble.language == language)
+            if (preamble.file == file && preamble.language == language
+                && check::condition_holds(preamble.condition, p.compiled_for))
                 out.appendf("{}\n", preamble.text);
 
     // EMIT-102: each helper the entry point's builtin calls need, once, in the order first needed.
@@ -2056,6 +2086,19 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
     }
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
+    // EMIT-117: HLSL's discard goes on as a helper rather than ending the function, so a path that discards reaches
+    // its end; a return there, which only such a path reaches past all its work, is what DXC asks of a function with
+    // a value
+    if (d.language() == builtins::language::hlsl && check::is_valid(p.e.result)
+        && p.e.result != check::checked_module::void_type)
+    {
+        auto const body = p.e.at(p.e.body);
+        auto discards = false;
+        for (auto const& st : p.e.stmts)
+            discards = discards || st.node.is<check::flat_discard>();
+        if (discards && (body.empty() || !p.e.at(body[body.size() - 1]).node.is<check::flat_return>()))
+            w.line(cc::format("return ({})0;", type_text(p, d, p.e.result)));
+    }
     w.out += "}\n";
     d.write_function_tail(w.out, p);
     return {.text = cc::move(w.out), .lines = cc::move(w.lines)};

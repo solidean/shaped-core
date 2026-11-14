@@ -123,6 +123,100 @@ TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to
     CHECK(out->index == 0u);                     // u0
 }
 
+TEST("ssc::dxc compile - NVAPI's shader extension slot reflects as a reserved slot, by its name and its address alone")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    // the counter UAV an nvapi fill declares, which a host covers and binds itself; any other counter buffer is refused
+    constexpr char const* extension_hlsl = R"(
+struct record { uint opcode; uint words[63]; };
+RWStructuredBuffer<record> g_NvidiaExt : register(u0, space13);
+RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    uint index = g_NvidiaExt.IncrementCounter();
+    g_NvidiaExt[index].opcode = 1;
+    Output[tid.x] = g_NvidiaExt.IncrementCounter();
+}
+)";
+    ssc::dxc::shader_description desc;
+    desc.stage = sg::shader_stage::compute;
+    desc.entry_point = "main";
+    desc.model = ssc::dxc::shader_model::sm_6_6;
+    desc.source = extension_hlsl;
+    auto const result = comp.value().compile(desc);
+    REQUIRE(result.has_value()).dump("dxc", result.has_error() ? result.error().to_string() : cc::string());
+    REQUIRE(result.value().bindings.size() == 1);
+    CHECK(result.value().bindings[0].name == cc::string_view("Output"));
+    // what a host lays it out by: a structured buffer of 256-byte records with a counter at u0, space13
+    REQUIRE(result.value().reserved_slots.size() == 1);
+    auto const& slot = result.value().reserved_slots[0];
+    CHECK(slot.name == cc::string_view("g_NvidiaExt"));
+    CHECK(slot.space == 13u);
+    CHECK(slot.index == 0u);
+    CHECK(slot.stride == 256u);
+    CHECK(slot.has_counter);
+
+    // another counter buffer, and that name at any other address, are refused as counter buffers are
+    for (auto const& [from, to] :
+         {cc::pair<cc::string_view, cc::string_view>{"g_NvidiaExt :", "counted :"},
+          cc::pair<cc::string_view, cc::string_view>{"register(u0, space13)", "register(u1, space13)"},
+          cc::pair<cc::string_view, cc::string_view>{"register(u0, space13)", "register(u0, space12)"}})
+    {
+        auto other = cc::string(extension_hlsl);
+        other.replace_all(from, to);
+        other.replace_all("g_NvidiaExt.", from == "g_NvidiaExt :" ? "counted." : "g_NvidiaExt.");
+        other.replace_all("g_NvidiaExt[", from == "g_NvidiaExt :" ? "counted[" : "g_NvidiaExt[");
+        desc.source = other;
+        auto const refused = comp.value().compile(desc);
+        REQUIRE(refused.has_error()).dump("source", other);
+        CHECK(refused.error().to_string().contains("counter buffers are not supported")).dump("source", other);
+    }
+}
+
+TEST("ssc::dxc compile - a raygen library reflects NVAPI's shader extension slot as the reserved slot a compute does")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    // where an nvapi fill of reordering lives: a ray-tracing stage, whose bindings reflect from its library function
+    constexpr char const* raygen_hlsl = R"(
+struct record { uint opcode; uint words[63]; };
+RWStructuredBuffer<record> g_NvidiaExt : register(u0, space13);
+RaytracingAccelerationStructure World : register(t0);
+RWStructuredBuffer<float> Output : register(u0);
+struct ray_payload { float value; };
+
+[shader("raygeneration")]
+void main_rg()
+{
+    uint index = g_NvidiaExt.IncrementCounter();
+    g_NvidiaExt[index].opcode = 1;
+    uint handle = g_NvidiaExt.IncrementCounter();
+    ray_payload p = { 0.0f };
+    RayDesc ray = (RayDesc)0;
+    TraceRay(World, 0, 0, 0, 0, handle, ray, p);
+    Output[DispatchRaysIndex().x] = p.value;
+}
+)";
+    auto const result = comp.value().compile({.source = raygen_hlsl,
+                                              .entry_point = "main_rg",
+                                              .stage = sg::shader_stage::raygen,
+                                              .model = ssc::dxc::shader_model::sm_6_6});
+    REQUIRE(result.has_value()).dump("dxc", result.has_error() ? result.error().to_string() : cc::string());
+    // the structure and the output are bindings, and the extension slot is no binding of theirs
+    CHECK(result.value().bindings.size() == 2);
+    for (auto const& b : result.value().bindings)
+        CHECK(b.name != cc::string_view("g_NvidiaExt"));
+    REQUIRE(result.value().reserved_slots.size() == 1);
+    auto const expected
+        = sg::reserved_slot{.name = "g_NvidiaExt", .space = 13, .index = 0, .stride = 256, .has_counter = true};
+    CHECK(result.value().reserved_slots[0] == expected);
+}
+
 #endif // CC_OS_WINDOWS
 
 TEST("ssc::dxc compile - the SPIR-V flag set applies to every stage")
