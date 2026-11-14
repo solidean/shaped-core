@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from . import console, profile, stall_report, ui
+from . import console, fail_fast, profile, stall_report, ui
 from .layout import DRIVER_ROOT
 from .logs import capture_line, step_log_paths
 from .models import Preset, StepResult
@@ -443,6 +443,16 @@ def run_step(
     """
     mirror = mirror or (_mirror_test_output and step_type == "test")
 
+    # Past the grace a failure left, nothing new starts: the command is failing, and this step would only make it later.
+    if fail_fast.aborted():
+        label = name or step_type
+        ui.write_line(console.yellow(f"  {label} not started: {fail_fast.reason()}"))
+        stdout_path, stderr_path = step_log_paths(build_dir, step_type, name)
+        stderr_path.write_text(f"[dev.py] not started: {fail_fast.reason()}\n", encoding="utf-8")
+        stdout_path.write_text("", encoding="utf-8")
+        return StepResult(step_type=step_type, name=label, command=cmd, returncode=fail_fast.ABORTED_RC, duration_s=0.0,
+                          stdout_log=stdout_path, stderr_log=stderr_path, timed_out=False)
+
     ui.write_line(console.dim(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else "")))
     if verbose:
         ui.write_line(console.dim(f"  $ {' '.join(cmd)}"))
@@ -494,6 +504,15 @@ def run_step(
 
                 watch = stall_report.StallWatch(proc.pid, name or step_type, report)
             feed = live.feed
+            # A test's output says it is red as it happens, so the grace starts then rather than when the binary ends.
+            if step_type == "test":
+                test_feed = feed
+
+                def feed(line: str) -> None:
+                    if fail_fast.is_failure_line(line):
+                        fail_fast.note_failure(name or step_type)
+                    test_feed(line)
+
             if watch is not None:
                 row_feed = feed
 
@@ -508,6 +527,8 @@ def run_step(
             ]
             for t in threads:
                 t.start()
+            tracking = fail_fast.tracked(proc)
+            tracking.__enter__()
             try:
                 proc.wait(timeout=timeout if timeout else None)
             except subprocess.TimeoutExpired:
@@ -522,10 +543,15 @@ def run_step(
                 if proc.poll() is None:
                     proc.kill()
                 proc.wait()
+            finally:
+                tracking.__exit__(None, None, None)
             for t in threads:
                 t.join()
             if watch is not None:
                 watch.stop()
+        aborted = proc is not None and fail_fast.was_killed(proc)
+        if aborted:
+            err_f.write(f"\n[dev.py] KILLED: {fail_fast.reason()}.\n")
         if timed_out:
             err_f.write(f"\n[dev.py] TIMEOUT: '{name or step_type}' exceeded {timeout:.0f}s, then killed.\n")
             if asked:
@@ -543,7 +569,8 @@ def run_step(
             ui.write_line(pointer)
 
     # 127 is the shell's "command not found", the nearest convention for a step that never started.
-    returncode = 127 if launch_error is not None else 124 if timed_out else proc.returncode
+    returncode = (127 if launch_error is not None else 124 if timed_out
+                  else fail_fast.ABORTED_RC if aborted else proc.returncode)
     profile.record(
         name or step_type, type=step_type, start=started_at, end=started_at + duration_s,
         extra={"returncode": returncode, "timed_out": timed_out, "command": cmd},
@@ -563,6 +590,8 @@ def run_step(
     label = name or step_type
     if launch_error is not None:
         summary = console.red(f"  {label} could not launch: {launch_error.strerror or launch_error}")
+    elif aborted:
+        summary = console.yellow(f"  {label} killed after {duration_s:.1f} s: {fail_fast.reason()}")
     elif timed_out:
         summary = console.red(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms")
     else:
@@ -580,6 +609,8 @@ def run_step(
     # Retiring the row prints the summary, so a step that passed collapses to this one line and a step that failed keeps
     # the tail of what it was saying as the evidence.
     live.finish(ok=result.ok, summary=summary)
+    if not result.ok and not aborted:
+        fail_fast.note_failure(label)
     return result
 
 

@@ -24,7 +24,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from ..core import console, crash_reports, profile, ui
+from ..core import console, crash_reports, fail_fast, profile, ui
 from ..core.logs import capture_line, parse_junit, step_fields, step_log_paths, write_sidecar, write_step_junit
 from ..core.models import Preset, StepResult, Target, TestSummary
 from ..core.process import describe_exit_code, emsdk_env, run_step
@@ -593,6 +593,10 @@ def test(
                 elif rec:
                     sample_path.unlink(missing_ok=True)
                     cmd += ["--rec", str(sample_path)]
+                # A red test ends the command soon after (fail_fast), so the binary stops starting tests by then too.
+                # Not through the server, which keys its results on the arguments the proof runs with.
+                if fail_fast.enabled():
+                    cmd += ["--fail-grace", f"{fail_fast.GRACE_S:g}"]
                 cmd += extra_args
 
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.

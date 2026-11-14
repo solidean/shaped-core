@@ -125,6 +125,11 @@ struct nx::test_schedule_config
     // 0 runs every test.
     double stop_after_secs = 0.0;
 
+    // --fail-grace SECS: once a check has failed, no test starts after this many seconds more; the rest are skipped.
+    // The grace lets the tests already running, and a few after them, report what else is red, without paying for the whole run.
+    // 0 runs every test whatever fails.
+    double fail_grace_secs = 0.0;
+
     // The run seed every test's seed derives from, and whether this run shuffles its order by it.
     // A real run draws the seed from the clock unless --seed pins it, prints it first, and shuffles both the schedule and every invocation's children.
     // A hand-built config keeps schedule and match order, for the same reason `jobs` defaults to 1 here.

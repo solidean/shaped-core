@@ -315,6 +315,20 @@ A hung build prints nothing past its `[build] all` banner, so after 5 minutes wi
 
 [stall_report.py](../../tools/dev/lib/core/stall_report.py) has the details, and [its self-test](../../tools/dev/stall-report-self-test.py) runs with `check`.
 
+## Once something is red, the command fails soon after
+
+The first red step of a command, a build, a gate or a test binary, gives everything still running **10 seconds**, then dev.py fails.
+- Within those seconds the rest goes on, so a command that is red for two reasons reports both.
+- Past them every child dev.py runs is killed, saying why in its log, and no step starts; a check names the gates it skipped.
+- A test is red as soon as its output says so, a judged `nexus: check failed` or the build server's verdict on a binary, not only once the binary has ended.
+- A binary dev.py runs itself gets `--fail-grace 10`, so it stops starting tests by then and ends with its report.
+  One the build server runs does not, since the server keys its results on the arguments.
+- `build --keep-going` turns it off, since it asks for every error the build has.
+- `ship`'s proof and its run of red tests at the change's base are exempt: a red there may be the remote's, and telling which is their job.
+  A dev.py that one of them starts runs with `DEV_FAIL_FAST=0` for the same reason.
+
+[fail_fast.py](../../tools/dev/lib/core/fail_fast.py) has the details, and [its self-test](../../tools/dev/fail-fast-self-test.py) runs with `check`.
+
 ## Where a binary finds the source tree
 
 A test, example or tool that reads files of the source tree gets their directory relative to the top-level source directory, never absolute.

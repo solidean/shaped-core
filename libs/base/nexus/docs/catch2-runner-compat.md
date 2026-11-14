@@ -50,6 +50,7 @@ This compatibility layer rests on two properties of the declaration:
 | `--rec <file>` | Writes a `.ccrec` of the whole run to `<file>`: every instrumented scope, with no sampling, for a test run as for a benchmark; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
 | `--log-rec <file>` | Writes the whole run compacted and compressed to `<file>`, about a megabyte, for keeping with the run's logs; `NX_LOG_REC_DIR` asks for `<program>.ccrec` in a directory instead. Not a Catch2 flag |
 | `--stop-after <secs>` | Starts no test once the run has taken `<secs>`; the tests already running finish, and the rest are skipped, saying why. 0, the default, runs every test. Not a Catch2 flag |
+| `--fail-grace <secs>` | Once a check has failed, starts no test after `<secs>` more; the rest are skipped, saying why, so a red run ends early with its report. 0, the default, runs every test. dev.py passes 10. Not a Catch2 flag |
 | `--benchmark-verbose` | Prints the full statistics block under every row of a benchmark table. Not a Catch2 flag |
 | `--benchmark-pin` | Pins the run to one core before the benchmarks, reporting whether the platform allowed it. Not a Catch2 flag |
 | `--record` | Buckets every test's `cc::rec` events and writes a recording for each failing one, whatever the tests' own configs say (see [recording.md](recording.md)). Not a Catch2 flag |

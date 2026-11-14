@@ -254,6 +254,11 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
                       "runs every test",
               .metavar = "SECS",
               .validate = nx::arg::at_least(0.0)});
+    args.arg({"fail-grace"}, config.fail_grace_secs,
+             {.desc = "once a check has failed, start no test after this many seconds more; the rest are skipped, "
+                      "saying why; 0 runs every test",
+              .metavar = "SECS",
+              .validate = nx::arg::at_least(0.0)});
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
     args.arg({"shard"}, state.shard,
              {.desc = "run only shard K of N, 0-based, each test placed by a hash of its name; an aliased driver's "
