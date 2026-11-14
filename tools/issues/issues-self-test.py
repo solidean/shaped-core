@@ -473,19 +473,35 @@ def test_claim_resolves_a_file_ref_into_a_submodule(base: Path):
 
 # ---------------------------------------------------------------------------
 
+def _run_one(name: str) -> str | None:
+    """Runs one test in a directory of its own; its traceback, or None when it passed."""
+    fn = globals()[name]
+    with tempfile.TemporaryDirectory(prefix="issues-test-") as tmp:
+        try:
+            fn(Path(tmp)) if fn.__code__.co_argcount else fn()
+        except Exception:
+            return traceback.format_exc()
+    return None
+
+
 def main() -> int:
-    tests = [(name, fn) for name, fn in globals().items() if name.startswith("test_")]
+    names = [name for name in globals() if name.startswith("test_")]
+    # Each test in a process of its own, side by side: every one builds its own repositories and remote, and one after
+    # another the suite spent its 20 s waiting on git.
+    from concurrent.futures import ProcessPoolExecutor
+    import os
+
+    with ProcessPoolExecutor(max_workers=min(len(names), os.cpu_count() or 4, 16)) as pool:
+        results = list(pool.map(_run_one, names))
     failed = 0
-    for name, fn in tests:
-        with tempfile.TemporaryDirectory(prefix="issues-test-") as tmp:
-            try:
-                fn(Path(tmp)) if fn.__code__.co_argcount else fn()
-                print(f"ok    {name}")
-            except Exception:
-                failed += 1
-                print(f"FAIL  {name}")
-                traceback.print_exc()
-    print(f"{len(tests) - failed} of {len(tests)} passed")
+    for name, error in zip(names, results):
+        if error is None:
+            print(f"ok    {name}")
+        else:
+            failed += 1
+            print(f"FAIL  {name}")
+            print(error, end="")
+    print(f"{len(names) - failed} of {len(names)} passed")
     return 1 if failed else 0
 
 
