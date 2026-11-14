@@ -127,7 +127,7 @@ public:
     /// **`mesh` by default**: on an Apple M4 it drew a third faster in one draw, and many times faster over many draws,
     /// each of which splits the compute route's pass (`sg geometry polyfill - a frame through a geometry stage …`).
     /// Set it before acquiring the pipelines it should cover.
-    [[nodiscard]] geometry_polyfill_route geometry_polyfill_route() const
+    [[nodiscard]] sg::geometry_polyfill_route geometry_polyfill_route() const
     {
         return _geometry_polyfill_route.load(cc::memory_order_relaxed);
     }

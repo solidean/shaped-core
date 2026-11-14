@@ -58,8 +58,30 @@ constexpr u32 k_breadcrumb_tail = 16;
         return "BuildRaytracingAccelerationStructure";
     case D3D12_AUTO_BREADCRUMB_OP_DISPATCHRAYS:
         return "DispatchRays";
+    case D3D12_AUTO_BREADCRUMB_OP_COPYTILES:
+        return "CopyTiles";
+    case D3D12_AUTO_BREADCRUMB_OP_RESOLVEQUERYDATA:
+        return "ResolveQueryData";
+    case D3D12_AUTO_BREADCRUMB_OP_ATOMICCOPYBUFFERUINT:
+        return "AtomicCopyBufferUINT";
+    case D3D12_AUTO_BREADCRUMB_OP_ATOMICCOPYBUFFERUINT64:
+        return "AtomicCopyBufferUINT64";
+    case D3D12_AUTO_BREADCRUMB_OP_WRITEBUFFERIMMEDIATE:
+        return "WriteBufferImmediate";
+    case D3D12_AUTO_BREADCRUMB_OP_EMITRAYTRACINGACCELERATIONSTRUCTUREPOSTBUILDINFO:
+        return "EmitRaytracingAccelerationStructurePostbuildInfo";
+    case D3D12_AUTO_BREADCRUMB_OP_COPYRAYTRACINGACCELERATIONSTRUCTURE:
+        return "CopyRaytracingAccelerationStructure";
+    case D3D12_AUTO_BREADCRUMB_OP_EXECUTEMETACOMMAND:
+        return "ExecuteMetaCommand";
+    case D3D12_AUTO_BREADCRUMB_OP_SETPIPELINESTATE1:
+        return "SetPipelineState1";
+    case D3D12_AUTO_BREADCRUMB_OP_DISPATCHMESH:
+        return "DispatchMesh";
+    case D3D12_AUTO_BREADCRUMB_OP_BARRIER:
+        return "Barrier";
     default:
-        return "op";
+        return "";
     }
 }
 
@@ -128,9 +150,13 @@ void append_breadcrumbs(cc::string& out, NodeT const* node)
         out += cc::format(": {} of {} operations completed", done, node->BreadcrumbCount);
 
         auto const first = done > k_breadcrumb_tail ? done - k_breadcrumb_tail : 0u;
-        for (auto i = first; i < node->BreadcrumbCount && i < done + 1; ++i)
-            out += cc::format("\n    [{}] {}{}", i, breadcrumb_op_name(node->pCommandHistory[i]),
+        for (auto i = first; i < node->BreadcrumbCount && i < done + 2; ++i)
+        {
+            auto const op = node->pCommandHistory[i];
+            auto const name = breadcrumb_op_name(op);
+            out += cc::format("\n    [{}] {}{}", i, name.empty() ? cc::format("op {}", int(op)) : cc::string(name),
                               i == done ? "   <-- did not complete" : "");
+        }
     }
 }
 

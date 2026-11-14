@@ -196,6 +196,7 @@ fun environment_is_dome(env: float4[28]) -> bool:
 /// A sampler then has nothing to draw toward, and skips the closure it would weigh the direction by.
 fun environment_is_black(env: float4[28]) -> bool:
     if environment_is_dome(env) => return false
+    @unroll
     for k in 0 ..< 16:
         if env[k].x != 0.0 or env[k].y != 0.0 or env[k].z != 0.0 => return false
     return true

@@ -339,7 +339,9 @@ binding svgf_atrous_images:
 
             let mut w = kernel[dx + 2] * kernel[dy + 2]
             w *= geometry_weight(nd_p.xyz, nd_p.w, nd_q.xyz, nd_q.w, as_float2(offset), svgf_atrous_constants.normal_power, svgf_atrous_constants.depth_sigma)
-            w *= exp(-abs(luminance(c.xyz) - center_lum) / lum_width)
+            // The center is exactly its own luminance: computed twice it may round apart, and one ulp over a converged width refuses it.
+            if dx != 0 or dy != 0:
+                w *= exp(-abs(luminance(c.xyz) - center_lum) / lum_width)
 
             sum += c.xyz * w
             variance_sum += c.w * w * w

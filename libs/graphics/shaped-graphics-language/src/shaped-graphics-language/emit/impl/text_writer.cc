@@ -1357,8 +1357,8 @@ struct writer
                                                    ? type_text(p, d, type)
                                                    : cc::string_view(),
                                   .hit_offsets = offsets,
-                                  .invoked_structure = structure,
                                   .is_device_coherent = is_device_coherent,
+                                  .invoked_structure = structure,
                                   .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
                                   .native_float_atomics = p.native_float_atomics});
             // the statements its value needs, ahead of the one that holds it

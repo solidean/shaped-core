@@ -88,6 +88,7 @@ TEST("sg - a shader's undeclared failed assert fails the test that dispatched it
     if (sg_test::context_factories().empty())
         SKIP("this binary has no backend");
 
+    auto judged = 0;
     for (auto& factory : sg_test::context_factories())
     {
         auto created = factory.create_for_test();
@@ -97,6 +98,7 @@ TEST("sg - a shader's undeclared failed assert fails the test that dispatched it
         (void)sg_test::shader_fixtures();
         if (!sg_test::shaders_reach(*ctx))
             continue;
+        ++judged;
 
         nx::test_registry reg;
         add_child(reg, "1 - dispatches a failing assert", &dispatches_a_failing_assert);
@@ -114,4 +116,6 @@ TEST("sg - a shader's undeclared failed assert fails the test that dispatched it
             .context(factory.backend);
         CHECK(!driver.nested[1].is_considered_failing()).context(factory.backend);
     }
+    if (judged == 0)
+        SKIP("no backend of this binary came up with a compiler that builds its shaders");
 }
