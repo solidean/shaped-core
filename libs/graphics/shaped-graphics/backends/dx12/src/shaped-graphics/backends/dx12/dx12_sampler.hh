@@ -1,7 +1,7 @@
 #pragma once
 
-#include <clean-core/error/optional.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -38,7 +38,9 @@ namespace sg::backend::dx12
 struct sg::backend::dx12::dx12_sampler_interner
 {
     /// The heap slot holding `desc`, written on first sight; null when the heap's persistent region is full.
-    [[nodiscard]] cc::optional<int> intern(ID3D12Device* device, dx12_descriptor_heap& heap, D3D12_SAMPLER_DESC const& desc);
+    [[nodiscard]] cc::optional<int> intern(ID3D12Device* device,
+                                           dx12_descriptor_heap& heap,
+                                           D3D12_SAMPLER_DESC const& desc);
 
 private:
     struct entry
