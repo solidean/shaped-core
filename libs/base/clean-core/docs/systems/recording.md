@@ -566,6 +566,7 @@ A collapsed scope's values are its durations in cycles; a stat's are its reading
 
 A collapsed scope's summary sits where the scope closed, and what the scope enclosed stays where it was, so it belongs to the scope around it from then on.
 A stat lane is one site on one thread inside one scope, so a summary never moves out of the scope its events were in.
+Nor does a lane span two owners: a change of owner closes every lane, so a summary belongs to one test pass, as its events did.
 Windows are aligned to multiples of the window, so summarizing twice at one window changes nothing, and collapsed scopes summarize with each other like any lane.
 A scope whose begin or end the recording lacks, and a site named at runtime, are kept as they are.
 So is a scope whose begin and end sit in different blocks: the later block's preamble names it open, and a reader would otherwise see it open forever.

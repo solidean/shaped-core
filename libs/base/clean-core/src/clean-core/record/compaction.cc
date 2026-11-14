@@ -223,6 +223,7 @@ cc::rec::recording cc::rec::recording::stats_summarized(u64 window_cycles) const
         auto frames = cc::vector<lane_frame>();
         frames.push_back({});
         auto last_cycles = u64(0);
+        auto stream_owner = u64(0);
 
         auto const emit = [&](block_builder& builder, lane const& l)
         {
@@ -304,6 +305,19 @@ cc::rec::recording cc::rec::recording::stats_summarized(u64 window_cycles) const
                     found->core = e.core;
                     f.oldest_window = cc::min(f.oldest_window, window);
                     continue;
+                }
+
+                // A lane never spans two owners either: what it folds is attributed by the delta before it, so the lanes
+                // close before the delta that hands the stream to another owner.
+                if (kind == rec::event_kind::ambient_changed || kind == rec::event_kind::stream_state)
+                {
+                    auto const owner = e.field_as_u64("owner").value_or(0);
+                    if (owner != stream_owner)
+                    {
+                        for (auto f = frames.size() - 1; f >= 0; --f)
+                            flush_frame(builder, frames[f]);
+                        stream_owner = owner;
+                    }
                 }
 
                 if (kind == rec::event_kind::scope_begin)

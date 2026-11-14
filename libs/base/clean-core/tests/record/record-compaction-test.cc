@@ -209,6 +209,44 @@ TEST("record/compaction - a stat lane folds into one summary per window")
     CHECK(listing(summarized.stats_summarized(10)) == listing(summarized));
 }
 
+TEST("record/compaction - a lane never spans two owners, so each summary belongs to one")
+{
+    static constexpr cc::rec::field ambient_fields[] = {
+        {.name = "trace", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
+        {.name = "owner", .type = cc::rec::type_code::u64_, .offset = 8, .size = 8},
+    };
+    static constexpr cc::rec::desc ambient = {
+        .kind = cc::rec::event_kind::ambient_changed,
+        .name = "async.ambient",
+        .dom = &cc::rec::g_system_domain,
+        .fields = ambient_fields,
+        .field_count = 2,
+        .fixed_payload_size = 16,
+    };
+    auto s = stream();
+    auto const owned_by = [&](u64 owner, u64 cycles)
+    {
+        u64 const payload[2] = {0, owner};
+        s.builder.add({.desc = &ambient,
+                       .cycles = cycles,
+                       .payload = cc::span<byte const>(reinterpret_cast<byte const*>(payload), 16)});
+    };
+    owned_by(7, 0);
+    s.stat(bytes_stat, 1, 1).stat(bytes_stat, 2, 1);
+    owned_by(7, 3); // the same owner again closes nothing
+    s.stat(bytes_stat, 4, 1);
+    owned_by(8, 5);
+    s.stat(bytes_stat, 6, 1);
+    auto const r = s.take();
+
+    // One window covers it all, and still the lane splits where the owner changes, before the delta that changes it.
+    CHECK(listing(r.stats_summarized(1'000'000)) == "async.ambient:stat async.ambient:stat bytes:sum async.ambient:stat bytes:sum");
+    auto const bytes = summaries(r.stats_summarized(1'000'000), "bytes");
+    REQUIRE(bytes.size() == 2);
+    CHECK(bytes[0].count == 3);
+    CHECK(bytes[1].count == 1);
+}
+
 TEST("record/compaction - a lane ends where the scope around it does")
 {
     auto s = stream();
