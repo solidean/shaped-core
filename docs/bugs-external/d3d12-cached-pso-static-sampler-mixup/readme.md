@@ -1,7 +1,7 @@
 # D3D12: a cached PSO restored with another pipeline's static sampler
 
 **Status:** open, not yet filed upstream; worked around in shaped-graphics.
-**Affects:** NVIDIA D3D12 driver on Windows 11, RTX 5070 Ti, driver 32.0.15.9186; WARP is not affected.
+**Affects:** NVIDIA D3D12 driver on Windows 11: RTX 5070 Ti with driver 32.0.15.9186, and RTX 4090 with driver 32.0.16.1088 (2026-11-14); WARP is not affected.
 **Found by:** `shaped-graphics-test`'s file-scope sampler test failing on dx12 only, depending on the order tests ran in, and only with sg's persistent pipeline cache warm.
 
 ## What happens
@@ -31,7 +31,11 @@ adapter                    restore                        result
 RTX 5070 Ti, 32.0.15.9186  alone                          correct
 RTX 5070 Ti, 32.0.15.9186  after a clamping twin, fresh   correct
 RTX 5070 Ti, 32.0.15.9186  after a repeating twin, fresh  WRONG: every clamped texel repeats
+RTX 4090, 32.0.16.1088     alone                          correct
+RTX 4090, 32.0.16.1088     after a clamping twin, fresh   correct
+RTX 4090, 32.0.16.1088     after a repeating twin, fresh  WRONG: 192 wrong texels
 WARP 10.0.26100.9278       every row above                correct
+WARP 10.0.26100.9818       every row above                correct
 ```
 
 What the bug needs:
