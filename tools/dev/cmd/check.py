@@ -7,6 +7,7 @@ docs/guides/building-and-testing.md documents what each gate does, and the argum
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import subprocess
 import sys
@@ -209,19 +210,29 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                 touched = dev.touched_paths(ctx.root, scope)
             except dev.ChangeScopeError:
                 touched = None
-        ok = True
+        selected = []
         for runner, args, watches in runners:
             if touched is not None:
                 watch = dev.Watch.of((runner, *watches))
                 if not any(watch.matches(p) for p in touched):
                     continue
-            result = dev.run_step(
+            selected.append((runner, args))
+
+        def run(entry: tuple[str, list[str]]) -> bool:
+            runner, args = entry
+            return dev.run_step(
                 ["uv", "run", str(ctx.root / runner), *args],
                 step_type="selftest", name=Path(runner).name.removesuffix(".py"),
                 build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
-            )
-            ok = ok and result.ok
-        return ok
+                profile_origin="external",
+            ).ok
+
+        # Side by side: each works in a directory of its own, and one after another they cost the sum, 20 s of mostly waiting.
+        # Mirrored output would interleave, so those runs stay serial.
+        from concurrent.futures import ThreadPoolExecutor
+        workers = 1 if (mirror or verbose) else max(1, min(len(selected), os.cpu_count() or 4))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return all(list(pool.map(run, selected)))
 
     def check_shader_grammar(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The binding pass exists twice -- in C++ for the runtime rewriter, in Python for the shader-package
