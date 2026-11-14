@@ -20,6 +20,7 @@ from .query import (
     SampleRow,
     ScopeInterval,
     StatRow,
+    SummaryRow,
     ThreadRunRow,
     ValueRow,
     analyze,

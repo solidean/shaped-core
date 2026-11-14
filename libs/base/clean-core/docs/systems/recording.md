@@ -543,6 +543,30 @@ It drops what finished before the cutoff, and keeps scopes still open across it 
 What went is replaced by one `dropped_span` event per block, saying how many events it covered and over what span.
 So after decimating, a reader can still tell "nothing happened" from "we stopped looking".
 
+### Compaction: coarser, not shorter
+
+Decimating drops time; compacting keeps all of it at a coarser resolution, which is what a recording kept with every test run wants.
+
+```cpp
+auto const folded = captured.scopes_collapsed(below_cycles);      // a short scope becomes a summary of its duration
+auto const lanes  = folded.stats_summarized(window_cycles);       // a stat lane becomes one summary per window
+auto const small  = captured.compacted({.min_scope_secs = 1e-3, .stat_window_secs = 0.1, .target_bytes = 1 << 20});
+auto const mine   = captured.without_sampling();                  // what the code recorded about itself, alone
+```
+
+**A summary is an event of kind `summary` that keeps its site's own descriptor**, so the site's name, domain and source location survive a file.
+The kind comes from the event's `flag_summary`, never from a descriptor, and its payload is a `rec::summary`: count, sum, min, max, last, and when the first and last folded event happened.
+A collapsed scope's values are its durations in cycles; a stat's are its readings, or its deltas when it accumulates.
+
+A collapsed scope's summary sits where the scope closed, and what the scope enclosed stays where it was, so it belongs to the scope around it from then on.
+A stat lane is one site on one thread inside one scope, so a summary never moves out of the scope its events were in.
+Windows are aligned to multiples of the window, so summarizing twice at one window changes nothing, and collapsed scopes summarize with each other like any lane.
+A scope whose begin or end the recording lacks, and a site named at runtime, are kept as they are.
+
+`compacted` runs both in rounds, the thresholds growing by `growth` each round, until the recording fits `target_bytes`.
+A round that changes nothing below the recording's span does not stop it, since a larger threshold may still fold what it could not; one past the span does.
+nexus applies it to the recording every run keeps with its logs ([its recording doc](../../../nexus/docs/recording.md)).
+
 The queries are what turn a recording into a test assertion:
 
 ```cpp

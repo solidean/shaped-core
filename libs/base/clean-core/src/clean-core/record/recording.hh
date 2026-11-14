@@ -89,6 +89,39 @@ struct cc::rec::decimation_options
     bool report_dropped = true;
 };
 
+/// How far `recording::compacted` folds a recording, and when it stops.
+///
+/// Each round collapses the scopes shorter than its scope threshold, then summarizes every stat lane to its window.
+/// Both grow by `growth` from round to round, until the recording holds at most `target_bytes`, or no round can shrink it:
+/// one changed nothing with both thresholds already past the recording's span.
+/// A round below that span that changes nothing does not stop it, since a larger threshold may still fold what it could not.
+/// A threshold of zero leaves that half out.
+struct cc::rec::compaction_options
+{
+    f64 min_scope_secs = 0;
+    f64 stat_window_secs = 0;
+    f64 growth = 4;
+    /// Off at zero: one round, whatever it leaves.
+    isize target_bytes = 0;
+    /// At most this many rounds, so a recording no threshold shrinks still ends.
+    i32 max_rounds = 8;
+    /// The cycle rate the thresholds convert at; zero is this process's, which is right for a live recording.
+    f64 cycles_per_second = 0;
+};
+
+/// What `recording::compacted` did, so a reader knows the resolution it is left with.
+struct cc::rec::compaction_report
+{
+    i32 rounds = 0;
+    /// The thresholds of the last round that ran.
+    f64 min_scope_secs = 0;
+    f64 stat_window_secs = 0;
+    isize bytes_before = 0;
+    isize bytes_after = 0;
+    /// Whether `target_bytes` was met; false too when no target was set.
+    bool reached_target = false;
+};
+
 /// What a bounded capture is allowed to keep.
 ///
 /// A long-running capture has to throw something away, and which thing depends entirely on what the capture is FOR.
@@ -245,12 +278,38 @@ public:
     /// Only events of one kind.
     [[nodiscard]] rec::recording of_kind(rec::event_kind k) const;
 
+    /// Without what a sampler wrote: its samples, its per-thread `record.thread_run` readings, and its tick scopes.
+    /// What is left is what the code recorded about itself, the instrumented scopes, stats, values and logs.
+    /// By name, so it works on a loaded recording as on a live one.
+    [[nodiscard]] rec::recording without_sampling() const;
+
     /// Only events whose timestamp falls in `[begin_cycles, end_cycles)`.
     [[nodiscard]] rec::recording in_cycle_range(u64 begin_cycles, u64 end_cycles) const;
 
     /// Drops what finished before the cutoff, keeping scopes that are still open across it.
     /// What went is reported as a `dropped_span` event, so the result says what it no longer knows.
     [[nodiscard]] rec::recording decimated(rec::decimation_options const& options) const;
+
+    /// Every closed scope shorter than `below_cycles` becomes a summary of one, its duration, at the place it closed.
+    ///
+    /// What the scope enclosed stays where it was, so it is attributed to the scope around it from then on.
+    /// A scope nested in a collapsed one is shorter still, so it collapses too.
+    /// Kept whatever its length: a scope whose begin or end this recording lacks, and one whose site is named at runtime,
+    /// since its summary would lose the name.
+    [[nodiscard]] rec::recording scopes_collapsed(u64 below_cycles) const;
+
+    /// Every stat lane, and every summary, folded into one summary per site and window of `window_cycles`.
+    ///
+    /// A lane is one site on one thread inside one scope: a summary is written where its window ends, or where the scope
+    /// around it closes, whichever comes first, so what a reader attributes it to does not change.
+    /// Windows are aligned to multiples of `window_cycles`, so summarizing twice at one window changes nothing.
+    /// A stat whose site is named at runtime is kept as it is.
+    [[nodiscard]] rec::recording stats_summarized(u64 window_cycles) const;
+
+    /// Collapses and summarizes in rounds of growing thresholds, until the recording is small enough or stops shrinking.
+    /// `report`, when given, says what it did.
+    [[nodiscard]] rec::recording compacted(rec::compaction_options const& options,
+                                           rec::compaction_report* report = nullptr) const;
 
     /// Only what was recorded while a thread was under `id`.
     ///
