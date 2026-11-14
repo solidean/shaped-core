@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # ///
 
 """Self-test for a Layout's extra roots — tools/dev/lib/quality/roots.py and the crossref and lint discovery over them.

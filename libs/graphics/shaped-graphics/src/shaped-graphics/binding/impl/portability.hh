@@ -38,4 +38,9 @@ namespace sg::impl
 /// A null stage and a stage whose features are unknown are not judged.
 [[nodiscard]] cc::optional<cc::string> find_missing_feature(feature_set supported,
                                                             cc::span<compiled_shader const* const> stages);
+
+/// The first stage that declares a reserved slot, as a message naming the shader and the slot: sg lays out none, so a
+/// pipeline of it is refused rather than left for the backend's own pipeline creation to fail on.
+/// A null stage is not judged.
+[[nodiscard]] cc::optional<cc::string> find_reserved_slot(cc::span<compiled_shader const* const> stages);
 } // namespace sg::impl

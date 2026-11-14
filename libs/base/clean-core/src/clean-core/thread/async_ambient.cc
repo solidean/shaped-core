@@ -1,5 +1,9 @@
+#include <clean-core/container/vector.hh>
 #include <clean-core/memory/node_allocation.hh>
+#include <clean-core/platform/stacktrace.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/async_ambient.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 
 using namespace cc::primitive_defines;
@@ -70,6 +74,142 @@ void cc::async_ambient_unwatch_releases(void const* head)
 #endif
 }
 
+#if CC_ASYNC_AMBIENT_TRACE
+constinit cc::atomic<i32> cc::impl::async_ambient_tracking = 0;
+
+namespace
+{
+/// A holder's reference to a link at or beneath a tracked head, and where it took it.
+struct held
+{
+    void const* holder = nullptr;
+    void const* link = nullptr;
+    cc::stacktrace stack;
+};
+
+/// The tracked heads, and every holder of one of them or of a link beneath one.
+struct holder_ledger
+{
+    cc::vector<void const*> heads;
+    cc::vector<held> holders;
+};
+
+cc::mutex<holder_ledger>& ledger()
+{
+    static auto l = cc::mutex<holder_ledger>();
+    return l;
+}
+
+/// Whether `link` is `head` or lies beneath it; a link is immutable once made, so the walk takes no lock of its own.
+[[nodiscard]] bool is_within(void const* link, void const* head)
+{
+    for (auto const* l = static_cast<cc::async_ambient_link const*>(link); l != nullptr; l = l->parent)
+        if (l == head)
+            return true;
+    return false;
+}
+} // namespace
+
+void cc::impl::async_ambient_note_retain(void const* a, void const* holder)
+{
+    // captured outside the lock: it is slow, and touches nothing of the ledger's
+    auto stack = cc::stacktrace::current(2);
+    ledger().lock(
+        [&](holder_ledger& l)
+        {
+            for (auto const* head : l.heads)
+                if (is_within(a, head))
+                {
+                    l.holders.push_back({.holder = holder, .link = a, .stack = cc::move(stack)});
+                    return;
+                }
+        });
+}
+
+void cc::impl::async_ambient_note_release(void const* holder)
+{
+    ledger().lock(
+        [&](holder_ledger& l)
+        {
+            for (auto i = isize(0); i < l.holders.size(); ++i)
+                if (l.holders[i].holder == holder)
+                {
+                    l.holders.remove_at(i);
+                    return;
+                }
+        });
+}
+#endif
+
+bool cc::async_ambient_track_holders(void const* head)
+{
+#if CC_ASYNC_AMBIENT_TRACE
+    if (head == nullptr)
+        return false;
+    ledger().lock([&](holder_ledger& l) { l.heads.push_back(head); });
+    impl::async_ambient_tracking.fetch_add(1, cc::memory_order_seq_cst);
+    return true;
+#else
+    (void)head;
+    return false;
+#endif
+}
+
+cc::vector<cc::string> cc::async_ambient_tracked_holders(void const* head)
+{
+    auto out = cc::vector<cc::string>();
+#if CC_ASYNC_AMBIENT_TRACE && CC_HAS_STACKTRACE
+    ledger().lock(
+        [&](holder_ledger& l)
+        {
+            for (auto const& h : l.holders)
+                if (is_within(h.link, head))
+                    out.push_back(cc::to_string(h.stack));
+        });
+#elif CC_ASYNC_AMBIENT_TRACE
+    ledger().lock(
+        [&](holder_ledger& l)
+        {
+            for (auto const& h : l.holders)
+                if (is_within(h.link, head))
+                    out.push_back(cc::string("<no stack: this toolchain has no <stacktrace>>"));
+        });
+#else
+    (void)head;
+#endif
+    return out;
+}
+
+void cc::async_ambient_untrack_holders(void const* head)
+{
+#if CC_ASYNC_AMBIENT_TRACE
+    auto const removed = ledger().lock(
+        [&](holder_ledger& l)
+        {
+            for (auto i = isize(0); i < l.heads.size(); ++i)
+                if (l.heads[i] == head)
+                {
+                    l.heads.remove_at(i);
+                    // a holder no other tracked head covers goes with it
+                    for (auto j = l.holders.size(); j-- > 0;)
+                    {
+                        auto covered = false;
+                        for (auto const* other : l.heads)
+                            covered = covered || is_within(l.holders[j].link, other);
+                        if (!covered)
+                            l.holders.remove_at(j);
+                    }
+                    return true;
+                }
+            return false;
+        });
+    if (removed)
+        impl::async_ambient_tracking.fetch_sub(1, cc::memory_order_seq_cst);
+#else
+    (void)head;
+#endif
+}
+
 void cc::impl::async_ambient_free(async_ambient_link* l)
 {
     // Iterative: releasing a link releases its parent, and a chain is as deep as a consumer nests scopes.
@@ -79,6 +219,10 @@ void cc::impl::async_ambient_free(async_ambient_link* l)
         l->~async_ambient_link();
         cc::node_allocation_free(reinterpret_cast<byte*>(l), ambient_class);
 
+#if CC_ASYNC_AMBIENT_TRACE
+        if (parent != nullptr && async_ambient_tracking.load(cc::memory_order_relaxed) > 0) [[unlikely]]
+            async_ambient_note_release(l);
+#endif
         if (parent == nullptr || !async_ambient_drop(parent))
             return;
         l = parent;
@@ -94,7 +238,7 @@ cc::async_ambient_scope::async_ambient_scope(void const* tag, u64 value)
     auto* const raw = cc::default_node_allocator().allocate_node_bytes(ambient_class, sizeof(async_ambient_link),
                                                                        alignof(async_ambient_link));
     auto* const parent = static_cast<async_ambient_link*>(impl::async_tls().ambient);
-    impl::async_ambient_retain(parent); // the link holds its parent strongly, so retaining a head retains the chain
+    impl::async_ambient_retain(parent, raw); // the link holds its parent strongly, so retaining a head retains the chain
 
     auto const mask = impl::async_ambient_tag_bit(tag) | (parent != nullptr ? parent->present_mask : 0);
     _link = new (cc::placement_new, raw) async_ambient_link{tag, value, parent, {1}, mask};

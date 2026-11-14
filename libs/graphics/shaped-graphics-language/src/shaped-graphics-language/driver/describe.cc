@@ -581,6 +581,11 @@ described_pipeline describe_pipeline(check::checked_module const& m,
             add_options_of(m, s.entry, options);
             mark_samplers(m, s.entry, legal, is_reached);
         }
+    // what the geometry stage appends, from its stream parameter's kind
+    if (check::is_valid(p.geometry))
+        for (auto const& parameter : m.at(m.functions[m.at(p.geometry).info].parameters))
+            if (m.at(parameter.type).kind == check::type_kind::stream && m.at(parameter.type).count > 0)
+                result.geometry_corners = m.at(parameter.type).count;
     // One layout serves every stage, so it carries what any of them reaches, in index order.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
         if (is_reached[i] != 0)

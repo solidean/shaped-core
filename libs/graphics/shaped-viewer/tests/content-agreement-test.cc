@@ -203,7 +203,8 @@ void check_cutout(cc::string_view name, agreement::converged const& contender, a
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv agreement - every kind of content draws the same in every mode",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

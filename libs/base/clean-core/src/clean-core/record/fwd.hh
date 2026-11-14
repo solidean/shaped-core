@@ -72,6 +72,14 @@ enum class cc::rec::event_kind : cc::u8
     /// The payload is `key=value` lines, so a reader needs no schema and no codec.
     stamp,
 
+    /// Many events of one site over a stretch of time, folded into a count, a sum, a minimum, a maximum and a last value.
+    ///
+    /// **No descriptor has this kind.** A summary keeps the descriptor of the site it folds, so its identity survives,
+    /// and says what it is through `impl::flag_summary` on the event; `event_view::kind()` reports it as this kind.
+    /// A folded scope's values are its durations in cycles; a folded stat's are its readings or deltas.
+    /// Only a compaction writes one (recording.hh), never a live site.
+    summary,
+
     count,
 };
 
@@ -235,6 +243,9 @@ struct recording;
 struct recording_listener;
 struct loaded_recording;
 struct scope_span;
+struct summary;
+struct compaction_options;
+struct compaction_report;
 struct trace_relation;
 struct decimation_options;
 struct retention_policy;

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.14"
 # dependencies = []
 # ///
 """SGL's own SPIR-V and DXIL against the same SGL's text through DXC: size and opcodes, entry point by entry point.

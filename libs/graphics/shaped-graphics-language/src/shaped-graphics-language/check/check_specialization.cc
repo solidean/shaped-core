@@ -606,6 +606,11 @@ bool holds(cc::span<target_condition const> nodes, i32 at, compile_target const&
 }
 } // namespace
 
+bool sgl::check::condition_holds(cc::span<target_condition const> condition, compile_target const& target)
+{
+    return condition.empty() || holds(condition, i32(condition.size()) - 1, target);
+}
+
 i32 sgl::check::chosen_type_branch(checked_module const& m, symbol_id type_symbol, compile_target const& target)
 {
     for (auto i = isize(0); i < m.target_type_branches.size(); ++i)

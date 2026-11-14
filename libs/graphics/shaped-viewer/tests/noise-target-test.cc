@@ -142,7 +142,8 @@ cc::shared_async<noise_run> trace_box(sg::context& ctx,
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv - a megakernel layer under a noise target stops each pixel where its noise is down to it",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::raytracing_pipeline))
@@ -197,7 +198,9 @@ ASYNC_INVOCABLE_TEST("sv - a megakernel layer under a noise target stops each pi
 // A final render: a sequence under a time budget, its layer left `automatic`, so the render picks the tracer, the noise target
 // and the denoiser itself, and spends the budget frame by frame.
 // The run must end near its budget however much a perfect image would take, and write every frame.
-INVOCABLE_TEST("sv - a sequence under a time budget renders every frame within it", (sg::context_handle const& ctx_h))
+INVOCABLE_TEST("sv - a sequence under a time budget renders every frame within it",
+               (sg::context_handle const& ctx_h),
+               nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::raytracing_pipeline))

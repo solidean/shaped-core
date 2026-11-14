@@ -129,6 +129,23 @@ CI uploads them inside `ci-logs.zip` — [docs/guides/ci.md](../../../../docs/gu
 
 ---
 
+## The whole run's recording, kept with the logs
+
+`--log-rec <file>`, or `NX_LOG_REC_DIR` naming a directory for `<program>.ccrec`, keeps the whole run at a coarse resolution, compressed.
+`dev.py test` sets the variable for every binary it runs, through the build server too, so each run's logs carry one.
+It is what to read when a run was slow or odd and nobody asked for `--rec` beforehand.
+
+It holds the instrumentation alone, the code's own scopes, stats, values and logs, coarsened by [compaction](../../clean-core/docs/systems/recording.md#compaction-coarser-not-shorter):
+- **No sampling.** A runner report's sampler writes a reading per thread at every tick, which would be most of the file.
+- **No allowed noise.** A warning or error a binary-wide `NX_ALLOW_LOGS` allows is dropped; one a test declares stays.
+- **Coarse.** Scopes under a millisecond become summaries and stat lanes fold per tenth of a second, both coarsening fourfold a round until the recording fits a megabyte.
+
+The capture compacts while the run goes, at 16 MB held, so a long binary never keeps the recorder's chunks from it and makes it drop events.
+`--rec` beside it keeps the full capture as before, and then the compaction waits for the end.
+A 30 s shaped-viewer run measured 28.7 MiB in full and 117 KB kept this way (2026-11-14).
+
+---
+
 ## A test that owns the recorder
 
 `cc::rec` is a process-wide singleton with one `initialize`/`shutdown` pair, so a test that drives it itself cannot run beside the run's recorder.

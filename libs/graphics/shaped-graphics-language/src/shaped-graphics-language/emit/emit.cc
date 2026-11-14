@@ -4,6 +4,7 @@
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
+#include <shaped-graphics-language/emit/impl/payload_access.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 #include <shaped-graphics-language/ir/pipeline.hh>
@@ -22,6 +23,26 @@ constexpr sgl::emit::target k_all_targets[] = {
 cc::span<sgl::emit::target const> sgl::emit::all_targets()
 {
     return k_all_targets;
+}
+
+cc::span<sgl::check::fill const> sgl::emit::fills_of(target t, check::feature f)
+{
+    static constexpr check::fill k_native[] = {check::fill::native};
+    static constexpr check::fill k_or_nvapi[] = {check::fill::native, check::fill::nvapi};
+    auto const has_nvapi = f == check::feature::shader_execution_reordering || f == check::feature::opacity_micromap;
+    return t == target::hlsl_dx12 && has_nvapi ? cc::span<check::fill const>(k_or_nvapi)
+                                               : cc::span<check::fill const>(k_native);
+}
+
+cc::span<sgl::check::fill const> sgl::emit::fills_of(target t, check::core_construct c)
+{
+    static constexpr check::fill k_native[] = {check::fill::native};
+    static constexpr check::fill k_draw_start[] = {check::fill::native, check::fill::root_constant};
+    static constexpr check::fill k_wave_size[] = {check::fill::native, check::fill::none};
+    if (t != target::hlsl_dx12)
+        return k_native;
+    return c == check::core_construct::draw_start ? cc::span<check::fill const>(k_draw_start)
+                                                  : cc::span<check::fill const>(k_wave_size);
 }
 
 cc::string_view sgl::emit::to_string(target t)
@@ -426,6 +447,135 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     auto plan = impl::make_plan(m, e, t, sources.device_features.has(check::feature::float_atomic_add));
     plan.diagnostics = sources.diagnostics;
     plan.sees_motion = sources.software_trace;
+    plan.compiled_for = compile_target_of(t, sources.device_features);
+    // EMIT-265: a fill the target does not offer is no output of it
+    auto const offers = [](cc::span<check::fill const> offered, check::fill how)
+    {
+        for (auto const f : offered)
+            if (f == how)
+                return true;
+        return false;
+    };
+    for (auto i = isize(0); i < sources.fills.size(); ++i)
+    {
+        auto const& asked = sources.fills[i];
+        auto const refused = [&](cc::string detail)
+        {
+            result.errors.push_back({.kind = error_kind::unsupported, .symbol = e.function, .detail = cc::move(detail)});
+            return result;
+        };
+        if (!sources.device_features.has(asked.f))
+            return refused(cc::format("a {} fill of {}, which the compile does not grant", check::name_of(asked.how),
+                                      check::name_of(asked.f)));
+        for (auto k = isize(0); k < i; ++k)
+            if (sources.fills[k].f == asked.f)
+                return refused(cc::format("two fills of {}", check::name_of(asked.f)));
+    }
+    for (auto const& asked : sources.fills)
+        if (!offers(fills_of(t, asked.f), asked.how))
+        {
+            result.errors.push_back(
+                {.kind = error_kind::unsupported,
+                 .symbol = e.function,
+                 .detail = cc::format("a {} fill of {}, which {} does not offer", check::name_of(asked.how),
+                                      check::name_of(asked.f), to_string(t))});
+            return result;
+        }
+    for (auto const c : {check::core_construct::draw_start, check::core_construct::wave_size})
+        if (auto const how = c == check::core_construct::draw_start ? sources.core.draw_start : sources.core.wave_size;
+            !offers(fills_of(t, c), how))
+        {
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("a {} fill of {}, which {} does not offer",
+                                                          check::name_of(how), check::name_of(c), to_string(t))});
+            return result;
+        }
+    // EMIT-128: dx12 reads where the draw started natively through Shader Model 6.8's system values; the root-constant
+    // fill is not written yet, so an entry that takes the draw's start is refused under it
+    if (t == target::hlsl_dx12)
+        for (auto const& input : e.stage_inputs)
+        {
+            if (input.input != check::stage_input::vertex_index && input.input != check::stage_input::instance_index
+                && input.input != check::stage_input::first_instance)
+                continue;
+            if (sources.core.draw_start == check::fill::native)
+            {
+                plan.reads_draw_start = true;
+                result.reads_draw_start = true;
+                continue;
+            }
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} takes @{}, which dx12 reads natively from Shader Model "
+                                                          "6.8's "
+                                                          "system values, and this compile asks the root-constant fill "
+                                                          "of draw_start, which is not written yet",
+                                                          e.name, check::info_of(input.input).name)});
+            return result;
+        }
+    // EMIT-148: dx12 states a preferred subgroup size as a range, Shader Model 6.8's, where the compile asks it natively
+    plan.states_wave_size_range
+        = t == target::hlsl_dx12 && e.preferred_subgroup_size > 0 && sources.core.wave_size == check::fill::native;
+    // EMIT-265: an nvapi fill on dx12; opacity micromaps are then the driver's, and the text states none (EMIT-184)
+    auto const nvapi = [&](check::feature f)
+    { return t == target::hlsl_dx12 && check::fill_of(sources.fills, f) == check::fill::nvapi; };
+    plan.reorders_through_nvapi = e.features.has(check::feature::shader_execution_reordering)
+                               && nvapi(check::feature::shader_execution_reordering);
+    plan.states_micromaps = e.features.has(check::feature::opacity_micromap) && !nvapi(check::feature::opacity_micromap);
+    result.writes_nvapi = plan.reorders_through_nvapi;
+    // EMIT-184: NVAPI applies a structure's micromaps itself, and has no flag that forces a query's trace to 2 states,
+    // so a trace that may force them on a device that has micromaps is refused rather than its force dropped
+    if (e.features.has(check::feature::opacity_micromap) && nvapi(check::feature::opacity_micromap))
+        for (auto const& x : e.exprs)
+        {
+            auto const* const call = x.node.try_as<check::flat_call>();
+            auto const* const record = call != nullptr ? m.builtin_function(call->intrinsic) : nullptr;
+            if (record == nullptr || record->flags_argument < 0)
+                continue;
+            auto const* const query = e.at(e.at(call->arguments)[0]).node.try_as<check::flat_local_ref>();
+            if (query == nullptr)
+                continue;
+            auto const& flags = plan.local_flags[index_of(query->local)];
+            constexpr auto k_force_2_state = 1024u;
+            if (flags.has_value() && (flags.value() & k_force_2_state) == 0)
+                continue;
+            result.errors.push_back(
+                {.kind = error_kind::unsupported,
+                 .symbol = e.function,
+                 .detail = flags.has_value()
+                             ? cc::format("{} forces a ray query's trace to 2 opacity micromap states, which the nvapi "
+                                          "fill of opacity_micromap cannot: NVAPI has no flag that forces them",
+                                          e.name)
+                             : cc::format("{} traces a ray query with flags that are no constant, so they may force 2 "
+                                          "opacity micromap states, which the nvapi fill of opacity_micromap cannot: "
+                                          "NVAPI has no flag that forces them",
+                                          e.name)});
+            return result;
+        }
+    // NVAPI invokes a hit object by tracing through it again, which takes the structure its trace took: each
+    // invocation names the one its hit object's `trace_hit` traced, and one that more than one may be is refused
+    if (plan.reorders_through_nvapi)
+        for (auto const& x : e.exprs)
+            if (auto const* const call = x.node.try_as<check::flat_call>())
+                if (auto const* const record = m.builtin_function(call->intrinsic);
+                    record != nullptr && record->name == "hit_object_invoke")
+                {
+                    auto const hit = e.at(call->arguments)[0];
+                    auto const found = impl::traced_structure(m, e, hit);
+                    if (found.has_error())
+                    {
+                        result.errors.push_back(
+                            {.kind = error_kind::unsupported,
+                             .symbol = e.function,
+                             .detail = cc::format("{} invokes a hit object {}, which the nvapi fill of "
+                                                  "shader_execution_reordering cannot: NVAPI invokes one by tracing it "
+                                                  "again through the acceleration structure its one trace took",
+                                                  e.name, found.error())});
+                        return result;
+                    }
+                    plan.invoked_structures.push_back({.hit = hit, .structure = found.value()});
+                }
     plan.float_guarantee = sources.float_guarantee;
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
@@ -486,6 +636,11 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         auto written = impl::write_text(plan, impl::dialect_of(t), sources);
         result.text = cc::move(written.text);
         result.lines = cc::move(written.lines);
+        // the DXIL writer states no subgroup size, so the range is the text's alone
+        result.states_wave_size_range = plan.states_wave_size_range;
+        if (t == target::hlsl_dx12)
+            for (auto const& s : plan.structs)
+                result.states_payload_qualifiers = result.states_payload_qualifiers || impl::is_payload(plan, s.type);
     }
     result.debug_sites = e.debug_sites;
     result.entry_point = plan.entry_name;
@@ -519,4 +674,44 @@ cc::string sgl::emit::dump_errors(emitted_text const& e)
     for (auto const& error : e.errors)
         out.appendf("{} {}\n", to_string(error.kind), error.detail);
     return out;
+}
+
+
+cc::result<sgl::check::flat_expr_id, cc::string> sgl::emit::impl::traced_structure(check::checked_module const& m,
+                                                                                   check::flat_entry_point const& e,
+                                                                                   check::flat_expr_id hit)
+{
+    // CHK-434: a hit object is the `let` its `trace_hit` gave, and a call inlined hands that `let` on, so the hit
+    // object names its local, and the local the one trace that gave it, wherever it is read: in a loop, in a callee
+    auto const* const ref = e.at(hit).node.try_as<check::flat_local_ref>();
+    if (ref == nullptr)
+        return cc::error(cc::string("that no let holds"));
+    auto structure = check::flat_expr_id::none;
+    for (auto const& st : e.stmts)
+    {
+        auto const* const let = st.node.try_as<check::flat_let>();
+        if (let == nullptr || let->local != ref->local || !check::is_valid(let->value))
+            continue;
+        auto const* const call = e.at(let->value).node.try_as<check::flat_call>();
+        auto const* const record = call != nullptr ? m.builtin_function(call->intrinsic) : nullptr;
+        if (record == nullptr || !record->name.starts_with("trace_hit_ray"))
+            return cc::error(cc::string("that no trace_hit made"));
+        auto const traced = e.at(call->arguments)[0];
+        if (check::is_valid(structure))
+            return cc::error(cc::string("that more than one trace_hit may have made, through different acceleration "
+                                        "structures"));
+        structure = traced;
+    }
+    if (!check::is_valid(structure))
+        return cc::error(cc::string("that no trace_hit made"));
+    // the trace pins the structure it took, so an index that moves after it moves nothing the invocation names
+    return structure;
+}
+
+sgl::check::flat_expr_id sgl::emit::impl::invoked_structure_of(plan const& p, check::flat_expr_id hit)
+{
+    for (auto const& entry : p.invoked_structures)
+        if (entry.hit == hit)
+            return entry.structure;
+    return check::flat_expr_id::none;
 }

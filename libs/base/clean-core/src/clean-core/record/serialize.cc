@@ -1,5 +1,6 @@
 #include "serialize.hh"
 
+#include <clean-core/bytes/compression.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
@@ -121,8 +122,10 @@ cc::vector<byte> cc::rec::serialize(cc::rec::recording const& r)
 
                 // The payload's own descriptor references go first: they are read through `original`, which the line
                 // below overwrites.
-                builder.rewrite_payload_pointers(
-                    *original, cc::span<byte>(out.data() + at + offset + isize(sizeof(*header)), payload));
+                // A summary's payload is a rec::summary whatever its descriptor's fields say, so it holds no pointer.
+                if ((header->flags & impl::flag_summary) == 0)
+                    builder.rewrite_payload_pointers(
+                        *original, cc::span<byte>(out.data() + at + offset + isize(sizeof(*header)), payload));
 
                 header->desc = reinterpret_cast<rec::desc const*>(uintptr_t(index));
                 offset += impl::event_bytes_for(payload);
@@ -372,7 +375,8 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
             // A `cstring` slot is left alone for now and measured instead: its bytes need an arena of their own, and
             // that arena's size is exactly what this walk is working out.
             auto const& d = out._descs[isize(index)];
-            for (isize f = 0; f < isize(d.field_count); ++f)
+            auto const field_count = (header->flags & impl::flag_summary) != 0 ? isize(0) : isize(d.field_count);
+            for (isize f = 0; f < field_count; ++f)
             {
                 auto const& field = d.fields[f];
                 if (isize(field.offset) + isize(sizeof(u64)) > isize(header->payload_size))
@@ -426,8 +430,9 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
         {
             auto* const header = reinterpret_cast<impl::event_header*>(events.data() + at + offset);
             auto const& d = *header->desc;
+            auto const field_count = (header->flags & impl::flag_summary) != 0 ? isize(0) : isize(d.field_count);
 
-            for (isize f = 0; f < isize(d.field_count); ++f)
+            for (isize f = 0; f < field_count; ++f)
             {
                 auto const& field = d.fields[f];
                 if (isize(field.offset) + isize(sizeof(u64)) > isize(header->payload_size))
@@ -530,9 +535,61 @@ cc::result<cc::rec::loaded_recording> cc::rec::impl::recording_loader::load(cc::
     return out;
 }
 
+namespace
+{
+/// The envelope's header: its magic, then the size of the recording inside, then a zstd frame of it.
+struct compressed_header
+{
+    char magic[8] = {};
+    u64 uncompressed_bytes = 0;
+};
+static_assert(sizeof(compressed_header) == 16);
+
+constexpr char compressed_magic[8] = {'C', 'C', 'R', 'E', 'C', 'Z', 'S', 'T'};
+
+[[nodiscard]] bool is_compressed(cc::span<byte const> bytes)
+{
+    if (bytes.size() < isize(sizeof(compressed_header)))
+        return false;
+    for (isize i = 0; i < 8; ++i)
+        if (char(bytes[i]) != compressed_magic[i])
+            return false;
+    return true;
+}
+} // namespace
+
+cc::vector<byte> cc::rec::compress_serialized(cc::span<byte const> bytes, int level)
+{
+    auto const header = compressed_header{
+        .magic = {'C', 'C', 'R', 'E', 'C', 'Z', 'S', 'T'},
+        .uncompressed_bytes = u64(bytes.size()),
+    };
+    auto const frame = cc::compress(bytes, {.algorithm = cc::compression_algorithm::zstd, .level = level});
+
+    auto out = cc::vector<byte>();
+    out.resize_to_uninitialized(isize(sizeof(header)) + frame.size());
+    cc::memcpy(out.data(), &header, sizeof(header));
+    cc::memcpy(out.data() + sizeof(header), frame.data(), size_t(frame.size()));
+    return out;
+}
+
 cc::result<cc::rec::loaded_recording> cc::rec::deserialize(cc::span<byte const> bytes)
 {
-    return impl::recording_loader::load(bytes);
+    if (!is_compressed(bytes))
+        return impl::recording_loader::load(bytes);
+
+    auto header = compressed_header{};
+    cc::memcpy(&header, bytes.data(), sizeof(header));
+
+    // The size is the file's claim, so it caps the decompression rather than sizing anything up front.
+    auto const inner = cc::decompress(
+        bytes.subspan(isize(sizeof(header))),
+        {.algorithm = cc::compression_algorithm::zstd, .max_output_size = isize(header.uncompressed_bytes)});
+    if (!inner.has_value())
+        return cc::error(cc::format("a compressed recording does not decompress: {}", inner.error().to_string()));
+    if (u64(inner.value().size()) != header.uncompressed_bytes)
+        return cc::error("a compressed recording decompresses to another size than its header says");
+    return impl::recording_loader::load(inner.value());
 }
 
 cc::result<cc::rec::loaded_recording> cc::rec::load_recording(cc::string_view path)
@@ -560,5 +617,5 @@ cc::result<cc::rec::loaded_recording> cc::rec::load_recording(cc::string_view pa
     if (read != bytes.size())
         return cc::error("the recording file ended early");
 
-    return impl::recording_loader::load(bytes);
+    return rec::deserialize(bytes);
 }

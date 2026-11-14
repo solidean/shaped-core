@@ -121,10 +121,6 @@ TEST("sgl emit - a polyfilled geometry stage that appends lines draws two corner
 
 TEST("sgl emit - a geometry stage the polyfill does not carry yet is refused by name, not guessed (CHK-525)")
 {
-    auto const points = half_of("points_gs", target::msl, mesh_form::compute);
-    REQUIRE(points.has_error());
-    CHECK(points.error().contains("appends points")).dump("error", points.error());
-
     auto const no_vertex = half_of("twice_gs", target::msl, mesh_form::compute, "");
     REQUIRE(no_vertex.has_error());
     CHECK(no_vertex.error().contains("none was named")).dump("error", no_vertex.error());
@@ -167,10 +163,15 @@ TEST("sgl emit - a geometry stage's mesh route is one mesh entry point of a work
     auto const& line_text = lines.value().text;
     CHECK(line_text.contains(", 253, 189, metal::topology::line>")).dump("text", line_text);
     CHECK(line_text.contains("2.0, 2.0, 2.0, 1.0")).dump("text", line_text);
-    // points the polyfill draws on neither route yet, and refuses by name
+    // a mesh stage writes lines or triangles alone, so points are the compute route's, whose primitive is one corner
     auto const points = half_of("points_gs", target::msl, mesh_form::mesh);
     REQUIRE(points.has_error());
-    CHECK(points.error().contains("appends points, which the polyfill does not draw yet")).dump("error", points.error());
+    CHECK(points.error().contains("appends points, which the mesh route does not draw yet")).dump("error", points.error());
+    auto const point_half = half_of("points_gs", target::msl, mesh_form::compute);
+    REQUIRE(point_half.has_value()).dump("error", point_half.has_error() ? point_half.error() : cc::string());
+    REQUIRE(point_half.value().mesh_layout.has_value());
+    CHECK(point_half.value().mesh_layout.value().corners == 1);
+    CHECK(point_half.value().mesh_layout.value().max_primitives == 3);
     auto const unnamed = half_of("twice_gs", target::msl, mesh_form::mesh, "");
     REQUIRE(unnamed.has_error());
     CHECK(unnamed.error().contains("none was named")).dump("error", unnamed.error());

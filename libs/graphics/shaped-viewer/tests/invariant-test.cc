@@ -106,7 +106,9 @@ namespace agreement = sv_test::agreement;
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sv invariant - twice the light is twice the image", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv invariant - twice the light is twice the image",
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))
@@ -159,7 +161,8 @@ ASYNC_INVOCABLE_TEST("sv invariant - a scene with nothing lit is black in every 
 }
 
 ASYNC_INVOCABLE_TEST("sv invariant - the scene turned with its camera is the same image",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))
@@ -189,7 +192,9 @@ ASYNC_INVOCABLE_TEST("sv invariant - the scene turned with its camera is the sam
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-ASYNC_INVOCABLE_TEST("sv invariant - the scene mirrored is the image mirrored", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv invariant - the scene mirrored is the image mirrored",
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))
@@ -216,7 +221,8 @@ ASYNC_INVOCABLE_TEST("sv invariant - the scene mirrored is the image mirrored", 
 // and counted, a caller waiting on a sample count takes the black image as the converged one.
 // The lamp's mesh and its area CDF each land a frame or more after the first trace, which a fresh manager shows.
 ASYNC_INVOCABLE_TEST("sv invariant - a scene still landing converges to the scene landed",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6"]
 # ///
 
@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote
@@ -186,8 +187,6 @@ def _load_config(root: Path) -> Config:
     path = root / CONFIG_FILE
     if not path.is_file():
         return Config()
-    import tomllib  # Here rather than at the top, so dev.py can import this module on the Python 3.10 it still allows.
-
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
@@ -602,6 +601,25 @@ def _file_ref(value: str) -> tuple[str, int | None, int | None]:
     return value, None, None
 
 
+def _names_test(ref: str, test: str) -> bool:
+    """Whether a `test:` ref names `test`, as `known` matches one: a glob, or either containing the other."""
+    v, t = ref.lower(), test.lower()
+    return fnmatch.fnmatch(t, v) or t in v or v in t
+
+
+def open_issues_naming_test(test: str, *, cwd: Path) -> list[str]:
+    """The ids of the open issues whose `test:` ref names `test`, in the repository at `cwd` and the submodules it tracks.
+
+    Stricter than `known`, since a caller acts on the answer unread: a ref, never a mention in the text, and the ref as a
+    glob over the whole name or over an invoked test's own, never one name merely containing the other.
+    """
+    names = {test.lower(), test.rsplit(" / ", 1)[-1].lower()}
+    ws = Workspace(cwd)
+    return [issue.qid for repo in ws.default for issue in repo.issues()
+            if not issue.closed and any(kind == "test" and any(fnmatch.fnmatchcase(n, value.lower()) for n in names)
+                                        for kind, value in issue.refs())]
+
+
 def cmd_known(ws: Workspace, args: argparse.Namespace) -> int:
     query = args.query
     hits: list[tuple[Issue, str]] = []
@@ -637,7 +655,7 @@ def cmd_known(ws: Workspace, args: argparse.Namespace) -> int:
         for issue in (i for r in repos for i in r.issues()):
             for kind, value in issue.refs():
                 v = value.lower()
-                if kind == "test" and (fnmatch.fnmatch(lowered, v) or lowered in v or v in lowered):
+                if kind == "test" and _names_test(value, query):
                     hits.append((issue, f"refs test: {value}"))
                 elif kind == "symbol" and (v == lowered or v.endswith("::" + lowered) or lowered.endswith("::" + v)):
                     hits.append((issue, f"refs symbol: {value}"))

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6"]
 # ///
 
@@ -427,6 +427,22 @@ def test_known_matches_refs_and_markers(base: Path):
     assert cli(a, "known", "nothing-like-this")[0] == 1
 
 
+def test_open_issues_naming_test_matches_refs_strictly(base: Path):
+    """What ship acts on unread, so a ref is a glob over the whole name or an invoked test's own, and nothing looser."""
+    a, _ = setup(base)
+    write(a / "docs/issues/bug-flaky.md", issue_text("Flaky", "refs:", "  - test: sg differential - every corpus*"))
+    write(a / "docs/issues/.closed/2026/01/bug-gone.md", issue_text("Gone", "closed: 2026-01-01", "resolution: fixed", "refs:",
+                                                                    "  - test: sg differential - every corpus*"))
+
+    def named(test: str) -> list[str]:
+        return issues.open_issues_naming_test(test, cwd=a)
+
+    assert named("sg differential - every corpus entry point computes alike") == ["bug-flaky"], "a glob ref names it, a closed issue does not"
+    assert named("sg dx12 - hardware / sg differential - every corpus entry point") == ["bug-flaky"], "an invoked test by its own name"
+    assert named("sg differential") == [], "a test whose name the ref merely contains is not named"
+    assert named("t0") == [], "nor one that shares a few letters with it"
+
+
 def test_submodules_are_their_own_repositories(base: Path):
     a, _ = setup(base)
     git(base, "init", "-q", "-b", "main", "lib")
@@ -473,19 +489,35 @@ def test_claim_resolves_a_file_ref_into_a_submodule(base: Path):
 
 # ---------------------------------------------------------------------------
 
+def _run_one(name: str) -> str | None:
+    """Runs one test in a directory of its own; its traceback, or None when it passed."""
+    fn = globals()[name]
+    with tempfile.TemporaryDirectory(prefix="issues-test-") as tmp:
+        try:
+            fn(Path(tmp)) if fn.__code__.co_argcount else fn()
+        except Exception:
+            return traceback.format_exc()
+    return None
+
+
 def main() -> int:
-    tests = [(name, fn) for name, fn in globals().items() if name.startswith("test_")]
+    names = [name for name in globals() if name.startswith("test_")]
+    # Each test in a process of its own, side by side: every one builds its own repositories and remote, and one after
+    # another the suite spent its 20 s waiting on git.
+    from concurrent.futures import ProcessPoolExecutor
+    import os
+
+    with ProcessPoolExecutor(max_workers=min(len(names), os.cpu_count() or 4, 16)) as pool:
+        results = list(pool.map(_run_one, names))
     failed = 0
-    for name, fn in tests:
-        with tempfile.TemporaryDirectory(prefix="issues-test-") as tmp:
-            try:
-                fn(Path(tmp)) if fn.__code__.co_argcount else fn()
-                print(f"ok    {name}")
-            except Exception:
-                failed += 1
-                print(f"FAIL  {name}")
-                traceback.print_exc()
-    print(f"{len(tests) - failed} of {len(tests)} passed")
+    for name, error in zip(names, results):
+        if error is None:
+            print(f"ok    {name}")
+        else:
+            failed += 1
+            print(f"FAIL  {name}")
+            print(error, end="")
+    print(f"{len(names) - failed} of {len(names)} passed")
     return 1 if failed else 0
 
 

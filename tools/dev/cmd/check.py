@@ -7,6 +7,7 @@ docs/guides/building-and-testing.md documents what each gate does, and the argum
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from tools import dev
 from tools.dev import Watch, console
 from tools.dev.lib.pipeline import build_server
 from tools.dev.lib.pipeline.eligibility import nexus_filter, query_listing
+from tools.dev.lib.quality import imports as dev_imports
 from tools.dev.lib.toolchain import jsruntime as jsr
 
 from .test import THOROUGH_TIMEOUT_FACTOR
@@ -25,6 +27,52 @@ from . import issues
 from .context import Context
 
 NAME = "check"
+
+# dev.py's own machinery and two tools beside it, which nothing else exercises, as one gate per group.
+# Each script watches what it imports, transitively (lib/quality/imports.py), plus what it reads or loads some other way;
+# the third element is that, and only that.
+# The progress region needs it most: it exists only as escape sequences on a stream, so a frame that miscounts its own
+# height has no other way of being caught.
+# extern/'s manifest resolution is answered on every configure and reported by nothing, so a wrong answer surfaces as a
+# link error on one runner.
+# clean-simd's link-map check runs after every link of a dispatching binary, where a parser that silently stopped
+# matching would look exactly like a clean link.
+SELFTESTS: dict[str, tuple[str, list[tuple[str, list[str], tuple[str, ...]]]]] = {
+    "dev-selftest-core": ("dev.py's process machinery: the job profile, the progress region, the guards, a quiet step, fail-fast", [
+        ("tools/dev/profile-self-test.py", [], ()),
+        ("tools/dev/ui-self-test.py", [], ()),
+        # The guard is installed in a child, whose script is a string: no import of it is visible here.
+        ("tools/dev/memory-guard-self-test.py", [], ("tools/dev/lib/core/memory_guard.py",)),
+        ("tools/dev/stall-report-self-test.py", [], ()),
+        ("tools/dev/fail-fast-self-test.py", [], ()),
+    ]),
+    "dev-selftest-scope": ("what a change selects: the change scope, the gate registry, the source roots", [
+        ("tools/dev/changes-self-test.py", [], ()),
+        ("tools/dev/checks-self-test.py", [], ()),
+        ("tools/dev/roots-self-test.py", [], ()),
+        ("tools/dev/imports-self-test.py", [], ()),
+    ]),
+    "dev-selftest-pipeline": ("the build and test pipeline: the build server and ship, benchmarks, failure sites", [
+        ("tools/dev/build-server-self-test.py", [], ()),
+        ("tools/dev/benchmarks-self-test.py", [], ()),
+        ("tools/dev/symbolize-self-test.py", [], ()),
+    ]),
+    "dev-selftest-toolchain": ("the tools dev.py installs and finds: JS runtimes, Monado, the Android SDK", [
+        ("tools/dev/jsruntime-self-test.py", [], ("tools/dev/js/*.json",)),
+        ("tools/dev/monado-self-test.py", [], ("tools/monado.version",)),
+        ("tools/dev/android-sdk-self-test.py", [], ("tools/android-sdk.version",)),
+    ]),
+    "dev-selftest-submodules": ("submodule sync, tip and bump, against real repositories", [
+        ("tools/dev/submodules-self-test.py", [], ()),
+    ]),
+    "extern-manifest-selftest": ("extern/'s dependency manifests: which upstream is available on which machine", [
+        # It imports deps_manifest from extern/ by a path it adds itself, and reads every manifest there.
+        ("extern/manifest-self-test.py", [], ("extern/**",)),
+    ]),
+    "simd-link-map-selftest": ("clean-simd's link-map check, which runs after every link of a dispatching binary", [
+        ("libs/base/clean-simd/tools/check-link-map.py", ["--self-test"], ("libs/base/clean-simd/tools/**",)),
+    ]),
+}
 
 # What one preset's whole test run is expected to stay inside.
 #
@@ -167,60 +215,42 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
         )
         return result.ok
 
-    def check_dev_selftest(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
-        # dev.py's own machinery, which nothing else exercises: the job profile's layout, the change-scope resolver, and
-        # the live progress region.
-        # The region is the one that most needs it — it exists only as escape sequences on a stream, so a frame that
-        # miscounts its own height has no other way of being caught.
-        # extern/'s manifest resolution runs here for the same reason: which upstream is available on which machine is
-        # answered on every configure and reported by nothing, so a wrong answer surfaces as a link error on one runner.
-        # clean-simd's link-map check runs after every link of a dispatching binary, where a parser that silently stopped
-        # matching would look exactly like a clean link.
-        # Not fixable, so fix is ignored.
-        #
-        # Each script runs when its own code changed: itself, the dev.py packages it imports, and lib/core, which they all stand on.
-        # A whole-tree run (`--all`), or a scope that cannot be read, runs every one.
-        dev_lib = "tools/dev/lib"
-        core = f"{dev_lib}/core/**"
-        runners = (
-            ("tools/dev/profile-self-test.py", [], (core,)),
-            ("tools/dev/changes-self-test.py", [], (core, f"{dev_lib}/quality/**", f"{dev_lib}/project/**")),
-            ("tools/dev/checks-self-test.py", [], (core, f"{dev_lib}/quality/**")),
-            ("tools/dev/roots-self-test.py", [], (core, f"{dev_lib}/quality/**")),
-            ("tools/dev/jsruntime-self-test.py", [], (core, f"{dev_lib}/toolchain/**", "tools/dev/js/*.json")),
-            ("tools/dev/ui-self-test.py", [], (core,)),
-            ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py", f"{dev_lib}/pipeline/sites.py")),
-            ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
-            ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
-            ("tools/dev/build-server-self-test.py", [], (core, f"{dev_lib}/pipeline/build_server.py", f"{dev_lib}/pipeline/build.py",
-                                                        f"{dev_lib}/pipeline/test.py", "tools/dev/cmd/ship.py")),
-            ("tools/dev/memory-guard-self-test.py", [], (core,)),
-            ("tools/dev/stall-report-self-test.py", [], (core,)),
-            ("tools/dev/monado-self-test.py", [], (core, f"{dev_lib}/toolchain/monado.py", "tools/monado.version")),
-            ("tools/dev/android-sdk-self-test.py", [], (core, f"{dev_lib}/toolchain/android_sdk.py", "tools/dev/cmd/install_android_sdk.py",
-                                                        "tools/android-sdk.version")),
-            ("extern/manifest-self-test.py", [], ("extern/**",)),
-            ("libs/base/clean-simd/tools/check-link-map.py", ["--self-test"], ("libs/base/clean-simd/tools/**",)),
-        )
-        touched = None
-        if scope is not None:
-            try:
-                touched = dev.touched_paths(ctx.root, scope)
-            except dev.ChangeScopeError:
-                touched = None
-        ok = True
-        for runner, args, watches in runners:
-            if touched is not None:
-                watch = dev.Watch.of((runner, *watches))
-                if not any(watch.matches(p) for p in touched):
-                    continue
-            result = dev.run_step(
-                ["uv", "run", str(ctx.root / runner), *args],
-                step_type="selftest", name=Path(runner).name.removesuffix(".py"),
-                build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
-            )
-            ok = ok and result.ok
-        return ok
+    def selftest_gate(group: str):
+        """The gate running one group of SELFTESTS, each script only when what it imports changed."""
+        runners = SELFTESTS[group][1]
+
+        def run_group(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+            # Not fixable, so fix is ignored; a whole-tree run (`--all`), or a scope that cannot be read, runs every one.
+            touched = None
+            if scope is not None:
+                try:
+                    touched = dev.touched_paths(ctx.root, scope)
+                except dev.ChangeScopeError:
+                    touched = None
+            selected = [(runner, args) for runner, args, extra in runners
+                        if touched is None or any(dev.Watch.of(selftest_watches(runner, extra)).matches(p) for p in touched)]
+
+            def run(entry: tuple[str, list[str]]) -> bool:
+                runner, args = entry
+                return dev.run_step(
+                    ["uv", "run", str(ctx.root / runner), *args],
+                    step_type="selftest", name=Path(runner).name.removesuffix(".py"),
+                    build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+                    profile_origin="external",
+                ).ok
+
+            # Side by side: each works in a directory of its own, and one after another they cost the sum.
+            # Mirrored output would interleave, so those runs stay serial.
+            from concurrent.futures import ThreadPoolExecutor
+            workers = 1 if (mirror or verbose) else max(1, min(len(selected), os.cpu_count() or 4))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                return all(list(pool.map(run, selected)))
+
+        return run_group
+
+    def selftest_watches(runner: str, extra: tuple[str, ...]) -> tuple[str, ...]:
+        """What one self-test watches: every repository file it imports, transitively, and what it reads otherwise."""
+        return (*sorted(dev_imports.closure(ctx.root, runner)), *extra)
 
     def check_shader_grammar(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The binding pass exists twice -- in C++ for the runtime rewriter, in Python for the shader-package
@@ -662,10 +692,10 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
         dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
                   False, check_deps_licenses,
                   watches=("extern/**", "docs/licenses/**", "tools/dev/**")),
-        dev.Check("dev-selftest", "dev.py's own self-tests (job profile, change scope, progress region, dependency manifests, "
-                                  "clean-simd's link-map check)",
-                  False, check_dev_selftest,
-                  watches=("dev.py", "tools/dev/**", "extern/**", "libs/base/clean-simd/tools/**")),
+        *(dev.Check(group, SELFTESTS[group][0], False, selftest_gate(group),
+                    watches=tuple(sorted({w for runner, _, extra in SELFTESTS[group][1]
+                                          for w in selftest_watches(runner, extra)})))
+          for group in SELFTESTS),
         # An issue marker can sit in any source file, and a deleted file anywhere can break a ref in an untouched issue.
         dev.Check("issues", "every issue file and every issue marker in the code is valid (docs/guides/issue-tracking.md)",
                   False, check_issues, always=True),
@@ -721,7 +751,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
 # A change to one of these feeds every target, so it runs every test binary.
 _BUILD_INPUTS = Watch.of([
     "**/CMakeLists.txt", "**/*.cmake", "CMakePresets.json", "tools/cmake/**",
-    # The harness files that run the tests, as opposed to the rest of dev.py, which the dev-selftest gate covers.
+    # The harness files that run the tests, as opposed to the rest of dev.py, which the dev-selftest-* gates cover.
     "tools/dev/lib/pipeline/test.py", "tools/dev/cmd/test.py", "tools/dev/cmd/check.py",
 ])
 

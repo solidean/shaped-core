@@ -106,7 +106,8 @@ struct material_case
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv agreement - every material type draws the same sphere in every mode",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

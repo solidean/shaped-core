@@ -63,7 +63,9 @@ struct traced_work
 //
 // The capture asks for `accumulation_sample_cap` samples, which only a converged layer holds, so a file at all means the layer converged.
 // The capture protocol is process environment, which is why this carries capture-environment as dx12-entry.cc's drivers do.
-ASYNC_TEST("sv dx12 - a raster layer draws on a device without ray tracing", nx::config::exclusive("capture-environment"))
+ASYNC_TEST("sv dx12 - a raster layer draws on a device without ray tracing",
+           nx::config::exclusive("capture-environment"),
+           nx::config::thorough_only)
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler, so the viewer's shaders do not build");
@@ -129,7 +131,8 @@ ASYNC_TEST("sv dx12 - a raster layer draws on a device without ray tracing", nx:
 // Beside it, a traced layer on the same device: it cannot be drawn, so it is declined, and it says so exactly once.
 //
 // The raster view converging is what shows the renderer was up and reached both layers; a few frames more show the error is not repeated.
-ASYNC_TEST("sv dx12 - a traced layer on a device without ray tracing is declined, and says so once")
+ASYNC_TEST("sv dx12 - a traced layer on a device without ray tracing is declined, and says so once",
+           nx::config::thorough_only)
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler, so the viewer's shaders do not build");

@@ -1051,6 +1051,20 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
   It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
   Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
+* **CHK-529** A preamble in a branch of a file-scope `const if` chain (AST-161) is written only by a compile that takes that branch, which its condition decides as CHK-426 does.
+  A branch holds where the chain's condition holds, no earlier branch held, and its own condition does, so a chain nests.
+  A branch that holds anything but preambles and such chains is `invalid-target-text`.
+
+```sgl
+const if target_api == .vulkan:
+    "hlsl
+        float only_vulkan(float x);
+    "
+else if has(.subgroups):
+    "hlsl
+        float with_subgroups(float x);
+    "
+```
 * **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
   A `require` in a test's body or a helper's is used where a call that body reaches, inlined, needs the feature (CHK-322).
   A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-265)).
@@ -1450,8 +1464,10 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   What it appends goes into the primitive's fixed slots, the mesh polyfill's words, so the draw keeps the native order: primitive by primitive, then as appended.
   A strip is cut into primitives as it grows, an odd triangle's first two corners swapped so every one winds alike; what is appended past `max_vertices` is dropped.
   `vertex_index` counts from the draw's first vertex, or is the index an indexed draw read; `instance_index` counts from the draw's first instance, and `primitive_id` within the instance.
-  A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
+  A geometry stage that appends points makes a primitive of each vertex it appends.
+  One that reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers, is `unsupported-yet` there.
   Where the target has mesh shaders, the same body can be a mesh entry point instead, a primitive a lane of a workgroup.
+  One that appends points cannot, since a mesh stage writes lines or triangles alone.
   Each lane writes its slots of the mesh output in lane order, so the draw is one mesh draw.
   A triangle slot a lane leaves unwritten is one vertex thrice, which covers nothing.
   A line slot joins the workgroup's filler vertex to itself: one vertex past the lanes', which lane 0 writes outside the clip volume at (2, 2, 2, 1).
@@ -1949,7 +1965,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
-| `invalid-target-text` | CHK-427, CHK-428, CHK-432, CHK-522 |
+| `invalid-target-text` | CHK-427, CHK-428, CHK-432, CHK-522, CHK-529 |
 
 ## Open
 

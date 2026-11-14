@@ -84,6 +84,9 @@ void register_log_allowance(cc::rec::level level,
                             cc::string_view domain,
                             cc::span<cc::string_view const> patterns,
                             cc::source_location location);
+
+/// Whether a binary-wide allowance covers a record of this level, domain and text, as the log rule judges it.
+[[nodiscard]] bool is_allowed_everywhere(cc::rec::level level, cc::string_view domain, cc::string_view text);
 } // namespace nx::impl
 
 /// Allows matching records in every test of this binary: at or below `level`, from `domain` (empty for any), matching the glob `pattern` anywhere in the message.

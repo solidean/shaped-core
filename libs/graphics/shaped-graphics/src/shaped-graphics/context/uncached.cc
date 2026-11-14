@@ -154,10 +154,13 @@ cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description con
     if (desc.view_count > 1)
         return cc::string("the pipeline renders several views from a polyfilled mesh stage, which sg does not wire up "
                           "yet");
-    if (p.corners != 2 && p.corners != 3)
-        return cc::format("the pipeline's mesh polyfill has {} corners a primitive, and a line has 2, a triangle 3",
+    if (p.corners < 1 || p.corners > 3)
+        return cc::format("the pipeline's mesh polyfill has {} corners a primitive, and a point has 1, a line 2, a "
+                          "triangle 3",
                           p.corners);
-    auto const topology = p.corners == 3 ? sg::primitive_topology::triangle_list : sg::primitive_topology::line_list;
+    auto const topology = p.corners == 3 ? sg::primitive_topology::triangle_list
+                        : p.corners == 2 ? sg::primitive_topology::line_list
+                                         : sg::primitive_topology::point_list;
     if (desc.topology != topology)
         return cc::string("the pipeline's topology is not the list its mesh polyfill's primitives draw as");
     if (p.primitives_per_group <= 0 || p.words_per_group <= 0)
@@ -328,6 +331,8 @@ cc::optional<cc::string> refusal_of(sg::compute_pipeline_description const& desc
     sg::compiled_shader const* const stages[] = {&desc.shader};
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
         return missing;
+    if (auto reserved = sg::impl::find_reserved_slot(stages); reserved.has_value())
+        return reserved;
     return misfit_of(desc.shader, desc.layout);
 }
 
@@ -394,6 +399,8 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
         return conflict;
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
         return missing;
+    if (auto reserved = sg::impl::find_reserved_slot(stages); reserved.has_value())
+        return reserved;
     for (auto const* stage : stages)
         if (stage != nullptr)
             if (auto misfit = misfit_of(*stage, desc.layout); misfit.has_value())
@@ -856,6 +863,8 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
         return cc::error(cc::move(conflict.value()));
     if (auto missing = impl::find_missing_feature(_ctx.supported_features(), stages); missing.has_value())
         return cc::error(cc::move(missing.value()));
+    if (auto reserved = impl::find_reserved_slot(stages); reserved.has_value())
+        return cc::error(cc::move(reserved.value()));
 
     _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);

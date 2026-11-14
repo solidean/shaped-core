@@ -122,7 +122,8 @@ struct tiled
 
 ASYNC_INVOCABLE_TEST("sv convergence - every mode's noise falls as one over the root of its samples, and its bias does "
                      "not grow",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))
@@ -170,7 +171,8 @@ ASYNC_INVOCABLE_TEST("sv convergence - every mode's noise falls as one over the 
 }
 
 ASYNC_INVOCABLE_TEST("sv convergence - a denoised image approaches the converged one as its mean grows",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

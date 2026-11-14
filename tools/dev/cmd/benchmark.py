@@ -155,7 +155,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if args.json:
                 command += ["--benchmark-json", _sidecar_path(args.json, target, iteration, args.repeat)]
             if args.rec:
-                command += ["--benchmark-rec", _sidecar_path(args.rec, target, iteration, args.repeat)]
+                command += ["--rec", _sidecar_path(args.rec, target, iteration, args.repeat)]
             if args.verbose_report:
                 command.append("--benchmark-verbose")
             if args.pin:

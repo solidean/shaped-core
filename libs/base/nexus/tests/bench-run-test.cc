@@ -463,7 +463,7 @@ TEST("bench - a loop's results reach cc::rec, at its boundary rather than per sa
     rec.sync();
 
     // One scope per loop, carrying the headline statistics.
-    // This is what --benchmark-rec writes out, and it is emitted OUTSIDE every timed region: one cc::rec event on a
+    // This is what --rec writes out, and it is emitted OUTSIDE every timed region: one cc::rec event on a
     // nanosecond body would be most of the measurement.
     //
     // Two events under the scope's name, not one: a scope is a begin and an end.

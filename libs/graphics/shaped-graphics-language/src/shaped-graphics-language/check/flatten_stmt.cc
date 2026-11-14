@@ -54,13 +54,28 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
         mark_failed();
         return;
     }
+    auto const first_expr = entry.exprs.size();
     auto const condition = flatten_expr(first.condition);
     auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
     // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
     if (auto const taken = constant_condition(condition); taken.has_value())
     {
         if (taken.value())
+        {
+            // EMIT-266: what the branches after it consult is a variant, where a grant can make it false
+            auto const after = ast::index_of(first.condition) * 2 + 1;
+            if (!rest.empty() && could_take(condition, first_expr, false))
+            {
+                if (!ast::is_valid(rest.front().condition))
+                    probe_consults(after, [&](flattener& p) { (void)p.flatten_body(rest.front().then); });
+                else
+                    probe_consults(after, [&](flattener& p) { p.flatten_if(from, rest, false); });
+            }
             return add_taken(from, granting(first.condition, [&] { return flatten_body(first.then); }));
+        }
+        if (could_take(condition, first_expr, true))
+            probe_consults(ast::index_of(first.condition) * 2, [&](flattener& p)
+                           { (void)p.granting(first.condition, [&] { return p.flatten_body(first.then); }); });
         if (!rest.empty() && !ast::is_valid(rest.front().condition))
             return add_taken(from, flatten_body(rest.front().then));
         return flatten_if(from, rest, is_const);
@@ -1049,6 +1064,7 @@ void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id 
             {.file = file(), .call = literal, .features = granted, .within = cc::move(within), .granted = granted});
     }
 
+    consult_preambles_of(chosen);
     auto const return_label = current()->return_label;
     auto const result_type = current()->result;
     auto const is_void = !is_valid(result_type) || result_type == checked_module::void_type;
@@ -1091,6 +1107,12 @@ void sgl::check::impl::flattener::judge_text_types()
                 return d.second;
         auto const& name = c.out.name_of(type);
         auto const chosen = chosen_type_branch(c.out, c.out.at(type).symbol, target);
+        // EMIT-266: what every branch's condition consults is a variant of the type, taken or not (CHK-432)
+        for (auto const& branch : c.out.target_type_branches)
+            if (branch.type_symbol == c.out.at(type).symbol)
+                for (auto const& node : branch.condition)
+                    if (node.kind == target_condition::kind_t::has)
+                        entry.consulted.set(feature(node.value));
         auto result = -3;
         if (chosen >= 0 && c.out.target_type_branches[chosen].is_fields)
             result = -2;
@@ -1280,4 +1302,75 @@ void sgl::check::impl::flattener::place_target_layouts()
         x.type = placed(x.type);
     for (auto& l : entry.locals)
         l.type = placed(l.type);
+}
+
+void sgl::check::impl::flattener::consult_preambles_of(i32 text)
+{
+    if (text < 0 || text >= c.out.target_texts.size())
+        return;
+    auto const& body = c.out.target_texts[text];
+    for (auto const& preamble : c.out.target_preambles)
+        if (preamble.file == body.file && preamble.language == body.language)
+            for (auto const& node : preamble.condition)
+                if (node.kind == target_condition::kind_t::has)
+                    entry.consulted.set(feature(node.value));
+}
+
+bool sgl::check::impl::flattener::could_take(flat_expr_id condition, isize first, bool wanted)
+{
+    auto literals = cc::vector<flat_expr_id>();
+    for (auto const l : has_literals)
+        if (isize(index_of(l)) >= first)
+            literals.push_back(l);
+    // decided by the target, an option or a constant alone, which no grant changes
+    if (literals.empty())
+        return false;
+    // past a handful, every grant is too many to try, and the side is probed
+    if (literals.size() > 10)
+        return true;
+    // a `has` a constant decision inside the condition folded away, a value `if` or a callee's `const if`, is no longer
+    // in it, so flipping it flips nothing here; what the side consults may still be a variant, so it is probed
+    struct reacher
+    {
+        flat_entry_point const& e;
+        cc::vector<bool> reached;
+
+        void expr(flat_expr_id id)
+        {
+            if (!is_valid(id) || isize(index_of(id)) >= reached.size() || reached[index_of(id)])
+                return;
+            reached[index_of(id)] = true;
+            auto const& x = e.at(id);
+            if (auto const* const b = x.node.try_as<flat_block>())
+                body(b->body);
+            for_each_operand(e, x, [&](flat_expr_id operand) { expr(operand); });
+        }
+        void body(ast::range_of<flat_stmt_id> range)
+        {
+            for (auto const st : e.at(range))
+            {
+                for_each_expr_of(e, e.at(st), [&](flat_expr_id inner) { expr(inner); });
+                for_each_body_of(e, e.at(st), [&](ast::range_of<flat_stmt_id> nested) { body(nested); });
+            }
+        }
+    };
+    auto r = reacher{.e = entry, .reached = cc::vector<bool>::create_filled(entry.exprs.size(), false)};
+    r.expr(condition);
+    for (auto const l : literals)
+        if (!r.reached[index_of(l)])
+            return true;
+    auto saved = cc::vector<bool>();
+    for (auto const l : literals)
+        saved.push_back(entry.exprs[index_of(l)].node.as<flat_bool_literal>().value);
+    auto can = false;
+    for (auto grant = u32(0); !can && grant < (1u << u32(literals.size())); ++grant)
+    {
+        for (auto i = isize(0); i < literals.size(); ++i)
+            entry.exprs[index_of(literals[i])].node.as<flat_bool_literal>().value = ((grant >> u32(i)) & 1u) != 0;
+        auto const value = constant_condition(condition);
+        can = value.has_value() && value.value() == wanted;
+    }
+    for (auto i = isize(0); i < literals.size(); ++i)
+        entry.exprs[index_of(literals[i])].node.as<flat_bool_literal>().value = saved[i];
+    return can;
 }

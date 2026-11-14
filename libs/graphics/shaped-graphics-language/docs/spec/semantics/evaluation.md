@@ -19,11 +19,13 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
   That is a float's exact meaning, which the interpreter computes; on a GPU an entry point's `@float` level licenses a target to depart from it (CHK-435).
   At `.fast` a target may assume no NaN or infinity arises, ignore the sign of zero, reassociate, contract into a fused multiply-add, divide through a reciprocal and flush denormals.
+  It may also keep a half operation's result at a float's precision rather than round it to a half (EVAL-96), as a fused multiply-add keeps its product unrounded.
   `.specials` keeps NaNs, infinities and signed zeros, `.precise` keeps the order of evaluation as well, and `.ieee` keeps denormals too.
   At every level a builtin is as precise as its target states.
 * **EVAL-96** A `half` is a 16-bit IEEE number, and a `short` and a `ushort` are 16 bits whose arithmetic wraps (CHK-381).
   An operation of them computes as its 32-bit family does and rounds its result once: a half to nearest, ties to even, and an integer to its low 16 bits.
   So `+`, `-`, `*`, `/` and `sqrt` of halves are exactly binary16's own, and a builtin of several steps, such as `mix` or `dot`, rounds once where a GPU may round each step.
+  At `.fast` a GPU may skip a half's rounding and carry a float's precision instead: Apple's compiler does under Metal's fast math, so only a level above `.fast` holds a half to binary16 there.
 * **EVAL-108** A double's rounding functions are exact, and a zero they give keeps the sign of the argument: `trunc(-0.5)` is -0.0 (CHK-458).
   `round` takes a tie to the even neighbour, and `fract(x)` is `x - floor(x)`.
   `sqrt` is the double nearest the root on the interpreter, and within one ULP of it on dx12; `inverse_sqrt` is `1 / sqrt(x)` there, and within two ULP on dx12.

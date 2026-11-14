@@ -105,6 +105,16 @@ events      the event bytes themselves
 Everything else about the event stream is byte-identical to the live one, so writing is a copy plus one word per event and reading is the same word patched back.
 So there is no second decoder to keep in step with the first.
 
+**A summary event's payload is a `rec::summary`, whatever its descriptor's fields say**, so neither direction patches pointers in it.
+Its header carries `flag_summary`; that flag, new in version 5, is what a reader keys the event's kind and layout on.
+
+### The compressed envelope
+
+`compress_serialized` wraps a serialized recording for keeping: the magic `CCRECZST`, the recording's size as a u64, then one standard zstd frame of it.
+The envelope has no version of its own, since the recording inside carries one.
+Both readers recognize it by its magic, so `load_recording`, `deserialize` and `ccrec.load` take either form.
+The size caps the decompression of an untrusted file, and a frame that holds more or less than it claims is refused.
+
 ---
 
 ## The crash dump

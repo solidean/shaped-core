@@ -390,7 +390,7 @@ enum class sgl::check::padding_kind : sgl::u8
 enum class sgl::check::float_level : sgl::u8
 {
     /// No annotation: assume no NaN or infinity arises, ignore the sign of zero, reassociate, contract, divide through
-    /// a reciprocal, and flush denormals.
+    /// a reciprocal, and flush denormals; a half operation may keep a float's precision rather than round (EVAL-96).
     fast,
     /// NaNs, infinities and signed zeros are kept; reassociating, contracting and flushing denormals are not ruled out.
     specials,

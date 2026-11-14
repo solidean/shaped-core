@@ -313,6 +313,16 @@ cc::vector<byte> encode_compiled_shader(compiled_shader const& shader)
         }
     }
 
+    put_u64(out, u64(shader.reserved_slots.size()));
+    for (auto const& slot : shader.reserved_slots)
+    {
+        put_string(out, slot.name);
+        put_u32(out, slot.space);
+        put_u32(out, slot.index);
+        put_u32(out, slot.stride);
+        put_bool(out, slot.has_counter);
+    }
+
     return out;
 }
 
@@ -433,6 +443,19 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
             line.inlined_from.push_back(cc::move(call));
         }
         shader.source_map.push_back(cc::move(line));
+    }
+
+    // A reserved slot is at least its name's length prefix, three words and its flag.
+    auto const reserved_count = r.get_count(8 + 3 * 4 + 1);
+    for (auto i = isize(0); r.ok && i < reserved_count; ++i)
+    {
+        auto slot = reserved_slot();
+        slot.name = r.get_string();
+        slot.space = r.get_u32();
+        slot.index = r.get_u32();
+        slot.stride = r.get_u32();
+        slot.has_counter = r.get_bool();
+        shader.reserved_slots.push_back(cc::move(slot));
     }
 
     // Trailing bytes mean this is not the blob we think it is, so it is refused like any other inconsistency.

@@ -83,7 +83,27 @@ TEST("sgl emit - the subgroup's stage inputs are read where HLSL has no semantic
 
 TEST("sgl emit - a preferred subgroup size is the range form on dx12, and reaches the host beside the text")
 {
-    CHECK(text_of(k_reduce, target::hlsl_dx12).contains("[numthreads(64, 1, 1)]\n[WaveSize(4, 128, 32)]\nvoid reduce("));
+    // EMIT-148: the range form is Shader Model 6.8's, which dx12 writes under the native fill, the default
+    auto const ranged = sgl::compile_to_text({.source = k_reduce, .entry_point = "reduce", .target = target::hlsl_dx12});
+    REQUIRE(ranged.has_value());
+    CHECK(ranged.value().text.contains("[numthreads(64, 1, 1)]\n[WaveSize(4, 128, 32)]\nvoid reduce("));
+    CHECK(ranged.value().dxil_shader_model == sgl::check::dxil_shader_model{.minor = 8});
+    // the `none` fill states nothing, and stays at 6.6
+    auto const plain = sgl::compile_to_text({.source = k_reduce,
+                                             .entry_point = "reduce",
+                                             .target = target::hlsl_dx12,
+                                             .core = {.wave_size = sgl::check::fill::none}});
+    REQUIRE(plain.has_value());
+    CHECK(plain.value().text.contains("[numthreads(64, 1, 1)]\nvoid reduce("));
+    CHECK(!plain.value().text.contains("WaveSize"));
+    CHECK(plain.value().dxil_shader_model == sgl::check::dxil_shader_model{});
+    // SGL's own DXIL states no subgroup size, so it stays at 6.6 under either fill
+    auto const native = sgl::compile_to_text({.source = k_reduce,
+                                              .entry_point = "reduce",
+                                              .target = target::hlsl_dx12,
+                                              .native = sgl::emit::native_route::require});
+    REQUIRE(native.has_value());
+    CHECK(native.value().dxil_shader_model == sgl::check::dxil_shader_model{});
     // no other text states it: sg's vulkan asks the pipeline instead, and WGSL and MSL have no way to ask
     CHECK(!text_of(k_reduce, target::hlsl_vulkan).contains("WaveSize"));
 

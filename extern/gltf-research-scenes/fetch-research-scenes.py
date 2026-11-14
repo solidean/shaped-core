@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6"]
 # ///
 """Download the glTF Research Scenes release and install its CC0 and CC-BY-3.0 scenes into extern/gltf-research-scenes/.install.

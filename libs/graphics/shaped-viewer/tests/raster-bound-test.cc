@@ -53,7 +53,8 @@ TEST("sv raster_bound - a device without ray tracing or binding arrays resolves 
     CHECK(sv::resolve_render_mode(*created.value(), sv::render_mode::raster) == sv::render_mode::raster);
 }
 
-ASYNC_TEST("sv raster_bound - a resource manager on a device without binding arrays keeps its pools and no tables")
+ASYNC_TEST("sv raster_bound - a resource manager on a device without binding arrays keeps its pools and no tables",
+           nx::config::thorough_only)
 {
     auto created = create_webgpu_like_context();
     if (created.has_error())
@@ -224,7 +225,8 @@ namespace
 // The quad's texture is pure green over a white material, so a sample that read white, or the texture of another slot, shows.
 // On the pulled path, which is what the web draws.
 ASYNC_TEST("sv raster_bound - a textured material samples its texture through its own group",
-           nx::config::exclusive("capture-environment"))
+           nx::config::exclusive("capture-environment"),
+           nx::config::thorough_only)
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler, so the viewer's shaders do not build");
