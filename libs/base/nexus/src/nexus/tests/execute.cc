@@ -16,6 +16,7 @@
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/stacktrace.hh> // the releases SC_ASYNC_AMBIENT_TRACE reports
 #include <clean-core/record/async_scope.hh>
+#include <clean-core/record/value.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
@@ -1166,6 +1167,15 @@ void run_scheduled_instance(nx::test_execution& execution, nx::test_schedule_con
 }
 
 /// What one ASYNC_TEST carries across the polls of its wrapper node.
+/// Names the pass about to run under its owner, so a recording can say which test an owner and its "nx.test" scope are.
+///
+/// The scope installs no links: a test may check that no async scope is in effect, and the pass owner attributes
+/// everything the pass records already.
+void record_test_name(nx::test_declaration const& decl)
+{
+    CC_RECORD("nx.test.name", cc::string_view(decl.name));
+}
+
 struct async_test_state
 {
     nx::test_execution* execution = nullptr;
@@ -1201,6 +1211,9 @@ struct async_test_state
 
     // The running pass's owner link, kept alive while its body runs and released before the leak check counts.
     cc::async_ambient_handle pass_ambient;
+
+    // The running pass's "nx.test" scope, opened as it starts and closed once it is filed.
+    cc::rec::open_async_scope pass_scope;
 
     // The running pass's body; both null between passes.
     cc::shared_async<cc::unit> root;
@@ -1318,6 +1331,8 @@ void start_async_pass(async_test_state& state)
 
     // Above the test's own link, so the scheduled body carries both; the handle keeps it alive past this poll.
     cc::rec::owner_scope const pass_owner(cc::rec::trace_id(ctx.pass_owner));
+    state.pass_scope = CC_RECORD_ASYNC_SCOPE_OPEN("nx.test");
+    record_test_name(decl);
     state.pass_ambient = cc::async_ambient_handle();
 
     {
@@ -1395,6 +1410,7 @@ void start_async_finish(async_test_state& state)
 /// File the pass whose body just resolved, and say whether another one runs.
 [[nodiscard]] bool finish_async_pass(async_test_state& state)
 {
+    state.pass_scope.close();
     auto& ctx = *state.ctx;
     auto const& decl = *state.execution->instance.declaration;
 
@@ -2497,6 +2513,10 @@ void nx::impl::run_test_body(nx::test_execution& execution,
             // Scoped to end before the leak check below, which would otherwise count the pass's own owner link as work left running.
             {
                 cc::rec::owner_scope const pass_owner(cc::rec::trace_id(ctx.pass_owner));
+                // An async scope even here: a plain one keeps a depth on the thread, which a test restarting the
+                // recorder resets under it.
+                auto pass_scope = CC_RECORD_ASYNC_SCOPE_OPEN("nx.test");
+                record_test_name(decl);
 
                 try
                 {

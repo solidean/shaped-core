@@ -126,6 +126,13 @@ cc::string write_runner_report(test_schedule_execution const& execution,
 
 namespace nx::impl
 {
+/// How often a thread's stack reaches the run's recording, whoever samples: a hang or a stall is read from these.
+/// The report's sampler records at this pace beside its sink, and a run without one starts a sampler at it.
+inline constexpr f64 recorded_sample_interval_secs = 0.5;
+
+/// Whether the runner report will sample this run, so nobody else's sampler should take its place.
+[[nodiscard]] bool report_sampling_requested();
+
 /// Notes that samples under `owner` belong to the scheduled test `slot`; a no-op unless the report samples.
 /// Also starts the report's sampler again where a test that owned the recorder stopped it.
 void note_pass_owner(u64 owner, test_declaration const* slot);
