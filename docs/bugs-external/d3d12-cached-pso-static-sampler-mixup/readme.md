@@ -54,13 +54,26 @@ It exits 2 when the run is inconclusive, which includes a restore the driver bui
 
 ## What shaped-core does about it
 
-A dx12 pipeline whose root signature carries a static sampler, a group's or the layout's own, neither restores from a cached blob nor hands one out.
-The rule is `dx12_pipeline_layout::has_static_samplers`.
-[dx12_pipeline_layout.hh](../../../libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_pipeline_layout.hh) states it.
-[compute-texture-test.cc](../../../libs/graphics/shaped-graphics/tests/compute/compute-texture-test.cc) pins it, since the fault itself needs two processes.
-Every other pipeline keeps its persistent cache.
+The dx12 backend makes no static samplers at all.
+Each one becomes a one-descriptor sampler table, pointed at its state's slot in the sampler heap when a pipeline is bound.
+The slot is interned once per state and never freed.
+That is `dx12_sampler_interner`, in [dx12_sampler.hh](../../../libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_sampler.hh).
+Two variants of one shader that differ in a sampler then share a root signature, so there is no twin for the driver to confuse, and their blobs persist.
+
+`run.py` checks that too: `repro --table` runs the same sequence with the sampler bound through a table.
+
+```
+adapter                    restore                        result
+-------------------------  -----------------------------  ------------------------------------
+RTX 4090, 32.0.16.1088     after a repeating twin, table  correct (2026-11-14)
+```
+
+Where the tables would not fit, past the 64-DWORD root budget or the sampler heap, a layout falls back to true static samplers.
+Such a layout neither restores from a cached blob nor hands one out: `dx12_pipeline_layout::has_static_samplers`.
+[compute-texture-test.cc](../../../libs/graphics/shaped-graphics/tests/compute/compute-texture-test.cc) pins that a table-bound pipeline restores from its blob and keeps its own sampler.
 
 ## Re-checking after a driver update
 
 Run `uv run run.py`.
-If it reports the fault gone, drop `has_static_samplers` from the dx12 backend and its test, and this directory with them.
+It exits 1 while the static-sampler fault is there, 4 if the table route goes wrong too, and 0 when neither does.
+If the fault is gone, the fallback's blob rule can go; the tables can stay, since they cost one root DWORD each.

@@ -8,6 +8,8 @@
 //   repro restore <blob> twin    builds the repeating twin fresh first, then does the same
 //   repro restore <blob> same    builds a clamping twin fresh first: the control, since its sampler is the blob's own
 //   ... --warp                   on the WARP software adapter instead of the high-performance one
+//   ... --table                  binds the sampler through a one-descriptor table instead, as shaped-graphics does:
+//                                the two variants then share a root signature, which is what the workaround rests on
 //
 // Every run prints one line and exits 0 when the pipeline sampled as its root signature says, 1 when it did not.
 // A restore the driver built without the blob exits 3, whatever it sampled, since it shows nothing about the blob.
@@ -32,6 +34,9 @@ using Microsoft::WRL::ComPtr;
 namespace
 {
 constexpr int extent = 16;
+
+/// Whether the sampler is a table's rather than the root signature's own static sampler.
+bool g_table = false;
 
 constexpr char const* shader_source = R"(
 Texture2D<float4> src : register(t0);
@@ -64,10 +69,16 @@ ComPtr<ID3D12RootSignature> root_signature(ID3D12Device* device, D3D12_TEXTURE_A
     ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     ranges[1].NumDescriptors = 1;
     ranges[1].OffsetInDescriptorsFromTableStart = 1;
-    D3D12_ROOT_PARAMETER table = {};
-    table.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    table.DescriptorTable = {2, ranges};
-    table.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_DESCRIPTOR_RANGE sampler_range = {};
+    sampler_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+    sampler_range.NumDescriptors = 1;
+    D3D12_ROOT_PARAMETER tables[2] = {};
+    tables[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    tables[0].DescriptorTable = {2, ranges};
+    tables[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    tables[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    tables[1].DescriptorTable = {1, &sampler_range};
+    tables[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_STATIC_SAMPLER_DESC sampler = {};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
@@ -78,10 +89,10 @@ ComPtr<ID3D12RootSignature> root_signature(ID3D12Device* device, D3D12_TEXTURE_A
     sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC desc = {};
-    desc.NumParameters = 1;
-    desc.pParameters = &table;
-    desc.NumStaticSamplers = 1;
-    desc.pStaticSamplers = &sampler;
+    desc.NumParameters = g_table ? 2 : 1;
+    desc.pParameters = tables;
+    desc.NumStaticSamplers = g_table ? 0 : 1;
+    desc.pStaticSamplers = g_table ? nullptr : &sampler;
 
     ComPtr<ID3DBlob> blob, error;
     check(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1_0, &blob, &error), "serialize root signature");
@@ -96,11 +107,12 @@ struct pipeline
     ComPtr<ID3D12RootSignature> rs;
     ComPtr<ID3D12PipelineState> pso;
     bool used_blob = false;
+    D3D12_TEXTURE_ADDRESS_MODE address = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // what a table binds, under --table
 };
 
 pipeline build(ID3D12Device* device, ID3DBlob* code, D3D12_TEXTURE_ADDRESS_MODE address, std::vector<char> const* blob)
 {
-    auto p = pipeline{.rs = root_signature(device, address)};
+    auto p = pipeline{.rs = root_signature(device, address), .address = address};
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
     desc.pRootSignature = p.rs.Get();
     desc.CS = {code->GetBufferPointer(), code->GetBufferSize()};
@@ -202,11 +214,25 @@ int clamp_mismatches(ID3D12Device* device, pipeline const& p)
     to_read.Transition = {src.Get(), 0, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
     list->ResourceBarrier(1, &to_read);
 
-    ID3D12DescriptorHeap* heaps[] = {heap.Get()};
-    list->SetDescriptorHeaps(1, heaps);
+    D3D12_DESCRIPTOR_HEAP_DESC sampler_heap_desc = {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 1,
+                                                    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+    ComPtr<ID3D12DescriptorHeap> sampler_heap;
+    check(device->CreateDescriptorHeap(&sampler_heap_desc, IID_PPV_ARGS(&sampler_heap)), "create sampler heap");
+    D3D12_SAMPLER_DESC sampler = {};
+    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    sampler.AddressU = p.address;
+    sampler.AddressV = p.address;
+    sampler.AddressW = p.address;
+    sampler.MaxLOD = D3D12_FLOAT32_MAX;
+    device->CreateSampler(&sampler, sampler_heap->GetCPUDescriptorHandleForHeapStart());
+
+    ID3D12DescriptorHeap* heaps[] = {heap.Get(), sampler_heap.Get()};
+    list->SetDescriptorHeaps(2, heaps);
     list->SetComputeRootSignature(p.rs.Get());
     list->SetPipelineState(p.pso.Get());
     list->SetComputeRootDescriptorTable(0, heap->GetGPUDescriptorHandleForHeapStart());
+    if (g_table)
+        list->SetComputeRootDescriptorTable(1, sampler_heap->GetGPUDescriptorHandleForHeapStart());
     list->Dispatch(extent / 8, extent / 8, 1);
 
     D3D12_RESOURCE_BARRIER to_copy = {};
@@ -260,6 +286,7 @@ int main(int argc, char** argv)
         twin_first = twin_first || std::strcmp(argv[i], "twin") == 0;
         same_twin = same_twin || std::strcmp(argv[i], "same") == 0;
         warp = warp || std::strcmp(argv[i], "--warp") == 0;
+        g_table = g_table || std::strcmp(argv[i], "--table") == 0;
     }
 
     ComPtr<IDXGIFactory6> factory;

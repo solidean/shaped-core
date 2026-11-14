@@ -1,4 +1,6 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh> // cc::memcmp
+#include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/sampler.hh>
 
@@ -104,3 +106,48 @@ D3D12_STATIC_SAMPLER_DESC to_d3d12_static_sampler_desc(sg::sampler const& s,
     return desc;
 }
 } // namespace sg::backend::dx12
+
+D3D12_SAMPLER_DESC sg::backend::dx12::to_d3d12_sampler_desc(D3D12_STATIC_SAMPLER_DESC const& s)
+{
+    auto desc = D3D12_SAMPLER_DESC{
+        .Filter = s.Filter,
+        .AddressU = s.AddressU,
+        .AddressV = s.AddressV,
+        .AddressW = s.AddressW,
+        .MipLODBias = s.MipLODBias,
+        .MaxAnisotropy = s.MaxAnisotropy,
+        .ComparisonFunc = s.ComparisonFunc,
+        .BorderColor = {},
+        .MinLOD = s.MinLOD,
+        .MaxLOD = s.MaxLOD,
+    };
+    // A static sampler names its border color; a dynamic one states it.
+    auto const opaque = s.BorderColor != D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+    auto const white = s.BorderColor == D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    for (auto i = 0; i < 3; ++i)
+        desc.BorderColor[i] = white ? 1.0f : 0.0f;
+    desc.BorderColor[3] = opaque ? 1.0f : 0.0f;
+    return desc;
+}
+
+cc::optional<int> sg::backend::dx12::dx12_sampler_interner::intern(ID3D12Device* device,
+                                                                   dx12_descriptor_heap& heap,
+                                                                   D3D12_SAMPLER_DESC const& desc)
+{
+    return _entries.lock(
+        [&](cc::vector<entry>& entries) -> cc::optional<int>
+        {
+            // Byte equality: every field is a plain value, and two descriptors alike in every byte are one state.
+            for (auto const& e : entries)
+                if (cc::memcmp(&e.desc, &desc, sizeof(desc)) == 0)
+                    return e.offset;
+
+            auto alloc = heap.allocate_persistent(1);
+            if (alloc.is_empty())
+                return cc::nullopt;
+            auto const offset = alloc.offset;
+            device->CreateSampler(&desc, heap.cpu_at(offset));
+            entries.push_back({.desc = desc, .offset = offset});
+            return offset;
+        });
+}

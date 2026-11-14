@@ -3,6 +3,8 @@ created: 2026-11-14
 refs:
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_pipeline_layout.hh:79
   - issue: perf-sg-raster-pipelines-never-persist
+closed: 2026-11-14
+resolution: fixed
 ---
 
 # Should dx12 lower static samplers to interned heap samplers, so pipelines with them can persist?

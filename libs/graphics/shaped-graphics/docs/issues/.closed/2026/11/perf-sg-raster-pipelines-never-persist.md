@@ -7,6 +7,8 @@ refs:
   - symbol: sg::pipeline_cache::acquire_raster_pipeline
   - test: shaped-viewer-test
   - issue: feat-sg-dx12-state-object-cached-blob
+closed: 2026-11-14
+resolution: fixed
 ---
 
 # Raster pipelines never reach the persistent PSO tier, so a slow driver compile is paid every run

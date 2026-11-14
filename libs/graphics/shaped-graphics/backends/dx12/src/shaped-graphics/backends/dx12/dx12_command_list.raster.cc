@@ -229,6 +229,7 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
     _list->SetGraphicsRootSignature(rp->layout->root_signature.Get());
     _list->SetPipelineState(rp->pipeline_state.Get());
     _bound_raster_pso = rp->pipeline_state.Get();
+    bind_sampler_tables(*rp->layout, true);
     bind_debug_window(*rp->layout, pipeline.footprint(), true);
     _list->IASetPrimitiveTopology(rp->topology);
     _raster_inline_constants.clear_resize_to_filled(rp->layout->inline_constants_num_32bit, 0u);
@@ -512,6 +513,7 @@ void dx12_command_list::draw_mesh_polyfilled(sg::impl::mesh_polyfill_state const
         auto const& layout = *half->layout;
         _list->SetComputeRootSignature(layout.root_signature.Get());
         _list->SetPipelineState(half->pipeline_state.Get());
+        bind_sampler_tables(layout, false);
         bind_debug_window(layout, half->footprint(), false);
         for (isize g = 0; g < _bound_raster_groups.size() && g < layout.groups.size(); ++g)
             if (auto const* const group = _bound_raster_groups[g]; group != nullptr)

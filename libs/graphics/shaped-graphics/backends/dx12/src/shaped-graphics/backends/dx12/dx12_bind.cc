@@ -66,7 +66,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_context::create_dx12_pipeline_layou
 {
     require_persistent(scope);
     return dx12_pipeline_layout::create(_device.Get(), desc.groups, desc.static_samplers, desc.inline_constants,
-                                        desc.dispatch_grid, desc.mesh_polyfill);
+                                        desc.dispatch_grid, desc.mesh_polyfill, this);
 }
 
 cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipeline(sg::compiled_shader const& shader,

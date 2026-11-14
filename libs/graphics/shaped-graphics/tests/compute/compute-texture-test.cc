@@ -215,8 +215,10 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
     // Nothing states a texture's first use before a scope yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
-    auto const& vs = co_await shaders::textures::screen_vs->acquire(*ctx);
-    auto const& ps = co_await shaders::textures::textured_ps->acquire(*ctx);
+    auto const vs_node = shaders::textures::screen_vs->acquire(*ctx);
+    auto const ps_node = shaders::textures::textured_ps->acquire(*ctx);
+    auto const& vs = co_await vs_node;
+    auto const& ps = co_await ps_node;
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
         .layout = shaders::textures::screen_vs.acquire_layout(*ctx),
         .vertex_shader = vs,
@@ -343,8 +345,10 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // One shader under two layouts that differ only in their bound sampler's address mode.
-    // On dx12 such a pipeline neither hands out nor takes a blob, for docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/.
-    auto const& shader = co_await shaders::textures::copy_clamped->acquire(*ctx);
+    // dx12 binds the sampler through a table, so the two share a root signature and the driver bug of
+    // docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/ has nothing to confuse: the blob is handed out and taken.
+    auto const shader_node = shaders::textures::copy_clamped->acquire(*ctx);
+    auto const& shader = co_await shader_node;
     auto const layout_with = [&](sg::sampler_address_mode address)
     {
         sg::bound_sampler const samplers[] = {{.binding = {.name = "clamped",
@@ -367,8 +371,8 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler
 
     if (ctx->backend() == sg::backend_kind::dx12)
     {
-        CHECK(first->cached_pipeline_data().empty());
-        CHECK(!rebuilt->used_cached_pipeline());
+        CHECK(!first->cached_pipeline_data().empty());
+        CHECK(rebuilt->used_cached_pipeline());
     }
     CHECK((co_await clamped_copy_mismatches(ctx, twin)) != 0); // the twin repeats, so the check can tell them apart
     CHECK((co_await clamped_copy_mismatches(ctx, rebuilt)) == 0);
@@ -473,7 +477,8 @@ cc::shared_async<cc::vector<byte>> fill_image(sg::context_handle ctx)
     cmd->compute.dispatch_threads(k_extent, k_extent);
     auto const written = cmd->download.bytes_from_texture(image.raw());
     ctx->submit_command_list(cc::move(cmd));
-    auto const& bytes = co_await written.bytes();
+    auto const bytes_node = written.bytes();
+    auto const& bytes = co_await bytes_node;
     co_return cc::vector<byte>::create_copy_of(bytes);
 }
 } // namespace

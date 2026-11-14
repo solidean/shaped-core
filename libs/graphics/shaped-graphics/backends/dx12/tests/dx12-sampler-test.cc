@@ -149,8 +149,8 @@ INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root si
     auto group_layout = c.create_dx12_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
 
-    // The pipeline layout carries an extra register-bound static sampler at s0 — not tied to any group
-    // binding — which bakes straight into the root signature.
+    // The pipeline layout carries an extra register-bound static sampler at s0, not tied to any group binding.
+    // It becomes a one-descriptor table over its interned state rather than a static sampler of the root signature.
     sg::pipeline_layout_description pld;
     pld.groups = {group_layout.value()};
     pld.static_samplers.push_back(
@@ -158,8 +158,20 @@ INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root si
          .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}});
 
     auto pipeline_layout = c.create_dx12_pipeline_layout(pld, sg::lifetime_scope::persistent);
-    REQUIRE(pipeline_layout.has_value()); // root sig: the group's SRV table + one baked static sampler
+    REQUIRE(pipeline_layout.has_value()); // root sig: the group's SRV table + the sampler's table
     CHECK(pipeline_layout.value()->groups.size() == 1);
+    CHECK(!pipeline_layout.value()->has_static_samplers);
+    REQUIRE(pipeline_layout.value()->sampler_tables.size() == 1);
+
+    // Another layout over the same state takes the same interned slot; one that differs takes its own.
+    auto const again = c.create_dx12_pipeline_layout(pld, sg::lifetime_scope::persistent);
+    REQUIRE(again.has_value());
+    CHECK(again.value()->sampler_tables[0].heap_offset == pipeline_layout.value()->sampler_tables[0].heap_offset);
+    pld.static_samplers[0].sampler.address_u = sg::sampler_address_mode::repeat;
+    auto const other = c.create_dx12_pipeline_layout(pld, sg::lifetime_scope::persistent);
+    REQUIRE(other.has_value());
+    CHECK(other.value()->sampler_tables[0].heap_offset != pipeline_layout.value()->sampler_tables[0].heap_offset);
+    CHECK(other.value()->sampler_tables[0].root_param == pipeline_layout.value()->sampler_tables[0].root_param);
 }
 
 INVOCABLE_TEST("sg dx12 - a group built by slot survives a sampler interleaved with its views",
