@@ -55,7 +55,8 @@ A pipeline of any kind that misses in memory consults [blob-cache](../../../../d
 The DXC shader cache does the same with encoded `compiled_shader`s.
 So the in-memory tier holds live handles for this run, and bcache holds bytes for every run after it.
 Compute builds through `build_compute_pipeline`, raster and ray-tracing pipelines through `build_through_store`, since their backends build asynchronously; the rules below are the same for all three.
-A backend that serializes nothing stores an empty placeholder and builds fresh every run: dx12 state objects, and on dx12 any layout with a static sampler ([the driver bug](../../../../../docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/readme.md)).
+A backend that serializes nothing stores an empty placeholder and builds fresh every run.
+That is dx12 state objects, and on dx12 any layout with a static sampler, for [a driver bug](../../../../../docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/readme.md).
 
 The two differ in one way that shapes the code.
 For a shader the cacheable product and the expensive product are the same bytes, so it is a plain `acquire`: decode what comes back, compile and encode on a miss.
