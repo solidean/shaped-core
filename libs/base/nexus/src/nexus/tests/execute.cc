@@ -723,6 +723,19 @@ void record_leftover_release(void const*, i32 left, void* user)
 }
 #endif
 
+/// With CC_ASYNC_AMBIENT_TRACE, records every holder of a test's context while it lives, so a leftover names its holder.
+struct holder_tracking
+{
+    explicit holder_tracking(void const* head) : _head(head) { (void)cc::async_ambient_track_holders(head); }
+    ~holder_tracking() { cc::async_ambient_untrack_holders(_head); }
+
+    holder_tracking(holder_tracking const&) = delete;
+    holder_tracking& operator=(holder_tracking const&) = delete;
+
+private:
+    void const* _head = nullptr;
+};
+
 /// Counts the work still carrying `head` beyond its owner's reference.
 /// With CC_ASYNC_AMBIENT_TRACE, leftover work is watched for leftover_watch_secs, and each release it makes is reported with its stack.
 /// The wait does not change the verdict: work there at the count failed the pass, whether it let go a microsecond later or never.
@@ -760,6 +773,11 @@ void record_leftover_release(void const*, i32 left, void* user)
             cc::format("{} of them still held it after {:.0f} ms (SC_ASYNC_AMBIENT_TRACE)", still_held, waited_ms));
     else
         result.detail.push_back(cc::format("all of them let go within {:.3f} ms (SC_ASYNC_AMBIENT_TRACE)", waited_ms));
+    for (auto const& stack : cc::async_ambient_tracked_holders(head))
+    {
+        result.detail.push_back("still held, by what took it here:");
+        result.detail.push_back(stack);
+    }
     watch.releases.lock(
         [&](cc::vector<leftover_watch::release>& releases)
         {
@@ -1414,6 +1432,7 @@ void start_async_finish(async_test_state& state)
 /// Fold an async test's outcome into its execution and drop its context.
 void finish_async_test(async_test_state& state)
 {
+    cc::async_ambient_untrack_holders(state.ambient.head());
     test_execute_end(cc::move(state.ctx), state.leaked);
     state.execution->finished_at_steady_s = cc::current_time_steady_secs();
 
@@ -1465,6 +1484,7 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         // Pushed and popped inside this one poll, which is the only shape async_ambient_scope allows, and kept alive past it by `ambient`.
         cc::async_ambient_scope const scope(nx::impl::test_ambient_tag(), state.ctx.get());
         state.ambient = cc::async_ambient_handle();
+        (void)cc::async_ambient_track_holders(state.ambient.head());
 
         start_async_pass(state);
     }
@@ -2407,6 +2427,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
         nx::impl::recorder_handover_scope const handover(decl.test_config.owns_recorder);
 
         cc::async_ambient_scope const test_ambient(nx::impl::test_ambient_tag(), &ctx);
+        holder_tracking const tracking(test_ambient.link());
         scoped_body const own_body(&ctx); // this thread is inside ctx's body from here until the replay loop ends
 
         auto* const crash_slot = running_test_slot_for_this_thread();

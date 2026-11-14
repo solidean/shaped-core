@@ -119,6 +119,30 @@ TEST("async-ambient - a lookup can be given an explicit head")
     cc::impl::async_ambient_release(captured);
 }
 
+// A leak never releases, so a watch of releases cannot name it; tracked holders can.
+// A handle and a nested scope's link both hold the tracked link, each recorded with where it took it and erased when it lets go.
+TEST("async-ambient - a tracked link lists each holder still taking a reference, and forgets one that lets go")
+{
+    cc::async_ambient_scope const s(tag_a(), &value_a);
+    if (!cc::async_ambient_track_holders(s.link()))
+    {
+        // a build without SC_ASYNC_AMBIENT_TRACE tracks nothing, and says so
+        CHECK(cc::async_ambient_tracked_holders(s.link()).empty());
+        return;
+    }
+    {
+        auto const held = cc::async_ambient_handle();
+        CHECK(cc::async_ambient_tracked_holders(s.link()).size() == 1);
+        {
+            cc::async_ambient_scope const inner(tag_b(), &value_b);
+            CHECK(cc::async_ambient_tracked_holders(s.link()).size() == 2);
+        }
+        CHECK(cc::async_ambient_tracked_holders(s.link()).size() == 1);
+    }
+    CHECK(cc::async_ambient_tracked_holders(s.link()).empty());
+    cc::async_ambient_untrack_holders(s.link());
+}
+
 TEST("async-ambient - a held link outlives its scope, and the parent chain with it")
 {
     void* held = nullptr;

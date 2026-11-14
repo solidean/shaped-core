@@ -1015,6 +1015,9 @@ A count says how much still carries a context, not who.
 A build with `SC_ASYNC_AMBIENT_TRACE` can watch one link's releases, `cc::async_ambient_watch_releases`, with a hook called on the releasing thread.
 Every drop of a link, a child freeing its parent included, goes through `impl::async_ambient_drop`, so the watch misses none.
 The hook may run under a node's lock, which is why it should only record; nexus captures a stack there and renders it after the unwatch.
+A holder that never releases is not seen by that watch, so the same builds can track a link's holders too, `cc::async_ambient_track_holders`.
+A retain or release names its holder: a node's ambient slot, an `async_ambient_handle`, or a child link holding its parent.
+From the tracking on, each holder of the link or of a link beneath it is recorded with its acquiring stack, and its release erases it; `cc::async_ambient_tracked_holders` lists what is left.
 
 `cc::async_is_polling()` sits alongside, on the same per-thread block.
 It answers whether a **throw from here has somewhere to land**: inside a poll it becomes the node's error, outside one it escapes a worker's thread function and terminates.
