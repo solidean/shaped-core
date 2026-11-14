@@ -228,9 +228,11 @@ def _judge(ctx: Context, preset, proof) -> bool:
         groups.setdefault((binary, outcome, why), []).append(test)
     for (binary, outcome, why), tests in groups.items():
         named = tests[0] if len(tests) == 1 else f"{len(tests)} tests" if len(tests) > 5 else ", ".join(tests)
-        dev.ui.write_line(console.yellow(f"ship: not blocking, file an issue: {binary}: {named}: {outcome} ({why})"))
-    if filed:
-        _say(f"{len(filed)} red test(s) above are not this change's; `uv run dev.py issues known <test>`, then file each that is not known")
+        ask = "already filed" if why.startswith("known: ") else "file an issue"
+        dev.ui.write_line(console.yellow(f"ship: not blocking, {ask}: {binary}: {named}: {outcome} ({why})"))
+    unknown = [f for f in filed if not f[3].startswith("known: ")]
+    if unknown:
+        _say(f"{len(unknown)} red test(s) above are not this change's; `uv run dev.py issues known <test>`, then file each that is not known")
     for reason in blockers:
         dev.ui.write_line(console.red(f"ship: proof: {reason}"))
     return passed
@@ -253,12 +255,23 @@ def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bo
     unfiled = [r for r in red if not r.get("filed")]
     # Each red that blocks is one of the proof's reasons; the rest (a failed build, a moved tree, an unbuilt binary) stand.
     others = [why for why in proof.reasons if not any(why.startswith(f"{r['binary']}: {r['test']}: ") for r in unfiled)]
-    settle = [r for r in red if r.get("judged") in _SETTLED_AT_BASE]
+    # A red an open issue already names was red before this change, which is what the issue says; running it again at
+    # the base costs a build of the base worktree, about 80 s, to learn that.
+    from tools.issues import issues as tracker
+
+    root = getattr(ctx, "root", None)
+    known = {(r["binary"], r["test"]): qids for r in red
+             if root is not None and (qids := tracker.open_issues_naming_test(r["test"], cwd=root))}
+    settle = [r for r in red if r.get("judged") in _SETTLED_AT_BASE and (r["binary"], r["test"]) not in known]
     at_base: dict[tuple[str, str], bool | None] = {}
     base = (report.get("delta") or {}).get("base")
     if settle and base:
         at_base = _red_at_base(ctx, preset, base, settle)
     filed, blockers = [], list(others)
+    for key, qids in known.items():
+        r = next(r for r in red if (r["binary"], r["test"]) == key)
+        filed.append((*key, r["outcome"], f"known: {', '.join(qids)}"))
+    red = [r for r in red if (r["binary"], r["test"]) not in known]
     # An invocable test's children are one test: red at the base on any child, it is red there, and a child that passed
     # there passed by chance, as a flaky test does.
     red_leaves = {(b, t.rsplit(" / ", 1)[-1]) for (b, t), v in at_base.items() if v is True}

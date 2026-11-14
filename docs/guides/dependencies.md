@@ -84,7 +84,7 @@ And an upstream left undeclared is fetched anyway, with the archive for another 
 CMake then reads `.install/` as "the dependency is here", and the first sign of trouble is the linker refusing it.
 OIDN publishes no asset for windows-arm64 or linux-arm64, and its macos-x64 asset is deliberately unpinned, so it declares all three.
 DXC ships no macOS build and no arm64 Linux one, so it declares those.
-[extern/manifest-self-test.py](../../extern/manifest-self-test.py) pins both against all six hosts, and runs in `check`'s `dev-selftest` gate.
+[extern/manifest-self-test.py](../../extern/manifest-self-test.py) pins both against all six hosts, and runs in `check`'s `extern-manifest-selftest` gate.
 
 **`license` is an SPDX identifier or expression**, `license_files` are paths relative to the dependency directory, and `used_by` is the one-line answer to "why do we have this".
 An upstream that ships no license file of its own carries the text inline as `license_text` — the SQLite amalgamation is the only one.

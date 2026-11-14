@@ -13,7 +13,7 @@ trouble is the linker refusing it several minutes later.
 Availability is asserted against the REAL manifests rather than fixtures, so these cases pin what `extern/` actually
 declares today and fail when someone adds a platform without adding its asset.
 
-Run directly, or through `uv run dev.py check` as part of `dev-selftest`.
+Run directly, or through `uv run dev.py check` as its `extern-manifest-selftest` gate.
 """
 
 from __future__ import annotations

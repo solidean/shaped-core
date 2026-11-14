@@ -535,6 +535,10 @@ A gate runs when a path the scope touched matches one of its globs, deletions an
 `check --list` prints what each watches, and a run names every gate it skipped, so a wrong rule is visible rather than silent.
 A glob that matches no tracked file is an error: the file it named has moved, and the gate would otherwise stop running without anyone noticing.
 
+A Python self-test watches what it imports, read from its source and followed transitively ([imports.py](../../tools/dev/lib/quality/imports.py)), plus what it reads some other way.
+dev.py's facade loads each `dev.X` on first use, so a self-test depends on the modules it reaches by name, not on all of dev.py.
+dev.py's own self-tests are one gate per group, `dev-selftest-core`, `-scope`, `-pipeline`, `-toolchain` and `-submodules`, and within a gate each script runs only when its own set is touched.
+
 `--all` runs everything, and so does naming a gate on the command line.
 CI runs everything, which is where a missing rule is caught.
 
