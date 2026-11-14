@@ -1,0 +1,92 @@
+// DIFF-38: a derivative of a function that takes a derivative is a second derivative.
+// The inner `fwd_diff` or `bwd_diff` is written into the function as any code is, and the outer one differentiates
+// that code, so every mode nests in every other.
+
+fun cube(x: float) -> float => x * x * x
+
+// the first derivative, 3 x^2, by each mode
+fun slope_fwd(x: float) -> float => fwd_diff(cube, x, 1.0)
+fun slope_bwd(x: float) -> float:
+    let mut d = 0.0
+    bwd_diff(cube, x, mut d, 1.0)
+    return d
+
+// its derivative, 6 x
+test fwd_diff(slope_fwd, 2.0, 1.0) == 12.0
+test fwd_diff(slope_bwd, 2.0, 1.0) == 12.0
+test:
+    let mut d = 0.0
+    bwd_diff(slope_fwd, 2.0, mut d, 1.0)
+    d == 12.0
+test:
+    let mut d = 0.0
+    bwd_diff(slope_bwd, 2.0, mut d, 1.0)
+    d == 12.0
+
+fun energy(x: float3) -> float:
+    let mut acc = 0.0
+    let n = normalize(x)
+    for i in 0 ..< 6:
+        if acc < 2.0:
+            acc = acc * 0.8 + dot(n, x) * sin(x.y * float(i + 1) * 0.3)
+        else:
+            acc = acc - x.z * 0.1
+    return acc * acc + exp(x.x * 0.5)
+
+fun gradient(x: float3) -> float3:
+    let mut g = float3(0.0)
+    bwd_diff(energy, x, mut g, 1.0)
+    return g
+
+// a Hessian times a vector: forward over the backward gradient, against a central difference of gradients
+fun hvp_agrees(x: float3, v: float3) -> bool:
+    let h = 1e-3
+    let numeric = (gradient(x + v * h) - gradient(x - v * h)) / (2.0 * h)
+    let hv = fwd_diff(gradient, x, v)
+    return nearly_equal(hv.x, numeric.x, within = 1e-2 * (1.0 + abs(numeric.x)))
+        and nearly_equal(hv.y, numeric.y, within = 1e-2 * (1.0 + abs(numeric.y)))
+        and nearly_equal(hv.z, numeric.z, within = 1e-2 * (1.0 + abs(numeric.z)))
+
+test hvp_agrees(float3(0.4, 0.7, -0.3), float3(1.0, 0.0, 0.0))
+test hvp_agrees(float3(0.4, 0.7, -0.3), float3(0.0, 1.0, 0.0))
+test hvp_agrees(float3(0.4, 0.7, -0.3), float3(0.2, -0.5, 1.0))
+
+// backward over backward: the gradient of a weighted gradient, which is a Hessian's row
+fun weighted(x: float3) -> float => dot(gradient(x), float3(0.3, -0.2, 0.5))
+
+fun row_agrees(x: float3, v: float3) -> bool:
+    let h = 1e-3
+    let numeric = (weighted(x + v * h) - weighted(x - v * h)) / (2.0 * h)
+    let mut g = float3(0.0)
+    bwd_diff(weighted, x, mut g, 1.0)
+    return nearly_equal(dot(g, v), numeric, within = 1e-2 * (1.0 + abs(numeric)))
+
+test row_agrees(float3(0.4, 0.7, -0.3), float3(1.0, 0.0, 0.0))
+test row_agrees(float3(0.4, 0.7, -0.3), float3(0.0, 0.0, 1.0))
+
+// a long inner loop, walked back in segments (1100 floats pass a tape), is differentiated forward as any other code is
+fun long_energy(x: float) -> float:
+    let mut acc = 0.0
+    for i in 0 ..< 1100:
+        acc = acc * 0.999 + sin(float(i) * 0.01 * x) * 0.01
+    return acc
+
+fun long_slope(x: float) -> float:
+    let mut d = 0.0
+    bwd_diff(long_energy, x, mut d, 1.0)
+    return d
+
+fun long_curvature_agrees(x: float) -> bool:
+    let h = 1e-3
+    let numeric = (long_slope(x + h) - long_slope(x - h)) / (2.0 * h)
+    return nearly_equal(fwd_diff(long_slope, x, 1.0), numeric, within = 1e-2 * (1.0 + abs(numeric)))
+
+test long_curvature_agrees(0.4)
+
+// a kernel holds a Hessian times a vector on every target
+binding results:
+    values: mut buffer[float]
+
+@compute(64) fun hvp_kernel(@thread_id id: int3){results}:
+    let hv = fwd_diff(gradient, float3(float(id.x) * 0.01, 0.7, -0.3), float3(1.0, 0.0, 0.0))
+    results.values[id.x] = hv.x + hv.y + hv.z

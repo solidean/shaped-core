@@ -9,6 +9,7 @@
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/hybrid_pacing.hh>
 #include <shaped-viewer/impl/wavefront_pacing.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/rendering/traced_group.hh>
@@ -100,8 +101,22 @@ struct temporal_slot
     /// Never true of a mean that restarts, whose counts are both 0.
     [[nodiscard]] bool is_at_target() const
     {
-        return accum_frame > 0 && (samples >= sample_target || (frame_target > 0 && accum_frame >= frame_target));
+        return accum_frame > 0
+            && (samples >= sample_target || (frame_target > 0 && accum_frame >= frame_target) || noise_settled);
     }
+
+    /// Whether a megakernel layer under a noise target traces with one: its per-pixel statistics and the count of pixels still tracing.
+    /// The statistics are kept across frames at the layer's extent, and restart with the mean, since a pixel's count of 0 is what restarts it.
+    bool noise_adaptive = false;
+    sg::texture_2d pixel_stats;
+    sg::buffer<u32> noise_counters;
+
+    /// Each pixel's own sample count under the noise target, written by every traced frame and read by the denoiser,
+    /// which would otherwise take the whole image for as converged as its noisiest pixel and leave the quiet ones' noise in.
+    sg::texture_2d noise_counts;
+
+    /// Whether a frame read back since the restart found every pixel down to the noise target, which is a target reached like any other.
+    bool noise_settled = false;
 
     /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
     ///
@@ -164,6 +179,9 @@ struct temporal_slot
 
     /// What a round of those paths costs, as the frames' own timestamps measured it; a frame budget picks rounds from it.
     wavefront_pacing pacing;
+
+    /// What a hybrid sample of this layer costs, as its packs' timestamps measured it; a frame budget picks how many a still frame packs.
+    hybrid_pacing sample_pacing;
 
     /// What each draw of this slot's raster layer was last frame, which its occlusion culling starts from; `raster_frame_desc::visibility`.
     sg::buffer<u32> raster_visibility;
@@ -277,6 +295,9 @@ void restart_accumulation(temporal_slot& slot);
 /// Starts every traced layer of `state` over, as a different image would: its mean, and the denoiser's history with it.
 void restart_accumulation(view_state& state);
 
+/// Starts every traced layer's mean of `state` over, and keeps the denoiser's history, which follows a content change per pixel.
+void restart_means(view_state& state);
+
 // -- Folding over a view's traced layers.
 //
 // One rule in one place, because the alternative already went wrong: `view_ref::accumulated_frames` read
@@ -284,14 +305,14 @@ void restart_accumulation(view_state& state);
 // was not layer 0 reported zero forever and nothing waiting on it ever finished.
 // Every caller asking "how far has this view got" goes through these two.
 
-// -- Pacing a still wavefront frame.
+// -- Pacing a still wavefront or hybrid frame.
 
-/// The GPU milliseconds the still wavefront layers of a frame under `config` share: none in a headless viewer.
+/// The GPU milliseconds the still wavefront and hybrid layers of a frame under `config` share: none in a headless viewer.
 /// A headless run is a capture or a test, whose image must not depend on how fast the machine is.
-[[nodiscard]] f32 wavefront_budget_of(viewer_config const& config);
+[[nodiscard]] f32 still_budget_of(viewer_config const& config);
 
-/// One still wavefront layer's share of `budget_ms`, split evenly among `still_layers` of them; 0 for no budget.
-[[nodiscard]] f32 wavefront_budget_share(f32 budget_ms, isize still_layers);
+/// One still layer's share of `budget_ms`, split evenly among `still_layers` of them; 0 for no budget.
+[[nodiscard]] f32 still_budget_share(f32 budget_ms, isize still_layers);
 
 /// The fewest samples per pixel across every traced layer of `state`, and 0 when it has none.
 ///

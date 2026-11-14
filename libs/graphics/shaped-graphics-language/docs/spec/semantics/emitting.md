@@ -205,6 +205,9 @@ const light_kind_sun: i32 = 2;
 * **EMIT-206** MSL writes a mesh entry point as a `[[mesh]]` function of a `metal::mesh<V, F, N, M, topology>` output, F `void` where nothing is written per primitive.
   It writes a task entry point as an `[[object]]` function; WGSL refuses both by EMIT-109.
 * **EMIT-261** WGSL refuses a pixel entry point that takes a mesh stage's per-primitive struct (CHK-489) as `target-lacks-feature`, naming `mesh_shader`.
+* **EMIT-262** MSL states its entry point's math mode above its includes: `#pragma METAL fp math_mode(fast)` at `.fast`, and `#pragma METAL fp math_mode(safe)` at any stricter level (EMIT-185).
+  The Metal compiler takes the text's pragma over its own `-fmetal-math-mode` and `MTLCompileOptions::mathMode`, so a metallib and a source compile keep the same level whatever they were handed.
+  A compile of any other MSL keeps the safe math sg and ssc::msl hand it.
   Only the pipeline of a polyfilled mesh stage hands it one there, and that pipeline's pixel stage is written in the form CHK-524 gives it, which takes no such struct.
   Metal counts the primitives alone, so `set_counts` is `set_primitive_count` of its second argument, and `triangle` and `line` set one index per corner.
   The object stage writes its payload and its grid of mesh workgroups from its first invocation, and a pixel stage's per-primitive struct arrives in one `[[stage_in]]` beside the link.
@@ -345,7 +348,9 @@ binding affine:
   WGSL writes an `int` count as `u32(count)`, and MSL masks the count, `x << (count & 31)`, since a count past 31 is undefined there.
 * **EMIT-126** A maths builtin is the target's function of its name, with these exceptions.
   `inverse_sqrt` is `rsqrt` in HLSL and MSL and `inverseSqrt` in WGSL; `fract` is `frac` in HLSL; `round` is `rint` in MSL, whose `round` is ties-away.
-  `ddx` and `ddy` are `dpdx` and `dpdy` in WGSL and `dfdx` and `dfdy` in MSL.
+  `ddx` and `ddy` are coarse (EVAL-144): `ddx_coarse` and `ddy_coarse` in HLSL and `dpdxCoarse` and `dpdyCoarse` in WGSL, since the plain names leave coarse or fine to the implementation.
+  `fwidth` is `sgl_fwidth_coarse`, a helper over those, in HLSL and `fwidthCoarse` in WGSL; `ddx_fine` and `ddy_fine` are `ddx_fine` and `ddy_fine` in HLSL and `dpdxFine` and `dpdyFine` in WGSL.
+  MSL has no coarse spelling: every derivative is `dfdx`, `dfdy` or `fwidth`, which are fine on Apple GPUs; issue: feat-sgl-coarse-derivatives-by-default.
   HLSL's `sign`, `countbits`, `firstbithigh` and `firstbitlow` give an int or a uint whatever they take, so the writer converts back, and `reversebits` of an int goes through a uint.
   `is_nan` and `is_inf` are a test of the float's bits on every target: `(bits & 0x7fffffff)` above `0x7f800000` is a NaN, and equal to it an infinity.
   No target may be handed the value, since a test of it could fold to false where a test of its bits cannot.
@@ -374,6 +379,8 @@ binding affine:
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
   HLSL's goes on as a helper rather than ending the function, so an entry point with a value whose path may end in one ends in `return (T)0;`, which only such a path reaches, past all its work.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
+* **EMIT-263** A signed integer `%` is `a - (a / b) * b` wherever it becomes SPIR-V, since Vulkan leaves `OpSRem` undefined for a negative operand and defines `OpSDiv`.
+  The native route writes those three operations, and HLSL for vulkan calls the helper `sgl_srem<T>`; every other target's `%` already means EVAL-83's remainder.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL, with a scalar `t` or a vector one alike.
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
 * **EMIT-157** Arguments of a vector's construction that are every field of one vector local, in order, are that local whole: `float4(..lit, 1.0)` is `float4(lit, 1.0)`.
@@ -448,7 +455,9 @@ fn main_ps(p: pixel_input) -> target_ {
   This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
 * **EMIT-234** Where a compile asks, `hlsl-dx12` is written as a DXIL container by SGL itself: `text_request::native`, `sgl emit --target dxil`.
   It takes what EMIT-232 says of a plan, of `require` and `prefer`, and of what a program may do.
-  The container states the shader model EMIT-264 gives, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
+  The container states the shader model EMIT-264 gives.
+  Its digest is DXBC's checksum of it, as a validator writes one when it signs, so D3D12 loads it although no validator ran.
+  The retail bypass digest would load too, but every container would share it, and AMD's shader cache crashes a ray query on that.
   A `fast` float operation carries LLVM's fast flags, and one past it carries none, which is what `-Gis` writes; only a `fast` addition may reorder.
   `ieee` states `fp32-denorm-mode` on the entry point, as `-denorm preserve` does.
 * **EMIT-236** A vertex or pixel entry point of a native route reads each element of its edge ahead of its body, and each `return` stores each output element.
@@ -463,7 +472,8 @@ fn main_ps(p: pixel_input) -> target_ {
   A stage that reads `@view_index` also states that every output lane depends on the view, which may say too much in the same way.
 * **EMIT-238** A native route writes a pixel stage's surface as its target's own operations, and `discard` terminates on neither.
   It is `OpDemoteToHelperInvocation` and `dx.op.discard(true)`, and the invocation goes on as a helper, so a neighbour's derivatives stay whole.
-  `ddx`, `ddy` and `fwidth` are `OpDPdx`, `OpDPdy` and `OpFwidth`, and on DXIL `derivCoarseX`, `derivCoarseY` and the sum of their absolute values, which is what HLSL's own names compile to.
+  `ddx`, `ddy` and `fwidth` are `OpDPdxCoarse`, `OpDPdyCoarse` and `OpFwidthCoarse` under `DerivativeControl`, and on DXIL `derivCoarseX`, `derivCoarseY` and the sum of their absolute values.
+  `ddx_fine` and `ddy_fine` are `OpDPdxFine` and `OpDPdyFine`, and `derivFineX` and `derivFineY`.
   `@depth` is `FragDepth` with `DepthReplacing`, plus `DepthGreater` or `DepthLess`, and DXIL's three depth elements.
   `@sample_mask` is SPIR-V's array of one on both sides of the stage, and on DXIL an output element with no row or `dx.op.coverage`.
   `@sample_index` stands in a signature with no row, and DXIL reads it with `dx.op.sampleIndex`; such an element is unallocated in `PSV0`.
@@ -688,7 +698,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   HLSL for dx12 writes Shader Model 6.10's `CandidateClusterID`, `CommittedClusterID` and `ClusterID`, and DXIL refuses it as `unsupported-yet` until then.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
-  `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order, and is not known to keep denormals.
+  `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order and flushes denormals, read and written (measured on an M4).
   `hlsl-vulkan` keeps every level through the same flags: DXC writes `SignedZeroInfNanPreserve` and `NoContraction` on every float operation for `-Gis`, and `DenormPreserve` for `-denorm preserve`.
   Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
   `wgsl` keeps `.fast` alone.

@@ -340,7 +340,7 @@ constexpr auto bound_spelling = body_spelling{.explicit_level = false, .mark = "
 }
 
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
-/// With `at_uv`, a texture's `fun sv_<name>_at(ctx, at)` instead, read at the uv `at` rather than the hit's own: a relief's march.
+/// With `at_uv`, a texture's `fun sv_<name>_at(ctx, at)` instead, read at the uv `at` rather than the hit's own.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
                                             material_parameter_layout const& layout,
                                             i32 index,
@@ -529,9 +529,24 @@ constexpr auto bound_spelling = body_spelling{.explicit_level = false, .mark = "
         "    return moved\n",
         r.type->height_top_attribute, r.type->height_bottom_attribute, spelling.mark, uv_slot.offset,
         element_expression(a.uv->frequency), spelling.mark, spelling.mark, spelling.mark, a.name, a.name);
-    out += "\n";
-    out += attribute_function(r, layout, height, spelling, true);
     return out;
+}
+
+/// `fun sv_<name>_at(ctx, at)`: attribute `index` read at a uv the fragment or a relief chose, rather than the mesh's own.
+///
+/// A texture samples there, through the same swizzle and transform; any other attribute has no uv to move and returns its value.
+/// So a fragment written against it compiles whichever frequency the attribute resolved at.
+[[nodiscard]] cc::string at_uv_function(resolved_material const& r,
+                                        material_parameter_layout const& layout,
+                                        i32 index,
+                                        body_spelling const& spelling)
+{
+    auto const& a = r.attributes[index];
+    if (a.frequency == material_frequency::material_texture || a.frequency == material_frequency::mesh_texture_binding)
+        return attribute_function(r, layout, index, spelling, true);
+    return cc::format("fun sv_{0}_at(ctx: material.shading_context, at: float2){{{1}}} -> {2}:\n"
+                      "    return sv_attribute_{0}(ctx)\n",
+                      a.name, spelling.group(), sgl_type_of(a.format));
 }
 
 /// Module `material`'s `frequency_*` for a mesh attribute's frequency.
@@ -743,6 +758,8 @@ constexpr auto bound_spelling = body_spelling{.explicit_level = false, .mark = "
     for (auto i = 0; i < r.attributes.size(); ++i)
     {
         src += attribute_function(r, layout, i32(i), spelling);
+        src += "\n";
+        src += at_uv_function(r, layout, i32(i), spelling);
         src += "\n";
     }
 

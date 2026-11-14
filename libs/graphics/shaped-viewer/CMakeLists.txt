@@ -384,6 +384,7 @@ if(SC_BUILD_TESTS)
             tests/hit-distance-test.cc
             tests/view-renderer-test.cc
             tests/frame-mesh-test.cc
+            tests/noise-target-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
             tests/drawing-render-test.cc
@@ -425,6 +426,8 @@ if(SC_BUILD_TESTS)
             tests/native-route-benchmark.cc
             tests/raster-benchmark.cc
             tests/hybrid-benchmark.cc
+            tests/still-frame-benchmark.cc
+            tests/final-render-benchmark.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
         )

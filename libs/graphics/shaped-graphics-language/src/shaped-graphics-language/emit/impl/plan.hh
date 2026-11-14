@@ -266,6 +266,8 @@ struct plan
     /// The entry point's traces see opacity micromaps: it holds the feature, and its fill writes them (EMIT-184).
     /// The `nvapi` fill writes nothing, since NVIDIA's driver applies them to every trace of a structure that has them.
     bool states_micromaps = false;
+    /// MSL: the entry point's float guarantee, written as the text's math mode (EMIT-262).
+    check::float_level float_guarantee = check::float_level::fast;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;

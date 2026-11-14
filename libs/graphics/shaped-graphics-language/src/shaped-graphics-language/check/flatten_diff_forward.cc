@@ -38,11 +38,13 @@ auto differentiator::derive(flat_expr_id id) -> dual
     // a constant block's member is a constant: a camera, a setting, what the host hands every invocation alike
     if (auto const* const member = x.node.try_as<flat_binding_member>(); member != nullptr && !member->is_workgroup)
         return {id, flat_expr_id::none};
+    if (auto const* const n = x.node.try_as<flat_buffer_element>())
+        return derive_buffer_read(id, x.type, *n);
     // a buffer holds what a gradient would have to be written back into, which a derivative never does silently
-    if (x.node.is<flat_buffer_element>() || x.node.is<flat_binding_member>())
+    if (x.node.is<flat_binding_member>())
     {
         failed("a read of a buffer, whose gradient it cannot write back; read it as `no_diff(…)` to hold it "
-               "constant, or give the function that reads it a @backward that writes the gradient");
+               "constant, or give the buffer a @gradient");
         return {id, flat_expr_id::none};
     }
     if (auto const* const n = x.node.try_as<flat_member>())
@@ -51,8 +53,15 @@ auto differentiator::derive(flat_expr_id id) -> dual
         auto const primal = add(x.type, flat_member{.object = object.primal, .member = n->member, .letters = n->letters});
         if (!is_valid(object.tangent))
             return {primal, flat_expr_id::none};
+        // a swizzle's letters name the fields, so only a struct that is its own tangent keeps their meaning
+        auto const object_type = type_of(object.primal);
+        if (n->is_swizzle() && tangent(object_type) != object_type && record_of(object_type) == nullptr)
+            return {primal, failed("a swizzle of a struct whose tangent is another struct")};
+        auto const member = n->is_swizzle() ? n->member : tangent_member(object_type, n->member);
+        if (!n->is_swizzle() && member < 0)
+            return {primal, flat_expr_id::none};
         return {primal,
-                add(tangent(x.type), flat_member{.object = object.tangent, .member = n->member, .letters = n->letters})};
+                add(tangent(x.type), flat_member{.object = object.tangent, .member = member, .letters = n->letters})};
     }
     if (auto const* const n = x.node.try_as<flat_element>())
     {
@@ -79,10 +88,15 @@ auto differentiator::derive(flat_expr_id id) -> dual
         auto const primal = add(x.type, flat_construct{.arguments = f.add_list(primals)});
         if (!any)
             return {primal, flat_expr_id::none};
+        // a struct's tangent holds its differentiable fields alone
+        auto kept = cc::vector<flat_expr_id>();
         for (auto i = isize(0); i < tangents.size(); ++i)
-            if (!is_valid(tangents[i]))
-                tangents[i] = zero(tangent(type_of(primals[i])));
-        return {primal, add(tangent(x.type), flat_construct{.arguments = f.add_list(tangents)})};
+        {
+            if (!is_part_kept(x.type, i))
+                continue;
+            kept.push_back(is_valid(tangents[i]) ? tangents[i] : zero(tangent(type_of(primals[i]))));
+        }
+        return {primal, add(tangent(x.type), flat_construct{.arguments = f.add_list(kept)})};
     }
     if (auto const* const n = x.node.try_as<flat_call>())
         return derive_call(x.type, *n);
@@ -96,17 +110,10 @@ auto differentiator::rule_name(symbol_id callee) const -> cc::string_view
     return s.operator_spelling.empty() ? cc::string_view(s.name) : cc::string_view(s.operator_spelling);
 }
 
-auto differentiator::is_linear_function(cc::string_view name, isize arity) -> bool
+auto differentiator::derivative_of(symbol_id callee) const -> builtins::derivative_kind
 {
-    if ((name == "+" || name == "-") && arity <= 2)
-        return true;
-    cc::string_view const linear[]
-        = {"transpose", "matrix_column", "matrix_row", "select", "float", "half", "float2", "float3", "float4",
-           "half2",     "half3",         "half4",      "vec3",   "pos3",  "mat2", "mat3",   "mat4"};
-    for (auto const l : linear)
-        if (name == l)
-            return true;
-    return false;
+    auto const* const record = m().builtin_function(m().at(callee).intrinsic);
+    return record != nullptr ? record->derivative : builtins::derivative_kind::unstated;
 }
 
 auto differentiator::componentwise_factors(cc::string_view name,
@@ -184,6 +191,28 @@ auto differentiator::componentwise_factors(cc::string_view name,
         factors[1] = one_minus(use(above_low));
         factors[2] = one_minus(use(below_high));
     }
+    else if (name == "%")
+    {
+        // a - b * trunc(a / b), whose truncation is constant between the points where it jumps
+        factors[0] = one(t);
+        factors[1] = negate(call("trunc", call("/", use(a[0]), use(a[1]))));
+    }
+    else if (name == "smoothstep")
+    {
+        // s = t * t * (3 - 2 t) for t = clamp((x - low) / (high - low), 0, 1), whose slope 6 t (1 - t) is zero where it clamps
+        auto const span = share(call("-", use(a[1]), use(a[0])));
+        auto const along = share(call("clamp", call("/", call("-", use(a[2]), use(a[0])), use(span)), zero(t), one(t)));
+        auto const k = share(call("/", mul(number(6.0), call("*", use(along), one_minus(use(along)))), use(span)));
+        factors[2] = use(k);
+        factors[0] = negate(call("*", use(k), one_minus(use(along))));
+        factors[1] = negate(call("*", use(k), use(along)));
+    }
+    else if (name == "fma")
+    {
+        factors[0] = use(a[1]);
+        factors[1] = use(a[0]);
+        factors[2] = one(t);
+    }
     else if (name == "mix")
     {
         factors[0] = one_minus(use(a[2]));
@@ -217,6 +246,39 @@ auto differentiator::transform_position_tangent(cc::span<flat_expr_id const> pri
     return result;
 }
 
+auto differentiator::affine_tangent(cc::span<flat_expr_id const> primals,
+                                    cc::span<flat_expr_id const> tangents,
+                                    type_id type,
+                                    f64 w) -> flat_expr_id
+{
+    auto const float4 = named_type("float4");
+    auto const scalar = named_type(builtins::k_float);
+    // a position is (p, 1) to the matrix and its change (dp, 0); a direction is (v, 0) and a float4 itself
+    auto const extended = [&](flat_expr_id v, f64 last)
+    {
+        if (type_of(v) == float4)
+            return use(v);
+        auto parts = cc::vector<flat_expr_id>();
+        for (auto i = 0; i < 3; ++i)
+            parts.push_back(add(f.field_type(type_of(v), i), flat_member{.object = use(v), .member = i}));
+        parts.push_back(add(scalar, flat_literal{.value = last}));
+        return add(float4, flat_construct{.arguments = f.add_list(parts)});
+    };
+    auto const dm = is_valid(tangents[0]) ? share_tangent(tangents[0]) : flat_expr_id::none;
+    auto const dv = is_valid(tangents[1]) ? share_tangent(tangents[1]) : flat_expr_id::none;
+    auto parts = cc::vector<flat_expr_id>();
+    for (auto i = 0; i < 3; ++i)
+    {
+        auto part = flat_expr_id::none;
+        if (is_valid(dm))
+            part = call("dot", call("affine3_row", use(dm), integer(i)), extended(primals[1], w));
+        if (is_valid(dv))
+            part = sum(part, call("dot", call("affine3_row", use(primals[0]), integer(i)), extended(dv, 0.0)));
+        parts.push_back(part);
+    }
+    return add(tangent(type), flat_construct{.arguments = f.add_list(parts)});
+}
+
 auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
 {
     auto const arguments = copy_of(n.arguments);
@@ -226,7 +288,8 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
     for (auto const a : arguments)
     {
         auto const d = derive(a);
-        primals.push_back(share(d.primal, "a"));
+        // a resource stands as itself, since no target holds one in a local
+        primals.push_back(is_resource(m().at(type_of(d.primal)).kind) ? d.primal : share(d.primal, "a"));
         tangents.push_back(d.tangent);
         any = any || is_valid(d.tangent);
     }
@@ -237,6 +300,16 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
             copies.push_back(use(p));
         return f.builtin_call(at, n.callee, copies);
     };
+    // a texture's texels change too, which no argument says
+    if (auto const* const record = m().builtin_function(n.intrinsic);
+        record != nullptr && record->is_texture_call && !primals.empty()
+        && m().at(type_of(primals[0])).kind == type_kind::texture)
+    {
+        auto const result = share(write_primal(), "r");
+        if (derivative_of(n.callee) == builtins::derivative_kind::zero)
+            return {use(result), flat_expr_id::none};
+        return {use(result), texture_tangent(n, primals, tangents, type)};
+    }
     if (!any)
         return {write_primal(), flat_expr_id::none};
     auto const name = rule_name(n.callee);
@@ -244,13 +317,60 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
     // `m * p` takes the translation, and its tangent does not: a position's change moves through `m` as a direction
     if (m().at(n.callee).name == "transform_position")
         return {use(result), transform_position_tangent(primals, tangents, type)};
-    if (m().at(n.callee).name == "transform_position_affine")
+    // a direction is (v, 0) to a mat4, whose product's first three components are the direction it moves to
+    if (m().at(n.callee).name == "transform_direction")
     {
-        failed("an affine3 times a position, which has no rule yet");
+        auto const float4 = named_type("float4");
+        auto const scalar = named_type(builtins::k_float);
+        auto const extended = [&](flat_expr_id v)
+        {
+            auto parts = cc::vector<flat_expr_id>();
+            for (auto i = 0; i < 3; ++i)
+                parts.push_back(add(f.field_type(type_of(v), i), flat_member{.object = use(v), .member = i}));
+            parts.push_back(add(scalar, flat_literal{.value = 0.0}));
+            return add(float4, flat_construct{.arguments = f.add_list(parts)});
+        };
+        auto moved = flat_expr_id::none;
+        if (is_valid(tangents[0]))
+            moved = call("*", share_tangent(tangents[0]), extended(primals[1]));
+        if (is_valid(tangents[1]))
+            moved = sum(moved, call("*", use(primals[0]), extended(share_tangent(tangents[1]))));
+        auto const whole = share_tangent(moved);
+        auto parts = cc::vector<flat_expr_id>();
+        for (auto i = 0; i < 3; ++i)
+            parts.push_back(add(scalar, flat_member{.object = use(whole), .member = i}));
+        return {use(result), add(type, flat_construct{.arguments = f.add_list(parts)})};
+    }
+    // an affine3's products are dots of its rows, which reverse mode transposes as it does any dot
+    if (auto const& callee = m().at(n.callee).name; callee == "transform_position_affine"
+                                                    || callee == "transform_direction_affine"
+                                                    || callee == "transform_float4_affine")
+        return {use(result), affine_tangent(primals, tangents, type, callee == "transform_position_affine" ? 1.0 : 0.0)};
+
+    // what the registry states of the builtin (builtins/register_derivatives.cc)
+    auto const kind = derivative_of(n.callee);
+    if (kind == builtins::derivative_kind::zero)
+        return {use(result), flat_expr_id::none};
+    if (kind == builtins::derivative_kind::none)
+    {
+        failed(cc::format("{}, whose value is no function of its arguments a derivative follows", name));
         return {use(result), flat_expr_id::none};
     }
-
-    if (is_linear_function(name, arguments.size()))
+    if (kind == builtins::derivative_kind::forward_only && is_reverse)
+    {
+        failed(cc::format("{} going backward, whose transpose needs which lane of the quad or the subgroup each "
+                          "invocation is",
+                          name));
+        return {use(result), flat_expr_id::none};
+    }
+    if (kind != builtins::derivative_kind::linear && kind != builtins::derivative_kind::rule
+        && kind != builtins::derivative_kind::forward_only)
+    {
+        failed(cc::format("no derivative of {} yet", name));
+        return {use(result), flat_expr_id::none};
+    }
+    if (kind == builtins::derivative_kind::linear
+        || (kind == builtins::derivative_kind::forward_only && name != "fwidth"))
     {
         // `x + dx` alone where the other side is zero and of the result's type
         if (name == "+" && arguments.size() == 2 && (!is_valid(tangents[0]) || !is_valid(tangents[1])))
@@ -298,6 +418,98 @@ auto differentiator::derive_call(type_id type, flat_call const& n) -> dual
     else if (name == "dot" || name == "cross")
         tangent = sum(is_valid(tangents[0]) ? call(name, tangent_of_argument(0), use(primals[1])) : flat_expr_id::none,
                       is_valid(tangents[1]) ? call(name, use(primals[0]), tangent_of_argument(1)) : flat_expr_id::none);
+    else if (name == "determinant")
+    {
+        // the inner product of its cofactors with the matrix's change
+        auto const column = [&](flat_expr_id m, i32 c) { return call("matrix_column", m, integer(c)); };
+        for (auto j = 0; j < 4; ++j)
+        {
+            auto others = cc::vector<flat_expr_id>();
+            for (auto c = 0; c < 4; ++c)
+                if (c != j)
+                    others.push_back(column(use(primals[0]), c));
+            others.push_back(add(scalar_of(type), flat_literal{.value = j % 2 == 0 ? 1.0 : -1.0}));
+            auto const cofactors = prelude_call("cofactor_column4", others);
+            tangent = sum(tangent, call("dot", cofactors, column(tangent_of_argument(0), j)));
+        }
+    }
+    else if (name == "refract")
+    {
+        // eta v - (eta c + sqrt(k)) n with c = dot(n, v) and k = 1 - eta^2 (1 - c^2); zero where k is below 0
+        auto const s = scalar_of(type);
+        auto const number = [&](f64 v) { return add(s, flat_literal{.value = v}); };
+        auto const v = primals[0];
+        auto const nn = primals[1];
+        auto const eta = primals[2];
+        auto const c = share(call("dot", use(nn), use(v)), "c");
+        auto const k
+            = share(call("-", number(1.0),
+                         call("*", call("*", use(eta), use(eta)), call("-", number(1.0), call("*", use(c), use(c))))),
+                    "k");
+        auto const root = share(call("sqrt", call("max", use(k), number(0.0))), "root");
+        auto dc = is_valid(tangents[0]) ? call("dot", use(nn), tangent_of_argument(0)) : flat_expr_id::none;
+        if (is_valid(tangents[1]))
+            dc = sum(dc, call("dot", tangent_of_argument(1), use(v)));
+        auto const shared_dc = is_valid(dc) ? share_tangent(dc) : flat_expr_id::none;
+        // dk = -2 eta deta (1 - c^2) + 2 eta^2 c dc
+        auto dk = is_valid(tangents[2])
+                    ? mul(tangent_of_argument(2),
+                          mul(number(-2.0), mul(use(eta), call("-", number(1.0), call("*", use(c), use(c))))))
+                    : flat_expr_id::none;
+        if (is_valid(shared_dc))
+            dk = sum(dk, mul(use(shared_dc), mul(number(2.0), mul(call("*", use(eta), use(eta)), use(c)))));
+        auto const droot = is_valid(dk) ? call("/", dk, mul(number(2.0), use(root))) : flat_expr_id::none;
+        // d(eta c + root)
+        auto d_along = is_valid(tangents[2]) ? mul(tangent_of_argument(2), use(c)) : flat_expr_id::none;
+        if (is_valid(shared_dc))
+            d_along = sum(d_along, mul(use(shared_dc), use(eta)));
+        d_along = sum(d_along, droot);
+        auto change = is_valid(tangents[2]) ? mul(tangent_of_argument(2), use(v)) : flat_expr_id::none;
+        if (is_valid(tangents[0]))
+            change = sum(change, mul(use(eta), tangent_of_argument(0)));
+        if (is_valid(d_along))
+            change = difference(change, mul(d_along, use(nn)));
+        if (is_valid(tangents[1]))
+            change = difference(change, mul(call("+", call("*", use(eta), use(c)), use(root)), tangent_of_argument(1)));
+        tangent = is_valid(change) ? mul(change, call("step", number(0.0), use(k))) : flat_expr_id::none;
+    }
+    else if (name == "subgroup_min" || name == "subgroup_max")
+    {
+        // the change of the invocations that hold the extreme, shared evenly where several do
+        auto const t = type_of(result);
+        auto const holds = share(call(is_scalar(t) ? "==" : "equal", use(primals[0]), use(result)), "holds");
+        auto const count = share(active_call("subgroup_add", call("select", use(holds), one(t), zero(t))), "count");
+        tangent = call("/", active_call("subgroup_add", call("select", use(holds), tangent_of_argument(0), zero(t))),
+                       use(count));
+    }
+    else if (name == "subgroup_mul" || name == "subgroup_inclusive_mul" || name == "subgroup_exclusive_mul")
+    {
+        // a product changes by itself times the sum of each factor's relative change
+        auto const sum_of = name == "subgroup_mul"           ? cc::string_view("subgroup_add")
+                          : name == "subgroup_inclusive_mul" ? cc::string_view("subgroup_inclusive_add")
+                                                             : cc::string_view("subgroup_exclusive_add");
+        tangent = mul(use(result), active_call(sum_of, call("/", tangent_of_argument(0), use(primals[0]))));
+    }
+    else if (name == "fwidth")
+    {
+        // |ddx x| + |ddy x|
+        tangent = sum(mul(call("sign", call("ddx", use(primals[0]))), call("ddx", tangent_of_argument(0))),
+                      mul(call("sign", call("ddy", use(primals[0]))), call("ddy", tangent_of_argument(0))));
+    }
+    else if (name == "reflect")
+    {
+        // v - 2 dot(n, v) n
+        auto const along = share(call("dot", use(primals[1]), use(primals[0])));
+        auto change = is_valid(tangents[0]) ? tangent_of_argument(0) : flat_expr_id::none;
+        auto d_along = is_valid(tangents[0]) ? call("dot", use(primals[1]), tangent_of_argument(0)) : flat_expr_id::none;
+        if (is_valid(tangents[1]))
+            d_along = sum(d_along, call("dot", tangent_of_argument(1), use(primals[0])));
+        change = difference(change, mul(mul(d_along, add(scalar_of(type), flat_literal{.value = 2.0})), use(primals[1])));
+        if (is_valid(tangents[1]))
+            change = difference(
+                change, mul(mul(use(along), add(scalar_of(type), flat_literal{.value = 2.0})), tangent_of_argument(1)));
+        tangent = change;
+    }
     else if (name == "length")
         tangent = call("/", call("dot", use(primals[0]), tangent_of_argument(0)), use(result));
     else if (name == "distance")
@@ -384,6 +596,25 @@ auto differentiator::place_of(flat_expr_id root, cc::span<place_step const> step
     return x;
 }
 
+auto differentiator::tangent_place_of(flat_expr_id root, cc::span<place_step const> steps) -> flat_expr_id
+{
+    auto x = root;
+    for (auto const& s : steps)
+    {
+        if (is_valid(s.index))
+        {
+            x = add(element_type(type_of(x)), flat_element{.object = x, .index = use(s.index)});
+            continue;
+        }
+        auto const primal = f.c.primal_of_tangent(type_of(x));
+        auto const member = is_valid(primal) ? tangent_member(primal, s.member) : s.member;
+        if (member < 0)
+            return flat_expr_id::none;
+        x = add(f.field_type(type_of(x), member), flat_member{.object = x, .member = member});
+    }
+    return x;
+}
+
 auto differentiator::forward(cc::span<flat_stmt_id const> statements) -> cc::vector<flat_stmt_id>
 {
     auto const copy = cc::vector<flat_stmt_id>::create_copy_of(statements);
@@ -438,7 +669,10 @@ auto differentiator::forward_stmt(flat_stmt_id id) -> void
         auto const tangent = tangent_of_value(n->value);
         auto const value = share(is_valid(tangent) ? tangent : zero(this->tangent(type_of(n->place))), "dt");
         f.block.push_back(id);
-        return emit(flat_assign{.place = place_of(ref(tangent_local), steps), .value = use(value)});
+        auto const place = tangent_place_of(ref(tangent_local), steps);
+        if (is_valid(place))
+            emit(flat_assign{.place = place, .value = use(value)});
+        return;
     }
     if (auto const* const n = s.node.try_as<flat_if>())
     {
@@ -474,6 +708,384 @@ auto differentiator::forward_stmt(flat_stmt_id id) -> void
         return restate(id, result);
     }
     f.block.push_back(id);
+}
+
+auto differentiator::texture_builtin(cc::string_view name, type_id texture, isize arity) const -> symbol_id
+{
+    auto const* const found = f.c.prelude_names.get_ptr(cc::string(name));
+    if (found == nullptr)
+        return symbol_id::none;
+    auto by_shape = symbol_id::none;
+    for (auto const candidate : *found)
+    {
+        auto const& s = m().at(candidate);
+        if (s.kind != symbol_kind::function || s.info < 0 || !is_valid(s.intrinsic))
+            continue;
+        auto const parameters = m().at(m().functions[s.info].parameters);
+        if (parameters.size() != arity)
+            continue;
+        if (parameters[0].type == texture)
+            return candidate;
+        // CHK-194: a bare `texture_2d` takes every texture of its shape
+        auto const& p = m().at(parameters[0].type);
+        if (p.kind == type_kind::texture && p.shape == m().at(texture).shape && !is_valid(p.element) && !p.is_depth)
+            by_shape = candidate;
+    }
+    return by_shape;
+}
+
+auto differentiator::prelude_call(cc::string_view name, cc::span<flat_expr_id const> arguments) -> flat_expr_id
+{
+    auto const* const found = f.c.prelude_names.get_ptr(cc::string(name));
+    if (found == nullptr || found->empty())
+        return failed(cc::format("the prelude's {}, which it cannot find", name));
+    auto const callee = found->front();
+    auto const inlined = f.inline_call(at, callee, arguments);
+    if (!is_valid(inlined.label))
+        return failed(cc::format("the prelude's {}, which did not inline", name));
+    return add(m().functions[m().at(callee).info].result, flat_block{.label = inlined.label, .body = inlined.body});
+}
+
+auto differentiator::texture_tangent(flat_call const& n,
+                                     cc::span<flat_expr_id const> primals,
+                                     cc::span<flat_expr_id const> tangents,
+                                     type_id type) -> flat_expr_id
+{
+    auto const& callee = m().at(n.callee);
+    auto const parameters = m().at(m().functions[callee.info].parameters);
+    auto const is_load = callee.name == "load" && primals.size() == 3;
+    auto const is_sample = callee.name == "sample" && primals.size() == 4 && parameters[2].name == "smp"
+                        && parameters[3].name == "level";
+    auto const is_gather = callee.name == "gather" && primals.size() == 4 && parameters[2].name == "smp"
+                        && parameters[3].name == "component";
+    auto const is_compare = callee.name == "sample_compare" && primals.size() == 5 && parameters[2].name == "smp"
+                         && parameters[3].name == "reference" && parameters[4].name == "level";
+    auto const texture_type = type_of(primals[0]);
+    if (is_compare)
+        return compare_tangent(primals, tangents);
+    auto const* const member = node(primals[0]).node.try_as<flat_binding_member>();
+    auto const* const info
+        = member != nullptr ? &m().at(m().bindings[m().at(member->binding).info].members)[member->member] : nullptr;
+    if ((!is_load && !is_sample && !is_gather) || info == nullptr || m().at(texture_type).shape != texture_shape::d2
+        || float_leaves(type) <= 0)
+        return failed("a texture read other than a texture_2d member's `load`, its `gather` or its `sample` at a "
+                      "level, "
+                      "which it cannot differentiate yet");
+    // a gather's texels are where its coordinate falls, which moves none of them between texels
+    if (is_gather)
+        return gather_tangent(n, primals, *info, texture_type);
+    if (info->is_no_diff && info->gradient.empty() && info->tangent.empty() && !is_valid(tangents[1]))
+        return flat_expr_id::none;
+    if (!info->is_no_diff && info->gradient.empty() && info->tangent.empty())
+        return failed("a read of a texture, whose gradient it cannot write back; give the texture a @gradient, or "
+                      "mark it @no_diff to hold its texels constant");
+
+    // the sampler's filter and address, which a static sampler alone says at compile time
+    auto is_linear = false;
+    auto mode_u = 0;
+    auto mode_v = 0;
+    if (is_sample)
+    {
+        auto state = static_cast<sampler_state const*>(nullptr);
+        auto const& smp = node(primals[2]).node;
+        if (auto const* const m_ = smp.try_as<flat_binding_member>())
+        {
+            auto const& s = m().at(m().bindings[m().at(m_->binding).info].members)[m_->member];
+            if (s.static_sampler >= 0)
+                state = &m().samplers[s.static_sampler];
+        }
+        else if (auto const* const file = smp.try_as<flat_file_sampler>())
+            state = &m().samplers[m().at(file->sampler).info];
+        if (state == nullptr)
+            return failed("a sample through a sampler whose filter the compile cannot see; a static sampler says it");
+        auto const* const level = node(primals[3]).node.try_as<flat_literal>();
+        if (level == nullptr || level->value != 0.0 || state->max_anisotropy > 1 || state->mip_lod_bias != 0.0f
+            || state->min_lod > 0.0f)
+            return failed("a sample at a level other than a constant 0, or through a sampler that moves it");
+        is_linear = state->mag_filter == 1;
+        mode_u = state->address_u;
+        mode_v = state->address_v;
+    }
+    else if (auto const level = f.constant_int(primals[2]); is_reverse && (!level.has_value() || level.value() != 0))
+        return failed("a load at a level other than a constant 0, whose gradient has no texels to go to yet");
+
+    auto const load = texture_builtin("load", texture_type, 3);
+    auto const size_of = texture_builtin("size", texture_type, 2);
+    if (!is_valid(load) || !is_valid(size_of))
+        return failed(cc::format("a load of {}, which no builtin is", m().name_of(texture_type)));
+    auto const taps = is_sample && is_linear ? 4 : 1;
+    auto const size
+        = is_sample
+            ? share(f.builtin_call(at, size_of, cc::span<flat_expr_id const>({use(primals[0]), integer(0)})), "size")
+            : flat_expr_id::none;
+    auto const tap_texel = [&](i32 k)
+    {
+        if (is_load)
+            return use(primals[1]);
+        flat_expr_id const arguments[]
+            = {use(size), use(primals[1]), integer(k), boolean(is_linear), integer(mode_u), integer(mode_v)};
+        return prelude_call("sample_tap_texel", arguments);
+    };
+    auto const tap_weight = [&](i32 k)
+    {
+        flat_expr_id const arguments[] = {use(size), use(primals[1]), integer(k), boolean(is_linear)};
+        return prelude_call("sample_tap_weight", arguments);
+    };
+    auto const level = is_load ? use(primals[2]) : integer(0);
+
+    auto result = flat_expr_id::none;
+    // the coordinate's change moves each tap's weight, and with it how much of its texel the sample holds
+    if (is_sample && is_linear && is_valid(tangents[1]))
+    {
+        auto const dc = share_tangent(tangents[1]);
+        for (auto k = 0; k < taps; ++k)
+        {
+            flat_expr_id const slope_arguments[] = {use(size), use(primals[1]), integer(k), boolean(is_linear)};
+            auto const slope = prelude_call("sample_tap_slope", slope_arguments);
+            auto const texel
+                = f.builtin_call(at, load, cc::span<flat_expr_id const>({use(primals[0]), tap_texel(k), integer(0)}));
+            result = sum(result, mul(texel, call("dot", slope, use(dc))));
+        }
+    }
+    if (!is_reverse)
+    {
+        if (info->tangent.empty())
+            return result;
+        auto const tangents_texture = resolve_paired(info->tangent, "tangent", texture_type);
+        if (!tangents_texture.has_value())
+            return result;
+        auto const& t = tangents_texture.value();
+        for (auto k = 0; k < taps; ++k)
+        {
+            auto const changed = add(t.type, flat_binding_member{.binding = t.binding, .member = t.member});
+            auto const texel
+                = f.builtin_call(at, load, cc::span<flat_expr_id const>({changed, tap_texel(k), use(level)}));
+            result = sum(result, taps == 1 ? texel : mul(texel, tap_weight(k)));
+        }
+        return result;
+    }
+    if (info->gradient.empty())
+    {
+        if (info->is_no_diff)
+            return result;
+        return failed("a read of a texture with a @tangent and no @gradient, where a backward derivative adds the "
+                      "read's adjoint");
+    }
+    auto const gradients = resolve_paired(info->gradient, "gradient", named_type(builtins::k_float));
+    if (!gradients.has_value())
+        return result;
+    auto const placeholder = f.add_local(local_kind::temporary, "t_texels", tangent(type));
+    linear_locals.insert(i32(placeholder));
+    texture_reads.push_back({.placeholder = placeholder,
+                             .gradients = gradients.value(),
+                             .texture = primals[0],
+                             .at = primals[1],
+                             .is_load = is_load,
+                             .is_linear = is_linear,
+                             .mode_u = mode_u,
+                             .mode_v = mode_v});
+    return sum(result, ref(placeholder));
+}
+
+auto differentiator::static_sampler_of(flat_expr_id smp) const -> sampler_state const*
+{
+    auto const& x = node(smp).node;
+    if (auto const* const member = x.try_as<flat_binding_member>())
+    {
+        auto const& s = m().at(m().bindings[m().at(member->binding).info].members)[member->member];
+        return s.static_sampler >= 0 ? &m().samplers[s.static_sampler] : nullptr;
+    }
+    if (auto const* const file = x.try_as<flat_file_sampler>())
+        return &m().samplers[m().at(file->sampler).info];
+    return nullptr;
+}
+
+auto differentiator::gather_tangent(flat_call const& n,
+                                    cc::span<flat_expr_id const> primals,
+                                    member_info const& info,
+                                    type_id texture_type) -> flat_expr_id
+{
+    auto const* const state = static_sampler_of(primals[2]);
+    // the component is an enum case, or the int it is once a constant was folded
+    auto channel = -1;
+    if (auto const* const e = node(primals[3]).node.try_as<flat_enum_value>())
+        channel = e->case_index;
+    else if (auto const k = f.constant_int(primals[3]); k.has_value())
+        channel = k.value();
+    if (state == nullptr || channel < 0)
+        return failed("a gather through a sampler the compile cannot see, or of a component no constant names");
+    if (info.is_no_diff && info.gradient.empty() && info.tangent.empty())
+        return flat_expr_id::none;
+    if (!info.is_no_diff && info.gradient.empty() && info.tangent.empty())
+        return failed("a read of a texture, whose gradient it cannot write back; give the texture a @gradient, or "
+                      "mark it @no_diff to hold its texels constant");
+    if (!is_reverse)
+    {
+        if (info.tangent.empty())
+            return flat_expr_id::none;
+        auto const tangents_texture = resolve_paired(info.tangent, "tangent", texture_type);
+        if (!tangents_texture.has_value())
+            return flat_expr_id::none;
+        auto const& t = tangents_texture.value();
+        auto const changed = add(t.type, flat_binding_member{.binding = t.binding, .member = t.member});
+        return f.builtin_call(
+            at, n.callee, cc::span<flat_expr_id const>({changed, use(primals[1]), use(primals[2]), use(primals[3])}));
+    }
+    if (info.gradient.empty())
+        return info.is_no_diff ? flat_expr_id::none
+                               : failed("a read of a texture with a @tangent and no @gradient, where a backward "
+                                        "derivative adds the read's adjoint");
+    auto const gradients = resolve_paired(info.gradient, "gradient", named_type(builtins::k_float));
+    if (!gradients.has_value())
+        return flat_expr_id::none;
+    auto const placeholder = f.add_local(local_kind::temporary, "t_texels", named_type("float4"));
+    linear_locals.insert(i32(placeholder));
+    texture_reads.push_back({.placeholder = placeholder,
+                             .gradients = gradients.value(),
+                             .texture = primals[0],
+                             .at = primals[1],
+                             .is_linear = true,
+                             .mode_u = state->address_u,
+                             .mode_v = state->address_v,
+                             .gather_channel = channel,
+                             .channels = float_leaves(m().at(texture_type).element)});
+    return ref(placeholder);
+}
+
+auto differentiator::compare_tangent(cc::span<flat_expr_id const> primals, cc::span<flat_expr_id const> tangents)
+    -> flat_expr_id
+{
+    // each tap's comparison is constant between the points where it jumps, and a linear filter weighs them by the
+    // coordinate, which the four comparisons a gather gives move by their slopes
+    auto const* const state = static_sampler_of(primals[2]);
+    auto const* const level = node(primals[4]).node.try_as<flat_literal>();
+    if (state == nullptr || level == nullptr || level->value != 0.0 || state->max_anisotropy > 1)
+        return failed("a comparison sample at a level other than a constant 0, or through a sampler the compile "
+                      "cannot see");
+    if (state->mag_filter != 1 || !is_valid(tangents[1]))
+        return flat_expr_id::none;
+    auto const texture_type = type_of(primals[0]);
+    auto const gather = texture_builtin("gather_compare", texture_type, 4);
+    auto const size_of = texture_builtin("size", texture_type, 2);
+    if (!is_valid(gather) || !is_valid(size_of))
+        return failed(cc::format("a comparison gather of {}, which no builtin is", m().name_of(texture_type)));
+    auto const size
+        = share(f.builtin_call(at, size_of, cc::span<flat_expr_id const>({use(primals[0]), integer(0)})), "size");
+    auto const passed
+        = share(f.builtin_call(
+                    at, gather,
+                    cc::span<flat_expr_id const>({use(primals[0]), use(primals[1]), use(primals[2]), use(primals[3])})),
+                "passed");
+    auto const dc = share_tangent(tangents[1]);
+    // a gather gives (0, 1), (1, 1), (1, 0) and (0, 0) of the footprint, which taps 2, 3, 1 and 0 are
+    i32 const taps[] = {2, 3, 1, 0};
+    auto result = flat_expr_id::none;
+    for (auto j = 0; j < 4; ++j)
+    {
+        flat_expr_id const slope_arguments[] = {use(size), use(primals[1]), integer(taps[j]), boolean(true)};
+        auto const slope = prelude_call("sample_tap_slope", slope_arguments);
+        auto const comparison = add(named_type(builtins::k_float), flat_member{.object = use(passed), .member = j});
+        result = sum(result, mul(comparison, call("dot", slope, use(dc))));
+    }
+    return result;
+}
+
+auto differentiator::resolve_paired(cc::string_view text, cc::string_view which, type_id element)
+    -> cc::optional<paired_buffer>
+{
+    // PROTOTYPE: matched by name, as `@forward(f)` is, since an attribute's argument is no expression resolved yet
+    auto const dot = text.find('.');
+    auto const binding_name = dot < 0 ? cc::string_view() : text.subview({.offset = 0, .size = dot});
+    auto const member_name = dot < 0 ? cc::string_view() : text.subview(dot + 1);
+    for (auto i = isize(0); i < m().symbols.size(); ++i)
+    {
+        auto const& s = m().symbols[i];
+        if (s.kind != symbol_kind::binding || s.name != binding_name)
+            continue;
+        auto const members = m().at(m().bindings[s.info].members);
+        for (auto k = isize(0); k < members.size(); ++k)
+        {
+            if (members[k].name != member_name)
+                continue;
+            auto const& t = m().at(members[k].type);
+            auto const& held = t.kind == type_kind::buffer ? m().at(t.element) : t;
+            auto const fits = which == "gradient" ? t.kind == type_kind::buffer && t.is_mut
+                                                        && held.kind == type_kind::atomic && held.element == element
+                            : t.kind == type_kind::buffer ? t.element == element
+                                                          : members[k].type == element;
+            if (!fits)
+            {
+                failed(cc::format("@{}({}) names a {}, where it takes a {} of {}", which, text,
+                                  m().name_of(members[k].type),
+                                  which == "gradient" ? "mut buffer of atomics" : "buffer", m().name_of(element)));
+                return {};
+            }
+            // the derivative reads or writes a binding the function never named, so the entry point must list it
+            auto is_listed = false;
+            for (auto const b : f.entry.bindings)
+                is_listed = is_listed || b == symbol_id(i);
+            if (!is_listed)
+            {
+                failed(cc::format("@{}({}) names a buffer of {}, which the entry point does not list; list {{{}}} "
+                                  "beside the bindings it reads",
+                                  which, text, binding_name, binding_name));
+                return {};
+            }
+            return paired_buffer{.binding = symbol_id(i), .member = i32(k), .type = members[k].type};
+        }
+    }
+    failed(cc::format("@{}({}) names no buffer of a binding", which, text));
+    return {};
+}
+
+auto differentiator::derive_buffer_read(flat_expr_id id, type_id type, flat_buffer_element const& n) -> dual
+{
+    auto const* const member = node(n.buffer).node.try_as<flat_binding_member>();
+    auto const* const info
+        = member != nullptr ? &m().at(m().bindings[m().at(member->binding).info].members)[member->member] : nullptr;
+    if (info == nullptr || (info->gradient.empty() && info->tangent.empty()))
+    {
+        failed("a read of a buffer, whose gradient it cannot write back; read it as `no_diff(…)` to hold it "
+               "constant, or give the buffer a @gradient");
+        return {id, flat_expr_id::none};
+    }
+    // a gradient is an atomic per float the element's tangent holds, which no other kind of leaf has
+    auto const stride = float_leaves(tangent(type));
+    if (stride <= 0)
+    {
+        failed(cc::format("a read of a buffer of {}, whose gradient is an atomic float per float it holds, and it "
+                          "holds another kind",
+                          m().name_of(type)));
+        return {id, flat_expr_id::none};
+    }
+    auto const index = share(n.index, "index");
+    auto const primal = add(type, flat_buffer_element{.buffer = n.buffer, .index = use(index)});
+    if (!is_reverse)
+    {
+        // without a @tangent, the buffer holds still in every direction a forward derivative follows
+        if (info->tangent.empty())
+            return {primal, flat_expr_id::none};
+        auto const tangents = resolve_paired(info->tangent, "tangent", tangent(type));
+        if (!tangents.has_value())
+            return {primal, flat_expr_id::none};
+        auto const& t = tangents.value();
+        auto const buffer = add(t.type, flat_binding_member{.binding = t.binding, .member = t.member});
+        return {primal, add(tangent(type), flat_buffer_element{.buffer = buffer, .index = use(index)})};
+    }
+    if (info->gradient.empty())
+    {
+        failed("a read of a buffer with a @tangent and no @gradient, where a backward derivative adds the read's "
+               "adjoint");
+        return {primal, flat_expr_id::none};
+    }
+    auto const gradients = resolve_paired(info->gradient, "gradient", named_type(builtins::k_float));
+    if (!gradients.has_value())
+        return {primal, flat_expr_id::none};
+    auto const placeholder = f.add_local(local_kind::temporary, "t_read", tangent(type));
+    linear_locals.insert(i32(placeholder));
+    gradient_reads.push_back(
+        {.placeholder = placeholder, .gradients = gradients.value(), .index = index, .stride = stride});
+    return {primal, ref(placeholder)};
 }
 
 } // namespace sgl::check::impl

@@ -469,7 +469,7 @@ struct sgl::check::checked_module
         auto const& t = at(id);
         if (t.kind == type_kind::void_)
             return "void";
-        if (t.kind == type_kind::structure && is_valid(t.generic))
+        if (t.kind == type_kind::structure && (is_valid(t.generic) || is_valid(t.tangent_of)))
             return t.spelled;
         if (t.kind == type_kind::structure || t.kind == type_kind::enumeration)
             return at(t.symbol).name;

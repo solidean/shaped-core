@@ -1,0 +1,15 @@
+// differential: setup blended
+// Blending as a compositor and a light accumulator do: alpha over an sRGB target, additive and subtractive half floats, and a min.
+// Layer 1 lands on layer 0, which lands on the clear, so each pixel blends twice or once.
+use diff_targets
+
+@pixel fun blended_ps(p: diff_targets.varyings){diff_targets.io} -> diff_targets.blend_target:
+    let cell = (p.position.x as int) + 16 * (p.position.y as int)
+    let s = fract(abs(diff_targets.io.input[cell & 255]) * 0.37)
+    let alpha = 0.3 + 0.4 * p.layer * s
+    return {
+        over = float4(p.uv.x, s, 1.0 - p.uv.y, alpha)
+        sum = float4(s * 4.0, p.uv.x * 100.0, 0.001 * p.uv.y, alpha)
+        darkest = float4(p.uv.y, 1.0 - s, p.uv.x * p.layer, 0.5)
+        difference = float4(s, p.uv.x * 2.0, 3.0 - p.uv.y, alpha)
+    }

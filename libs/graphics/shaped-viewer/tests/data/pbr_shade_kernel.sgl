@@ -20,33 +20,57 @@ fun sv_attribute_base_color(ctx: material.shading_context){tracer.bindless} -> f
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load3(ctx.param_offset + 0u))
 
+fun sv_base_color_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float3:
+    return sv_attribute_base_color(ctx)
+
 fun sv_attribute_metallic(ctx: material.shading_context){tracer.bindless} -> float:
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 12u))
+
+fun sv_metallic_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float:
+    return sv_attribute_metallic(ctx)
 
 fun sv_attribute_roughness(ctx: material.shading_context){tracer.bindless} -> float:
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 16u))
 
+fun sv_roughness_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float:
+    return sv_attribute_roughness(ctx)
+
 fun sv_attribute_emissive(ctx: material.shading_context){tracer.bindless} -> float3:
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load3(ctx.param_offset + 20u))
+
+fun sv_emissive_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float3:
+    return sv_attribute_emissive(ctx)
 
 fun sv_attribute_normal(ctx: material.shading_context){tracer.bindless} -> float3:
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load3(ctx.param_offset + 32u))
 
+fun sv_normal_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float3:
+    return sv_attribute_normal(ctx)
+
 fun sv_attribute_occlusion(ctx: material.shading_context){tracer.bindless} -> float:
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 44u))
+
+fun sv_occlusion_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float:
+    return sv_attribute_occlusion(ctx)
 
 fun sv_attribute_tangent_frame(ctx: material.shading_context){tracer.bindless} -> float4:
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4(ctx.param_offset + 48u))
 
+fun sv_tangent_frame_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float4:
+    return sv_attribute_tangent_frame(ctx)
+
 fun sv_attribute_tangent_handedness(ctx: material.shading_context){tracer.bindless} -> float:
     let block = ctx.param_buffer as int
     return reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + 64u))
+
+fun sv_tangent_handedness_at(ctx: material.shading_context, at: float2){tracer.bindless} -> float:
+    return sv_attribute_tangent_handedness(ctx)
 
 fun sv_parallax(ctx: material.shading_context, g: tracer.hit_geometry){tracer.bindless} -> material.shading_context:
     return ctx

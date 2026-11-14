@@ -248,6 +248,46 @@ auto differentiator::transpose(flat_expr_id t, flat_expr_id g) -> void
             transpose(arguments[2], share(call("select", use(condition), zero(r), use(g))));
         return;
     }
+    // a subgroup's sums go back as sums, and a swap is its own transpose
+    if (name == "subgroup_add")
+        return transpose(arguments[0], share(active_call("subgroup_add", use(g))));
+    if (name == "subgroup_inclusive_add" || name == "subgroup_exclusive_add")
+    {
+        // what each later invocation's sum took of this one: the total less what came before, or up to, it
+        auto const before = active_call(
+            name == "subgroup_inclusive_add" ? "subgroup_exclusive_add" : "subgroup_inclusive_add", use(g));
+        return transpose(arguments[0], share(call("-", active_call("subgroup_add", use(g)), before)));
+    }
+    if (name == "subgroup_broadcast_first")
+    {
+        auto const first = call("==", active_call("subgroup_exclusive_add", integer(1)), integer(0));
+        return transpose(arguments[0],
+                         share(call("select", first, active_call("subgroup_add", use(g)), zero(type_of(arguments[0])))));
+    }
+    if (name == "subgroup_shuffle_xor" || name == "quad_swap_x" || name == "quad_swap_y" || name == "quad_swap_diagonal")
+    {
+        auto swapped = cc::vector<flat_expr_id>();
+        swapped.push_back(use(g));
+        for (auto i = isize(1); i < arguments.size(); ++i)
+            swapped.push_back(clone(arguments[i]));
+        return transpose(arguments[0], share(active_call(name, swapped)));
+    }
+    // an affine3 is read and built by its rows, each the other's transpose
+    if (name == "affine3_row" && arguments.size() == 2)
+    {
+        auto const i = share(arguments[1]);
+        flat_expr_id rows[3] = {};
+        for (auto row = 0; row < 3; ++row)
+            rows[row] = call("select", call("==", use(i), integer(row)), use(g), zero(r));
+        return transpose(arguments[0], share(call("affine3_of_rows", rows[0], rows[1], rows[2])));
+    }
+    if (name == "affine3_of_rows" && arguments.size() == 3)
+    {
+        for (auto row = 0; row < 3; ++row)
+            if (linear_at(row))
+                transpose(arguments[row], share(call("affine3_row", use(g), integer(row))));
+        return;
+    }
     if (name == "matrix_column" && arguments.size() == 2)
     {
         // the matrix whose column `i` is `g`, and every other column zero
@@ -264,7 +304,7 @@ auto differentiator::transpose(flat_expr_id t, flat_expr_id g) -> void
         }
         return transpose(arguments[0], share(assemble(ut, parts)));
     }
-    if (is_linear_function(name, arguments.size()) && leaf_count(r) > 0)
+    if (derivative_of(n->callee) == builtins::derivative_kind::linear && leaf_count(r) > 0)
     {
         // a construction or a conversion: each argument's adjoint is the components of `g` it filled
         auto total = 0;
@@ -318,9 +358,14 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
         if (!tracked.contains(i32(root)) || !is_differentiable(type_of(n->place)))
             return;
         auto const adjoint = adjoint_of_local(root);
-        auto const g = share(place_of(ref(adjoint), steps), "g");
-        emit(flat_assign{.place = place_of(ref(adjoint), steps), .value = zero(tangent(type_of(n->place)))});
+        auto const read = tangent_place_of(ref(adjoint), steps);
+        if (!is_valid(read))
+            return;
+        auto const g = share(read, "g");
+        emit(flat_assign{.place = tangent_place_of(ref(adjoint), steps), .value = zero(tangent(type_of(n->place)))});
         linear_lets.clear();
+        gradient_reads.clear();
+        texture_reads.clear();
         auto const t = tangent_of_value(n->value);
         transpose(t, g);
         // a tangent read twice was bound once; its adjoint is complete only once every read is transposed
@@ -335,6 +380,8 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
                 emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
             }
         }
+        add_gradient_reads();
+        add_texture_reads();
         return;
     }
     if (auto const* const n = s.node.try_as<flat_if>())
@@ -348,6 +395,8 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
     // a kept loop is walked back from its last iteration, its index read reversed by every clone of its body
     if (auto const* const n = s.node.try_as<flat_for>())
     {
+        if (auto const* const loop = checkpointed.get_ptr(i32(n->label)))
+            return backward_checkpointed(*n, *loop);
         auto const bounds = constant_bounds(*n).value();
         auto const back = f.add_local(local_kind::index, "back", f.int_type());
         auto const index = n->index;
@@ -374,6 +423,106 @@ auto differentiator::backward_stmt(flat_stmt_id id) -> void
         auto const body = collect([&] { backward(copy_of(n->body)); });
         emit(flat_block{.label = f.add_label("back"), .body = f.add_list(body)});
     }
+}
+
+auto differentiator::run_again(cc::span<flat_stmt_id const> statements) -> cc::vector<flat_stmt_id>
+{
+    auto const copy = cc::vector<flat_stmt_id>::create_copy_of(statements);
+    return collect(
+        [&]
+        {
+            for (auto const id : copy)
+            {
+                auto const s = f.entry.at(id);
+                if (auto const* const n = s.node.try_as<flat_assign>())
+                {
+                    if (is_buffer_place(n->place) || f.calls_impure(n->value, 0))
+                        return (void)failed("a loop too long to keep whole, whose segments run again, and one with an "
+                                            "effect would repeat it; a @backward walks such a loop back");
+                    emit(flat_assign{.place = clone(n->place), .value = clone(n->value)});
+                }
+                else if (auto const* const n = s.node.try_as<flat_if>())
+                {
+                    auto const condition = clone(n->condition);
+                    auto const then_body = f.add_list(run_again(copy_of(n->then_body)));
+                    auto const else_body = f.add_list(run_again(copy_of(n->else_body)));
+                    emit(flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
+                }
+                else if (auto const* const n = s.node.try_as<flat_block>();
+                         n != nullptr && !f.custom_calls.contains(i32(n->label)))
+                    emit(flat_block{.label = f.add_label("again"), .body = f.add_list(run_again(copy_of(n->body)))});
+                else if (auto const* const n = s.node.try_as<flat_for>())
+                {
+                    auto const index = f.add_local(local_kind::index, f.entry.at(n->index).name, f.int_type());
+                    auto const outer = substitution.get_ptr(i32(n->index)) != nullptr ? substitution.get(i32(n->index))
+                                                                                      : local_id::none;
+                    substitution[i32(n->index)] = index;
+                    auto const body = f.add_list(run_again(copy_of(n->body)));
+                    if (is_valid(outer))
+                        substitution[i32(n->index)] = outer;
+                    else
+                        substitution.erase(i32(n->index));
+                    emit(flat_for{.label = f.add_label("again"),
+                                  .index = index,
+                                  .first = clone(n->first),
+                                  .end = clone(n->end),
+                                  .body = body});
+                }
+                else
+                    return (void)failed("a loop too long to keep whole, whose segments run again, holding what it "
+                                        "cannot run again; a @backward walks such a loop back");
+            }
+        });
+}
+
+auto differentiator::backward_checkpointed(flat_for const& n, checkpointed_loop const& loop) -> void
+{
+    // each segment, last first: from its start's state, run again to write its tapes, then walked back
+    auto const back = f.add_local(local_kind::index, "segment_back", f.int_type());
+    auto const segment_body = collect(
+        [&]
+        {
+            auto const segment = f.add_local(local_kind::let, "segment", f.int_type());
+            emit(flat_let{.local = segment, .value = call("-", integer(loop.segments - 1), ref(back))});
+            for (auto k = isize(0); k < loop.state.size(); ++k)
+            {
+                auto const slot = add(m().at(f.entry.at(loop.saved[k]).type).element,
+                                      flat_element{.object = ref(loop.saved[k]), .index = ref(segment)});
+                emit(flat_assign{.place = ref(loop.state[k]), .value = slot});
+            }
+            // the iteration a step of a segment is, first + segment * size + step, and whether the loop has it
+            auto const iteration_at = [&](flat_expr_id step)
+            { return call("+", integer(loop.first), call("+", call("*", ref(segment), integer(loop.segment)), step)); };
+            auto const stepped = [&](cc::string_view name, bool is_backward)
+            {
+                auto const step = f.add_local(local_kind::index, name, f.int_type());
+                auto const body = collect(
+                    [&]
+                    {
+                        auto const iteration = f.add_local(local_kind::let, f.entry.at(n.index).name, f.int_type());
+                        auto const offset = is_backward ? call("-", integer(loop.segment - 1), ref(step)) : ref(step);
+                        emit(flat_let{.local = iteration, .value = iteration_at(offset)});
+                        substitution[i32(n.index)] = iteration;
+                        auto const inside = is_backward ? collect([&] { backward(loop.body); }) : run_again(loop.body);
+                        substitution.erase(i32(n.index));
+                        emit(flat_if{.condition = call("<", ref(iteration), integer(loop.first + loop.count)),
+                                     .then_body = f.add_list(inside),
+                                     .else_body = f.add_list(cc::span<flat_stmt_id const>())});
+                    });
+                emit(flat_for{.label = f.add_label(name),
+                              .index = step,
+                              .first = integer(0),
+                              .end = integer(loop.segment),
+                              .body = f.add_list(body)});
+            };
+            stepped("again", false);
+            stepped("back", true);
+        });
+    emit(flat_for{.label = f.add_label("segments"),
+                  .index = back,
+                  .first = integer(0),
+                  .end = integer(loop.segments),
+                  .body = f.add_list(segment_body)});
 }
 
 auto differentiator::parameters_of(symbol_id function) const -> cc::span<parameter const>
@@ -479,6 +628,216 @@ auto differentiator::backward_custom(flattener::custom_call const& custom, label
     auto const call = inline_derivative(custom, custom.derivatives.backward, arguments);
     if (is_valid(call))
         emit(flat_block{.label = node(call).node.as<flat_block>().label, .body = node(call).node.as<flat_block>().body});
+}
+
+auto differentiator::add_texture_reads() -> void
+{
+    for (auto const& r : texture_reads)
+    {
+        auto const* const a = adjoint_of.get_ptr(i32(r.placeholder));
+        if (a == nullptr)
+            continue;
+        auto const adjoint = *a;
+        auto const atomic = m().at(r.gradients.type).element;
+        auto const callee = atomic_add_of(m().at(atomic).element);
+        auto const size_of = texture_builtin("size", type_of(r.texture), 2);
+        if (!is_valid(callee) || !is_valid(size_of))
+            return (void)failed("an atomic add of a texel's gradient, which no builtin is");
+        auto leaves = cc::vector<flat_expr_id>();
+        leaves_into(share(ref(adjoint), "g"), leaves);
+        for (auto& l : leaves)
+            l = share(l, "leaf");
+        auto const channels = r.gather_channel >= 0 ? r.channels : i32(leaves.size());
+        auto const size
+            = share(f.builtin_call(at, size_of, cc::span<flat_expr_id const>({use(r.texture), integer(0)})), "size");
+        auto const taps = !r.is_load && r.is_linear ? 4 : 1;
+        // a gather's components are taps 2, 3, 1 and 0 of the footprint, each its texel's one channel
+        i32 const gathered[] = {2, 3, 1, 0};
+        for (auto j = 0; j < taps; ++j)
+        {
+            auto const k = r.gather_channel >= 0 ? gathered[j] : j;
+            auto texel = use(r.at);
+            auto weight = flat_expr_id::none;
+            if (!r.is_load)
+            {
+                flat_expr_id const texel_arguments[]
+                    = {use(size), use(r.at), integer(k), boolean(r.is_linear), integer(r.mode_u), integer(r.mode_v)};
+                texel = prelude_call("sample_tap_texel", texel_arguments);
+                if (r.is_linear && r.gather_channel < 0)
+                {
+                    flat_expr_id const weight_arguments[] = {use(size), use(r.at), integer(k), boolean(r.is_linear)};
+                    weight = share(prelude_call("sample_tap_weight", weight_arguments), "weight");
+                }
+            }
+            texel = share(texel, "texel");
+            // texel (x, y) of level 0 holds its channels at (y * width + x) * channels
+            auto const first = call("*",
+                                    call("+",
+                                         call("*", add(f.int_type(), flat_member{.object = use(texel), .member = 1}),
+                                              add(f.int_type(), flat_member{.object = use(size), .member = 0})),
+                                         add(f.int_type(), flat_member{.object = use(texel), .member = 0})),
+                                    integer(channels));
+            auto const base = share(first, "at");
+            for (auto c = 0; c < (r.gather_channel >= 0 ? 1 : channels); ++c)
+            {
+                auto const channel = r.gather_channel >= 0 ? r.gather_channel : c;
+                auto const leaf = r.gather_channel >= 0 ? leaves[j] : leaves[c];
+                auto const buffer = add(
+                    r.gradients.type, flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
+                auto const place = add(
+                    atomic,
+                    flat_buffer_element{.buffer = buffer,
+                                        .index = channel == 0 ? use(base) : call("+", use(base), integer(channel))});
+                flat_expr_id const arguments[] = {place, is_valid(weight) ? mul(use(leaf), use(weight)) : use(leaf)};
+                emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+            }
+        }
+        emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
+    }
+    texture_reads.clear();
+}
+
+auto differentiator::reduces_gradients() const -> bool
+{
+    if (f.is_test || !is_valid(f.entry.function))
+        return false;
+    auto const& s = m().at(f.entry.function);
+    return s.kind == symbol_kind::function && s.info >= 0 && s.info < f.c.notes.size()
+        && f.c.notes[s.info].declared_features.has(feature::subgroups);
+}
+
+auto differentiator::active_call(cc::string_view name, flat_expr_id a) -> flat_expr_id
+{
+    flat_expr_id const arguments[] = {a};
+    return active_call(name, arguments);
+}
+
+auto differentiator::active_call(cc::string_view name, cc::span<flat_expr_id const> arguments) -> flat_expr_id
+{
+    auto const id = call(name, arguments);
+    if (auto* const c = is_valid(id) ? f.entry.exprs[index_of(id)].node.try_as<flat_call>() : nullptr)
+        c->is_active_lanes = true;
+    return id;
+}
+
+auto differentiator::float_leaves(type_id t) const -> i32
+{
+    if (auto const* const r = record_of(t))
+        return r->leaf_kind == value_kind::scalar_float ? r->leaf_count : -1;
+    auto const& info = m().at(t);
+    if (info.kind == type_kind::array)
+    {
+        auto const each = float_leaves(info.element);
+        return each < 0 ? -1 : each * info.count;
+    }
+    if (info.kind != type_kind::structure)
+        return -1;
+    auto sum = 0;
+    for (auto const& member : m().at(info.members))
+    {
+        auto const each = float_leaves(member.type);
+        if (each < 0)
+            return -1;
+        sum += each;
+    }
+    return sum;
+}
+
+auto differentiator::leaves_into(flat_expr_id g, cc::vector<flat_expr_id>& out) -> void
+{
+    auto const t = type_of(g);
+    if (record_of(t) != nullptr)
+    {
+        for (auto k = 0; k < leaf_count(t); ++k)
+            out.push_back(component(g, k));
+        return;
+    }
+    auto const info = m().at(t);
+    auto const count = info.kind == type_kind::array ? info.count : i32(info.members.count);
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const part = info.kind == type_kind::array
+                            ? add(info.element, flat_element{.object = use(g), .index = integer(i)})
+                            : add(f.field_type(t, i), flat_member{.object = use(g), .member = i});
+        leaves_into(share(part), out);
+    }
+}
+
+auto differentiator::atomic_add_of(type_id element) const -> symbol_id
+{
+    // the builtin's atomic is a `mut atomic[T]` of its own, so it is matched by what the atomic holds
+    auto const* const found = f.c.prelude_names.get_ptr(cc::string("add"));
+    if (found == nullptr)
+        return symbol_id::none;
+    for (auto const candidate : *found)
+    {
+        auto const& s = m().at(candidate);
+        if (s.kind != symbol_kind::function || s.info < 0)
+            continue;
+        auto const parameters = m().at(m().functions[s.info].parameters);
+        if (parameters.size() == 2 && m().at(parameters[0].type).kind == type_kind::atomic
+            && m().at(parameters[0].type).element == element && parameters[1].type == element)
+            return candidate;
+    }
+    return symbol_id::none;
+}
+
+auto differentiator::add_gradient_reads() -> void
+{
+    for (auto const& r : gradient_reads)
+    {
+        auto const* const a = adjoint_of.get_ptr(i32(r.placeholder));
+        if (a == nullptr)
+            continue;
+        auto const adjoint = *a;
+        auto const atomic = m().at(r.gradients.type).element;
+        auto const callee = atomic_add_of(m().at(atomic).element);
+        if (!is_valid(callee))
+            return (void)failed(cc::format("an atomic add of {}, which no builtin is", m().name_of(atomic)));
+        auto const add_each = [&](cc::span<flat_expr_id const> leaves)
+        {
+            for (auto k = isize(0); k < leaves.size(); ++k)
+            {
+                auto const index = r.stride == 1
+                                     ? use(r.index)
+                                     : call("+", call("*", use(r.index), integer(r.stride)), integer(i32(k)));
+                auto const buffer = add(
+                    r.gradients.type, flat_binding_member{.binding = r.gradients.binding, .member = r.gradients.member});
+                auto const place = add(atomic, flat_buffer_element{.buffer = buffer, .index = index});
+                flat_expr_id const arguments[] = {place, use(leaves[k])};
+                emit(flat_eval{.value = f.builtin_call(at, callee, arguments)});
+            }
+        };
+        auto leaves = cc::vector<flat_expr_id>();
+        leaves_into(share(ref(adjoint), "g"), leaves);
+        for (auto& l : leaves)
+            l = share(l, "leaf");
+        if (!reduces_gradients())
+            add_each(leaves);
+        else
+        {
+            // where every invocation that reaches it adds to one element, as every pixel of a tile adds to one splat's,
+            // the subgroup sums its adjoints and its first invocation adds them: one atomic in place of many
+            auto const first = share(active_call("subgroup_broadcast_first", use(r.index)), "first");
+            auto const shared = active_call("subgroup_all", call("==", use(r.index), use(first)));
+            auto const none = cc::span<flat_stmt_id const>();
+            auto const reduced = collect(
+                [&]
+                {
+                    auto sums = cc::vector<flat_expr_id>();
+                    for (auto const l : leaves)
+                        sums.push_back(share(active_call("subgroup_add", use(l)), "sum"));
+                    auto const elected = call("==", active_call("subgroup_exclusive_add", integer(1)), integer(0));
+                    auto const adds = collect([&] { add_each(sums); });
+                    emit(flat_if{.condition = elected, .then_body = f.add_list(adds), .else_body = f.add_list(none)});
+                });
+            auto const each = collect([&] { add_each(leaves); });
+            emit(flat_if{.condition = shared, .then_body = f.add_list(reduced), .else_body = f.add_list(each)});
+        }
+        // a read in a kept loop is transposed once per iteration, each adjoint its own
+        emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
+    }
+    gradient_reads.clear();
 }
 
 } // namespace sgl::check::impl

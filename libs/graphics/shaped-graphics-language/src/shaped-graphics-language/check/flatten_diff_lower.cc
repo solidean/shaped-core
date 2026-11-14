@@ -42,55 +42,7 @@ auto differentiator::scalar_of(type_id t) const -> type_id
 
 auto differentiator::leaves_of(type_id t, f32 v, cc::vector<scalar>& out) const -> bool
 {
-    if (auto const* const r = record_of(t))
-    {
-        for (auto i = 0; i < r->leaf_count; ++i)
-        {
-            switch (r->leaf_kind)
-            {
-            case value_kind::scalar_float:
-                out.push_back(scalar::of(v));
-                break;
-            case value_kind::scalar_half:
-                out.push_back(scalar::of_half(f64(v)));
-                break;
-            case value_kind::scalar_uint:
-                out.push_back(scalar::of_uint(0));
-                break;
-            case value_kind::boolean:
-                out.push_back(scalar::of(false));
-                break;
-            case value_kind::none:
-                return false;
-            default:
-                out.push_back({.kind = r->leaf_kind, .bits = 0});
-                break;
-            }
-        }
-        return true;
-    }
-    auto const& info = m().at(t);
-    if (info.kind == type_kind::enumeration)
-    {
-        auto const cases = m().at(info.cases);
-        if (cases.empty())
-            return false;
-        out.push_back(scalar::of(cases[0].value));
-        return true;
-    }
-    if (info.kind == type_kind::array)
-    {
-        for (auto i = 0; i < info.count; ++i)
-            if (!leaves_of(info.element, v, out))
-                return false;
-        return info.count > 0;
-    }
-    if (info.kind != type_kind::structure)
-        return false;
-    for (auto const& member : m().at(info.members))
-        if (!leaves_of(member.type, v, out))
-            return false;
-    return true;
+    return f.leaves_of(t, v, out);
 }
 
 auto differentiator::constant(type_id t, f32 v) -> flat_expr_id
@@ -302,7 +254,46 @@ auto differentiator::lower_stmt(flat_stmt_id id) -> void
     if (auto const* const n = s.node.try_as<flat_var>())
         return restate(id, flat_var{.local = n->local, .value = lift(n->value)});
     if (auto const* const n = s.node.try_as<flat_assign>())
-        return restate(id, flat_assign{.place = n->place, .value = lift(n->value)});
+    {
+        // an index the place computes, as a tape's slot of a checkpointed loop does, is held in a `let` ahead of the
+        // value, so the place is one both modes follow, an inner derivative's included
+        for (auto x = n->place; is_valid(x);)
+        {
+            auto& place = f.entry.exprs[index_of(x)];
+            if (auto* const e = place.node.try_as<flat_element>())
+            {
+                if (!f.is_substitutable(e->index) && !f.calls_impure(e->index, 0))
+                {
+                    auto const index = f.add_local(local_kind::let, "slot", type_of(e->index));
+                    emit(flat_let{.local = index, .value = lift(e->index)});
+                    f.entry.exprs[index_of(x)].node.as<flat_element>().index = ref(index);
+                }
+                x = f.entry.exprs[index_of(x)].node.as<flat_element>().object;
+            }
+            else if (auto const* const m = place.node.try_as<flat_member>())
+                x = m->object;
+            else
+                break;
+        }
+        auto const value = lift(n->value);
+        // `v.xz = e` writes each field it names, which both modes follow as any assignment to a field
+        auto const* const m = node(n->place).node.try_as<flat_member>();
+        if (m == nullptr || !m->is_swizzle() || !is_valid(root_of(m->object, nullptr)))
+            return restate(id, flat_assign{.place = n->place, .value = value});
+        auto const swizzle = *m;
+        auto const written = f.add_local(local_kind::let, "swizzled", type_of(value));
+        restate(id, flat_let{.local = written, .value = value});
+        for (auto k = 0; k < swizzle.letters.count; ++k)
+        {
+            auto const object = clone(swizzle.object);
+            auto const field = swizzle.letters.fields[k];
+            auto const place = add(f.field_type(type_of(object), field), flat_member{.object = object, .member = field});
+            emit(flat_assign{
+                .place = place,
+                .value = add(f.field_type(type_of(value), k), flat_member{.object = ref(written), .member = k})});
+        }
+        return;
+    }
     if (auto const* const n = s.node.try_as<flat_eval>())
     {
         auto const value = lift(n->value);

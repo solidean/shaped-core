@@ -938,3 +938,151 @@ ASYNC_INVOCABLE_TEST("sv - a moving hybrid layer draws at the upscaler's extent 
     if (support.dlss_rr)
         co_await moving_then_still(ctx, sr::denoise_method::dlss_rr);
 }
+
+namespace
+{
+/// How a still hybrid layer reached its sample target: the frames it took, the samples it stopped at, and its mean.
+struct packed_run
+{
+    int frames = 0;
+    u32 samples = 0;
+    cc::vector<tg::vec4f> mean;
+};
+
+/// The lit Cornell box drawn by a hybrid layer until `target` samples, packing up to `per_frame` into a still frame.
+/// `warm` first draws it in a throwaway store until every permutation is built, so the run counts only its own frames.
+cc::shared_async<packed_run> run_to_target(sg::context& ctx,
+                                           sv::gpu_resource_manager& resources,
+                                           sv::scene_item const& item,
+                                           u32 target,
+                                           u32 per_frame)
+{
+    auto const output_size = tg::vec2i(48, 32);
+    auto const id = sv::view_id::from_string("packed");
+    auto def = sv::viewer_definition{};
+    def.sample_target = target;
+    def.still_samples_per_frame = per_frame;
+    {
+        auto v = sv::view_data{};
+        v.id = id;
+        v.camera = sv_test::cornell_camera();
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.items.push_back(item);
+        scene.lights.push_back(
+            {.id = sv::light_id::from_string("key"),
+             .light = sv::light::rect(tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(40)});
+        scene.settings.mode = sv::render_mode::hybrid;
+        scene.settings.hybrid_lighting = sv::hybrid_lighting::deferred;
+        def.views.push_back(cc::move(v));
+
+        auto const root_node = def.nodes.add_container(sv::invalid_node);
+        auto leaf = sv::layout_leaf{};
+        leaf.views.push_back(sv::view_index(0));
+        def.nodes.add_leaf(root_node, cc::move(leaf));
+        auto root = sv::view_data{};
+        root.id = sv::view_id::from_string("root");
+        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+        def.root_view = sv::view_index(def.views.size());
+        def.views.push_back(cc::move(root));
+    }
+
+    auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                          .width = output_size[0],
+                                                          .height = output_size[1],
+                                                          .usage = sg::texture_usage::render_target});
+    auto const history = sv::view_history{};
+    auto index = u64(0);
+    auto const execute = [&](sv::view_store& store, sg::command_list& cmd)
+    {
+        resources.advance_to(ctx.current_epoch());
+        store.begin_frame(u64(ctx.current_epoch()));
+        auto const plan = sv::build_render_plan(def, output_size, index++, history);
+        return sv::viewer_renderer::execute(cmd, def, plan, resources, store,
+                                            output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+    };
+    auto const slot_in = [&](sv::view_store& store) -> sv::impl::temporal_slot const*
+    {
+        auto const* const rec = store.peek_ptr(id);
+        return rec != nullptr ? rec->temporal.get_ptr(sv::temporal_id::accumulation(0)) : nullptr;
+    };
+
+    // Until every permutation compiled, a stand-in restarts the mean every frame, which would count against the run.
+    {
+        auto warm = sv::view_store{};
+        REQUIRE(sv_test::frames_until_executed(ctx,
+                                               [&](sg::command_list& cmd)
+                                               {
+                                                   (void)execute(warm, cmd);
+                                                   auto const* const s = slot_in(warm);
+                                                   return s != nullptr && s->accum_frame >= 2
+                                                            ? sg::routine_outcome::executed
+                                                            : sg::routine_outcome::declined;
+                                               }));
+    }
+
+    auto store = sv::view_store{};
+    auto run = packed_run{};
+    while (slot_in(store) == nullptr || !slot_in(store)->is_at_target())
+    {
+        auto cmd = ctx.create_command_list();
+        CHECK(execute(store, *cmd) == sg::routine_outcome::executed);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        ++run.frames;
+        REQUIRE(run.frames <= int(target) + 1);
+    }
+    run.samples = slot_in(store)->samples;
+
+    auto cmd = ctx.create_command_list();
+    auto back = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(slot_in(store)->texture.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+    co_await ctx.idle_completion(); // an epoch advance drains the GPU but not the readback actor
+    auto const pixels = back.try_get_data();
+    REQUIRE(pixels.has_value());
+    for (auto const p : pixels.value())
+        run.mean.push_back(p);
+    co_await cc::async_settled(sv::background_work(ctx));
+    co_return run;
+}
+} // namespace
+
+// A still hybrid frame packs several samples, each the one a frame of its own would draw, so a capture spends one frame's
+// recording on many samples: most of a frame's cost in a scene of many instances.
+// The pack changes how many frames the mean takes and nothing else — it stops on the same sample, at the same image.
+ASYNC_INVOCABLE_TEST("sv - a still hybrid frame packs samples, and reaches the image one sample a frame would",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(shadowed_cornell_box());
+    resources.wait_for_pending_uploads();
+
+    // 13 is no multiple of 4, so the last pack is cut short at the target.
+    auto const single = co_await run_to_target(ctx, resources, item, 13, 1);
+    auto const packed = co_await run_to_target(ctx, resources, item, 13, 4);
+
+    CHECK(single.frames == 13);
+    // the first frame restarts the mean and draws one, then 4, 4 and the 4 that end on 13
+    CHECK(packed.frames == 4);
+    CHECK(single.samples == 13);
+    CHECK(packed.samples == 13);
+
+    REQUIRE(single.mean.size() == packed.mean.size());
+    auto worst = 0.0f;
+    auto lit = 0;
+    for (auto i = isize(0); i < single.mean.size(); ++i)
+    {
+        for (auto c = 0; c < 3; ++c)
+            worst = cc::max(worst, tg::abs(single.mean[i][c] - packed.mean[i][c]));
+        if (single.mean[i][0] + single.mean[i][1] + single.mean[i][2] > 0.01f)
+            ++lit;
+    }
+    REQUIRE(lit > int(single.mean.size()) / 4); // a black image would agree with anything
+    CHECK(worst <= 1e-5f).dump("worst channel difference", worst);
+}

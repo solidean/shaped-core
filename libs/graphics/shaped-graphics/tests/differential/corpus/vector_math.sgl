@@ -1,0 +1,21 @@
+// differential: setup floats
+// differential: routes relative 0.00001
+// differential: across relative 0.00001
+// The routes' bound, until SGL's DXIL normalizes as DXC's does; issue: bug-sgl-dxil-division-and-normalize-round-unlike-dxc
+// Across APIs a relative bound, since output 2 sums three products to a small value, where an ulp of it says nothing.
+// Vector and matrix math as a transform or a lighting pass writes it: dot, cross, normalize, and a matrix times a vector.
+use diff_floats
+
+fun at(i: int){diff_floats.io} -> float => diff_floats.io.input[i & 255]
+
+@compute(64) fun vectors(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let p = float3(at(i), at(i + 1), at(i + 2))
+    let q = float3(at(i + 3), at(i + 4), at(i + 5))
+    let n = normalize(cross(p, q) + float3(0.0, 0.0, 0.25))
+    let m = mat3(float3(at(i + 6), 0.5, 0.0), float3(0.0, at(i + 7), 0.5), float3(0.25, 0.0, at(i + 8)))
+    let moved = m * p
+    diff_floats.io.output[4 * i] = dot(p, q)
+    diff_floats.io.output[4 * i + 1] = n.x + n.y * 2.0 + n.z * 4.0
+    diff_floats.io.output[4 * i + 2] = moved.x - moved.y + moved.z
+    diff_floats.io.output[4 * i + 3] = length(p - q) + distance(p, q * 0.5)

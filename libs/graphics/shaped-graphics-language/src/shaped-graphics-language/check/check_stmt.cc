@@ -119,12 +119,29 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
     auto const& ast = ast_of(file);
     auto const& s = ast.at(stmt);
     auto const where = span_of(file, stmt);
-    // CHK-389: a `for` may be unrolled, and no other statement takes an attribute
-    cc::string_view const loop_attributes[] = {"unroll"};
+    // CHK-389: a `for` may be unrolled, CHK-528: a `for` and a `while` may be bounded, and no other statement takes one
+    cc::string_view const for_attributes[] = {"unroll", "max_iterations"};
+    cc::string_view const while_attributes[] = {"max_iterations"};
     if (s.node.is<ast::for_stmt>())
-        judge_attributes(file, s.attributes, loop_attributes, "a for");
+        judge_attributes(file, s.attributes, for_attributes, "a for");
+    else if (s.node.is<ast::while_stmt>())
+        judge_attributes(file, s.attributes, while_attributes, "a while");
     else
         judge_attributes(file, s.attributes, {}, "a statement");
+    if (auto const* const a = find_attribute(file, s.attributes, "max_iterations");
+        a != nullptr && (s.node.is<ast::for_stmt>() || s.node.is<ast::while_stmt>()))
+    {
+        auto const arguments = ast.at(a->arguments);
+        auto const value = arguments.size() == 1 && arguments[0].name.empty() && ast::is_valid(arguments[0].value)
+                             ? constant_count(file, arguments[0].value, &scope)
+                             : cc::optional<i32>();
+        if (value.has_value() && value.value() >= 1)
+            set_type(file, arguments[0].value, type_of_builtin(builtins::k_int, file, a->name));
+        else
+            report(diagnostic_kind::invalid_constant_argument, file, a->name,
+                   "@max_iterations takes an int constant of at least 1, a literal or a `const`, as in "
+                   "@max_iterations(64)");
+    }
     // CHK-427: a body in a target's own text is checked where its function's body is planned, and ends it
     if (auto const text = target_text_flow(file, stmt); text.has_value())
         return text.value();

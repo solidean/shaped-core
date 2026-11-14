@@ -137,3 +137,30 @@ TEST("sgl float - a float compared with itself warns at fast and not at specials
                           "    work.values[id.x] = if is_nan(v) or v != v => 0.0 else v\n";
     CHECK(!reports_for(kept).contains("nan-test-at-fast")).dump("reports", reports_for(kept));
 }
+
+// EMIT-262: Metal's math mode is the text's own, so the entry point's guarantee reaches the compile whatever it was handed.
+TEST("sgl float - metal's text states its entry point's math mode, fast for no guarantee and safe for any")
+{
+    auto const fast_pragma = cc::string_view("#pragma METAL fp math_mode(fast)\n");
+    auto const safe_pragma = cc::string_view("#pragma METAL fp math_mode(safe)\n");
+    auto const include = cc::string_view("#include <metal_stdlib>");
+
+    auto const loose = compiled("loose", target::msl);
+    REQUIRE(loose.has_value()).dump("error", loose.has_error() ? loose.error() : cc::string());
+    auto const& loose_text = loose.value().text;
+    CHECK(loose_text.contains(fast_pragma)).dump("text", loose_text);
+    CHECK(!loose_text.contains(safe_pragma));
+    CHECK(loose_text.find(fast_pragma) < loose_text.find(include));
+
+    auto const both = compiled("both", target::msl);
+    REQUIRE(both.has_value()).dump("error", both.has_error() ? both.error() : cc::string());
+    auto const& both_text = both.value().text;
+    CHECK(both_text.contains(safe_pragma)).dump("text", both_text);
+    CHECK(!both_text.contains(fast_pragma));
+    CHECK(both_text.find(safe_pragma) < both_text.find(include));
+
+    // the other targets state no math mode in their text: DXC and Vulkan take it from the compile
+    auto const hlsl = compiled("loose", target::hlsl_dx12);
+    REQUIRE(hlsl.has_value());
+    CHECK(!hlsl.value().text.contains("math_mode"));
+}

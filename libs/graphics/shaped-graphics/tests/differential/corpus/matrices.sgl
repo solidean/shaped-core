@@ -1,0 +1,26 @@
+// differential: setup floats
+// differential: routes ulps 8
+// differential: across relative 0.0001
+// The routes' bound is EVAL-6's at `.fast`: a determinant sums 24 products a target may contract and reorder, and on AMD its two routes do, 3 ulps apart.
+// Across implementations: a product of two matrices sums four products of values up to 64 before applying them.
+// Matrix work as a transform hierarchy does it: products, a matrix applied to a point, a transpose, and a determinant.
+use diff_floats
+
+fun at(i: int){diff_floats.io} -> float => diff_floats.io.input[i & 255]
+
+fun column(i: int){diff_floats.io} -> float4 => float4(at(i), at(i + 1), at(i + 2), at(i + 3))
+
+fun matrix(i: int){diff_floats.io} -> mat4 => mat4(column(i), column(i + 4), column(i + 8), column(i + 12))
+
+@compute(64) fun transforms(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let m = matrix(i)
+    let n = matrix(i + 16)
+    let v = float4(at(i + 32), at(i + 33), at(i + 34), 1.0)
+    diff_floats.io.output[4 * i] = (m * (n * v)).x
+    diff_floats.io.output[4 * i + 1] = ((m * n) * v).y
+    diff_floats.io.output[4 * i + 2] = (transpose(m) * v).z
+    // diagonally dominant, as a transform is: a random one may be nearly singular, and its determinant then cancels to rounding
+    let d = 200.0
+    let dominant = mat4(column(i) + float4(d, 0.0, 0.0, 0.0), column(i + 4) + float4(0.0, d, 0.0, 0.0), column(i + 8) + float4(0.0, 0.0, d, 0.0), column(i + 12) + float4(0.0, 0.0, 0.0, d))
+    diff_floats.io.output[4 * i + 3] = determinant(dominant)

@@ -406,7 +406,11 @@ void writer::derivative_lanes(u32 index, instruction const& i)
         auto const lane = leaf_at(source, l);
         if (kind != derivative::width)
         {
-            _loaded.push_back(across(kind == derivative::x ? dx_op::deriv_coarse_x : dx_op::deriv_coarse_y, lane));
+            auto const op = kind == derivative::x      ? dx_op::deriv_coarse_x
+                          : kind == derivative::y      ? dx_op::deriv_coarse_y
+                          : kind == derivative::x_fine ? dx_op::deriv_fine_x
+                                                       : dx_op::deriv_fine_y;
+            _loaded.push_back(across(op, lane));
             continue;
         }
         auto const x = across(dx_op::fabs, across(dx_op::deriv_coarse_x, lane));

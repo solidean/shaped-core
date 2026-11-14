@@ -1308,19 +1308,16 @@ struct writer
             arguments.push_back(expr(id));
 
         auto const& how = record.write;
-        switch (how.kind)
-        {
-        case builtins::spelling_kind::infix:
-            return builtins::write_infix(how.text, how.binds, cc::move(arguments[0]), cc::move(arguments[1]));
-        case builtins::spelling_kind::prefix:
-            // parenthesized whenever it is no name: `--x` is a decrement in every C-like target
-            return {.text = cc::format("{}{}", how.text, wrapped(cc::move(arguments[0]), level::primary)),
-                    .binds = level::unary};
-        case builtins::spelling_kind::custom:
+        auto const is_vulkan = p.which == emit::target::hlsl_vulkan;
+        auto const writer = is_vulkan && how.hlsl_vulkan != nullptr     ? how.hlsl_vulkan
+                          : how.kind == builtins::spelling_kind::custom ? how.custom
+                                                                        : builtins::custom_writer(nullptr);
+        if (writer != nullptr)
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
             // the types a helper is given, which a record with one may read too; another's need not be spelled
-            auto const types = how.helper != nullptr ? argument_types_of(p, d, c) : cc::vector<cc::string>();
+            auto const types = how.helper != nullptr || writer == how.hlsl_vulkan ? argument_types_of(p, d, c)
+                                                                                  : cc::vector<cc::string>();
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
@@ -1347,29 +1344,39 @@ struct writer
             for (auto const& [traced, pinned] : pinned_structures)
                 if (traced == invoked)
                     structure = pinned;
-            auto result = how.custom({.target = d.language(),
-                                      .is_vulkan = p.which == emit::target::hlsl_vulkan,
-                                      .reorders_through_nvapi = p.reorders_through_nvapi,
-                                      .states_micromaps = p.states_micromaps,
-                                      .arguments = arguments,
-                                      .argument_types = types,
-                                      .builtins = *p.m.builtins,
-                                      .data = how.data,
-                                      .mint = mint,
-                                      .result_type = p.m.builtin_type_of(type) != nullptr || record.gives_prelude_struct
-                                                       ? type_text(p, d, type)
-                                                       : cc::string_view(),
-                                      .hit_offsets = offsets,
-                                      .invoked_structure = structure,
-                                      .is_device_coherent = is_device_coherent,
-                                      .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
-                                      .native_float_atomics = p.native_float_atomics});
+            auto result = writer({.target = d.language(),
+                                  .is_vulkan = is_vulkan,
+                                  .reorders_through_nvapi = p.reorders_through_nvapi,
+                                  .states_micromaps = p.states_micromaps,
+                                  .arguments = arguments,
+                                  .argument_types = types,
+                                  .builtins = *p.m.builtins,
+                                  .data = how.data,
+                                  .mint = mint,
+                                  .result_type = p.m.builtin_type_of(type) != nullptr || record.gives_prelude_struct
+                                                   ? type_text(p, d, type)
+                                                   : cc::string_view(),
+                                  .hit_offsets = offsets,
+                                  .invoked_structure = structure,
+                                  .is_device_coherent = is_device_coherent,
+                                  .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
+                                  .native_float_atomics = p.native_float_atomics});
             // the statements its value needs, ahead of the one that holds it
             for (auto const& l : result.lines)
                 line(l);
             result.lines.clear();
             return result;
         }
+        switch (how.kind)
+        {
+        case builtins::spelling_kind::infix:
+            return builtins::write_infix(how.text, how.binds, cc::move(arguments[0]), cc::move(arguments[1]));
+        case builtins::spelling_kind::prefix:
+            // parenthesized whenever it is no name: `--x` is a decrement in every C-like target
+            return {.text = cc::format("{}{}", how.text, wrapped(cc::move(arguments[0]), level::primary)),
+                    .binds = level::unary};
+        case builtins::spelling_kind::custom:
+            break;
         case builtins::spelling_kind::call:
             break;
         }

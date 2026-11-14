@@ -126,6 +126,19 @@ pipeline doubled:
     cull = .none
     format = .rgba32_float
 
+// Each triangle's edges as one closed line strip, which leaves two of a primitive's five line slots unwritten.
+@geometry(max_vertices = 6)
+fun edges_gs(tri: staged[3], stream: mut line_stream[staged]):
+    for i in 0 ..< 4:
+        stream.emit(tri[i % 3])
+
+pipeline outlined:
+    vertex = white_vs
+    geometry = edges_gs
+    pixel = staged_ps
+    cull = .none
+    format = .rgba32_float
+
 // Each triangle carries its primitive id to the pixel stage, flat.
 struct primitive_tagged:
     @position position: hpos4

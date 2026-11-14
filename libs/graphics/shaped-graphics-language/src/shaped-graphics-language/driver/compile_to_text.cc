@@ -125,7 +125,7 @@ check::float_level kept_float_level(emit::target target)
     {
     case emit::target::hlsl_dx12:
         return check::float_level::ieee;
-    // safe math keeps the specials and the order; whether it keeps denormals is not known
+    // safe math keeps the specials and the order, and flushes denormals, read and written (measured on an M4)
     case emit::target::msl:
         return check::float_level::precise;
     // DXC's -Gis writes SignedZeroInfNanPreserve and NoContraction on every float operation, and -denorm preserve
@@ -201,6 +201,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         if (made.has_error())
             return cc::error(cc::format("{}: error: unsupported: {}\n", source_name, made.error()));
         fused = cc::move(made.value());
+        // reported as a polyfill's layout is, so a host draws the list of the kind the stage writes
+        polyfill_layout = mesh_route_layout.value();
         // what comes back is a mesh entry point, which every target with mesh shaders writes as it is
         mesh = emit::mesh_form::native;
     }
@@ -374,7 +376,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                            .core = core,
                                            .software_trace = software_trace,
                                            .native = native,
-                                           .native_line_table = native_line_table});
+                                           .native_line_table = native_line_table,
+                                           .float_guarantee = float_guarantee});
     if (!emitted.has_text())
     {
         auto text = cc::string();

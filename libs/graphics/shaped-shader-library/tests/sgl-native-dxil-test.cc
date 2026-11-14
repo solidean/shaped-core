@@ -5,6 +5,7 @@
 #include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
+#include <shaped-graphics-language/ir/dxil/dxil.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
 #include <filesystem>
@@ -508,7 +509,9 @@ TEST("slib - SGL's DXIL states each payload field's access, as DXC does for SGL'
     }
 }
 
-TEST("slib - a container SGL writes carries the digest the retail runtime takes unsigned, and its stage's parts")
+// Signed as a validator signs, each container has a digest of its own; the retail bypass digest, which every unsigned
+// container shares, is what AMD's shader cache crashes a ray query on (docs/bugs-external/amd-d3d12-inline-ray-query-crashes-compiler).
+TEST("slib - a container SGL writes carries its own DXBC checksum as its digest, never the shared unsigned one")
 {
     auto const e = written(k_sums, "fast_sum");
     REQUIRE(e.has_value());
@@ -516,8 +519,14 @@ TEST("slib - a container SGL writes carries the digest the retail runtime takes 
     REQUIRE(bytes.size() > 32);
     CHECK(u8(bytes[0]) == 'D');
     CHECK(u8(bytes[3]) == 'C');
-    for (auto i = isize(4); i < 20; ++i)
-        CHECK(u8(bytes[i]) == 1);
+    auto const digest = sgl::ir::dxbc_digest(bytes);
+    auto is_unsigned = true;
+    for (auto i = isize(0); i < 16; ++i)
+    {
+        CHECK(bytes[4 + i] == digest[i]);
+        is_unsigned = is_unsigned && u8(bytes[4 + i]) == 1;
+    }
+    CHECK(!is_unsigned);
 }
 
 TEST("slib - a task stage's payload DXC's own task stage cannot write passes the validator in DXC's shape")

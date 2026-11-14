@@ -1,0 +1,11 @@
+// The `raster` setup's vertex stage: one triangle over the whole target from nothing but the vertex index.
+// Its corners are uv (0, 0), (2, 0) and (0, 2), so the target's square is the triangle's upper-left half.
+use diff_raster
+
+@vertex fun fullscreen(@vertex_index v: int) -> diff_raster.varyings:
+    let uv = float2(((v << 1) & 2) as float, (v & 2) as float)
+    return {
+        position = hpos4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0)
+        uv = uv
+        weight = uv.x * 3.0 - uv.y * 0.5 + 0.25
+    }

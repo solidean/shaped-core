@@ -28,6 +28,9 @@ struct sv::hybrid_frame_desc
     /// One TLAS instance per row of `instance_table`, in its order, which the frame's TLAS is built from.
     cc::span<sg::tlas_instance const> instances;
 
+    /// The TLAS of `instances`, built by a caller drawing several samples of one scene in one frame; null builds one.
+    sg::tlas_handle tlas;
+
     /// One record per row, as the tracer's instance table holds them; `raster_draw::instance` indexes it.
     sg::buffer<shaders::tracer::instance_record> instance_table;
 
@@ -50,6 +53,13 @@ struct sv::hybrid_frame_desc
     /// Where the frame is written, every target at one extent: `color` is this frame's lit image, one sample per pixel.
     /// The rest are its guides, as a raster frame writes them; every texture also needs `image` usage, which a deferred frame writes them through.
     raster_gbuffer targets;
+
+    /// A deferred frame's thin G-buffer, from `hybrid_routine::create_thin_targets` at the frame's extent; empty creates one.
+    /// A caller drawing several samples in one frame passes one, so they share it: each is about 28 bytes a pixel, which a pack would multiply.
+    raster_thin_targets thin;
+
+    /// The raster pass's depth buffer and pyramid, shared by a pack as `thin` is; empty creates them.
+    raster_scratch scratch;
 
     /// Where set, receives this frame's own guides on a frame whose `frame.guide_frame` blends them into `targets`, and nothing otherwise.
     /// A temporal denoiser of this frame's samples reads them, since the blended ones describe other offsets than its samples'.
@@ -77,6 +87,9 @@ public:
     ///
     /// Must be called with no rendering scope open.
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, hybrid_frame_desc const& d);
+
+    /// A deferred frame's thin G-buffer at `extent`, transient, for `hybrid_frame_desc::thin`.
+    [[nodiscard]] static raster_thin_targets create_thin_targets(sg::context& ctx, tg::vec2i extent);
 
 protected:
     /// Creates the stand-ins, which outlive every shader reload.

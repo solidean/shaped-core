@@ -170,6 +170,9 @@ struct sgl::emit::options
     /// A mesh entry point as one half of its polyfill rather than as a mesh stage, and a pixel entry point as the one
     /// that follows the vertex half; every other entry ignores it.
     mesh_form mesh = mesh_form::native;
+    /// The float guarantee the entry point keeps, already weighed against the target (EMIT-185).
+    /// MSL states it as the text's math mode, which the Metal compiler honors over its own options (EMIT-262).
+    check::float_level float_guarantee = check::float_level::fast;
 };
 
 /// Either the text or the reasons there is none.

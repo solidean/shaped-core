@@ -588,9 +588,38 @@ written write_unpack_half(call_context const& c)
     return {};
 }
 
+/// `fwidth` as the coarse `abs(ddx(x)) + abs(ddy(x))`: HLSL's own `fwidth` leaves coarse or fine to the implementation.
+written write_coarse_width(call_context const& c)
+{
+    auto const& x = c.arguments[0].text;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("sgl_fwidth_coarse({})", x)};
+    case language::wgsl:
+        return {.text = cc::format("fwidthCoarse({})", x)};
+    case language::msl:
+        return {.text = cc::format("fwidth({})", x)};
+    }
+    return {};
+}
+cc::string coarse_width_helper(helper_context const& c)
+{
+    if (c.target != language::hlsl)
+        return {};
+    return "template <typename T>\n"
+           "T sgl_fwidth_coarse(T x)\n"
+           "{\n"
+           "    return abs(ddx_coarse(x)) + abs(ddy_coarse(x));\n"
+           "}\n";
+}
+
 // ---- the names each custom spelling writes, which no name of the program may take in that target ---------------
 
 constexpr cc::string_view k_sign[] = {"sign"};
+constexpr cc::string_view k_coarse_width_hlsl[] = {"sgl_fwidth_coarse", "ddx_coarse", "ddy_coarse", "abs"};
+constexpr cc::string_view k_coarse_width_wgsl[] = {"fwidthCoarse"};
+constexpr cc::string_view k_coarse_width_msl[] = {"fwidth"};
 constexpr cc::string_view k_non_finite_hlsl[] = {"asuint"};
 constexpr cc::string_view k_non_finite_wgsl[] = {"bitcast"};
 constexpr cc::string_view k_non_finite_msl[] = {"as_type"};
@@ -768,17 +797,37 @@ void sgl::builtins::register_math(registry& r)
     }
 
     r.add_comment("// derivatives across the 2x2 quad of pixels, which only a pixel stage has;\n"
+                  "// `ddx`, `ddy` and `fwidth` are coarse, one value for the whole quad, on every target (EVAL-144);\n"
                   "// a run of one invocation has no neighbours, and reads 0; WGSL takes the derivative of no half");
     for (auto const t : floats)
     {
         if (t.starts_with("half"))
             continue;
-        add(r, cc::format("@pure @stages(.pixel) fun ddx(x: {0}) -> {0}", t), no_derivative,
-            {.wgsl = "dpdx", .msl = "dfdx"}, nullptr, true);
-        add(r, cc::format("@pure @stages(.pixel) fun ddy(x: {0}) -> {0}", t), no_derivative,
-            {.wgsl = "dpdy", .msl = "dfdy"}, nullptr, true);
-        add(r, cc::format("@pure @stages(.pixel) fun fwidth(x: {0}) -> {0}", t), no_derivative, {}, nullptr, true,
-            "/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.");
+        // MSL has no coarse spelling, and its `dfdx` and `dfdy` are fine on Apple GPUs
+        auto const coarse_x = spelling{.hlsl = "ddx_coarse", .wgsl = "dpdxCoarse", .msl = "dfdx"};
+        auto const coarse_y = spelling{.hlsl = "ddy_coarse", .wgsl = "dpdyCoarse", .msl = "dfdy"};
+        add(r, cc::format("@pure @stages(.pixel) fun ddx(x: {0}) -> {0}", t), no_derivative, coarse_x, nullptr, true,
+            "/// How much `x` changes from the quad's left column to its right, the same in all four pixels.");
+        add(r, cc::format("@pure @stages(.pixel) fun ddy(x: {0}) -> {0}", t), no_derivative, coarse_y, nullptr, true,
+            "/// How much `x` changes from the quad's top row to its bottom, the same in all four pixels.");
+        add(r, cc::format("@pure @stages(.pixel) fun ddx_coarse(x: {0}) -> {0}", t), no_derivative, coarse_x, nullptr,
+            true, "/// `ddx(x)`, spelled out.");
+        add(r, cc::format("@pure @stages(.pixel) fun ddy_coarse(x: {0}) -> {0}", t), no_derivative, coarse_y, nullptr,
+            true, "/// `ddy(x)`, spelled out.");
+        add(r, cc::format("@pure @stages(.pixel) fun ddx_fine(x: {0}) -> {0}", t), no_derivative,
+            {.hlsl = "ddx_fine", .wgsl = "dpdxFine", .msl = "dfdx"}, nullptr, true,
+            "/// How much `x` changes along this pixel's own row of the quad.");
+        add(r, cc::format("@pure @stages(.pixel) fun ddy_fine(x: {0}) -> {0}", t), no_derivative,
+            {.hlsl = "ddy_fine", .wgsl = "dpdyFine", .msl = "dfdy"}, nullptr, true,
+            "/// How much `x` changes down this pixel's own column of the quad.");
+        add(r, cc::format("@pure @stages(.pixel) fun fwidth(x: {0}) -> {0}", t), no_derivative,
+            {.kind = spelling_kind::custom,
+             .custom = write_coarse_width,
+             .helper = coarse_width_helper,
+             .hlsl_names = k_coarse_width_hlsl,
+             .wgsl_names = k_coarse_width_wgsl,
+             .msl_names = k_coarse_width_msl},
+            nullptr, true, "/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.");
     }
 
     r.add_comment("// geometry");

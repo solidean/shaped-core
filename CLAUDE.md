@@ -132,6 +132,8 @@ One-liner per library:
   Fetching it is a choice nothing makes for you: `uv run extern/agility/fetch-agility.py --accept-license`.
   **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
   opengl and webgl are intended tiers with no backend yet.
+  **One `sg::sampler` picks dx12's mip level on every backend**: NVIDIA's vulkan driver samples anisotropic mips up to a quarter level too coarse, and the vulkan backend biases that away.
+  [docs/concepts/anisotropic-lod.md](libs/graphics/shaped-graphics/docs/concepts/anisotropic-lod.md) is why; shaped-rendering's `tools/lod-probe` measures it on any machine.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
   Namespace `sg`.
   Depends on clean-core + typed-geometry.

@@ -75,7 +75,7 @@ test:
     dp.x == 1.0
     dv.x == 1.0
 
-// a struct's tangent is the struct itself for now, so a position in one holds its direction
+// a struct's tangent is `tangent[S]`, so a position in one is its direction there (struct-tangents.sgl)
 struct particle:
     at: pos3
     mass: float
@@ -84,18 +84,23 @@ fun reach(p: particle) => distance(p.at, pos3(0.0)) * p.mass
 
 const somewhere = particle(at = pos3(3.0, 4.0, 0.0), mass = 2.0)
 
-test fwd_diff(reach, somewhere, particle(at = pos3(1.0, 0.0, 0.0), mass = 0.0)) == 1.2
+fun along_x() -> tangent[particle]:
+    let mut t = tangent[particle]()
+    t.at = vec3(1.0, 0.0, 0.0)
+    return t
+
+test fwd_diff(reach, somewhere, along_x()) == 1.2
 test:
-    let mut g = particle(at = pos3(0.0), mass = 0.0)
+    let mut g = tangent[particle]()
     bwd_diff(reach, somewhere, mut g, 1.0)
     g.at.x == 1.2
     g.mass == 5.0
 
 binding particles:
     values: buffer[particle]
-    gradients: mut buffer[particle]
+    gradients: mut buffer[tangent[particle]]
 
 @compute(64) fun particle_backward(@thread_id id: int3){particles}:
-    let mut g = particle(at = pos3(0.0), mass = 0.0)
+    let mut g = tangent[particle]()
     bwd_diff(reach, particles.values[id.x], mut g, 1.0)
     particles.gradients[id.x] = g

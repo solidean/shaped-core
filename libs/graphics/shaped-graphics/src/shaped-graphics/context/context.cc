@@ -521,6 +521,25 @@ cc::shared_async<cc::unit> context::epochs_in_flight_completion(int allowed_in_f
     return on_device_home(*this, epochs_in_flight_steps(allowed_in_flight));
 }
 
+cc::shared_async<cc::unit> context::diagnostics_settled()
+{
+    if (!_debug_windows.has_records_due())
+        return cc::make_async_from_value(cc::unit{});
+    return on_device_home(*this, diagnostics_settled_steps());
+}
+
+cc::shared_async<cc::unit> context::diagnostics_settled_steps()
+{
+    if (_debug_windows.is_recording_written())
+        advance_epoch();
+    // A window is asked for once its epoch retires and decoded once its bytes are back, which an idle context has delivered.
+    while (_debug_windows.has_records_due())
+    {
+        co_await idle_completion_steps();
+        process_completed_epochs();
+    }
+}
+
 cc::shared_async<cc::unit> context::idle_completion_steps()
 {
     // Three things, in drain_at_shutdown's order and for its reasons: the GPU first, since an actor delivers a

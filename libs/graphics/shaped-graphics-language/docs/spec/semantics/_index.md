@@ -29,6 +29,7 @@ A call of a function of the program is inlined into the structured form, so no l
 | [why/emitting.md](why/emitting.md) | the reasons behind the rules of the emitters | |
 | [evaluation.md](evaluation.md) | what a flat tree means: the abstract machine over the structured form, evaluation order, effects, blocks and exits, and which tree a call and a statement of the source are | `EVAL` |
 | [why/evaluation.md](why/evaluation.md) | the reasons behind the rules of the machine | |
+| [differentiation.md](differentiation.md) | `fwd_diff` and `bwd_diff`: the calls, tangent types, what each builtin states, control flow, derivatives written by hand, and buffers and textures | `DIFF` |
 | [legalization.md](legalization.md) | an informative appendix: the core form, the rules that reach it and their cost, and what each core construct is in each target | `LEGAL` |
 | [why/legalization.md](why/legalization.md) | the reasons behind the rules of the legalizer | |
 

@@ -470,7 +470,8 @@ fun shade(k: float) -> float:
 | a struct field | `@bits` and `@absent` in a branch of a `@target_layout` struct (CHK-526), `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@per_draw`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
-| a `for` statement | `@unroll` |
+| a `for` statement | `@unroll`, `@max_iterations` |
+| a `while` statement | `@max_iterations` |
 
 * **CHK-323** `@internal` on a declaration of the prelude makes it the prelude's alone: no lookup from the program's file finds it, and the prelude's files still do.
   That holds for every path a lookup takes: a name, the type scope and declaring scope of a first argument's type (CHK-247), and `T.f(…)` (CHK-248).
@@ -1269,7 +1270,7 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
 * **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
   A note names the branch or the exit that made the flow so, and what the branch tested.
   A branch of the prelude is no line of the program, so the note names the program's call that reached it instead.
-  `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy` and `fwidth` take derivatives.
+  `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy`, their `_coarse` and `_fine` forms and `fwidth` take derivatives.
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
 * **CHK-283** A value is **non-uniform** where it comes from what the stage is handed, from a `mut` buffer or a `mut` image,
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.
@@ -1466,7 +1467,9 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   A geometry stage that appends points, reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers is `unsupported-yet` there.
   Where the target has mesh shaders, the same body can be a mesh entry point instead, a primitive a lane of a workgroup.
   Each lane writes its slots of the mesh output in lane order, so the draw is one mesh draw.
-  A slot a lane leaves unwritten is a triangle of one vertex thrice, which covers nothing; one that appends lines has no such filler, and is `unsupported-yet` by this route.
+  A triangle slot a lane leaves unwritten is one vertex thrice, which covers nothing.
+  A line slot joins the workgroup's filler vertex to itself: one vertex past the lanes', which lane 0 writes outside the clip volume at (2, 2, 2, 1).
+  Every rasterizer drops a line wholly outside a clip plane, where a zero-length line it might not.
 * **CHK-527** Where a device has no tessellator, D3D's own stands in: `prelude/tessellation.sgl` cuts a patch into the domain points and primitives D3D's reference tessellator makes, in its order.
   Every location is 16.16 fixed point, as D3D computes it, so no target's float rounding moves a point.
   The factors are clamped and rounded as D3D does, and a patch with an edge factor that is zero, negative or NaN is culled; a NaN inside factor is the partitioning's least.
@@ -1693,6 +1696,13 @@ hit_group textured for path_rays:
 * **CHK-415** A `for` runs over an int range, or over a walk of one ([EVAL-102](evaluation.md#from-the-source)): `.reversed` and `.by(step)` after the range, in any number and order.
   A step is an int constant of at least 1, a literal or a `const`, and anything else is `invalid-constant-argument`.
   There is no float range: an int range and a conversion keep the number of iterations exact.
+* **CHK-528** `@max_iterations(n)` on a `while` or a `for` ends the loop after n iterations at the latest ([EVAL-147](evaluation.md#from-the-source)).
+  It is a bound every compile keeps, never a promise: a loop that would run on stops there, on every target and in a test alike.
+  So a derivative walking the loop back sees the loop that ran, and keeps it on a tape of n slots ([autodiff](../incubator/autodiff.md)).
+  `n` is an int constant of at least 1, a literal or a `const`, and anything else is `invalid-constant-argument`.
+  Over constant bounds it lowers the end to `first + n` where the range holds more, `@unroll` included.
+  With `@unroll` the bounds must still be constants, as CHK-389 says.
+  On any other statement the attribute is `unsupported-yet`, by CHK-39, a `loop:` among them: `@max_iterations(n) while true:` says the same.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.
   In the flat tree it is the block of CHK-170 around an `if`, so a branch under a non-uniform condition is in non-uniform control flow (CHK-284).

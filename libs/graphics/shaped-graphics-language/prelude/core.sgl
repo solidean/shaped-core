@@ -573,3 +573,44 @@ fun keep_view(view: int) -> float:
     const if has(.pixel_view_read_workaround):
         return if view < 0 => 0.0 else 1.0
     return 1.0
+
+// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): what a sample at level 0 reads,
+// which its derivative reads again and adds its adjoint to: tap `k` of four, `k % 2` across and `k / 2` down.
+// A nearest sample is tap 0 alone; `mode` is a sampler's address, a position in `k_sampler_addresses`.
+@internal fun texel_address(i: int, size: int, mode: int) -> int:
+    if mode == 0 => return ((i % size) + size) % size
+    if mode == 1:
+        let period = 2 * size
+        let m = ((i % period) + period) % period
+        return if m < size => m else period - 1 - m
+    return clamp(i, 0, size - 1)
+
+@internal fun sample_tap_texel(size: int2, coord: float2, k: int, is_linear: bool, mode_u: int, mode_v: int) -> int2:
+    let centre = if is_linear => 0.5 else 0.0
+    let base = int2(floor(coord * float2(size) - centre)) + int2(k % 2, k / 2)
+    return int2(texel_address(base.x, size.x, mode_u), texel_address(base.y, size.y, mode_v))
+
+@internal fun sample_tap_weight(size: int2, coord: float2, k: int, is_linear: bool) -> float:
+    if not is_linear => return if k == 0 => 1.0 else 0.0
+    let p = coord * float2(size) - 0.5
+    let f = p - floor(p)
+    let wx = if k % 2 == 0 => 1.0 - f.x else f.x
+    let wy = if k / 2 == 0 => 1.0 - f.y else f.y
+    return wx * wy
+
+// how tap `k`'s weight changes with the coordinate; a nearest sample's never does between texels
+@internal fun sample_tap_slope(size: int2, coord: float2, k: int, is_linear: bool) -> float2:
+    if not is_linear => return float2(0.0)
+    let p = coord * float2(size) - 0.5
+    let f = p - floor(p)
+    let wx = if k % 2 == 0 => 1.0 - f.x else f.x
+    let wy = if k / 2 == 0 => 1.0 - f.y else f.y
+    let sx = if k % 2 == 0 => -1.0 else 1.0
+    let sy = if k / 2 == 0 => -1.0 else 1.0
+    return float2(sx * wy * float(size.x), sy * wx * float(size.y))
+
+// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/semantics/differentiation.md): column `j` of a mat4's
+// cofactors, from its other three columns in order and the sign of `j`, which a determinant's change is the inner
+// product of with the matrix's
+@internal fun cofactor_column4(a: float4, b: float4, c: float4, sign: float) -> float4:
+    return sign * float4(dot(a.yzw, cross(b.yzw, c.yzw)), -dot(a.xzw, cross(b.xzw, c.xzw)), dot(a.xyw, cross(b.xyw, c.xyw)), -dot(a.xyz, cross(b.xyz, c.xyz)))

@@ -1243,10 +1243,10 @@ ASYNC_INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and 
 
     // A mesh nobody has placed is not ready, and says so rather than pretending it has nothing to wait for.
     CHECK(!mesh.is_ready());
-    CHECK(mesh.cache.manager == nullptr);
+    CHECK(mesh.cache.manager == sv::impl::cache_owner::none);
 
     auto const& first = m.create_mesh(mesh);
-    CHECK(mesh.cache.manager != nullptr);
+    CHECK(mesh.cache.manager != sv::impl::cache_owner::none);
     CHECK(first.geometry != sv::mesh_id::invalid);
 
     // Its payloads are streaming, so it is placed but not yet ready — which is what makes it draw as a placeholder.
@@ -1275,6 +1275,49 @@ ASYNC_INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and 
     CHECK(copy.is_ready());
     CHECK(m.create_mesh(copy).geometry == first.geometry);
 
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sv::mesh - a manager at a dead manager's address does not believe the mesh's cache",
+                     (sg::context_handle const& ctx_h))
+{
+    // Every viewer builds its own manager, so a mesh an application holds across viewers meets one manager after another,
+    // routinely allocated where the last one was.
+    // A cache keyed on the address then named the first manager's ids in the second, where they resolve to other
+    // geometry, and drawing that hung the GPU: bug-sv-oidn-later-capture-hang.
+    auto& ctx = *ctx_h;
+
+    auto const triangle = [](float x)
+    {
+        auto const positions = cc::vector<tg::pos3f>{tg::pos3f(x, 0, 0), tg::pos3f(x + 1, 0, 0), tg::pos3f(x, 1, 0)};
+        return sv::mesh{.geometry = sv::triangle_geometry::create_from_positions(positions)};
+    };
+    auto held = triangle(0);
+    auto const other = triangle(5);
+
+    auto slot = cc::optional<sv::gpu_resource_manager>();
+    slot.emplace_value(sv::gpu_resource_manager::create(ctx));
+    auto const* const first_address = &slot.value();
+    slot.value().advance_to(ctx.current_epoch());
+    auto const held_first = slot.value().create_mesh(held).geometry;
+    slot.value().wait_for_pending_uploads();
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+
+    // replaces the manager in place, so the new one is where the old one was
+    slot.emplace_value(sv::gpu_resource_manager::create(ctx));
+    CHECK(&slot.value() == first_address); // the case under test: same storage, a different manager
+    auto& m = slot.value();
+    m.advance_to(ctx.current_epoch());
+
+    // The other mesh is placed first, so it takes the id the held mesh's cache still names.
+    auto const other_id = m.create_mesh(other).geometry;
+    CHECK(other_id == held_first);
+    auto const held_id = m.create_mesh(held).geometry;
+    CHECK(held_id != other_id);
+
+    m.wait_for_pending_uploads();
     ctx.advance_epoch();
     co_await ctx.idle_completion();
 }

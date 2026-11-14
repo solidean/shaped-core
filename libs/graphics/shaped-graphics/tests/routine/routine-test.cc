@@ -940,5 +940,6 @@ ASYNC_INVOCABLE_TEST("sg - a routine cancelled at its own generation is not rest
     CHECK(cancelled_routine::try_acquire(*ctx).is_failed());
     CHECK(cancelled_routine::runs.load() == 1);
 
+    (void)co_await ctx->routines.idle_completion();
     cancelled_routine::evict(*ctx);
 }

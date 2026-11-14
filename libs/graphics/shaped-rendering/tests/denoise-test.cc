@@ -1253,10 +1253,12 @@ ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call 
     // A reload runs the init again on the same routine, and it must not open NGX a second time.
     // An open no close balances keeps NGX open for the device until exit, where its library releases the device
     // after the driver's threads are gone, and the process never exits.
-    REQUIRE(sr::impl::dlss_open_count(ctx) == 1);
+    // The count is the device's, and every context on this adapter shares one D3D12 device, so it is compared, not fixed.
+    auto const opens = sr::impl::dlss_open_count(ctx);
+    REQUIRE(opens >= 1);
     sg::signal_reload();
     co_await prewarm(ctx);
-    CHECK(sr::impl::dlss_open_count(ctx) == 1);
+    CHECK(sr::impl::dlss_open_count(ctx) == opens);
 
     // Every guide it requires, all at the input extent.
     // The values are a plausible surface rather than a rendered one: what is under test is that NGX accepts the set

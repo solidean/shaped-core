@@ -314,6 +314,7 @@ registry sgl::builtins::make_registry()
     auto result = registry();
     register_builtins(result);
     result.finalize();
+    state_derivatives(result);
     return result;
 }
 

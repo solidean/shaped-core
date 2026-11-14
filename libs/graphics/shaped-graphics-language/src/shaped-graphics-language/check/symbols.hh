@@ -60,6 +60,8 @@ enum class sgl::check::type_kind : sgl::u8
     constant,
     /// `scalar_of[V]` of an open `V`, which is its `element`: an instance makes it `V`'s scalar (CHK-423).
     scalar_of,
+    /// `tangent[T]` of an open `T`, which is its `element`: an instance makes it `T`'s tangent (DIFF-7).
+    tangent_of,
     // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
@@ -331,6 +333,9 @@ struct sgl::check::type_info
     /// A template's parameters in order, and what each stands for in an instance of it; a range of
     /// `checked_module::type_lists` (CHK-339).
     ast::range_of<type_id> arguments;
+    /// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): the struct whose tangent
+    /// type this one is, `tangent[S]`, which holds a tangent per differentiable field of `S`; `none` for every other type.
+    type_id tangent_of = type_id::none;
 
     bool operator==(type_info const&) const = default;
 };
@@ -435,6 +440,8 @@ struct sgl::check::member_info
     padding_kind padding = padding_kind::natural;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
+    /// PROTOTYPE (autodiff): `@no_diff` on a texture, whose texels a derivative holds constant.
+    bool is_no_diff = false;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
     /// one reads (CHK-279); -1 without one.
     i32 default_sampler = -1;
@@ -446,6 +453,12 @@ struct sgl::check::member_info
     i32 layout_bits = 0;
     /// `@absent` in such a branch: the target's record has no such field, and a construction drops it (CHK-526).
     bool is_absent = false;
+    /// PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): `@gradient(binding.member)` on a buffer, as written: the buffer of atomics a
+    /// backward derivative adds a read's adjoint to, at the read's index; empty without one.
+    cc::string gradient;
+    /// PROTOTYPE: `@tangent(binding.member)` on a buffer, as written: the buffer a forward derivative reads a read's
+    /// change from, at the read's index; empty without one, where a read changes by nothing going forward.
+    cc::string tangent;
 
     bool operator==(member_info const&) const = default;
 };
@@ -846,6 +859,8 @@ enum class sgl::check::target_kind : sgl::u8
     /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
     /// (CHK-341).
     undefined_value,
+    /// On a call: `tangent[T]()`, the zero of `T`'s tangent type, which every field is assigned from (PROTOTYPE, autodiff).
+    zero_value,
     /// On a cast: `x as texel[F]` to a texel of another width than `x`'s (CHK-391).
     texel_conversion,
     /// A value parameter's name in an instance: `index` is the constant it stands for, in `checked_module::types`

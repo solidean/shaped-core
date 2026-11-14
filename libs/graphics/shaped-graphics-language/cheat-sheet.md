@@ -483,6 +483,8 @@ sgl::check::driver_bindings{.groups = {{.name = "frame", .members = {{.name = "e
                                            // filtering is exact f32 (EVAL-122): compare between texel centres to ~8 bits
 {.lane_count = 32}                         // run_inputs: the run is 32 lanes of one subgroup, run one after another;
                                            // subgroup ops and derivatives exchange between them (EVAL-140 to EVAL-145)
+{.lane_parameters = {p0, p1, p2, p3}}      // run_inputs: each lane's own stage struct, a quad's four pixels; o.lane_results
+                                           // holds every lane's result, lane order (EVAL-148)
 sgl::check::resolve_inputs(m, e, bound)    // -> cc::result<run_inputs>; left out: zero, empty, root 0 (the empty TLAS)
 sgl::check::write_back(m, o, bound)        // what the run stored, into each .mutable_bytes and image .mutable_texels
 
@@ -622,6 +624,8 @@ for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no tex
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
                                          // ...and so does an inner one whose bound reads its index, under the same warning
                                          // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
+@max_iterations(64)                      // on a `while` or a `for`: ends it after 64 iterations at the latest, in every compile
+while t < far: ...                       //   (CHK-528); a bound kept, not a promise, so bwd_diff walks it back over a tape
 
 @float(.specials) fun clean(v: float) -> float:   // the least float guarantee a body needs (CHK-435): .fast (default),
     return if v != v => 0.0 else v       //   .specials, .precise, .ieee; an entry point keeps the strictest it reaches
@@ -781,6 +785,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   `is_nan` and `is_inf` are a bit test on every target, since Vulkan, WGSL and MSL may each assume neither arises.
   They take a half too, tested as the float it widens to.
   Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
+  **`ddx`, `ddy` and `fwidth` are coarse**, one value per quad, on every target but metal; `ddx_fine`/`ddy_fine` are the per-pixel difference (EVAL-144).
   `fma(a, b, c)` of halves, floats and doubles rounds once on the interpreter, and a GPU may round the product first except a double's on DXIL (EVAL-146, EMIT-254).
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.

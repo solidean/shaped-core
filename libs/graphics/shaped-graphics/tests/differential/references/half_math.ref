@@ -1,0 +1,4 @@
+# The differential reference of half_math.sgl: what one machine computed, which every other is held to.
+# Rewritten by `SC_DIFFERENTIAL_REFRESH=1 uv run dev.py test "sg differential - every corpus entry point computes what its committed reference says"`; review the diff like code.
+# halves written on dx12 (Intel(R) Arc(TM) B580 Graphics) dxc
+halves output bytes 4096 fnv1a 0xbd792ac8a9942ebc

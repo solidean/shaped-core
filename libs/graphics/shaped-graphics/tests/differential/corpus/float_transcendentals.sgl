@@ -1,0 +1,14 @@
+// differential: setup floats
+// differential: routes relative 0.0001
+// differential: across relative 0.001
+// Transcendentals, which no API defines to the last bit: held to a relative bound, a tighter one between routes of one driver.
+use diff_floats
+
+@compute(64) fun transcendentals(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let a = diff_floats.io.input[i]
+    let small = a / 64.0
+    diff_floats.io.output[4 * i] = sin(a) + cos(a) * 0.5
+    diff_floats.io.output[4 * i + 1] = exp(small) + exp2(small * 2.0)
+    diff_floats.io.output[4 * i + 2] = log(abs(a)) + log2(abs(a) + 1.0)
+    diff_floats.io.output[4 * i + 3] = atan2(a, small + 0.5) + tanh(small)

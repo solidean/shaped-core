@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-rendering/slug_atlas.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/cache_owner.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 
@@ -128,4 +129,5 @@ private:
     bool _warned_full = false;
     bool _warned_over = false;
     bool _warned_decals_full = false;
+    impl::cache_owner _owner = impl::next_cache_owner();
 };

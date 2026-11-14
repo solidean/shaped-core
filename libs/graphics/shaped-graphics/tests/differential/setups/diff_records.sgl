@@ -1,0 +1,25 @@
+// The `records` setup's contract, which setups.cc fills: 256 records of mixed members, read, rearranged and written back.
+// `records` holds what the host wrote through the struct SGL generates for `record`; `results` is as many records, all zero.
+// `echo` is 20 words a record, all zero: a corpus file writes there each member of the record it read, a word each, in declaration order.
+// A float is its bits, a bool32 0 or 1, and an int its two's complement; the words past the 19th stay zero.
+// The setup holds `echo` to what it wrote, so a member the GPU reads from elsewhere than the host put it is an error naming it, on every route.
+module diff_records
+
+struct surface:
+    albedo: float3
+    roughness: float
+    layers: uint2
+
+struct record:
+    id: uint
+    position: float3
+    scale: float2
+    surface: surface
+    weights: float[3]
+    visible: bool32
+    offset: int3
+
+binding io:
+    records: buffer[record]
+    results: mut buffer[record]
+    echo: mut buffer[uint]

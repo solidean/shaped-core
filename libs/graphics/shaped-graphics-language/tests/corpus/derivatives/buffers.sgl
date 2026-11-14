@@ -1,7 +1,8 @@
 // PROTOTYPE (docs/spec/incubator/autodiff.md): what a derivative does with what a shader reads from a binding.
 // A constant block's member is a constant: a camera, a setting, what every invocation is handed alike.
 // A buffer's element is refused: its gradient would have to be written back, and a derivative never drops one silently.
-// `no_diff(x)` reads it as a constant, and a @backward on the function that reads it writes its gradient back.
+// `no_diff(x)` reads it as a constant, and a buffer's @gradient and @tangent say where a read's change comes from and
+// its gradient goes; a @backward on the function that reads it can say so too.
 
 // `no_diff` holds a value constant: d/dx of x * (3 x), with the second factor held, is 3 x
 fun half_held(x: float) => x * no_diff(x * 3.0)
@@ -67,3 +68,54 @@ fun loss(i: int){scene} -> float:
 
 @compute(64) fun loss_forward(@thread_id id: int3){scene, training}:
     training.losses[id.x] = fwd_diff(loss, id.x)
+
+// A differentiable buffer, by its attributes: going forward a read changes by its @tangent's element, and going
+// backward its adjoint is added to its @gradient's element, at the read's index.
+binding fitted:
+    @gradient(training.gradients) @tangent(training.tangents) weights: buffer[float]
+    targets: buffer[float]
+
+fun fitted_loss(i: int){fitted} -> float:
+    let d = fitted.weights[i] * fitted.weights[i] - no_diff(fitted.targets[i])
+    return d * d
+
+@compute(64) fun fitted_backward(@thread_id id: int3){fitted, training}:
+    bwd_diff(fitted_loss, id.x, 1.0)
+
+@compute(64) fun fitted_forward(@thread_id id: int3){fitted, training}:
+    training.losses[id.x] = fwd_diff(fitted_loss, id.x)
+
+// a gradient goes into atomics of floats, which many invocations add to at once
+binding misfitted:
+    @gradient(training.losses) weights: buffer[float]
+
+fun misfitted_read(i: int){misfitted} => misfitted.weights[i] * 2.0
+
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_a_gradient_of_no_atomics(@thread_id id: int3){misfitted, training}:
+    bwd_diff(misfitted_read, id.x, 1.0)
+
+// a buffer that only says where its change comes from has nowhere to put its gradient
+binding forward_only:
+    @tangent(training.tangents) weights: buffer[float]
+
+fun forward_only_read(i: int){forward_only} => forward_only.weights[i] * 2.0
+
+@compute(64) fun forward_only_forward(@thread_id id: int3){forward_only, training}:
+    training.losses[id.x] = fwd_diff(forward_only_read, id.x)
+
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_a_gradient_with_no_place(@thread_id id: int3){forward_only, training}:
+    bwd_diff(forward_only_read, id.x, 1.0)
+
+// the derivative adds to a binding the function never named, so the entry point lists it
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_an_unlisted_gradient(@thread_id id: int3){fitted}:
+    bwd_diff(fitted_loss, id.x, 1.0)
+
+// an entry point that declares `subgroups` shares a gradient's atomic through the subgroup where every invocation that
+// reaches it adds to one element, in divergent control flow too, since the sum is over the invocations that reach it
+@compute(64) fun fitted_backward_shared(@thread_id id: int3){fitted, training}:
+    require subgroups
+    if id.x % 3 != 0:
+        bwd_diff(fitted_loss, id.x / 64, 1.0)

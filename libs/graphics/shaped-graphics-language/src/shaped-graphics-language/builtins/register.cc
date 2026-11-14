@@ -1,9 +1,51 @@
 #include "register.hh"
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 
 using namespace sgl;
 using namespace sgl::builtins;
+
+namespace
+{
+constexpr cc::string_view k_signed_remainder_hlsl[] = {"sgl_srem"};
+
+/// EVAL-83's `%` on HLSL for vulkan, which DXC writes as `OpSRem`: Vulkan leaves that undefined where an operand is
+/// negative, and defines `OpSDiv`.
+/// The helper's type is named, since DXC deduces a `const int` local and a literal as two types; a scalar beside a
+/// vector converts to it.
+written write_signed_remainder(call_context const& c)
+{
+    return {.text
+            = cc::format("sgl_srem<{0}>({0}({1}), {0}({2}))", c.result_type, c.arguments[0].text, c.arguments[1].text)};
+}
+
+cc::string signed_remainder_helper(helper_context const& c)
+{
+    if (c.target != language::hlsl || !c.is_vulkan)
+        return {};
+    return "template <typename T>\n"
+           "T sgl_srem(T a, T b)\n"
+           "{\n"
+           "    return a - (a / b) * b;\n"
+           "}\n";
+}
+
+/// Whether the record is `%` of a signed integer type, scalar or vector.
+bool is_signed_remainder(function_record const& f)
+{
+    auto const signature = cc::string_view(f.signature);
+    if (!signature.contains("@operator(\"%\")"))
+        return false;
+    auto const arrow = signature.find("-> ");
+    if (arrow < 0)
+        return false;
+    auto element = signature.subview(arrow + 3);
+    while (!element.empty() && element.back() >= '0' && element.back() <= '9')
+        element.remove_suffix(1);
+    return element == "int" || element == "short" || element == "long";
+}
+} // namespace
 
 void sgl::builtins::register_builtins(registry& r)
 {
@@ -22,6 +64,15 @@ void sgl::builtins::register_builtins(registry& r)
     register_subgroups(r);
     register_raytracing(r);
     register_target(r);
+
+    for (auto& f : r.functions)
+        if (is_signed_remainder(f))
+        {
+            CC_ASSERT(f.write.helper == nullptr && f.write.hlsl_names.empty(), "a signed `%` has a helper of its own");
+            f.write.hlsl_vulkan = write_signed_remainder;
+            f.write.helper = signed_remainder_helper;
+            f.write.hlsl_names = k_signed_remainder_hlsl;
+        }
 }
 
 void impl::add_infix(registry& r,

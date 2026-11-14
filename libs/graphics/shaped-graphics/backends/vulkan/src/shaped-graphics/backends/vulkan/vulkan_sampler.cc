@@ -57,6 +57,25 @@ VkCompareOp to_vk_compare_op(sg::compare_op op)
     CC_UNREACHABLE("unhandled compare_op");
 }
 
+float anisotropic_lod_correction(sg::adapter_info const& adapter, float max_anisotropy)
+{
+    constexpr u32 nvidia = 0x10de;
+    if (adapter.vendor_id != nvidia || max_anisotropy < 2.0f)
+        return 0.0f;
+    // -(1 - 1/s) / 2 for the blend slope s of each anisotropy band.
+    if (max_anisotropy < 4.0f)
+        return -1.0f / 6.0f; // s = 1.5
+    if (max_anisotropy < 8.0f)
+        return -3.0f / 14.0f; // s = 1.75
+    return -0.25f;            // s = 2
+}
+
+float vulkan_context::anisotropic_lod_correction(float max_anisotropy) const
+{
+    return _correct_anisotropic_lod ? sg::backend::vulkan::anisotropic_lod_correction(metrics.adapter(), max_anisotropy)
+                                    : 0.0f;
+}
+
 VkSamplerCreateInfo to_vk_sampler_info(vulkan_context const& ctx, sg::sampler const& s)
 {
     // max_anisotropy == 1 means anisotropy off, which Vulkan spells as a disable flag rather than a ratio of one.
@@ -73,7 +92,7 @@ VkSamplerCreateInfo to_vk_sampler_info(vulkan_context const& ctx, sg::sampler co
         .addressModeU = to_vk_address_mode(s.address_u),
         .addressModeV = to_vk_address_mode(s.address_v),
         .addressModeW = to_vk_address_mode(s.address_w),
-        .mipLodBias = s.mip_lod_bias,
+        .mipLodBias = s.mip_lod_bias + (anisotropic ? ctx.anisotropic_lod_correction(max_anisotropy) : 0.0f),
         .anisotropyEnable = anisotropic ? VK_TRUE : VK_FALSE,
         .maxAnisotropy = anisotropic ? max_anisotropy : 1.0f,
         .compareEnable = s.compare.has_value() ? VK_TRUE : VK_FALSE,

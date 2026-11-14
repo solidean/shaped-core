@@ -1,0 +1,168 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): loops whose bound is stated rather than constant (CHK-528).
+// `@max_iterations(n)` makes any `while` or `for` a loop of n iterations whose body starts by leaving once the loop is
+// done, so going backward it is walked back over a tape of n slots, as a loop of constant bounds is.
+
+// a march whose step count follows the input: 6 steps here, the count changing only at x.x = 0 and x.x = 1
+fun marched(x: float2) -> float:
+    let mut t = 0.0
+    let mut acc = 0.0
+    @max_iterations(16)
+    while t < 3.0:
+        t += 0.5 + 0.1 * x.x
+        acc = acc * 0.9 + sin(t * x.y)
+    return acc + t
+
+// a loop whose end only a `let` knows, so it is no constant
+fun powered(x: float2, n: int) -> float:
+    let end = n
+    let mut y = x.x
+    @max_iterations(8)
+    for i in 1 ..< end:
+        y = y * x.y + 0.1 * sin(y * float(i))
+    return y
+
+fun powered_of(x: float2) => powered(x, 5)
+
+// a `break` out of a bounded loop leaves its later iterations as nothing, going backward too
+fun searched(x: float2) -> float:
+    let mut y = x.x
+    let mut k = 0
+    @max_iterations(20)
+    while true:
+        y = y * 0.8 + x.y * 0.3
+        k += 1
+        if k == 7 => break
+    return y * y
+
+fun marched_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (marched(x + axis * h) - marched(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(marched, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(marched, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test marched_agrees(float2(0.7, 0.4), float2(1.0, 0.0))
+test marched_agrees(float2(0.7, 0.4), float2(0.0, 1.0))
+
+fun powered_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (powered_of(x + axis * h) - powered_of(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(powered_of, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(powered_of, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test powered_agrees(float2(0.6, 0.9), float2(1.0, 0.0))
+test powered_agrees(float2(0.6, 0.9), float2(0.0, 1.0))
+
+fun searched_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (searched(x + axis * h) - searched(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(searched, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(searched, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test searched_agrees(float2(0.5, -0.4), float2(1.0, 0.0))
+test searched_agrees(float2(0.5, -0.4), float2(0.0, 1.0))
+
+binding results:
+    values: mut buffer[float]
+
+// a kernel holds the bounded loop and its tape on every target
+@compute(64) fun marched_backward(@thread_id id: int3){results}:
+    let mut gradient = float2(0.0)
+    bwd_diff(marched, float2(float(id.x) * 0.01, 0.4), mut gradient, 1.0)
+    results.values[id.x] = gradient.x + gradient.y
+
+// DIFF-21: a loop whose tapes would pass what a tape holds is walked back in segments of about the square root of
+// its iterations: going forward it saves its state at each segment's start, and going backward each segment, last
+// first, starts from its save, runs again to write its tapes, and is walked back
+fun long_sum(x: float2) -> float:
+    let mut acc = 0.0
+    for i in 0 ..< 2000:
+        acc = acc * 0.999 + sin(float(i) * 0.01 * x.y) * x.x * 0.01
+        if acc > 50.0 => break
+    return acc
+
+// a nest is segmented by its outer loop, each segment's tapes holding the inner loop's iterations too
+fun long_nest(x: float2) -> float:
+    let mut acc = x.x
+    for i in 0 ..< 300:
+        for j in 0 ..< 4:
+            acc = acc * 0.99 + x.y * 0.01 * float(j + 1)
+    return acc * acc
+
+fun long_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (long_sum(x + axis * h) - long_sum(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(long_sum, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(long_sum, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test long_agrees(float2(0.7, 0.4), float2(1.0, 0.0))
+test long_agrees(float2(0.7, 0.4), float2(0.0, 1.0))
+
+fun nest_agrees(x: float2, axis: float2) -> bool:
+    let h = 1e-3
+    let numeric = (long_nest(x + axis * h) - long_nest(x - axis * h)) / (2.0 * h)
+    let mut gradient = float2(0.0)
+    bwd_diff(long_nest, x, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(long_nest, x, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test nest_agrees(float2(0.6, 0.9), float2(1.0, 0.0))
+test nest_agrees(float2(0.6, 0.9), float2(0.0, 1.0))
+
+@compute(64) fun long_backward(@thread_id id: int3){results}:
+    let mut gradient = float2(0.0)
+    bwd_diff(long_sum, float2(float(id.x) * 0.01, 0.4), mut gradient, 1.0)
+    results.values[id.x] = gradient.x + gradient.y
+
+// a segment runs again, so a loop too long to keep whole whose body has an effect would repeat it
+fun logged(x: float){results} -> float:
+    let mut t = x
+    for i in 0 ..< 2000:
+        t = t * 0.999 + 0.001
+        results.values[i] = t
+    return t
+
+@expect(error = "unsupported-yet")
+@compute(1) fun refuses_an_effect_run_again(){results}:
+    let mut dx = 0.0
+    bwd_diff(logged, results.values[0], mut dx, 1.0)
+    results.values[1] = dx
+
+// one iteration that keeps more than a tape holds has no segment to walk back
+fun wide(x: float) -> float:
+    let mut m = mat4(float4(x), float4(x), float4(x), float4(x))
+    for i in 0 ..< 4:
+        for j in 0 ..< 100:
+            m = m * 0.5
+    return determinant(m)
+
+@expect(error = "unsupported-yet")
+@compute(1) fun refuses_a_wide_iteration(){results}:
+    let mut dx = 0.0
+    bwd_diff(wide, results.values[0], mut dx, 1.0)
+    results.values[1] = dx
+
+// without a bound a `while` still has no tape, and only a @backward walks it back
+fun unbounded(x: float) -> float:
+    let mut t = 0.0
+    while t < 3.0:
+        t += 0.5 + x * x
+    return t
+
+@expect(error = "unsupported-yet")
+@compute(1) fun refuses_an_unbounded_while(){results}:
+    let mut dx = 0.0
+    bwd_diff(unbounded, results.values[0], mut dx, 1.0)
+    results.values[1] = dx

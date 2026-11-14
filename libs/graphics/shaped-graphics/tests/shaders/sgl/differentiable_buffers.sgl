@@ -1,0 +1,98 @@
+// A buffer differentiable by its @gradient and @tangent, as the GPU runs it: every invocation's `bwd_diff` adds into one
+// gradient buffer through its float atomic, and `fwd_diff` reads each weight's change from the tangent buffer.
+
+binding params:
+    @gradient(training.gradients) @tangent(training.tangents) weights: buffer[float]
+
+binding training:
+    gradients: mut buffer[atomic[float]]
+    tangents: buffer[float]
+    forward: mut buffer[float]
+
+// (w_k x - 1)^2 for one weight k
+fun loss(k: int, x: float){params} -> float:
+    let d = params.weights[k] * x - 1.0
+    return d * d
+
+@compute(64) fun loss_backward(@thread_id id: int3){params, training}:
+    let mut dx = 0.0
+    bwd_diff(loss, id.x % 4, 0.5, mut dx, 1.0)
+
+@compute(64) fun loss_forward(@thread_id id: int3){params, training}:
+    training.forward[id.x] = fwd_diff(loss, id.x % 4, 0.5, 0.0)
+
+// a buffer of structs: an atomic per float of the element's tangent, a position's three and the weight's one
+struct mark:
+    at: pos3
+    weight: float
+
+binding marked:
+    @gradient(mark_training.gradients) marks: buffer[mark]
+
+binding mark_training:
+    gradients: mut buffer[atomic[float]]
+
+fun mark_loss(k: int){marked} -> float:
+    let m = marked.marks[k]
+    let d = m.at - pos3(1.0, 0.0, 0.0)
+    return m.weight * dot(d, d)
+
+@compute(64) fun marks_backward(@thread_id id: int3){marked, mark_training}:
+    bwd_diff(mark_loss, id.x % 2, 1.0)
+
+// the same gradient, shared through the subgroup first: an entry point that declares `subgroups` sums a subgroup's
+// adjoints where every invocation that reaches the add adds to one element, and only its first adds them
+@compute(64) fun marks_backward_reduced(@thread_id id: int3){marked, mark_training}:
+    require subgroups
+    // a third of the invocations never reach the add, so the sum is over those that do
+    if id.x % 3 != 0:
+        bwd_diff(mark_loss, (id.x / 64) % 2, 1.0)
+
+// a texture with a @gradient: a linear sample's adjoint goes to the two texels it weighs, at their weights, and its
+// coordinate's to the slope between them
+binding painted:
+    @gradient(painting.gradients) canvas: texture_2d[float]
+    sampler linear:
+        filter = .linear
+        address = .clamp_edge
+
+binding painting:
+    gradients: mut buffer[atomic[float]]
+    slopes: mut buffer[float]
+
+fun brightness(u: float){painted} -> float => 2.0 * painted.canvas.sample(float2(u, 0.5), painted.linear, level = 0.0)
+
+@compute(64) fun canvas_backward(@thread_id id: int3){painted, painting}:
+    let mut du = 0.0
+    bwd_diff(brightness, 0.5, mut du, 1.0)
+    painting.slopes[id.x] = du
+
+// a subgroup's sum differentiated: every invocation's result took 2 x of its argument, so its adjoint is 2 x times
+// the invocations that reached the sum, whatever size the device's subgroup is
+binding lanes:
+    ratios: mut buffer[float]
+
+fun energy(x: float) -> float => subgroup_add(x * x)
+
+@compute(64) fun energy_backward(@thread_id id: int3){lanes}:
+    require subgroups
+    let x = 0.5 + float(id.x % 7)
+    let mut g = 0.0
+    bwd_diff(energy, x, mut g, 1.0)
+    lanes.ratios[id.x] = g / (2.0 * x * subgroup_add(1.0))
+
+// a loop too long to keep whole is walked back in segments: each thread's backward derivative meets its forward one
+binding longs:
+    differences: mut buffer[float]
+
+fun long_sum(x: float2) -> float:
+    let mut acc = 0.0
+    for i in 0 ..< 2000:
+        acc = acc * 0.999 + sin(float(i) * 0.01 * x.y) * x.x * 0.01
+    return acc
+
+@compute(64) fun long_backward(@thread_id id: int3){longs}:
+    let x = float2(0.5 + float(id.x % 8) * 0.05, 0.4)
+    let mut g = float2(0.0)
+    bwd_diff(long_sum, x, mut g, 1.0)
+    longs.differences[id.x] = g.y - fwd_diff(long_sum, x, float2(0.0, 1.0))

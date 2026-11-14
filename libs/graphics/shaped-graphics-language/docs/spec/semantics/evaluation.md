@@ -213,6 +213,11 @@ fun graded(a: float) -> float:
   With `last` a constant below the largest `int` it is that `..<` range, `@unroll` included (CHK-389).
 * **EVAL-102** A range followed by `.reversed` or `.by(step)` is a walk: its values are the range's in reverse, or every `step`-th from the first, and the two compose in the order written.
   So `(0 ..< 8).reversed` is 7 down to 0, `(0 ..< 8).by(3)` is 0, 3 and 6, and `(0 ..< 8).by(3).reversed` is 6, 3 and 0.
+* **EVAL-147** A loop with `@max_iterations(n)` (CHK-528) is `for $l k in 0 ..< n` whose body starts by leaving `$l` once the loop is done.
+  For a `while` that is `if not c { leave $l }`, so its condition is evaluated before every iteration and never an n+1-th time.
+  For a `for` over bounds that are no constants, both are evaluated once into locals, and the variable is `first + k`.
+  Its body leaves once `first + k` reaches `end`, or for `..=` once the last value was `last`, so no value past it is computed.
+  A `continue` reaches the next `k`, and with it the test.
   It is a `for` of a fresh `k` over `0 ..< count`, whose variable is `start + k * step`; the bounds are evaluated once, `first` before `last`.
 * **EVAL-57** A `loop:` that is a value is `block $loop_value { loop $loop { … } }`, and its `break value` is `leave $loop_value value`.
 * **EVAL-58** `a < b <= c` is `a < b and b <= c` with `b` evaluated once: each inner operand is bound to a local where it first stands, and read from it after that.
@@ -339,11 +344,15 @@ A subgroup operation and a derivative exchange values between invocations, so a 
   A reduction combines the lanes in lane order, each step rounded as an operation of its type is, and a scan the lanes below this one, from its operation's identity.
   A broadcast, a shuffle and a quad operation give the value of the lane they name, and zero where it names no lane of the subgroup (CHK-376).
   A lane that reaches a call another does not is a `program-error`, which only a call no uniformity is judged of can do, such as one in a check's condition.
-* **EVAL-144** `ddx(v)` is `v` at the quad's `(1, 0)` minus `v` at its `(0, 0)`, and `ddy(v)` at `(0, 1)` minus `(0, 0)`, in every lane of the quad: the coarse derivative, which every target may give.
+* **EVAL-144** `ddx(v)` is `v` at the quad's `(1, 0)` minus `v` at its `(0, 0)`, and `ddy(v)` at `(0, 1)` minus `(0, 0)`, in every lane of the quad: the coarse derivative, on every target.
+  A port from HLSL or GLSL may assume fine derivatives, which these are not: `ddx_coarse` and `ddy_coarse` spell the same, and `ddx_fine` and `ddy_fine` are the per-pixel difference.
+  `ddx_fine(v)` is the difference along the lane's own row of the quad, and `ddy_fine(v)` down its own column.
   `fwidth(v)` is `abs(ddx(v)) + abs(ddy(v))`, and a sample that takes its level from derivatives takes `ddx` and `ddy` of its coordinate as its gradients (EVAL-124).
   A run of fewer than four lanes has no quad, and its derivatives are 0.
 * **EVAL-145** A run ends as its first lane that does not end normally, in lane order, and normally where every lane does.
   A `discard` ends its own lane, so the run is `discarded` (EVAL-89); a lane after it runs to its end, and reads zero where it exchanges a value with the discarded one.
+* **EVAL-148** A driver may give each lane a stage struct of its own, as a pixel quad's four pixels each have their position and varyings, and a lane it gives none takes the run's.
+  Each lane's result is kept, in lane order, so a driver running a quad reads all four pixels from one run and their derivatives are those of the quad.
 ## Open
 
 * Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.

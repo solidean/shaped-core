@@ -413,6 +413,15 @@ public:
     /// Awaited under `process_completed_epochs`' rule: never while another thread advances the epoch.
     [[nodiscard]] cc::shared_async<cc::unit> epochs_in_flight_completion(int allowed_in_flight);
 
+    /// Settles once every print and assert record a shader wrote so far has been decoded and logged.
+    ///
+    /// **A record reaches the log only after its epoch retires**, so whoever ends before that hands a failed assert to whatever runs next.
+    /// A test harness awaits this as each test's last step, which is what bills the assert to the test that dispatched it.
+    /// It closes the recording epoch where a pipeline wrote records in it, so every command list of that epoch must be submitted or dropped.
+    /// Ready at once when nothing is due, which a context without SC_SHADER_DIAGNOSTICS always is.
+    /// Awaited under `process_completed_epochs`' rule: never while another thread advances the epoch.
+    [[nodiscard]] cc::shared_async<cc::unit> diagnostics_settled();
+
     /// Whether the command list that produced this token has finished executing.
     [[nodiscard]] virtual bool is_submission_complete(submission_token token) const = 0;
 
@@ -506,6 +515,7 @@ private:
     /// The coroutines behind idle_completion and epochs_in_flight_completion, which place them on the device's home.
     [[nodiscard]] cc::shared_async<cc::unit> idle_completion_steps();
     [[nodiscard]] cc::shared_async<cc::unit> epochs_in_flight_steps(int allowed_in_flight);
+    [[nodiscard]] cc::shared_async<cc::unit> diagnostics_settled_steps();
 
     /// Settles when no transfer actor holds outstanding work; one of `idle_completion`'s three steps.
     [[nodiscard]] cc::shared_async<cc::unit const> transfers_drained_completion();

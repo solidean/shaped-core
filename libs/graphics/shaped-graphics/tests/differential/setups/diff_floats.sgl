@@ -1,0 +1,8 @@
+// The `floats` setup's contract, which floats.cc fills: 256 threads read `input` and write `output`, both 32-bit floats.
+// `input` holds ordinary values only, -64 to 64 with no zero, so no shader meets a denormal, an infinity or a NaN it did not make.
+// `output` holds four floats a thread, all zero.
+module diff_floats
+
+binding io:
+    input: buffer[float]
+    output: mut buffer[float]

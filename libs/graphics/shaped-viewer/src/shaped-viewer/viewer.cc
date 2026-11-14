@@ -145,14 +145,32 @@ template <class T>
 /// A 1080p frame holds about 14 MB between its readback and its encode, and a PNG at level 1 takes about 100 ms to encode.
 constexpr isize max_capture_writes_in_flight = 16;
 
+/// How many samples a capture's still hybrid frame packs.
+/// A sample of a 1080p frame costs about 2 ms on a laptop RTX 5070, so 16 keep a frame near a few dozen milliseconds of GPU work.
+constexpr u32 capture_samples_per_frame = 16;
+
 /// How many frames a capture of a `raster_bound` layer waits once nothing is owed, where the request names no
 /// iteration count: enough for its shadow and antialiasing histories to settle.
 constexpr i32 raster_capture_frames = 128;
 
 /// Waits for one capture write and logs why it failed, if it did.
+/// The longest a capture waits for one image's readback and encode before it gives the image up.
+/// An encode takes about 100 ms, so this is only ever reached by a readback that will not land, and waiting on would hang the run.
+constexpr int capture_write_timeout_ms = 30'000;
+
 void report_capture_write(sg::context& ctx, cc::shared_async<cc::string> const& writing)
 {
-    auto const failure = block_on(ctx, writing);
+    auto const may_block = ctx.execution() == sg::execution_model::may_block;
+    CC_ASSERT(may_block, "sv::viewer blocks its caller's thread every frame, and this context cannot block");
+    auto const settled = cc::try_async_blocking_get_for(writing, capture_write_timeout_ms);
+    if (!settled.has_value())
+    {
+        CC_LOG_ERROR("capture: an image was not read back and written within {} s; it is given up rather than waited "
+                     "for",
+                     capture_write_timeout_ms / 1000);
+        return;
+    }
+    auto const& failure = settled.value();
     if (failure.has_error())
         CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
     else if (!failure.value().empty())
@@ -274,6 +292,9 @@ struct viewer::impl
     /// Whether a layer left `render_mode::automatic` has been said to fall back to raster, which is said once per viewer.
     bool raster_fallback_reported = false;
 
+    /// What reconstruction this device runs, asked once by the first frame of a final render.
+    cc::optional<sr::reconstruct_support> reconstruct_support;
+
     /// Whether the frame being finished draws a `raster_bound` layer, whose histories a capture waits out.
     bool frame_has_raster_bound = false;
 
@@ -316,6 +337,83 @@ struct viewer::impl
     /// same delta moves twice as far.
     cc::vector<view_id> last_frame_views;
 };
+
+namespace
+{
+/// A final render's noise target where a layer names none: about one step of an 8-bit image after the display's curve.
+constexpr f32 final_noise_target = 0.004f;
+
+/// The bounces a final render's path tracer takes at least; a layer asking for more keeps its own.
+constexpr i32 final_min_bounces = 8;
+
+/// Below this share of the budget a frame, in seconds, a final render traces one sample a frame rather than the layer's count.
+/// An image takes at least one frame, and four samples of eight bounces at 1280x720 took about 80 ms on a laptop RTX 5070,
+/// so a share near that could not be kept at all; one sample a frame costs a quarter of the trace and spends the rest in more frames.
+/// Decided from the budget alone, so every frame of a run traces the same count and no mean restarts on it.
+constexpr double final_tight_share_seconds = 0.15;
+
+/// Makes every traced layer of `def` what a final render under the capture's time budget asks for.
+///
+/// - **Full path tracing**: a layer left `automatic` is traced by the megakernel, every bounce, rather than by the hybrid's one or two.
+///   On this hardware it is the fastest per sample of the two path tracers; a layer naming a mode keeps it.
+/// - **Samples where the noise is**: a noise target, so a pixel stops once it is down to it and the share goes to the ones still noisy.
+/// - **The denoiser that reads what adaptive sampling leaves**: DLSS or MetalFX ray reconstruction on the mean where the device has one.
+///   Its history is carried from frame to frame, a capture's first-frame drain aside.
+///   Else the spatial member, which judges each pixel by its own sample count.
+///   OIDN is not picked: it reads one count for the whole image.
+///   A layer naming a denoiser keeps it.
+/// `support` is what the device reconstructs with, asked once and kept by the caller.
+void apply_final_render(sg::context const& ctx,
+                        impl::capture_session const& capture,
+                        cc::optional<sr::reconstruct_support>& support_cache,
+                        viewer_definition& def)
+{
+    auto const first = !support_cache.has_value();
+    if (first)
+        support_cache = sr::query_reconstruct_support(ctx);
+    auto const& support = support_cache.value();
+    auto const& req = capture.request();
+    auto const traces = ctx.supports(sg::feature::raytracing_pipeline);
+    if (first)
+        CC_LOG_INFO("final render: {} s for {} frames; layers left automatic are path traced, denoised by {}",
+                    req.budget_seconds, cc::max(1, req.frames),
+                    support.dlss_rr      ? "dlss_rr on the mean, its history kept across frames"
+                    : support.metalfx_rr ? "metalfx_rr on the mean, its history kept across frames"
+                                         : "the spatial member at each frame's end");
+
+    for (auto& v : def.views)
+        for (auto& l : v.layers)
+        {
+            if (l.kind != layer_kind::scene_3d)
+                continue;
+            auto& s = l.settings;
+            if (s.mode == render_mode::automatic && traces)
+                s.mode = render_mode::megakernel;
+            if (s.mode != render_mode::megakernel && s.mode != render_mode::wavefront)
+                continue;
+            s.max_bounces = cc::max(s.max_bounces, final_min_bounces);
+            if (s.mode == render_mode::megakernel
+                && req.budget_seconds / f64(cc::max(1, req.frames)) < final_tight_share_seconds)
+                s.samples_per_pixel = 1;
+            if (s.noise_target <= 0.0f)
+                s.noise_target = final_noise_target;
+
+            auto& r = s.reconstruct;
+            if (r.denoiser != sr::denoise_method::none && r.denoiser != sr::denoise_method::automatic)
+                continue;
+            if (support.dlss_rr || support.metalfx_rr)
+            {
+                r.denoiser = support.dlss_rr ? sr::denoise_method::dlss_rr : sr::denoise_method::metalfx_rr;
+                s.still_denoise = still_denoise::temporal_on_mean;
+            }
+            else
+            {
+                r.denoiser = sr::denoise_method::automatic;
+                s.still_denoise = still_denoise::spatial;
+            }
+        }
+}
+} // namespace
 
 cc::result<viewer> viewer::try_create(cc::string_view id_str, viewer_config config)
 {
@@ -1224,7 +1322,18 @@ void viewer::finish_frame(frame& f)
         auto const& req = im.capture->request();
         def.sample_target = req.iterations > 0 ? 0 : req.accumulate;
         def.frame_target = req.iterations;
+        // Under a budget the time is the bar: a layer traces until its noise target or the frame's share, whichever comes first.
+        // Once another frame would no longer fit the share, this one is the image's last: it traces, reaches the target and denoises.
+        if (im.capture->has_budget())
+        {
+            im.capture->note_viewer_frame();
+            def.sample_target = 0;
+            def.frame_target = 0;
+            def.last_frame_of_image = im.capture->is_share_spent();
+        }
         def.denoise_at_target_only = true;
+        // Nobody watches a capture's frames, and a packed sample is the one a frame of its own would draw.
+        def.still_samples_per_frame = capture_samples_per_frame;
     }
 
     // A canvas places its drawings in logical pixels, and the window's display scale is how many back-buffer pixels one of those covers.
@@ -1378,7 +1487,11 @@ void viewer::finish_frame(frame& f)
             p.at = p.at + down;
     }
 
-    def.wavefront_budget_ms = sv::impl::wavefront_budget_of(im.config);
+    def.still_budget_ms = sv::impl::still_budget_of(im.config);
+
+    // A capture under a time budget is a final render, so every layer it traces gets what that asks for.
+    if (im.capture != nullptr && !im.capture->is_done() && im.capture->has_budget())
+        apply_final_render(*im.ctx, *im.capture, im.reconstruct_support, def);
 
     // `automatic` is resolved here, where the plan is built, so the plan declares what the resolved mode writes.
     for (auto& v : def.views)
@@ -1570,8 +1683,10 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
 
         any_traced = true;
         // Under an iteration count the frame target alone stops a layer, and a sample count reached early must not settle it first.
-        auto const samples
-            = session.request().iterations > 0 ? cc::optional<u32>() : cc::optional<u32>(session.request().accumulate);
+        // Under a budget the layer's own stop decides too: its noise target, or the share's end.
+        auto const samples = session.request().iterations > 0 || session.has_budget()
+                               ? cc::optional<u32>()
+                               : cc::optional<u32>(session.request().accumulate);
         views_converged &= im.views.is_accumulation_converged(tr.id, samples);
     }
 
@@ -1589,8 +1704,14 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     // Nor does a run out of time: it writes what it has on this frame, where a restart would defer the write and leave it a frame's samples.
     if (session.note_owed_work(owed) && !plan.traces.empty() && !session.is_out_of_time())
     {
+        // On a run's first frame the temporal histories are cut too; later frames of a sequence keep them (`drain_cuts_history`).
         for (auto const& tr : plan.traces)
-            im.views.restart_accumulation(tr.id);
+        {
+            if (session.drain_cuts_history())
+                im.views.restart_accumulation(tr.id);
+            else
+                im.views.restart_means(tr.id);
+        }
         return;
     }
 

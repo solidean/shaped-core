@@ -282,12 +282,17 @@ enum class sgl::ir::group_fold : sgl::u8
 };
 
 /// What a derivative across a pixel quad gives; the `sub` of `op::derivative`.
+/// `x`, `y` and `width` are the coarse ones, the same in every lane of the quad (EVAL-144).
 enum class sgl::ir::derivative : sgl::u8
 {
     x,
     y,
     /// `abs(x) + abs(y)`.
     width,
+    /// Along the lane's own row of the quad.
+    x_fine,
+    /// Down the lane's own column of the quad.
+    y_fine,
 };
 
 enum class sgl::ir::barrier : sgl::u8

@@ -443,6 +443,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-affine-memory-test.cc
             tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
+            tests/compute/compute-assert-billing-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
@@ -451,6 +452,8 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-native-spirv-test.cc
             tests/compute/compute-matrix-arithmetic-test.cc
             tests/compute/compute-float-atomics-test.cc
+            tests/compute/compute-differentiable-buffers-test.cc
+            tests/compute/compute-splat-fitting-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/raster/mixed-route-test.cc
@@ -537,6 +540,8 @@ if(SC_BUILD_TESTS)
                 array_equality.sgl:*
                 matrix_arithmetic.sgl:*
                 float_atomics.sgl:*
+                differentiable_buffers.sgl:*
+                splat_fitting.sgl:*
                 option_formats.sgl:*
         )
         sc_add_shader_package(
@@ -621,6 +626,54 @@ if(SC_BUILD_TESTS)
             SHADERS
                 software_trace.sgl:*
                 pipeline_motion.sgl:*
+        )
+
+        # The differential corpus: every file in it is an entry, so adding a shader is adding a file.
+        # Its setups' modules are the contract between a corpus file and the C++ beside them (docs/differential-testing.md).
+        target_sources(shaped-graphics-test PRIVATE
+            tests/differential/differential.cc
+            tests/differential/differential-test.cc
+            tests/differential/interpreted.cc
+            tests/differential/setups/setups.cc
+        )
+        # SGL's interpreter is the corpus's third opinion, checking each file against the setups' modules as the package does.
+        target_link_libraries(shaped-graphics-test PRIVATE shaped-graphics-language)
+        sc_target_source_paths(shaped-graphics-test PRIVATE SG_DIFFERENTIAL_SETUPS_DIR tests/differential/setups)
+        # What another machine computed, which this one is held to; a refresh rewrites them in the source tree.
+        sc_target_source_paths(shaped-graphics-test PRIVATE SG_DIFFERENTIAL_REFERENCES_DIR tests/differential/references)
+        file(GLOB _sg_differential_corpus CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/corpus
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/corpus/*.sgl)
+        list(TRANSFORM _sg_differential_corpus APPEND ":*")
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_differential
+            NAMESPACE  sg::test::differential
+            SOURCE_DIR tests/differential/corpus
+            LANGUAGE   sgl
+            MODULE_DIRS tests/differential/setups
+            SHADERS
+                module:diff_words
+                module:diff_floats
+                module:diff_texels
+                module:diff_raster
+                module:diff_scene
+                module:diff_targets
+                module:diff_tallies
+                module:diff_records
+                ${_sg_differential_corpus}
+        )
+        # The stages a setup brings itself, such as the raster setup's vertex stage, compiled on each run's route.
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_differential_setups
+            NAMESPACE  sg::test::differential_setups
+            SOURCE_DIR tests/differential/setups/shaders
+            LANGUAGE   sgl
+            MODULE_DIRS tests/differential/setups
+            SHADERS
+                fullscreen.sgl:*
+                layered.sgl:*
+                read_samples.sgl:*
         )
     endif()
 

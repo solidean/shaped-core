@@ -1,0 +1,32 @@
+// differential: setup words
+// Per-thread arrays indexed by data, structs passed by value, and a small sort, which a compiler keeps in registers or spills.
+use diff_words
+
+struct ranked:
+    key: uint
+    slot: int
+
+fun lighter(a: ranked, b: ranked) -> bool => a.key < b.key or (a.key == b.key and a.slot < b.slot)
+
+@compute(64) fun sorted_window(@thread_id id: int3){diff_words.io}:
+    let i = id.x
+    let mut window = ranked[8].filled(ranked(key = 0u, slot = 0))
+    for k in 0 ..< 8:
+        window[k] = ranked(key = diff_words.io.input[(i * 5 + k * 3) & 255] >> 20u, slot = k)
+
+    // an insertion sort, every swap an index the data chose
+    for k in 1 ..< 8:
+        let held = window[k]
+        let mut j = k - 1
+        while j >= 0 and lighter(held, window[j]):
+            window[j + 1] = window[j]
+            j -= 1
+        window[j + 1] = held
+
+    let mut histogram = uint[16].filled(0u)
+    for k in 0 ..< 8:
+        histogram[window[k].key & 15u] += 1u
+    diff_words.io.output[4 * i] = window[0].key
+    diff_words.io.output[4 * i + 1] = window[7].key
+    diff_words.io.output[4 * i + 2] = ((window[3].slot as uint) << 16u) | (window[4].slot as uint)
+    diff_words.io.output[4 * i + 3] = histogram[diff_words.io.input[i] & 15u] + (histogram[0] << 8u)

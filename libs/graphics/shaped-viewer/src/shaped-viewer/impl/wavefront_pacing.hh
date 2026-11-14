@@ -73,9 +73,9 @@ struct wavefront_pacing
     void reset();
 };
 
-/// How many of `plan`'s traces run a still wavefront frame this frame, as far as is known before any of them traces, which is what splits the budget.
-/// That is every refreshing wavefront layer whose mean has not restarted and whose slot has not reached its sample target.
+/// How many of `plan`'s traces run a still wavefront or hybrid frame this frame, as far as is known before any of them traces, which is what splits the budget.
+/// That is every refreshing wavefront or hybrid layer whose mean has not restarted and whose slot has not reached its sample target.
 /// One whose image changes this frame still counts, and leaves its share unspent; one at its target traces nothing, so it takes no share.
 /// The target is known a landing late, so a layer that just reached it keeps its share for a frame or two.
-[[nodiscard]] isize still_wavefront_traces(viewer_definition const& def, render_plan const& plan, view_store const& store);
+[[nodiscard]] isize still_budgeted_traces(viewer_definition const& def, render_plan const& plan, view_store const& store);
 } // namespace sv::impl

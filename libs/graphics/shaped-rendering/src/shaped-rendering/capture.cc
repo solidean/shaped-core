@@ -85,6 +85,15 @@ capture_request capture_request::from_environment()
             CC_LOG_WARNING("capture: ignoring unparseable {}", capture_timeout_env_var);
     }
 
+    if (auto const budget = cc::environment_variable(capture_budget_env_var); budget.has_value())
+    {
+        auto parsed = 0.0;
+        if (cc::from_string(budget.value(), parsed) && parsed > 0.0)
+            req.budget_seconds = parsed;
+        else
+            CC_LOG_WARNING("capture: ignoring unparseable {}", capture_budget_env_var);
+    }
+
     if (auto const frames = cc::environment_variable(capture_frames_env_var); frames.has_value())
     {
         auto parsed = i32(0);

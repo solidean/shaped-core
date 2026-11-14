@@ -477,6 +477,8 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
                            cc::format("{} is no vector or matrix, so it has no scalar_of", out.name_of(of)));
             }
         }
+        else if (is_named(file, applied->object, "tangent"))
+            result = resolve_tangent(file, expr, *applied, scope);
         else if (auto const generic = generic_named(file, applied->object); is_valid(generic))
         {
             // CHK-339: `ring[4, float]`, an instance of a generic struct, one argument per parameter and of its kind
@@ -735,8 +737,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
-        cc::string_view const known_on_member[]
-            = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic", "padding"};
+        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic",
+                                                   "padding",      "gradient",      "tangent", "no_diff"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -1060,6 +1062,40 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 collected.back().layout_bits = count.value();
         }
         collected.back().is_absent = is_struct && find_attribute(file, f.attributes, "absent") != nullptr;
+        // PROTOTYPE (libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md): kept as written, and resolved where a derivative reads the buffer, since the
+        // binding it names may come later in the file
+        for (auto const which : {cc::string_view("gradient"), cc::string_view("tangent")})
+        {
+            auto const* const a = is_struct ? nullptr : find_attribute(file, f.attributes, which);
+            if (a == nullptr)
+                continue;
+            auto const arguments = ast.at(a->arguments);
+            if (arguments.size() != 1 || !arguments[0].name.empty() || !ast::is_valid(arguments[0].value))
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                       cc::format("@{0} takes the buffer it pairs with: `@{0}(training.{0}s)`", which));
+                continue;
+            }
+            if (auto const& r = out.at(innermost);
+                type != checked_module::error_type && r.kind != type_kind::buffer && r.kind != type_kind::texture)
+            {
+                report(
+                    diagnostic_kind::wrong_kind_of_name, file, a->name,
+                    cc::format("only a buffer's or a texture's read is differentiated, so only they take a @{}", which));
+                continue;
+            }
+            (which == "gradient" ? collected.back().gradient : collected.back().tangent)
+                = cc::string(text_of(file, span_of(file, arguments[0].value)));
+        }
+        // PROTOTYPE (autodiff): a texture whose texels a derivative holds constant, its sample changing with its coordinate
+        if (auto const* const held = is_struct ? nullptr : find_attribute(file, f.attributes, "no_diff"))
+        {
+            if (type != checked_module::error_type && out.at(innermost).kind != type_kind::texture)
+                report(diagnostic_kind::wrong_kind_of_name, file, held->name,
+                       "@no_diff on a binding member holds a texture's texels constant, so only a texture takes it");
+            else
+                collected.back().is_no_diff = true;
+        }
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(
                 {.member = collected.size() - 1, .attribute = named, .name = name_argument_of(file, named)});
@@ -1134,7 +1170,7 @@ void checker::compile_struct(symbol_id id)
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
     cc::string_view const known[]
-        = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle", "target_layout"};
+        = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle", "target_layout", "tangent"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -1260,6 +1296,10 @@ void checker::compile_struct(symbol_id id)
     });
     out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
+
+    // DIFF-37: a struct may say which struct its change is, whose fields name the fields they change
+    if (auto const* const declared = find_attribute(file, d.attributes, "tangent"))
+        declare_tangent(file, type, *declared, !parameters.empty());
 
     // CHK-522: a struct SGL ships may stand in each target's own order, a branch of fields per target
     auto const* const layout = find_attribute(file, d.attributes, "target_layout");

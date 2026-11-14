@@ -156,8 +156,7 @@ TEST("sv - a mean that restarted holds no samples, whatever was counted before")
     CHECK(slot.sample_floors.empty());
 }
 
-// What a capture does when owed work drains: a BC7 encode replaces a texture's contents under the same id, so no trace restarts on it.
-// A view that already stopped at its target would keep samples of the uncompressed texture, all of them on a fast GPU and some on a slow one.
+// The reset a person asks for: the image converging again from nothing, the denoiser's history with it.
 TEST("sv - a view's restart starts every traced layer over and cuts its history")
 {
     auto store = sv::view_store();
@@ -183,6 +182,70 @@ TEST("sv - a view's restart starts every traced layer over and cuts its history"
     CHECK(store.peek_ptr(sv::view_id::from_string("absent")) == nullptr);
 }
 
+namespace
+{
+/// The clock a budget test advances by hand: `capture_request::clock_seconds` is a plain function pointer.
+double budget_clock = 0.0;
+double read_budget_clock()
+{
+    return budget_clock;
+}
+} // namespace
+
+// A final render under a time budget: each frame gets what is left over the frames still to come, so a quick frame leaves
+// its time to the later ones, and a frame's share running out is the plan rather than a timeout.
+TEST("sv - a budgeted sequence gives each frame its share of what is left")
+{
+    budget_clock = 100.0;
+    auto session = sv::impl::capture_session(sr::capture_request{.timeout_seconds = 60.0,
+                                                                 .budget_seconds = 40.0,
+                                                                 .frames = 4,
+                                                                 .clock_seconds = read_budget_clock});
+    REQUIRE(session.has_budget());
+    session.begin();
+    CHECK(session.frame_share_seconds() == 10.0);
+    CHECK(!session.is_share_spent());
+
+    // the first frame finishes after 4 s, so the three left share the 36 s still unspent
+    budget_clock = 104.0;
+    session.advance_frame();
+    CHECK(session.frame_share_seconds() == 12.0);
+
+    // the second spends its whole share and more: spent, but nowhere near the timeout
+    budget_clock = 117.0;
+    CHECK(session.is_share_spent());
+    CHECK(!session.is_out_of_time());
+    session.advance_frame();
+    CHECK(session.frame_share_seconds() == 11.5);
+    CHECK(session.run_elapsed_seconds() == 17.0);
+
+    // a run past its budget gives the frames left nothing, and each then ends on its first finished frame
+    budget_clock = 150.0;
+    session.advance_frame();
+    CHECK(session.frame_share_seconds() == 0.0);
+    CHECK(session.is_share_spent());
+
+    // a share longer than the timeout moves the timeout past it, so spending the share is never a failure
+    budget_clock = 0.0;
+    auto long_still = sv::impl::capture_session(
+        sr::capture_request{.timeout_seconds = 60.0, .budget_seconds = 300.0, .clock_seconds = read_budget_clock});
+    long_still.begin();
+    budget_clock = 200.0;
+    CHECK(!long_still.is_share_spent());
+    CHECK(!long_still.is_out_of_time());
+    budget_clock = 305.0;
+    CHECK(long_still.is_share_spent());
+    CHECK(!long_still.is_out_of_time());
+    budget_clock = 311.0;
+    CHECK(long_still.is_out_of_time());
+
+    // without a budget nothing is ever a share
+    auto plain = sv::impl::capture_session(sr::capture_request{.frames = 4, .clock_seconds = read_budget_clock});
+    plain.begin();
+    CHECK(!plain.has_budget());
+    CHECK(!plain.is_share_spent());
+}
+
 TEST("sv - a capture restarts its views each time owed work drains, and only then")
 {
     auto session = sv::impl::capture_session(sr::capture_request{});
@@ -200,6 +263,40 @@ TEST("sv - a capture restarts its views each time owed work drains, and only the
     // Work that comes back, a texture landing late, restarts them again once it drains.
     CHECK(!session.note_owed_work(1));
     CHECK(session.note_owed_work(0));
+}
+
+// What a capture does when owed work drains: a BC7 encode replaces a texture's contents under the same id, so no trace restarts on it.
+// A view that already stopped at its target would keep samples of the uncompressed texture, all of them on a fast GPU and some on a slow one.
+// A video streaming geometry into every frame drains on every frame, and cutting the history there left DLSS starting cold on each.
+// The first frame's drain lands an asset's loads and encodes under the same texture ids; a temporal member carried across it
+// hung the GPU on a later viewer, so that drain cuts the history, and only that one: a video streaming content keeps it.
+TEST("sv - a capture's drain cuts the temporal history on the run's first frame alone")
+{
+    auto session = sv::impl::capture_session(sr::capture_request{.frames = 3});
+    CHECK(session.drain_cuts_history());
+    session.advance_frame();
+    CHECK(!session.drain_cuts_history());
+    session.advance_frame();
+    CHECK(!session.drain_cuts_history());
+    CHECK(sv::impl::capture_session(sr::capture_request{}).drain_cuts_history());
+}
+
+TEST("sv - restarting a view's means keeps its temporal history")
+{
+    auto store = sv::view_store();
+    auto const id = sv::view_id::from_string("streaming");
+    auto& state = store.get_or_create(id);
+    state.temporal[sv::temporal_id::accumulation(0)].accum_frame = 4;
+    state.temporal[sv::temporal_id::accumulation(0)].samples = 64;
+
+    store.restart_means(id);
+
+    CHECK(store.min_accumulated_samples(id) == 0);
+    CHECK(store.accumulated_frames(id) == 0);
+    CHECK(!state.camera_cut_pending);
+
+    store.restart_means(sv::view_id::from_string("absent"));
+    CHECK(store.peek_ptr(sv::view_id::from_string("absent")) == nullptr);
 }
 
 // What a capture that gives up names: every traced layer's pixels below its target, but none of a mean that restarted.

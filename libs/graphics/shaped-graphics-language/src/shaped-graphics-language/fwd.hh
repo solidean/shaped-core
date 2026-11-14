@@ -201,6 +201,7 @@ enum class spelling_kind : u8;
 enum class judged_operand : u8;
 enum class written_argument : u8;
 enum class index_mark : u8;
+enum class derivative_kind : u8;
 struct spelling;
 struct block_layout;
 struct type_record;

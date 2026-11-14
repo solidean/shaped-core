@@ -1,0 +1,7 @@
+// The `samples` setup's read stage: every sample of every pixel of the drawn target, pixel after pixel.
+use diff_targets
+
+@compute(64) fun read_samples(@thread_id id: int3){diff_targets.samples}:
+    let pixel = int2(id.x % 16, id.x / 16)
+    for s in 0 ..< 4:
+        diff_targets.samples.values[id.x * 4 + s] = diff_targets.samples.target.load(pixel, sample = s)

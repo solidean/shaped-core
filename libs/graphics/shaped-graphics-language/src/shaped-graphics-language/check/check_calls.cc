@@ -507,6 +507,24 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             auto const is_function = scope.find_local(name) == nullptr && !is_type_parameter_name(name)
                                   && found != nullptr && !found->empty()
                                   && out.at(found->front()).kind == symbol_kind::function;
+            // PROTOTYPE (autodiff): `tangent[T]()` is the zero of that tangent type, whose fields are then assigned
+            if (name == "tangent" && scope.find_local(name) == nullptr && (found == nullptr || found->empty()))
+            {
+                auto const type = resolve_value_type(file, call.callee, &scope);
+                if (!ast.at(call.arguments).empty())
+                {
+                    (void)check_arguments(scope, call.arguments, false);
+                    if (type != error_type)
+                        unsupported(file, callee_where,
+                                    "a tangent built from its fields: `tangent[T]()` is its zero, whose fields are "
+                                    "then "
+                                    "assigned");
+                    return error_type;
+                }
+                if (type != error_type)
+                    set_target(file, id, {.kind = target_kind::zero_value});
+                return type;
+            }
             // CHK-339: `ring[4, float](…)` constructs that instance, which binds every parameter its constructor has
             if (scope.find_local(name) == nullptr && !is_type_parameter_name(name)
                 && is_valid(generic_named(file, index->object)))
@@ -736,10 +754,15 @@ type_id checker::check_named_call(function_scope& scope,
     if (!judge_uniform_load(file, candidates, call.arguments))
         return error_type;
     // PROTOTYPE (autodiff): a derivative of a named function takes what that function's parameters ask
+    auto const outer_derivative = is_resolving_derivative;
     if ((text == "fwd_diff" || text == "bwd_diff") && is_prelude_file(out.at(candidates[0]).file))
         if (auto derived = derivative_candidates(candidates, arguments, file, callee_where); !derived.empty())
+        {
             candidates = cc::move(derived);
+            is_resolving_derivative = true;
+        }
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
+    is_resolving_derivative = outer_derivative;
     if (result != error_type)
     {
         judge_filtering(file, id, where, arguments.written);
@@ -1094,10 +1117,27 @@ symbol_id checker::function_of_type(cc::span<symbol_id const> candidates, type_i
             continue;
         auto const& info = out.functions[out.at(f).info];
         // an entry point or a builtin is no function a body calls through a parameter
-        if (info.entry_stage != stage::none || is_valid(out.at(f).intrinsic) || info.result != out.at(type).element)
+        if (info.entry_stage != stage::none || is_valid(out.at(f).intrinsic)
+            || (info.type_parameters.count == 0 && info.result != out.at(type).element))
             continue;
-        auto const parameters = out.at(info.parameters);
+        auto const parameters = cc::vector<parameter>::create_copy_of(out.at(info.parameters));
         auto is_same = parameters.size() == wanted.size();
+        // DIFF-4: a derivative's generic meets the signature of the instance its call deduced
+        if (info.type_parameters.count > 0)
+        {
+            if (!is_resolving_derivative)
+                continue;
+            auto bindings = cc::vector<type_id>();
+            auto const wanted_types = cc::vector<member_info>::create_copy_of(wanted);
+            for (auto i = isize(0); is_same && i < parameters.size(); ++i)
+                is_same = !parameters[i].is_mut && unify(parameters[i].type, wanted_types[i].type, bindings);
+            if (!is_same)
+                continue;
+            if (is_valid(found))
+                return symbol_id::none;
+            found = f;
+            continue;
+        }
         for (auto i = isize(0); is_same && i < parameters.size(); ++i)
             is_same = parameters[i].type == wanted[i].type && !parameters[i].is_mut;
         if (!is_same)

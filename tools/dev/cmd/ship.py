@@ -249,9 +249,15 @@ def _settle_at_base(ctx: Context, preset, proof: build_server.Proof) -> tuple[bo
     if settle and base:
         at_base = _red_at_base(ctx, preset, base, settle)
     filed, blockers = [], list(others)
+    # An invocable test's children are one test: red at the base on any child, it is red there, and a child that passed
+    # there passed by chance, as a flaky test does.
+    red_leaves = {(b, t.rsplit(" / ", 1)[-1]) for (b, t), v in at_base.items() if v is True}
     for r in red:
         key, desc = (r["binary"], r["test"]), f"{r['binary']}: {r['test']}: {r['outcome']}"
         verdict = at_base.get(key)
+        if verdict is False and (r["binary"], r["test"].rsplit(" / ", 1)[-1]) in red_leaves:
+            filed.append((*key, r["outcome"], f"its test is red at the change's base {base[:12]} on another child, so flaky there"))
+            continue
         if verdict is True and _binary_red(r):
             filed.append((*key, r["outcome"], f"its binary ends without a report at the change's base {base[:12]} too, so the case is unproven"))
         elif verdict is True:
@@ -304,32 +310,24 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
             # A binary that ended without a report (a crash, a timeout) has every case red by the binary's ending:
             # it says nothing of a single case, only the whole binary run again can show whether it ends that way at the base too.
             whole = len(mine) > 1 or any(_binary_red(r) for r in mine)
-            rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"]]))
+            # a case of an invocable test is named by its path, `driver / child / test`, which selects nothing as a filter;
+            # its leaf selects every child, and the report names each by its path again
+            rc = dev("test", "-t", binary, "--no-build", *([] if whole else [mine[0]["test"].rsplit(" / ", 1)[-1]]))
             found = _cases_red(xml)
             # a binary that wrote no report of its own gets dev.py's stand-in, one case named after the binary
             if set(found) == {binary}:
                 found = {}
-            ended_without_report = rc != 0 and not found
+            # A binary that dies writes the cases it reached first, so a failed run missing one of them ended there too:
+            # what it reached green is no case of a binary whose run ends red by its ending, at the base as with the change.
+            ended_early = rc != 0 and any(r["test"] not in found for r in mine)
             for r, key in zip(mine, keys):
-                out[key] = True if _binary_red(r) and ended_without_report else found.get(r["test"])
+                out[key] = True if _binary_red(r) and ended_early else found.get(r["test"])
         return out
 
     out = run(reds)
     _say_at_base(out)
-    # A red at the base counts only where the worktree reproduces the checkout: red there too at the commit being pushed,
-    # which is everything ship pushes, since it refuses uncommitted work.
-    # Green there, the worktree differs from the checkout, and its base run says nothing.
-    reproduce = [r for r in reds if out[(r["binary"], r["test"])] is True]
-    head = subprocess.run(["git", "-C", str(ctx.root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    if reproduce and head:
-        wt, why = base_worktree.ensure(ctx.root, head)
-        if wt is None:
-            _say(f"the worktree could not be moved to {head[:12]} to check it, so the server's judgement stands: {why}")
-            return {k: (None if v else v) for k, v in out.items()}
-        for key, red in run(reproduce).items():
-            if red is not True:
-                _say(f"  but green in the worktree at {head[:12]} too, so the worktree differs from the checkout: {key[0]}: {key[1]}")
-                out[key] = None
+    # A red at the base is the base's, whatever a run at the change would show: a flaky test is red at the base too, and
+    # a run of it at the change that happens to pass says nothing about the change.
     return out
 
 

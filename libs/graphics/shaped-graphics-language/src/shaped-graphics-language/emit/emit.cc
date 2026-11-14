@@ -576,6 +576,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                     }
                     plan.invoked_structures.push_back({.hit = hit, .structure = found.value()});
                 }
+    plan.float_guarantee = sources.float_guarantee;
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
         for (auto const& s : plan.samplers)

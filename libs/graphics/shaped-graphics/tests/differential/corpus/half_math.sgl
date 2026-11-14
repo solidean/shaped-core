@@ -1,0 +1,17 @@
+// differential: setup floats
+// differential: across exact
+// EVAL-96 rounds each operation of halves once, to nearest, ties to even, and a lone +, - or * leaves `.fast` nothing to contract or reorder.
+// So a conversion and each operation agree to the bit everywhere.
+// AMD's dx12 and vulkan drivers convert a float to a half toward zero instead, its arithmetic rounding as it should; issue: bug-sgl-half-conversion-rounds-toward-zero-on-amd
+// Half-precision math as a bandwidth-bound or mobile shader writes it: a conversion and the operations a division or a root is built from.
+require shader_f16
+use diff_floats
+
+@compute(64) fun halves(@thread_id id: int3){diff_floats.io}:
+    let i = id.x
+    let a = abs(diff_floats.io.input[i]) as half
+    let b = abs(diff_floats.io.input[(i + 29) & 255]) as half
+    diff_floats.io.output[4 * i] = a as float
+    diff_floats.io.output[4 * i + 1] = (a * b) as float
+    diff_floats.io.output[4 * i + 2] = (a + b) as float
+    diff_floats.io.output[4 * i + 3] = (a - b) as float
