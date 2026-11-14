@@ -111,7 +111,8 @@ constexpr phase k_script[] = {
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black blocks, and a still image settles",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
@@ -206,7 +207,8 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
             co_await ctx.idle_completion();
             sv_test::drive_ambient_work();
 
-            auto const& pixels = co_await readback.data();
+            auto const pixels_async = readback.data();
+            auto const& pixels = co_await pixels_async;
             auto const now = cc::span<u32 const>(pixels.data(), pixels.size());
             stats.push_back(stats_of(now, previous));
             if (shown && stats.back().dark > worst_dark)

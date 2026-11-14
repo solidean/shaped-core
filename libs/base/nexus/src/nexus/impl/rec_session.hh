@@ -43,7 +43,10 @@ void end_run_recording(cc::string_view log_dir);
 ///
 /// With `sample`, the threads the recorder knows are sampled until the run ends, and their busy stacks are printed as
 /// a hot-function report beside the write.
-void begin_run_capture(cc::string_view path, bool sample = false);
+///
+/// `compacted_path` gets the same capture compacted and compressed, the recording a run keeps with its logs.
+/// Without a full `path` the capture compacts as it goes, so it never holds the recorder's chunks for long.
+void begin_run_capture(cc::string_view path, cc::string_view compacted_path, bool sample = false);
 
 /// Where this run keeps its crash reports, from the environment variable NX_CRASH_DIR, or empty when it is unset.
 /// A driver sets it so a crash leaves files that outlive the run: the report, a minidump, and the recording below.

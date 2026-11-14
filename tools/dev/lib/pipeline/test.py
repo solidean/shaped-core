@@ -24,7 +24,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from ..core import console, crash_reports, profile, ui
+from ..core import console, crash_reports, fail_fast, profile, ui
 from ..core.logs import capture_line, parse_junit, step_fields, step_log_paths, write_sidecar, write_step_junit
 from ..core.models import Preset, StepResult, Target, TestSummary
 from ..core.process import describe_exit_code, emsdk_env, run_step
@@ -115,7 +115,13 @@ def server_env(preset: Preset, root: Path, base: dict[str, str] | None = None,
     return {
         **os.environ, **(base or {}), **(_preset_env(preset) if preset_env is None else preset_env),
         "SC_SOURCE_ROOT": str(root), "NX_CRASH_DIR": str(crash_reports.incoming_dir(preset.build_dir)),
+        "NX_LOG_REC_DIR": str(log_rec_dir(preset)),
     }
+
+
+def log_rec_dir(preset: Preset) -> Path:
+    """Where every nexus binary keeps its compacted recording of the run, `<binary>.ccrec`, beside the run's logs."""
+    return preset.build_dir / "run-logs"
 
 
 def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> None:
@@ -166,6 +172,14 @@ def _binary_timeout(target: Target, timeout: float | None, explicit: bool) -> fl
     if explicit or not timeout or target.timeout_secs is None:
         return timeout
     return max(timeout, target.timeout_secs)
+
+
+def _echo_recording(recording: Path) -> None:
+    """Say where --rec kept a binary's recording, and how large it is."""
+    if recording.is_file():
+        ui.write_line(f"  recording kept: {recording} ({recording.stat().st_size / (1 << 20):.1f} MiB)")
+    else:
+        ui.write_line(console.yellow("  no recording: the run wrote none (--no-recording, or a crash before the end)"))
 
 
 def _echo_sample_report(stdout_log: Path | None, recording: Path) -> None:
@@ -266,7 +280,7 @@ def _record(result: StepResult, target: Target, preset: Preset, *, root: Path, t
     }
 
 
-def _server_bypass(*, sample: bool, write_xml: bool, extra_env: bool, preset: Preset) -> str | None:
+def _server_bypass(*, sample: bool, rec: bool, write_xml: bool, extra_env: bool, preset: Preset) -> str | None:
     """Why this preset's binaries run without the build server although it is opted in; None when they can go through it.
 
     The server stores and restores a binary's console output and JUnit report only, so a run writing anything else runs the plain way.
@@ -275,6 +289,8 @@ def _server_bypass(*, sample: bool, write_xml: bool, extra_env: bool, preset: Pr
         return "a cross-compiled preset"
     if sample:
         return "--sample"
+    if rec:
+        return "--rec"
     if profile.enabled():
         return "--profile (per-test timings)"
     if not write_xml:
@@ -455,6 +471,7 @@ def test(
     emsdk_path: str | None = None,
     runtime: jsr.JsRuntimeRequest | None = None,
     sample: bool = False,
+    rec: bool = False,
     server: build_server.Session | None = None,
     rerun: bool = False,
 ) -> list[dict]:
@@ -512,7 +529,8 @@ def test(
         records: list[dict] = []
         plain_names = binary_names
         if server is not None:
-            bypass = _server_bypass(sample=sample, write_xml=write_xml, extra_env=extra_env_for is not None, preset=preset)
+            bypass = _server_bypass(sample=sample, rec=rec, write_xml=write_xml, extra_env=extra_env_for is not None,
+                                    preset=preset)
             if bypass is not None:
                 ui.write_line(console.dim(f"  tests run without the build server: {bypass}"))
             else:
@@ -572,6 +590,13 @@ def test(
                 if sample:
                     sample_path.unlink(missing_ok=True)
                     cmd += ["--sample", str(sample_path)]
+                elif rec:
+                    sample_path.unlink(missing_ok=True)
+                    cmd += ["--rec", str(sample_path)]
+                # A red test ends the command soon after (fail_fast), so the binary stops starting tests by then too.
+                # Not through the server, which keys its results on the arguments the proof runs with.
+                if fail_fast.enabled():
+                    cmd += ["--fail-grace", f"{fail_fast.GRACE_S:g}"]
                 cmd += extra_args
 
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
@@ -583,6 +608,7 @@ def test(
                 # A native nexus binary keeps every crash or hang report in files too, which collect() files below.
                 if not preset.is_cross_compiling:
                     layered.setdefault("NX_CRASH_DIR", str(crash_reports.incoming_dir(preset.build_dir)))
+                    layered.setdefault("NX_LOG_REC_DIR", str(log_rec_dir(preset)))
                 if layered:
                     run_env = {**os.environ, **(preset_base_env or {}), **layered}
 
@@ -604,6 +630,8 @@ def test(
 
                 if sample:
                     _echo_sample_report(result.stdout_log, sample_path)
+                elif rec:
+                    _echo_recording(sample_path)
 
                 record = _record(result, target, preset, root=root, test_name=test_name, write_xml=write_xml,
                                  verbose=verbose)

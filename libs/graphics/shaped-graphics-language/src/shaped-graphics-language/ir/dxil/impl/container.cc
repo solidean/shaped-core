@@ -1,5 +1,8 @@
 #include "writer.hh"
 
+#include <clean-core/common/assert.hh>
+#include <shaped-graphics-language/ir/dxil/dxil.hh>
+
 using namespace sgl;
 using namespace sgl::ir;
 using namespace sgl::ir::dxil;
@@ -17,9 +20,77 @@ namespace
 }
 
 constexpr u32 k_triple_dxbc = four_cc('D', 'X', 'B', 'C');
-/// What the epic's spike found the retail runtime takes in place of a validator's hash.
-constexpr u8 k_bypass_digest = 0x01;
+/// Where the digest stands in the header, and how long it is; the checksum covers what follows it.
+constexpr isize k_digest_offset = 4;
+constexpr isize k_digest_size = 16;
+constexpr isize k_checksummed_from = k_digest_offset + k_digest_size;
 constexpr u32 k_bitcode_offset = 16;
+
+constexpr u32 k_md5_sines[64] = {
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
+};
+constexpr u32 k_md5_shifts[16] = {7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21};
+
+/// MD5's compression of one 64-byte block into `state`.
+void md5_block(u32 (&state)[4], byte const* block)
+{
+    u32 m[16];
+    for (auto i = 0; i < 16; ++i)
+        m[i] = u32(u8(block[4 * i])) | (u32(u8(block[4 * i + 1])) << 8) | (u32(u8(block[4 * i + 2])) << 16)
+             | (u32(u8(block[4 * i + 3])) << 24);
+    auto a = state[0];
+    auto b = state[1];
+    auto c = state[2];
+    auto d = state[3];
+    for (auto i = 0; i < 64; ++i)
+    {
+        auto f = u32(0);
+        auto g = 0;
+        if (i < 16)
+        {
+            f = (b & c) | (~b & d);
+            g = i;
+        }
+        else if (i < 32)
+        {
+            f = (d & b) | (~d & c);
+            g = (5 * i + 1) % 16;
+        }
+        else if (i < 48)
+        {
+            f = b ^ c ^ d;
+            g = (3 * i + 5) % 16;
+        }
+        else
+        {
+            f = c ^ (b | ~d);
+            g = (7 * i) % 16;
+        }
+        f += a + k_md5_sines[i] + m[g];
+        auto const shift = k_md5_shifts[(i / 16) * 4 + i % 4];
+        a = d;
+        d = c;
+        c = b;
+        b += (f << shift) | (f >> (32 - shift));
+    }
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+}
+
+void put_u32_le(byte* at, u32 value)
+{
+    for (auto i = 0; i < 4; ++i)
+        at[i] = byte((value >> (i * 8)) & 0xffu);
+}
 
 class byte_writer
 {
@@ -348,8 +419,8 @@ struct container_part
 
     auto out = byte_writer();
     out.u32_le(k_triple_dxbc);
-    for (auto i = 0; i < 16; ++i)
-        out.u8_le(k_bypass_digest);
+    for (auto i = 0; i < k_digest_size; ++i)
+        out.u8_le(0); // the digest, which covers what follows it and is written once that is
     out.u16_le(1);
     out.u16_le(0);
     out.u32_le(total);
@@ -366,7 +437,11 @@ struct container_part
         out.u32_le(u32(p.bytes.size()));
         out.append(p.bytes);
     }
-    return out.take();
+    auto container = out.take();
+    auto const digest = sgl::ir::dxbc_digest(container);
+    for (auto i = 0; i < k_digest_size; ++i)
+        container[k_digest_offset + i] = digest[i];
+    return container;
 }
 
 /// `RDAT`: the tables a state object reads a library by, which the validator builds again and compares.
@@ -511,4 +586,48 @@ cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
     parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
 
     return assembled(parts);
+}
+
+cc::fixed_array<byte, 16> sgl::ir::dxbc_digest(cc::span<byte const> container)
+{
+    CC_ASSERT(container.size() >= k_checksummed_from, "a DXBC container is at least its header's first 20 bytes");
+    auto const* const data = container.data() + k_checksummed_from;
+    auto const size = container.size() - k_checksummed_from;
+    // MD5 of what follows the digest, but for the last block: it leads with the bit count and ends with a second count,
+    // where MD5 pads to 56 bytes and ends with one
+    auto const bits = u32(size * 8);
+    auto const bits_at_end = (bits >> 2) | 1u;
+    u32 state[4] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
+    auto const whole = size - size % 64;
+    for (auto at = isize(0); at < whole; at += 64)
+        md5_block(state, data + at);
+
+    auto const left = size - whole;
+    byte block[64] = {};
+    if (left >= 56)
+    {
+        for (auto i = isize(0); i < left; ++i)
+            block[i] = data[whole + i];
+        block[left] = byte(0x80);
+        md5_block(state, block);
+        for (auto& b : block)
+            b = byte(0);
+        put_u32_le(block, bits);
+        put_u32_le(block + 60, bits_at_end);
+        md5_block(state, block);
+    }
+    else
+    {
+        put_u32_le(block, bits);
+        for (auto i = isize(0); i < left; ++i)
+            block[4 + i] = data[whole + i];
+        block[4 + left] = byte(0x80);
+        put_u32_le(block + 60, bits_at_end);
+        md5_block(state, block);
+    }
+
+    auto digest = cc::fixed_array<byte, 16>();
+    for (auto i = 0; i < 4; ++i)
+        put_u32_le(digest.data() + 4 * i, state[i]);
+    return digest;
 }

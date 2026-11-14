@@ -580,7 +580,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a l
 //
 // One SGL source serves both APIs, so the vulkan image is held to the dx12 hardware one to rounding.
 // Without a dx12 hardware device the vulkan images are held to being lit and finite alone.
-ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to rounding")
+ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to rounding", nx::config::thorough_only)
 {
     // what one SGL source traces on two APIs is the shader compiler's, which no preset's flags change
     if (nx::is_smoke())
@@ -650,7 +650,8 @@ cc::shared_async<cc::unit> held_to_dxc(sg::context_handle native, sg::context_ha
 } // namespace
 
 // The path tracer and every material's hit group through SGL's own DXIL and SPIR-V, each held to DXC's image on its API.
-ASYNC_TEST("sv - the path tracer through SGL's binary traces what DXC's traces, on dx12 and on vulkan")
+ASYNC_TEST("sv - the path tracer through SGL's binary traces what DXC's traces, on dx12 and on vulkan",
+           nx::config::thorough_only)
 {
     if (nx::is_smoke())
         SKIP("a smoke run: the default preset holds the routes to each other");

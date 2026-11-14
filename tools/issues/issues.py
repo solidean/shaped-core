@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6"]
 # ///
 
@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote
@@ -186,8 +187,6 @@ def _load_config(root: Path) -> Config:
     path = root / CONFIG_FILE
     if not path.is_file():
         return Config()
-    import tomllib  # Here rather than at the top, so dev.py can import this module on the Python 3.10 it still allows.
-
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:

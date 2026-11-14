@@ -27,6 +27,40 @@ struct cc::rec::thread_info
     cc::string_view name;
 };
 
+/// What an `event_kind::summary` event carries: many events of its site, folded.
+///
+/// A folded scope's values are durations in cycles; a folded stat's are its readings, or its deltas when it accumulates.
+/// `begin_cycles` and `end_cycles` are the first and the last folded event's own times; the event's timestamp may be later.
+struct cc::rec::summary
+{
+    u64 count = 0;
+    f64 sum = 0;
+    f64 min = 0;
+    f64 max = 0;
+    /// the last folded value, which is what a snapshot stat means at the end of the stretch
+    f64 last = 0;
+    u64 begin_cycles = 0;
+    u64 end_cycles = 0;
+
+    /// Folds `other`, which must come after this one in time, into this.
+    void merge(rec::summary const& other);
+};
+
+namespace cc::rec
+{
+/// The payload layout of every summary event, whatever its descriptor's own fields are.
+inline constexpr rec::field summary_fields[] = {
+    {.name = "count", .type = rec::type_code::u64_, .offset = 0, .size = 8},
+    {.name = "sum", .type = rec::type_code::f64_, .offset = 8, .size = 8},
+    {.name = "min", .type = rec::type_code::f64_, .offset = 16, .size = 8},
+    {.name = "max", .type = rec::type_code::f64_, .offset = 24, .size = 8},
+    {.name = "last", .type = rec::type_code::f64_, .offset = 32, .size = 8},
+    {.name = "begin_cycles", .type = rec::type_code::u64_, .offset = 40, .size = 8},
+    {.name = "end_cycles", .type = rec::type_code::u64_, .offset = 48, .size = 8},
+};
+static_assert(sizeof(rec::summary) == 56, "summary_fields must match the summary layout");
+} // namespace cc::rec
+
 /// One decoded event, borrowing the bytes it came from.
 struct cc::rec::event_view
 {
@@ -38,7 +72,11 @@ struct cc::rec::event_view
 
     // the descriptor, restated for readability at call sites
 public:
-    [[nodiscard]] rec::event_kind kind() const { return desc->kind; }
+    /// The descriptor's kind, or `summary` for a summary event, whose descriptor is the site it folds.
+    [[nodiscard]] rec::event_kind kind() const { return is_summary() ? rec::event_kind::summary : desc->kind; }
+    [[nodiscard]] bool is_summary() const { return (flags & rec::impl::flag_summary) != 0; }
+    /// The payload of a summary event, or empty for every other kind.
+    [[nodiscard]] cc::optional<rec::summary> as_summary() const;
     [[nodiscard]] rec::level level() const { return desc->lvl; }
     /// The site's name: the descriptor's, or the payload's for a CC_RECORD_NAMED site.
     ///
@@ -49,8 +87,11 @@ public:
     [[nodiscard]] rec::domain const* domain() const { return desc->dom; }
     [[nodiscard]] rec::unit const* quantity() const { return desc->quantity; }
     [[nodiscard]] rec::source_ref const& site() const { return desc->site; }
+    /// The payload's fields: the descriptor's, or `summary_fields` for a summary event.
     [[nodiscard]] cc::span<rec::field const> fields() const
     {
+        if (is_summary())
+            return rec::summary_fields;
         return cc::span<rec::field const>(desc->fields, isize(desc->field_count));
     }
 

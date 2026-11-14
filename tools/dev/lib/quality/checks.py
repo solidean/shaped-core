@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core import console, profile, ui
+from ..core import console, fail_fast, profile, ui
 from ..core.report import fmt_dur
 from .changes import ChangeScope, touched_paths
 from .memo import CheckMemo
@@ -196,6 +196,10 @@ def run_checks(
                 memo.record_gate(c.name, keys.get(c.name))
 
         def run_one(c: Check) -> None:
+            if fail_fast.aborted():
+                ui.write_line(console.yellow(f"\n--- skipped {c.name} ({fail_fast.reason()}) ---"))
+                gates.advance(c.name)
+                return
             if c.name in unbuilt:
                 ui.write_line(console.red(f"\n--- skipped {c.name} (its build failed) ---"))
                 gates.advance(c.name)
@@ -221,6 +225,8 @@ def run_checks(
                 if not ok:
                     failed.append(c.name)
                 remember(c, ok)
+            if not ok:
+                fail_fast.note_failure(c.name)
 
         # Mirrored output from several gates at once would interleave into noise, so those runs stay serial.
         workers = 1 if (mirror or verbose) else max(1, len(readers))

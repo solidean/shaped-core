@@ -202,7 +202,8 @@ ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean an
 
 ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean and its automatic exposure, in the "
                      "wavefront tracer",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     if (!sv_test::can_run(*ctx_h) || !ctx_h->supports(sg::feature::ray_query))
         SKIP("no inline ray tracing or no SGL compiler, so the view does not build");

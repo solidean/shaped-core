@@ -723,6 +723,50 @@ void record_leftover_release(void const*, i32 left, void* user)
 }
 #endif
 
+/// With CC_ASYNC_AMBIENT_TRACE, records every holder of a test's context while it lives, so a leftover names its holder.
+struct holder_tracking
+{
+    explicit holder_tracking(void const* head) : _head(head) { (void)cc::async_ambient_track_holders(head); }
+    ~holder_tracking() { cc::async_ambient_untrack_holders(_head); }
+
+    holder_tracking(holder_tracking const&) = delete;
+    holder_tracking& operator=(holder_tracking const&) = delete;
+
+private:
+    void const* _head = nullptr;
+};
+
+/// When the run began, for --stop-after; execute_tests anchors it before any test starts.
+double& run_started_at()
+{
+    static auto started = 0.0;
+    return started;
+}
+
+/// Whether --stop-after's time is up, so no further test starts.
+[[nodiscard]] bool is_past_stop_after(nx::test_schedule_config const& config)
+{
+    return config.stop_after_secs > 0.0 && cc::current_time_steady_secs() - run_started_at() >= config.stop_after_secs;
+}
+
+/// When the run's first check failed, in steady milliseconds, or 0 before one has; for --fail-grace.
+cc::atomic<i64> g_first_failure_ms = 0;
+
+void note_failure_for_fail_grace()
+{
+    auto expected = i64(0);
+    auto const now = cc::max(i64(cc::current_time_steady_secs() * 1000.0), i64(1));
+    (void)g_first_failure_ms.compare_exchange_strong(expected, now, cc::memory_order_relaxed);
+}
+
+/// Whether a check failed at least --fail-grace seconds ago, so no further test starts.
+[[nodiscard]] bool is_past_fail_grace(nx::test_schedule_config const& config)
+{
+    auto const first = g_first_failure_ms.load(cc::memory_order_relaxed);
+    return config.fail_grace_secs > 0.0 && first > 0
+        && cc::current_time_steady_secs() - f64(first) / 1000.0 >= config.fail_grace_secs;
+}
+
 /// Counts the work still carrying `head` beyond its owner's reference.
 /// With CC_ASYNC_AMBIENT_TRACE, leftover work is watched for leftover_watch_secs, and each release it makes is reported with its stack.
 /// The wait does not change the verdict: work there at the count failed the pass, whether it let go a microsecond later or never.
@@ -760,6 +804,11 @@ void record_leftover_release(void const*, i32 left, void* user)
             cc::format("{} of them still held it after {:.0f} ms (SC_ASYNC_AMBIENT_TRACE)", still_held, waited_ms));
     else
         result.detail.push_back(cc::format("all of them let go within {:.3f} ms (SC_ASYNC_AMBIENT_TRACE)", waited_ms));
+    for (auto const& stack : cc::async_ambient_tracked_holders(head))
+    {
+        result.detail.push_back("still held, by what took it here:");
+        result.detail.push_back(stack);
+    }
     watch.releases.lock(
         [&](cc::vector<leftover_watch::release>& releases)
         {
@@ -1196,6 +1245,10 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
         auto _ = scoped_test_assertion_handler();
         if (decl.test_config.thorough_only && !ctx.config->thorough)
             SKIP("runs only under --thorough");
+        else if (is_past_stop_after(*ctx.config))
+            SKIP("the run had reached its --stop-after time");
+        else if (is_past_fail_grace(*ctx.config))
+            SKIP("a check failed, and --fail-grace ended the run");
         else if (decl.is_invocable())
             decl.async_invocable_function(values, sink);
         else
@@ -1414,6 +1467,7 @@ void start_async_finish(async_test_state& state)
 /// Fold an async test's outcome into its execution and drop its context.
 void finish_async_test(async_test_state& state)
 {
+    cc::async_ambient_untrack_holders(state.ambient.head());
     test_execute_end(cc::move(state.ctx), state.leaked);
     state.execution->finished_at_steady_s = cc::current_time_steady_secs();
 
@@ -1465,6 +1519,7 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         // Pushed and popped inside this one poll, which is the only shape async_ambient_scope allows, and kept alive past it by `ambient`.
         cc::async_ambient_scope const scope(nx::impl::test_ambient_tag(), state.ctx.get());
         state.ambient = cc::async_ambient_handle();
+        (void)cc::async_ambient_track_holders(state.ambient.head());
 
         start_async_pass(state);
     }
@@ -2120,6 +2175,9 @@ void nx::impl::report_check_result(check_result result)
         return;
     }
 
+    if (!result.passed && result.op != cmp_op::skip)
+        note_failure_for_fail_grace();
+
     // Reported from somewhere other than the test's own body: a pool worker driving its nodes, or a thread it started.
     // Counted on the side, and filed under the running pass's leaf when the pass ends.
     if (!is_own_test_body(&ctx))
@@ -2389,6 +2447,8 @@ void nx::impl::run_test_body(nx::test_execution& execution,
     execution.started_at_steady_s = cc::current_time_steady_secs();
     execution.thread = u64(cc::current_thread_id());
     auto const skip_as_not_thorough = decl.test_config.thorough_only && !config.thorough;
+    auto const skip_as_stopped = is_past_stop_after(config);
+    auto const skip_as_failed_before = is_past_fail_grace(config);
 
     // Set up test context for check reporting
     auto owned_ctx = test_execute_begin(execution, config, section_scopes, filter_offset);
@@ -2407,6 +2467,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
         nx::impl::recorder_handover_scope const handover(decl.test_config.owns_recorder);
 
         cc::async_ambient_scope const test_ambient(nx::impl::test_ambient_tag(), &ctx);
+        holder_tracking const tracking(test_ambient.link());
         scoped_body const own_body(&ctx); // this thread is inside ctx's body from here until the replay loop ends
 
         auto* const crash_slot = running_test_slot_for_this_thread();
@@ -2442,6 +2503,10 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                     auto _ = scoped_test_assertion_handler(); // a failing CC_ASSERT aborts the body like a REQUIRE
                     if (skip_as_not_thorough)
                         SKIP("runs only under --thorough");
+                    else if (skip_as_stopped)
+                        SKIP("the run had reached its --stop-after time");
+                    else if (skip_as_failed_before)
+                        SKIP("a check failed, and --fail-grace ended the run");
                     else
                         body();
                 }
@@ -2879,6 +2944,7 @@ void finish_run(nx::test_schedule_execution& result, nx::test_schedule_config co
 nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, test_schedule_config const& config)
 {
     scoped_execution_depth const depth_guard;
+    run_started_at() = cc::current_time_steady_secs();
 
     test_schedule_execution result;
 

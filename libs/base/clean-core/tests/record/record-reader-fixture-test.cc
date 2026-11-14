@@ -333,7 +333,12 @@ REC_TEST("record/serialize - the Python reader's fixture round-trips through the
         main_body();
         cc::rec::flush_blocking();
     }
-    auto const live = rl.take();
+    auto live = rl.take();
+
+    // Summaries too, which only a compaction writes: every stat lane folded once more, as a block of its own.
+    auto const stats = live.stats_summarized(u64(1) << 62).of_kind(cc::rec::event_kind::summary);
+    REQUIRE(stats.event_count() > 0);
+    live.append(stats);
 
     auto const dir = cc::environment_variable("CC_REC_READER_FIXTURE_DIR");
     auto const keep = dir.has_value();
@@ -342,7 +347,9 @@ REC_TEST("record/serialize - the Python reader's fixture round-trips through the
     auto const manifest_path
         = keep ? cc::format("{}/fixture.manifest", dir.value()) : cc::temp_file_path("cc-record-reader", ".manifest");
 
-    REQUIRE(cc::rec::save_recording(live, recording_path).has_value());
+    // Compressed, so both readers take the envelope as well as what is inside it.
+    REQUIRE(cc::rec::save_serialized_recording(cc::rec::compress_serialized(cc::rec::serialize(live)), recording_path)
+                .has_value());
     auto loaded = cc::rec::load_recording(recording_path);
     REQUIRE(loaded.has_value());
 

@@ -674,7 +674,7 @@ struct async_unresolved
     ///
     /// This is the single release site, and it covers all three ways an arm ends: resolved with a value, resolved with an error, and torn down cold or parked.
     /// Pairing it with the write sites here rather than at those three call sites is what makes the count exactly-once by construction.
-    ~async_unresolved() { impl::async_ambient_release(ambient); }
+    ~async_unresolved() { impl::async_ambient_release(ambient, static_cast<void const*>(&ambient)); }
 
     // Declaring the destructor suppresses the implicit move ctor, which the two heads would otherwise supply.
     // Nothing moves an arm — it is placement-constructed in the payload and stays there — so make that explicit rather than leave it a side effect.

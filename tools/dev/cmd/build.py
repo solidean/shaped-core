@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tools import dev
 
+from ..lib.core import fail_fast
 from . import args as a
 from .context import Context
 
@@ -71,6 +72,9 @@ def _object_targets(args: argparse.Namespace, ctx: Context, preset) -> list[str]
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     server = ctx.build_server(args)
+    # --keep-going asks for every error the build has, so a failure ends nothing early.
+    if args.keep_going:
+        fail_fast.disable()
 
     if args.files:
         # Objects are per-build-dir paths, so each preset resolves its own rather than sharing one list.

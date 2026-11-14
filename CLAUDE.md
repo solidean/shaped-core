@@ -11,7 +11,7 @@ A library's entry below is a few lines, written for whoever *uses* the library; 
 **shaped-core** is a collection of foundational C++ libraries by Shaped Code, powering SOLIDEAN, internal tools, customer projects, and research.
 
 * C++23, CMake (>= 3.28), presets per platform/compiler (MSVC / Clang / GCC across Windows / Linux / macOS / Android).
-* [dev.py](dev.py) is the unified build & test driver, run via `uv` (Python 3.12+) — see the `building-and-testing` skill.
+* [dev.py](dev.py) is the unified build & test driver, run via `uv` (Python 3.14+) — see the `building-and-testing` skill.
 * The library set is **growing** — the list below is current, not exhaustive.
 
 ---
@@ -465,6 +465,7 @@ That is history, not a counter-example.
 * Keep wording the user deliberately set.
 
 Helper scripts (Python): uv-run shebang with PEP 723 inline dependency metadata, matching [dev.py:1-5](dev.py#L1-L5); invoke as `uv run <script>.py`.
+Every script declares `requires-python = ">=3.14"`, the one floor the repo's Python has.
 
 ---
 
@@ -554,6 +555,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
 | Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Find why a test is slow          | `uv run dev.py test "<pattern>" --sample` (prints where the busy time went, by self and total; keeps `<binary>.ccrec`) |
+| Analyze a `.ccrec` recording     | a short script over clean-core's `ccrec` package — the `analyzing-recordings` skill |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Compile an SGL file to target text | `uv run dev.py run sgl -- emit <file.sgl> --entry <name> --target <t>` (`hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`) |

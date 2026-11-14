@@ -1,5 +1,7 @@
 // differential: setup floats
+// differential: routes ulps 8
 // differential: across relative 0.0001
+// The routes' bound is EVAL-6's at `.fast`: a determinant sums 24 products a target may contract and reorder, and on AMD its two routes do, 3 ulps apart.
 // Across implementations: a product of two matrices sums four products of values up to 64 before applying them.
 // Matrix work as a transform hierarchy does it: products, a matrix applied to a point, a transpose, and a determinant.
 use diff_floats

@@ -20,6 +20,7 @@ The static gates run as always; any problem with the server runs the full gate i
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ from pathlib import Path
 from tools import dev
 from tools.dev import console
 
+from ..lib.core import fail_fast
 from ..lib.pipeline import build_server
 from ..lib.pipeline import test as pipeline_test
 from ..lib.project import submodules as lib
@@ -198,10 +200,18 @@ def _prove(ctx: Context, server: build_server.Session) -> bool | None:
     if not all(r.ok for r in results):
         dev.report.print_build_failure(results, [preset], ctx.root)
         return False
-    proof = server.proof(preset.build_dir, env=pipeline_test.server_env(preset, ctx.root),
-                         progress=lambda line: dev.ui.write_line(console.dim(f"  {line}")))
-    if proof is None:
-        return None
+    # A red test in a proof may be the remote's rather than this change's, which is what the proof and the run at the
+    # change's base settle; neither may be cut short by a red they exist to judge.
+    with fail_fast.exempt():
+        proof = server.proof(preset.build_dir, env=pipeline_test.server_env(preset, ctx.root),
+                             progress=lambda line: dev.ui.write_line(console.dim(f"  {line}")))
+        if proof is None:
+            return None
+        return _judge(ctx, preset, proof)
+
+
+def _judge(ctx: Context, preset, proof) -> bool:
+    """What a finished proof means for the push, once its reds have run at the change's base."""
     plan = proof.report.get("plan") or {}
     ran = proof.report.get("ran") or []
     _say(f"proof: {proof.report.get('declared', 0)} test(s), {len(plan.get('must_run') or [])} without a green result ran, "
@@ -287,7 +297,9 @@ def _red_at_base(ctx: Context, preset, base: str, reds: list[dict]) -> dict[tupl
         _say(f"{preset.build_dir} is outside the checkout, so the base worktree has no build dir to mirror it")
         return {}
     def dev(*args: str) -> int:
+        # DEV_FAIL_FAST=0: the reds are what this run is for, so one of them must not end it.
         return subprocess.run(["uv", "run", "dev.py", *args, "--preset", preset.name], cwd=str(wt),
+                              env={**os.environ, "DEV_FAIL_FAST": "0"},
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
 
     def run(rs: list[dict]) -> dict[tuple[str, str], bool | None]:

@@ -5,7 +5,9 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/pair.hh>
 #include <clean-core/record/domain.hh>
+#include <clean-core/record/impl/block_builder.hh>
 #include <clean-core/record/overhead.hh>
+#include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/trace.hh>
 
@@ -37,69 +39,7 @@ constexpr cc::rec::desc dropped_span_desc = {
     .fixed_payload_size = sizeof(dropped_span_payload),
 };
 
-/// Builds one synthesized block out of a sequence of events copied from `source`.
-///
-/// The events a filter keeps are no longer contiguous, so they are copied into a buffer of their own.
-/// That also means the result stops pinning the chunk it came from, which is usually what a caller narrowing a
-/// capture down wanted anyway.
-struct block_builder
-{
-    explicit block_builder(cc::rec::recorded_block const& source) : _template(&source) {}
-
-    void add(cc::rec::event_view const& e)
-    {
-        auto const header_bytes = isize(sizeof(cc::rec::impl::event_header));
-        auto const total = cc::rec::impl::event_bytes_for(e.payload.size());
-
-        auto const offset = _bytes.size();
-        _bytes.resize_to_uninitialized(offset + total);
-
-        auto header = cc::rec::impl::event_header{
-            .desc = e.desc,
-            .cycles = e.cycles,
-            .payload_size = u32(e.payload.size()),
-            .core = u16(e.core),
-            .flags = e.flags,
-        };
-        cc::memcpy(_bytes.data() + offset, &header, sizeof(header));
-        if (!e.payload.empty())
-            cc::memcpy(_bytes.data() + offset + header_bytes, e.payload.data(), size_t(e.payload.size()));
-
-        ++_count;
-    }
-
-    [[nodiscard]] bool empty() const { return _count == 0; }
-
-    /// Hands back the finished block, leaving the builder empty.
-    [[nodiscard]] cc::rec::recorded_block take()
-    {
-        auto const owned = cc::make_pinned_data(cc::move(_bytes)).reinterpret_as<byte const>();
-
-        auto block = cc::rec::recorded_block{
-            .owned = owned,
-            .from = 0,
-            .to = u32(owned.size()),
-            .thread_id = _template->thread_id,
-            .thread_index = _template->thread_index,
-            .thread_name = _template->thread_name,
-            .chunk_seq = _template->chunk_seq,
-            .layer = _template->layer,
-            .base_cycles = _template->base_cycles,
-            .base_wall_secs = _template->base_wall_secs,
-            .seal_cycles = _template->seal_cycles,
-            .seal_wall_secs = _template->seal_wall_secs,
-        };
-
-        _bytes = {};
-        _count = 0;
-        return block;
-    }
-
-private:
-    cc::rec::recorded_block const* _template;
-    cc::vector<byte> _bytes;
-    isize _count = 0;
-};
+using cc::rec::impl::block_builder;
 
 /// One event plus where it came from, so a query can order across blocks.
 struct located_event
@@ -305,6 +245,18 @@ cc::rec::recording cc::rec::recording::from_domain(cc::string_view name) const
 cc::rec::recording cc::rec::recording::of_kind(cc::rec::event_kind k) const
 {
     return filtered([k](rec::chunk_view const&, rec::event_view const& e) { return e.kind() == k; });
+}
+
+cc::rec::recording cc::rec::recording::without_sampling() const
+{
+    auto const run_name = cc::string_view(rec::impl::thread_run_desc().name);
+    auto const tick_name = cc::string_view(rec::impl::sample_tick_scope_name);
+    return filtered(
+        [run_name, tick_name](rec::chunk_view const&, rec::event_view const& e)
+        {
+            auto const name = cc::string_view(e.desc->name);
+            return e.kind() != rec::event_kind::sample && name != run_name && name != tick_name;
+        });
 }
 
 cc::rec::recording cc::rec::recording::in_cycle_range(u64 begin_cycles, u64 end_cycles) const

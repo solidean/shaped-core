@@ -102,6 +102,23 @@ class StatRow(Attributed):
 
 
 @dataclass(slots=True)
+class SummaryRow(Attributed):
+    """Many events of one site folded by a compaction: a scope's durations in cycles, or a stat's readings or deltas.
+
+    `folds` is the kind of the site folded, `scope_begin` for a collapsed scope; `begin_cycles` and `end_cycles` are the first and last folded event's own times.
+    """
+
+    folds: EventKind | int = EventKind.invalid
+    count: int = 0
+    sum: float = 0.0
+    min: float = 0.0
+    max: float = 0.0
+    last: float = 0.0
+    begin_cycles: int = 0
+    end_cycles: int = 0
+
+
+@dataclass(slots=True)
 class MarkerRow(Attributed):
     """A marker: this code ran."""
 
@@ -205,6 +222,7 @@ class Analysis:
     scopes: list[ScopeInterval] = field(default_factory=list)
     values: list[ValueRow] = field(default_factory=list)
     stats: list[StatRow] = field(default_factory=list)
+    summaries: list[SummaryRow] = field(default_factory=list)
     markers: list[MarkerRow] = field(default_factory=list)
     logs: list[LogRow] = field(default_factory=list)
     samples: list[SampleRow] = field(default_factory=list)
@@ -263,13 +281,29 @@ class Analysis:
         return out[::-1]
 
     def total_cycles_by_name(self, *, threads: Iterable[int] | None = None) -> dict[str, int]:
-        """Summed closed-scope durations per name; nested scopes of one name count once per level."""
+        """Summed closed-scope durations per name, collapsed scopes' summaries included; nested scopes of one name count once per level."""
         keep = None if threads is None else set(threads)
         out: dict[str, int] = {}
         for s in self.scopes:
             if s.end_cycles is None or (keep is not None and s.thread.index not in keep):
                 continue
             out[s.name] = out.get(s.name, 0) + s.end_cycles - s.begin_cycles
+        for m in self.summaries:
+            if m.folds != EventKind.scope_begin or (keep is not None and m.thread.index not in keep):
+                continue
+            out[m.name] = out.get(m.name, 0) + int(m.sum)
+        return out
+
+    def counts_by_name(self, *, threads: Iterable[int] | None = None) -> dict[str, int]:
+        """How many closed scopes of each name ran, collapsed scopes' summaries included."""
+        keep = None if threads is None else set(threads)
+        out: dict[str, int] = {}
+        for s in self.scopes:
+            if s.end_cycles is not None and (keep is None or s.thread.index in keep):
+                out[s.name] = out.get(s.name, 0) + 1
+        for m in self.summaries:
+            if m.folds == EventKind.scope_begin and (keep is None or m.thread.index in keep):
+                out[m.name] = out.get(m.name, 0) + m.count
         return out
 
     def off_cpu(self, *, max_ran_ratio: float = 0.5) -> list[ThreadRunRow]:
@@ -369,7 +403,13 @@ def analyze(recording: Recording) -> Analysis:
 
             last_log = None
 
-            if kind in (EventKind.stat_snapshot, EventKind.stat_accumulate):
+            if kind == EventKind.summary:
+                f = e.fields()
+                a.summaries.append(SummaryRow(**common, folds=e.desc.kind, count=f.get("count") or 0,
+                                              sum=f.get("sum") or 0.0, min=f.get("min") or 0.0, max=f.get("max") or 0.0,
+                                              last=f.get("last") or 0.0, begin_cycles=f.get("begin_cycles") or 0,
+                                              end_cycles=f.get("end_cycles") or 0))
+            elif kind in (EventKind.stat_snapshot, EventKind.stat_accumulate):
                 a.stats.append(StatRow(**common, value=e.field("value"), unit=e.desc.unit,
                                        accumulate=kind == EventKind.stat_accumulate))
             elif kind == EventKind.marker:

@@ -241,6 +241,9 @@ inline constexpr isize thread_run_payload_size = 32;
 /// The descriptor every `record.thread_run` is written through, a value event of the system domain.
 [[nodiscard]] rec::desc const& thread_run_desc();
 
+/// The scope each of the sampler's ticks records on its own thread, the literal in sampling.cc's CC_RECORD_SCOPE.
+inline constexpr char const* sample_tick_scope_name = "record.sample_tick";
+
 /// What `thread_index` says when the sampled thread has no stream of its own.
 /// Its `native_tid` is then the only identity it has, and there is nothing to anchor into.
 inline constexpr u32 sample_unknown_thread = ~u32(0);

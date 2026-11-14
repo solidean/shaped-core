@@ -400,7 +400,8 @@ cc::shared_async<cc::unit> hold_still(sg::context& ctx,
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv temporal - a still denoised image stops changing as its mean converges",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))
