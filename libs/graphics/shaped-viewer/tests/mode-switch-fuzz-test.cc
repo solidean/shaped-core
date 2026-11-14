@@ -181,7 +181,8 @@ cc::shared_async<f32> run_frames(session& s, int frames, bool moving, cc::random
 
 ASYNC_INVOCABLE_TEST("sv fuzz - any sequence of renderer, lighting, denoiser and camera changes keeps every frame "
                      "whole",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!agreement::can_trace(ctx))

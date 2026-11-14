@@ -45,7 +45,8 @@ ASYNC_INVOCABLE_TEST("sv agreement - the comparison tells the Cornell box's dire
 }
 
 ASYNC_INVOCABLE_TEST("sv agreement - the wavefront converges to the megakernel's Cornell box, tile by tile",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     nx::config::thorough_only)
 {
     auto& ctx = *ctx_h;
     if (!can_trace(ctx))
