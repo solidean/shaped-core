@@ -3084,7 +3084,8 @@ def serve_fixture(root: Path):
     app = ReviewApp(repo, paths, Watcher(paths))
     # Port 0 lets the OS pick, so two suites running at once cannot collide.
     server = Server(("127.0.0.1", 0), app)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # Polled often, since shutdown() waits out the poll interval, half a second by default, in every test that serves.
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_port}", app
 
 
@@ -3349,21 +3350,34 @@ def test_a_dev_py_example_runs_with_its_output_mirrored(root: Path) -> None:
 # ---- harness ----------------------------------------------------------------
 
 
-def main() -> int:
-    tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
-    failed = 0
-    for test in tests:
-        with tempfile.TemporaryDirectory(prefix="review-self-test-") as workdir:
-            try:
-                test(Path(workdir))
-            except Exception as e:  # noqa: BLE001 — a self-test reports every failure rather than stopping at the first.
-                failed += 1
-                print(f"FAIL {test.__name__}: {type(e).__name__}: {e}")
-            else:
-                if VERBOSE:
-                    print(f"ok   {test.__name__}")
+def _run_one(name: str) -> str | None:
+    """Runs one test in a directory of its own; its failure as text, or None when it passed."""
+    with tempfile.TemporaryDirectory(prefix="review-self-test-") as workdir:
+        try:
+            globals()[name](Path(workdir))
+        except Exception as e:  # noqa: BLE001 — a self-test reports every failure rather than stopping at the first.
+            return f"{type(e).__name__}: {e}"
+    return None
 
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+
+def main() -> int:
+    names = [name for name in sorted(globals()) if name.startswith("test_")]
+    # Each test in a process of its own, side by side: every one works in its own directory on an ephemeral port,
+    # and one after another the suite spent most of its 45 s waiting on git and on subprocesses.
+    from concurrent.futures import ProcessPoolExecutor
+    import os
+
+    with ProcessPoolExecutor(max_workers=min(len(names), os.cpu_count() or 4, 16)) as pool:
+        results = list(pool.map(_run_one, names))
+    failed = 0
+    for name, error in zip(names, results):
+        if error is not None:
+            failed += 1
+            print(f"FAIL {name}: {error}")
+        elif VERBOSE:
+            print(f"ok   {name}")
+
+    print(f"\n{len(names) - failed}/{len(names)} passed")
     return 1 if failed else 0
 
 
