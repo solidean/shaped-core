@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # ///
 
 """Install test: build a library subset with SC_INSTALL, install it, and build a consumer against the installed package.

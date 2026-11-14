@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.14"
 # dependencies = ["matplotlib>=3.7"]
 # ///
 """Run the node-allocation design benchmark and plot the fast-path variants.

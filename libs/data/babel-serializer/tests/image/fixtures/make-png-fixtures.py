@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.14"
 # ///
 """Generate the PNG decode fixtures babel's own encoder cannot produce.
 

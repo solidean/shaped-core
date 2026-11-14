@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.14"
 # ///
 
 """Self-test for tools/dev/lib/pipeline/build_server.py — when a build or test run goes through the optional build server, and when it falls back.
