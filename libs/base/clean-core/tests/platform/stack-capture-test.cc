@@ -9,6 +9,10 @@
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
+#if defined(_WIN32)
+#include <clean-core/platform/win32_sanitized.hh> // RUNTIME_FUNCTION and CONTEXT, for a hand-made function table
+#endif
+
 
 using namespace cc::primitive_defines;
 
@@ -370,6 +374,30 @@ TEST("stack capture - the available walk matches the platform")
     CHECK(!chase);
 #endif
 }
+
+#if defined(_WIN32) && !defined(CC_ARCH_ARM64)
+TEST("stack capture - a function entry chained to itself ends the walk instead of looping")
+{
+    // A module's function table as a stale snapshot may read it: one entry whose chain points back at itself.
+    alignas(16) static byte image[4096] = {};
+    auto* const entry = reinterpret_cast<RUNTIME_FUNCTION*>(image);
+    entry->BeginAddress = 0x100;
+    entry->EndAddress = 0x200;
+    entry->UnwindData = 0 | 1;
+
+    auto const base = u64(reinterpret_cast<uintptr_t>(image));
+    auto snapshot = cc::unwind_snapshot();
+    snapshot.modules.push_back({.base = base, .end = base + sizeof(image), .functions = image, .function_count = 1});
+
+    CONTEXT ctx = {};
+    ctx.Rip = base + 0x150;
+    ctx.Rsp = u64(reinterpret_cast<uintptr_t>(&ctx));
+    void* frames[8] = {};
+    auto const r = cc::capture_stack_from_native_context(&ctx, snapshot, frames);
+    CHECK(r.count == 1); // the start pc, then nothing it could unwind
+    CHECK(r.broken);
+}
+#endif
 
 // wasm has no walkable native stack, so its capture goes through the JS engine's frame text and the parser in
 // platform/impl/wasm_frames.hh.
