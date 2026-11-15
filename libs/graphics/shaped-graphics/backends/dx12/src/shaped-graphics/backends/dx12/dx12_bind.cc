@@ -3,6 +3,7 @@
 // Plus the sg::context override forwarders, which unpack the description and downcast the abstract layout handles.
 
 #include <clean-core/common/profiling.hh>
+#include <clean-core/record/value.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
@@ -18,6 +19,23 @@
 #include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
+
+namespace
+{
+/// Names a shader a pipeline create builds, inside its scope, so a recording tells one slow create from the rest.
+void record_pipeline_shader(sg::compiled_shader const& shader)
+{
+    CC_RECORD("sg.pipeline.entry_point", cc::string_view(shader.entry_point));
+    CC_RECORD("sg.pipeline.bytecode_bytes", shader.bytecode.size());
+}
+
+/// Whether a create was handed a cached blob, and whether the driver took it: the persistent tier's hit, as it landed.
+void record_cached_blob_use(bool offered, bool used)
+{
+    CC_RECORD("sg.pipeline.cached_blob_offered", offered);
+    CC_RECORD("sg.pipeline.cached_blob_used", used);
+}
+} // namespace
 
 namespace sg::backend::dx12
 {
@@ -48,7 +66,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_context::create_dx12_pipeline_layou
 {
     require_persistent(scope);
     return dx12_pipeline_layout::create(_device.Get(), desc.groups, desc.static_samplers, desc.inline_constants,
-                                        desc.dispatch_grid, desc.mesh_polyfill);
+                                        desc.dispatch_grid, desc.mesh_polyfill, this);
 }
 
 cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipeline(sg::compiled_shader const& shader,
@@ -59,9 +77,13 @@ cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipel
     // Pipeline creation is the multi-millisecond one: the driver compiles here, and a cached blob is the difference
     // between a stutter and none.
     CC_RECORD_SCOPE("sg.pipeline.compute.create");
+    record_pipeline_shader(shader);
 
     require_persistent(scope);
-    return dx12_compute_pipeline::create(_device.Get(), cc::move(layout), shader, cached_pipeline);
+    auto pipeline = dx12_compute_pipeline::create(_device.Get(), cc::move(layout), shader, cached_pipeline);
+    if (pipeline.has_value())
+        record_cached_blob_use(!cached_pipeline.empty(), pipeline.value()->used_cached_pipeline());
+    return pipeline;
 }
 
 cc::result<dx12_raster_pipeline_handle> dx12_context::create_dx12_raster_pipeline(sg::raster_pipeline_description const& desc,
@@ -69,9 +91,17 @@ cc::result<dx12_raster_pipeline_handle> dx12_context::create_dx12_raster_pipelin
                                                                                   sg::lifetime_scope scope)
 {
     CC_RECORD_SCOPE("sg.pipeline.raster.create");
+    record_pipeline_shader(desc.vertex_shader);
+    if (desc.fragment_shader.has_value())
+        record_pipeline_shader(desc.fragment_shader.value());
+    if (desc.mesh_shader.has_value())
+        record_pipeline_shader(desc.mesh_shader.value());
 
     require_persistent(scope);
-    return dx12_raster_pipeline::create(_device.Get(), cc::move(layout), desc);
+    auto pipeline = dx12_raster_pipeline::create(_device.Get(), cc::move(layout), desc);
+    if (pipeline.has_value())
+        record_cached_blob_use(!desc.cached_pipeline.empty(), pipeline.value()->used_cached_pipeline());
+    return pipeline;
 }
 
 cc::result<dx12_raytracing_pipeline_handle> dx12_context::create_dx12_raytracing_pipeline(
@@ -80,6 +110,8 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_context::create_dx12_raytracing
     sg::lifetime_scope scope)
 {
     CC_RECORD_SCOPE("sg.pipeline.raytracing.create");
+    for (auto const& raygen : desc.raygen_shaders)
+        record_pipeline_shader(raygen);
 
     require_persistent(scope);
     return dx12_raytracing_pipeline::create(_device.Get(), cc::move(layout), desc,

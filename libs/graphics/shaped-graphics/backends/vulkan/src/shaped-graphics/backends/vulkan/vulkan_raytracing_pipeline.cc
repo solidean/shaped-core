@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/assertf.hh>
-#include <clean-core/common/utility.hh> // cc::memcpy
+#include <clean-core/common/utility.hh>                               // cc::memcpy
+#include <shaped-graphics/backends/vulkan/vulkan_compute_pipeline.hh> // is_usable_pipeline_cache_blob
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -54,6 +55,16 @@ cc::result<vulkan_raytracing_pipeline_handle> vulkan_raytracing_pipeline::create
 
     auto pipeline = std::make_shared<vulkan_raytracing_pipeline>(ctx);
     pipeline->layout = cc::move(vk_layout);
+
+    bool const usable = !desc.cached_pipeline.empty() && is_usable_pipeline_cache_blob(ctx, desc.cached_pipeline.span());
+    auto const cache_info = VkPipelineCacheCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+        .initialDataSize = usable ? size_t(desc.cached_pipeline.size()) : 0,
+        .pInitialData = usable ? desc.cached_pipeline.data() : nullptr,
+    };
+    if (VkResult const r = vkCreatePipelineCache(ctx._device, &cache_info, nullptr, &pipeline->_cache); r != VK_SUCCESS)
+        return vulkan_error(r, "vkCreatePipelineCache failed");
+    pipeline->_used_cached_pipeline = usable;
 
     cc::vector<staged_module> modules;
     cc::vector<VkShaderStageFlagBits> stage_bits;
@@ -209,8 +220,8 @@ cc::result<vulkan_raytracing_pipeline_handle> vulkan_raytracing_pipeline::create
     VkResult r = VK_SUCCESS;
     {
         sg::impl::raytracing_driver_hold const driver_guard;
-        r = ctx._raytracing_functions.create_raytracing_pipelines(ctx._device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &info,
-                                                                  nullptr, &pipeline->_pipeline);
+        r = ctx._raytracing_functions.create_raytracing_pipelines(ctx._device, VK_NULL_HANDLE, pipeline->_cache, 1,
+                                                                  &info, nullptr, &pipeline->_pipeline);
     }
     if (r != VK_SUCCESS)
         return vulkan_error(r, "vkCreateRayTracingPipelinesKHR failed");
@@ -254,15 +265,38 @@ cc::span<byte const> vulkan_raytracing_pipeline::callable_handle(sg::callable_sh
     return handle_at(_group_handles, _handle_size, _callable_base, int(h), _group_count - _callable_base);
 }
 
+cc::pinned_data<byte const> vulkan_raytracing_pipeline::cached_pipeline_data() const
+{
+    if (_cache == VK_NULL_HANDLE)
+        return {};
+
+    size_t size = 0;
+    if (vkGetPipelineCacheData(_ctx._device, _cache, &size, nullptr) != VK_SUCCESS || size == 0)
+        return {};
+
+    auto data = cc::pinned_data<byte>::create_uninitialized(isize(size));
+    if (vkGetPipelineCacheData(_ctx._device, _cache, &size, data.data()) != VK_SUCCESS)
+        return {};
+    return data;
+}
+
 void vulkan_raytracing_pipeline::release_backend_objects()
 {
-    if (_pipeline == VK_NULL_HANDLE)
+    if (_pipeline == VK_NULL_HANDLE && _cache == VK_NULL_HANDLE)
         return;
 
     vulkan_expiring_resource expiring;
     auto* const device = &_ctx._device;
-    expiring.finalizers.push_back([device, pipeline = _pipeline] { vkDestroyPipeline(*device, pipeline, nullptr); });
+    expiring.finalizers.push_back(
+        [device, pipeline = _pipeline, cache = _cache]
+        {
+            if (pipeline != VK_NULL_HANDLE)
+                vkDestroyPipeline(*device, pipeline, nullptr);
+            if (cache != VK_NULL_HANDLE)
+                vkDestroyPipelineCache(*device, cache, nullptr);
+        });
     _pipeline = VK_NULL_HANDLE;
+    _cache = VK_NULL_HANDLE;
     _ctx.schedule_deferred_deletion(cc::move(expiring));
 }
 

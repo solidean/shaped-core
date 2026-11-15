@@ -2,6 +2,7 @@
 
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/linalg/quat.hh>
@@ -148,10 +149,12 @@ ASYNC_INVOCABLE_TEST("sv invariant - a scene with nothing lit is black in every 
          .lighting = sv::hybrid_lighting::deferred,
          .fallback_light = false},
     };
+    // 4 samples a pixel in a default run, 16 under --thorough.
+    auto const samples = nx::is_thorough() ? 16u : 4u;
     for (auto const& m : modes)
     {
         auto const c
-            = co_await agreement::converge(ctx, resources, unlit, box_camera(), m, 16, 0, agreement::k_size, true);
+            = co_await agreement::converge(ctx, resources, unlit, box_camera(), m, samples, 0, agreement::k_size, true);
         auto lit = 0;
         for (auto i = isize(0); i < c.first.size(); ++i)
             lit += c.first[i][0] != 0.0f || c.first[i][1] != 0.0f || c.first[i][2] != 0.0f ? 1 : 0;

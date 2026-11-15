@@ -194,6 +194,11 @@ private:
     void raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
                                          sg::impl::geometry_polyfill_draw const& draw) override;
     void raster_draw_geometry_meshed(sg::impl::geometry_polyfill_draw const& draw) override;
+    // What an indexed draw over a strip finds at sg_geometry_strip: the windows the strip scan writes first, outside the
+    // pass, which `reader` then reads; every other draw finds its own values there, which nothing reads.
+    void bind_geometry_strip(sg::impl::geometry_polyfill_draw const& draw,
+                             u64 draw_address,
+                             sg::pipeline_stage_flag reader);
     void raster_draw_tessellation_polyfilled(sg::impl::tessellation_polyfill_state const& polyfill,
                                              sg::impl::geometry_polyfill_draw const& draw) override;
     void raster_draw_indexed(draw_indexed_config const& config) override;

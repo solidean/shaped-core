@@ -322,3 +322,28 @@ REC_TEST("record/async-scope - a scope OPENED INSIDE a coroutine survives the su
     CHECK(after_suspend == "opened-inside"); // the scope is still the innermost one after the suspend
     CHECK(ambient_changes(r) >= 2);
 }
+
+REC_TEST("record/async-scope - an open scope begins when made and ends when closed, once, installing nothing")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto scope = cc::rec::open_async_scope();
+    auto const r = capture(
+        [&]
+        {
+            scope = CC_RECORD_ASYNC_SCOPE_OPEN("pass");
+            CHECK(scope.is_open());
+            CHECK(cc::rec::current_async_scope() == nullptr);
+            CHECK(cc::rec::current_trace_id() == cc::rec::trace_id::none);
+
+            // Moved, it is still one scope: one end, from whichever holds it last.
+            auto moved = cc::move(scope);
+            CHECK(!scope.is_open());
+            moved.close();
+            moved.close();
+            CHECK(!moved.is_open());
+        });
+
+    CHECK(r.count_of_kind(cc::rec::event_kind::async_scope_begin) == 1);
+    CHECK(r.count_of_kind(cc::rec::event_kind::async_scope_end) == 1);
+}

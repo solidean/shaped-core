@@ -229,15 +229,47 @@ cc::result<flat_entry_point, cc::string> geometry_as(checked_module const& m,
         body.push_back(out.if_(w.binary("greater_equal_uint", t, total), ends));
     }
 
+    // A strip's primitive `p` starts at position `p`, and an odd triangle of one swaps its first two corners, so every
+    // one winds alike; a list's starts at `p * corners`.
+    // An indexed strip's restart index ends one strip and begins the next: the strip scan says what each window makes,
+    // its id among the draw's primitives and its parity within its strip, or nothing where a restart lies in it.
+    // Every other window `p` is primitive `p`, its parity `p`'s.
+    auto const in_strip = w.bound("geometry_strip_draw", w.binary("not_equal_uint", draw_value(1, 3), w.word(0)), body);
+    auto const pick = [&](flat_expr_id condition, flat_expr_id a, flat_expr_id b)
+    {
+        flat_expr_id const arguments[] = {condition, a, b};
+        return out.call("select", arguments);
+    };
+    auto const window = var_of(
+        "geometry_window", w.uint_type(),
+        w.binary("bit_or_uint", w.binary("shift_left_uint", p, w.word(1)), w.binary("bit_and_uint", p, w.word(1))), body);
+    {
+        auto scanned = stmt_list();
+        scanned.push_back(out.assign(out.local(window), w.at_of(listed(out, "sg_geometry_strip"), p)));
+        flat_stmt_id const ends[] = {out.return_(flat_expr_id::none)};
+        scanned.push_back(out.if_(w.binary("equal_uint", out.local(window), w.word(0xffffffff)), ends));
+        body.push_back(out.if_(out.and_(in_strip, w.binary("not_equal_uint", draw_value(0, 2), w.word(0))), scanned));
+    }
+    auto const odd_primitive
+        = w.bound("geometry_odd_primitive",
+                  w.binary("equal_uint", w.binary("bit_and_uint", out.local(window), w.word(1)), w.word(1)), body);
+    auto const primitive_number
+        = w.bound("geometry_primitive_number", w.binary("shift_right_uint", out.local(window), w.word(1)), body);
+    auto const position_of = [&](i32 c, stmt_list& into)
+    {
+        auto const listed_at = w.binary("add_uint", w.binary("multiply_uint", p, w.word(u32(corners))), w.word(u32(c)));
+        auto const swapped
+            = corners == 3 && c < 2 ? pick(odd_primitive, w.word(u32(1 - c)), w.word(u32(c))) : w.word(u32(c));
+        return w.bound("geometry_corner", pick(in_strip, w.binary("add_uint", p, swapped), listed_at), into);
+    };
+
     // Each corner: its vertex from the index buffer or the draw's range, then the vertex stage on it.
     auto results = cc::vector<flat_expr_id>();
     for (auto c = 0; c < corners; ++c)
     {
         out.from = from;
         out.inlined_through = {};
-        auto const k
-            = w.bound("geometry_corner",
-                      w.binary("add_uint", w.binary("multiply_uint", p, w.word(u32(corners))), w.word(u32(c))), body);
+        auto const k = position_of(c, body);
         auto result = run_vertex_stage(out, w, v, vertex_input, k, instance, body);
         if (result.has_error())
             return cc::error(result.error());
@@ -254,7 +286,7 @@ cc::result<flat_entry_point, cc::string> geometry_as(checked_module const& m,
         out.e.locals[index_of(si.local)].kind = local_kind::let;
         if (si.input != stage_input::primitive_id)
             return cc::error(cc::format("{} reads a stage input the polyfill does not carry yet", g.name));
-        body.push_back(out.let(si.local, as_int(p)));
+        body.push_back(out.let(si.local, as_int(primitive_number)));
     }
     if (!is_mesh)
         out.e.locals[index_of(stream)].kind = local_kind::temporary;

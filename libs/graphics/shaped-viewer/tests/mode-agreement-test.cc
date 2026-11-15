@@ -2,6 +2,7 @@
 
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 
@@ -32,12 +33,14 @@ ASYNC_INVOCABLE_TEST("sv agreement - the comparison tells the Cornell box's dire
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const box = make_lit_box(resources);
 
+    // 256 samples an image in a default run, 1024 under --thorough; the indirect light is many standard errors wide at either.
+    auto const samples = nx::is_thorough() ? 1024u : 256u;
     auto const full = co_await agreement::converge(ctx, resources, box.items, box.camera,
-                                                   {.name = "full", .mode = sv::render_mode::megakernel}, 1024,
+                                                   {.name = "full", .mode = sv::render_mode::megakernel}, samples,
                                                    k_reference_restarts);
-    auto const direct
-        = co_await agreement::converge(ctx, resources, box.items, box.camera,
-                                       {.name = "direct", .mode = sv::render_mode::megakernel, .max_bounces = 1}, 1024);
+    auto const direct = co_await agreement::converge(
+        ctx, resources, box.items, box.camera,
+        {.name = "direct", .mode = sv::render_mode::megakernel, .max_bounces = 1}, samples);
     auto const report = agreement::compare_tiles(direct, full, 0.01, 5.0);
     CC_LOG_INFO("direct light against the full transport: {} of {} tiles past 5 standard errors, worst {:.1f}",
                 report.failed, report.compared, report.worst_z);

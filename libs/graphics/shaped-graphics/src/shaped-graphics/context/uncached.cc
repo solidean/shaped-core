@@ -110,6 +110,7 @@ sg::impl::mesh_polyfill_state state_of(sg::mesh_polyfill_description const& poly
             .primitives_per_group = polyfill.primitives_per_group,
             .words_per_group = polyfill.words_per_group,
             .input_corners = polyfill.input_corners,
+            .input_strip = polyfill.input_strip,
             .task = cc::move(halves.task),
             .launched = cc::move(halves.launched),
             .scan = cc::move(halves.scan),
@@ -188,6 +189,15 @@ cc::optional<cc::string> polyfill_refusal_of(sg::raster_pipeline_description con
                               p.launch_budget, sg::max_dispatch_groups_per_dimension);
     }
     return {};
+}
+
+/// `built`, with the strip scan its draws of a strip run first, once both are.
+cc::shared_async<sg::raster_pipeline_handle> with_strip_scan(cc::shared_async<sg::raster_pipeline_handle> built,
+                                                             cc::shared_async<sg::compute_pipeline_handle> scan)
+{
+    auto pipeline = co_await built;
+    sg::impl::set_geometry_strip_scan(*pipeline, co_await scan);
+    co_return pipeline;
 }
 
 cc::shared_async<sg::raster_pipeline_handle> with_polyfill(cc::shared_async<sg::raster_pipeline_handle> built,
@@ -527,12 +537,13 @@ cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_p
                                                    sg::raster_target_formats formats,
                                                    bool is_mesh_shaded,
                                                    sg::impl::pipeline_footprint footprint,
-                                                   int geometry_mesh_corners)
+                                                   int geometry_mesh_corners,
+                                                   bool geometry_mesh_strip)
 {
     auto pipeline = co_await built;
     sg::impl::set_targets(*pipeline, target_set, formats, is_mesh_shaded);
     if (geometry_mesh_corners > 0)
-        sg::impl::set_geometry_mesh_corners(*pipeline, geometry_mesh_corners);
+        sg::impl::set_geometry_mesh_corners(*pipeline, geometry_mesh_corners, geometry_mesh_strip);
     sg::impl::set_footprint(*pipeline, cc::move(footprint));
     co_return pipeline;
 }
@@ -742,13 +753,24 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
         tessellation = cc::move(state);
     }
 
+    auto strip_scan = compute_pipeline_handle();
+    if (desc.geometry_strip_scan.has_value())
+    {
+        auto scan = try_create_compute_pipeline(compute_half_of(_ctx, desc, desc.geometry_strip_scan.value(), false));
+        if (scan.has_error())
+            return cc::error(cc::format("its geometry polyfill's strip scan: {}", scan.error()));
+        strip_scan = cc::move(scan.value());
+    }
+
     _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
     {
+        if (strip_scan != nullptr)
+            impl::set_geometry_strip_scan(*r.value(), cc::move(strip_scan));
         impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc), desc.mesh_shader.has_value());
         if (desc.geometry_mesh_corners > 0)
-            impl::set_geometry_mesh_corners(*r.value(), desc.geometry_mesh_corners);
+            impl::set_geometry_mesh_corners(*r.value(), desc.geometry_mesh_corners, desc.geometry_mesh_strip);
         add_debug_sites(_ctx._debug_windows, desc);
         impl::set_footprint(*r.value(), footprint_of(desc));
         if (desc.mesh_polyfill.has_value())
@@ -805,12 +827,21 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
             scan = _ctx.cached.acquire_compute_pipeline(task_half_of(_ctx, desc, p.scan_shader));
     }
 
+    // a strip's scan beside them, over the compute half's twin, since it reads the same entries
+    auto strip_scan = cc::shared_async<compute_pipeline_handle>();
+    if (desc.geometry_strip_scan.has_value())
+        strip_scan
+            = _ctx.cached.acquire_compute_pipeline(compute_half_of(_ctx, desc, desc.geometry_strip_scan.value(), false));
+
     // A backend may settle the build from a callback of its own, so the name is set once it has.
     _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
     add_debug_sites(_ctx._debug_windows, desc);
-    auto result = named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc),
-                        desc.mesh_shader.has_value(), footprint_of(desc), desc.geometry_mesh_corners);
+    auto result
+        = named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc), desc.mesh_shader.has_value(),
+                footprint_of(desc), desc.geometry_mesh_corners, desc.geometry_mesh_strip);
+    if (strip_scan != nullptr)
+        result = with_strip_scan(cc::move(result), cc::move(strip_scan));
     if (desc.tessellation_polyfill.has_value())
     {
         auto const passes = tessellation_passes_of(_ctx, desc);

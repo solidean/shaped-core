@@ -18,6 +18,7 @@
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
+#include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/backends/dx12/dx12_software_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_swapchain.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
@@ -887,6 +888,9 @@ public:
     // Shader-visible SAMPLER heap dynamic samplers are written into — a separate heap, since D3D12 binds one of each type.
     // Same transient/persistent split as _descriptor_heap; initialized in create_dx12_context.
     dx12_descriptor_heap _sampler_heap;
+
+    // The sampler states root signatures bind through tables instead of as static samplers, interned in _sampler_heap.
+    dx12_sampler_interner _sampler_interner;
 
     // Non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into; CPU-only, bound via the output-merger.
     // Built by dx12_cpu_descriptor_heap::create in create_dx12_context.

@@ -69,6 +69,7 @@ class dx12_micromap;
 // Bind path (see dx12_binding_group_layout.hh / dx12_pipeline_layout.hh / dx12_compute_pipeline.hh /
 // dx12_binding_group.hh).
 struct dx12_descriptor_heap;
+struct dx12_sampler_interner;
 class dx12_binding_group_layout;
 class dx12_pipeline_layout;
 class dx12_compute_pipeline;

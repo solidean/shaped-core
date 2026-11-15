@@ -102,7 +102,8 @@ inline constexpr reserved_binding_address reserved_mesh_input = {.name = "sg_mes
 
 /// What a polyfilled geometry stage's draw was, `uint4[3]`, which its compute form assembles primitives by.
 /// `[0]` first vertex or first index, primitives an instance, index kind (0 none, 1 16-bit, 2 32-bit), vertex offset.
-/// `[1]` first instance, the index buffer's offset in indices; `[2]` each vertex buffer's offset in words.
+/// `[1]` first instance, the index buffer's offset in indices, the mesh route's instances, and 1 for a strip.
+/// `[2]` each vertex buffer's offset in words.
 inline constexpr reserved_binding_address reserved_geometry_draw = {.name = "sg_geometry_draw",
                                                                     .dx12_space = 11,
                                                                     .dx12_register = 8,
@@ -120,6 +121,15 @@ inline constexpr reserved_binding_address reserved_geometry_indices = {.name = "
                                                                        .webgpu_group = 3,
                                                                        .webgpu_binding = 26,
                                                                        .metal_buffer = 23};
+/// What each window of an indexed strip makes, as the strip scan writes it: `id << 1 | parity`, or all ones for none.
+inline constexpr reserved_binding_address reserved_geometry_strip = {.name = "sg_geometry_strip",
+                                                                     .dx12_space = 11,
+                                                                     .dx12_register = 17,
+                                                                     .vulkan_set = 3,
+                                                                     .vulkan_binding = 39,
+                                                                     .webgpu_group = 3,
+                                                                     .webgpu_binding = 39,
+                                                                     .metal_buffer = 16};
 inline constexpr reserved_binding_address reserved_geometry_vertices[] = {
     {.name = "sg_geometry_vertices0",
      .dx12_space = 11,
@@ -229,18 +239,29 @@ inline constexpr reserved_binding_address reserved_task_input = {.name = "sg_tas
                                                                  .webgpu_group = 3,
                                                                  .webgpu_binding = 32};
 
-inline constexpr reserved_binding_address reserved_bindings[]
-    = {reserved_debug_window,          reserved_acceleration_pool,
-       reserved_acceleration_roots,    reserved_array_lengths,
-       reserved_dispatch_grid,         reserved_acceleration_addresses,
-       reserved_mesh_output,           reserved_mesh_input,
-       reserved_geometry_draw,         reserved_geometry_indices,
-       reserved_geometry_vertices[0],  reserved_geometry_vertices[1],
-       reserved_geometry_vertices[2],  reserved_geometry_vertices[3],
-       reserved_tessellation_draw,     reserved_tessellation_patches,
-       reserved_tessellation_controls, reserved_tessellation_points,
-       reserved_tessellation_indices,  reserved_tessellation_args,
-       reserved_task_output,           reserved_task_input};
+inline constexpr reserved_binding_address reserved_bindings[] = {reserved_debug_window,
+                                                                 reserved_acceleration_pool,
+                                                                 reserved_acceleration_roots,
+                                                                 reserved_array_lengths,
+                                                                 reserved_dispatch_grid,
+                                                                 reserved_acceleration_addresses,
+                                                                 reserved_mesh_output,
+                                                                 reserved_mesh_input,
+                                                                 reserved_geometry_draw,
+                                                                 reserved_geometry_indices,
+                                                                 reserved_geometry_vertices[0],
+                                                                 reserved_geometry_vertices[1],
+                                                                 reserved_geometry_vertices[2],
+                                                                 reserved_geometry_vertices[3],
+                                                                 reserved_geometry_strip,
+                                                                 reserved_tessellation_draw,
+                                                                 reserved_tessellation_patches,
+                                                                 reserved_tessellation_controls,
+                                                                 reserved_tessellation_points,
+                                                                 reserved_tessellation_indices,
+                                                                 reserved_tessellation_args,
+                                                                 reserved_task_output,
+                                                                 reserved_task_input};
 
 namespace impl
 {

@@ -38,12 +38,19 @@ void impl::set_tessellation_polyfill(raster_pipeline const& pipeline, tessellati
     p._tessellation_polyfill = cc::move(state);
 }
 
-void impl::set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners)
+void impl::set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners, bool strip)
 {
     // as set_targets: only on a pipeline nobody else holds yet
     auto& p = const_cast<raster_pipeline&>(pipeline);
     // a geometry stage's mesh route draws with `draw`, as its pipeline would natively
     p._is_mesh_shaded = false;
     p._geometry_mesh_corners = corners;
+    p._geometry_mesh_strip = strip;
+}
+
+void impl::set_geometry_strip_scan(raster_pipeline const& pipeline, compute_pipeline_handle scan)
+{
+    // as set_targets: only on a pipeline nobody else holds yet
+    const_cast<raster_pipeline&>(pipeline)._geometry_strip_scan = cc::move(scan);
 }
 } // namespace sg

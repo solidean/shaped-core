@@ -231,6 +231,7 @@ struct listener;
 struct listener_handle;
 struct attribution;
 struct owner_scope;
+struct open_async_scope;
 struct attribution_cursor;
 struct console_listener;
 struct console_options;

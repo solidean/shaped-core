@@ -67,3 +67,43 @@ cc::rec::impl::async_scope_guard::~async_scope_guard()
     // Before the links come off, for the same reason.
     rec::record_event(_end_desc, u64(_id));
 }
+
+cc::rec::open_async_scope::open_async_scope(cc::rec::desc const& begin_desc,
+                                            cc::rec::desc const& end_desc,
+                                            cc::rec::trace_id id)
+  : _begin_desc(&begin_desc), _end_desc(&end_desc), _id(id)
+{
+    rec::record_event(begin_desc, u64(id));
+}
+
+cc::rec::open_async_scope::~open_async_scope()
+{
+    close();
+}
+
+cc::rec::open_async_scope::open_async_scope(open_async_scope&& rhs) noexcept
+  : _begin_desc(rhs._begin_desc), _end_desc(rhs._end_desc), _id(rhs._id)
+{
+    rhs._end_desc = nullptr;
+}
+
+cc::rec::open_async_scope& cc::rec::open_async_scope::operator=(open_async_scope&& rhs) noexcept
+{
+    if (this != &rhs)
+    {
+        close();
+        _begin_desc = rhs._begin_desc;
+        _end_desc = rhs._end_desc;
+        _id = rhs._id;
+        rhs._end_desc = nullptr;
+    }
+    return *this;
+}
+
+void cc::rec::open_async_scope::close()
+{
+    if (_end_desc == nullptr)
+        return;
+    rec::record_event(*_end_desc, u64(_id));
+    _end_desc = nullptr;
+}

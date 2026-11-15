@@ -1692,7 +1692,7 @@ void metal_command_list::raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill
                             draw.first_instance,
                             0,
                             0,
-                            0,
+                            draw.is_strip ? u32(polyfill.input_corners) : 0u, // [1].w: a strip's corners, 0 for a list
                             0,
                             0,
                             0,
@@ -1710,6 +1710,7 @@ void metal_command_list::raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill
 
     // The compute half runs outside the pass, which Metal has no dispatch inside of: the draw splits the scope.
     suspend_render_encoder("a polyfilled geometry stage", split_remedy::none);
+    bind_geometry_strip(draw, staging.buffer->gpuAddress() + u64(staging.offset), sg::pipeline_stage_flag::compute);
     place_inline_constants();
     declare_bound_groups(sg::pipeline_stage_flag::compute, &compute->footprint());
     for (auto const& vertex_buffer : _bound_vertex_buffers)
@@ -1776,7 +1777,7 @@ void metal_command_list::raster_draw_geometry_meshed(sg::impl::geometry_polyfill
                             draw.first_instance,
                             0,
                             draw.instances,
-                            0,
+                            draw.is_strip ? u32(_bound_raster->geometry_mesh_corners()) : 0u, // [1].w: a strip's corners
                             0,
                             0,
                             0,
@@ -1792,7 +1793,10 @@ void metal_command_list::raster_draw_geometry_meshed(sg::impl::geometry_polyfill
     adopt_overflow_staging(staging);
     cc::memcpy(staging.bytes().data(), values, sizeof(values));
 
-    // The draw's buffers are the mesh stage's to read, inside the pass: nothing splits it.
+    // An indexed strip's scan runs outside the pass first, which splits it for that draw alone.
+    bind_geometry_strip(draw, staging.buffer->gpuAddress() + u64(staging.offset), sg::pipeline_stage_flag::vertex);
+
+    // The draw's buffers are the mesh stage's to read, inside the pass: nothing else splits it.
     for (auto const& vertex_buffer : _bound_vertex_buffers)
         if (vertex_buffer != nullptr)
             declare_buffer(vertex_buffer, sg::pipeline_stage_flag::vertex, sg::access_flag::shader_read);
@@ -1817,6 +1821,42 @@ void metal_command_list::raster_draw_geometry_meshed(sg::impl::geometry_polyfill
     _render_encoder->drawMeshThreadgroups(MTL::Size(NS::UInteger(groups), 1, 1), _bound_raster->object_threads(),
                                           _bound_raster->mesh_threads());
     ++_draws_in_render_encoder;
+}
+
+void metal_command_list::bind_geometry_strip(sg::impl::geometry_polyfill_draw const& draw,
+                                             u64 draw_address,
+                                             sg::pipeline_stage_flag reader)
+{
+    auto* const table = argument_table();
+    auto const& scan_handle = _bound_raster->geometry_strip_scan();
+    if (!draw.is_strip || !draw.is_indexed || scan_handle == nullptr)
+    {
+        table->setAddress(draw_address, NS::UInteger(sg::reserved_geometry_strip.metal_buffer));
+        return;
+    }
+    auto const* const scan = dynamic_cast<metal_compute_pipeline const*>(scan_handle.get());
+    CC_ASSERT(scan != nullptr, "a geometry polyfill's strip scan is not a metal compute_pipeline");
+
+    // One word a window, the windows being the same for every instance.
+    auto const windows = _metal_context.transient.create_raw_buffer(isize(cc::max(draw.primitives, 1u)) * 4,
+                                                                    sg::buffer_usage::readwrite_buffer);
+    auto const& mtl_windows = static_cast<metal_buffer const&>(*windows);
+    suspend_render_encoder("a polyfilled geometry stage's strip scan", split_remedy::none);
+    declare_buffer(_bound_index_buffer, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
+    declare_buffer(windows, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    flush_barriers();
+    bind_debug_window(scan->footprint());
+    table->setAddress(draw_address, NS::UInteger(sg::reserved_geometry_draw.metal_buffer));
+    table->setAddress(_index_address, NS::UInteger(sg::reserved_geometry_indices.metal_buffer));
+    table->setAddress(mtl_windows.gpu_address(), NS::UInteger(sg::reserved_geometry_strip.metal_buffer));
+    auto* const encoder = compute_encoder();
+    encoder->setComputePipelineState(scan->state());
+    encoder->setArgumentTable(table);
+    encoder->dispatchThreads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+    if (_bound_compute != nullptr)
+        encoder->setComputePipelineState(_bound_compute->state());
+    // the stage reads what the scan wrote, after it
+    declare_buffer(windows, reader, sg::access_flag::shader_read);
 }
 
 void metal_command_list::raster_draw_tessellation_polyfilled(sg::impl::tessellation_polyfill_state const& polyfill,

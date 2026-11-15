@@ -4,6 +4,7 @@
 #include <clean-core/record/log.hh> // CC_LOG_INFO
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough, nx::is_smoke
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -137,10 +138,13 @@ cc::shared_async<cc::unit> check_restart(sg::context& ctx, sv::render_mode mode)
     // Counted from the last frame that shaded through a stand-in, since its image is another one, and the exposure
     // meters it all the same: it moves a fifth of the way per reading, so it needs frames after the compile lands.
     // Counting stand-in frames let a late compile end the wait while the exposure was still adapting (measured).
+    // 32 frames and samples in a default run, which settle the exposure to a thousandth of its offset; 128 and 64 under --thorough.
+    auto const settle_frames = nx::is_thorough() ? 128 : 32;
+    auto const settle_samples = nx::is_thorough() ? 64u : 32u;
     auto converged = reading{};
     auto drawn = 0;
     auto frames = 0;
-    while (drawn < 128 || converged.samples < 64)
+    while (drawn < settle_frames || converged.samples < settle_samples)
     {
         converged = co_await frame();
         drawn = converged.samples > 0 && !converged.stand_ins ? drawn + 1 : 0;
@@ -157,7 +161,9 @@ cc::shared_async<cc::unit> check_restart(sg::context& ctx, sv::render_mode mode)
     auto worst_energy_at = -1;
     auto worst_exposure = 0.0f;
     auto worst_exposure_at = -1;
-    for (auto f = 0; f < 48; ++f)
+    // 16 frames after the restart in a default run, 48 under --thorough.
+    auto const restarted_frames = nx::is_thorough() ? 48 : 16;
+    for (auto f = 0; f < restarted_frames; ++f)
     {
         auto const r = co_await frame();
         // A wavefront pixel holds nothing until its first path finishes, which is no sample of the mean yet.

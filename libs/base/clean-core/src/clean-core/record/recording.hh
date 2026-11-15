@@ -283,6 +283,14 @@ public:
     /// By name, so it works on a loaded recording as on a live one.
     [[nodiscard]] rec::recording without_sampling() const;
 
+    /// What a sampler wrote, thinned to at most one sample and one `record.thread_run` per sampled thread per `interval_secs`.
+    /// A window whose stack repeats the thread's previous kept one goes with its reading, so a parked thread shows once.
+    /// Its tick scopes go entirely; the rest of the recording is untouched.
+    /// Windows are aligned to multiples of the interval, so thinning twice at one interval changes nothing.
+    /// A kept sample's anchor still names the position its thread's stream had then, which a filter may since have moved.
+    /// `cycles_per_second` of 0 takes this process's rate, which is only right for a recording made on this machine.
+    [[nodiscard]] rec::recording with_sampling_thinned(f64 interval_secs, f64 cycles_per_second = 0) const;
+
     /// Only events whose timestamp falls in `[begin_cycles, end_cycles)`.
     [[nodiscard]] rec::recording in_cycle_range(u64 begin_cycles, u64 end_cycles) const;
 

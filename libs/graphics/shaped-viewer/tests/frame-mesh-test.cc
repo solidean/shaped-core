@@ -3,6 +3,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
@@ -188,7 +189,9 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh traces in the frame it is placed, and ke
 
     // New buffers every frame for many frames: each epoch's bindless indices are acquired, not minted, so the descriptor heap stays flat.
     // A per-frame transient buffer minted persistently exhausted it within a second once (gpu_resource_manager.hh, describe_instance).
-    for (auto i = 0; i < 300; ++i)
+    // 64 frames in a default run, 300 under --thorough.
+    auto const churn_frames = nx::is_thorough() ? 300 : 64;
+    for (auto i = 0; i < churn_frames; ++i)
         REQUIRE(sv_test::frames_until_executed(ctx,
                                                [&](sg::command_list& cmd)
                                                {

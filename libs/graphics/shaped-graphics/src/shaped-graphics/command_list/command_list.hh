@@ -352,7 +352,8 @@ private:
     bool _raster_is_mesh_shaded = false;                           // of the bound raster pipeline
     cc::optional<impl::mesh_polyfill_state> _raster_mesh_polyfill; // of the bound raster pipeline, where it polyfills
     cc::optional<impl::tessellation_polyfill_state> _raster_tessellation_polyfill; // likewise, for its tessellation
-    int _raster_geometry_mesh_corners = 0; // of the bound raster pipeline, where it is a geometry stage's mesh route
+    int _raster_geometry_mesh_corners = 0;    // of the bound raster pipeline, where it is a geometry stage's mesh route
+    bool _raster_geometry_mesh_strip = false; // and whether its draws are strips
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
 
     // One entry per color and depth-stencil target of the open rendering, the subresources a copy inside the scope

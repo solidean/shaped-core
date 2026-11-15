@@ -214,20 +214,22 @@ constexpr auto log_compaction = cc::rec::compaction_options{
 /// chunks it releases come back before the recorder runs out and drops events the log rule needs.
 constexpr isize compact_while_running_at = 16 << 20;
 
-/// `r` with its instrumentation alone, without what a binary-wide allowance allows, compacted.
-/// A runner report's sampler writes a reading per thread at every tick, which would be most of the file otherwise.
+/// `r` with its instrumentation, a sample per thread per half second, and without what a binary-wide allowance allows, compacted.
+/// A sampler writes a reading per thread at every tick, which would be most of the file otherwise; the thinned samples
+/// are what a hang or a stall is read from.
 /// `to_target` runs the rounds down to the target, otherwise one round at the first thresholds, which is what the
 /// capture does while the run goes.
 cc::rec::recording compacted_for_logs(cc::rec::recording const& r, bool to_target)
 {
-    auto const kept = r.without_sampling().filtered(
-        [](cc::rec::chunk_view const&, cc::rec::event_view const& e)
-        {
-            if (e.kind() != cc::rec::event_kind::log || e.level() < cc::rec::level::warning)
-                return true;
-            return !nx::impl::is_allowed_everywhere(e.level(), e.domain()->name(),
-                                                    e.payload.empty() ? e.name() : e.payload_as_text());
-        });
+    auto const kept = r.with_sampling_thinned(nx::impl::recorded_sample_interval_secs)
+                          .filtered(
+                              [](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+                              {
+                                  if (e.kind() != cc::rec::event_kind::log || e.level() < cc::rec::level::warning)
+                                      return true;
+                                  return !nx::impl::is_allowed_everywhere(
+                                      e.level(), e.domain()->name(), e.payload.empty() ? e.name() : e.payload_as_text());
+                              });
     auto options = log_compaction;
     if (!to_target)
         options.target_bytes = 0;
@@ -268,6 +270,7 @@ cc::rec::listener_handle g_capture_handle;
 cc::string g_capture_path;
 cc::string g_compacted_path;
 bool g_sampling = false;
+bool g_profile_samples = false; // the sampler is `--sample`'s, whose profile the run prints
 
 /// nexus's own defaults, with `CC_LOG_*` applied over them.
 ///
@@ -384,6 +387,13 @@ void nx::impl::begin_run_capture(cc::string_view path, cc::string_view compacted
     {
         cc::rec::start_sampling({.stop_at_scope = false});
         g_sampling = true;
+        g_profile_samples = true;
+    }
+    // A slow sampler for the log recording alone, so a hang leaves its stacks; the report's records at this pace itself.
+    else if (!compacted_path.empty() && !nx::impl::report_sampling_requested() && !cc::rec::is_sampling())
+    {
+        cc::rec::start_sampling({.rate_hz = 1.0 / nx::impl::recorded_sample_interval_secs, .stop_at_scope = false});
+        g_sampling = true;
     }
 }
 
@@ -393,10 +403,12 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
         return;
 
     // Stopped before the drain, so the last tick's samples are in it.
-    auto const sampled = g_sampling;
-    if (sampled)
+    // Only `--sample` prints where the time went; the log recording's slow sampler has too few samples to say.
+    auto const sampled = g_sampling && g_profile_samples;
+    if (g_sampling)
         cc::rec::stop_sampling();
     g_sampling = false;
+    g_profile_samples = false;
 
     // A sampler must not outlive the recorder whose threads it walks.
     nx::impl::pause_report_sampling();

@@ -9,6 +9,7 @@
 #include <clean-core/string/to_string.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-rendering/capture.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -92,10 +93,13 @@ ASYNC_INVOCABLE_TEST("sv - an automatic exposure shows an image's mean as middle
     if (!sv_test::can_run(ctx))
         SKIP("no ray tracing or no SGL compiler, so the tracer does not build");
 
+    // A default run captures at 64 samples, sixteen frames of the megakernel; --thorough at 512.
+    auto const samples = nx::is_thorough() ? 512u : 64u;
+
     // Fifty times apart, and both read sRGB 118, the neutral curve's 0.18.
     for (auto const sky : {1.0f, 50.0f})
     {
-        auto const value = co_await captured_middle(ctx, sky, 512);
+        auto const value = co_await captured_middle(ctx, sky, samples);
         CHECK(tg::abs(value - 118.0f) <= 3.0f).dump("sky", sky).dump("middle", value);
     }
 }

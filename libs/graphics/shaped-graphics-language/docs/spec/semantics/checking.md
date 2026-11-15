@@ -1463,6 +1463,9 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   One thread a primitive of an instance assembles it from the draw's index and vertex buffers, runs the vertex stage on each corner, and runs the geometry stage on the result.
   What it appends goes into the primitive's fixed slots, the mesh polyfill's words, so the draw keeps the native order: primitive by primitive, then as appended.
   A strip is cut into primitives as it grows, an odd triangle's first two corners swapped so every one winds alike; what is appended past `max_vertices` is dropped.
+  A draw of a strip assembles its primitive `p` from positions `p` on, an odd triangle's first two corners swapped as an appended strip's are.
+  An indexed strip's restart index ends one strip and begins the next: a window with a restart in it makes no primitive, and parity and `primitive_id` start again past it.
+  `prelude/geometry.sgl`'s strip scan walks the draw's indices once beforehand and writes what each window makes to `sg_geometry_strip`.
   `vertex_index` counts from the draw's first vertex, or is the index an indexed draw read; `instance_index` counts from the draw's first instance, and `primitive_id` within the instance.
   A geometry stage that appends points makes a primitive of each vertex it appends.
   One that reads a stage input other than `primitive_id`, or follows a vertex stage that reads `view_index` or more than four vertex buffers, is `unsupported-yet` there.

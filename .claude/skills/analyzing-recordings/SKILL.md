@@ -65,7 +65,18 @@ for m in a.summaries:
         totals[m.name] += m.sum
 # logs, by level and text
 print(Counter((l.level.name, l.desc.name) for l in a.logs).most_common(10))
+
+# which test: every nexus pass is an async scope "nx.test" under an owner, and "nx.test.name" names the owner
+tests = a.values_by_owner("nx.test.name")
+for s in sorted(a.async_scopes, key=lambda s: -((s.end_cycles or a.last_cycles) - s.begin_cycles))[:10]:
+    if s.name == "nx.test":
+        print(f"{rec.secs((s.end_cycles or a.last_cycles) - s.begin_cycles):8.3f} s  {tests.get(s.owner, '?')}")
+# any row's owner names its test the same way: tests.get(row.owner)
 ```
+
+For a run that stalled, bin the time and look at what moved: when nothing records for seconds, one scope on one thread is usually open.
+The samples (`a.samples`, one per thread per half second in a log recording) show where each thread sat, with `open_scopes` filled in.
+`sg.pipeline.*.create` scopes carry values `sg.pipeline.entry_point`, `sg.pipeline.bytecode_bytes` and `sg.pipeline.cached_blob_offered` / `_used`, read through `a.values` by their `scope`.
 
 The rest of the surface, each a one-liner on `a`:
 - `children(i)`, `ancestors(i)` and `open_scopes_at(thread, cycles)` for scope nesting.

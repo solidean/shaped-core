@@ -4,6 +4,7 @@
 #include <clean-core/record/log.hh> // CC_LOG_INFO
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -149,7 +150,8 @@ ASYNC_INVOCABLE_TEST("sv - inside a glowing sphere the hybrid sees the emission 
             if (store.min_accumulated_samples(id) < 64 || !accumulated.is_valid())
                 continue;
 
-            auto const& pixels = co_await accumulated.data();
+            auto const pixels_node = accumulated.data();
+            auto const& pixels = co_await pixels_node;
             auto sum = 0.0;
             for (auto const& p : pixels)
                 sum += 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
@@ -170,10 +172,14 @@ ASYNC_INVOCABLE_TEST("sv - inside a glowing sphere the hybrid sees the emission 
                                     {.mode = sv::render_mode::hybrid, .lighting = sv::hybrid_lighting::forward},
                                     {.mode = sv::render_mode::megakernel}};
     int const all_bounces[] = {1, 2};
+    // A default run measures the deferred hybrid at two bounces; --thorough every contender at one and two.
     // a smoke run measures one contender at one bounce, which is what a preset's flags can break
+    auto const thorough = nx::is_thorough();
     auto const smoke = nx::is_smoke();
-    for (auto const c : cc::span<contender const>(contenders).subspan({.offset = 0, .size = smoke ? 1 : 3}))
-        for (auto const bounces : cc::span<int const>(all_bounces).subspan({.offset = 0, .size = smoke ? 1 : 2}))
+    auto const bounce_offset = thorough || smoke ? 0 : 1;
+    for (auto const c : cc::span<contender const>(contenders).subspan({.offset = 0, .size = thorough ? 3 : 1}))
+        for (auto const bounces :
+             cc::span<int const>(all_bounces).subspan({.offset = bounce_offset, .size = thorough ? 2 : 1}))
         {
             auto const seen = co_await measure(f32(rho), bounces, c.mode, c.lighting);
             auto const expected = bounce_sum(le, rho, bounces);

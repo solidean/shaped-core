@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/binding.hh> // sg::is_sampler
@@ -15,7 +16,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
                                                                      cc::span<sg::bound_sampler const> static_samplers,
                                                                      cc::optional<sg::binding> const& inline_constants,
                                                                      bool dispatch_grid,
-                                                                     sg::mesh_polyfill_slots mesh_polyfill)
+                                                                     sg::mesh_polyfill_slots mesh_polyfill,
+                                                                     dx12_context* samplers_from)
 {
     if (int(groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
@@ -186,6 +188,58 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         param.Descriptor.RegisterSpace = UINT(slot.address->dx12_space);
         (slot.is_task ? pl->task_slots_root_param : pl->mesh_slots_root_param) = int(params.size());
         params.push_back(param);
+    }
+
+    // Each static sampler as a one-descriptor table over its interned state, where they all fit; see dx12_sampler_interner.
+    // All or none, so a layout either persists its blobs or never does, whatever order its states were first met in.
+    auto root_dwords = 0;
+    for (auto const& p : params)
+    {
+        if (p.ParameterType == D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE)
+            root_dwords += 1;
+        else if (p.ParameterType == D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS)
+            root_dwords += int(p.Constants.Num32BitValues);
+        else
+            root_dwords += 2;
+    }
+    constexpr auto root_dword_budget = 64;
+    auto sampler_ranges = cc::vector<D3D12_DESCRIPTOR_RANGE>();
+    if (samplers_from != nullptr && !static_sampler_descs.empty()
+        && root_dwords + int(static_sampler_descs.size()) <= root_dword_budget)
+    {
+        auto tables = cc::vector<sampler_table>();
+        for (auto const& ss : static_sampler_descs)
+        {
+            auto const offset = samplers_from->_sampler_interner.intern(device, samplers_from->_sampler_heap,
+                                                                        to_d3d12_sampler_desc(ss));
+            if (!offset.has_value())
+                break;
+            tables.push_back({.root_param = int(params.size() + tables.size()), .heap_offset = offset.value()});
+        }
+        if (tables.size() == static_sampler_descs.size())
+        {
+            // Reserved in full first: each table points at its range until serialization.
+            sampler_ranges.reserve(static_sampler_descs.size());
+            for (auto const& ss : static_sampler_descs)
+            {
+                auto& range = sampler_ranges.emplace_back();
+                range = D3D12_DESCRIPTOR_RANGE{
+                    .RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER,
+                    .NumDescriptors = 1,
+                    .BaseShaderRegister = ss.ShaderRegister,
+                    .RegisterSpace = ss.RegisterSpace,
+                    .OffsetInDescriptorsFromTableStart = 0,
+                };
+                D3D12_ROOT_PARAMETER param = {};
+                param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+                param.ShaderVisibility = ss.ShaderVisibility;
+                param.DescriptorTable.NumDescriptorRanges = 1;
+                param.DescriptorTable.pDescriptorRanges = &range;
+                params.push_back(param);
+            }
+            pl->sampler_tables = cc::move(tables);
+            static_sampler_descs.clear();
+        }
     }
 
     pl->has_static_samplers = !static_sampler_descs.empty();

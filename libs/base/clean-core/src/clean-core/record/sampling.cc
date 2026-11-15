@@ -587,7 +587,6 @@ cc::native_thread g_sampler;
 void sampler_main()
 {
     cc::set_current_thread_name(sampler_thread_name);
-    cc::rec::set_current_thread_record_name(sampler_thread_name);
 
     auto cfg = load_config();
 
@@ -643,6 +642,9 @@ void sampler_main()
     auto const unwind = cc::unwind_snapshot::create(); // empty: a frame chain needs no tables
     auto unwind_is_stale = false;
 #endif
+
+    // Per thread, when a sample that went to a sink last went to the recording too; see recorded_every_secs.
+    auto recorded_at = cc::map<u64, f64>();
 
     while (!g_stop.load(cc::memory_order_acquire))
     {
@@ -754,11 +756,23 @@ void sampler_main()
                     // Inside the tick scope, so the sample and its cost stay together until splicing moves the sample
                     // onto the thread it caught.
                     if (cfg.sink != nullptr)
+                    {
                         cfg.sink(cc::rec::sample_view{.native_tid = s.native_tid,
                                                       .owner = s.owner,
                                                       .frames = cc::span<void* const>(frames.data(), s.capture.count),
                                                       .truncated = s.capture.truncated},
                                  cfg.sink_user);
+                        if (cfg.recorded_every_secs > 0)
+                        {
+                            auto const now = cc::current_time_steady_secs();
+                            auto* const last = recorded_at.get_ptr(s.native_tid);
+                            if (last == nullptr || now - *last >= cfg.recorded_every_secs)
+                            {
+                                write_sample(s, frames);
+                                recorded_at[s.native_tid] = now;
+                            }
+                        }
+                    }
                     else
                         write_sample(s, frames);
                     g_taken.fetch_add(1, cc::memory_order_relaxed);

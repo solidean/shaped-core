@@ -413,7 +413,7 @@ struct geometry_polyfill_draw;
 struct tessellation_polyfill_state;
 void set_mesh_polyfill(raster_pipeline const& pipeline, mesh_polyfill_state state);
 void set_tessellation_polyfill(raster_pipeline const& pipeline, tessellation_polyfill_state state);
-void set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners);
+void set_geometry_mesh_corners(raster_pipeline const& pipeline, int corners, bool strip);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.
@@ -550,6 +550,11 @@ using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immuta
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema
 using pipeline_layout_handle = std::shared_ptr<pipeline_layout const>;           // immutable ordered group layouts
 using compute_pipeline_handle = std::shared_ptr<compute_pipeline const>;
+namespace impl
+{
+/// Sets the strip scan a polyfilled geometry stage's indexed strip draws run first; defined in raster_pipeline.cc.
+void set_geometry_strip_scan(raster_pipeline const& pipeline, compute_pipeline_handle scan);
+} // namespace impl
 using raster_pipeline_handle = std::shared_ptr<raster_pipeline const>; // immutable graphics PSO + root signature
 using raytracing_pipeline_handle = std::shared_ptr<raytracing_pipeline const>; // immutable DXR state object + shader ids
 using raytracing_shader_table_handle = std::shared_ptr<raytracing_shader_table const>; // immutable table over a pipeline

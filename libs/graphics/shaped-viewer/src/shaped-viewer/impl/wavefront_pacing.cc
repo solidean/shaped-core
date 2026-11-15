@@ -23,7 +23,7 @@ wavefront_timing& wavefront_pacing::queue(wavefront_plan plan)
 void wavefront_pacing::withdraw()
 {
     CC_ASSERT(!in_flight.empty(), "only a queued frame can be withdrawn");
-    in_flight.pop_back();
+    in_flight.remove_back();
     --still_frames;
 }
 

@@ -88,12 +88,24 @@ struct stream
         return *this;
     }
 
+    /// Ends the block being written, as a sealed chunk would, so what follows goes into the stream's next one.
+    stream& next_block()
+    {
+        blocks.push_back(builder.take());
+        ++metadata.chunk_seq;
+        return *this;
+    }
+
     [[nodiscard]] cc::rec::recording take()
     {
         auto r = cc::rec::recording();
+        for (auto const& b : blocks)
+            r.append_block(b);
         r.append_block(builder.take());
         return r;
     }
+
+    cc::vector<cc::rec::recorded_block> blocks;
 
 private:
     void add(cc::rec::desc const& d, u64 cycles, cc::span<byte const> payload)
@@ -163,6 +175,14 @@ TEST("record/compaction - a scope this recording saw only one end of is kept")
     CHECK(listing(r.scopes_collapsed(1000)) == "work:end inner:begin");
 }
 
+TEST("record/compaction - a short scope across a block boundary is kept, since the later block's preamble names it")
+{
+    auto s = stream();
+    s.begin(work_begin, 0).next_block().end(work_end, 10).begin(inner_begin, 20).end(inner_end, 30);
+    auto const r = s.take();
+    CHECK(listing(r.scopes_collapsed(1000)) == "work:begin work:end inner:sum");
+}
+
 TEST("record/compaction - a stat lane folds into one summary per window")
 {
     auto s = stream();
@@ -187,6 +207,45 @@ TEST("record/compaction - a stat lane folds into one summary per window")
 
     // Aligned windows, so a second pass at the same window finds nothing left to fold.
     CHECK(listing(summarized.stats_summarized(10)) == listing(summarized));
+}
+
+TEST("record/compaction - a lane never spans two owners, so each summary belongs to one")
+{
+    static constexpr cc::rec::field ambient_fields[] = {
+        {.name = "trace", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
+        {.name = "owner", .type = cc::rec::type_code::u64_, .offset = 8, .size = 8},
+    };
+    static constexpr cc::rec::desc ambient = {
+        .kind = cc::rec::event_kind::ambient_changed,
+        .name = "async.ambient",
+        .dom = &cc::rec::g_system_domain,
+        .fields = ambient_fields,
+        .field_count = 2,
+        .fixed_payload_size = 16,
+    };
+    auto s = stream();
+    auto const owned_by = [&](u64 owner, u64 cycles)
+    {
+        u64 const payload[2] = {0, owner};
+        s.builder.add({.desc = &ambient,
+                       .cycles = cycles,
+                       .payload = cc::span<byte const>(reinterpret_cast<byte const*>(payload), 16)});
+    };
+    owned_by(7, 0);
+    s.stat(bytes_stat, 1, 1).stat(bytes_stat, 2, 1);
+    owned_by(7, 3); // the same owner again closes nothing
+    s.stat(bytes_stat, 4, 1);
+    owned_by(8, 5);
+    s.stat(bytes_stat, 6, 1);
+    auto const r = s.take();
+
+    // One window covers it all, and still the lane splits where the owner changes, before the delta that changes it.
+    CHECK(listing(r.stats_summarized(1'000'000))
+          == "async.ambient:stat async.ambient:stat bytes:sum async.ambient:stat bytes:sum");
+    auto const bytes = summaries(r.stats_summarized(1'000'000), "bytes");
+    REQUIRE(bytes.size() == 2);
+    CHECK(bytes[0].count == 3);
+    CHECK(bytes[1].count == 1);
 }
 
 TEST("record/compaction - a lane ends where the scope around it does")
@@ -264,6 +323,89 @@ TEST("record/compaction - without sampling, what the code recorded about itself 
     s.builder.add({.desc = &cc::rec::impl::thread_run_desc(), .cycles = 3, .payload = run});
     s.stat(bytes_stat, 4, 1).end(work_end, 5);
     CHECK(listing(s.take().without_sampling()) == "work:begin bytes:stat work:end");
+}
+
+TEST("record/compaction - thinned sampling keeps one reading per sampled thread per window")
+{
+    auto s = stream();
+    auto const reading = [&](u32 thread, u64 cycles)
+    {
+        byte run[cc::rec::impl::thread_run_payload_size] = {};
+        cc::memcpy(run, &thread, sizeof(thread));
+        s.builder.add({.desc = &cc::rec::impl::thread_run_desc(), .cycles = cycles, .payload = run});
+    };
+    reading(1, 0);
+    reading(1, 3);
+    reading(2, 4);
+    reading(1, 12);
+    reading(1, 15);
+    reading(1, 25);
+    s.stat(bytes_stat, 26, 1);
+    auto const r = s.take();
+
+    auto const count = [](cc::rec::recording const& rec, u32 thread)
+    {
+        auto n = 0;
+        rec.for_each_event(
+            [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+            {
+                if (e.desc == &cc::rec::impl::thread_run_desc() && e.field_as_u64("thread_index").value_or(0) == thread)
+                    ++n;
+            });
+        return n;
+    };
+    auto const thinned = r.with_sampling_thinned(10, 1);
+    CHECK(count(thinned, 1) == 3);
+    CHECK(count(thinned, 2) == 1);
+    CHECK(summaries(thinned, "bytes").empty()); // the rest is untouched
+    CHECK(listing(thinned).ends_with("bytes:stat"));
+
+    // Aligned windows, so a second pass at the same interval keeps the same events.
+    CHECK(listing(thinned.with_sampling_thinned(10, 1)) == listing(thinned));
+}
+
+TEST("record/compaction - thinned sampling drops a stack its thread repeats, with that window's reading")
+{
+    auto s = stream();
+    auto const sample = [&](u64 cycles, u64 frame)
+    {
+        byte payload[cc::rec::impl::sample_frames_offset + 8] = {};
+        auto const thread = u32(1);
+        auto const count = u32(1);
+        cc::memcpy(payload, &thread, sizeof(thread));
+        cc::memcpy(payload + 24, &count, sizeof(count));
+        cc::memcpy(payload + cc::rec::impl::sample_frames_offset, &frame, sizeof(frame));
+        s.builder.add({.desc = &cc::rec::impl::sample_desc(), .cycles = cycles, .payload = payload});
+    };
+    auto const reading = [&](u64 cycles)
+    {
+        byte run[cc::rec::impl::thread_run_payload_size] = {};
+        auto const thread = u32(1);
+        cc::memcpy(run, &thread, sizeof(thread));
+        s.builder.add({.desc = &cc::rec::impl::thread_run_desc(), .cycles = cycles, .payload = run});
+    };
+    // A thread parked in one wait for three windows, then somewhere else.
+    for (auto const [cycles, frame] : {cc::pair<u64, u64>{0, 0x10}, {10, 0x10}, {20, 0x10}, {30, 0x20}})
+    {
+        reading(cycles);
+        sample(cycles + 1, frame);
+    }
+    auto const thinned = s.take().with_sampling_thinned(10, 1);
+
+    auto samples = cc::vector<u64>();
+    auto readings = 0;
+    thinned.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.desc == &cc::rec::impl::sample_desc())
+                samples.push_back(e.cycles);
+            else if (e.desc == &cc::rec::impl::thread_run_desc())
+                ++readings;
+        });
+    REQUIRE(samples.size() == 2);
+    CHECK(samples[0] == 1);  // the first time it was seen there
+    CHECK(samples[1] == 31); // and once it moved
+    CHECK(readings == 2);
 }
 
 TEST("record/compaction - a summary survives a file, compressed or not, with its site")

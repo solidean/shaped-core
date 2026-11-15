@@ -8,6 +8,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -32,12 +33,13 @@ constexpr auto k_size = tg::vec2i(64, 64);
     return set;
 }
 
-/// `set` seen through `cam`, drawn the `mode` and `lighting` way, captured once it holds 32 samples.
+/// `set` seen through `cam`, drawn the `mode` and `lighting` way, captured once it holds `samples` samples.
 cc::shared_async<babel::image::image> capture(sg::context& ctx,
                                               sv::quadric_set const& set,
                                               sv::camera cam,
                                               sv::render_mode mode,
-                                              sv::hybrid_lighting lighting)
+                                              sv::hybrid_lighting lighting,
+                                              int samples)
 {
     auto const path = cc::temp_file_path("sv-quadric-raster", ".png");
     {
@@ -46,7 +48,7 @@ cc::shared_async<babel::image::image> capture(sg::context& ctx,
         auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
         auto const dim
             = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", k_size[0], k_size[1]));
-        auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "32");
+        auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", samples));
         auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
         cam.projection.aspect_ratio = 1.0;
@@ -121,17 +123,20 @@ ASYNC_INVOCABLE_TEST("sv - a quadric draws on the raster path where the tracer d
         contender{.name = "hybrid deferred", .lighting = sv::hybrid_lighting::deferred},
         contender{.name = "hybrid forward", .lighting = sv::hybrid_lighting::forward},
     };
-    // a smoke run draws through the raster path and the deferred hybrid, which is what a preset's flags can break
-    auto const contenders
-        = cc::span<contender const>(all_contenders).subspan({.offset = 0, .size = nx::is_smoke() ? 2 : 3});
+    // A default run draws the raster path and the deferred hybrid, at 16 samples outside and 4 inside; --thorough adds forward, at 32 throughout.
+    // a smoke run draws through the same two, which is what a preset's flags can break
+    auto const thorough = nx::is_thorough();
+    auto const contenders = cc::span<contender const>(all_contenders).subspan({.offset = 0, .size = thorough ? 3 : 2});
+    auto const outside_samples = thorough ? 32 : 16;
+    auto const inside_samples = thorough ? 32 : 4;
     auto const pixels = isize(k_size[0]) * isize(k_size[1]);
 
     // Outside: the sphere covers the pixels the tracer's does, lit as the tracer lights it.
     {
         auto const set = sphere_set(1.0f);
         auto const cam = sv::camera::looking_at(tg::pos3d(0.3, 0.2, -4), tg::pos3d(0, 0, 0));
-        auto const reference
-            = co_await capture(ctx, set, cam, sv::render_mode::megakernel, sv::hybrid_lighting::deferred);
+        auto const reference = co_await capture(ctx, set, cam, sv::render_mode::megakernel,
+                                                sv::hybrid_lighting::deferred, outside_samples);
         auto covered = 0;
         auto red = 0.0;
         for (auto i = isize(0); i < pixels; ++i)
@@ -145,7 +150,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric draws on the raster path where the tracer d
 
         for (auto const& c : contenders)
         {
-            auto const seen = co_await capture(ctx, set, cam, c.mode, c.lighting);
+            auto const seen = co_await capture(ctx, set, cam, c.mode, c.lighting, outside_samples);
             auto differing = 0;
             auto seen_covered = 0;
             auto seen_red = 0.0;
@@ -176,7 +181,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric draws on the raster path where the tracer d
         auto const cam = sv::camera::looking_at(tg::pos3d(0, 0, 0), tg::pos3d(0, 0, 1));
         for (auto const& c : contenders)
         {
-            auto const seen = co_await capture(ctx, set, cam, c.mode, c.lighting);
+            auto const seen = co_await capture(ctx, set, cam, c.mode, c.lighting, inside_samples);
             auto covered = 0;
             for (auto i = isize(0); i < pixels; ++i)
                 if (!is_sky(seen, i))

@@ -12,6 +12,7 @@
 #include <nexus/async-test.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/impl/capture_session.hh> // sv::impl::partial_capture_path
@@ -269,10 +270,13 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
     auto const young_raw_path = cc::temp_file_path("sv-wavefront-young-raw", ".png");
     auto const temporal_path = cc::temp_file_path("sv-wavefront-automatic", ".png");
 
+    // A default run denoises through SVGF alone; --thorough adds the à-trous capture at 32 samples, the run's longest.
+    auto const thorough = nx::is_thorough();
     auto const wavefront = sv::render_mode::wavefront;
     co_await capture_box(ctx, sr::denoise_method::none, reference_path, 16);
     co_await capture_box(ctx, sr::denoise_method::none, raw_path, 16, wavefront);
-    co_await capture_box(ctx, sr::denoise_method::atrous, spatial_path, 32, wavefront);
+    if (thorough)
+        co_await capture_box(ctx, sr::denoise_method::atrous, spatial_path, 32, wavefront);
     co_await capture_box(ctx, sr::denoise_method::none, young_raw_path, 2, wavefront);
     co_await capture_box(ctx, sr::denoise_method::automatic, temporal_path, 2, wavefront);
 
@@ -281,9 +285,12 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
     CHECK(tg::abs(traced - reference) < 0.05 * reference)
         .context(cc::format("mean brightness megakernel {} wavefront {}", reference, traced));
 
-    auto const raw = roughness_of(raw_path);
-    auto const spatial = roughness_of(spatial_path);
-    CHECK(spatial < 0.7 * raw).context(cc::format("roughness raw {} atrous {}", raw, spatial));
+    if (thorough)
+    {
+        auto const raw = roughness_of(raw_path);
+        auto const spatial = roughness_of(spatial_path);
+        CHECK(spatial < 0.7 * raw).context(cc::format("roughness raw {} atrous {}", raw, spatial));
+    }
 
     auto const young_raw = roughness_of(young_raw_path);
     auto const temporal = roughness_of(temporal_path);
@@ -291,7 +298,8 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
 
     cc::remove_file(reference_path);
     cc::remove_file(raw_path);
-    cc::remove_file(spatial_path);
+    if (thorough)
+        cc::remove_file(spatial_path);
     cc::remove_file(young_raw_path);
     cc::remove_file(temporal_path);
 }

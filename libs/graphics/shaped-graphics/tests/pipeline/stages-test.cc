@@ -468,6 +468,224 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage that appends points draws each corne
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a geometry stage over a triangle strip draws both triangles of a quad, each wound alike",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+
+        // a quad as a strip of two triangles; back faces are culled, so the second draws only if its first two corners
+        // are swapped as a strip's odd triangle's are, winding it as the first
+        auto const a = tg::vec2f(-0.75f, -0.75f);
+        auto const b = tg::vec2f(0.75f, -0.75f);
+        auto const c = tg::vec2f(-0.75f, 0.75f);
+        auto const d = tg::vec2f(0.75f, 0.75f);
+        shaders::stages::stage_corner const corners[]
+            = {{.position = a}, {.position = b}, {.position = c}, {.position = d}};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::stripped);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                             [&](sg::rendering_scope& scope)
+                                                             {
+                                                                 scope.bind_pipeline(*pipeline);
+                                                                 scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                                 scope.draw({.vertex_range = {.offset = 0, .size = 4}});
+                                                             });
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+            {
+                auto const p = centre_of(x, y);
+                auto const first = side_of(p, a, b, c);
+                auto const second = side_of(p, b, d, c);
+                if (first == 0 || second == 0)
+                    continue;
+                CHECK(drawn(pixels, x, y) == (first > 0 || second > 0)).context(cc::format("{}: pixel ({}, {})", by, x, y));
+            }
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an indexed triangle strip through a geometry stage begins a new strip at its restart index",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+
+        // a quad on the left as a strip of four indices, the restart index, and a triangle on the right: no primitive
+        // spans the restart, so nothing lies between the two or outside them
+        // Back faces are culled, and the right triangle begins a strip at position 5: as the first of its strip it is
+        // even, and unswapped it winds as the quad's, where counting from the draw's start would swap it away.
+        auto const a = tg::vec2f(-0.875f, -0.75f);
+        auto const b = tg::vec2f(-0.125f, -0.75f);
+        auto const c = tg::vec2f(-0.875f, 0.75f);
+        auto const d = tg::vec2f(-0.125f, 0.75f);
+        auto const e = tg::vec2f(0.125f, -0.75f);
+        auto const f = tg::vec2f(0.875f, -0.75f);
+        auto const g = tg::vec2f(0.5f, 0.75f);
+        shaders::stages::stage_corner const corners[]
+            = {{.position = a}, {.position = b}, {.position = c}, {.position = d},
+               {.position = e}, {.position = f}, {.position = g}};
+        u16 const short_indices[] = {0, 1, 2, 3, 0xffff, 4, 5, 6};
+        u32 const long_indices[] = {0, 1, 2, 3, 0xffffffffu, 4, 5, 6};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const shorts = ctx->persistent.create_buffer_from_data(short_indices, sg::buffer_usage::index_buffer);
+        auto const longs = ctx->persistent.create_buffer_from_data(long_indices, sg::buffer_usage::index_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::stripped);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+
+        for (auto const is_short : {true, false})
+        {
+            auto const kind = cc::format("{}, {}-bit indices", by, is_short ? 16 : 32);
+            auto const pixels = co_await sg_test::draw_offscreen(
+                *ctx, stage_target(),
+                [&](sg::rendering_scope& scope)
+                {
+                    scope.bind_pipeline(*pipeline);
+                    scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                    scope.bind_index_buffer(is_short ? shorts.as_index_buffer() : longs.as_index_buffer());
+                    scope.draw_indexed({.index_range = {.offset = 0, .size = 8}});
+                });
+            for (auto y = 0; y < size; ++y)
+                for (auto x = 0; x < size; ++x)
+                {
+                    auto const p = centre_of(x, y);
+                    auto const left = side_of(p, a, b, c);
+                    auto const left_second = side_of(p, b, d, c);
+                    auto const right = side_of(p, e, f, g);
+                    if (left == 0 || left_second == 0 || right == 0)
+                        continue;
+                    CHECK(drawn(pixels, x, y) == (left > 0 || left_second > 0 || right > 0))
+                        .context(cc::format("{}: pixel ({}, {})", kind, x, y));
+                }
+        }
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a geometry stage's primitive id counts the primitives an indexed strip makes past its "
+                     "restart",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+
+        // the restart test's strips: the quad's two triangles are primitives 0 and 1, and the right triangle, the
+        // fifth window, is primitive 2, since the three windows over the restart make none
+        auto const a = tg::vec2f(-0.875f, -0.75f);
+        auto const b = tg::vec2f(-0.125f, -0.75f);
+        auto const c = tg::vec2f(-0.875f, 0.75f);
+        auto const d = tg::vec2f(-0.125f, 0.75f);
+        auto const e = tg::vec2f(0.125f, -0.75f);
+        auto const f = tg::vec2f(0.875f, -0.75f);
+        auto const g = tg::vec2f(0.5f, 0.75f);
+        shaders::stages::stage_corner const corners[]
+            = {{.position = a}, {.position = b}, {.position = c}, {.position = d},
+               {.position = e}, {.position = f}, {.position = g}};
+        u16 const indices[] = {0, 1, 2, 3, 0xffff, 4, 5, 6};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const index_buffer = ctx->persistent.create_buffer_from_data(indices, sg::buffer_usage::index_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::strip_primitive_ids);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+
+        auto const pixels
+            = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                               [&](sg::rendering_scope& scope)
+                                               {
+                                                   scope.bind_pipeline(*pipeline);
+                                                   scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                   scope.bind_index_buffer(index_buffer.as_index_buffer());
+                                                   scope.draw_indexed({.index_range = {.offset = 0, .size = 8}});
+                                               });
+        auto checked = 0;
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+            {
+                auto const p = centre_of(x, y);
+                auto const in = [&](tg::vec2f u, tg::vec2f v, tg::vec2f w) { return side_of(p, u, v, w); };
+                auto const expect = in(a, b, c) > 0 ? 0 : in(b, d, c) > 0 ? 1 : in(e, f, g) > 0 ? 2 : -1;
+                if (expect < 0 || in(a, b, c) == 0 || in(b, d, c) == 0 || in(e, f, g) == 0)
+                    continue;
+                ++checked;
+                CHECK(pixels[0].rgba_float(x, y)[0] == float(expect)).context(cc::format("{}: pixel ({}, {})", by, x, y));
+            }
+        CHECK(checked > 20).context(by);
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a geometry stage over a line strip draws each segment of the loop",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+
+        // a closed loop of four vertices, three segments: a triangle's outline, and nothing inside it
+        auto const a = tg::vec2f(-0.75f, -0.75f);
+        auto const b = tg::vec2f(0.75f, -0.75f);
+        auto const c = tg::vec2f(0.0f, 0.75f);
+        shaders::stages::stage_corner const corners[]
+            = {{.position = a}, {.position = b}, {.position = c}, {.position = a}};
+        auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::line_stripped);
+        CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                             [&](sg::rendering_scope& scope)
+                                                             {
+                                                                 scope.bind_pipeline(*pipeline);
+                                                                 scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                                 scope.draw({.vertex_range = {.offset = 0, .size = 4}});
+                                                             });
+        auto const pixel = 2.0f / float(size);
+        auto const distance_to_edges = [&](tg::vec2f p)
+        {
+            auto best = 1e9f;
+            tg::vec2f const ends[][2] = {{a, b}, {b, c}, {c, a}};
+            for (auto const& e : ends)
+            {
+                auto const dir = e[1] - e[0];
+                auto const t = cc::clamp(
+                    ((p - e[0])[0] * dir[0] + (p - e[0])[1] * dir[1]) / (dir[0] * dir[0] + dir[1] * dir[1]), 0.0f, 1.0f);
+                best = cc::min(best, (p - (e[0] + dir * t)).length() / pixel);
+            }
+            return best;
+        };
+        auto lit = 0;
+        for (auto y = 0; y < size; ++y)
+            for (auto x = 0; x < size; ++x)
+                if (drawn(pixels, x, y))
+                {
+                    ++lit;
+                    CHECK(distance_to_edges(centre_of(x, y)) < 1.5f)
+                        .context(cc::format("{}: pixel ({}, {}) is lit away from every edge", by, x, y));
+                }
+        CHECK(lit > 3 * 8).context(by);
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id and passes it on flat",
                      (sg::context_handle const& ctx))
 {

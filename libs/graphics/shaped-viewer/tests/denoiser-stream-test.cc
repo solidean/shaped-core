@@ -2,6 +2,7 @@
 
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
@@ -98,10 +99,11 @@ ASYNC_INVOCABLE_TEST("sv agreement - every denoiser keeps a moving and a settlin
                  .material = glass}));
     resources.wait_for_pending_uploads();
 
+    // The reference at 128 samples in a default run, 512 under --thorough.
     auto const reference
         = co_await agreement::converge(ctx, resources, box.items, box.camera,
                                        {.name = "megakernel", .mode = sv::render_mode::megakernel, .max_bounces = 2},
-                                       512, agreement::k_reference_restarts);
+                                       nx::is_thorough() ? 512u : 128u, agreement::k_reference_restarts);
     auto reference_mean = cc::vector<tg::vec4f>();
     for (auto i = isize(0); i < reference.first.size(); ++i)
         reference_mean.push_back(reference.mean_at(i));
@@ -110,8 +112,10 @@ ASYNC_INVOCABLE_TEST("sv agreement - every denoiser keeps a moving and a settlin
     auto const support = sr::query_reconstruct_support(ctx);
     sr::denoise_method const members[]
         = {sr::denoise_method::atrous, sr::denoise_method::svgf, sr::denoise_method::oidn, sr::denoise_method::dlss_rr};
-    constexpr int moving_frames = 32;
-    constexpr int still_frames = 48;
+    // One sweep of the steps and 24 still frames, past the members' hand-off, in a default run.
+    // Four sweeps and 48 still frames under --thorough.
+    auto const moving_frames = nx::is_thorough() ? 32 : 8;
+    auto const still_frames = nx::is_thorough() ? 48 : 24;
 
     for (auto const member : members)
     {

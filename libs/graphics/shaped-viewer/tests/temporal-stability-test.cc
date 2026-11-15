@@ -2,6 +2,7 @@
 
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
@@ -136,13 +137,15 @@ ASYNC_INVOCABLE_TEST("sv temporal - a denoised stream leaves no ghost behind a m
     };
 
     // One converged image per position, at the path length the hybrid's one bounce corresponds to.
+    // 64 samples a position in a default run, 256 under --thorough.
+    auto const reference_samples = nx::is_thorough() ? 256u : 64u;
     auto references = cc::vector<cc::vector<tg::vec4f>>();
     for (auto p = 0; p < k_positions; ++p)
     {
         auto const items = items_at(p);
         auto const c = co_await agreement::converge(
             ctx, resources, items, box.camera,
-            {.name = "temporal reference", .mode = sv::render_mode::megakernel, .max_bounces = 2}, 256);
+            {.name = "temporal reference", .mode = sv::render_mode::megakernel, .max_bounces = 2}, reference_samples);
         auto mean = cc::vector<tg::vec4f>();
         for (auto i = isize(0); i < c.first.size(); ++i)
             mean.push_back(c.mean_at(i));
@@ -157,8 +160,9 @@ ASYNC_INVOCABLE_TEST("sv temporal - a denoised stream leaves no ghost behind a m
     auto const support = sr::query_reconstruct_support(ctx);
     sr::denoise_method const members[]
         = {sr::denoise_method::atrous, sr::denoise_method::svgf, sr::denoise_method::oidn, sr::denoise_method::dlss_rr};
-    constexpr int moving_frames = 3 * 2 * (k_positions - 1);
-    constexpr int still_frames = 64;
+    // One sweep there and back and 40 still frames in a default run; three sweeps and 64 still frames under --thorough.
+    auto const moving_frames = (nx::is_thorough() ? 3 : 1) * 2 * (k_positions - 1);
+    auto const still_frames = nx::is_thorough() ? 64 : 40;
     // Past the temporal member's frames and the fade after them, so what is measured is the member that owns a still image.
     constexpr int settle_after = 24;
 
