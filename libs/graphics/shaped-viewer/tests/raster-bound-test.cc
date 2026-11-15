@@ -9,6 +9,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // dx12_config::withhold_binding_arrays
 #include <shaped-viewer/all.hh>
@@ -114,6 +115,7 @@ namespace
 /// A bound layer's capture on `ctx`, end to end: the viewer comes up, the image is the Cornell box's, and it is final.
 ///
 /// The capture asks for `accumulation_sample_cap` samples, which only a converged layer holds, so a file at all means the layer converged.
+/// A default run counts 16 frames in its place; --thorough keeps the cap, and the viewer's own frame count for the histories.
 [[nodiscard]] cc::shared_async<cc::unit> check_bound_cornell(sg::context& ctx)
 {
     REQUIRE(!ctx.supports(sg::feature::binding_arrays));
@@ -127,6 +129,9 @@ namespace
     auto const acc
         = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_sample_cap));
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
+    // 0 leaves the frame count to the viewer, as an unset variable does.
+    auto const iterations
+        = cc::scoped_environment_variable(sr::capture_iterations_env_var, nx::is_thorough() ? "0" : "16");
 
     auto const box = sv_test::make_cornell_box();
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);

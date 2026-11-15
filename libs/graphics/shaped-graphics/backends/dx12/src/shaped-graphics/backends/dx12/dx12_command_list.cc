@@ -126,6 +126,18 @@ void dx12_command_list::bind_software_trace(dx12_pipeline_layout const& layout,
     }
 }
 
+void dx12_command_list::bind_sampler_tables(dx12_pipeline_layout const& layout, bool is_graphics)
+{
+    for (auto const& t : layout.sampler_tables)
+    {
+        auto const at = _ctx._sampler_heap.gpu_at(t.heap_offset);
+        if (is_graphics)
+            _list->SetGraphicsRootDescriptorTable(UINT(t.root_param), at);
+        else
+            _list->SetComputeRootDescriptorTable(UINT(t.root_param), at);
+    }
+}
+
 void dx12_command_list::bind_debug_window(dx12_pipeline_layout const& layout,
                                           sg::impl::pipeline_footprint const& footprint,
                                           bool is_graphics)
@@ -341,6 +353,7 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
     _list->SetDescriptorHeaps(2, heaps);
     _list->SetComputeRootSignature(dp->layout->root_signature.Get());
     _list->SetPipelineState(dp->pipeline_state.Get());
+    bind_sampler_tables(*dp->layout, false);
     bind_debug_window(*dp->layout, pipeline.footprint(), false);
 
     // The pipeline layout supplies each slot's root-parameter indices for bind_group; reset the per-slot
@@ -481,6 +494,7 @@ void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& 
     _list->SetDescriptorHeaps(2, heaps);
     _list->SetComputeRootSignature(rp->layout->root_signature.Get());
     list4->SetPipelineState1(rp->state_object.Get());
+    bind_sampler_tables(*rp->layout, false);
     bind_debug_window(*rp->layout, pipeline.footprint(), false);
 
     _bound_pipeline_layout = rp->layout.get();

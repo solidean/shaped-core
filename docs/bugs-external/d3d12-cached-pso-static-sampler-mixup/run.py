@@ -12,6 +12,7 @@ Windows only, since the bug is D3D12's.
     uv run run.py
 
 Exits 1 when a restored pipeline samples through the wrong static sampler, 0 when every run samples as it should.
+Exits 4 when the sampler bound through a table goes wrong too, which is what shaped-graphics' workaround rests on.
 Exits 2 when the run is inconclusive, which includes a restore the driver built without the blob (repro.cc's exit code 3).
 """
 
@@ -56,9 +57,12 @@ def main() -> int:
         if exe is None:
             return 2
         reproduced = False
-        for adapter in ([], ["--warp"]):
-            print(f"on {'WARP' if adapter else 'the high-performance adapter'}:")
-            blob = str(workdir / f"clamp{'-warp' if adapter else ''}.blob")
+        table_broken = False
+        for adapter, binding in (([], []), (["--warp"], []), ([], ["--table"]), (["--warp"], ["--table"])):
+            adapter = adapter + binding
+            name = "WARP" if "--warp" in adapter else "the high-performance adapter"
+            print(f"on {name}{', the sampler through a table' if binding else ''}:")
+            blob = str(workdir / f"clamp{'-warp' if '--warp' in adapter else ''}{'-table' if binding else ''}.blob")
             # Each step is its own process: the fault needs the blob to meet a process that never built its pipeline.
             stored = run(exe, "store", blob, *adapter)
             alone = run(exe, "restore", blob, *adapter)
@@ -70,11 +74,16 @@ def main() -> int:
             if after_twin == 3:
                 print("  inconclusive: the driver built the pipeline after the twin without the blob")
                 return 2
-            if after_twin != 0:
+            if after_twin != 0 and binding:
+                print("  TABLE BROKEN: even through a table, the restored pipeline samples by its twin's sampler")
+                table_broken = True
+            elif after_twin != 0:
                 print("  REPRODUCED: a correct blob, restored after its repeating twin was built, samples by repeat")
                 reproduced = True
             else:
                 print("  not reproduced")
+    if table_broken:
+        return 4
     return 1 if reproduced else 0
 
 

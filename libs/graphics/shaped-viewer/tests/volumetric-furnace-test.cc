@@ -7,6 +7,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -84,6 +85,9 @@ struct furnace_case
     /// Small, because this must also pass on WARP: a scattering interior is the most expensive thing the integrator does,
     /// and the MEAN — which is what the test actually asserts on — converges long before the pixels do.
     tg::vec2i image_size = tg::vec2i(32, 32);
+
+    /// whether a default run traces it, or only a thorough one
+    bool by_default = true;
 };
 
 /// The mean of every pixel, plus the extremes — a flat image is what this test is looking for, so the spread matters as
@@ -310,7 +314,7 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     glass.push_back(binding::of("specular_ior", 1.5f));
     glass.push_back(binding::of("specular_roughness", 0.05f));
     glass.push_back(binding::of("transmission_weight", 1.0f));
-    cases.push_back({.name = "glass interior at index 1.5", .bindings = cc::move(glass)});
+    cases.push_back({.name = "glass interior at index 1.5", .bindings = cc::move(glass), .by_default = false});
 
     // Pure scattering: white transmission color means no absorption at all, so the walk conserves every photon and only
     // moves it around.
@@ -343,7 +347,8 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     // Each pixel keeps its samples, so the per-pixel bounds are unchanged, and the mean they lose paths from sits far inside its margin.
     cases.push_back({.name = "dense scattering interior",
                      .bindings = cc::move(dense),
-                     .image_size = nx::is_thorough() ? tg::vec2i(32, 32) : tg::vec2i(16, 16)});
+                     .image_size = nx::is_thorough() ? tg::vec2i(32, 32) : tg::vec2i(16, 16),
+                     .by_default = false});
 
     // The same walk with absorption, which must come back darker — the control that separates "the medium is lossless"
     // from "the medium was never entered".
@@ -364,7 +369,18 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     cases.push_back({.name = "rough glass interior",
                      .bindings = cc::move(rough),
                      .lossless = false,
-                     .at_least = 0.81f * luminance_of(environment)});
+                     .at_least = 0.81f * luminance_of(environment),
+                     .by_default = false});
+
+    // A default run traces the clear, scattering and absorbing interiors; --thorough adds the glass, dense and rough glass ones.
+    if (!nx::is_thorough())
+    {
+        auto narrowed = cc::vector<furnace_case>();
+        for (auto& c : cases)
+            if (c.by_default)
+                narrowed.push_back(cc::move(c));
+        cases = cc::move(narrowed);
+    }
 
     // a smoke run traces the clear interior alone, which is what a preset's flags can break
     if (nx::is_smoke())

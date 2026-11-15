@@ -7,9 +7,9 @@ namespace cc
 {
 struct scoped_scheduler_tick;
 
-/// Sets the calling thread's OS name (as seen in debuggers and profilers). name is UTF-8.
-/// Best-effort: silently truncated where the platform is stricter (15 bytes on Linux) and a
-/// no-op where thread naming is unavailable (e.g. single-threaded WebAssembly).
+/// Sets the calling thread's OS name (as seen in debuggers and profilers) and its name in every recording.
+/// `name` is UTF-8.
+/// Best-effort: silently truncated where the platform is stricter (15 bytes on Linux), and a no-op where thread naming is unavailable (single-threaded WebAssembly).
 void set_current_thread_name(string_view name);
 
 } // namespace cc

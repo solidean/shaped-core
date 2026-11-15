@@ -117,6 +117,12 @@ struct cc::rec::sampling_config
     /// The next tick waits for it, so it should be quick; it may allocate and lock.
     void (*sink)(rec::sample_view const& sample, void* user) = nullptr;
     void* sink_user = nullptr;
+
+    /// With a sink, a sample also goes to the recording once its thread's last recorded one is this old; 0 records none.
+    ///
+    /// So an aggregating consumer still leaves a slow trace of where every thread was, which is what a hang or a stall
+    /// in a recording is read from afterwards.
+    f64 recorded_every_secs = 0;
 };
 
 namespace cc::rec

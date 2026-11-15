@@ -284,8 +284,16 @@ cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
         return nullptr;
 #if !defined(CC_ARCH_ARM64)
     // An entry may stand for another one, as RtlLookupFunctionEntry follows too.
-    while ((f->UnwindData & 1) != 0)
-        f = reinterpret_cast<RUNTIME_FUNCTION const*>(m.base + (f->UnwindData & ~DWORD(1)));
+    // Bounded, and only inside the module: a snapshot gone stale under an unloaded module reads whatever is mapped
+    // there now, and a chain through that may cycle, with the sampled thread suspended for as long as it does.
+    constexpr auto max_chain = 8;
+    for (auto hops = 0; (f->UnwindData & 1) != 0; ++hops)
+    {
+        auto const target = m.base + (f->UnwindData & ~DWORD(1));
+        if (hops == max_chain || target < m.base || target + sizeof(RUNTIME_FUNCTION) > m.end)
+            return nullptr;
+        f = reinterpret_cast<RUNTIME_FUNCTION const*>(target);
+    }
 #endif
     return f;
 }

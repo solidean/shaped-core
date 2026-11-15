@@ -43,7 +43,8 @@ public:
         cc::span<sg::bound_sampler const> static_samplers,
         cc::optional<sg::binding> const& inline_constants,
         bool dispatch_grid,
-        sg::mesh_polyfill_slots mesh_polyfill = sg::mesh_polyfill_slots::none);
+        sg::mesh_polyfill_slots mesh_polyfill = sg::mesh_polyfill_slots::none,
+        dx12_context* samplers_from = nullptr);
 
     ComPtr<ID3D12RootSignature> root_signature;
     cc::vector<group_slot> groups; // one per bind slot, in order
@@ -69,7 +70,19 @@ public:
     /// stage's compute half that reads them; -1 where the layout holds neither.
     int task_slots_root_param = -1;
 
-    /// Whether the root signature carries a static sampler, a group's or the layout's own.
+    /// A static sampler bound through a table: the root parameter, and the sampler heap slot its state is interned at.
+    struct sampler_table
+    {
+        int root_param = -1;
+        int heap_offset = 0;
+    };
+
+    /// Every static sampler, a group's or the layout's own, as a one-descriptor table appended after every other root
+    /// parameter, which binding a pipeline points at its interned state; see dx12_sampler_interner on why.
+    cc::vector<sampler_table> sampler_tables;
+
+    /// Whether the root signature carries a true static sampler, where the tables would not fit: past the 64-DWORD root
+    /// budget, past the sampler heap, or with no context to intern in.
     /// **A pipeline over one neither restores from a cached blob nor hands one out.**
     /// A correct blob, restored in a process that has built the same shader under a static sampler that differs, came
     /// back sampling through that other sampler.

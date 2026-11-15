@@ -117,10 +117,23 @@ INVOCABLE_TEST("ssc::dxc + dx12 - ctx.cached dedups raster pipelines and keys ev
     sg::raster_pipeline_handle const built = cc::async_blocking_get(base);
     CHECK(built != nullptr);
 
-    // A distinct pipeline layout is a distinct pipeline, for otherwise identical shaders and state.
+    // The layout counts by its structure, not its address: the key reaches the persistent tier, where an address names
+    // nothing, so a second layout built alike shares the pipeline.
+    auto twin_layout_description = base_description();
+    twin_layout_description.layout = ctx.uncached.create_pipeline_layout({});
+    REQUIRE(twin_layout_description.layout.get() != pipeline_layout.get());
+    CHECK(ctx.cached.acquire_raster_pipeline(twin_layout_description).get() == base.get());
+
+    // A structurally distinct layout is a distinct pipeline, for otherwise identical shaders and state.
     auto other_layout_description = base_description();
-    other_layout_description.layout = ctx.uncached.create_pipeline_layout({});
-    REQUIRE(other_layout_description.layout.get() != pipeline_layout.get());
+    other_layout_description.layout = ctx.uncached.create_pipeline_layout({
+        .inline_constants = sg::binding{.name = "Params",
+                                        .space = 0,
+                                        .index = 0,
+                                        .count = 1,
+                                        .type = sg::binding_type::constants_buffer,
+                                        .block_size = 16},
+    });
     auto const other_layout = ctx.cached.acquire_raster_pipeline(other_layout_description);
     CHECK(base.get() != other_layout.get());
     (void)cc::try_async_blocking_get(other_layout);
@@ -172,6 +185,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - ctx.cached dedups raster pipelines and keys ev
     differs("a vertex attribute offset", [](auto& d) { d.vertex_input.attributes[0].offset = 4; });
     differs("a vertex slot stride", [](auto& d) { d.vertex_input.slots[0].stride = 32; });
     differs("a per-instance vertex slot", [](auto& d) { d.vertex_input.slots[0].per_instance = true; });
+    // dx12 bakes the view count into the PSO, so two pipelines that differ in it alone are two pipelines.
+    if (ctx.supports(sg::feature::view_instancing))
+        differs("the view count", [](auto& d) { d.view_count = 2; });
 }
 
 ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - the cached PSO blob is not part of the raster key",

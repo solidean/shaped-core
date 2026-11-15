@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
@@ -1350,12 +1351,18 @@ ASYNC_INVOCABLE_TEST("sv - a normal map shades as the tangent frame turned onto 
         cc::string_view name;
         tg::vec3f tangent;
         f32 handedness;
+        /// The one encoding a default run traces this frame in, or none; --thorough traces every frame in both.
+        cc::optional<bool> signed_by_default;
     };
     auto const up = tg::vec3f(0, 1, 0);
+    // A default run traces the quarter turn signed and the mirrored frame unsigned, each encoding and each turned axis once.
     auto const frames = cc::vector<frame_case>{
         {.name = "tangent along +x", .tangent = tg::vec3f(1, 0, 0), .handedness = 1.0f},
-        {.name = "tangent along -z, a quarter turn", .tangent = tg::vec3f(0, 0, -1), .handedness = 1.0f},
-        {.name = "mirrored", .tangent = tg::vec3f(1, 0, 0), .handedness = -1.0f},
+        {.name = "tangent along -z, a quarter turn",
+         .tangent = tg::vec3f(0, 0, -1),
+         .handedness = 1.0f,
+         .signed_by_default = true},
+        {.name = "mirrored", .tangent = tg::vec3f(1, 0, 0), .handedness = -1.0f, .signed_by_default = false},
     };
 
     // From above, off every axis, so a tilt toward each of the four tangent directions is lit differently.
@@ -1370,6 +1377,8 @@ ASYNC_INVOCABLE_TEST("sv - a normal map shades as the tangent frame turned onto 
     for (auto const& f : frames)
         for (auto const is_signed : {true, false})
         {
+            if (!nx::is_thorough() && f.signed_by_default != is_signed)
+                continue;
             auto shades = cc::vector<f32>();
             for (auto const azimuth_degrees : {0.0f, 90.0f, 180.0f, 270.0f})
             {

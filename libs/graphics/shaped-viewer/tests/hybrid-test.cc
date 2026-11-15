@@ -8,6 +8,7 @@
 #include <clean-core/record/log.hh> // CC_LOG_INFO
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/scene/studio.hh>
@@ -349,16 +350,22 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass sphere under a uniform sky sh
         f64 distance = 1.9;
         f64 fov_degrees = 60.0;
     };
+    // A default run draws forward close by and deferred from far off, 32 frames each; --thorough both ways from both, 64 frames.
+    auto const thorough = nx::is_thorough();
+    auto const frames = thorough ? 64 : 32;
     for (auto const at :
          {placement{.distance = 1.9, .fov_degrees = 60.0}, placement{.distance = 1000.0, .fov_degrees = 0.1146}})
         for (auto const lighting : {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred})
         {
+            auto const distant = at.distance > 100.0;
+            if (!thorough && distant != (lighting == sv::hybrid_lighting::deferred))
+                continue;
             auto cam = sv::camera::looking_at(tg::pos3d(0, 0, -at.distance), tg::pos3d(0, 0, 0));
             cam.projection.vertical_fov = tg::angle_d::make_from_degree(at.fov_degrees);
 
             auto const name = cc::format(
                 "{} from {}", lighting == sv::hybrid_lighting::forward ? "forward" : "deferred", at.distance);
-            auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, 64,
+            auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, frames,
                                                      sv::background::uniform(tg::vec3f(sky, sky, sky)));
 
             // The middle of the image, which only the sphere covers, and the whole of its disc.
@@ -443,8 +450,11 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass pane thinner than a millimete
     auto const sky = 0.5f;
 
     constexpr auto size = tg::vec2i(48, 48);
+    // A default run draws deferred alone; --thorough adds forward.
     for (auto const lighting : {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred})
     {
+        if (!nx::is_thorough() && lighting == sv::hybrid_lighting::forward)
+            continue;
         auto const name = lighting == sv::hybrid_lighting::forward ? "forward" : "deferred";
         auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, 16,
                                                  sv::background::uniform(tg::vec3f(sky, sky, sky)));

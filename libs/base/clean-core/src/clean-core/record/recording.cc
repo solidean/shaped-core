@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/pair.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/impl/block_builder.hh>
 #include <clean-core/record/overhead.hh>
@@ -256,6 +257,56 @@ cc::rec::recording cc::rec::recording::without_sampling() const
         {
             auto const name = cc::string_view(e.desc->name);
             return e.kind() != rec::event_kind::sample && name != run_name && name != tick_name;
+        });
+}
+
+cc::rec::recording cc::rec::recording::with_sampling_thinned(f64 interval_secs, f64 cycles_per_second) const
+{
+    auto const run_name = cc::string_view(rec::impl::thread_run_desc().name);
+    auto const tick_name = cc::string_view(rec::impl::sample_tick_scope_name);
+    auto const rate = cycles_per_second > 0 ? cycles_per_second : rec::cycles_per_second();
+    auto const window_cycles = cc::max(u64(1), u64(interval_secs * rate));
+
+    // A thread's sample and reading of one window, as one key; thread indices stay far below 2^20.
+    auto const key_of = [&](rec::event_view const& e)
+    { return (e.cycles / window_cycles + 1) << 20 | (e.field_as_u64("thread_index").value_or(0) & 0xFFFFF); };
+
+    // First the windows whose stack repeats the thread's previous kept one: an idle thread parked in one wait would
+    // otherwise be most of the result, saying the same thing every window.
+    auto repeated = cc::set<u64>();
+    {
+        auto seen = cc::set<u64>();
+        auto last_frames = cc::map<u64, cc::vector<u64>>();
+        for_each_event(
+            [&](rec::chunk_view const&, rec::event_view const& e)
+            {
+                if (e.kind() != rec::event_kind::sample || !seen.insert(key_of(e)))
+                    return;
+                auto frames = e.field_as_u64_array("frames");
+                auto& last = last_frames[e.field_as_u64("thread_index").value_or(0)];
+                if (frames.size() == last.size()
+                    && cc::memcmp(frames.data(), last.data(), size_t(frames.size()) * sizeof(u64)) == 0)
+                    repeated.insert(key_of(e));
+                else
+                    last = cc::move(frames);
+            });
+    }
+
+    // Per kind, the windows whose one event was kept.
+    auto kept_samples = cc::set<u64>();
+    auto kept_readings = cc::set<u64>();
+    return filtered(
+        [&](rec::chunk_view const&, rec::event_view const& e)
+        {
+            auto const name = cc::string_view(e.desc->name);
+            if (name == tick_name)
+                return false;
+            auto const is_sample = e.kind() == rec::event_kind::sample;
+            if (!is_sample && name != run_name)
+                return true;
+
+            auto const key = key_of(e);
+            return (is_sample ? kept_samples : kept_readings).insert(key) && !repeated.contains(key);
         });
 }
 

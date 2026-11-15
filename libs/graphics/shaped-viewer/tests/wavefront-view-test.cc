@@ -14,6 +14,7 @@
 #include <nexus/async-test.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh>
@@ -145,9 +146,11 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     auto const reference_path = cc::temp_file_path("sv-parity-megakernel", ".png");
     auto const traced_path = cc::temp_file_path("sv-parity-wavefront", ".png");
 
-    // The same samples per pixel for both, so the noise left between them is the same: 48 megakernel frames of 4.
-    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 192);
-    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 192);
+    // The same samples per pixel for both, so the noise left between them is the same.
+    // A default run captures 48 samples per pixel, 12 megakernel frames of 4; --thorough 192, 48 frames.
+    auto const samples = nx::is_thorough() ? 192 : 48;
+    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, samples);
+    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, samples);
 
     auto const reference = read_png(reference_path);
     auto const traced = read_png(traced_path);

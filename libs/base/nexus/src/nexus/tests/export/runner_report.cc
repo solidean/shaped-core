@@ -8,9 +8,11 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/large_allocations.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/string/from_string.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 
@@ -88,7 +90,10 @@ void take_sample(cc::rec::sample_view const& s, void*)
 void start_report_sampler(f64 hz)
 {
     // Whole stacks: a stack cut at a profiling scope names the scope's function and nothing it called.
-    cc::rec::start_sampling({.rate_hz = hz, .stop_at_scope = false, .sink = &take_sample});
+    cc::rec::start_sampling({.rate_hz = hz,
+                             .stop_at_scope = false,
+                             .sink = &take_sample,
+                             .recorded_every_secs = nx::impl::recorded_sample_interval_secs});
 }
 
 /// The modules sorted by base, and the ones the report names, in the order it first names them.
@@ -213,6 +218,14 @@ void nx::impl::note_pass_owner(u64 owner, test_declaration const* slot)
             if (!cc::rec::is_sampling() && cc::rec::is_initialized())
                 start_report_sampler(r.hz);
         });
+}
+
+bool nx::impl::report_sampling_requested()
+{
+    if (!cc::environment_variable(nx::runner_report_variable).has_value())
+        return false;
+    auto const hz = cc::environment_variable(nx::runner_report_sampling_variable);
+    return hz.has_value() && cc::from_string<f64>(hz.value()).value_or(0.0) > 0;
 }
 
 void nx::impl::pause_report_sampling()

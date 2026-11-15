@@ -111,6 +111,36 @@ private:
     alignas(cc::async_ambient_scope) byte _storage[sizeof(cc::async_ambient_scope)] = {};
 };
 
+/// An async scope whose two ends are separate calls: opened in one, closed in a later one, possibly on another thread.
+///
+/// For an operation that is no one C++ block, a harness's pass that a poll starts and a later poll finishes above all.
+/// Opening records the begin; `close()` or destruction records the end, once.
+/// It puts nothing on the ambient chain, so it attributes nothing recorded under it: an owner or a trace does that.
+/// Movable, so it can live in the state of the operation it names.
+struct cc::rec::open_async_scope
+{
+    open_async_scope() = default;
+    open_async_scope(rec::desc const& begin_desc, rec::desc const& end_desc, rec::trace_id id);
+    ~open_async_scope();
+
+    open_async_scope(open_async_scope&& rhs) noexcept;
+    open_async_scope& operator=(open_async_scope&& rhs) noexcept;
+    open_async_scope(open_async_scope const&) = delete;
+    open_async_scope& operator=(open_async_scope const&) = delete;
+
+    /// Records the end; a second call, or one on a closed or default scope, does nothing.
+    void close();
+
+    [[nodiscard]] bool is_open() const { return _end_desc != nullptr; }
+    [[nodiscard]] rec::trace_id id() const { return _id; }
+    [[nodiscard]] rec::desc const* begin_desc() const { return _begin_desc; }
+
+private:
+    rec::desc const* _begin_desc = nullptr;
+    rec::desc const* _end_desc = nullptr;
+    rec::trace_id _id = rec::trace_id::none;
+};
+
 namespace cc::rec
 {
 /// The owner the calling thread is currently under, or `none`; a chain walk, like current_trace_id.
@@ -152,3 +182,15 @@ namespace cc::rec
     CC_REC_DEFINE_ASYNC_SCOPE_DESCS(cc_rec_async_desc_, cc_rec_async_end_desc_, (name_)); \
     auto const cc_rec_async_scope_                                                        \
         = ::cc::rec::impl::async_scope_guard(cc_rec_async_desc_, cc_rec_async_end_desc_, (id_))
+
+/// Opens an async scope that a later call closes, as a cc::rec::open_async_scope value.
+///
+///   state.scope = CC_RECORD_ASYNC_SCOPE_OPEN("nx.test");
+///   ...
+///   state.scope.close();
+#define CC_RECORD_ASYNC_SCOPE_OPEN(name_)                                                                          \
+    [&]                                                                                                            \
+    {                                                                                                              \
+        CC_REC_DEFINE_ASYNC_SCOPE_DESCS(cc_rec_async_desc_, cc_rec_async_end_desc_, (name_));                      \
+        return ::cc::rec::open_async_scope(cc_rec_async_desc_, cc_rec_async_end_desc_, ::cc::rec::new_trace_id()); \
+    }()

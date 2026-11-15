@@ -2,6 +2,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh> // cc::max
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/writer.hh>     // cc::rec::set_current_thread_record_name
 #include <clean-core/thread/async_node.hh> // cc::impl::async_bind_main_thread_home
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
@@ -186,7 +187,7 @@ void cc::mark_current_thread_as_main()
 extern "C" __declspec(dllimport) void* __stdcall GetCurrentThread();
 extern "C" __declspec(dllimport) long __stdcall SetThreadDescription(void*, wchar_t const*);
 
-void cc::set_current_thread_name(string_view name)
+static void set_os_thread_name(cc::string_view name)
 {
     static_assert(sizeof(wchar_t) == sizeof(char16_t), "Windows wchar_t must be 16-bit");
 
@@ -199,7 +200,7 @@ void cc::set_current_thread_name(string_view name)
 
 #include <pthread.h>
 
-void cc::set_current_thread_name(string_view name)
+static void set_os_thread_name(cc::string_view name)
 {
     // Linux caps the thread name at 16 bytes including the NUL terminator.
     char buf[16];
@@ -215,7 +216,7 @@ void cc::set_current_thread_name(string_view name)
 
 #include <pthread.h>
 
-void cc::set_current_thread_name(string_view name)
+static void set_os_thread_name(cc::string_view name)
 {
     char buf[64];
     isize const n = name.size() < 63 ? name.size() : 63;
@@ -228,7 +229,7 @@ void cc::set_current_thread_name(string_view name)
 
 #else // threads exist but naming is unsupported on this OS
 
-void cc::set_current_thread_name(string_view)
+static void set_os_thread_name(cc::string_view)
 {
 }
 
@@ -236,8 +237,15 @@ void cc::set_current_thread_name(string_view)
 
 #else // CC_HAS_THREADS == 0
 
-void cc::set_current_thread_name(string_view)
+static void set_os_thread_name(cc::string_view)
 {
 }
 
 #endif
+
+// The recorder's name follows the OS one, so a recording names every thread that was ever named.
+void cc::set_current_thread_name(string_view name)
+{
+    set_os_thread_name(name);
+    cc::rec::set_current_thread_record_name(name);
+}

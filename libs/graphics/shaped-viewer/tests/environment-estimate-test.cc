@@ -2,6 +2,7 @@
 
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 
@@ -125,9 +126,14 @@ ASYNC_INVOCABLE_TEST("sv environment estimate - a face nothing blocks takes no n
     auto sampled = sky_modes(sv::environment_estimate::sampled);
     auto exact = sky_modes(sv::environment_estimate::exact);
     // Matte, where the specular layer reflects little; and glossy, where sampled, the rare bounce into its lobe carries the sky whole.
+    // A default run takes the glossy cube in the megakernel and the deferred hybrid; --thorough takes both cubes in every mode.
+    auto const in_this_run = [](f32 roughness, cc::string_view mode)
+    { return nx::is_thorough() || (roughness == 0.4f && (mode == "megakernel" || mode == "deferred")); };
     for (auto const roughness : {1.0f, 0.4f})
         for (auto i = isize(0); i < exact.size(); ++i)
         {
+            if (!in_this_run(roughness, exact[i].name))
+                continue;
             auto const items = floating_cube(resources, roughness);
             // The deferred hybrid's G-buffer says where the faces are, which is the same image in every mode.
             auto const faces = co_await agreement::converge(ctx, resources, items, camera, exact.back(), 4, 0,

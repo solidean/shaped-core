@@ -346,6 +346,9 @@ private:
                            sg::impl::pipeline_footprint const& footprint,
                            bool is_graphics);
 
+    /// Points each of `layout`'s sampler tables at its interned state; called wherever its root signature is set.
+    void bind_sampler_tables(dx12_pipeline_layout const& layout, bool is_graphics);
+
     sg::impl::member_track track_buffer_access(dx12_buffer_handle const& buffer,
                                                sg::pipeline_stage_flags stages,
                                                sg::access_flags access,

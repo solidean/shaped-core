@@ -135,8 +135,10 @@ CI uploads them inside `ci-logs.zip` — [docs/guides/ci.md](../../../../docs/gu
 `dev.py test` sets the variable for every binary it runs, through the build server too, so each run's logs carry one.
 It is what to read when a run was slow or odd and nobody asked for `--rec` beforehand.
 
-It holds the instrumentation alone, the code's own scopes, stats, values and logs, coarsened by [compaction](../../clean-core/docs/systems/recording.md#compaction-coarser-not-shorter):
-- **No sampling.** A runner report's sampler writes a reading per thread at every tick, which would be most of the file.
+It holds the code's own scopes, stats, values and logs, coarsened by [compaction](../../clean-core/docs/systems/recording.md#compaction-coarser-not-shorter):
+- **Every test pass is an async scope `nx.test`**, and the value `nx.test.name` names it under the pass's owner: `values_by_owner("nx.test.name")` in the Python reader maps owners to tests.
+- **A sample per thread per half second, where its stack changed.** A hang or a stall is read from these stacks; a thread parked in one wait shows once.
+  A run nobody samples gets a 2 Hz sampler for it, and the runner report's sampler records at that pace beside its sink.
 - **No allowed noise.** A warning or error a binary-wide `NX_ALLOW_LOGS` allows is dropped; one a test declares stays.
 - **Coarse.** Scopes under a millisecond become summaries and stat lanes fold per tenth of a second, both coarsening fourfold a round until the recording fits a megabyte.
 
