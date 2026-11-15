@@ -250,6 +250,12 @@ if (MSVC)
     sc_build_options(COMPILE $<$<CONFIG:RelWithDebInfo>:/Ob2>)
 endif()
 
+# cl.exe writes the COFF object format, capped at 65279 sections, until /bigobj lifts the cap: SGL's larger sources pass
+# it in Debug (C1128). clang-cl switches to the big format by itself and takes the flag as it is.
+if (MSVC)
+    sc_build_options(COMPILE /bigobj)
+endif()
+
 # Release on Windows carries debug info on the side: a PDB beside each binary, never inside it, so a release crash symbolizes.
 # /OPT:REF and /OPT:ICF restore what /DEBUG turns off, so the code is Release's own.
 # Not elsewhere: -g puts the debug info into the binary, which a consumer shipping it would have to split off first.
