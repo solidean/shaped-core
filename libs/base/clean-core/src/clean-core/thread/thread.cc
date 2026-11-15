@@ -214,13 +214,13 @@ static void set_os_thread_name(cc::string_view name)
 
 #elif defined(CC_OS_MACOS) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
 
-#include <pthread.h>
+// <pthread.h> is included at the top of the file, for every Apple platform
 
 static void set_os_thread_name(cc::string_view name)
 {
     char buf[64];
-    isize const n = name.size() < 63 ? name.size() : 63;
-    for (isize i = 0; i < n; ++i)
+    cc::isize const n = name.size() < 63 ? name.size() : 63;
+    for (cc::isize i = 0; i < n; ++i)
         buf[i] = name.data()[i];
     buf[n] = '\0';
 
