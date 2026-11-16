@@ -848,30 +848,62 @@
     sg_tessellation_patches.words[patch * 8u + 6u] = p.point_count as uint
     sg_tessellation_patches.words[patch * 8u + 7u] = p.index_count as uint
 
+/// The scan's running sums of one chunk of patches, a point count and an index count a thread.
+@internal @workgroup binding sg_tessellation_scan_sums:
+    points: uint[256]
+    indices: uint[256]
+
 /// The counts scanned into each patch's first point and index, in patch order, then the draw's and the evaluation
 /// pass's arguments.
-@internal @compute(1) fun sg_tessellation_scan(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches, sg_tessellation_args}:
+/// One workgroup walks the patches a chunk of 256 at a time: a tree scan within the chunk, the chunks' totals carried.
+@internal @compute(256) fun sg_tessellation_scan(@local_thread_index local: int){sg_tessellation_draw, sg_tessellation_patches, sg_tessellation_args, sg_tessellation_scan_sums}:
     let draw = sg_tessellation_draw.values[0]
-    let patches = (draw.x * draw.y) as int
+    let patches = draw.x * draw.y
     let mut points = 0u
     let mut indices = 0u
-    for patch in 0 ..< patches:
-        let at = (patch as uint) * 8u
-        let point_count = sg_tessellation_patches.words[at + 6u]
-        let index_count = sg_tessellation_patches.words[at + 7u]
-        sg_tessellation_patches.words[at + 6u] = points
-        sg_tessellation_patches.words[at + 7u] = indices
-        points += point_count
-        indices += index_count
-    sg_tessellation_args.words[0] = indices
-    sg_tessellation_args.words[1] = 1u
-    sg_tessellation_args.words[2] = 0u
-    sg_tessellation_args.words[3] = 0u
-    sg_tessellation_args.words[4] = 0u
-    sg_tessellation_args.words[5] = (points + 63u) / 64u
-    sg_tessellation_args.words[6] = 1u
-    sg_tessellation_args.words[7] = 1u
-    sg_tessellation_args.words[8] = points
+    let mut first = 0u
+    while first < patches:
+        let patch = first + (local as uint)
+        let at = patch * 8u
+        let mut point_count = 0u
+        let mut index_count = 0u
+        if patch < patches:
+            point_count = sg_tessellation_patches.words[at + 6u]
+            index_count = sg_tessellation_patches.words[at + 7u]
+        sg_tessellation_scan_sums.points[local] = point_count
+        sg_tessellation_scan_sums.indices[local] = index_count
+        workgroup_barrier()
+        // each step adds the sum `stride` places back, so a thread ends holding its chunk's sum up to itself
+        let mut stride = 1
+        while stride < 256:
+            let mut point_sum = sg_tessellation_scan_sums.points[local]
+            let mut index_sum = sg_tessellation_scan_sums.indices[local]
+            if local >= stride:
+                point_sum += sg_tessellation_scan_sums.points[local - stride]
+                index_sum += sg_tessellation_scan_sums.indices[local - stride]
+            workgroup_barrier()
+            sg_tessellation_scan_sums.points[local] = point_sum
+            sg_tessellation_scan_sums.indices[local] = index_sum
+            workgroup_barrier()
+            stride = stride << 1
+        if patch < patches:
+            sg_tessellation_patches.words[at + 6u] = points + sg_tessellation_scan_sums.points[local] - point_count
+            sg_tessellation_patches.words[at + 7u] = indices + sg_tessellation_scan_sums.indices[local] - index_count
+        points += sg_tessellation_scan_sums.points[255]
+        indices += sg_tessellation_scan_sums.indices[255]
+        // no thread overwrites the sums before every thread has read the chunk's total
+        workgroup_barrier()
+        first += 256u
+    if local == 0:
+        sg_tessellation_args.words[0] = indices
+        sg_tessellation_args.words[1] = 1u
+        sg_tessellation_args.words[2] = 0u
+        sg_tessellation_args.words[3] = 0u
+        sg_tessellation_args.words[4] = 0u
+        sg_tessellation_args.words[5] = (points + 63u) / 64u
+        sg_tessellation_args.words[6] = 1u
+        sg_tessellation_args.words[7] = 1u
+        sg_tessellation_args.words[8] = points
 
 /// Each patch's points and indices, at the places the scan gave it.
 @internal @compute(64) fun sg_tessellation_generate(@thread_id id: int3){sg_tessellation_draw, sg_tessellation_patches, sg_tessellation_points, sg_tessellation_indices}:

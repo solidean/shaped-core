@@ -249,3 +249,30 @@ pipeline quad_cw:
     pixel = staged_ps
     cull = .back
     format = .rgba32_float
+
+// A grid of quad patches whose factors differ from patch to patch, 1 to 5 by where each lies.
+// Each color holds the patch-local `uv` and the patch's left edge, so a point placed in another patch's range shows.
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise, max_factor = 5)
+fun grid_tc(patch: control_point[4]) -> quad_factors:
+    let column = ((patch[0].position.x + 1.0) * 16.0 + 0.5) as int
+    let row = ((patch[0].position.y + 1.0) * 16.0 + 0.5) as int
+    let f = (1 + (column + 3 * row) % 5) as float
+    return {edges = [f, f, f, f], inside = [f, f]}
+
+@tessellation_evaluation
+fun grid_te(patch: control_point[4], f: quad_factors, @domain_location uv: float2) -> staged:
+    let bottom = patch[0].position + (patch[1].position - patch[0].position) * uv.x
+    let top = patch[3].position + (patch[2].position - patch[3].position) * uv.x
+    let p = bottom + (top - bottom) * uv.y
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        color = float4(uv.x, uv.y, patch[0].position.x, 1.0)
+    }
+
+pipeline quad_grid:
+    vertex = corner_vs
+    tessellation_control = grid_tc
+    tessellation_evaluation = grid_te
+    pixel = staged_ps
+    cull = .back
+    format = .rgba32_float

@@ -308,6 +308,61 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated quad patch covers its quad, reports its
         }
 }
 
+ASYNC_INVOCABLE_TEST("sg - tessellated patches of differing factors each draw their own points, past one workgroup "
+                     "of the scan",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_tessellation(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = tessellation_polyfilling(*ctx);
+
+    // 32 x 32 patches of 2 x 2 pixels over a 64 x 64 target, 1024 of them, so the polyfill's scan walks four chunks.
+    // Factors 1 to 5 by place give each patch its own point and index counts, so an offset off by one patch shows as
+    // a pixel left out, or one colored by another patch's `uv` or left edge.
+    constexpr auto grid = 32;
+    constexpr auto pixels_wide = 2 * grid;
+    auto corners = cc::vector<shaders::stages::stage_corner>();
+    auto const step = 2.0f / float(grid);
+    for (auto row = 0; row < grid; ++row)
+        for (auto column = 0; column < grid; ++column)
+        {
+            auto const at = tg::vec2f(-1.0f + float(column) * step, -1.0f + float(row) * step);
+            corners.push_back({.position = at});
+            corners.push_back({.position = at + tg::vec2f(step, 0)});
+            corners.push_back({.position = at + tg::vec2f(step, step)});
+            corners.push_back({.position = at + tg::vec2f(0, step)});
+        }
+    auto const count = corners.size();
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(corners), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::quad_grid);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = pixels_wide,
+                                                          .height = pixels_wide,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::stages::stage_target::name,
+                                                          .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = count}});
+                                                         });
+
+    auto const near = [](float a, float b) { return a - b < 0.001f && b - a < 0.001f; };
+    for (auto y = 0; y < pixels_wide; ++y)
+        for (auto x = 0; x < pixels_wide; ++x)
+        {
+            auto const got = pixels[0].rgba_float(x, y);
+            // pixel rows count down from the top, and a patch's v up from its bottom
+            auto const u = (x % 2 == 0) ? 0.25f : 0.75f;
+            auto const v = (y % 2 == 0) ? 0.75f : 0.25f;
+            auto const left = -1.0f + float(x / 2) * step;
+            CHECK((got[3] == 1.0f && near(got[0], u) && near(got[1], v) && near(got[2], left)))
+                .context(cc::format("pixel ({}, {}): ({}, {}, {}, {})", x, y, got[0], got[1], got[2], got[3]));
+        }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a geometry stage's ended strips draw each copy and nothing between them",
                      (sg::context_handle const& ctx))
 {

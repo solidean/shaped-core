@@ -1,0 +1,73 @@
+// What the tessellation polyfill costs: quad patches cut at a factor of 4, 16 and 64, each evaluated by blending its corners.
+// Many coarse patches load its scan, few fine ones its per-patch tessellator.
+// Each control stage states its largest factor, which sizes the polyfill's scratch.
+require tessellation_shader
+
+@vertex struct bench_corner:
+    position: float2
+
+struct bench_point:
+    position: float2
+
+struct bench_staged:
+    @position position: hpos4
+    color: float4
+
+@pixel struct bench_target:
+    color: float4
+
+struct bench_factors:
+    @edge_factors edges: float[4]
+    @inside_factors inside: float[2]
+
+@vertex fun bench_vs(v: bench_corner) -> bench_point:
+    return {position = v.position}
+
+@pixel fun bench_ps(p: bench_staged) -> bench_target:
+    return {color = p.color}
+
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise, max_factor = 4)
+fun coarse_tc(patch: bench_point[4]) -> bench_factors:
+    return {edges = [4.0, 4.0, 4.0, 4.0], inside = [4.0, 4.0]}
+
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise, max_factor = 16)
+fun medium_tc(patch: bench_point[4]) -> bench_factors:
+    return {edges = [16.0, 16.0, 16.0, 16.0], inside = [16.0, 16.0]}
+
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise, max_factor = 64)
+fun fine_tc(patch: bench_point[4]) -> bench_factors:
+    return {edges = [64.0, 64.0, 64.0, 64.0], inside = [64.0, 64.0]}
+
+@tessellation_evaluation
+fun bench_te(patch: bench_point[4], f: bench_factors, @domain_location uv: float2) -> bench_staged:
+    let bottom = patch[0].position + (patch[1].position - patch[0].position) * uv.x
+    let top = patch[3].position + (patch[2].position - patch[3].position) * uv.x
+    let p = bottom + (top - bottom) * uv.y
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        color = float4(uv.x, uv.y, 0.5, 1.0)
+    }
+
+pipeline coarse:
+    vertex = bench_vs
+    tessellation_control = coarse_tc
+    tessellation_evaluation = bench_te
+    pixel = bench_ps
+    cull = .none
+    format = .rgba8_unorm
+
+pipeline medium:
+    vertex = bench_vs
+    tessellation_control = medium_tc
+    tessellation_evaluation = bench_te
+    pixel = bench_ps
+    cull = .none
+    format = .rgba8_unorm
+
+pipeline fine:
+    vertex = bench_vs
+    tessellation_control = fine_tc
+    tessellation_evaluation = bench_te
+    pixel = bench_ps
+    cull = .none
+    format = .rgba8_unorm

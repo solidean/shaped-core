@@ -38,10 +38,18 @@ Measured against dx12's native tessellation on the same patches.
 - 2026-11-12: `@tessellation_control(…, max_factor = N)`, CHK-304; its patches' scratch is sized by it, through slib's emit cache.
   It caps every factor the stage returns, natively too: every return caps each factor, and HLSL states `[maxtessfactor(N)]`.
   So the evaluation stage reads the same factors on every target, which `sg - a control stage's max_factor …` checks on metal through the polyfill.
+- 2026-11-16: the scan is one workgroup of 256 threads, a tree scan a chunk of 256 patches at a time with the chunks' totals carried.
+  `sg - tessellated patches of differing factors each draw their own points, past one workgroup of the scan` draws 1024 patches of factors 1 to 5 and checks every pixel; an inclusive scan fails it.
+  `sg tessellation polyfill - a frame of quad patches, …` measures 10 frames on the M4.
+  256 x 256 patches at factor 4 went from 105 ms to 49 ms, 64 x 64 at 16 from 38 to 33, 8 x 8 at 64 from 24 to 21.
+  Each idempotent pass run five times instead of once says what it costs a frame.
+  The tessellator costs 0.6 ms at 256 x 256 and none measurable at 8 x 8, the evaluation pass 0.8 and 0.06, control and count together 0.12.
+  So the thread-a-patch tessellator is kept: a thread a point and a triangle would save at most 0.6 ms a frame of about 5, and none where patches are few and fine.
+  About 2 ms a frame is left at 8 x 8 with every pass near zero, likely the benchmark's own pacing (hypothesis).
+  Found on the way: every patch reserves its largest factor's scratch, gigabytes for many patches at the default 64 (bug-sg-tessellation-polyfill-scratch-worst-case-per-patch).
 
 ## Still open
 
 - dx12 and vulkan: the layout twins that hold the six `sg_tessellation_*` entries, the draw, and the benchmark against their native stages that decides `where_missing`; on Windows.
 - webgpu: the control pass reads nine storage buffers with the debug window, over WebGPU's default of eight a stage.
-- The scan is one invocation, and the tessellator one thread a patch, 8192 triangles at factor 64 on a quad; a thread a point and a triangle is the faster form, once measured.
 - An indexed draw's `vertex_index` in the vertex stage is the index read, as the geometry polyfill takes it; unchecked against D3D.

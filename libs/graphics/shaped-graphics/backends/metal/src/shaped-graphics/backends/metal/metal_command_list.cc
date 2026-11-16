@@ -1981,7 +1981,7 @@ void metal_command_list::raster_draw_tessellation_polyfilled(sg::impl::tessellat
     declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
     declare_buffer(args, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
     flush_barriers();
-    run(scan, 1);
+    run(scan, scan->workgroup_size().x); // one workgroup, which walks every patch
     declare_buffer(records, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
     declare_buffer(point_words, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
     declare_buffer(indices, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
