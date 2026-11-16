@@ -350,7 +350,8 @@ binding affine:
   `inverse_sqrt` is `rsqrt` in HLSL and MSL and `inverseSqrt` in WGSL; `fract` is `frac` in HLSL; `round` is `rint` in MSL, whose `round` is ties-away.
   `ddx` and `ddy` are coarse (EVAL-144): `ddx_coarse` and `ddy_coarse` in HLSL and `dpdxCoarse` and `dpdyCoarse` in WGSL, since the plain names leave coarse or fine to the implementation.
   `fwidth` is `sgl_fwidth_coarse`, a helper over those, in HLSL and `fwidthCoarse` in WGSL; `ddx_fine` and `ddy_fine` are `ddx_fine` and `ddy_fine` in HLSL and `dpdxFine` and `dpdyFine` in WGSL.
-  MSL has no coarse spelling: every derivative is `dfdx`, `dfdy` or `fwidth`, which are fine on Apple GPUs; issue: feat-sgl-coarse-derivatives-by-default.
+  MSL has neither spelling: every derivative is `dfdx`, `dfdy` or `fwidth`, which Apple's backend makes coarse under fast math and fine otherwise.
+  So metal falls short of EVAL-144 at every level, coarse missing above `.fast` and fine at it; issue: feat-sgl-coarse-derivatives-by-default.
   HLSL's `sign`, `countbits`, `firstbithigh` and `firstbitlow` give an int or a uint whatever they take, so the writer converts back, and `reversebits` of an int goes through a uint.
   `is_nan` and `is_inf` are a test of the float's bits on every target: `(bits & 0x7fffffff)` above `0x7f800000` is a NaN, and equal to it an infinity.
   No target may be handed the value, since a test of it could fold to false where a test of its bits cannot.
