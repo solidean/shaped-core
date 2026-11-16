@@ -179,6 +179,11 @@ public:
     /// The bound raster pipeline's state object, which a polyfilled mesh draw sets again after its compute half, since
     /// D3D12 has one pipeline-state slot for both.
     ID3D12PipelineState* _bound_raster_pso = nullptr;
+    /// The bound strip pipeline's two state objects, by the index format whose all-ones value restarts the strip.
+    /// An indexed draw sets the one its bound index buffer needs; both are null for a pipeline that is no strip.
+    ID3D12PipelineState* _bound_raster_pso_32 = nullptr;
+    ID3D12PipelineState* _bound_raster_pso_16 = nullptr;
+    void select_strip_cut();
     /// The raster inline constants as last set, which a polyfilled mesh draw's compute half is handed too.
     cc::vector<u32> _raster_inline_constants;
 

@@ -193,7 +193,7 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
     auto const input_assembly = VkPipelineInputAssemblyStateCreateInfo{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology = to_vk_topology(desc.topology),
-        .primitiveRestartEnable = VK_FALSE,
+        .primitiveRestartEnable = sg::is_strip(desc.topology) ? VK_TRUE : VK_FALSE,
     };
 
     auto const tessellation = VkPipelineTessellationStateCreateInfo{

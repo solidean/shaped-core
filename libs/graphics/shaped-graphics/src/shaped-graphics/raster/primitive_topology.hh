@@ -7,6 +7,7 @@
 
 /// How vertices are assembled into primitives.
 /// The concrete topology, not the coarse family: a backend derives the PSO's topology *type* (point / line / triangle) from it via `topology_type`.
+/// **An indexed strip restarts at the all-ones index of its index format** (0xffff or 0xffffffff), on every backend.
 enum class sg::primitive_topology
 {
     point_list,     // DX12 POINTLIST     / Vk POINT_LIST
@@ -51,5 +52,11 @@ namespace sg
         return primitive_topology_type::patch;
     }
     return primitive_topology_type::triangle;
+}
+
+/// Whether `t` is a strip, whose indexed draws restart at the index format's all-ones value.
+[[nodiscard]] constexpr bool is_strip(primitive_topology t)
+{
+    return t == primitive_topology::line_strip || t == primitive_topology::triangle_strip;
 }
 } // namespace sg

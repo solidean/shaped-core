@@ -49,6 +49,7 @@ struct view_instanced_stream
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, D3D12_RASTERIZER_DESC> rasterizer;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, D3D12_DEPTH_STENCIL_DESC> depth_stencil;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT, D3D12_INPUT_LAYOUT_DESC> input_layout;
+    stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_IB_STRIP_CUT_VALUE, D3D12_INDEX_BUFFER_STRIP_CUT_VALUE> strip_cut;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, D3D12_PRIMITIVE_TOPOLOGY_TYPE> topology;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY> rtv_formats;
     stream_subobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, DXGI_FORMAT> dsv_format;
@@ -79,6 +80,7 @@ HRESULT create_view_instanced(ID3D12Device* device,
     stream.rasterizer.value = pso.RasterizerState;
     stream.depth_stencil.value = pso.DepthStencilState;
     stream.input_layout.value = pso.InputLayout;
+    stream.strip_cut.value = pso.IBStripCutValue;
     stream.topology.value = pso.PrimitiveTopologyType;
     stream.rtv_formats.value.NumRenderTargets = pso.NumRenderTargets;
     for (auto i = 0; i < 8; ++i)
@@ -316,6 +318,9 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     pso.DepthStencilState.BackFace = to_stencil_face(ds.stencil_back);
 
     pso.PrimitiveTopologyType = to_d3d12_topology_type(sg::topology_type(desc.topology));
+    auto const is_strip = sg::is_strip(desc.topology) && !is_mesh_shaded;
+    pso.IBStripCutValue
+        = is_strip ? D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFFFFFF : D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
     pso.NumRenderTargets = UINT(desc.color_targets.size());
     for (int i = 0; i < int(desc.color_targets.size()); ++i)
         pso.RTVFormats[i] = to_dxgi_format(desc.color_targets[i].format);
@@ -371,6 +376,19 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
 
     if (FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateGraphicsPipelineState failed");
+
+    // A PSO holds one strip-cut value, which must match the index format, so a strip's 16-bit twin is a PSO of its own.
+    if (is_strip)
+    {
+        auto const thirty_two = pipeline->pipeline_state;
+        pso.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFF;
+        pso.CachedPSO = {};
+        hr = create();
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateGraphicsPipelineState failed for a strip's 16-bit restart");
+        pipeline->pipeline_state_16 = pipeline->pipeline_state;
+        pipeline->pipeline_state = thirty_two;
+    }
 
     pipeline->layout = cc::move(layout);
     return dx12_raster_pipeline_handle(cc::move(pipeline));

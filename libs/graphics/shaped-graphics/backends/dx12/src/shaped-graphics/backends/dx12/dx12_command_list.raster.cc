@@ -229,6 +229,8 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
     _list->SetGraphicsRootSignature(rp->layout->root_signature.Get());
     _list->SetPipelineState(rp->pipeline_state.Get());
     _bound_raster_pso = rp->pipeline_state.Get();
+    _bound_raster_pso_32 = rp->pipeline_state_16 != nullptr ? rp->pipeline_state.Get() : nullptr;
+    _bound_raster_pso_16 = rp->pipeline_state_16.Get();
     bind_sampler_tables(*rp->layout, true);
     bind_debug_window(*rp->layout, pipeline.footprint(), true);
     _list->IASetPrimitiveTopology(rp->topology);
@@ -297,6 +299,17 @@ void dx12_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg::
     }
 
     _list->IASetVertexBuffers(UINT(first_slot), UINT(vbvs.size()), vbvs.empty() ? nullptr : vbvs.data());
+}
+
+void dx12_command_list::select_strip_cut()
+{
+    if (_bound_raster_pso_16 == nullptr)
+        return;
+    auto* const wanted = _index_format == sg::index_format::uint16 ? _bound_raster_pso_16 : _bound_raster_pso_32;
+    if (wanted == _bound_raster_pso)
+        return;
+    _list->SetPipelineState(wanted);
+    _bound_raster_pso = wanted;
 }
 
 void dx12_command_list::raster_bind_index_buffer(sg::index_buffer_view const& view)
@@ -629,6 +642,7 @@ void dx12_command_list::raster_draw_indexed(sg::draw_indexed_config const& confi
               "an odd first index into a 16-bit index buffer starts the fetch off a 4-byte boundary. Use an even "
               "first index, or 32-bit indices — sg::is_aligned_index_fetch answers it without asserting");
 
+    select_strip_cut();
     declare_raster_draw_barriers(true);
     flush_barriers();
     _list->DrawIndexedInstanced(UINT(config.index_range.size), UINT(config.instance_range.size),
@@ -647,6 +661,7 @@ void dx12_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const
 
     // The arguments are read by the command processor, a stage of their own, before any vertex is fetched.
     track_buffer_access(buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    select_strip_cut();
     declare_raster_draw_barriers(true);
     flush_barriers();
     _list->ExecuteIndirect(_ctx._draw_indexed_signature.Get(), UINT(count), buffer->_resource.Get(),

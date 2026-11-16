@@ -23,6 +23,9 @@ public:
 
     dx12_pipeline_layout_handle layout;
     ComPtr<ID3D12PipelineState> pipeline_state;
+    /// For a strip, the same pipeline restarting at a 16-bit index's all-ones, where `pipeline_state` restarts at a 32-bit one.
+    /// Null for every other topology, whose PSO cuts no strip.
+    ComPtr<ID3D12PipelineState> pipeline_state_16;
 
     /// Set for a mesh-shaded pipeline, which neither restores from a cached blob nor hands one out.
     /// Its blob is refused on every restore, a run after the one that stored it, with the debug layer reporting a description that does not match.
