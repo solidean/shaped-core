@@ -786,7 +786,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   They take a half too, tested as the float it widens to.
   Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
   **`ddx`, `ddy` and `fwidth` are coarse**, one value per quad, and `ddx_fine`/`ddy_fine` the per-pixel difference, whatever the `@float` level (EVAL-144).
-  Metal does not hold that yet: issue feat-sgl-coarse-derivatives-by-default.
+  Metal builds them from the quad's lanes, since MSL's `dfdx` is coarse or fine as Apple's backend picks (EMIT-126).
   `fma(a, b, c)` of halves, floats and doubles rounds once on the interpreter, and a GPU may round the product first except a double's on DXIL (EVAL-146, EMIT-254).
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.

@@ -3,6 +3,8 @@ created: 2026-11-02
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/register_math.cc
+closed: 2026-11-16
+resolution: fixed
 ---
 
 # metal's derivatives mean EVAL-144's at every `@float` level
@@ -34,3 +36,10 @@ So metal's default derivatives are coarse wherever no `@float` is stated, which 
 A `ddx_fine` on metal needs a guarantee above `.fast`, or a probe that pins what fast math does to `dfdx` at all.
 
 2026-11-16: the `@float` level is not to change a derivative's meaning, since EVAL-6 licenses float arithmetic alone; the fix is the emitter's, whatever Apple's backend does to `dfdx`.
+
+## Resolved
+
+2026-11-16: metal's emitter builds every derivative from the quad's lanes (EMIT-126), and `sg - a coarse derivative is one per quad and a fine one per pixel, at every float level` pins it.
+Before the change, on an M4, that probe read `dfdx` and `dfdy` fine at the default level and at `.fast` alike, the pragma in place: the 2026-11-13 coarse observation did not reproduce there.
+After it, both levels read EVAL-144's coarse and fine values, so lane bit 0 is the column, bit 1 the row, and the prefix count finds the lane, helpers included.
+`pixel_derivatives` meets the dx12 reference and the interpreter at the raster setup's own bound, its loose cross-machine one dropped.

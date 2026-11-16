@@ -47,6 +47,32 @@ pipeline discard_derivative:
     cull = .none
     format = .rgba32_float
 
+// x·y at pixel centres, so a derivative along x reads its row's y and one along y its column's x.
+// Coarse ones read one row or column for the whole quad, fine ones the pixel's own, whatever the @float level (EVAL-144).
+@pixel fun quad_derivatives_ps(p: tagged) -> tag_target:
+    let v = p.position.x * p.position.y
+    return {
+        value = float4(ddx(v), ddy(v), ddx_fine(v), ddy_fine(v))
+    }
+
+@float(.fast) @pixel fun fast_quad_derivatives_ps(p: tagged) -> tag_target:
+    let v = p.position.x * p.position.y
+    return {
+        value = float4(ddx(v), ddy(v), ddx_fine(v), ddy_fine(v))
+    }
+
+pipeline quad_derivatives:
+    vertex = tagged_vs
+    pixel = quad_derivatives_ps
+    cull = .none
+    format = .rgba32_float
+
+pipeline fast_quad_derivatives:
+    vertex = tagged_vs
+    pixel = fast_quad_derivatives_ps
+    cull = .none
+    format = .rgba32_float
+
 binding pixel_claims:
     owners: mut buffer[atomic[uint]]
 

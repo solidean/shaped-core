@@ -109,6 +109,55 @@ ASYNC_INVOCABLE_TEST("sg - a discarded pixel still takes part in its quad's deri
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a coarse derivative is one per quad and a fine one per pixel, at every float level",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // A 4 × 4 target, two quads by two, each pixel writing ddx, ddy, ddx_fine and ddy_fine of x·y at its centre.
+    // A fine derivative along x is the pixel's own row's y, along y its own column's x.
+    // A coarse one is the same in all four pixels of a quad, one of its two rows or columns: which one, a target leaves open.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+
+    for (auto const fast : {false, true})
+    {
+        auto const pipeline
+            = fast ? co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::fast_quad_derivatives)
+                   : co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::quad_derivatives);
+        auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                             {.width = 4,
+                                                              .height = 4,
+                                                              .colors = {sg::pixel_format::rgba32_float},
+                                                              .target_set = shaders::pixel_semantics::tag_target::name},
+                                                             [&](sg::rendering_scope& scope)
+                                                             {
+                                                                 scope.bind_pipeline(*pipeline);
+                                                                 scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                                 scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                             });
+
+        for (auto y = 0; y < 4; ++y)
+            for (auto x = 0; x < 4; ++x)
+            {
+                auto const at = cc::format("{} pixel ({}, {})", fast ? ".fast" : "default", x, y);
+                auto const got = pixels[0].rgba_float(x, y);
+                auto const first = pixels[0].rgba_float(x & ~1, y & ~1);
+                auto const row = float(y & ~1);
+                auto const column = float(x & ~1);
+                CHECK(got[0] == first[0]).context(at);
+                CHECK((got[0] == row + 0.5f || got[0] == row + 1.5f)).context(at).context(cc::format("ddx {}", got[0]));
+                CHECK(got[1] == first[1]).context(at);
+                CHECK((got[1] == column + 0.5f || got[1] == column + 1.5f)).context(at).context(cc::format("ddy {}", got[1]));
+                CHECK(got[2] == float(y) + 0.5f).context(at);
+                CHECK(got[3] == float(x) + 0.5f).context(at);
+            }
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a strong compare-exchange in a pixel stage leaves helper pixels out, and the draw ends",
                      (sg::context_handle const& ctx))
 {

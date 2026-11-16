@@ -588,38 +588,99 @@ written write_unpack_half(call_context const& c)
     return {};
 }
 
-/// `fwidth` as the coarse `abs(ddx(x)) + abs(ddy(x))`: HLSL's own `fwidth` leaves coarse or fine to the implementation.
-written write_coarse_width(call_context const& c)
+/// The derivatives, each its target's own spelling but on metal, whose `dfdx` and `dfdy` are coarse or fine as Apple's backend picks.
+/// MSL builds them from the quad's lanes instead: lane bit 0 is the column and bit 1 the row, every lane active, helpers too.
+/// A fine one finds its lane as the count of lanes before it, which needs all four active, as any derivative does.
+enum class derivative
+{
+    coarse_x,
+    coarse_y,
+    fine_x,
+    fine_y,
+    coarse_width,
+};
+
+template <derivative D>
+written write_derivative(call_context const& c)
 {
     auto const& x = c.arguments[0].text;
+    struct names
+    {
+        cc::string_view hlsl, wgsl, msl;
+    };
+    constexpr auto n = D == derivative::coarse_x ? names{"ddx_coarse", "dpdxCoarse", "sgl_ddx_coarse"}
+                     : D == derivative::coarse_y ? names{"ddy_coarse", "dpdyCoarse", "sgl_ddy_coarse"}
+                     : D == derivative::fine_x   ? names{"ddx_fine", "dpdxFine", "sgl_ddx_fine"}
+                     : D == derivative::fine_y   ? names{"ddy_fine", "dpdyFine", "sgl_ddy_fine"}
+                                                 : names{"sgl_fwidth_coarse", "fwidthCoarse", "sgl_fwidth_coarse"};
     switch (c.target)
     {
     case language::hlsl:
-        return {.text = cc::format("sgl_fwidth_coarse({})", x)};
+        return {.text = cc::format("{}({})", n.hlsl, x)};
     case language::wgsl:
-        return {.text = cc::format("fwidthCoarse({})", x)};
+        return {.text = cc::format("{}({})", n.wgsl, x)};
     case language::msl:
-        return {.text = cc::format("fwidth({})", x)};
+        return {.text = cc::format("{}({})", n.msl, x)};
     }
     return {};
 }
-cc::string coarse_width_helper(helper_context const& c)
+
+/// HLSL's own `fwidth` leaves coarse or fine to the implementation, and MSL has no derivative of a chosen kind at all.
+template <derivative D>
+cc::string derivative_helper(helper_context const& c)
 {
-    if (c.target != language::hlsl)
+    if (c.target == language::hlsl && D == derivative::coarse_width)
+        return "template <typename T>\n"
+               "T sgl_fwidth_coarse(T x)\n"
+               "{\n"
+               "    return abs(ddx_coarse(x)) + abs(ddy_coarse(x));\n"
+               "}\n";
+    if (c.target != language::msl)
         return {};
+    // one text for every derivative, so the writer keeps it once
     return "template <typename T>\n"
+           "T sgl_ddx_coarse(T x)\n"
+           "{\n"
+           "    return quad_shuffle(x, 1) - quad_shuffle(x, 0);\n"
+           "}\n"
+           "template <typename T>\n"
+           "T sgl_ddy_coarse(T x)\n"
+           "{\n"
+           "    return quad_shuffle(x, 2) - quad_shuffle(x, 0);\n"
+           "}\n"
+           "template <typename T>\n"
+           "T sgl_ddx_fine(T x)\n"
+           "{\n"
+           "    ushort row = ushort(quad_prefix_exclusive_sum(1u)) & 2;\n"
+           "    return quad_shuffle(x, row | 1) - quad_shuffle(x, row);\n"
+           "}\n"
+           "template <typename T>\n"
+           "T sgl_ddy_fine(T x)\n"
+           "{\n"
+           "    ushort column = ushort(quad_prefix_exclusive_sum(1u)) & 1;\n"
+           "    return quad_shuffle(x, column | 2) - quad_shuffle(x, column);\n"
+           "}\n"
+           "template <typename T>\n"
            "T sgl_fwidth_coarse(T x)\n"
            "{\n"
-           "    return abs(ddx_coarse(x)) + abs(ddy_coarse(x));\n"
+           "    return abs(sgl_ddx_coarse(x)) + abs(sgl_ddy_coarse(x));\n"
            "}\n";
 }
 
 // ---- the names each custom spelling writes, which no name of the program may take in that target ---------------
 
 constexpr cc::string_view k_sign[] = {"sign"};
-constexpr cc::string_view k_coarse_width_hlsl[] = {"sgl_fwidth_coarse", "ddx_coarse", "ddy_coarse", "abs"};
-constexpr cc::string_view k_coarse_width_wgsl[] = {"fwidthCoarse"};
-constexpr cc::string_view k_coarse_width_msl[] = {"fwidth"};
+constexpr cc::string_view k_derivative_hlsl[]
+    = {"sgl_fwidth_coarse", "ddx_coarse", "ddy_coarse", "ddx_fine", "ddy_fine", "abs"};
+constexpr cc::string_view k_derivative_wgsl[] = {"fwidthCoarse", "dpdxCoarse", "dpdyCoarse", "dpdxFine", "dpdyFine"};
+constexpr cc::string_view k_derivative_msl[] = {"sgl_ddx_coarse",
+                                                "sgl_ddy_coarse",
+                                                "sgl_ddx_fine",
+                                                "sgl_ddy_fine",
+                                                "sgl_fwidth_coarse",
+                                                "quad_shuffle",
+                                                "quad_prefix_exclusive_sum",
+                                                "abs"};
 constexpr cc::string_view k_non_finite_hlsl[] = {"asuint"};
 constexpr cc::string_view k_non_finite_wgsl[] = {"bitcast"};
 constexpr cc::string_view k_non_finite_msl[] = {"as_type"};
@@ -803,9 +864,17 @@ void sgl::builtins::register_math(registry& r)
     {
         if (t.starts_with("half"))
             continue;
-        // MSL has no coarse spelling, and its `dfdx` and `dfdy` are fine on Apple GPUs
-        auto const coarse_x = spelling{.hlsl = "ddx_coarse", .wgsl = "dpdxCoarse", .msl = "dfdx"};
-        auto const coarse_y = spelling{.hlsl = "ddy_coarse", .wgsl = "dpdyCoarse", .msl = "dfdy"};
+        auto const spelled = [](auto write, auto helper)
+        {
+            return spelling{.kind = spelling_kind::custom,
+                            .custom = write,
+                            .helper = helper,
+                            .hlsl_names = k_derivative_hlsl,
+                            .wgsl_names = k_derivative_wgsl,
+                            .msl_names = k_derivative_msl};
+        };
+        auto const coarse_x = spelled(write_derivative<derivative::coarse_x>, derivative_helper<derivative::coarse_x>);
+        auto const coarse_y = spelled(write_derivative<derivative::coarse_y>, derivative_helper<derivative::coarse_y>);
         add(r, cc::format("@pure @stages(.pixel) fun ddx(x: {0}) -> {0}", t), no_derivative, coarse_x, nullptr, true,
             "/// How much `x` changes from the quad's left column to its right, the same in all four pixels.");
         add(r, cc::format("@pure @stages(.pixel) fun ddy(x: {0}) -> {0}", t), no_derivative, coarse_y, nullptr, true,
@@ -815,19 +884,14 @@ void sgl::builtins::register_math(registry& r)
         add(r, cc::format("@pure @stages(.pixel) fun ddy_coarse(x: {0}) -> {0}", t), no_derivative, coarse_y, nullptr,
             true, "/// `ddy(x)`, spelled out.");
         add(r, cc::format("@pure @stages(.pixel) fun ddx_fine(x: {0}) -> {0}", t), no_derivative,
-            {.hlsl = "ddx_fine", .wgsl = "dpdxFine", .msl = "dfdx"}, nullptr, true,
+            spelled(write_derivative<derivative::fine_x>, derivative_helper<derivative::fine_x>), nullptr, true,
             "/// How much `x` changes along this pixel's own row of the quad.");
         add(r, cc::format("@pure @stages(.pixel) fun ddy_fine(x: {0}) -> {0}", t), no_derivative,
-            {.hlsl = "ddy_fine", .wgsl = "dpdyFine", .msl = "dfdy"}, nullptr, true,
+            spelled(write_derivative<derivative::fine_y>, derivative_helper<derivative::fine_y>), nullptr, true,
             "/// How much `x` changes down this pixel's own column of the quad.");
         add(r, cc::format("@pure @stages(.pixel) fun fwidth(x: {0}) -> {0}", t), no_derivative,
-            {.kind = spelling_kind::custom,
-             .custom = write_coarse_width,
-             .helper = coarse_width_helper,
-             .hlsl_names = k_coarse_width_hlsl,
-             .wgsl_names = k_coarse_width_wgsl,
-             .msl_names = k_coarse_width_msl},
-            nullptr, true, "/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.");
+            spelled(write_derivative<derivative::coarse_width>, derivative_helper<derivative::coarse_width>), nullptr,
+            true, "/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.");
     }
 
     r.add_comment("// geometry");
