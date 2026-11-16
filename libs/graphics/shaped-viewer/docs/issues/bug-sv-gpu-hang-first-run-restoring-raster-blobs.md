@@ -17,5 +17,5 @@ Seven runs since, with the same store and the same blobs restored (134 per run),
 Hypothesis, not verified: a restored pipeline ran another pipeline's code, as the static-sampler bug does on this driver (docs/bugs-external/d3d12-cached-pso-static-sampler-mixup).
 That bug needs a blob restored in a process that first built a twin fresh, which fits a first run restoring fresh blobs.
 
-The run's logs and its recording are in solidean's gitignored `data/crashes/shaped-viewer-test-20261114-183029-failed/`.
+The run's logs and its recording are in a consumer checkout's gitignored crash folder, `shaped-viewer-test-20261114-183029-failed/`.
 `sg.pipeline.cached_blob_used` says which creates restored; the first step is a run that logs each restored pipeline's key, to name the one that hangs.
