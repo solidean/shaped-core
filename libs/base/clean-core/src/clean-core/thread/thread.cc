@@ -203,9 +203,9 @@ static void set_os_thread_name(cc::string_view name)
 static void set_os_thread_name(cc::string_view name)
 {
     // Linux caps the thread name at 16 bytes including the NUL terminator.
-    char buf[16];
-    isize const n = name.size() < 15 ? name.size() : 15;
-    for (isize i = 0; i < n; ++i)
+    char buf[16] = {};
+    cc::isize const n = name.size() < 15 ? name.size() : 15;
+    for (cc::isize i = 0; i < n; ++i)
         buf[i] = name.data()[i];
     buf[n] = '\0';
 
