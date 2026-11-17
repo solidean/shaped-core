@@ -74,7 +74,9 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
   - Note: ssa.cc splits a promoted local into scalar slots (`add_slots`, `write_whole`); a store's value op names its first slot
 - [ ] P3.6 Every pass treats a debug op as no use and no content (D7)
   - Note: the ~28 `operand::value` checks skip the `debug` role by themselves: liveness, use counts, local reads, SSA's promotability
-  - Note: the generic rewriters must take it too, through one helper: renumbering cleanup.cc:213, flatten.cc:131, tables.cc:285; replacing cleanup.cc:426 and 462, flatten.cc:328, tables.cc:287; simplify.cc:199; locals cleanup.cc:390
+  - Note: the generic rewriters must take it too, through one helper
+  - Note: renumbering at cleanup.cc:213, flatten.cc:131 and tables.cc:285; replacing at cleanup.cc:426 and 462, flatten.cc:328 and tables.cc:287
+  - Note: constants at simplify.cc:199, and locals at cleanup.cc:390
   - Note: a rewriter whose target was removed writes `value_ref::none`, which a writer states as optimized out; ssa.cc's `lay_out` renumbers too
   - Note: `flatten_branches` must not count a debug op as content of an arm, nor `chain_sums` as a second read
   - Note: `remove_unused`, `share_common_values`, `hoist_common_values`, `flatten_branches`, `simplify`, `regroup_lanes`, `chain_sums`, `state_constant_tables`
