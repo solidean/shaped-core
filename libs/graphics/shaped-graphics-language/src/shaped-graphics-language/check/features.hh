@@ -165,7 +165,7 @@ enum class sgl::check::fill : sgl::u8
     /// D3D12 on NVIDIA through NVAPI's shader extensions, which `nvHLSLExtns.h` declares; the host enables them.
     /// `shader_execution_reordering` is `NvHitObject` and `NvReorderThread`, and `opacity_micromap` writes nothing.
     nvapi,
-    /// The draw's start handed over in root constants, a block the host writes before each draw (EMIT-128, EMIT-267).
+    /// The draw's start handed over in root constants, a block the host writes before each draw (EMIT-128, EMIT-271).
     root_constant,
     /// The construct left out: no `WaveSize` at all (EMIT-148).
     none,
@@ -247,7 +247,7 @@ inline constexpr i32 k_nvapi_space = 13;
 inline constexpr i32 k_nvapi_record_bytes = 256;
 
 /// The register and space of the block of root constants a dx12 entry point reads its draw's start from under the
-/// `root_constant` fill of `draw_start`, `b1, space9` (EMIT-128, EMIT-267): the space of the inline constants, whose
+/// `root_constant` fill of `draw_start`, `b1, space9` (EMIT-128, EMIT-271): the space of the inline constants, whose
 /// `b0` is the `@inline` block's.
 /// The block is `k_draw_start_bytes` long: the first vertex, a `uint`, at byte 0, and the first instance at byte 4.
 inline constexpr i32 k_draw_start_register = 1;

@@ -158,7 +158,7 @@ struct module_library
 } // namespace
 
 // EMIT-264: with no feature granted and the 6.6 core fills, nothing SGL writes for dx12 needs more than 6.6, either route.
-// An entry that takes the draw's start reads it from the block the host writes (EMIT-128, EMIT-267), so none is refused.
+// An entry that takes the draw's start reads it from the block the host writes (EMIT-128, EMIT-271), so none is refused.
 // Every file of sg's, sr's and sv's shaders and of the corpus is swept with the repo's modules, a fourth by default and all
 // under --thorough; every one compiles, so a file that does not fails the sweep.
 // SGL's own DXIL states its model in the container; the text's is checked by DXC at the 6.6 profiles in slib's tests.

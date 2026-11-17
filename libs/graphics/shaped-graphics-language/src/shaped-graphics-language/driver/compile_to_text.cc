@@ -181,7 +181,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  check::flat_entry_point const* polyfill_control = nullptr)
 {
     // EMIT-128: a polyfill form is sg's to draw, its vertex half counting from a draw sg makes, indirectly too, which no
-    // host of the root-constant fill makes (EMIT-267)
+    // host of the root-constant fill makes (EMIT-271)
     if (mesh != emit::mesh_form::native && target == emit::target::hlsl_dx12
         && core.draw_start == check::fill::root_constant)
         return cc::error(cc::format("{}: error: unsupported: the {} polyfill form of {} entry point '{}' under the "
@@ -477,7 +477,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                    .has_counter = true,
                                    .access = "read_write"});
     }
-    // EMIT-267: the root-constant fill reads the draw's start from a block the host lays out and writes itself, listed
+    // EMIT-271: the root-constant fill reads the draw's start from a block the host lays out and writes itself, listed
     // wherever the entry takes the start, and used where it reads it
     if (emitted.declares_draw_start)
         result.bindings.push_back({.name = "draw_start",

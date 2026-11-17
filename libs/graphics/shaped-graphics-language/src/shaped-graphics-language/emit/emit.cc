@@ -492,7 +492,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             return result;
         }
     // EMIT-128: dx12 reads where the draw started natively through Shader Model 6.8's system values, and under the
-    // root-constant fill from the block `sgl_draw_start` the host writes (EMIT-267)
+    // root-constant fill from the block `sgl_draw_start` the host writes (EMIT-271)
     if (t == target::hlsl_dx12)
         for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
         {
@@ -657,7 +657,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);
-    // EMIT-267: the draw's start is no binding of the program, but a host lays it out by its fields as any block
+    // EMIT-271: the draw's start is no binding of the program, but a host lays it out by its fields as any block
     if (plan.draw_start_in_root_constants)
     {
         auto layout = emitted_layout{.global = cc::string(impl::k_draw_start_global)};

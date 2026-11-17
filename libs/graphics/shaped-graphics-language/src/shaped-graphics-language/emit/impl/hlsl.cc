@@ -560,7 +560,7 @@ public:
         if (calls_builtin(p, "hit_cluster_id"))
             out += _is_vulkan ? k_hit_cluster_vulkan : k_hit_cluster_dx12;
 
-        // EMIT-128, EMIT-267: the draw's start the host writes as root constants, beside the inline constants' `b0`
+        // EMIT-128, EMIT-271: the draw's start the host writes as root constants, beside the inline constants' `b0`
         if (p.draw_start_in_root_constants)
             out.appendf("struct {}\n{{\n    uint first_vertex;\n    uint first_instance;\n}};\n"
                         "ConstantBuffer<{}> {} : register(b{}, space{});\n\n",

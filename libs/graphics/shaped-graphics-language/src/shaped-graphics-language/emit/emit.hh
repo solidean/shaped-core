@@ -220,7 +220,7 @@ struct sgl::emit::emitted_text
     /// (EMIT-265), and the text includes `nvHLSLExtns.h`.
     bool writes_nvapi = false;
     /// dx12 under the `root_constant` fill of `draw_start`: the entry point takes the draw's start, so the output declares
-    /// the block `sgl_draw_start` at `b1, space9`, which the host writes (EMIT-128, EMIT-267); and whether its body reads
+    /// the block `sgl_draw_start` at `b1, space9`, which the host writes (EMIT-128, EMIT-271); and whether its body reads
     /// the start, which is when the host must write it.
     bool declares_draw_start = false;
     bool reads_declared_draw_start = false;

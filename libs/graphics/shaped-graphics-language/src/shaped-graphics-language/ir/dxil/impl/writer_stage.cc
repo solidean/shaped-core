@@ -226,7 +226,7 @@ void writer::stage_load(u32 index, instruction const& i)
         return call(op, _m.int_type(), args);
     };
     // EMIT-128: the draw's start, from Shader Model 6.8's operations, or from the block the host writes under the
-    // root-constant fill (EMIT-267), which needs no more than 6.6
+    // root-constant fill (EMIT-271), which needs no more than 6.6
     auto const start_of = [&](dx_op op)
     {
         if (_draw_start != ll_value::none)

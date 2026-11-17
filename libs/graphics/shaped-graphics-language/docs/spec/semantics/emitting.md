@@ -370,7 +370,7 @@ binding affine:
   vulkan reads it as `[[vk::builtin("BaseVertex")]]` and `[[vk::builtin("BaseInstance")]]`, which every shader model has, and so does `@first_instance`.
   dx12 reads it as `SV_StartVertexLocation` and `SV_StartInstanceLocation`, Shader Model 6.8's, under the `native` fill of `draw_start`, the default (EMIT-265).
   Under its `root_constant` fill dx12 reads it from `sgl_draw_start`, a block of root constants at `register(b1, space9)`, on both routes, at Shader Model 6.6.
-  The block holds the first vertex at byte 0 and the first instance at byte 4, each a `uint`, and EMIT-267 is how a host writes them.
+  The block holds the first vertex at byte 0 and the first instance at byte 4, each a `uint`, and EMIT-271 is how a host writes them.
   `@vertex_index` is `SV_VertexID` plus the first vertex, `@instance_index` `SV_InstanceID` plus the first instance, and `@first_instance` the first instance itself.
   The first vertex is what `SV_StartVertexLocation` would hold: a draw's first vertex, and an indexed draw's base vertex.
   A polyfill form under that fill is `unsupported`, naming the form and the fill, since sg draws one, indirectly too.
@@ -697,7 +697,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A bake compiles a variant per choice on each axis, each fill or the feature not granted, and a host runs the first its device takes, most demanding first.
   `sgl::variant_key::of` names one variant, its fills in feature order whatever order they came in, so two keys of one variant are equal; a feature named twice is an error.
   Its `to_string` is `feature=fill` for each granted feature in feature order, then `draw_start=` and `wave_size=` where not `native`, joined by `;`.
-* **EMIT-267** Under the `root_constant` fill of `draw_start`, a dx12 vertex entry point that takes the draw's start lists one slot no binding declares ([why](why/emitting.md#emit-267)).
+* **EMIT-271** Under the `root_constant` fill of `draw_start`, a dx12 vertex entry point that takes the draw's start lists one slot no binding declares ([why](why/emitting.md#emit-271)).
   It takes the draw's start where it takes `@vertex_index`, `@instance_index` or `@first_instance` (EMIT-128).
   It is `is_reserved`, with `reserved = reserved_slot::draw_start`, of kind `constant`, at group 9 and slot 1, the space and register of `b1, space9`, and `block_size` 8.
   `layouts` lays out `sgl_draw_start`: `first_vertex` at offset 0 and `first_instance` at offset 4.

@@ -499,7 +499,7 @@ private:
         }
         for (auto const& b : emitted.bindings)
         {
-            // a reserved slot is an nvapi fill's (EMIT-265) or the root-constant fill's draw start (EMIT-267), neither of
+            // a reserved slot is an nvapi fill's (EMIT-265) or the root-constant fill's draw start (EMIT-271), neither of
             // which slib asks for: sg's backends lay out neither, so a pipeline built without it would run with nothing
             // covering what the code declares
             if (b.is_reserved)

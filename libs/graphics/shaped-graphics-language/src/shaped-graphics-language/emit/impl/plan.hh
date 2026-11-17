@@ -20,7 +20,7 @@ inline constexpr auto k_max_groups = 3;
 /// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
 /// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 inline constexpr auto k_inline_constants_space = 9;
-/// The draw's start of the `root_constant` fill stands in the same space, at `b1` (EMIT-267).
+/// The draw's start of the `root_constant` fill stands in the same space, at `b1` (EMIT-271).
 static_assert(check::k_draw_start_space == k_inline_constants_space);
 /// What the text names that block and its struct; the prefix `sgl_` is kept from programs, so no name of theirs is it.
 inline constexpr auto k_draw_start_global = cc::string_view("sgl_draw_start");
@@ -258,7 +258,7 @@ struct plan
     /// Model 6.8's system values (EMIT-128).
     bool reads_draw_start = false;
     /// dx12: the entry point takes the draw's start, and the compile fills it from root constants, so the text declares
-    /// `sgl_draw_start` at `b1, space9` and reads the start from there (EMIT-128, EMIT-267).
+    /// `sgl_draw_start` at `b1, space9` and reads the start from there (EMIT-128, EMIT-271).
     bool draw_start_in_root_constants = false;
     /// dx12: the compile fills the subgroup size natively, so the text states a preferred one as a range (EMIT-148).
     bool states_wave_size_range = false;

@@ -1797,7 +1797,7 @@ cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
         for (auto j = isize(0); j < p.e.stage_inputs.size(); ++j)
             if (p.e.stage_inputs[j].input == check::stage_input::first_instance)
                 base = cc::string(p.stage_input_names[j]);
-    // EMIT-128: under the root-constant fill, dx12 reads the draw's start from the block the host writes (EMIT-267)
+    // EMIT-128: under the root-constant fill, dx12 reads the draw's start from the block the host writes (EMIT-271)
     if (p.draw_start_in_root_constants)
     {
         auto const first_vertex = cc::format("{}.first_vertex", k_draw_start_global);

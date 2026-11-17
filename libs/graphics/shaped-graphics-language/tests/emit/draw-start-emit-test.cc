@@ -11,7 +11,7 @@ using sgl::emit::native_route;
 using sgl::emit::target;
 
 // The draw's start under the `root_constant` fill of `draw_start` (EMIT-128), and the slot a host writes it into
-// (EMIT-267): a dx12 vertex entry that takes `@vertex_index`, `@instance_index` or `@first_instance` reads where the draw
+// (EMIT-271): a dx12 vertex entry that takes `@vertex_index`, `@instance_index` or `@first_instance` reads where the draw
 // started from `sgl_draw_start` at `b1, space9`, at Shader Model 6.6 on both routes.
 
 namespace
@@ -85,7 +85,7 @@ constexpr auto k_feature_start_location = u64(1) << 32;
     return found;
 }
 
-/// That `e` lists the draw's start slot once, as EMIT-267 states it, used as `is_used` says, and lays its block out.
+/// That `e` lists the draw's start slot once, as EMIT-271 states it, used as `is_used` says, and lays its block out.
 void check_draw_start_slot(sgl::emitted_source const& e, bool is_used)
 {
     auto const reserved = reserved_of(e);
@@ -127,7 +127,7 @@ void check_no_draw_start_slot(sgl::emitted_source const& e)
 } // namespace
 
 TEST("sgl emit - the root-constant fill reads @vertex_index's draw start from sgl_draw_start at 6.6 (EMIT-128, "
-     "EMIT-267)")
+     "EMIT-271)")
 {
     auto const source = vertex_of("@vertex_index v: int", "v as float");
     for (auto const route : k_routes)
@@ -196,7 +196,7 @@ TEST("sgl emit - the root-constant fill reads @instance_index and @first_instanc
         }
 }
 
-TEST("sgl emit - an entry that takes the draw's start and reads none lists its slot, unused (EMIT-267)")
+TEST("sgl emit - an entry that takes the draw's start and reads none lists its slot, unused (EMIT-271)")
 {
     auto const source = vertex_of("@vertex_index v: int, @first_instance f: int", "0.0");
     for (auto const route : k_routes)
@@ -216,7 +216,7 @@ TEST("sgl emit - an entry that takes the draw's start and reads none lists its s
     }
 }
 
-TEST("sgl emit - an entry that takes no draw start, and every other stage, lists no slot of it (EMIT-267)")
+TEST("sgl emit - an entry that takes no draw start, and every other stage, lists no slot of it (EMIT-271)")
 {
     auto const source = vertex_of("", "0.0");
     for (auto const route : k_routes)
@@ -261,7 +261,7 @@ TEST("sgl emit - the native fill and vulkan read the draw's start as before, and
 }
 
 TEST("sgl emit - every target's compile under the root-constant fill lists the draw's start slot on dx12 alone "
-     "(EMIT-267)")
+     "(EMIT-271)")
 {
     auto const source = vertex_of("@vertex_index v: int", "v as float");
     target const both[] = {target::hlsl_dx12, target::hlsl_vulkan};
@@ -328,7 +328,7 @@ TEST("sgl emit - a polyfill form under the root-constant fill of the draw's star
 }
 
 TEST("sgl emit - an entry with an @inline block and the draw's start declares and lists both blocks of space 9 "
-     "(EMIT-267)")
+     "(EMIT-271)")
 {
     constexpr auto source = cc::string_view("@inline binding tuning:\n"
                                             "    offset: int\n"
@@ -370,7 +370,7 @@ TEST("sgl emit - an entry with an @inline block and the draw's start declares an
 }
 
 TEST("sgl emit - @vertex_index adds the first vertex as a uint and converts the sum, so a negative base vertex wraps "
-     "(EMIT-128, EMIT-267)")
+     "(EMIT-128, EMIT-271)")
 {
     // an indexed draw's base vertex is a signed INT the host writes as its bits; uint addition wraps, so
     // `int(SV_VertexID + first_vertex)` is the fetched index plus the base, negative bases included

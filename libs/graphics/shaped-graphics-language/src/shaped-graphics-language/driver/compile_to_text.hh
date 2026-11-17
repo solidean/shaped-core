@@ -58,7 +58,7 @@ struct sgl::text_request
     cc::span<check::feature_fill const> fills;
     /// How the core constructs are written (EMIT-265); `native` for both is the default, at Shader Model 6.8 on dx12.
     /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`, and then
-    /// writes the draw's start into the slot an entry point that takes it lists (EMIT-267).
+    /// writes the draw's start into the slot an entry point that takes it lists (EMIT-271).
     check::core_fills core;
     /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
     emit::native_route native = emit::native_route::text;
@@ -153,7 +153,7 @@ enum class sgl::reserved_slot : sgl::u8
     /// as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot
     /// on its device.
     nvapi_extension,
-    /// The draw's start under the `root_constant` fill of `draw_start` (EMIT-267): a block of `block_size` bytes, the
+    /// The draw's start under the `root_constant` fill of `draw_start` (EMIT-271): a block of `block_size` bytes, the
     /// first vertex at byte 0 and the first instance at byte 4, each a `uint`, which the host writes as root constants
     /// before every direct draw of the pipeline, and whose indirect draws it refuses.
     draw_start,
