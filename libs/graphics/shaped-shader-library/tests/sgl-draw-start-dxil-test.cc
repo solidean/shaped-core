@@ -117,3 +117,104 @@ TEST("slib - SGL's DXIL of an entry that takes the draw's start and reads none d
         }
     CHECK(listed == 1);
 }
+
+namespace
+{
+/// A vertex entry that reads its `@inline` block, at `b0, space9`, beside the draw's start, at `b1, space9`: the
+/// block's first row and the draw's start's are read in one basic block.
+constexpr auto k_inline_beside = cc::string_view("@inline binding tuning:\n"
+                                                 "    offset: int\n"
+                                                 "    scale: float\n"
+                                                 "\n"
+                                                 "struct varyings:\n"
+                                                 "    @position position: hpos4\n"
+                                                 "\n"
+                                                 "@vertex fun vs(@vertex_index v: int, @instance_index i: int){tuning} "
+                                                 "-> varyings:\n"
+                                                 "    let x = ((v + tuning.offset) as float) * tuning.scale\n"
+                                                 "    return { position = hpos4(x, i as float, 0.0, 1.0) }\n");
+
+/// How often `text` holds `part`.
+[[nodiscard]] isize count_of(cc::string_view text, cc::string_view part)
+{
+    auto n = isize(0);
+    for (auto at = text.find(part); at >= 0; at = text.find(part, at + part.size()))
+        ++n;
+    return n;
+}
+} // namespace
+
+TEST("slib - an entry reading its @inline block and the draw's start binds both blocks of space 9 apart (EMIT-267)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const request = [&](sgl::emit::native_route route)
+    {
+        return sgl::compile_to_text(
+            {.source = k_inline_beside,
+             .entry_point = "vs",
+             .target = sgl::emit::target::hlsl_dx12,
+             .core = {.draw_start = sgl::check::fill::root_constant, .wave_size = sgl::check::fill::none},
+             .native = route});
+    };
+
+    // the interface lists the program's @inline block and the reserved draw start, each once
+    auto const native = request(sgl::emit::native_route::require);
+    REQUIRE(native.has_value()).dump("error", native.has_error() ? native.error() : cc::string());
+    auto inline_blocks = 0;
+    auto draw_starts = 0;
+    for (auto const& b : native.value().bindings)
+    {
+        inline_blocks += b.is_inline ? 1 : 0;
+        if (b.reserved == sgl::reserved_slot::draw_start)
+        {
+            ++draw_starts;
+            CHECK(b.is_used);
+            CHECK(b.group == 9);
+            CHECK(b.slot == 1);
+        }
+    }
+    CHECK(inline_blocks == 1);
+    CHECK(draw_starts == 1);
+
+    // SGL's DXIL: two constant buffers in space 9, each loaded through its own handle, which the validator takes
+    auto const refused = compiler.value().validate(native.value().dxil);
+    CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+    auto const ours = compiler.value().disassemble(native.value().dxil);
+    REQUIRE(ours.has_value());
+    CHECK(draw_start_size(ours.value()) == 8).dump("ours", ours.value());
+    CHECK(ours.value().contains("i32 9, i32 0, i32 1, i32 ")).dump("ours", ours.value());
+    CHECK(count_of(ours.value(), "call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32") >= 2).dump("ours", ours.value());
+    // a negative base vertex arrives as its bits, so the addition must wrap: no flag may make an overflow poison
+    CHECK(!ours.value().contains("add nsw")).dump("ours", ours.value());
+    CHECK(!ours.value().contains("add nuw")).dump("ours", ours.value());
+
+    // the text: DXC builds it at 6.6 and reflects the two blocks at b0 and b1 of space 9
+    auto const text = request(sgl::emit::native_route::text);
+    REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
+    CHECK(text.value().text.contains("register(b0, space9)")).dump("text", text.value().text);
+    CHECK(text.value().text.contains("register(b1, space9)")).dump("text", text.value().text);
+    auto options = ssc::dxc::compile_options();
+    options.extra_args.push_back(cc::string("-enable-16bit-types"));
+    auto const built = compiler.value().compile({.source = text.value().text,
+                                                 .entry_point = text.value().entry_point,
+                                                 .stage = sg::shader_stage::vertex,
+                                                 .model = ssc::dxc::shader_model::sm_6_6},
+                                                options);
+    REQUIRE(built.has_value()).dump("dxc", built.has_error() ? built.error().to_string() : cc::string());
+    auto at_b0 = 0;
+    auto at_b1 = 0;
+    for (auto const& b : built.value().bindings)
+        if (b.space == 9u)
+        {
+            CHECK(b.type == sg::binding_type::constants_buffer);
+            at_b0 += b.index == 0 ? 1 : 0;
+            at_b1 += b.index == 1 ? 1 : 0;
+        }
+    CHECK(at_b0 == 1);
+    CHECK(at_b1 == 1);
+    auto const theirs = compiler.value().disassemble(built.value().bytecode);
+    REQUIRE(theirs.has_value());
+    CHECK(draw_start_size(theirs.value()) == 8).dump("theirs", theirs.value());
+}

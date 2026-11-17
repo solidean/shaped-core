@@ -326,3 +326,64 @@ TEST("sgl emit - a polyfill form under the root-constant fill of the draw's star
     REQUIRE(vertex.has_value()).dump("error", vertex.has_error() ? vertex.error() : cc::string());
     check_draw_start_slot(vertex.value(), true);
 }
+
+TEST("sgl emit - an entry with an @inline block and the draw's start declares and lists both blocks of space 9 "
+     "(EMIT-267)")
+{
+    constexpr auto source = cc::string_view("@inline binding tuning:\n"
+                                            "    offset: int\n"
+                                            "    scale: float\n"
+                                            "\n"
+                                            "struct varyings:\n"
+                                            "    @position position: hpos4\n"
+                                            "\n"
+                                            "@vertex fun vs(@vertex_index v: int){tuning} -> varyings:\n"
+                                            "    let x = ((v + tuning.offset) as float) * tuning.scale\n"
+                                            "    return { position = hpos4(x, 0.0, 0.0, 1.0) }\n");
+    for (auto const route : k_routes)
+    {
+        auto const e = dx12(source, "vs", route);
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        CHECK(e.value().dxil_shader_model == k_six_six);
+        check_draw_start_slot(e.value(), true);
+        // the program's block keeps its own entry, at its own place, and its own layout beside the draw start's
+        auto inline_blocks = 0;
+        for (auto const& b : e.value().bindings)
+            if (b.is_inline)
+            {
+                ++inline_blocks;
+                CHECK(!b.is_reserved);
+                CHECK(b.reserved == sgl::reserved_slot::none);
+                CHECK(b.group == -1);
+                CHECK(b.slot == 0);
+            }
+        CHECK(inline_blocks == 1);
+        CHECK(e.value().layouts.size() == 2);
+        if (route == native_route::text)
+        {
+            auto const& text = e.value().text;
+            CHECK(text.contains("register(b0, space9)")).dump("text", text);
+            CHECK(text.contains("ConstantBuffer<sgl_draw_start_block> sgl_draw_start : register(b1, space9);"))
+                .dump("text", text);
+        }
+    }
+}
+
+TEST("sgl emit - @vertex_index adds the first vertex as a uint and converts the sum, so a negative base vertex wraps "
+     "(EMIT-128, EMIT-267)")
+{
+    // an indexed draw's base vertex is a signed INT the host writes as its bits; uint addition wraps, so
+    // `int(SV_VertexID + first_vertex)` is the fetched index plus the base, negative bases included
+    auto const e = dx12(vertex_of("@vertex_index v: int", "v as float"), "vs", native_route::text);
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto const& text = e.value().text;
+    CHECK(text.contains("uint first_vertex;")).dump("text", text);
+    auto const at = text.find(" + sgl_draw_start.first_vertex)");
+    REQUIRE(at >= 0);
+    // the addition is the argument of `int(...)`, of the uint semantic and the uint member
+    auto const view = cc::string_view(text);
+    auto const open = view.subview(cc::start_end{.start = 0, .end = at}).rfind("int(");
+    REQUIRE(open >= 0);
+    auto const name = view.subview(cc::offset_size{.offset = open + 4, .size = at - open - 4});
+    CHECK(text.contains(cc::format("uint {} : SV_VertexID", name))).dump("name", name).dump("text", text);
+}
