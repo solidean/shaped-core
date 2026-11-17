@@ -23,16 +23,17 @@ TEST("sv - the bindless layout is module tracer's, one binding per table")
         CHECK(b.index == next_free);
         next_free = b.index + b.count;
 
-        // The name is the module's, which is what sg resolves an access declaration's footprint by.
+        // The name is the module's host name, `tracer.bindless.<table>`, which is what sg resolves an access
+        // declaration's footprint by (CHK-171).
         CHECK(sv::name_of(sv::bindless_table(i)) == cc::string_view(b.name));
-        CHECK(cc::string_view(b.name).starts_with("bindless."));
+        CHECK(cc::string_view(b.name).starts_with("tracer.bindless."));
         CHECK(sv::capacity_of(sv::bindless_table(i)) == b.count);
     }
 
     // A texture table carries the dimension a backend needs for a dimension-correct null descriptor; the buffer
     // table is raw bytes and carries none.
     auto const& tex2d = all[u32(sv::bindless_table::textures_2d)];
-    CHECK(tex2d.name == cc::string_view("bindless.textures_2d"));
+    CHECK(tex2d.name == cc::string_view("tracer.bindless.textures_2d"));
     CHECK(tex2d.type == sg::binding_type::texture);
     REQUIRE(tex2d.texture_dimension.has_value());
     CHECK(tex2d.texture_dimension.value() == sg::texture_view_dimension::tex_2d);
@@ -42,7 +43,7 @@ TEST("sv - the bindless layout is module tracer's, one binding per table")
     CHECK(cube.texture_dimension.value() == sg::texture_view_dimension::cube);
 
     auto const& buffers = all[u32(sv::bindless_table::buffers)];
-    CHECK(buffers.name == cc::string_view("bindless.buffers"));
+    CHECK(buffers.name == cc::string_view("tracer.bindless.buffers"));
     CHECK(buffers.type == sg::binding_type::bytes);
     CHECK(buffers.access == sg::access_mode::read);
     CHECK(!buffers.texture_dimension.has_value());

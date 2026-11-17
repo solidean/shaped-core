@@ -500,6 +500,7 @@ if(SC_BUILD_TESTS)
                 module:marking.tints
                 module_marking.sgl:*
                 module_tinting.sgl:*
+                module_twin.sgl:*
                 double_values.sgl:*
                 affine_memory.sgl:*
                 quads.sgl:*

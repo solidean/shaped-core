@@ -1,0 +1,10 @@
+// A file whose own binding is named as module `marking`'s is: the host tells the two apart by their host names,
+// `marking.marks.hits` and `marks.hits`, which sg matches each group's views by (CHK-171).
+use marking
+
+binding marks:
+    hits: mut buffer[float]
+
+@compute(64) fun twin(@thread_id id: int3){marking.marks, marks}:
+    marking.marks.hits[id.x] = marking.marks.tint.x + (id.x as float)
+    marks.hits[id.x] = 100.0 + (id.x as float)

@@ -2,6 +2,7 @@
 
 #include <clean-core/sequence/sequence.hh>
 #include <nexus/source_root.hh>
+#include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/describe.hh>
 
 using namespace sgl_test;
@@ -899,4 +900,79 @@ TEST("sgl describe - a module's ray set a pipeline names is described with the p
     CHECK(d.ray_sets[0].name == "rt.path_rays");
     REQUIRE(d.ray_sets[0].rays.size() == 1);
     CHECK(d.ray_sets[0].rays[0] == "surface");
+}
+
+TEST("sgl describe - a module's binding is named by its module wherever the host reads it, apart from the program's "
+     "own")
+{
+    // CHK-171: the program's `sky` and the module's `scenes.sky` both stand in one entry point's list, and the host tells
+    // them apart by name alone; the alias the program uses the module by is no part of it
+    sgl::library_file const library[] = {{.name = "scenes.sgl",
+                                          .source = "module scenes\n"
+                                                    "binding sky:\n"
+                                                    "    exposure: float\n"
+                                                    "    near: mut buffer[float]\n"}};
+    constexpr auto source = cc::string_view("use scenes as s\n"
+                                            "binding sky:\n"
+                                            "    gain: float\n"
+                                            "    near: mut buffer[float]\n"
+                                            "@compute(1) fun main(@thread_id id: int3){s.sky, sky}:\n"
+                                            "    s.sky.near[id.x] = s.sky.exposure\n"
+                                            "    sky.near[id.x] = sky.gain\n");
+
+    auto const r = sgl::describe({.source = source, .source_name = "t.sgl", .library = library});
+    if (r.has_error())
+        FAIL(r.error());
+    auto const& d = r.value();
+    // the program's own binding is the one it describes, bare
+    REQUIRE(d.bindings.size() == 1);
+    CHECK(d.bindings[0].name == "sky");
+    CHECK(d.bindings[0].block_host_name == "sky");
+    REQUIRE(d.bindings[0].members.size() == 2);
+    CHECK(d.bindings[0].members[1].host_name == "sky.near");
+    REQUIRE(d.entry_points.size() == 1);
+    auto const& e = d.entry_points[0];
+    REQUIRE(e.bindings.size() == 2);
+    CHECK(e.bindings[0] == "scenes.sky");
+    CHECK(e.bindings[1] == "sky");
+    auto footprint = cc::vector<cc::string>();
+    for (auto const& slot : e.footprint)
+        footprint.push_back(slot.host_name);
+    REQUIRE(footprint.size() == 4);
+    CHECK(footprint[0] == "scenes.sky");
+    CHECK(footprint[1] == "scenes.sky.near");
+    CHECK(footprint[2] == "sky");
+    CHECK(footprint[3] == "sky.near");
+
+    // the module's own description names its binding as the program does, so a group generated from it matches
+    auto const module = sgl::describe({.library = library, .module = "scenes"});
+    if (module.has_error())
+        FAIL(module.error());
+    REQUIRE(module.value().bindings.size() == 1);
+    auto const& sky = module.value().bindings[0];
+    CHECK(sky.name == "sky");
+    CHECK(sky.block_host_name == "scenes.sky");
+    REQUIRE(sky.members.size() == 2);
+    CHECK(sky.members[1].host_name == "scenes.sky.near");
+
+    // and so does the interface a compile states, on every target, beside the footprint it hands sg
+    for (auto const t :
+         {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan, sgl::emit::target::wgsl, sgl::emit::target::msl})
+    {
+        auto const c = sgl::compile_to_text(
+            {.source = source, .source_name = "t.sgl", .library = library, .entry_point = "main", .target = t});
+        if (c.has_error())
+            FAIL(c.error());
+        auto names = cc::vector<cc::string>();
+        for (auto const& b : c.value().bindings)
+            names.push_back(b.name);
+        REQUIRE(names.size() == 4);
+        CHECK(names[0] == "scenes.sky");
+        CHECK(names[1] == "scenes.sky.near");
+        CHECK(names[2] == "sky");
+        CHECK(names[3] == "sky.near");
+        REQUIRE(c.value().footprint.size() == 4);
+        CHECK(c.value().footprint[1].host_name == "scenes.sky.near");
+        CHECK(c.value().footprint[3].host_name == "sky.near");
+    }
 }

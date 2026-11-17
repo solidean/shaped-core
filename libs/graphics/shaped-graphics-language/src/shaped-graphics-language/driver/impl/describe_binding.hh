@@ -7,7 +7,11 @@ namespace sgl::driver::impl
 {
 /// What `sgl describe` says of one binding: its members, their slots and facts, and its block.
 /// `s` must be a binding that passed `emit::impl::validate_binding`.
-[[nodiscard]] described_binding describe_binding(check::checked_module const& m, check::symbol const& s);
+/// `module` is the module that declares it, which its host names are qualified by, `view.frame.exposure` (CHK-171);
+/// empty for the program's own.
+[[nodiscard]] described_binding describe_binding(check::checked_module const& m,
+                                                 check::symbol const& s,
+                                                 cc::string_view module);
 
 /// What `sgl describe` says of one file-scope sampler, which must have checked.
 [[nodiscard]] described_file_sampler describe_file_sampler(check::checked_module const& m, check::symbol_id id);

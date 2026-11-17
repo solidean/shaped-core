@@ -321,6 +321,8 @@ No target binds by name: HLSL by register, SPIR-V by set and binding, WGSL by `@
 So the host name need not be an identifier of any target, and the path is the one name that is injective and needs no rule for a reader to learn.
 `a_b.c` and `a.b_c` stay two buffers, where any identifier built from them would clash.
 The identifier a target writes is the emitter's to mint (EMIT-85), and the text reports the pair (EMIT-95).
+A module's binding is qualified because a program may declare a binding of the same name, `sky` beside `scenes.sky`, and both may stand in one pipeline's layout.
+Named bare, the two would be one name to sg, which matches a view to its slot by it.
 
 ## CHK-197
 

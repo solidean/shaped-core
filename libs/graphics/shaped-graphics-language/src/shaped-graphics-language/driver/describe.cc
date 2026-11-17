@@ -321,7 +321,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
 /// A binding as a frozen line names it: by its name and its shape.
 cc::string bound_text(check::checked_module const& m, check::symbol_id b)
 {
-    return cc::format("{}@{}", m.at(b).name, check::hex_of(check::structural_hash(m, m.bindings[m.at(b).info])));
+    return cc::format("{}@{}", host_name_of(m, b), check::hex_of(check::structural_hash(m, m.bindings[m.at(b).info])));
 }
 
 /// A binding list as a frozen line names it.
@@ -402,12 +402,13 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
                                                            check::pipeline_info const& p,
                                                            cc::span<check::flat_entry_point const> legal)
 {
-    auto result = described_raytracing_pipeline{.name = m.at(p.symbol).name,
-                                                .ray_set = m.qualified_name_of(p.ray_set),
-                                                .raygen = m.at(p.raygen).name,
-                                                .has_host_hit_groups = p.has_host_hit_groups,
-                                                .max_recursion_depth = p.max_recursion_depth,
-                                                .inline_constants = name_or_empty(m, p.inline_constants)};
+    auto result = described_raytracing_pipeline{
+        .name = m.at(p.symbol).name,
+        .ray_set = m.qualified_name_of(p.ray_set),
+        .raygen = m.at(p.raygen).name,
+        .has_host_hit_groups = p.has_host_hit_groups,
+        .max_recursion_depth = p.max_recursion_depth,
+        .inline_constants = check::is_valid(p.inline_constants) ? host_name_of(m, p.inline_constants) : cc::string()};
     auto features = m.functions[m.at(p.raygen).info].features;
     auto options = cc::vector<check::symbol_id>();
     add_options_of(m, p.raygen, options);
@@ -667,8 +668,12 @@ described_pipeline describe_pipeline(check::checked_module const& m,
 }
 } // namespace
 
-sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module const& m, check::symbol const& s)
+sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module const& m,
+                                                           check::symbol const& s,
+                                                           cc::string_view module)
 {
+    // CHK-171: the binding's name as the host knows it, a module's qualified by the module
+    auto const host = module.empty() ? cc::string(s.name) : cc::format("{}.{}", module, s.name);
     auto const& b = m.bindings[s.info];
     auto const members = m.at(b.members);
     auto result = described_binding{.name = s.name,
@@ -696,7 +701,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
     {
         result.block_size = placed.size;
         result.block_slot = 0;
-        result.block_host_name = s.name;
+        result.block_host_name = host;
     }
     auto slot = sgl::emit::impl::first_resource_slot(m, b);
     auto next_constant = isize(0);
@@ -721,14 +726,14 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
                  .slot = slot,
                  .count = count,
                  .stride = sgl::emit::impl::element_stride(m, t.element, sgl::emit::impl::element_space(b, member)),
-                 .host_name = cc::format("{}.{}", s.name, member.name),
+                 .host_name = cc::format("{}.{}", host, member.name),
                  .access = cc::string(t.is_mut ? "read_write" : "read")});
             slot += count;
             continue;
         }
         if (check::is_resource(t.kind))
         {
-            auto described = describe_resource(m, member, slot, cc::format("{}.{}", s.name, member.name));
+            auto described = describe_resource(m, member, slot, cc::format("{}.{}", host, member.name));
             described.count = count;
             result.members.push_back(cc::move(described));
             slot += count;
@@ -931,7 +936,9 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             emit_impl::validate_binding(m, id, errors);
             if (errors.size() == before)
             {
-                result.bindings.push_back(driver::impl::describe_binding(m, s));
+                // a module described is the host's module, whose own bindings it names as the program does
+                result.bindings.push_back(
+                    driver::impl::describe_binding(m, s, is_module ? request.module : m.foreign_module_of(id)));
                 describe_options(s, result.bindings.back());
                 described.push_back(id);
             }

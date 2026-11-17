@@ -55,9 +55,9 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
         if (m.bindings[s.info].is_workgroup)
             continue;
         auto const is_inline = m.bindings[s.info].is_inline;
-        auto const described = driver::impl::describe_binding(m, s);
+        auto const described = driver::impl::describe_binding(m, s, m.foreign_module_of(id));
         if (is_inline || described.block_slot == 0)
-            result.push_back({.name = s.name,
+            result.push_back({.name = m.qualified_name_of(id),
                               .emitted = emitted_of(m.qualified_name_of(id)),
                               .kind = described_member_kind::constant,
                               .is_inline = is_inline,

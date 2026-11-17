@@ -503,6 +503,9 @@ fun shade(k: float) -> float:
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
 * **CHK-46** A binding is no value: its bare name in an expression is `unsupported-yet`.
 * **CHK-171** A buffer member is known to the host by its path, `binding.member`, and a group's constant block by the binding's name ([why](why/checking.md#chk-171)).
+  A module's binding is named as the program names it (CHK-348), `view.frame.exposure` and `view.frame`, whatever alias its `use` gave the module.
+  So is it in the module's own description, so a group generated from the module and a shader that lists the binding name it alike.
+  Every name of a binding the host reads says so: the interface's, the description's, a footprint's, an entry point's list and a pipeline's layout.
 * **CHK-198** A texture, an image and a sampler are types of a binding member, as a buffer is, and none is a value: [bindings.md](../bindings.md) is the model.
   Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture_2d[float4]`, `out image_2d[.rgba8_unorm]`.
 * **CHK-199** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.

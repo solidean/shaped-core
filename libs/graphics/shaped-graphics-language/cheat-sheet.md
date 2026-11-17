@@ -86,7 +86,8 @@ auto const t = sgl::test_source(text, "colors.sgl", library);   // library optio
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
 sgl::describe({.library = files, .module = "view"});   // module `view` instead of a source: its bindings and structs, no entry point
-                                           // a binding of another module is named `view.frame`, and every struct by its host name,
+                                           // a binding of another module is named `view.frame`, its members' host names `view.frame.x`
+                                           // in the module's own description too (CHK-171), and every struct by its host name,
                                            // `view.particle` for a module's (a memory struct of one carries `module` too)
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
                                            // texture / image / sampler members also carry the sg enum values of their binding:
