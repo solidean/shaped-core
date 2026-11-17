@@ -200,9 +200,9 @@ public:
 
     /// The same of DXIL: a dx12 context, unless it was created with `dx12_config::native_dxil` off.
     [[nodiscard]] virtual bool prefers_native_dxil() const { return false; }
-    /// Whether SGL's own SPIR-V and DXIL should carry each operation's `.sgl` line, for a debugger (EMIT-257).
-    /// Opt-in, since it grows every binary by the sources it names: a context created with `native_line_tables`.
-    [[nodiscard]] virtual bool writes_native_line_tables() const { return false; }
+    /// What SGL's own SPIR-V and DXIL carry of the source, for a debugger (EMIT-257): the config's `native_debug_info`,
+    /// or `SC_SG_NATIVE_DEBUG_INFO` where it is set (`native_debug_info_from_environment`).
+    [[nodiscard]] virtual sg::native_debug_info native_debug_info() const { return sg::native_debug_info::none; }
 
     /// The home the bound calls run in, or null when there is none to move to.
     ///

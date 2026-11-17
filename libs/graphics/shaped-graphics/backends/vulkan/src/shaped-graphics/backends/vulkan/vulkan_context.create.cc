@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_forward_waits.hh>
 #include <shaped-graphics/context/gpu_selector.hh>
+#include <shaped-graphics/context/native_debug_info.hh>
 
 
 namespace sg::backend::vulkan
@@ -1411,7 +1412,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // nowhere to write, so a context that cannot allocate one is not worth handing back.
     ctx->_execution = config.execution;
     ctx->_native_spirv = config.native_spirv;
-    ctx->_native_line_tables = config.native_line_tables;
+    ctx->_native_debug_info = sg::native_debug_info_from_environment(config.native_debug_info);
     if (auto ring = ctx->_upload_inline.initialize(*ctx, config.upload_ring_bytes); ring.has_error())
         return cc::error(cc::move(ring).error());
     if (auto ring = ctx->_download_inline.initialize(*ctx, config.download_ring_bytes); ring.has_error())

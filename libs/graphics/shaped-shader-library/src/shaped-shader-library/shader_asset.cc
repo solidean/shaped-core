@@ -102,7 +102,7 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     // writes: a `has` anywhere it inlines, a prelude function's included.
     for (auto const& o : options)
         if (o.name == k_device_features_option || o.name == k_native_spirv_option || o.name == k_native_dxil_option
-            || o.name == k_native_line_table_option || o.name == k_mesh_form_option
+            || o.name == k_native_debug_info_option || o.name == k_mesh_form_option
             || o.name == k_polyfill_vertex_option || o.name == k_polyfill_task_option
             || o.name == k_polyfill_control_option || o.name == k_polyfill_pass_option)
             key.push_back(o);
@@ -203,8 +203,9 @@ void slib::add_context_options(cc::vector<shader_option>& options, sg::context c
         options.push_back({.name = cc::string(k_native_spirv_option), .value = cc::string("true")});
     if (ctx.prefers_native_dxil())
         options.push_back({.name = cc::string(k_native_dxil_option), .value = cc::string("true")});
-    if (ctx.writes_native_line_tables())
-        options.push_back({.name = cc::string(k_native_line_table_option), .value = cc::string("true")});
+    if (auto const level = ctx.native_debug_info(); level != sg::native_debug_info::none)
+        options.push_back({.name = cc::string(k_native_debug_info_option),
+                           .value = cc::string(level == sg::native_debug_info::full ? "full" : "lines")});
 }
 
 sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc::span<shader_option const> options) const

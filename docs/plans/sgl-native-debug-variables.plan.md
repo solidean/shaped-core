@@ -44,9 +44,12 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 
 ## P2: The request, as a level
 
-- [ ] P2.1 `debug_info` level `none` / `lines` / `full` in place of the `native_line_table` bool, through `text_request`, slib, `vulkan_config` and `dx12_config`
-- [ ] P2.2 `lines` writes today's bytes: the line-table tests unchanged under the new spelling
-- [ ] P2.3 EMIT-257 in the spec says the level; a new rule states `full`
+- [x] P2.1 `debug_info` level `none` / `lines` / `full` in place of the `native_line_table` bool, through `text_request`, slib, `vulkan_config` and `dx12_config`
+  - Outcome: `sgl::emit::debug_info` and `sg::native_debug_info`; slib's option `native_debug_info`; `sgl emit --debug-info`
+- [x] P2.4 `SC_SG_NATIVE_DEBUG_INFO` overrides the config, so any program's shaders carry debug info for a capture (D6)
+- [x] P2.2 `lines` writes today's bytes: the line-table tests unchanged under the new spelling
+- [x] P2.3 EMIT-257 in the spec says the level; a new rule states `full`
+  - Outcome: EMIT-267; `full` writes what `lines` writes until P3 and P4 land
 
 ## P3: The IR half, shared by both writers
 
@@ -113,9 +116,17 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - **Why:** Any sg program becomes capturable headless and under dev.py, with no change to it, on both backends, and it outlives this plan.
 - **Alternatives:** The capture code in one sample only; RenderDoc injecting from outside, which skips dev.py and needs a window.
 
+### D6: An environment variable overrides the level (2026-11-17) [P2.4]
+- **Context:** A capture by `SC_SG_CAPTURE` needs no change to the program, but its shaders carried no source unless the program's config asked.
+- **Decision:** `SC_SG_NATIVE_DEBUG_INFO` overrides `dx12_config` and `vulkan_config::native_debug_info` when a context is created.
+- **Why:** The two variables together debug any sg program at `.sgl` level with no code change; the P1 sample needed a local edit for it.
+- **Alternatives:** A capture implying `full`, which couples two independent switches; config only.
+
 ## Deviations
 
 ## Log
 
 - 2026-11-17: Plan created from the issue and a design conversation; D1 to D4 decided.
+- 2026-11-17: Two red differential corpus entries fixed on the way to pushing P1, both ties a vendor breaks its own way.
+- 2026-11-17: P2 done: one level through SGL, slib and sg, and `SC_SG_NATIVE_DEBUG_INFO` (D6).
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.
