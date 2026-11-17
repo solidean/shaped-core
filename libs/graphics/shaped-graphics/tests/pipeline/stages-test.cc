@@ -685,6 +685,96 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage's primitive id counts the primitives
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - an indexed strip's primitive ids and windings hold past one workgroup of the strip scan",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (auto const why = no_geometry_stage(*ctx); why.has_value())
+        SKIP(why.value());
+    auto const polyfill = geometry_polyfilling(*ctx);
+
+    // A 64 x 64 target, each pixel row cut into strips of irregular length, a restart between them: over 8000 windows,
+    // so the polyfill's strip scan walks over thirty chunks of 256 and carries its counts and its last restart across.
+    // A strip zigzags top, bottom, top, ... across its cells, the tops a quarter pixel right, so a pixel's centre lies
+    // in its cell's first triangle, window 2 x within the strip, wound counter-clockwise as the even windows are.
+    // With back faces culled, a window given the wrong parity is swapped, wound the other way, and draws nothing.
+    constexpr auto wide = 64;
+    auto corners = cc::vector<shaders::stages::stage_corner>();
+    auto indices = cc::vector<u32>();
+    auto expected = cc::vector<int>::create_filled(wide * wide, -1);
+    auto const clip = [&](float x, float y) { return tg::vec2f(-1.0f + 2.0f * x / wide, 1.0f - 2.0f * y / wide); };
+    auto made = 0;
+    for (auto row = 0; row < wide; ++row)
+    {
+        auto const top_of = [&](int x)
+        {
+            corners.push_back({.position = clip(float(x) + 0.25f, float(row))});
+            return u32(corners.size() - 1);
+        };
+        auto const bottom_of = [&](int x)
+        {
+            corners.push_back({.position = clip(float(x), float(row + 1))});
+            return u32(corners.size() - 1);
+        };
+        auto x0 = 0;
+        while (x0 < wide)
+        {
+            auto const x1 = cc::min(wide, x0 + 1 + (x0 * 7 + row * 13) % 23);
+            for (auto x = x0; x <= x1; ++x)
+            {
+                indices.push_back(top_of(x));
+                indices.push_back(bottom_of(x));
+            }
+            for (auto x = x0; x < x1; ++x)
+            {
+                expected[row * wide + x] = made;
+                made += 2;
+            }
+            indices.push_back(0xffffffffu);
+            x0 = x1;
+        }
+    }
+    CHECK(made > 8000);
+    auto const count = indices.size();
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(corners), sg::buffer_usage::vertex_buffer);
+    auto const index_buffer = ctx->persistent.create_buffer_from_data(cc::move(indices), sg::buffer_usage::index_buffer);
+
+    for (auto const route : geometry_routes_of(*ctx))
+    {
+        auto const routed = geometry_routing(*ctx, route);
+        auto const by = route == sg::geometry_polyfill_route::mesh ? "the mesh route" : "the compute route";
+        for (auto const is_culled : {false, true})
+        {
+            auto const pipeline
+                = is_culled ? co_await ctx->cached.acquire_raster_pipeline(shaders::stages::strip_primitive_ids_culled)
+                            : co_await ctx->cached.acquire_raster_pipeline(shaders::stages::strip_primitive_ids);
+            CHECK(is_built_by(*ctx, *pipeline, route)).context(by);
+            auto const kind = cc::format("{}, {}", by, is_culled ? "culled" : "not culled");
+            auto const pixels
+                = co_await sg_test::draw_offscreen(*ctx,
+                                                   {.width = wide,
+                                                    .height = wide,
+                                                    .colors = {sg::pixel_format::rgba32_float},
+                                                    .target_set = shaders::stages::stage_target::name,
+                                                    .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                   [&](sg::rendering_scope& scope)
+                                                   {
+                                                       scope.bind_pipeline(*pipeline);
+                                                       scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                       scope.bind_index_buffer(index_buffer.as_index_buffer());
+                                                       scope.draw_indexed({.index_range = {.offset = 0, .size = count}});
+                                                   });
+            for (auto y = 0; y < wide; ++y)
+                for (auto x = 0; x < wide; ++x)
+                {
+                    auto const got = pixels[0].rgba_float(x, y)[0];
+                    CHECK(got == float(expected[y * wide + x]))
+                        .context(cc::format("{}: pixel ({}, {}) is {}", kind, x, y, got));
+                }
+        }
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a geometry stage over a line strip draws each segment of the loop",
                      (sg::context_handle const& ctx))
 {
