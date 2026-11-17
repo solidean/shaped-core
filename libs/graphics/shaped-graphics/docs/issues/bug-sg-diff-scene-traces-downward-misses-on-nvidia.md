@@ -34,3 +34,6 @@ Against `blend_equations.ref`, "darkest: 16 of 64 referenced elements beyond rel
 Each is 0.33333334 (0x3eaaaaab) where the reference holds 0.6666667 (0x3f2aaaab), e.g. elements 51, 119, 187 and 255.
 Both fail on dx12 and vulkan, through DXC and through SGL's binary, with the same values, and at origin/main 09432cabb built alone in a worktree of its own.
 f6e7545c5 says the corpus "runs whole on AMD's iGPU", so it was likely only checked on AMD so far.
+
+2026-11-17, on an RTX 5070 Laptop GPU at bd28b805a and a85500dc3: the same scene_traces and blend_equations failures, with the same values, on dx12 and vulkan through both routes.
+They are what blocks `dev.py ship` on this machine; CI runs no differential corpus on its GPU-less runners.
