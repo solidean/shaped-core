@@ -264,6 +264,13 @@ A target's compiler reflects the names the text declares, and those follow each 
 The host binds by the path instead, so whoever compiles the text renames what the compiler reflected, and needs the pairs to do it.
 slib does that as the compile settles, which is why no target's identifier rules ever reach sg.
 
+## EMIT-268
+
+A host may build its pipelines in its own code rather than from `pipeline` declarations, and it still needs what each entry point hands its pipeline.
+A declaration names no vertex input: it follows from the vertex entry point's signature (the pipelines file's "What the entry points state is not a setting").
+So reporting it only on a declared pipeline left such a host matching each vertex shader to its struct by hand, though the pixel side, `target_struct`, was already reported per entry point.
+The members stay on the struct's description, which every entry point taking the struct shares, so `compile_to_text` names the struct and `describe` describes it, as for the target struct.
+
 ## EMIT-135
 
 WebGPU has no ray query, and a portable shader that traces is worth more than one refused on a whole platform.
@@ -329,6 +336,20 @@ Its offsets would follow the program's last member too, so a host would have to 
 Space 9 already holds what a host writes as root constants at an address the interface names, so `b1` of it costs no new reserved space and touches no contract of sg's.
 The first vertex of an indexed draw is its base vertex because SGL's `@vertex_index` is vulkan's, the fetched index plus the base, which is what `SV_StartVertexLocation` holds on 6.8.
 A host that wrote the first index would draw the wrong vertices without any error, so the rule says it.
+
+## EMIT-269
+
+A ray set sizes its payloads, but a payload in no ray set, a callable's parameter among them, was sized nowhere.
+A host compiling single entry points matched a stage's payload to a set by name to size it.
+The size is the checker's `ray_data_bytes`, the one count a ray set and a `@raytracing pipeline` take too, so the three cannot disagree.
+
+## EMIT-270
+
+A `@raytracing pipeline` derives its attribute size from its groups, and with `.host` it takes the 32-byte cap, since a host's group is compiled apart.
+A host that builds its own table knows its shaders, and each shader's signature fixes what it takes.
+An entry point names its `A`, and one entry point cannot serve a triangle group and a procedural one (CHK-330).
+So each states its size, and the table's is the largest of them rather than the cap.
+The name and the shape let a host check a procedural group's hits against what its intersection reports, as CHK-330 checks a declared group.
 
 ## EMIT-149
 

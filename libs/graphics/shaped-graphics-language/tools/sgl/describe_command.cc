@@ -206,8 +206,14 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const& name : e.options)
             list.write(cc::string_view(name));
     }
+    // EMIT-268 to EMIT-270: what the signature hands a pipeline, which a host that builds its own pipelines reads
+    o.write("vertex_input", cc::string_view(e.vertex_input));
     o.write("payload", cc::string_view(e.payload));
     o.write("payload_shape", cc::string_view(e.payload_shape));
+    o.write("payload_size", e.payload_size);
+    o.write("attributes", cc::string_view(e.attributes));
+    o.write("attributes_shape", cc::string_view(e.attributes_shape));
+    o.write("attribute_size", e.attribute_size);
     // One `slot: access` per touched slot, the way a corpus pin spells it.
     auto list = o.write_array("footprint", babel::json::layout::compact);
     for (auto const& slot : e.footprint)
@@ -559,4 +565,51 @@ COMMAND("describe")
         return exit_usage;
     }
     return exit_ok;
+}
+
+// EMIT-268 to EMIT-270: every entry point carries its interface's keys, empty or 0 where its stage has none, so a host
+// reading them needs no case for a missing one.
+TEST("sgl describe - each entry point's JSON names its vertex input, its payload and its hit attributes")
+{
+    auto const described = sgl::describe({.source = "require raytracing_pipeline\n"
+                                                    "@vertex struct mesh_vertex:\n"
+                                                    "    position: pos3\n"
+                                                    "struct varyings:\n"
+                                                    "    @position position: hpos4\n"
+                                                    "@vertex fun fed(v: mesh_vertex) -> varyings:\n"
+                                                    "    return { position = hpos4(v.position.x, 0.0, 0.0, 1.0) }\n"
+                                                    "struct radiance:\n"
+                                                    "    color: float3\n"
+                                                    "struct sphere_attributes:\n"
+                                                    "    u: float\n"
+                                                    "    v: float\n"
+                                                    "    w: float\n"
+                                                    "@closest_hit fun shade(h: procedural_hit[sphere_attributes], p: "
+                                                    "mut radiance):\n"
+                                                    "    p.color = float3(h.attributes.u, 0.0, 0.0)\n",
+                                          .source_name = "t.sgl"});
+    REQUIRE(described.has_value());
+    auto const json = to_json(described.value());
+    REQUIRE(json.has_value());
+    auto const doc = babel::json::read(cc::string_view(json.value()));
+    REQUIRE(doc.has_value());
+    auto const entries = doc.value().root()["entry_points"];
+    REQUIRE(entries.size() == 2);
+    auto const fed = entries[0];
+    CHECK(fed["name"].as_string() == "fed");
+    CHECK(fed["vertex_input"].as_string() == "mesh_vertex");
+    CHECK(fed["payload"].as_string() == "");
+    CHECK(fed["payload_size"].as_double(-1) == 0);
+    CHECK(fed["attributes"].as_string() == "");
+    CHECK(fed["attributes_shape"].as_string() == "");
+    CHECK(fed["attribute_size"].as_double(-1) == 0);
+    auto const shade = entries[1];
+    CHECK(shade["name"].as_string() == "shade");
+    CHECK(shade["vertex_input"].as_string() == "");
+    CHECK(shade["payload"].as_string() == "radiance");
+    CHECK(shade["payload_size"].as_double() == 12);
+    CHECK(shade["attributes"].as_string() == "sphere_attributes");
+    CHECK(shade["attributes_shape"].as_string() == cc::string_view(described.value().entry_points[1].attributes_shape));
+    CHECK(shade["attributes_shape"].as_string().size() == 32);
+    CHECK(shade["attribute_size"].as_double() == 12);
 }

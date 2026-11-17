@@ -312,11 +312,14 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     result.footprint = check::footprint_of(m, legal);
     for (auto const id : driver::impl::file_samplers_of(legal))
         result.samplers.push_back(m.qualified_name_of(id));
-    if (e.entry_stage >= check::stage::raygen && check::is_valid(e.input))
-    {
-        result.payload = m.name_of(e.input);
-        result.payload_shape = check::hex_of(check::structural_hash(m, e.input));
-    }
+    auto facts = driver::impl::entry_interface_of(m, e);
+    result.vertex_input = cc::move(facts.vertex_input);
+    result.payload = cc::move(facts.payload);
+    result.payload_shape = cc::move(facts.payload_shape);
+    result.payload_size = facts.payload_size;
+    result.attributes = cc::move(facts.attributes);
+    result.attributes_shape = cc::move(facts.attributes_shape);
+    result.attribute_size = facts.attribute_size;
     return result;
 }
 
@@ -769,6 +772,47 @@ cc::vector<sgl::check::symbol_id> sgl::driver::impl::file_samplers_of(check::fla
             if (at == result.size() || result[at] != smp->sampler)
                 result.insert_at(at, smp->sampler);
         }
+    return result;
+}
+
+sgl::driver::impl::entry_interface sgl::driver::impl::entry_interface_of(check::checked_module const& m,
+                                                                         check::flat_entry_point const& e)
+{
+    auto result = entry_interface();
+    // CHK-88, CHK-89: a vertex entry point's stage struct is its vertex input, and one that takes none has none
+    if (e.entry_stage == check::stage::vertex && check::is_valid(e.input))
+        result.vertex_input = host_type_name_of(m, e.input);
+    // CHK-328: a ray-tracing stage's payload is its one `mut` parameter, a callable's its parameter
+    if (e.entry_stage >= check::stage::raygen && check::is_valid(e.input))
+    {
+        result.payload = m.name_of(e.input);
+        result.payload_shape = check::hex_of(check::structural_hash(m, e.input));
+        result.payload_size = m.ray_data_bytes(e.input);
+    }
+    // CHK-326, CHK-342: a hit takes a triangle's barycentrics or a procedural primitive's `A`, and an intersection
+    // reports an `A`
+    auto attributes = check::type_id::none;
+    if (e.entry_stage == check::stage::intersection)
+        attributes = m.at(m.functions[m.at(e.function).info].result).element;
+    if (e.entry_stage == check::stage::closest_hit || e.entry_stage == check::stage::any_hit)
+        for (auto const& parameter : m.at(m.functions[m.at(e.function).info].parameters))
+        {
+            if (parameter.is_mut)
+                continue;
+            auto const& t = m.at(parameter.type);
+            auto const name = m.name_of(parameter.type);
+            if (name == "triangle_hit" || name == "triangle_candidate")
+                result.attribute_size = 8;
+            else if (check::is_valid(t.generic) && check::is_valid(t.symbol)
+                     && (m.at(t.symbol).name == "procedural_hit" || m.at(t.symbol).name == "procedural_candidate"))
+                attributes = t.element;
+        }
+    if (check::is_valid(attributes))
+    {
+        result.attributes = m.name_of(attributes);
+        result.attributes_shape = check::hex_of(check::structural_hash(m, attributes));
+        result.attribute_size = m.ray_data_bytes(attributes);
+    }
     return result;
 }
 

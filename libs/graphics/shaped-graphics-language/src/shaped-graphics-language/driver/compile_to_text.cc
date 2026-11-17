@@ -443,6 +443,16 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     if (!result.target_struct.empty() && check::is_valid(e.result) && check::is_valid(m.at(e.result).symbol))
         if (auto const module = m.foreign_module_of(m.at(e.result).symbol); !module.empty())
             result.target_struct = cc::format("{}.{}", module, result.target_struct);
+    // EMIT-268 to EMIT-270: what the entry point's own signature hands its pipeline, as `describe` reports it, whatever
+    // form the text took
+    auto facts = driver::impl::entry_interface_of(m, e);
+    result.vertex_input = cc::move(facts.vertex_input);
+    result.payload = cc::move(facts.payload);
+    result.payload_shape = cc::move(facts.payload_shape);
+    result.payload_size = facts.payload_size;
+    result.attributes = cc::move(facts.attributes);
+    result.attributes_shape = cc::move(facts.attributes_shape);
+    result.attribute_size = facts.attribute_size;
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = form.workgroup[axis];
     result.is_dispatched_by_threads = form.is_auto_workgroup;

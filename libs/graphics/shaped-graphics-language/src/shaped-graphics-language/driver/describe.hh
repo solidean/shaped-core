@@ -207,10 +207,21 @@ struct sgl::described_entry_point
     cc::vector<check::slot_footprint> footprint;
     /// The file-scope samplers its code reaches, which its pipeline layout carries, in index order.
     cc::vector<cc::string> samplers;
-    /// A ray-tracing stage's payload, or a callable's parameter, and its structural hash as 32 hex digits.
-    /// Both empty for any other stage and for a stage without one.
+    /// A vertex entry point's `@vertex struct`, which `structs` describes; `m.name` for another module's (EMIT-268).
+    /// Empty for every other stage and for a vertex entry point that draws from no vertex buffer.
+    cc::string vertex_input;
+    /// A ray-tracing stage's payload, or a callable's parameter, its structural hash as 32 hex digits, and its bytes
+    /// (EMIT-269).
+    /// Empty and 0 for any other stage and for a stage without one.
     cc::string payload;
     cc::string payload_shape;
+    i32 payload_size = 0;
+    /// A procedural closest or any hit's attributes, or what an intersection reports, and its structural hash as 32 hex
+    /// digits (EMIT-270); both empty for a triangle hit and for every other stage.
+    cc::string attributes;
+    cc::string attributes_shape;
+    /// A hit's or an intersection's attributes in bytes, 8 for a triangle's barycentrics; 0 for every other stage.
+    i32 attribute_size = 0;
     /// The options it reaches, by name in declaration order (CHK-355): each distinct set of their values is one compile.
     cc::vector<cc::string> options;
 };

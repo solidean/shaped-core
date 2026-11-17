@@ -230,6 +230,23 @@ struct sgl::emitted_source
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;
     cc::string target_struct;
+    /// A vertex entry point's `@vertex struct`, named as `target_struct` is; empty for every other stage and for a vertex
+    /// entry point that draws from no vertex buffer (EMIT-268).
+    /// Its members' locations, formats, semantics and streams are not here: `describe` describes the struct of this name
+    /// in its `structs`, which is what a host's input layout is built from.
+    cc::string vertex_input;
+    /// A ray-tracing stage's payload, or a callable's parameter, its structural hash as 32 hex digits, and its bytes, as
+    /// `described_entry_point` has them (EMIT-269); empty and 0 for any other stage and for a stage without one.
+    cc::string payload;
+    cc::string payload_shape;
+    i32 payload_size = 0;
+    /// A procedural closest or any hit's attributes, or what an intersection reports, and its structural hash as 32 hex
+    /// digits (EMIT-270); both empty for a triangle hit and for every other stage.
+    cc::string attributes;
+    cc::string attributes_shape;
+    /// A hit's or an intersection's attributes in bytes, 8 for a triangle's barycentrics; 0 for every other stage.
+    /// A host building its own ray-tracing pipeline takes the largest of its shaders' as its attribute size.
+    i32 attribute_size = 0;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
     /// A `hlsl-dx12` compile's: the DXIL shader model the output needs, which a host compiles the text at (EMIT-264).

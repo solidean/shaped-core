@@ -180,6 +180,13 @@ const light_kind_sun: i32 = 2;
 * **EMIT-94** A stream changes nothing in the text: it is which buffer the host reads a member from, and a location stays the member's position ([why](why/emitting.md#emit-94)).
 * **EMIT-95** The text of an entry point comes with the pair of every resource and constant buffer it declares, samplers included.
   The pair is the name it minted, and the host name CHK-171 gives ([why](why/emitting.md#emit-95)).
+* **EMIT-268** An entry point's description and its compiled text name its **vertex input** ([why](why/emitting.md#emit-268)).
+  That is a vertex entry point's stage struct, the `@vertex struct` it draws from (CHK-88, CHK-89).
+  It is `vertex_input` on `described_entry_point`, on `emitted_source` and on each entry point `sgl describe` writes.
+  It names the struct as `target_struct` names a `@pixel struct`, `m.name` for a module's.
+  It is empty for a vertex entry point that takes no stage struct, which draws from no vertex buffer, and for every other stage.
+  What an input layout needs of the members, their locations, formats, semantics and streams, is the struct's own description in `describe`'s `structs`.
+  A `pipeline` declaration's `vertex_input` is its vertex stage's.
 
 | stage | parameter | result |
 |---|---|---|
@@ -660,6 +667,17 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   On DXIL `dx.op.allocateRayQuery2` with the flag that allows them, at Shader Model 6.9, a library's function row included.
   dx12's `nvapi` fill of the feature states none of it, at 6.6: NVIDIA's driver applies a structure's micromaps to every trace itself (EMIT-265).
   NVAPI has no flag that forces a query's trace to 2 states, so under that fill a trace whose flags force them, or are no constant, is `unsupported`, naming that.
+* **EMIT-269** An entry point's description and its compiled text state its **payload**, a ray-tracing stage's `mut` parameter or a callable's parameter (CHK-328) ([why](why/emitting.md#emit-269)).
+  They are `payload`, `payload_shape` and `payload_size` on `described_entry_point`, on `emitted_source` and on each entry point `sgl describe` writes: its name, its structural hash and its bytes.
+  The bytes count a word per scalar and per enum, as a ray set's `payload_sizes` do.
+  A stage without a payload states an empty name and shape, and 0 bytes.
+* **EMIT-270** An entry point's description and its compiled text state its **hit attributes** ([why](why/emitting.md#emit-270)).
+  They are `attributes`, `attributes_shape` and `attribute_size`, in the same places as its payload.
+  A closest or any hit that takes a `triangle_hit` or a `triangle_candidate` states 8 bytes, a triangle's barycentrics, and no name.
+  One that takes a `procedural_hit[A]` or a `procedural_candidate[A]`, and an intersection that returns `report[A]`, states `A`.
+  That is its name, its structural hash and its bytes, counted as a payload's are (CHK-342).
+  Every other stage states an empty name and shape, and 0 bytes.
+  A host building its own ray-tracing pipeline takes the largest `attribute_size` of its shaders as the pipeline's, which is what a `@raytracing pipeline` derives from its groups.
 * **EMIT-264** A `hlsl-dx12` compile reports the DXIL shader model its output needs, `emitted_source::dxil_shader_model`, on both routes.
   It is the highest that `check::dxil_shader_model_of` gives of each feature the entry point needs in its fill, and of each core construct written natively; 6.6 where none needs more.
   Natively `shader_execution_reordering` and `opacity_micromap` need 6.9 and `clustered_geometry` 6.10, and the `draw_start` and `wave_size` core constructs 6.8; every other fill needs 6.6.
