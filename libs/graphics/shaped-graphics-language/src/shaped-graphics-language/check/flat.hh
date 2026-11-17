@@ -183,6 +183,8 @@ struct sgl::check::flat_local
     local_kind kind = local_kind::let;
     /// Minted, so it is unique within the entry point and differs from every module-level name.
     cc::string name;
+    /// The name as the source wrote it, for a debugger (EMIT-267); empty for a local a pass introduced.
+    cc::string source_name;
     type_id type = type_id::none;
     bool is_mut = false;
     /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.
@@ -711,6 +713,8 @@ struct sgl::check::source_line
     /// -1 for no line at all.
     i32 file = -1;
     i32 line = 0;
+    /// The function whose body the line stands in, where `source_lines::origin_of` knows it (EMIT-267).
+    symbol_id function = symbol_id::none;
 
     constexpr bool operator==(source_line const&) const = default;
 };

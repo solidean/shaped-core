@@ -578,7 +578,7 @@ fn main_ps(p: pixel_input) -> target_ {
   After the text, a directive names the statement's line again.
   WGSL has no such directive, and its messages map back through the table (EMIT-181).
 * **EMIT-257** Asked for a native line table, a native route writes each operation's line of EMIT-181 into its binary, and nothing else changes.
-  It is opt-in, `text_request::native_line_table`, since it carries the text of each file a line names.
+  It is opt-in, `text_request::native_debug_info` at `lines` or above, since it carries the text of each file a line names.
   SPIR-V states an `OpString` and an `OpSource` with the text per file, and an `OpLine` before an operation whose line differs from the last in its block.
   Core SPIR-V has no inlined calls, so an `OpLine` names the innermost line, where the operation stands.
   The files' ids are the module's last, so every other id is the one it has without the table.
@@ -586,6 +586,11 @@ fn main_ps(p: pixel_input) -> target_ {
   `ILDB` is the module again, each instruction with a `DILocation`, an inlined statement's in a `DISubprogram` of its file with the chain of `inlinedAt` calls.
   It holds `dx.source.contents`, so a debugger shows each line without the file, and no variable is described.
   A function's expression inlines into the statement that calls it, so only a function's own statements keep an inlined line.
+* **EMIT-267** Asked for `full`, a native route writes EMIT-257's lines and describes each local the source wrote: a `let`, a `var`, a parameter and a `for` counter.
+  A local a pass introduced is not described.
+  Each is described under its name as written, with its type, in the scope of the function it was written in, inlined calls included.
+  Its value is stated where the source gives it one, and follows it wherever a pass moves or splits it; where the value no longer exists, it reads as optimized out.
+  Asking for `full` changes no instruction but the debug ones, as `lines` changes none.
 
 ## Diagnostics
 

@@ -70,6 +70,8 @@ Those stages live in [tests/differential/setups/shaders/](../tests/differential/
 
 The `across` bounds of the two texture setups allow for a filter weight of 8 fractional bits, which some hardware has.
 The `targets` bound allows a step of the coarsest format, since an implementation may round a float into one either way.
+**A corpus value never lands on a tie the target leaves open**: a step no bound absorbs is a vendor's choice.
+Alpha 0.5 into rgb10a2's two alpha bits was one, between Intel and NVIDIA, and so was a ray along a triangle edge no other triangle shares.
 An output a setup marks `is_exact`, as `targets` marks its integer target, is compared byte for byte and committed as a hash, whatever its file's bound.
 `records` also holds what the GPU read to what the host wrote, member by member, and logs the first member read from elsewhere as an error.
 Agreement between configurations cannot see a layout every backend gets wrong alike; that check can.

@@ -1,5 +1,6 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/record/async_scope.hh>
@@ -238,7 +239,12 @@ cc::rec::recording compacted_for_logs(cc::rec::recording const& r, bool to_targe
 
 /// Set when the capture keeps only the compacted recording, so it may compact while the run goes.
 bool g_compact_while_running = false;
+/// What the capture keeps out of the recorder's pool: **a referenced chunk pins its whole capacity**, however few of
+/// its bytes the capture's views cover.
+/// A short-lived thread fills a few hundred bytes of its 1 MB chunk, so counting the views' bytes let a run of many
+/// threads pin the whole pool well before the threshold, and the recorder dropped every event after it.
 isize g_held_bytes = 0;
+cc::set<cc::rec::chunk const*> g_held_chunks;
 isize g_compact_at = compact_while_running_at;
 
 struct capture_listener final : cc::rec::listener
@@ -251,12 +257,16 @@ struct capture_listener final : cc::rec::listener
             [&](cc::rec::recording& r)
             {
                 r.append(view);
-                g_held_bytes += view.bytes.size();
+                if (view.source == nullptr)
+                    g_held_bytes += view.bytes.size();
+                else if (g_held_chunks.insert(view.source))
+                    g_held_bytes += isize(view.source->capacity);
                 if (!g_compact_while_running || g_held_bytes < g_compact_at)
                     return;
 
                 // The compacted recording owns its bytes, so the chunks it came from go back to the recorder.
                 r = compacted_for_logs(r, false);
+                g_held_chunks.clear();
                 g_held_bytes = r.total_bytes();
                 g_compact_at = cc::max(compact_while_running_at, 2 * g_held_bytes);
             });
@@ -378,6 +388,7 @@ void nx::impl::begin_run_capture(cc::string_view path, cc::string_view compacted
     g_compacted_path = cc::string(compacted_path);
     g_compact_while_running = path.empty();
     g_held_bytes = 0;
+    g_held_chunks.clear();
     g_compact_at = compact_while_running_at;
     g_capture_handle = cc::rec::register_listener(g_capture_listener);
 
@@ -500,6 +511,7 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
                     compacted_bytes = cc::rec::compress_serialized(cc::rec::serialize(compacted_for_logs(r, true)));
                 r = {};
                 g_held_bytes = 0;
+                g_held_chunks.clear();
             });
 
         if (!g_capture_path.empty())

@@ -211,6 +211,15 @@ pipeline strip_primitive_ids:
     cull = .none
     format = .rgba32_float
 
+// The same with back faces culled, so a triangle swapped as the other parity's draws nothing.
+pipeline strip_primitive_ids_culled:
+    vertex = white_vs
+    geometry = tag_gs
+    pixel = primitive_ps
+    topology = .triangle_strip
+    cull = .back
+    format = .rgba32_float
+
 // A quad patch, its corners counter-clockwise from the bottom left, blended across by `uv`.
 struct quad_factors:
     @edge_factors edges: float[4]

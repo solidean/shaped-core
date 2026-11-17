@@ -62,9 +62,9 @@ struct sgl::text_request
     check::core_fills core;
     /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
     emit::native_route native = emit::native_route::text;
-    /// Writes the `.sgl` line of each operation into what the native route writes, for a debugger to read (EMIT-257).
-    /// Off, the binary is byte for byte what it would be without this option; the text route has `line_directives`.
-    bool native_line_table = false;
+    /// What the native route writes of the source, for a debugger to read (EMIT-257).
+    /// `none` writes the binary byte for byte as it is without the option; the text route has `line_directives`.
+    emit::debug_info native_debug_info = emit::debug_info::none;
     /// A mesh or geometry entry point as one half of its polyfill (CHK-524, CHK-525), which
     /// `emitted_source::mesh_layout` then describes.
     emit::mesh_form mesh = emit::mesh_form::native;

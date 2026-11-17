@@ -607,8 +607,13 @@ cc::string random_program(u64 seed, i32 count)
 
 TEST("sgl autodiff - random programs: forward agrees with backward, and both with central differences")
 {
-    // about 0.2 s a program on the interpreter
-    auto const programs = nx::is_thorough() ? 200 : nx::is_smoke() ? 2 : 6;
+    // about 0.2 s a program on the interpreter, and 2 s on wasm's one thread
+#if defined(__EMSCRIPTEN__)
+    auto const is_narrow = true;
+#else
+    auto const is_narrow = nx::is_smoke();
+#endif
+    auto const programs = nx::is_thorough() ? 200 : is_narrow ? 2 : 6;
     auto const functions = 8;
     auto seeds = nx::test_random();
     for (auto p = 0; p < programs; ++p)

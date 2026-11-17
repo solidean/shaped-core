@@ -138,6 +138,7 @@ rules:
       - src/clean-core/common/assert.cc
       - src/clean-core/error/crash_handler.cc
       - src/clean-core/memory/allocation.cc
+      - src/clean-core/memory/mimalloc_resource.cc
       - src/clean-core/platform/console.cc
       - src/clean-core/platform/native.cc
 
@@ -309,6 +310,11 @@ rules:
     value: [<psapi.h>, <tlhelp32.h>]
     reason: the working set and its peak, and the thread snapshot that is the only unprivileged thread count
     files: src/clean-core/platform/process_metrics.cc
+
+  - kind: allow-include
+    value: [<psapi.h>]
+    reason: the commit charge the memory cap polls, without the thread snapshot a full usage query takes
+    files: src/clean-core/platform/resource_limits.cc
 
   - kind: allow-include
     value: [<mach/mach.h>, <mach/task.h>]

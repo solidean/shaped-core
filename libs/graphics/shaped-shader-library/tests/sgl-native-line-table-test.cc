@@ -105,7 +105,7 @@ TEST("slib - SGL's DXIL with its line table passes the validator, and DXC reads 
                                          .entry_point = "run",
                                          .target = sgl::emit::target::hlsl_dx12,
                                          .native = sgl::emit::native_route::require,
-                                         .native_line_table = true});
+                                         .native_debug_info = sgl::emit::debug_info::lines});
     REQUIRE(e.has_value());
     auto const refused = compiler.value().validate(e.value().dxil);
     CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
@@ -156,7 +156,7 @@ TEST("slib - every entry point SGL's DXIL lowers passes the validator with its l
                                                  .entry_point = entry.entry_point,
                                                  .target = sgl::emit::target::hlsl_dx12,
                                                  .native = sgl::emit::native_route::prefer,
-                                                 .native_line_table = true});
+                                                 .native_debug_info = sgl::emit::debug_info::lines});
             if (e.has_error() || e.value().dxil.empty())
                 continue;
             ++validated;

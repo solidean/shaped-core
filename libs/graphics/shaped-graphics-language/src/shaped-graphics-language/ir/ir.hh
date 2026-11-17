@@ -799,6 +799,8 @@ struct sgl::ir::source_place
     /// -1 where the statement names no line.
     i32 file = -1;
     i32 line = 0;
+    /// A position in `line_table::functions`: the function whose body the line stands in; -1 where it is not known.
+    i32 function = -1;
     /// A range of `line_table::calls`: the calls it was inlined through, innermost first.
     u32 calls_first = 0;
     u32 calls_count = 0;
@@ -814,6 +816,8 @@ struct sgl::ir::line_table
     cc::vector<source_place> statements;
     /// The call sites of every place, each a place of its own with no calls.
     cc::vector<source_place> calls;
+    /// The name of each function a place stands in, each once (EMIT-267).
+    cc::vector<cc::string> functions;
 
     [[nodiscard]] bool is_empty() const { return statements.empty(); }
     /// The place of statement `s`, or one with no file.

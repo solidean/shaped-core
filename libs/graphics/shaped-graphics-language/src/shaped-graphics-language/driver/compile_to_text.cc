@@ -174,7 +174,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  cc::span<check::feature_fill const> fills,
                                                  check::core_fills core,
                                                  emit::native_route native = emit::native_route::text,
-                                                 bool native_line_table = false,
+                                                 emit::debug_info native_debug_info = emit::debug_info::none,
                                                  emit::mesh_form mesh = emit::mesh_form::native,
                                                  check::flat_entry_point const* polyfill_vertex = nullptr,
                                                  check::flat_entry_point const* polyfill_task = nullptr,
@@ -406,7 +406,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                            .core = core,
                                            .software_trace = software_trace,
                                            .native = native,
-                                           .native_line_table = native_line_table,
+                                           .native_debug_info = native_debug_info,
                                            .float_guarantee = float_guarantee});
     if (!emitted.has_text())
     {
@@ -614,7 +614,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
                             request.guards_undefined, request.software_trace, request.weakens_float,
                             request.device_features, request.fills, request.core, request.native,
-                            request.native_line_table, request.mesh, polyfill_vertex, polyfill_task, polyfill_control);
+                            request.native_debug_info, request.mesh, polyfill_vertex, polyfill_task, polyfill_control);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(

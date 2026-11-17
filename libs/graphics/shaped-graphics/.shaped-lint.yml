@@ -33,6 +33,11 @@ rules:
     reason: the debug layer, needed only where the device is created — it leaks past the gate above, and belongs behind it eventually
     files: backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc
 
+  - kind: allow-include
+    value: [<windows.h>, <dlfcn.h>]
+    reason: a GPU capture tool's library is loaded by name, on request only, so no build links RenderDoc or PIX
+    files: src/shaped-graphics/context/impl/gpu_capture.cc
+
   # =========================================================================================================
   # Language facilities with no cc:: equivalent
   # =========================================================================================================

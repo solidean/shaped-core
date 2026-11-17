@@ -49,16 +49,18 @@ pipeline discard_derivative:
 
 // x·y at pixel centres, so a derivative along x reads its row's y and one along y its column's x.
 // Coarse ones read one row or column for the whole quad, fine ones the pixel's own, whatever the @float level (EVAL-144).
+// The tag, 0 on the test's corners, is added so the stage reads what the vertex stage writes: an output nothing reads is
+// a warning of vulkan's validation once DXC drops the input.
 @pixel fun quad_derivatives_ps(p: tagged) -> tag_target:
     let v = p.position.x * p.position.y
     return {
-        value = float4(ddx(v), ddy(v), ddx_fine(v), ddy_fine(v))
+        value = float4(ddx(v), ddy(v), ddx_fine(v), ddy_fine(v) + (p.tag as float))
     }
 
 @float(.fast) @pixel fun fast_quad_derivatives_ps(p: tagged) -> tag_target:
     let v = p.position.x * p.position.y
     return {
-        value = float4(ddx(v), ddy(v), ddx_fine(v), ddy_fine(v))
+        value = float4(ddx(v), ddy(v), ddx_fine(v), ddy_fine(v) + (p.tag as float))
     }
 
 pipeline quad_derivatives:

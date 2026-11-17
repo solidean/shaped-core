@@ -44,11 +44,30 @@ source_line source_lines::line_at(i32 file, u32 offset)
 line_origin source_lines::origin_of(flat_entry_point const& e, flat_stmt const& s)
 {
     // innermost first: the statement, then its calls from the inside out
+    // a call stands in the function the call before it called, the outermost in the entry point's
+    auto const calls = e.at(s.inlined_through);
+    auto const callee_of = [&](isize i) -> symbol_id
+    {
+        if (i < 0)
+            return e.function;
+        auto const& site = calls[i];
+        if (site.file < 0 || site.file >= m.files.size() || !ast::is_valid(site.call))
+            return symbol_id::none;
+        // a call in a generic function's instance stands past the file's own tables, and names no function here
+        auto const& calls_of = m.files[site.file].call_of;
+        if (ast::index_of(site.call) >= calls_of.size())
+            return symbol_id::none;
+        auto const record = calls_of[ast::index_of(site.call)];
+        return record >= 0 && record < m.call_records.size() ? m.call_records[record].callee : symbol_id::none;
+    };
     auto frames = cc::vector<source_line>();
     frames.push_back(line_of(s.from.file, s.from.expr, s.from.stmt));
-    auto const calls = e.at(s.inlined_through);
+    frames.back().function = callee_of(calls.size() - 1);
     for (auto i = calls.size(); i > 0; --i)
+    {
         frames.push_back(line_of(calls[i - 1].file, calls[i - 1].call, ast::stmt_id::none));
+        frames.back().function = callee_of(i - 2);
+    }
 
     auto const is_prelude = [&](source_line const& l) { return l.file >= 0 && l.file < m.prelude_files; };
     auto any_outside = false;

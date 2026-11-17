@@ -254,6 +254,11 @@ That is why the `sanitize-*` presets set it `OFF`.
 The two flags stay independent on purpose, and `SANITIZE` implies nothing about `SC_MIMALLOC`.
 Sanitizing a mimalloc build stays available for the times the thing being chased is mimalloc's own behavior.
 
+**On wasm, mimalloc keeps only the blocks of at most 1 KiB**, and every larger one is emscripten's malloc's.
+wasm memory never shrinks and mimalloc never returns an arena, so a vector growing through tens of megabytes stranded an arena at every step and exhausted the 2 GB heap.
+emscripten's malloc merges what is freed, and from 4 KiB up it was also 2-3.5x faster there; below 1 KiB mimalloc is ahead, which is what the split keeps.
+The resource routes every call on the block's current size, so a mimalloc block never resizes in place past 1 KiB.
+
 The one behavioral difference is in-place resize.
 mimalloc reports its usable size and can grow a block into that slack, while the system resource always declines and the caller reallocates and copies.
 So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a platform assumption.

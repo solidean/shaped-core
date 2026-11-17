@@ -176,7 +176,12 @@ TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of th
     auto const six_six = sgl::check::dxil_shader_model{.major = 6, .minor = 6};
     auto const six_six_fills
         = sgl::check::core_fills{.draw_start = sgl::check::fill::root_constant, .wave_size = sgl::check::fill::none};
+    // an eighth on wasm, whose one thread spent 20 s on a fourth
+#if defined(__EMSCRIPTEN__)
+    auto const stride = nx::is_thorough() ? 1 : 8;
+#else
     auto const stride = nx::is_thorough() ? 1 : 4;
+#endif
     auto native_stages = cc::vector<sgl::check::stage>();
     auto text_stages = cc::vector<sgl::check::stage>();
     auto swept = 0;

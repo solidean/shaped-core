@@ -17,6 +17,15 @@ enum class sg::backend_kind
     webgl,
 };
 
+/// What SGL's own SPIR-V and DXIL carry of the `.sgl` source, for a debugger (EMIT-257); what DXC compiles carries nothing of it.
+/// Anything but `none` grows every binary by the sources it names.
+enum class sg::native_debug_info
+{
+    none,  ///< nothing: the binary is what it is without the source
+    lines, ///< each operation's line, and the sources it names: a debugger steps the `.sgl` source
+    full,  ///< the lines, and each source variable with its type and scope: a debugger shows their values too
+};
+
 /// How a context may be used across threads — a contract on the caller, whatever the application's own threading.
 ///
 /// Every model leaves the free-threaded surface free: anything returning an async, layouts and samplers may be called from any thread.

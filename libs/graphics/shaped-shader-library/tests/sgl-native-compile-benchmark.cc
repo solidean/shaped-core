@@ -203,19 +203,21 @@ BENCHMARK("slib - the viewer's tracer through SGL's own binaries with and withou
         auto bytes = isize(0);
         auto const compile = [&](bool line_table)
         {
-            return best_of(40,
-                           [&]
-                           {
-                               auto written = sgl::compile_to_text({.source = source,
-                                                                    .source_name = path,
-                                                                    .library = library,
-                                                                    .entry_point = "path_trace",
-                                                                    .target = target,
-                                                                    .native = sgl::emit::native_route::require,
-                                                                    .native_line_table = line_table});
-                               REQUIRE(written.has_value());
-                               bytes = is_dx12 ? written.value().dxil.size() : written.value().spirv.size() * 4;
-                           });
+            return best_of(
+                40,
+                [&]
+                {
+                    auto written = sgl::compile_to_text(
+                        {.source = source,
+                         .source_name = path,
+                         .library = library,
+                         .entry_point = "path_trace",
+                         .target = target,
+                         .native = sgl::emit::native_route::require,
+                         .native_debug_info = line_table ? sgl::emit::debug_info::lines : sgl::emit::debug_info::none});
+                    REQUIRE(written.has_value());
+                    bytes = is_dx12 ? written.value().dxil.size() : written.value().spirv.size() * 4;
+                });
         };
         auto const off = compile(false);
         auto const off_bytes = bytes;
