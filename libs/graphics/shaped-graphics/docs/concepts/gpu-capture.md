@@ -56,4 +56,13 @@ uv run libs/graphics/shaped-graphics/tools/gpu-capture/debug-pixel.py <capture.r
 ```
 
 A trace's `instInfo` holds only the instructions with debug info, each naming its own instruction, so a step is looked up by that number rather than by position.
+
+[tools/gpu-capture/check-debugger.py](../../tools/gpu-capture/check-debugger.py) is the check built on both.
+It captures sgl-cube at a debug info level, debugs its centre pixel, and holds the result to what the debugger should see.
+At `lines` that is cube.sgl and the lines of the pixel's path; at `full` its locals too; at `none` no source at all.
+It runs by hand, since CI has no RenderDoc, on dx12, vulkan or both.
+
+```bash
+uv run libs/graphics/shaped-graphics/tools/gpu-capture/check-debugger.py --debug-info lines
+```
 PIX's API debugs shaders only from a postmortem dump, so a PIX capture is for looking at by hand.

@@ -39,8 +39,10 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
   - Outcome: sgl-cube's center pixel steps the same eight lines of cube.sgl on both backends, 41 to 59; DXIL with its inlined calls up to three frames deep, SPIR-V one frame
 - [x] P1.4 File what the debuggers show wrong about the line table, if anything
   - Outcome: nothing wrong in the lines; every inlined DXIL frame reads `<inlined>`, with no function name, since the scopes are per file, which P3.2 fixes
-- [ ] P1.6 A test that runs the capture and the replay where RenderDoc is installed, so the debugger check is repeatable
-  - Note: no RenderDoc on CI; a manual nexus test or a dev.py command, to be decided
+- [x] P1.6 A test that runs the capture and the replay where RenderDoc is installed, so the debugger check is repeatable
+  - Files: libs/graphics/shaped-graphics/tools/gpu-capture/check-debugger.py
+  - Outcome: `lines` and `none` hold on dx12 and vulkan; `full` fails as it should until P4 and P5, listing only the stage's inputs and outputs
+  - Note: a uv script rather than a nexus test, since it drives `dev.py example` and RenderDoc's UI process; P4.6 and P5.5 are this check at `full`
 
 ## P2: The request, as a level
 
@@ -158,4 +160,5 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: P3 started: its design notes in P3.1 to P3.5 and P3.8; P3.2 done, each line naming the function it stands in.
 - 2026-11-17: P3.8 done: a local keeps the name its declaration wrote.
 - 2026-11-17: D7 decided, with the sites P3.3 and P3.6 change; next session starts at P3.1 and P3.3.
+- 2026-11-17: P1.6 done: check-debugger.py, the debugger check P4 and P5 are held to at `full`.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.
