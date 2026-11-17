@@ -12,6 +12,11 @@ binding probe:
     let a = probe.at[id.x]
     probe.values[id.x] = probe.source.sample(float2(a.x, a.y), probe.smp, level = a.z)
 
+// `at` is u, v and the gradients' lengths along x and y, so the sampler picks the level of detail itself.
+@compute(1) fun sample_by_gradients(@thread_id id: int3){probe}:
+    let a = probe.at[id.x]
+    probe.values[id.x] = probe.source.sample(float2(a.x, a.y), probe.smp, grad_x = float2(a.z, 0.0), grad_y = float2(0.0, a.w))
+
 // A depth texture compared against a reference per probe, through a comparison sampler the host sweeps.
 binding compared:
     depth: texture_2d_depth
