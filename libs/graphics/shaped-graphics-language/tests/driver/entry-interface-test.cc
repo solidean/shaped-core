@@ -277,3 +277,92 @@ TEST("sgl entry interface - a module's vertex input is named as the program name
     REQUIRE(e.has_value());
     CHECK(e.value().vertex_input == "view.quad");
 }
+
+TEST("sgl entry interface - nested, generic and a module's structs are sized by every member, alike on both reports")
+{
+    // a word per scalar, an enum and a bool each one word, summed through nested and generic structs, with no padding
+    sgl::library_file const library[] = {{.name = "view.sgl",
+                                          .source = "module view\n"
+                                                    "struct ray_load:\n"
+                                                    "    color: float3\n"
+                                                    "    hits: int\n"
+                                                    "struct sphere_attributes:\n"
+                                                    "    u: float\n"
+                                                    "    v: float\n"
+                                                    "    w: float\n"}};
+    auto const source = cc::string_view(R"(require raytracing_pipeline
+use view
+
+struct inner:
+    a: float3
+    b: int
+
+struct big:
+    first: inner
+    second: inner
+    m: float2
+    flag: bool
+
+struct nested_attributes:
+    pair: inner
+    w: float
+
+struct pair[T]:
+    a: T
+    b: T
+
+@miss fun sky(p: mut big):
+    p.m = float2(1.0, 1.0)
+
+@closest_hit fun shade(h: procedural_hit[nested_attributes], p: mut big):
+    p.m = float2(h.attributes.w, 0.0)
+
+@intersection fun isect(b: procedural_box) -> report[nested_attributes]:
+    return report.none()
+
+@any_hit fun cut(c: procedural_candidate[pair[int]], p: mut pair[float]) -> hit_decision:
+    return hit_decision.accept
+
+@miss fun module_sky(p: mut view.ray_load):
+    p.hits = 0
+
+@closest_hit fun module_shade(h: procedural_hit[view.sphere_attributes], p: mut view.ray_load):
+    p.hits = 1
+)");
+    auto const r = sgl::describe({.source = source, .source_name = "t.sgl", .library = library});
+    if (r.has_error())
+        FAIL(r.error());
+    auto const& d = r.value();
+    CHECK(entry_named(d, "sky").payload_size == 44);
+    CHECK(entry_named(d, "shade").payload_size == 44);
+    CHECK(entry_named(d, "shade").attributes == "nested_attributes");
+    CHECK(entry_named(d, "shade").attribute_size == 20);
+    CHECK(entry_named(d, "isect").attribute_size == 20);
+    CHECK(entry_named(d, "isect").attributes_shape == entry_named(d, "shade").attributes_shape);
+    CHECK(entry_named(d, "cut").payload == "pair[float]");
+    CHECK(entry_named(d, "cut").payload_size == 8);
+    CHECK(entry_named(d, "cut").attributes == "pair[int]");
+    CHECK(entry_named(d, "cut").attribute_size == 8);
+    CHECK(entry_named(d, "module_sky").payload_size == 16);
+    CHECK(entry_named(d, "module_shade").attribute_size == 12);
+    CHECK(entry_named(d, "module_shade").attributes_shape.size() == 32);
+    for (auto const name : {"sky", "shade", "isect", "cut", "module_sky", "module_shade"})
+        SECTION("{}", name)
+        {
+            auto const& described_entry = entry_named(d, name);
+            for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+            {
+                auto const c = sgl::compile_to_text(
+                    {.source = source, .source_name = "t.sgl", .library = library, .entry_point = name, .target = t});
+                if (c.has_error())
+                    FAIL(c.error());
+                auto const& e = c.value();
+                CHECK(e.payload == described_entry.payload);
+                CHECK(e.payload_shape == described_entry.payload_shape);
+                CHECK(e.payload_size == described_entry.payload_size);
+                CHECK(e.attributes == described_entry.attributes);
+                CHECK(e.attributes_shape == described_entry.attributes_shape);
+                CHECK(e.attribute_size == described_entry.attribute_size);
+            }
+        }
+}
