@@ -271,6 +271,11 @@ A declaration names no vertex input: it follows from the vertex entry point's si
 So reporting it only on a declared pipeline left such a host matching each vertex shader to its struct by hand, though the pixel side, `target_struct`, was already reported per entry point.
 The members stay on the struct's description, which every entry point taking the struct shares, so `compile_to_text` names the struct and `describe` describes it, as for the target struct.
 
+Every struct the description names is named by its host name, `m.name` for a module's, because a bare name is ambiguous: a program may declare `radiance` and use a module that declares one too.
+A payload, a ray set's payloads and a memory struct named bare would then name two structs alike, and a host matching them by name would take one for the other.
+The module's name, not the program's alias, is what the host knows a module by, which is how `vertex_input` and `target_struct` already named a module's struct.
+An instance of a generic struct takes EMIT-179's name, since that is what the host's C++ calls it, and SGL's own spelling, `pair[float]`, is no identifier.
+
 ## EMIT-135
 
 WebGPU has no ray query, and a portable shader that traces is worth more than one refused on a whole platform.

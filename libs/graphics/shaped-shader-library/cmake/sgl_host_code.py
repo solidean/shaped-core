@@ -308,11 +308,12 @@ def modules_used(entries: SglEntries) -> list[str]:
 def memory_structs_of(entries: SglEntries, path: str) -> dict[str, tuple[str, int]]:
     """Every struct file `path` places in GPU memory, by name: its C++ spelling, and its size.
 
-    The file's own are named as SGL names them, within its namespace; another module's through that module's namespace.
+    Each is keyed by its host name, as the description names every struct: the file's own bare, within its namespace,
+    and another module's as `m.name`, through that module's namespace.
     """
     out = {s["name"]: (s["name"], s["size"]) for f, s in entries.memory_structs if f.path == path}
-    for name, (module, size) in entries.foreign_structs.items():
-        out.setdefault(name, (cpp_name(f"{module}.{name}"), size))
+    for name, (_, size) in entries.foreign_structs.items():
+        out.setdefault(name, (cpp_name(name), size))
     return out
 
 

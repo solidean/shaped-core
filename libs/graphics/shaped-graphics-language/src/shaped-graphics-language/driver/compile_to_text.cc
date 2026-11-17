@@ -440,9 +440,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     for (auto const name : names)
         result.line_files.push_back(cc::string(name));
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
-    if (!result.target_struct.empty() && check::is_valid(e.result) && check::is_valid(m.at(e.result).symbol))
-        if (auto const module = m.foreign_module_of(m.at(e.result).symbol); !module.empty())
-            result.target_struct = cc::format("{}.{}", module, result.target_struct);
+    if (!result.target_struct.empty() && check::is_valid(e.result))
+        result.target_struct = driver::impl::host_type_name_of(m, e.result);
     // EMIT-268 to EMIT-270: what the entry point's own signature hands its pipeline, as `describe` reports it, whatever
     // form the text took
     auto facts = driver::impl::entry_interface_of(m, e);

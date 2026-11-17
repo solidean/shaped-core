@@ -198,11 +198,10 @@ cc::string host_name_of(check::checked_module const& m, check::symbol_id id)
     return m.qualified_name_of(id);
 }
 
-/// `host_name_of` the type's declaration, for a type a module declares; its spelling for any other.
+/// `driver::impl::host_type_name_of`, here by its short name.
 cc::string host_type_name_of(check::checked_module const& m, check::type_id type)
 {
-    auto const symbol = m.at(type).symbol;
-    return check::is_valid(symbol) ? host_name_of(m, symbol) : host_spelling(m, type);
+    return driver::impl::host_type_name_of(m, type);
 }
 
 /// The module of `type`'s declaration where it is not the source's own; empty otherwise.
@@ -217,7 +216,7 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
                                                emit_impl::address_space space)
 {
     auto const placed = emit_impl::place_struct(m, type, space);
-    auto result = described_memory_struct{.name = host_spelling(m, type),
+    auto result = described_memory_struct{.name = host_type_name_of(m, type),
                                           .module = foreign_module_of_type(m, type),
                                           .space = cc::string(emit_impl::is_storage(space) ? "storage" : "constants"),
                                           .size = placed.size};
@@ -225,7 +224,7 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
     for (auto i = isize(0); i < members.size(); ++i)
         if (members[i].type != check::checked_module::void_type)
             result.members.push_back({.name = members[i].name,
-                                      .type = host_spelling(m, members[i].type),
+                                      .type = host_type_name_of(m, members[i].type),
                                       .offset = placed.offsets[i],
                                       .size = placed.sizes[i]});
     return result;
@@ -475,7 +474,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         // CHK-343: only the module's last table takes the host's
         if (t->has_host_callables)
         {
-            result.host_callable_parameter = m.name_of(t->callable_parameter);
+            result.host_callable_parameter = host_type_name_of(m, t->callable_parameter);
             result.host_callable_shape = check::hex_of(check::structural_hash(m, t->callable_parameter));
         }
     }
@@ -505,7 +504,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
     auto rays = cc::string();
     auto const members = m.at(m.at(m.at(p.ray_set).type).members);
     for (auto const& ray : members)
-        rays += cc::format("{}{} {}@{} {}", rays.empty() ? "" : ", ", ray.name, m.name_of(ray.type),
+        rays += cc::format("{}{} {}@{} {}", rays.empty() ? "" : ", ", ray.name, host_type_name_of(m, ray.type),
                            check::hex_of(check::structural_hash(m, ray.type)), m.ray_data_bytes(ray.type));
     result.frozen.push_back(cc::format("rays = {}: {}", result.ray_set, rays));
     result.frozen.push_back(cc::format("raygen = {}", result.raygen));
@@ -545,7 +544,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
 described_callables describe_callables(check::checked_module const& m, check::pipeline_info const& p)
 {
     auto result = described_callables{.name = m.at(p.symbol).name,
-                                      .parameter = cc::string(m.name_of(p.callable_parameter)),
+                                      .parameter = host_type_name_of(m, p.callable_parameter),
                                       .parameter_shape = check::hex_of(check::structural_hash(m, p.callable_parameter)),
                                       .has_host = p.has_host_callables};
     for (auto const entry : m.at(p.records))
@@ -621,7 +620,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
 
     // The frozen part, which a reload compares line by line: a declaration by its name and its shape.
     auto const shaped = [&](check::type_id type)
-    { return cc::format("{}@{}", m.name_of(type), check::hex_of(check::structural_hash(m, type))); };
+    { return cc::format("{}@{}", host_type_name_of(m, type), check::hex_of(check::structural_hash(m, type))); };
     result.frozen.push_back(cc::format("layout = {}", layout_text(m, p.layout)));
     result.frozen.push_back(cc::format("inline constants = {}",
                                        check::is_valid(p.inline_constants) ? bound_text(m, p.inline_constants) : ""));
@@ -686,7 +685,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         for (auto i = isize(0); i < members.size(); ++i)
             result.members.push_back({.name = members[i].name,
                                       .kind = described_member_kind::constant,
-                                      .type = host_spelling(m, members[i].type),
+                                      .type = host_type_name_of(m, members[i].type),
                                       .offset = placed.offsets[i],
                                       .size = placed.sizes[i]});
         result.block_size = placed.size;
@@ -722,7 +721,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
             result.members.push_back(
                 {.name = member.name,
                  .kind = described_member_kind::buffer,
-                 .type = host_spelling(m, t.element),
+                 .type = host_type_name_of(m, t.element),
                  .slot = slot,
                  .count = count,
                  .stride = sgl::emit::impl::element_stride(m, t.element, sgl::emit::impl::element_space(b, member)),
@@ -741,7 +740,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         }
         result.members.push_back({.name = member.name,
                                   .kind = described_member_kind::constant,
-                                  .type = host_spelling(m, member.type),
+                                  .type = host_type_name_of(m, member.type),
                                   .offset = placed.offsets[next_constant],
                                   .size = placed.sizes[next_constant]});
         ++next_constant;
@@ -775,6 +774,28 @@ cc::vector<sgl::check::symbol_id> sgl::driver::impl::file_samplers_of(check::fla
     return result;
 }
 
+cc::string sgl::driver::impl::host_type_name_of(check::checked_module const& m, check::type_id type)
+{
+    auto const& t = m.at(type);
+    // an array of structs, `view.light[4]`: its element's host name, then its lengths as SGL writes them
+    if (t.kind == check::type_kind::array)
+    {
+        auto base = type;
+        while (m.at(base).kind == check::type_kind::array)
+            base = m.at(base).element;
+        auto const spelled = m.name_of(type);
+        auto const bare = m.name_of(base);
+        if (m.at(base).kind != check::type_kind::structure || !spelled.starts_with(bare))
+            return cc::string(spelled);
+        return host_type_name_of(m, base) + cc::string(spelled.subview(bare.size()));
+    }
+    if (t.kind != check::type_kind::structure || check::is_valid(t.tangent_of) || !check::is_valid(t.symbol))
+        return host_spelling(m, type);
+    // CHK-348: another module's struct as the program names it, an instance of a generic one by its template's module
+    auto const module = m.foreign_module_of(t.symbol);
+    return module.empty() ? host_spelling(m, type) : cc::format("{}.{}", module, host_spelling(m, type));
+}
+
 sgl::driver::impl::entry_interface sgl::driver::impl::entry_interface_of(check::checked_module const& m,
                                                                          check::flat_entry_point const& e)
 {
@@ -785,7 +806,7 @@ sgl::driver::impl::entry_interface sgl::driver::impl::entry_interface_of(check::
     // CHK-328: a ray-tracing stage's payload is its one `mut` parameter, a callable's its parameter
     if (e.entry_stage >= check::stage::raygen && check::is_valid(e.input))
     {
-        result.payload = m.name_of(e.input);
+        result.payload = host_type_name_of(m, e.input);
         result.payload_shape = check::hex_of(check::structural_hash(m, e.input));
         result.payload_size = m.ray_data_bytes(e.input);
     }
@@ -809,7 +830,7 @@ sgl::driver::impl::entry_interface sgl::driver::impl::entry_interface_of(check::
         }
     if (check::is_valid(attributes))
     {
-        result.attributes = m.name_of(attributes);
+        result.attributes = host_type_name_of(m, attributes);
         result.attributes_shape = check::hex_of(check::structural_hash(m, attributes));
         result.attribute_size = m.ray_data_bytes(attributes);
     }
@@ -1004,7 +1025,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             for (auto const& ray : m.at(m.at(s.type).members))
             {
                 set.rays.push_back(ray.name);
-                set.payloads.push_back(m.name_of(ray.type));
+                set.payloads.push_back(host_type_name_of(m, ray.type));
                 set.payload_sizes.push_back(m.ray_data_bytes(ray.type));
                 set.payload_shapes.push_back(check::hex_of(check::structural_hash(m, ray.type)));
             }

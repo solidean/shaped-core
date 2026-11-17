@@ -15,12 +15,18 @@ namespace sgl::driver::impl
 /// The file-scope samplers the code of `legal` reaches, in index order.
 [[nodiscard]] cc::vector<check::symbol_id> file_samplers_of(check::flat_entry_point const& legal);
 
+/// The host name of `type`, which is how the description names every struct (`describe.hh`'s rule): a struct as the
+/// target text names it, `pair_float_int` for an instance of a generic one (EMIT-179), and `m.name` for another
+/// module's (CHK-348); an array of structs as its element, with its lengths; every other type as SGL spells it.
+[[nodiscard]] cc::string host_type_name_of(check::checked_module const& m, check::type_id type);
+
 /// What one entry point's signature hands a pipeline beside its bindings, which a host that builds that pipeline in
 /// its own code reads (EMIT-268, EMIT-269, EMIT-270).
 /// `describe` and `compile_to_text` both report it from here, so the two cannot disagree.
+/// Each struct is named by `host_type_name_of`.
 struct entry_interface
 {
-    /// A vertex entry point's `@vertex struct`, `m.name` for another module's; empty for every other entry point.
+    /// A vertex entry point's `@vertex struct`; empty for every other entry point.
     cc::string vertex_input;
     /// A ray-tracing stage's payload, or a callable's parameter: its name, its structural hash as 32 hex digits and its
     /// bytes; empty and 0 for any other stage and for a stage without one.

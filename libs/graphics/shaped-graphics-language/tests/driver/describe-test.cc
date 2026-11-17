@@ -783,10 +783,13 @@ TEST("sgl describe - a module's names are qualified, and only the source's own d
     REQUIRE(d.entry_points[0].bindings.size() == 2);
     CHECK(d.entry_points[0].bindings[0] == "view.frame");
     CHECK(d.entry_points[0].bindings[1] == "local");
-    // a struct of the module that a buffer of the source places is the module's, which the host names rather than writes
+    // a struct of the module that a buffer of the source places is the module's, which the host names rather than writes,
+    // named as the program names it whatever the alias
     REQUIRE(d.memory_structs.size() == 1);
-    CHECK(d.memory_structs[0].name == "particle");
+    CHECK(d.memory_structs[0].name == "view.particle");
     CHECK(d.memory_structs[0].module == "view");
+    REQUIRE(d.bindings[0].members.size() == 1);
+    CHECK(d.bindings[0].members[0].type == "view.particle");
 }
 
 TEST("sgl describe - a module is described as every declaration of its files, without its entry points")
@@ -827,12 +830,15 @@ TEST("sgl describe - a module is described without the modules it uses, which de
     REQUIRE(d.bindings.size() == 2);
     CHECK(d.bindings[0].name == "frame");
     CHECK(d.bindings[1].name == "local");
-    // two structs named `particle`, one of each module, are both placed
+    // two structs named `particle`, one of each module, are both placed, each by its host name
     REQUIRE(d.memory_structs.size() == 2);
-    CHECK(d.memory_structs[0].name == "particle");
+    CHECK(d.memory_structs[0].name == "math.particle");
     CHECK(d.memory_structs[0].module == "math");
     CHECK(d.memory_structs[1].name == "particle");
     CHECK(d.memory_structs[1].module == "");
+    // and each buffer's element names the one it holds
+    CHECK(d.bindings[0].members[0].type == "math.particle");
+    CHECK(d.bindings[1].members[0].type == "particle");
 }
 
 TEST("sgl describe - a module file saved with a byte-order mark is still a module of the library")

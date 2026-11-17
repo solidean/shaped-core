@@ -339,9 +339,10 @@ struct pair[T]:
     CHECK(entry_named(d, "shade").attribute_size == 20);
     CHECK(entry_named(d, "isect").attribute_size == 20);
     CHECK(entry_named(d, "isect").attributes_shape == entry_named(d, "shade").attributes_shape);
-    CHECK(entry_named(d, "cut").payload == "pair[float]");
+    // an instance of a generic struct by its host name, as the target text names it (EMIT-179)
+    CHECK(entry_named(d, "cut").payload == "pair_float");
     CHECK(entry_named(d, "cut").payload_size == 8);
-    CHECK(entry_named(d, "cut").attributes == "pair[int]");
+    CHECK(entry_named(d, "cut").attributes == "pair_int");
     CHECK(entry_named(d, "cut").attribute_size == 8);
     CHECK(entry_named(d, "module_sky").payload_size == 16);
     CHECK(entry_named(d, "module_shade").attribute_size == 12);
@@ -365,4 +366,237 @@ struct pair[T]:
                 CHECK(e.attribute_size == described_entry.attribute_size);
             }
         }
+}
+
+namespace
+{
+/// A module declaring a struct of each bare name the program declares too, and a ray set over its own payload.
+constexpr cc::string_view k_twin_module = R"(module view
+
+struct radiance:
+    color: float3
+
+struct hit_uv:
+    u: float
+    v: float
+    w: float
+
+struct operand:
+    x: float
+    y: float
+
+struct particle:
+    q: float4
+
+struct glow:
+    q: float4
+
+@vertex struct mesh_vertex:
+    position: pos3
+    weight: float
+
+rays shared:
+    primary: radiance
+)";
+
+/// The program's own struct of each of those names, reached beside the module's, which the program uses by an alias.
+constexpr cc::string_view k_twin_program = R"(require raytracing_pipeline
+use view as v
+
+struct radiance:
+    color: float4
+
+struct hit_uv:
+    u: float
+    v: float
+
+struct operand:
+    x: float
+
+struct particle:
+    p: float
+
+@vertex struct mesh_vertex:
+    position: pos3
+
+rays own_rays:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.triangles]
+    theirs: buffer[v.particle]
+    own: buffer[particle]
+    nearest: v.glow[2]
+
+struct varyings:
+    @position position: hpos4
+
+@pixel struct shaded:
+    color: float4
+
+@vertex fun own_vs(m: mesh_vertex) -> varyings:
+    return { position = hpos4(m.position.x, m.position.y, m.position.z, 1.0) }
+
+@vertex fun module_vs(m: v.mesh_vertex) -> varyings:
+    return { position = hpos4(m.position.x, m.position.y, m.position.z, m.weight) }
+
+@pixel fun shade_ps(p: varyings) -> shaded:
+    return { color = float4(1.0, 1.0, 1.0, 1.0) }
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut q = v.radiance(float3(frame.theirs[0].q.x + frame.own[0].p + frame.nearest[1].q.y, 0.0, 0.0))
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), v.shared.primary, mut q)
+
+@miss fun own_sky(p: mut radiance):
+    p.color = float4(1.0, 1.0, 1.0, 1.0)
+
+@miss fun module_sky(p: mut v.radiance):
+    p.color = float3(1.0, 1.0, 1.0)
+
+@closest_hit fun own_hit(h: procedural_hit[hit_uv], p: mut radiance):
+    p.color = float4(h.attributes.u, h.attributes.v, 0.0, 1.0)
+
+@closest_hit fun module_hit(h: procedural_hit[v.hit_uv], p: mut v.radiance):
+    p.color = float3(h.attributes.u, h.attributes.v, h.attributes.w)
+
+@intersection fun module_isect(b: procedural_box) -> report[v.hit_uv]:
+    return report.none()
+
+@callable fun own_call(o: mut operand):
+    o.x = o.x * 2.0
+
+@callable fun module_call(o: mut v.operand):
+    o.y = o.x
+
+callables own_ops = (own_call)
+
+callables module_ops = (module_call, .host)
+
+hit_group round for v.shared:
+    geometry = .procedural
+    intersection = module_isect
+    primary = (closest_hit = module_hit)
+
+@raytracing pipeline path:
+    rays = v.shared
+    raygen = start
+    hit_groups = (round)
+
+pipeline drawn:
+    vertex = module_vs
+    pixel = shade_ps
+    format = .bgra8_unorm
+)";
+
+/// The ray set the description names `name`; fails the test where it names none.
+sgl::described_ray_set const& ray_set_named(sgl::module_description const& d, cc::string_view name)
+{
+    for (auto const& s : d.ray_sets)
+        if (s.name == name)
+            return s;
+    FAIL(cc::format("no ray set {} was described", name));
+    return d.ray_sets[0];
+}
+
+/// Whether one of `lines` starts with `prefix`.
+bool any_starts_with(cc::span<cc::string const> lines, cc::string_view prefix)
+{
+    for (auto const& line : lines)
+        if (line.starts_with(prefix))
+            return true;
+    return false;
+}
+} // namespace
+
+TEST("sgl entry interface - every struct the description names is its host name, a module's apart from the file's own")
+{
+    // a struct of the module and the program's own of one bare name are told apart by `m.name`, the module's name and
+    // not the program's alias for it, wherever the description names a struct
+    sgl::library_file const library[] = {{.name = "view.sgl", .source = k_twin_module}};
+    auto const r = sgl::describe({.source = k_twin_program, .source_name = "t.sgl", .library = library});
+    if (r.has_error())
+        FAIL(r.error());
+    auto const& d = r.value();
+
+    struct named
+    {
+        cc::string_view entry;
+        cc::string_view vertex_input;
+        cc::string_view payload;
+        cc::string_view attributes;
+    };
+    constexpr named k_names[] = {
+        {.entry = "own_vs", .vertex_input = "mesh_vertex"},
+        {.entry = "module_vs", .vertex_input = "view.mesh_vertex"},
+        {.entry = "own_sky", .payload = "radiance"},
+        {.entry = "module_sky", .payload = "view.radiance"},
+        {.entry = "own_hit", .payload = "radiance", .attributes = "hit_uv"},
+        {.entry = "module_hit", .payload = "view.radiance", .attributes = "view.hit_uv"},
+        {.entry = "module_isect", .attributes = "view.hit_uv"},
+        {.entry = "own_call", .payload = "operand"},
+        {.entry = "module_call", .payload = "view.operand"},
+    };
+    for (auto const& x : k_names)
+        SECTION("{}", x.entry)
+        {
+            auto const& e = entry_named(d, x.entry);
+            CHECK(e.vertex_input == x.vertex_input);
+            CHECK(e.payload == x.payload);
+            CHECK(e.attributes == x.attributes);
+            // compile_to_text names each as describe does, on both targets that have every stage
+            for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+            {
+                auto const c = sgl::compile_to_text({.source = k_twin_program,
+                                                     .source_name = "t.sgl",
+                                                     .library = library,
+                                                     .entry_point = x.entry,
+                                                     .target = t});
+                if (c.has_error())
+                    FAIL(c.error());
+                CHECK(c.value().vertex_input == x.vertex_input);
+                CHECK(c.value().payload == x.payload);
+                CHECK(c.value().attributes == x.attributes);
+            }
+        }
+    // the two payloads differ in shape as well as in name
+    CHECK(entry_named(d, "own_sky").payload_shape != entry_named(d, "module_sky").payload_shape);
+
+    // a ray set's payloads, the program's own set's and the module's
+    REQUIRE(ray_set_named(d, "own_rays").payloads.size() == 1);
+    CHECK(ray_set_named(d, "own_rays").payloads[0] == "radiance");
+    REQUIRE(ray_set_named(d, "view.shared").payloads.size() == 1);
+    CHECK(ray_set_named(d, "view.shared").payloads[0] == "view.radiance");
+
+    // a callables table's parameter, and the one a host's callable takes
+    REQUIRE(d.callables.size() == 2);
+    CHECK(d.callables[0].parameter == "operand");
+    CHECK(d.callables[1].parameter == "view.operand");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    auto const& rt = d.raytracing_pipelines[0];
+    CHECK(rt.host_callable_parameter == "view.operand");
+    CHECK(rt.host_callable_shape == d.callables[1].parameter_shape);
+    // and the frozen lines, which a reload compares, name them as the fields do
+    CHECK(any_starts_with(rt.frozen, "rays = view.shared: primary view.radiance@"));
+    CHECK(any_starts_with(
+        rt.frozen, cc::format("callables = own_call, module_call, .host view.operand@{}", rt.host_callable_shape)));
+
+    // a raster pipeline's vertex input, in its field and its frozen line
+    REQUIRE(d.pipelines.size() == 1);
+    CHECK(d.pipelines[0].vertex_input == "view.mesh_vertex");
+    CHECK(any_starts_with(d.pipelines[0].frozen, "vertex input = view.mesh_vertex@"));
+
+    // the structs the binding places in memory, and its members' types, an array of a module's struct by its element
+    auto memory_names = cc::vector<cc::string>();
+    for (auto const& s : d.memory_structs)
+        memory_names.push_back(s.name);
+    CHECK(memory_names.size() == 3);
+    CHECK(memory_names.values().any([](cc::string const& n) { return n == "view.glow"; }));
+    CHECK(memory_names.values().any([](cc::string const& n) { return n == "view.particle"; }));
+    CHECK(memory_names.values().any([](cc::string const& n) { return n == "particle"; }));
+    REQUIRE(d.bindings.size() == 1);
+    auto const& members = d.bindings[0].members;
+    REQUIRE(members.size() == 4);
+    CHECK(members[1].type == "view.particle");
+    CHECK(members[2].type == "particle");
+    CHECK(members[3].type == "view.glow[2]");
 }

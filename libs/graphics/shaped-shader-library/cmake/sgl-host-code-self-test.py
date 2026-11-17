@@ -702,6 +702,35 @@ def a_buffer_of_3_vectors_strides_by_16_through_gpu_padded():
 
 
 @test
+def a_modules_struct_and_the_files_own_of_one_bare_name_are_two_cpp_types():
+    # every struct name in the description is its host name, so `view.particle` and `particle` never meet
+    described = SglFile(path="t.sgl", memory_structs=[
+        {"name": "view.particle", "module": "view", "space": "storage", "size": 16,
+         "members": [{"name": "y", "type": "float4", "offset": 0, "size": 16}]},
+        {"name": "particle", "module": "", "space": "storage", "size": 4,
+         "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}]},
+    ])
+    group = {"name": "local", "inline": False, "members": [
+        resource("buffer", name="theirs", type="view.particle", slot=0, stride=16, access="read"),
+        resource("buffer", name="own", type="particle", slot=1, stride=4, access="read"),
+        resource("buffer", name="pairs", type="view.particle[2]", slot=2, stride=32, access="read"),
+    ]}
+    entries = sgl_description.SglEntries()
+    sgl_description.add_declared(entries, set(), "bindings", ("t.sgl", "local"), (described, group))
+    expect_equal(entries.foreign_structs, {"view.particle": ("view", 16)}, "the module's struct, by its host name")
+    expect_equal([s["name"] for _, s in entries.memory_structs], ["particle"], "the file's own, generated here")
+    memory = sgl_host_code.memory_structs_of(entries, "t.sgl")
+    expect_equal(memory["view.particle"], ("::sgl_modules::view::particle", 16), "the module's, through its namespace")
+    expect_equal(memory["particle"], ("particle", 4), "the file's own, within the file's namespace")
+    header = sgl_host_code.emit_group("pkg", memory, "ns", described, group)
+    expect_in("sg::readonly_buffer_view<::sgl_modules::view::particle> theirs;", header, "a buffer of the module's struct")
+    expect_in("sg::readonly_buffer_view<particle> own;", header, "a buffer of the file's own struct")
+    expect_in("sg::readonly_buffer_view<cc::fixed_array<::sgl_modules::view::particle, 2>> pairs;", header,
+              "an array of the module's struct, by its element's host name")
+    expect_equal(sgl_host_code.modules_used(entries), ["view"], "the module whose header the generated code includes")
+
+
+@test
 def a_mat3_is_gpu_mat3_at_48_bytes_and_tg_mat3f_packed():
     natural = [{"name": "basis", "type": "mat3", "offset": 0, "size": 48}]
     packed = [{"name": "basis", "type": "mat3", "offset": 0, "size": 36}]

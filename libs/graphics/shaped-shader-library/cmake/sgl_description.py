@@ -126,8 +126,8 @@ class SglEntries:
     raytracing_pipelines: list[tuple[SglFile, dict]] = field(default_factory=list)
     # (file, the described struct) for every struct a generated binding places in GPU memory, innermost first.
     memory_structs: list[tuple[SglFile, dict]] = field(default_factory=list)
-    # A struct a generated binding places that another module declares, by name: (that module, its size).
-    # The host names that module's type, which the module's own entry generates.
+    # A struct a generated binding places that another module declares, by its host name, `view.light`: (that module,
+    # its size). The host names that module's type, which the module's own entry generates.
     foreign_structs: dict[str, tuple[str, int]] = field(default_factory=dict)
     # The modules the package exports, `module:name` each, by name.
     modules: dict[str, SglEntries] = field(default_factory=dict)
