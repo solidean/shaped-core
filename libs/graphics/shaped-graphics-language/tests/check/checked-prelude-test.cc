@@ -262,8 +262,12 @@ TEST("sgl checked prelude - the corpus files, every fourth by default")
     auto files = cc::vector<program>();
     add_files_under(files, "corpus", nx::source_path(SGL_CORPUS_DIR));
     REQUIRE(files.size() > 0);
-    // a default run takes every fourth file
+    // a default run takes every fourth file, and wasm's one thread every eighth
+#if defined(__EMSCRIPTEN__)
+    auto const stride = nx::is_thorough() ? isize(1) : isize(8);
+#else
     auto const stride = nx::is_thorough() ? isize(1) : isize(4);
+#endif
     for (auto i = isize(0); i < files.size(); i += stride)
         nx::invoke_tests(files[i].name, files[i]);
 }
@@ -276,8 +280,12 @@ TEST("sgl checked prelude - the samples and sg shaders, every third by default")
     auto const samples = files.size();
     add_files_under(files, "sg", nx::source_path(SGL_SG_SHADERS_DIR));
     REQUIRE(files.size() > samples);
-    // A default run takes every third file.
+    // A default run takes every third file, and wasm's one thread every sixth.
+#if defined(__EMSCRIPTEN__)
+    auto const stride = nx::is_thorough() ? isize(1) : isize(6);
+#else
     auto const stride = nx::is_thorough() ? isize(1) : isize(3);
+#endif
     auto visited_sg = isize(0);
     for (auto i = isize(0); i < files.size(); i += stride)
     {
@@ -972,7 +980,8 @@ namespace
 /// one must be the very link a fresh check makes over the edited one, field for field.
 /// So must the link's artifact, saved before the edit and loaded after it, which loads exactly where it relocates.
 /// The chain is the links that build; a module that reports ends it, since nothing is relocated past what failed.
-void check_relocations(cc::span<sgl::check::module_file const> library, bool expects_relocation)
+/// Edits every `edit_stride`th module of the chain, and checks every module after it against its fresh check.
+void check_relocations(cc::span<sgl::check::module_file const> library, bool expects_relocation, isize edit_stride = 1)
 {
     auto const* const checked = sgl::checked_prelude();
     REQUIRE(checked != nullptr);
@@ -1009,7 +1018,7 @@ void check_relocations(cc::span<sgl::check::module_file const> library, bool exp
     {
         auto relocated = 0;
         auto refused = 0;
-        for (auto k = isize(0); k < order.size(); ++k)
+        for (auto k = isize(0); k < order.size(); k += edit_stride)
         {
             // the edited library: module k's files with a comment line each
             auto edited_parsed = cc::vector<cc::unique_ptr<sgl::parsed_file>>();
@@ -1085,7 +1094,13 @@ void check_relocations(cc::span<sgl::check::module_file const> library, bool exp
 
 TEST("sgl checked modules - a link relocated past an edit of a module is the link a fresh check makes there")
 {
-    check_relocations(viewer_modules().files, true);
+#if defined(__EMSCRIPTEN__)
+    // wasm runs the binary on one thread, where every module edited was 30 s of it
+    auto const edit_stride = nx::is_thorough() ? 1 : 6;
+#else
+    auto const edit_stride = 1;
+#endif
+    check_relocations(viewer_modules().files, true, edit_stride);
 }
 
 TEST("sgl checked modules - a link that instantiates, evaluates or inlines an edited module's function is checked "
