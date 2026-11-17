@@ -745,9 +745,13 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   The text declares it wherever the entry point lists an acceleration member, and SGL's own SPIR-V only once a trace reads it; the slot is listed exactly there.
   It is `is_used` where the code traces through it, so SGL's own SPIR-V never lists it unused.
   The host fills it before every dispatch, draw and trace of a pipeline whose stages use it, with the device address of each acceleration member.
-  A member's position k counts the entry point's `bindings` of kind `acceleration_structure` and `count` 1, not reserved, by `group` and then by `slot`.
-  Its address is the `uint4` at k / 2, `.xy` for an even k and `.zw` for an odd one, each address's low word first.
-  16 positions fit: a trace of a later member, or of an element of a binding array of structures, reads its descriptor in the text and is a native gap in SGL's own SPIR-V.
+  An acceleration binding is one of the entry point's `bindings`, not reserved, of kind `acceleration_structure`: a member, or a binding array of them.
+  Its position k is the number of acceleration bindings ordered before it, by `group` and then by `slot`.
+  A binding array takes one position, whatever its `count`, and no trace reads the address there: a trace of its element reads the element's descriptor.
+  The address of position k is the `uint4` at k / 2, `.xy` for an even k and `.zw` for an odd one, each address's low word first.
+  The stages of one pipeline list the same binding at every position they share (CHK-184), so a position means the same member in each of them.
+  So the host fills one block per pipeline, from the longest list, its layout's, and writes 0 at a position nothing is bound at, as sg does.
+  16 positions fit: a trace of a member past them reads its descriptor in the text and is a native gap in SGL's own SPIR-V, as a trace of a binding array's element is.
   `hlsl-dx12` traces through the structure's descriptor on both routes, and lists no such slot; nor does any other target.
   sg lays the block out and fills it itself wherever a vulkan layout holds an acceleration member, so slib passes the slot over.
 * **EMIT-260** A hit's `cluster_id` is read only where the device builds a BLAS from clusters, `clustered_geometry`, and is -1 everywhere else.

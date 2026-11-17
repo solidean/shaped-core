@@ -160,10 +160,12 @@ enum class sgl::reserved_slot : sgl::u8
     /// vulkan's `sg_acceleration_addresses` (EMIT-272): a block of `block_size` bytes, `uint4[8]`, which every trace of
     /// SGL's on vulkan reads its acceleration structure's device address from, rather than its descriptor.
     /// The host fills it before every dispatch, draw and trace that uses it, with each acceleration member's address.
-    /// A member's position k counts the `bindings` of kind `acceleration_structure` and `count` 1, not reserved, by
-    /// `group` and then by `slot`.
+    /// An acceleration binding's position k is the number of `bindings` of kind `acceleration_structure`, not reserved,
+    /// ordered before it by `group` and then by `slot`; a binding array of them takes one position, whose address no
+    /// trace reads.
     /// Its address is `uint4` k / 2, `.xy` for an even k and `.zw` for an odd one, each address's low word first.
-    /// 16 positions fit, and EMIT-272 says what a trace past them does.
+    /// Positions agree across a pipeline's stages (CHK-184), so the host fills one block per pipeline, 0 where nothing
+    /// is bound; 16 positions fit, and EMIT-272 says what a trace past them does.
     /// sg lays it out and fills it itself wherever a layout holds an acceleration member.
     acceleration_addresses,
 };

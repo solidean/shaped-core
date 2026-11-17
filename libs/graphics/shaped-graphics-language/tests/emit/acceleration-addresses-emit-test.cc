@@ -207,12 +207,13 @@ TEST("sgl emit - dx12 traces through the structure's descriptor and lists no add
 
 TEST("sgl emit - a member's address position is its rank among the listed acceleration members (EMIT-272)")
 {
-    // the host's rule: the bindings of kind acceleration_structure and count 1, not reserved, by group and then slot,
-    // the address of position k at `uint4` k / 2, `.xy` for an even k and `.zw` for an odd one
+    // the host's rule: k is the number of bindings of kind acceleration_structure, not reserved, before it by group and
+    // then slot, a binding array one of them; the address of position k at `uint4` k / 2, `.xy` for an even k, `.zw`
+    // for an odd one
     auto const e = compiled(k_pipeline, "start", target::hlsl_vulkan, native_route::text);
     auto members = cc::vector<sgl::interface_binding>();
     for (auto const& b : e.bindings)
-        if (b.kind == sgl::described_member_kind::acceleration_structure && b.count == 1 && !b.is_reserved)
+        if (b.kind == sgl::described_member_kind::acceleration_structure && !b.is_reserved)
         {
             auto at = isize(0);
             while (at < members.size()

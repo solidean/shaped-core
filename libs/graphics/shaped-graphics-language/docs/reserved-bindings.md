@@ -59,7 +59,7 @@ sg writes it at each dispatch and draw from the groups bound, beside the roots, 
 A pipeline of such a shader is built over its layout's twin that holds it, `pipeline_layout_description::dispatch_grid`, so no other layout pays for it.
 
 `sg_acceleration_addresses` is every acceleration member's device address, `uint4[8]`, two a vector and each low word first, by the member's position.
-That position is the layout's acceleration members group by group, each group's by slot: the numbering the software roots use.
+That position is the layout's acceleration members group by group, each group's by slot, a binding array of them as one: the numbering the software roots use.
 **Every vulkan trace of SGL's reads its structure by it**, through `OpConvertUToAccelerationStructureKHR`, rather than through its descriptor.
 That is how vulkan traces a partitioned tlas, which `VK_EXT_descriptor_buffer` has no descriptor for.
 - SGL's own SPIR-V declares it in `lowering::acceleration_by_address`, so it has no prelude declaration; an element of an array of structures is a native gap there.
