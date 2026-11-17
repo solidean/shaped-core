@@ -225,3 +225,123 @@ TEST("sgl emit - a member's address position is its rank among the listed accele
     // the raygen traces `scene.second`, position 2: the second vector's low half
     CHECK(e.text.contains("sg_acceleration_from_address(sg_acceleration_addresses[1].xy)"));
 }
+
+namespace
+{
+/// A binding array of structures before a member of its own binding, which a ray query traces.
+constexpr auto k_after_array = cc::string_view(R"(require ray_query
+require binding_arrays
+
+binding frame:
+    many: acceleration_structure[.triangles][2]
+    world: acceleration_structure[.triangles]
+    output: mut buffer[float]
+
+@compute(1) fun query(@thread_id id: int3){frame}:
+    let h = frame.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), flags = ray_flags.force_opaque)
+    frame.output[id.x] = h.t
+)");
+
+/// A module's binding of two structures listed ahead of the program's own, a trace of each.
+constexpr auto k_module_scenes = cc::string_view(R"(module scenes
+require ray_query
+
+binding sky:
+    near: acceleration_structure[.triangles]
+    far: acceleration_structure[.triangles]
+)");
+constexpr auto k_after_module = cc::string_view(R"(require ray_query
+use scenes
+
+binding frame:
+    output: mut buffer[float]
+    world: acceleration_structure[.triangles]
+
+@compute(1) fun query(@thread_id id: int3){scenes.sky, frame}:
+    let h = frame.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), flags = ray_flags.force_opaque)
+    let g = scenes.sky.far.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), flags = ray_flags.force_opaque)
+    frame.output[id.x] = h.t + g.t
+)");
+
+/// The address positions SGL's own SPIR-V reads, as its dump reads them: the `uint4` an access chain picks, and the
+/// half its shuffle takes, components 0 and 1 for an even position, 2 and 3 for an odd one.
+[[nodiscard]] cc::string native_positions_of(cc::string_view dump)
+{
+    auto result = cc::string();
+    constexpr auto chain = cc::string_view("access_chain @sg_acceleration_addresses 0x0 0x");
+    for (auto at = dump.find(chain); at != -1; at = dump.find(chain, at + 1))
+    {
+        auto const end = dump.find('\n', at);
+        auto const vector = dump.subview({.start = at + chain.size(), .end = end});
+        REQUIRE(vector.size() == 1);
+        auto const shuffle = dump.find("= shuffle ", end);
+        REQUIRE(shuffle != -1);
+        auto const is_high = dump.subview({.start = shuffle, .end = dump.find('\n', shuffle)}).ends_with(" %2 %3");
+        result += cc::format("{}{}", result.empty() ? "" : ", ", 2 * (vector[0] - '0') + (is_high ? 1 : 0));
+    }
+    return result;
+}
+
+/// `e`'s listed acceleration members in EMIT-272's order, by group and then by slot, each as `group:slot`, and a binding
+/// array of structures with its `[count]`, which sg's vulkan layout counts as one position.
+[[nodiscard]] cc::string address_order_of(sgl::emitted_source const& e)
+{
+    auto members = cc::vector<sgl::interface_binding>();
+    for (auto const& b : e.bindings)
+        if (b.kind == sgl::described_member_kind::acceleration_structure && !b.is_reserved)
+        {
+            auto at = isize(0);
+            while (at < members.size()
+                   && (members[at].group < b.group || (members[at].group == b.group && members[at].slot < b.slot)))
+                ++at;
+            members.insert_at(at, b);
+        }
+    auto names = cc::string();
+    for (auto const& m : members)
+        names += cc::format("{}{}:{}{}", names.empty() ? "" : ", ", m.group, m.slot,
+                            m.count == 1 ? cc::string() : cc::format("[{}]", m.count));
+    return names;
+}
+} // namespace
+
+TEST("sgl emit - a binding array of structures takes one address position, as sg's vulkan layout counts it (EMIT-272)")
+{
+    // sg counts every acceleration binding of a layout, a binding array as one (sg::impl::acceleration_position), and
+    // fills the address of the k-th at k; so the member after a binding array is position 1 on both routes, the
+    // second address of the first `uint4`
+    auto const text = compiled(k_after_array, "query", target::hlsl_vulkan, native_route::text);
+    CHECK(address_order_of(text) == "0:0[2], 0:2");
+    CHECK(text.text.contains("sg_acceleration_from_address(sg_acceleration_addresses[0].zw)"));
+    CHECK(!text.text.contains("sg_acceleration_addresses[0].xy"));
+    check_address_slot(text, native_route::text, true);
+    auto const native = compiled(k_after_array, "query", target::hlsl_vulkan, native_route::require);
+    CHECK(native_positions_of(native.text) == "1");
+    check_address_slot(native, native_route::require, true);
+}
+
+TEST("sgl emit - address positions run over a module's binding by group, then by slot (EMIT-272)")
+{
+    // `scenes.sky` is group 0, so its `far` is position 1, and the program's `frame.world`, group 1, position 2
+    sgl::library_file const library[] = {{.name = "scenes.sgl", .source = k_module_scenes}};
+    for (auto const route : k_routes)
+        SECTION("{}", route == native_route::text ? "text" : "native")
+        {
+            auto const r = sgl::compile_to_text({.source = k_after_module,
+                                                 .library = library,
+                                                 .entry_point = "query",
+                                                 .target = target::hlsl_vulkan,
+                                                 .native = route});
+            if (r.has_error())
+                FAIL(r.error());
+            auto const& e = r.value();
+            CHECK(address_order_of(e) == "0:0, 0:1, 1:1");
+            if (route == native_route::text)
+            {
+                CHECK(e.text.contains("sg_acceleration_from_address(sg_acceleration_addresses[1].xy)"));
+                CHECK(e.text.contains("sg_acceleration_from_address(sg_acceleration_addresses[0].zw)"));
+            }
+            else
+                CHECK(native_positions_of(e.text) == "2, 1");
+            check_address_slot(e, route, true);
+        }
+}
