@@ -219,6 +219,11 @@ struct sgl::emit::emitted_text
     /// The output talks to NVIDIA's driver through NVAPI's shader extensions at `u0, space13`: an `nvapi` fill wrote it
     /// (EMIT-265), and the text includes `nvHLSLExtns.h`.
     bool writes_nvapi = false;
+    /// dx12 under the `root_constant` fill of `draw_start`: the entry point takes the draw's start, so the output declares
+    /// the block `sgl_draw_start` at `b1, space9`, which the host writes (EMIT-128, EMIT-267); and whether its body reads
+    /// the start, which is when the host must write it.
+    bool declares_draw_start = false;
+    bool reads_declared_draw_start = false;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -234,7 +239,8 @@ struct sgl::emit::emitted_text
             && task_layout == rhs.task_layout && reads_draw_start == rhs.reads_draw_start
             && states_wave_size_range == rhs.states_wave_size_range
             && states_payload_qualifiers == rhs.states_payload_qualifiers && writes_nvapi == rhs.writes_nvapi
-            && ast::impl::is_equal(errors, rhs.errors);
+            && declares_draw_start == rhs.declares_draw_start
+            && reads_declared_draw_start == rhs.reads_declared_draw_start && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

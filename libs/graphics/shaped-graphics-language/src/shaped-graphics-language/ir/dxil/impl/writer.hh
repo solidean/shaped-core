@@ -424,6 +424,9 @@ private:
     /// The properties a stage adds to its entry after its flags, as metadata operands.
     void stage_properties(cc::vector<u32>& properties);
     void stage_load(u32 index, instruction const& i);
+    /// EMIT-128: lane `lane` of the draw's start under the `root_constant` fill, row 0 of `sgl_draw_start`'s block: the
+    /// first vertex in lane 0, the first instance in lane 1.
+    [[nodiscard]] ll_value draw_start_lane(u32 lane);
     void stage_store(instruction const& i);
     /// A call through a sampler: the coordinate's lanes, its three offsets, none of them stated, then what `tail` adds.
     void sampled(u32 index,
@@ -514,6 +517,9 @@ private:
     cc::vector<binding_record> _bindings;
     /// EMIT-265: the handle of the nvapi fill's counter UAV, past the program's own in `_handles`; none without it.
     ll_value _nvapi = ll_value::none;
+    /// EMIT-128: the handle of the draw's start block under the `root_constant` fill, past the program's own in
+    /// `_handles`; none where the entry point reads no draw start, or reads it natively.
+    ll_value _draw_start = ll_value::none;
     cc::vector<row_entry> _rows;
     /// The operations' functions this module declared; a few dozen at most.
     cc::vector<function_entry> _functions;

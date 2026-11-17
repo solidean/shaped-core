@@ -32,6 +32,7 @@ struct tested_source;
 struct emitted_source;
 struct variant_axis;
 class variant_key;
+enum class reserved_slot : u8;
 struct interface_binding;
 struct prelude_file;
 struct library_file;

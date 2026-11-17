@@ -491,13 +491,14 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                                           check::name_of(how), check::name_of(c), to_string(t))});
             return result;
         }
-    // EMIT-128: dx12 reads where the draw started natively through Shader Model 6.8's system values; the root-constant
-    // fill is not written yet, so an entry that takes the draw's start is refused under it
+    // EMIT-128: dx12 reads where the draw started natively through Shader Model 6.8's system values, and under the
+    // root-constant fill from the block `sgl_draw_start` the host writes (EMIT-267)
     if (t == target::hlsl_dx12)
-        for (auto const& input : e.stage_inputs)
+        for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
         {
-            if (input.input != check::stage_input::vertex_index && input.input != check::stage_input::instance_index
-                && input.input != check::stage_input::first_instance)
+            auto const input = e.stage_inputs[i].input;
+            if (input != check::stage_input::vertex_index && input != check::stage_input::instance_index
+                && input != check::stage_input::first_instance)
                 continue;
             if (sources.core.draw_start == check::fill::native)
             {
@@ -505,15 +506,16 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 result.reads_draw_start = true;
                 continue;
             }
-            result.errors.push_back({.kind = error_kind::unsupported,
-                                     .symbol = e.function,
-                                     .detail = cc::format("{} takes @{}, which dx12 reads natively from Shader Model "
-                                                          "6.8's "
-                                                          "system values, and this compile asks the root-constant fill "
-                                                          "of draw_start, which is not written yet",
-                                                          e.name, check::info_of(input.input).name)});
-            return result;
+            plan.draw_start_in_root_constants = true;
+            result.declares_draw_start = true;
+            result.reads_declared_draw_start = result.reads_declared_draw_start || plan.stage_input_read[i];
         }
+    // the prefix `sgl_` is kept from the program's names already; taken here, no name a writer mints is the block's either
+    if (plan.draw_start_in_root_constants)
+    {
+        (void)plan.names.reserve(impl::k_draw_start_global);
+        (void)plan.names.reserve(impl::k_draw_start_block);
+    }
     // EMIT-148: dx12 states a preferred subgroup size as a range, Shader Model 6.8's, where the compile asks it natively
     plan.states_wave_size_range
         = t == target::hlsl_dx12 && e.preferred_subgroup_size > 0 && sources.core.wave_size == check::fill::native;
@@ -655,6 +657,15 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);
+    // EMIT-267: the draw's start is no binding of the program, but a host lays it out by its fields as any block
+    if (plan.draw_start_in_root_constants)
+    {
+        auto layout = emitted_layout{.global = cc::string(impl::k_draw_start_global)};
+        layout.fields.push_back({.name = cc::string("first_vertex"), .offset = check::k_draw_start_first_vertex_offset});
+        layout.fields.push_back(
+            {.name = cc::string("first_instance"), .offset = check::k_draw_start_first_instance_offset});
+        result.layouts.push_back(cc::move(layout));
+    }
     // a pixel stage that writes images alone has no target struct at all (CHK-418)
     if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none
         && e.result != check::checked_module::void_type)

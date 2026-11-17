@@ -47,6 +47,11 @@ On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and
 It covers it as a UAV with a counter in a descriptor table, binds a null or a valid buffer there, and enables the slot on its device; sg lays out none, and slib refuses it.
 `emitted_source::bindings` lists it with `is_reserved`, DXC's reflection as `sg::compiled_shader::reserved_slots`, and no entry here takes space 13.
 
+`b1, space9` on dx12 is no entry of this table either, but SGL's draw start: the block `sgl_draw_start` a vertex entry point reads under the `root_constant` fill of `draw_start` (EMIT-128).
+The host lays it out as two 32-bit root constants and writes the draw's first vertex and first instance there before every direct draw (EMIT-267).
+`emitted_source::bindings` lists it with `is_reserved` and `reserved_slot::draw_start`, and DXC's reflection as a plain constant buffer at that address.
+sg lays out none: its dx12 context requires Shader Model 6.8 and slib compiles the `native` fill, so no shader of sg's reads it, slib refuses it, and no entry here may take it.
+
 `sg_array_lengths` is a block of 16 lengths, `uint4[4]`, one per unbounded binding array of the bound groups in the order of their groups.
 sg writes it at each dispatch and draw from the groups bound, beside the roots, and an emit for dx12 or vulkan rewrites `xs.length` into a read of it (CHK-491).
 

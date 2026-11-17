@@ -858,6 +858,9 @@ struct sgl::ir::program
     /// EMIT-265: DXIL writes the hit objects through NVAPI's shader extensions, the `nvapi` fill of shader execution
     /// reordering, rather than as Shader Model 6.9's own.
     bool reorders_through_nvapi = false;
+    /// EMIT-128: DXIL reads the draw's start from the block `sgl_draw_start` at `b1, space9` the host writes (EMIT-267),
+    /// the `root_constant` fill of `draw_start`, rather than through Shader Model 6.8's operations.
+    bool draw_start_in_root_constants = false;
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;
     /// The `.sgl` lines each writer states beside its operations, where the compile asked for them.

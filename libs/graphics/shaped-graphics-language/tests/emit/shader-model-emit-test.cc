@@ -240,41 +240,22 @@ TEST("sgl emit - each target offers its fills, most demanding first (EMIT-265)")
     CHECK(metal.error().contains("a none fill of wave_size, which msl does not offer"));
 }
 
-TEST("sgl emit - the root-constant fill of the draw's start refuses an entry that takes it, for now (EMIT-128)")
+TEST("sgl emit - the root-constant fill of the draw's start takes an entry that takes it, at 6.6 (EMIT-128)")
 {
+    // draw-start-emit-test.cc holds what it writes and the slot it lists (EMIT-267)
     for (auto const route : k_routes)
     {
-        auto const refused = dx12(k_draws, "vs", route, k_six_six_fills);
-        REQUIRE(refused.has_error());
-        CHECK(refused.error()
-              == "<sgl>: error: unsupported: vs takes @vertex_index, which dx12 reads natively from Shader Model 6.8's "
-                 "system values, and this compile asks the root-constant fill of draw_start, which is not written "
-                 "yet\n");
-
-        auto const instance = dx12("struct varyings:\n"
-                                   "    @position position: hpos4\n"
-                                   "\n"
-                                   "@vertex fun vs(@instance_index i: int) -> varyings:\n"
-                                   "    return { position = hpos4(i as float, 0.0, 0.0, 1.0) }\n",
-                                   "vs", route, k_six_six_fills);
-        REQUIRE(instance.has_error());
-        CHECK(instance.error().contains("vs takes @instance_index, which dx12 reads natively"));
-
-        // `@first_instance` is the draw's start itself
-        auto const first = dx12("require first_instance\n"
-                                "struct varyings:\n"
-                                "    @position position: hpos4\n"
-                                "\n"
-                                "@vertex fun vs(@first_instance f: int) -> varyings:\n"
-                                "    return { position = hpos4(f as float, 0.0, 0.0, 1.0) }\n",
-                                "vs", route, k_six_six_fills);
-        REQUIRE(first.has_error());
-        CHECK(first.error().contains("vs takes @first_instance, which dx12 reads natively"));
+        auto const e = dx12(k_draws, "vs", route, k_six_six_fills);
+        REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+        CHECK(e.value().dxil_shader_model == k_six_six);
+        if (route == native_route::text)
+        {
+            CHECK(e.value().text.contains("sgl_draw_start.first_vertex"));
+            CHECK(!e.value().text.contains("SV_Start"));
+        }
+        else
+            CHECK(container_model(e.value().dxil) == k_six_six);
     }
-    // vulkan reads the draw's start as its builtins under its one fill
-    auto const vulkan = sgl::compile_to_text({.source = k_draws, .entry_point = "vs", .target = target::hlsl_vulkan});
-    REQUIRE(vulkan.has_value());
-    CHECK(vulkan.value().text.contains("[[vk::builtin(\"BaseVertex\")]]"));
 }
 
 TEST("sgl emit - the native fill of the draw's start reads it as system values and states 6.8, the default (EMIT-264)")
@@ -828,6 +809,7 @@ TEST("sgl emit - the nvapi fill of reordering writes NVAPI's hit objects through
             CHECK(b.access == "read_write");
             CHECK(b.stride == 256);
             CHECK(b.has_counter);
+            CHECK(b.reserved == sgl::reserved_slot::nvapi_extension);
         }
     CHECK(reserved == 1);
     // its axis offers both fills
@@ -847,7 +829,10 @@ TEST("sgl emit - the native fill of reordering writes Shader Model 6.9's hit obj
     CHECK(!e.value().needs_nvapi_header);
     CHECK(e.value().dxc_args.empty());
     for (auto const& b : e.value().bindings)
+    {
         CHECK(!b.is_reserved);
+        CHECK(b.reserved == sgl::reserved_slot::none);
+    }
     // and a device without the feature traces plainly, with the same axis
     auto const plain
         = sgl::compile_to_text({.source = k_reordering, .entry_point = "shoot", .target = target::hlsl_dx12});
@@ -870,7 +855,11 @@ TEST("sgl emit - SGL's DXIL of the nvapi fill talks to the driver through the co
     CHECK(!e.value().needs_nvapi_header);
     auto reserved = 0;
     for (auto const& b : e.value().bindings)
-        reserved += b.is_reserved ? 1 : 0;
+        if (b.is_reserved)
+        {
+            ++reserved;
+            CHECK(b.reserved == sgl::reserved_slot::nvapi_extension);
+        }
     CHECK(reserved == 1);
 }
 

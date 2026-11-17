@@ -3,7 +3,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
+#include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics-language/emit/impl/memory_form.hh>
 
@@ -18,6 +20,11 @@ inline constexpr auto k_max_groups = 3;
 /// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
 /// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 inline constexpr auto k_inline_constants_space = 9;
+/// The draw's start of the `root_constant` fill stands in the same space, at `b1` (EMIT-267).
+static_assert(check::k_draw_start_space == k_inline_constants_space);
+/// What the text names that block and its struct; the prefix `sgl_` is kept from programs, so no name of theirs is it.
+inline constexpr auto k_draw_start_global = cc::string_view("sgl_draw_start");
+inline constexpr auto k_draw_start_block = cc::string_view("sgl_draw_start_block");
 /// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
 inline constexpr auto k_bound_samplers_space = 10;
 
@@ -247,9 +254,12 @@ struct plan
     bool sees_motion = false;
     /// The target and the device the compile writes for, which a preamble's condition reads (CHK-529).
     check::compile_target compiled_for;
-    /// dx12: the compile fills the draw's start natively, so the text reads it as Shader Model 6.8's system values
-    /// (EMIT-128); under any other fill no entry that takes the draw's start reaches the writer.
+    /// dx12: the entry point takes the draw's start, and the compile fills it natively, so the text reads it as Shader
+    /// Model 6.8's system values (EMIT-128).
     bool reads_draw_start = false;
+    /// dx12: the entry point takes the draw's start, and the compile fills it from root constants, so the text declares
+    /// `sgl_draw_start` at `b1, space9` and reads the start from there (EMIT-128, EMIT-267).
+    bool draw_start_in_root_constants = false;
     /// dx12: the compile fills the subgroup size natively, so the text states a preferred one as a range (EMIT-148).
     bool states_wave_size_range = false;
     /// dx12: the entry point reorders through NVAPI's shader extensions, the `nvapi` fill of shader execution

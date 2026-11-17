@@ -57,7 +57,8 @@ struct sgl::text_request
     /// offer are each an error of the request.
     cc::span<check::feature_fill const> fills;
     /// How the core constructs are written (EMIT-265); `native` for both is the default, at Shader Model 6.8 on dx12.
-    /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`.
+    /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`, and then
+    /// writes the draw's start into the slot an entry point that takes it lists (EMIT-267).
     check::core_fills core;
     /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
     emit::native_route native = emit::native_route::text;
@@ -141,6 +142,23 @@ struct sgl::all_text_request
     check::core_fills core;
 };
 
+/// Which slot an `interface_binding` the program never declared is: one the host lays out itself, on dx12 alone.
+/// A host that knows none of them refuses every one it does not know, by `is_reserved`, which keeps it safe.
+enum class sgl::reserved_slot : sgl::u8
+{
+    /// A binding of the program, which is no reserved slot.
+    none,
+    /// NVAPI's shader extension slot, the counter UAV an `nvapi` fill talks to NVIDIA's driver through (EMIT-265).
+    /// It is a structured buffer of `stride` bytes with a counter, which no root descriptor can be: the host covers it
+    /// as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot
+    /// on its device.
+    nvapi_extension,
+    /// The draw's start under the `root_constant` fill of `draw_start` (EMIT-267): a block of `block_size` bytes, the
+    /// first vertex at byte 0 and the first instance at byte 4, each a `uint`, which the host writes as root constants
+    /// before every direct draw of the pipeline, and whose indirect draws it refuses.
+    draw_start,
+};
+
 /// One slot the text declares for the host to bind: a block of constants or a resource, with every fact its API needs.
 /// Enums are spelled as the sg enum value they are, as `sgl describe` spells them; empty where a fact does not apply.
 struct sgl::interface_binding
@@ -155,12 +173,11 @@ struct sgl::interface_binding
     bool is_inline = false;
     /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
     bool is_file_sampler = false;
-    /// A slot no binding of the program declares, which the host lays out itself: NVAPI's shader extension slot, the
-    /// counter UAV an `nvapi` fill talks to NVIDIA's driver through (EMIT-265), at register `slot` of space `group`.
-    /// It is a structured buffer of `stride` bytes with a counter, which no root descriptor can be: the host covers it
-    /// as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot
-    /// on its device.
+    /// A slot no binding of the program declares, which the host lays out itself, at register `slot` of space `group`;
+    /// `reserved` says which.
     bool is_reserved = false;
+    /// Which reserved slot it is; `none` exactly where `is_reserved` is false.
+    reserved_slot reserved = reserved_slot::none;
     /// The group it is listed at, counted without the `@inline` binding, and its slot there.
     /// -1 and 0 for the `@inline` block, -1 and its index for a file-scope sampler, and the dx12 space and register of
     /// a reserved slot.

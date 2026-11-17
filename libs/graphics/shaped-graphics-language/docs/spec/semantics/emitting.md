@@ -369,9 +369,11 @@ binding affine:
 * **EMIT-128** HLSL counts a vertex and an instance from the draw's base, on dx12 and on vulkan through DXC alike, so the text adds where the draw started back.
   vulkan reads it as `[[vk::builtin("BaseVertex")]]` and `[[vk::builtin("BaseInstance")]]`, which every shader model has, and so does `@first_instance`.
   dx12 reads it as `SV_StartVertexLocation` and `SV_StartInstanceLocation`, Shader Model 6.8's, under the `native` fill of `draw_start`, the default (EMIT-265).
-  Under its `root_constant` fill a dx12 compile of an entry point that takes `@vertex_index`, `@instance_index` or `@first_instance` is `unsupported`, on both routes.
-  The detail names the input and the fill.
-  That refusal is interim: the fill's lowering, which hands the draw's start over in a root constant, replaces it.
+  Under its `root_constant` fill dx12 reads it from `sgl_draw_start`, a block of root constants at `register(b1, space9)`, on both routes, at Shader Model 6.6.
+  The block holds the first vertex at byte 0 and the first instance at byte 4, each a `uint`, and EMIT-267 is how a host writes them.
+  `@vertex_index` is `SV_VertexID` plus the first vertex, `@instance_index` `SV_InstanceID` plus the first instance, and `@first_instance` the first instance itself.
+  The first vertex is what `SV_StartVertexLocation` would hold: a draw's first vertex, and an indexed draw's base vertex.
+  A polyfill form under that fill is `unsupported`, naming the form and the fill, since sg draws one, indirectly too.
 * **EMIT-129** A stage link's member carries its interpolation: HLSL's `nointerpolation`, `noperspective`, `centroid` and `sample`, and WGSL's `@interpolate(…)`.
   MSL names each combination as one attribute: `flat`, `centroid_perspective`, `center_no_perspective` and their like.
   The default, perspective at the centre, is written by none of them.
@@ -467,6 +469,7 @@ fn main_ps(p: pixel_input) -> target_ {
   So a stage of either route links against a stage of the text route, in both directions.
   A pixel stage's `@position.w` on SPIR-V is the reciprocal of `FragCoord.w`, as `-fvk-use-dx-position-w` writes it.
   `@vertex_index` and `@instance_index` add the draw's base on DXIL alone (EMIT-128), since `VertexIndex` and `InstanceIndex` already hold it.
+  DXIL reads that base through `startVertexLocation` and `startInstanceLocation` under the `native` fill, and as lanes 0 and 1 of row 0 of `sgl_draw_start` under the `root_constant` fill.
   A 64-bit link crosses as its words on DXIL (EMIT-196) and as itself on SPIR-V, and a pixel stage's second struct is what a mesh stage wrote per primitive (CHK-489), `PerPrimitiveEXT` on SPIR-V.
   A link of 16-bit numbers is `unsupported` so far.
 * **EMIT-237** DXIL's `dx.viewIdState` and `PSV0` state that every declared input lane reaches every declared output lane.
@@ -694,6 +697,18 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A bake compiles a variant per choice on each axis, each fill or the feature not granted, and a host runs the first its device takes, most demanding first.
   `sgl::variant_key::of` names one variant, its fills in feature order whatever order they came in, so two keys of one variant are equal; a feature named twice is an error.
   Its `to_string` is `feature=fill` for each granted feature in feature order, then `draw_start=` and `wave_size=` where not `native`, joined by `;`.
+* **EMIT-267** Under the `root_constant` fill of `draw_start`, a dx12 vertex entry point that takes the draw's start lists one slot no binding declares ([why](why/emitting.md#emit-267)).
+  It takes the draw's start where it takes `@vertex_index`, `@instance_index` or `@first_instance` (EMIT-128).
+  It is `is_reserved`, with `reserved = reserved_slot::draw_start`, of kind `constant`, at group 9 and slot 1, the space and register of `b1, space9`, and `block_size` 8.
+  `layouts` lays out `sgl_draw_start`: `first_vertex` at offset 0 and `first_instance` at offset 4.
+  It is listed wherever the entry point takes one of them, and `is_used` where its body reads one; an entry point that takes none lists none, so no pixel or compute stage does.
+  NVAPI's slot (EMIT-265) is `reserved_slot::nvapi_extension`, so a host tells the two apart, and one that knows neither refuses both by `is_reserved`.
+  The host lays the slot out as 32-bit root constants, two of them, in the root signature of every pipeline whose stages list it.
+  Before every direct draw of such a pipeline it writes the draw's first vertex and its first instance there: `StartVertexLocation` and `StartInstanceLocation` for `DrawInstanced`.
+  For `DrawIndexedInstanced` the first vertex is `BaseVertexLocation`, the base vertex written as its bits, and not the first index.
+  That is because `@vertex_index` is vulkan's `VertexIndex`, which counts the base vertex in, and D3D12's `SV_VertexID` of an indexed draw leaves it out.
+  A draw from vertex 0 writes `{0, 0}` all the same, since a root constant nobody wrote is undefined.
+  A host refuses an indirect draw of such a pipeline, since SGL describes no draw and cannot.
 * **EMIT-260** A hit's `cluster_id` is read only where the device builds a BLAS from clusters, `clustered_geometry`, and is -1 everywhere else.
   The prelude asks with `has`, so no program names the feature, and an entry point on any other device needs nothing of it.
   SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.

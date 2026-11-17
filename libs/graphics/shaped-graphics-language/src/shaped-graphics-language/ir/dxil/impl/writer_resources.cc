@@ -97,6 +97,8 @@ void writer::declare_handles()
     _handles.resize_to_filled(_p.globals.size(), {});
     // only what the program reaches is declared, which is the footprint sg binds
     auto is_used = cc::vector<bool>::create_filled(_p.globals.size(), false);
+    // EMIT-128: and the draw's start block, where the root-constant fill reads it
+    auto reads_draw_start = false;
     for (auto const b : blocks_in_order(_p))
     {
         if (!is_reachable(b))
@@ -106,6 +108,12 @@ void writer::declare_handles()
         {
             auto const& inst = _p.instructions[i];
             auto const operands = _p.operands_of(inst);
+            if (inst.code == op::stage_load && _p.draw_start_in_root_constants)
+            {
+                auto const system = _p.stage_elements[operands[0]].system;
+                reads_draw_start = reads_draw_start || system == ir::built_in::vertex_index
+                                || system == ir::built_in::instance_index || system == ir::built_in::first_instance;
+            }
             for (auto k = isize(0); k < operands.size(); ++k)
                 if (operand_role(inst.code, k) == operand::value && is_global(value_ref(operands[k])))
                     is_used[index_of(value_ref(operands[k]))] = true;
@@ -267,6 +275,31 @@ void writer::declare_handles()
                              .psv_type = k_psv_uav_with_counter,
                              .name = "g_NvidiaExt",
                              .has_counter = true,
+                             .upper = lower,
+                             .range = 1});
+    }
+    // EMIT-128, EMIT-267: `ConstantBuffer<sgl_draw_start_block> sgl_draw_start` at `b1, space9`, the draw's start the
+    // host writes as root constants; no global of the program, so its handle stands past theirs as NVAPI's does
+    if (reads_draw_start)
+    {
+        auto const space = u32(check::k_draw_start_space);
+        auto const lower = u32(check::k_draw_start_register);
+        auto const size = u32(check::k_draw_start_bytes);
+        auto entry
+            = handle_entry{.lower = lower, .upper = lower, .space = space, .cls = 2, .word0 = k_kind_constants, .word1 = size};
+        entry.annotated = made_handle(entry, ll_value::none, false);
+        _draw_start = entry.annotated;
+        _handles.push_back(entry);
+        auto const rule = rule_of(global_kind::constants);
+        _bindings.push_back({.global = u32(_handles.size() - 1),
+                             .cls = 2,
+                             .id = next_id[2]++,
+                             .space = space,
+                             .lower = lower,
+                             .kind = k_kind_constants,
+                             .size = size,
+                             .psv_type = rule.psv_read,
+                             .name = emit::impl::k_draw_start_global,
                              .upper = lower,
                              .range = 1});
     }

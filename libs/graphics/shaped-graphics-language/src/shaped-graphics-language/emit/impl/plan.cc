@@ -1787,9 +1787,8 @@ cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
     auto const is_wgsl = p.which == target::wgsl;
     auto const is_hlsl = p.which == target::hlsl_dx12 || p.which == target::hlsl_vulkan;
     // EMIT-147: an input HLSL has no semantic for is read where the entry point starts
-    auto const raw = is_hlsl && !spelling_of(input.input).hlsl_read.empty()
-                       ? spelling_of(input.input).hlsl_read
-                       : cc::string_view(p.stage_input_names[index]);
+    auto raw = is_hlsl && !spelling_of(input.input).hlsl_read.empty() ? cc::string(spelling_of(input.input).hlsl_read)
+                                                                      : cc::string(p.stage_input_names[index]);
     auto const type = check::info_of(input.input).type;
     // HLSL counts a vertex and an instance from the draw's base, and DXC keeps that meaning on vulkan (EMIT-128).
     // An entry taking `@first_instance` too has that base as a parameter already, and HLSL takes one semantic once.
@@ -1798,6 +1797,15 @@ cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
         for (auto j = isize(0); j < p.e.stage_inputs.size(); ++j)
             if (p.e.stage_inputs[j].input == check::stage_input::first_instance)
                 base = cc::string(p.stage_input_names[j]);
+    // EMIT-128: under the root-constant fill, dx12 reads the draw's start from the block the host writes (EMIT-267)
+    if (p.draw_start_in_root_constants)
+    {
+        auto const first_vertex = cc::format("{}.first_vertex", k_draw_start_global);
+        auto const first_instance = cc::format("{}.first_instance", k_draw_start_global);
+        if (input.input == check::stage_input::first_instance)
+            raw = first_instance;
+        base = input.input == check::stage_input::vertex_index ? first_vertex : first_instance;
+    }
     auto const value = has_base(p, input.input) ? cc::format("{} + {}", raw, base) : cc::string(raw);
     if (type == "int")
         return cc::format("{}({})", is_wgsl ? "i32" : "int", value);
