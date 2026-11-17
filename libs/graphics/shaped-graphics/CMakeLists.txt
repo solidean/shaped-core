@@ -44,6 +44,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/bindless_array.cc
     src/shaped-graphics/context/pipeline_cache.cc
     src/shaped-graphics/context/cold_caches.cc
+    src/shaped-graphics/context/native_debug_info.cc
     src/shaped-graphics/context/gpu_selector.cc
     src/shaped-graphics/present/swapchain.cc
     src/shaped-graphics/routine/reload_generation.cc
@@ -327,6 +328,7 @@ if(SC_BUILD_TESTS)
             tests/context/context-test.cc
             tests/context/metrics-test.cc
             tests/context/cold-caches-test.cc
+            tests/context/native-debug-info-test.cc
             tests/context/gpu-selector-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc

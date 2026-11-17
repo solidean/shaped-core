@@ -412,6 +412,7 @@ namespace sgl::emit
 enum class target : u8;
 enum class error_kind : u8;
 enum class native_route : u8;
+enum class debug_info : u8;
 enum class mesh_form : u8;
 struct error;
 struct emitted_text;

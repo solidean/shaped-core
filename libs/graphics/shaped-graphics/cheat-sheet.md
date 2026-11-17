@@ -333,6 +333,7 @@ ctx.completed_epoch()                   // sg::epoch — latest fully-finished e
 ctx.advance_epoch()                     // void — close current epoch, open next. NEVER waits; bound the depth below
 // SC_SG_CAPTURE=renderdoc|pix captures the epoch the n-th advance opens (SC_SG_CAPTURE_EPOCH, default 1) into SC_SG_CAPTURE_FILE;
 //   no code change, headless too; docs/concepts/gpu-capture.md, and tools/gpu-capture/debug-pixel.py reads a .rdc back
+// SC_SG_NATIVE_DEBUG_INFO=none|lines|full overrides dx12_config / vulkan_config::native_debug_info: what SGL's own binaries carry of the source
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
 ctx.defer_until_retired(fn)             // void — run fn once the GPU is done with every epoch up to the current one;
                                         //   never inline (except past shutdown), in registration order, and before the

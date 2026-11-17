@@ -608,7 +608,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (sources.native != native_route::text)
     {
         auto program = ir::program();
-        if (sources.native_line_table && !sources.files.empty())
+        if (sources.native_debug_info != debug_info::none && !sources.files.empty())
             program.lines = line_table_of(m, plan.e, sources);
         auto const is_dxil = t == target::hlsl_dx12;
         auto const gap

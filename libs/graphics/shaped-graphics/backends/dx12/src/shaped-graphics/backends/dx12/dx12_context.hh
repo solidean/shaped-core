@@ -99,9 +99,9 @@ struct sg::backend::dx12::dx12_config
     /// `false` takes the text route, SGL's HLSL through DXC, for every SGL shader of this context.
     bool native_dxil = true;
 
-    /// SGL's own DXIL carries each operation's `.sgl` line, in a debug module beside the program, for PIX (EMIT-257).
-    /// The program part keeps its bytes, and what DXC compiles is untouched.
-    bool native_line_tables = false;
+    /// What SGL's own DXIL carries of the source, in a debug module beside the program, for PIX and RenderDoc (EMIT-257).
+    /// The program part keeps its bytes, and what DXC compiles is untouched; `SC_SG_NATIVE_DEBUG_INFO` overrides it.
+    sg::native_debug_info native_debug_info = sg::native_debug_info::none;
 
     /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
     ///
@@ -247,7 +247,7 @@ public:
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
     [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
-    [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
+    [[nodiscard]] sg::native_debug_info native_debug_info() const override { return _native_debug_info; }
 
     /// D3D12 has every stage sg models, and headless present is always available here.
     ///
@@ -775,14 +775,15 @@ public:
     // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5).
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
-    bool _unaligned_block_textures = false;    // D3D12_OPTIONS8, cached at creation
-    bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
-    bool _withhold_binding_arrays = false;     // dx12_config::withhold_binding_arrays
-    bool _withhold_primitive_index = false;    // dx12_config::withhold_primitive_index
-    bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
-    bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
-    bool _native_dxil = false;                 // dx12_config::native_dxil
-    bool _native_line_tables = false;          // dx12_config::native_line_tables
+    bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
+    bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
+    bool _withhold_binding_arrays = false;  // dx12_config::withhold_binding_arrays
+    bool _withhold_primitive_index = false; // dx12_config::withhold_primitive_index
+    bool _native_16bit_shader_ops = false;  // D3D12_OPTIONS4, cached at creation
+    bool _wave_ops = false;                 // D3D12_OPTIONS1, cached at creation
+    bool _native_dxil = false;              // dx12_config::native_dxil
+    sg::native_debug_info _native_debug_info
+        = sg::native_debug_info::none;         // dx12_config::native_debug_info, or the environment
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
     bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
     bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation

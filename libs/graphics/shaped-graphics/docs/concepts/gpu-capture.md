@@ -7,6 +7,9 @@ Nothing in the program changes, so a test, an example or a viewer is capturable 
 SC_SG_CAPTURE=renderdoc SC_SG_CAPTURE_EPOCH=3 SC_SG_CAPTURE_FILE=<dir>/cube uv run dev.py example sgl-cube --capture
 ```
 
+`SC_SG_NATIVE_DEBUG_INFO=lines` (or `full`) beside it makes SGL's own binaries carry the source, so a debugger steps `.sgl` lines rather than DXIL or SPIR-V.
+It overrides a config's `native_debug_info`, as the capture needs no change to the program either.
+
 ## The variables
 
 | Variable | Value | Default |
