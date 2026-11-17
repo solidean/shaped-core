@@ -64,12 +64,19 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
   - Note: a frame is a `check::call_site`; its callee is `call_records[files[file].call_at(call)].callee`, through an instance's tables for a generic call
   - Outcome: `source_line::function`, filled by `source_lines::origin_of`; `ir::line_table::functions` and `source_place::function`
   - Note: a call inside a generic function's instance stands past the file's tables and names no function yet; its frame keeps the file's scope
-- [ ] P3.3 `op::debug_value` and `op::debug_declare`, with `ir::verify`, `dump` and `operand_role`
+- [ ] P3.3 `op::debug_value` and `op::debug_declare`, with `ir::verify`, `dump` and `operand_role` (D7)
+  - Note: place both after `stage_store`, outside `has_effect`'s ranges and `gives_only_a_value`, so no pass shares, hoists or speculates them
+  - Note: `debug_value`: literal variable, value (role `debug`), literal first leaf; `debug_declare`: literal variable, local (role `debug`)
+  - Note: writers skip both until P4 and P5, and `remove_unused` keeps a debug op while its operand lives
 - [ ] P3.4 Lowering writes them: a value at each source `let`, parameter and `for` counter, a declare at each `var`; temporaries none
   - Note: an immutable `let` that holds no array is no IR local but a value (lower.cc, `_locals[position] = expr(value)`), so its value op stands there
 - [ ] P3.5 `construct_ssa` turns a promoted local's declare and stores into per-scalar `debug_value`s
   - Note: ssa.cc splits a promoted local into scalar slots (`add_slots`, `write_whole`); a store's value op names its first slot
-- [ ] P3.6 Every pass treats a debug op as no use and no content
+- [ ] P3.6 Every pass treats a debug op as no use and no content (D7)
+  - Note: the ~28 `operand::value` checks skip the `debug` role by themselves: liveness, use counts, local reads, SSA's promotability
+  - Note: the generic rewriters must take it too, through one helper: renumbering cleanup.cc:213, flatten.cc:131, tables.cc:285; replacing cleanup.cc:426 and 462, flatten.cc:328, tables.cc:287; simplify.cc:199; locals cleanup.cc:390
+  - Note: a rewriter whose target was removed writes `value_ref::none`, which a writer states as optimized out; ssa.cc's `lay_out` renumbers too
+  - Note: `flatten_branches` must not count a debug op as content of an arm, nor `chain_sums` as a second read
   - Note: `remove_unused`, `share_common_values`, `hoist_common_values`, `flatten_branches`, `simplify`, `regroup_lanes`, `chain_sums`, `state_constant_tables`
 - [ ] P3.7 Test: `full` against `lines` leaves every non-debug operation the same, over the repo's SGL
 
@@ -133,6 +140,12 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - **Why:** The two variables together debug any sg program at `.sgl` level with no code change; the P1 sample needed a local edit for it.
 - **Alternatives:** A capture implying `full`, which couples two independent switches; config only.
 
+### D7: A debug op's operand has a role of its own (2026-11-17) [P3.3, P3.6]
+- **Context:** A debug op must not keep a value alive, change a use count or stop a local from being promoted, or `full` would change instructions.
+- **Decision:** `operand::debug` for the value or local a debug op names; checks for `operand::value` skip it as they stand, and the few generic rewriters take both.
+- **Why:** About 28 sites count uses and 9 rewrite operands; changing the 9 is safer than teaching the 28 to skip debug ops one by one.
+- **Alternatives:** Debug ops whose operands are `value` and a skip at each counting site; a side table outside the instruction stream, which every renumbering would have to remap.
+
 ## Deviations
 
 ## Log
@@ -142,4 +155,5 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: P2 done: one level through SGL, slib and sg, and `SC_SG_NATIVE_DEBUG_INFO` (D6).
 - 2026-11-17: P3 started: its design notes in P3.1 to P3.5 and P3.8; P3.2 done, each line naming the function it stands in.
 - 2026-11-17: P3.8 done: a local keeps the name its declaration wrote.
+- 2026-11-17: D7 decided, with the sites P3.3 and P3.6 change; next session starts at P3.1 and P3.3.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.
