@@ -25,6 +25,14 @@ r.value().text                             // the emitter's text, unchanged
 r.value().entry_point                      // the name the text declares, which is the one to compile: `main` is `main_` in MSL
 r.value().bound_names                      // { emitted, host } per resource: `work_values` is what the host binds as `work.values`
 r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
+r.value().vertex_input                     // a vertex entry point's `@vertex struct`; empty without one, and for other stages (EMIT-268)
+r.value().payload  .payload_shape  .payload_size     // a ray-tracing stage's payload or a callable's parameter (EMIT-269)
+r.value().attributes  .attributes_shape  .attribute_size  // a procedural hit's or an intersection's `A`; a triangle hit: 8 bytes, no name (EMIT-270)
+                                           // each struct by its host name: `view.radiance` for a module's, `pair_float` for `pair[float]`;
+                                           // the entry point as written, a polyfilled one too; describe's entry points say the same
+r.value().bindings                         // interface_binding per slot the text declares: group, slot, count, kind, is_used, block_size, ...
+                                           // one no binding declares is_reserved, its reserved_slot: nvapi_extension (EMIT-265),
+                                           // draw_start (dx12, b1 space9, EMIT-271), acceleration_addresses (vulkan, set 3 binding 22, EMIT-272)
 r.value().features                         // check::feature_set the device needs: the entry's, plus what the output used of the grant
 r.value().dxil_shader_model                // { major, minor }: the DXIL shader model a dx12 output needs in its fills (EMIT-264)
 r.value().dxc_args                         // what DXC takes beside the text at that model: -enable-payload-qualifiers below 6.7
@@ -78,13 +86,16 @@ auto const t = sgl::test_source(text, "colors.sgl", library);   // library optio
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
 sgl::describe({.library = files, .module = "view"});   // module `view` instead of a source: its bindings and structs, no entry point
-                                           // a binding of another module is named `view.frame`; a memory struct of one carries `module`
+                                           // a binding of another module is named `view.frame`, and every struct by its host name,
+                                           // `view.particle` for a module's (a memory struct of one carries `module` too)
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint,
-                                           // samplers: the file-scope samplers its code reaches
+                                           // samplers: the file-scope samplers its code reaches,
+                                           // vertex_input, payload / payload_shape / payload_size, attributes / attributes_shape /
+                                           // attribute_size: what its signature hands its pipeline (EMIT-268 to EMIT-270)
 d.value().samplers                         // the file-scope samplers: name, index (declaration order), sampler_type, settings, shape
 d.value().options                          // every `@option const`: name, type (`bool`, `int`, `float`, `uint`, an enum's name), value
                                            // as described, and `follows`: the options its default is computed from (CHK-519)

@@ -188,6 +188,7 @@ const light_kind_sun: i32 = 2;
   An instance of a generic struct is named as EMIT-179 names it, qualified by its template's module.
   So the program's own struct and a module's of the same bare name are never named alike, here, in EMIT-269's and EMIT-270's fields, or anywhere else the description names a struct.
   It is empty for a vertex entry point that takes no stage struct, which draws from no vertex buffer, and for every other stage.
+  A polyfilled compile reports the entry point as written, not the form its polyfill made of it, and so do EMIT-269 and EMIT-270.
   What an input layout needs of the members, their locations, formats, semantics and streams, is the struct's own description in `describe`'s `structs`.
   A `pipeline` declaration's `vertex_input` is its vertex stage's.
 

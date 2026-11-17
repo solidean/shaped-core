@@ -253,7 +253,7 @@ TEST("sgl entry interface - compile_to_text states what describe states, on ever
         }
 }
 
-TEST("sgl entry interface - a module's vertex input is named as the program names it")
+TEST("sgl entry interface - a module's vertex input is named by the module's name, not the program's alias for it")
 {
     sgl::library_file const library[] = {{.name = "view.sgl",
                                           .source = "module view\n"
