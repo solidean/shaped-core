@@ -149,7 +149,7 @@ BENCHMARK("sv - a 20 second clip of a real asset rendered within a budget of min
     // Every step places the same asset's meshes, so a chain also checks what one viewer leaves the next.
     if (auto const probe = cc::environment_variable("SV_FINAL_RENDER_PROBE"); probe.has_value())
     {
-        auto const megakernel = sv::render_settings{.mode = sv::render_mode::megakernel, .max_bounces = 8};
+        auto const megakernel = sv::render_settings{.max_bounces = 8, .mode = sv::render_mode::megakernel};
         auto rest = cc::string_view(probe.value());
         auto index = 0;
         while (!rest.empty())
