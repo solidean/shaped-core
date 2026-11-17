@@ -52,6 +52,9 @@ constexpr auto k_draws = cc::string_view("require first_instance\n"
 TEST("slib - SGL's DXIL of the root-constant fill reads the draw's start from b1, space9 at 6.6, as DXC's of its text "
      "(EMIT-128)")
 {
+#ifndef CC_OS_WINDOWS
+    SKIP("a DXIL compile reflects through the Windows SDK's d3d12shader.h, which the Linux DXC release does not ship");
+#endif
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
@@ -146,6 +149,9 @@ constexpr auto k_inline_beside = cc::string_view("@inline binding tuning:\n"
 
 TEST("slib - an entry reading its @inline block and the draw's start binds both blocks of space 9 apart (EMIT-267)")
 {
+#ifndef CC_OS_WINDOWS
+    SKIP("a DXIL compile reflects through the Windows SDK's d3d12shader.h, which the Linux DXC release does not ship");
+#endif
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
