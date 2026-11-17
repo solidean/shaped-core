@@ -390,7 +390,9 @@ void nx::impl::begin_run_capture(cc::string_view path, cc::string_view compacted
         g_profile_samples = true;
     }
     // A slow sampler for the log recording alone, so a hang leaves its stacks; the report's records at this pace itself.
-    else if (!compacted_path.empty() && !nx::impl::report_sampling_requested() && !cc::rec::is_sampling())
+    // Opportunistic, so a platform that cannot sample goes without rather than warning in every run.
+    else if (!compacted_path.empty() && !nx::impl::report_sampling_requested() && !cc::rec::is_sampling()
+             && cc::rec::sampling_available())
     {
         cc::rec::start_sampling({.rate_hz = 1.0 / nx::impl::recorded_sample_interval_secs, .stop_at_scope = false});
         g_sampling = true;
