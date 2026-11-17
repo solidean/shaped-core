@@ -4,6 +4,8 @@ priority: next
 tags: [sgl, differential]
 refs:
   - test: "sg differential - every corpus entry point computes*"
+closed: 2026-11-17
+resolution: fixed
 ---
 
 # scene_traces' downward trace reports no hit on NVIDIA, where its reference and the interpreter see one
@@ -37,3 +39,13 @@ f6e7545c5 says the corpus "runs whole on AMD's iGPU", so it was likely only chec
 
 2026-11-17, on an RTX 5070 Laptop GPU at bd28b805a and a85500dc3: the same scene_traces and blend_equations failures, with the same values, on dx12 and vulkan through both routes.
 They are what blocks `dev.py ship` on this machine; CI runs no differential corpus on its GPU-less runners.
+
+## Cause and fix, 2026-11-17
+
+**Thread 0's downward ray ran exactly along the terrain's outer edge**: `hashed(0)` is 0, so its draw is 0 and its origin x is 0.0, the terrain's border.
+An edge no other triangle shares hits or misses as each implementation breaks the tie, which DXR and Vulkan leave open.
+NVIDIA misses it; the B580 that wrote the reference and SGL's interpreter hit it.
+It was the only failing thread, 8 elements against the interpreter being its two traces' float4s.
+The downward rays now start at `0.5 + 7 * draw`, half a cell inside the border; a dyadic draw makes that never an integer, so no ray meets a cell's edge either.
+Only `downward`'s lines of scene_traces.ref are rewritten, on an RTX 5080; `from_the_side` keeps the B580's.
+`blend_equations` was a tie of the same kind, [bug-sg-diff-blend-rgb10a2-alpha-tie](bug-sg-diff-blend-rgb10a2-alpha-tie.md).

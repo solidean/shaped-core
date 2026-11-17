@@ -242,7 +242,7 @@ TEST("sgl emit - each target offers its fills, most demanding first (EMIT-265)")
 
 TEST("sgl emit - the root-constant fill of the draw's start takes an entry that takes it, at 6.6 (EMIT-128)")
 {
-    // draw-start-emit-test.cc holds what it writes and the slot it lists (EMIT-267)
+    // draw-start-emit-test.cc holds what it writes and the slot it lists (EMIT-271)
     for (auto const route : k_routes)
     {
         auto const e = dx12(k_draws, "vs", route, k_six_six_fills);

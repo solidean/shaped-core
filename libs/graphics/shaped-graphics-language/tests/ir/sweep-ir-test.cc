@@ -158,7 +158,7 @@ struct module_library
 } // namespace
 
 // EMIT-264: with no feature granted and the 6.6 core fills, nothing SGL writes for dx12 needs more than 6.6, either route.
-// An entry that takes the draw's start reads it from the block the host writes (EMIT-128, EMIT-267), so none is refused.
+// An entry that takes the draw's start reads it from the block the host writes (EMIT-128, EMIT-271), so none is refused.
 // Every file of sg's, sr's and sv's shaders and of the corpus is swept with the repo's modules, a fourth by default and all
 // under --thorough; every one compiles, so a file that does not fails the sweep.
 // SGL's own DXIL states its model in the container; the text's is checked by DXC at the 6.6 profiles in slib's tests.
@@ -176,7 +176,12 @@ TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of th
     auto const six_six = sgl::check::dxil_shader_model{.major = 6, .minor = 6};
     auto const six_six_fills
         = sgl::check::core_fills{.draw_start = sgl::check::fill::root_constant, .wave_size = sgl::check::fill::none};
+    // an eighth on wasm, whose one thread spent 20 s on a fourth
+#if defined(__EMSCRIPTEN__)
+    auto const stride = nx::is_thorough() ? 1 : 8;
+#else
     auto const stride = nx::is_thorough() ? 1 : 4;
+#endif
     auto native_stages = cc::vector<sgl::check::stage>();
     auto text_stages = cc::vector<sgl::check::stage>();
     auto swept = 0;

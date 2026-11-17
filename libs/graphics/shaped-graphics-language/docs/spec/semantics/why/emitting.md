@@ -328,7 +328,7 @@ What a shader model adds is often what a device has some other way, so a target'
 NVIDIA's devices reorder and see micromaps through NVAPI at 6.6, and a draw's start can arrive in a root constant, so a fill names that choice per construct.
 A feature stays what the device can do, and its fill how this compile writes it, which keeps the features one list across every target.
 
-## EMIT-267
+## EMIT-271
 
 The draw's start is a block of its own, not two members appended to the `@inline` block.
 An `@inline` block whose size depends on the target would break the host types generated from it, the one block every stage of a pipeline shares, and its 128-byte cap on dx12 alone.

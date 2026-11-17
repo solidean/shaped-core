@@ -18,6 +18,7 @@ using namespace cc::primitive_defines;
 
 enum class backend_kind;            // which graphics API a context runs on (see types.hh)
 enum class thread_model;            // what a context promises about concurrent use (see types.hh)
+enum class native_debug_info;       // what SGL's own binaries carry of the source, for a debugger (see types.hh)
 enum class buffer_usage : u32;      // one buffer usage; a set of them is buffer_usages (see types.hh)
 enum class texture_aspect : u32;    // color / depth / stencil planes of a subresource (see resource/subresource.hh)
 enum class command_list_slot : int; // a recorder's slot in the per-context pool (see barrier/command_list_slot.hh)

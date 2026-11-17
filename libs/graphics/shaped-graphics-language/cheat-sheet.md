@@ -51,8 +51,8 @@ sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = 
                                            // a missing entry point names the ones the source holds; a wrong stage says both
 sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, options, run_tests,
                                            // line_directives: `#line n "file"` in HLSL and MSL (EMIT-182); slib asks for them, `sgl emit` only with --line-directives
-                                           // native_line_table: each operation's line in SGL's own SPIR-V and DXIL (EMIT-257); opt-in, since it carries
-                                           // the sources; off writes the same bytes; `vulkan_config` / `dx12_config::native_line_tables` ask for it
+                                           // native_debug_info: none / lines / full, what SGL's own SPIR-V and DXIL carry of the source (EMIT-257, EMIT-267);
+                                           // none writes the same bytes; `vulkan_config` / `dx12_config::native_debug_info` and SC_SG_NATIVE_DEBUG_INFO ask for it
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
                                            // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
@@ -757,7 +757,7 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A dx12 output's shader model is what its fills need (EMIT-264, EMIT-265).** The `root_constant` fill of `draw_start` and the `none` of `wave_size` keep it at 6.6.
   Under `root_constant` an entry point taking `@vertex_index`, `@instance_index` or `@first_instance` reads the draw's start from `sgl_draw_start` (EMIT-128).
   That block stands at `b1, space9`; vulkan reads the inputs as its builtins.
-  It lists that block as a reserved slot, `reserved_slot::draw_start`, which the host writes before every direct draw and refuses indirect draws of (EMIT-267).
+  It lists that block as a reserved slot, `reserved_slot::draw_start`, which the host writes before every direct draw and refuses indirect draws of (EMIT-271).
   It writes `ray_query` through the emulated trace instead (EMIT-135).
   MSL refuses one needing `geometry_shader` or `tessellation_shader` the same way.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.

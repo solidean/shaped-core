@@ -40,12 +40,13 @@ constexpr u32 k_op_fmul = 133;
                                            sgl::emit::target target,
                                            bool line_table)
 {
-    auto e = sgl::compile_to_text({.source = source,
-                                   .source_name = "lines.sgl",
-                                   .entry_point = entry,
-                                   .target = target,
-                                   .native = sgl::emit::native_route::require,
-                                   .native_line_table = line_table});
+    auto e = sgl::compile_to_text(
+        {.source = source,
+         .source_name = "lines.sgl",
+         .entry_point = entry,
+         .target = target,
+         .native = sgl::emit::native_route::require,
+         .native_debug_info = line_table ? sgl::emit::debug_info::lines : sgl::emit::debug_info::none});
     REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
     return cc::move(e.value());
 }
@@ -217,12 +218,13 @@ TEST("sgl native lines - every entry point of the repo's SGL changes no instruct
             {
                 auto const request = [&](bool line_table)
                 {
-                    return sgl::compile_to_text({.source = source,
-                                                 .source_name = files[i],
-                                                 .entry_point = entry.entry_point,
-                                                 .target = target,
-                                                 .native = sgl::emit::native_route::prefer,
-                                                 .native_line_table = line_table});
+                    return sgl::compile_to_text(
+                        {.source = source,
+                         .source_name = files[i],
+                         .entry_point = entry.entry_point,
+                         .target = target,
+                         .native = sgl::emit::native_route::prefer,
+                         .native_debug_info = line_table ? sgl::emit::debug_info::lines : sgl::emit::debug_info::none});
                 };
                 auto const off = request(false);
                 auto const on = request(true);

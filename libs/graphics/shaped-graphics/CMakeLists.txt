@@ -44,6 +44,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/bindless_array.cc
     src/shaped-graphics/context/pipeline_cache.cc
     src/shaped-graphics/context/cold_caches.cc
+    src/shaped-graphics/context/native_debug_info.cc
     src/shaped-graphics/context/gpu_selector.cc
     src/shaped-graphics/present/swapchain.cc
     src/shaped-graphics/routine/reload_generation.cc
@@ -53,6 +54,7 @@ add_library(shaped-graphics
     src/shaped-graphics/context/impl/completion_waiter.cc
     src/shaped-graphics/context/impl/debug_windows.cc
     src/shaped-graphics/context/impl/device_lifecycle.cc
+    src/shaped-graphics/context/impl/gpu_capture.cc
     src/shaped-graphics/context/gpu_load_sampler.cc
     src/shaped-graphics/context/metrics.cc
     src/shaped-graphics/context/persistent.cc
@@ -84,6 +86,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/impl/completion_waiter.hh
     src/shaped-graphics/context/impl/debug_windows.hh
     src/shaped-graphics/context/impl/device_lifecycle.hh
+    src/shaped-graphics/context/impl/gpu_capture.hh
     src/shaped-graphics/context/persistent.hh
     src/shaped-graphics/context/transient.hh
     src/shaped-graphics/context/upload.hh
@@ -325,6 +328,7 @@ if(SC_BUILD_TESTS)
             tests/context/context-test.cc
             tests/context/metrics-test.cc
             tests/context/cold-caches-test.cc
+            tests/context/native-debug-info-test.cc
             tests/context/gpu-selector-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc

@@ -377,7 +377,7 @@ binding affine:
   vulkan reads it as `[[vk::builtin("BaseVertex")]]` and `[[vk::builtin("BaseInstance")]]`, which every shader model has, and so does `@first_instance`.
   dx12 reads it as `SV_StartVertexLocation` and `SV_StartInstanceLocation`, Shader Model 6.8's, under the `native` fill of `draw_start`, the default (EMIT-265).
   Under its `root_constant` fill dx12 reads it from `sgl_draw_start`, a block of root constants at `register(b1, space9)`, on both routes, at Shader Model 6.6.
-  The block holds the first vertex at byte 0 and the first instance at byte 4, each a `uint`, and EMIT-267 is how a host writes them.
+  The block holds the first vertex at byte 0 and the first instance at byte 4, each a `uint`, and EMIT-271 is how a host writes them.
   `@vertex_index` is `SV_VertexID` plus the first vertex, `@instance_index` `SV_InstanceID` plus the first instance, and `@first_instance` the first instance itself.
   The first vertex is what `SV_StartVertexLocation` would hold: a draw's first vertex, and an indexed draw's base vertex.
   A polyfill form under that fill is `unsupported`, naming the form and the fill, since sg draws one, indirectly too.
@@ -585,7 +585,7 @@ fn main_ps(p: pixel_input) -> target_ {
   After the text, a directive names the statement's line again.
   WGSL has no such directive, and its messages map back through the table (EMIT-181).
 * **EMIT-257** Asked for a native line table, a native route writes each operation's line of EMIT-181 into its binary, and nothing else changes.
-  It is opt-in, `text_request::native_line_table`, since it carries the text of each file a line names.
+  It is opt-in, `text_request::native_debug_info` at `lines` or above, since it carries the text of each file a line names.
   SPIR-V states an `OpString` and an `OpSource` with the text per file, and an `OpLine` before an operation whose line differs from the last in its block.
   Core SPIR-V has no inlined calls, so an `OpLine` names the innermost line, where the operation stands.
   The files' ids are the module's last, so every other id is the one it has without the table.
@@ -593,6 +593,11 @@ fn main_ps(p: pixel_input) -> target_ {
   `ILDB` is the module again, each instruction with a `DILocation`, an inlined statement's in a `DISubprogram` of its file with the chain of `inlinedAt` calls.
   It holds `dx.source.contents`, so a debugger shows each line without the file, and no variable is described.
   A function's expression inlines into the statement that calls it, so only a function's own statements keep an inlined line.
+* **EMIT-267** Asked for `full`, a native route writes EMIT-257's lines and describes each local the source wrote: a `let`, a `var`, a parameter and a `for` counter.
+  A local a pass introduced is not described.
+  Each is described under its name as written, with its type, in the scope of the function it was written in, inlined calls included.
+  Its value is stated where the source gives it one, and follows it wherever a pass moves or splits it; where the value no longer exists, it reads as optimized out.
+  Asking for `full` changes no instruction but the debug ones, as `lines` changes none.
 
 ## Diagnostics
 
@@ -715,7 +720,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A bake compiles a variant per choice on each axis, each fill or the feature not granted, and a host runs the first its device takes, most demanding first.
   `sgl::variant_key::of` names one variant, its fills in feature order whatever order they came in, so two keys of one variant are equal; a feature named twice is an error.
   Its `to_string` is `feature=fill` for each granted feature in feature order, then `draw_start=` and `wave_size=` where not `native`, joined by `;`.
-* **EMIT-267** Under the `root_constant` fill of `draw_start`, a dx12 vertex entry point that takes the draw's start lists one slot no binding declares ([why](why/emitting.md#emit-267)).
+* **EMIT-271** Under the `root_constant` fill of `draw_start`, a dx12 vertex entry point that takes the draw's start lists one slot no binding declares ([why](why/emitting.md#emit-271)).
   It takes the draw's start where it takes `@vertex_index`, `@instance_index` or `@first_instance` (EMIT-128).
   It is `is_reserved`, with `reserved = reserved_slot::draw_start`, of kind `constant`, at group 9 and slot 1, the space and register of `b1, space9`, and `block_size` 8.
   `layouts` lays out `sgl_draw_start`: `first_vertex` at offset 0 and `first_instance` at offset 4.

@@ -188,16 +188,30 @@ namespace
         table.names.push_back(cc::string(lines.name_of(i32(f))));
         table.texts.push_back(cc::string(sources.files[f].file.source));
     }
+    // EMIT-267: each function a line stands in, by its position in `functions`
+    auto function_symbols = cc::vector<check::symbol_id>();
+    auto const function_of = [&](check::symbol_id f) -> i32
+    {
+        if (!check::is_valid(f))
+            return -1;
+        for (auto i = isize(0); i < function_symbols.size(); ++i)
+            if (function_symbols[i] == f)
+                return i32(i);
+        function_symbols.push_back(f);
+        table.functions.push_back(cc::string(m.at(f).name));
+        return i32(function_symbols.size() - 1);
+    };
     table.statements.reserve(e.stmts.size());
     for (auto const& s : e.stmts)
     {
         auto const origin = lines.origin_of(e, s);
         auto place = ir::source_place{.file = origin.at.file,
                                       .line = origin.at.line,
+                                      .function = function_of(origin.at.function),
                                       .calls_first = u32(table.calls.size()),
                                       .calls_count = u32(origin.inlined_from.size())};
         for (auto const& call : origin.inlined_from)
-            table.calls.push_back({.file = call.file, .line = call.line});
+            table.calls.push_back({.file = call.file, .line = call.line, .function = function_of(call.function)});
         table.statements.push_back(place);
     }
     return table;
@@ -492,7 +506,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             return result;
         }
     // EMIT-128: dx12 reads where the draw started natively through Shader Model 6.8's system values, and under the
-    // root-constant fill from the block `sgl_draw_start` the host writes (EMIT-267)
+    // root-constant fill from the block `sgl_draw_start` the host writes (EMIT-271)
     if (t == target::hlsl_dx12)
         for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
         {
@@ -610,7 +624,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (sources.native != native_route::text)
     {
         auto program = ir::program();
-        if (sources.native_line_table && !sources.files.empty())
+        if (sources.native_debug_info != debug_info::none && !sources.files.empty())
             program.lines = line_table_of(m, plan.e, sources);
         auto const is_dxil = t == target::hlsl_dx12;
         auto const gap
@@ -657,7 +671,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);
-    // EMIT-267: the draw's start is no binding of the program, but a host lays it out by its fields as any block
+    // EMIT-271: the draw's start is no binding of the program, but a host lays it out by its fields as any block
     if (plan.draw_start_in_root_constants)
     {
         auto layout = emitted_layout{.global = cc::string(impl::k_draw_start_global)};

@@ -5,7 +5,7 @@
 
 using namespace cc::primitive_defines;
 
-// The draw's start under SGL's `root_constant` fill of `draw_start` (EMIT-128, EMIT-267): a dx12 vertex entry reads it
+// The draw's start under SGL's `root_constant` fill of `draw_start` (EMIT-128, EMIT-271): a dx12 vertex entry reads it
 // from the block `sgl_draw_start` at `b1, space9`, at Shader Model 6.6. SGL's own DXIL passes the validator and states
 // the block as DXC's compile of SGL's text does, which DXC builds at the 6.6 profile and reflects at that address.
 
@@ -99,7 +99,7 @@ TEST("slib - SGL's DXIL of the root-constant fill reads the draw's start from b1
     CHECK(draw_start_size(ours.value()) == size).dump("ours", ours.value()).dump("theirs", theirs.value());
 }
 
-TEST("slib - SGL's DXIL of an entry that takes the draw's start and reads none declares no block of it (EMIT-267)")
+TEST("slib - SGL's DXIL of an entry that takes the draw's start and reads none declares no block of it (EMIT-271)")
 {
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
@@ -147,7 +147,7 @@ constexpr auto k_inline_beside = cc::string_view("@inline binding tuning:\n"
 }
 } // namespace
 
-TEST("slib - an entry reading its @inline block and the draw's start binds both blocks of space 9 apart (EMIT-267)")
+TEST("slib - an entry reading its @inline block and the draw's start binds both blocks of space 9 apart (EMIT-271)")
 {
 #ifndef CC_OS_WINDOWS
     SKIP("a DXIL compile reflects through the Windows SDK's d3d12shader.h, which the Linux DXC release does not ship");

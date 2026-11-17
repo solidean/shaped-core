@@ -330,7 +330,7 @@ private:
         auto options = cc::vector<sgl::check::option_value>();
         auto device_features = sgl::check::feature_set();
         auto weakens_float = false;
-        auto native_line_table = false;
+        auto native_debug_info = sgl::emit::debug_info::none;
         auto mesh = sgl::emit::mesh_form::native;
         auto polyfill_vertex = cc::string();
         auto polyfill_task = cc::string();
@@ -348,9 +348,11 @@ private:
                 weakens_float = o.value == "true";
                 continue;
             }
-            if (o.name == slib::k_native_line_table_option)
+            if (o.name == slib::k_native_debug_info_option)
             {
-                native_line_table = o.value == "true";
+                native_debug_info = o.value == "full"  ? sgl::emit::debug_info::full
+                                  : o.value == "lines" ? sgl::emit::debug_info::lines
+                                                       : sgl::emit::debug_info::none;
                 continue;
             }
             if (o.name == slib::k_mesh_form_option)
@@ -428,7 +430,7 @@ private:
              .weakens_float = weakens_float,
              .device_features = device_features,
              .native = native,
-             .native_line_table = native_line_table,
+             .native_debug_info = native_debug_info,
              .mesh = mesh,
              .polyfill_vertex = polyfill_vertex,
              .polyfill_control = polyfill_control,
@@ -499,7 +501,7 @@ private:
         }
         for (auto const& b : emitted.bindings)
         {
-            // a reserved slot is an nvapi fill's (EMIT-265) or the root-constant fill's draw start (EMIT-267), neither of
+            // a reserved slot is an nvapi fill's (EMIT-265) or the root-constant fill's draw start (EMIT-271), neither of
             // which slib asks for: sg's backends lay out neither, so a pipeline built without it would run with nothing
             // covering what the code declares
             if (b.is_reserved)

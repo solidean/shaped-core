@@ -127,7 +127,7 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
                      .diagnostics = true,
                      .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
                      .native = sgl::emit::native_route::prefer,
-                     .native_line_table = line_table});
+                     .native_debug_info = line_table ? sgl::emit::debug_info::lines : sgl::emit::debug_info::none});
             };
             auto const on_dx12 = compile(sgl::emit::target::hlsl_dx12);
             if (on_dx12.has_value() && !on_dx12.value().dxil.empty())

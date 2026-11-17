@@ -306,7 +306,8 @@ struct flattener
     /// `type` as the current frame's bindings make it: a generic body names its type parameters, and the tree never does.
     [[nodiscard]] type_id concrete(type_id type);
 
-    local_id add_local(local_kind kind, cc::string_view desired, type_id type);
+    /// `written` is the name of the declaration the local stands for, empty for one this pass introduces (EMIT-267).
+    local_id add_local(local_kind kind, cc::string_view desired, type_id type, cc::string_view written = {});
 
     /// The names of `entry.labels`, which are unique among the labels alone.
     name_mint label_names;

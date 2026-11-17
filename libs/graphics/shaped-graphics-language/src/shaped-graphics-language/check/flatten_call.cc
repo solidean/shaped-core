@@ -619,7 +619,7 @@ void sgl::check::impl::flattener::bind_parameter(parameter const& p, flat_expr_i
         current()->bound.push_back({.where = where, .literal = value});
     else
     {
-        auto const local = add_local(local_kind::let, p.name, x.type);
+        auto const local = add_local(local_kind::let, p.name, x.type, p.name);
         add_stmt(x.from, flat_let{.local = local, .value = value});
         current()->bound.push_back({.where = where, .local = local});
     }
@@ -744,7 +744,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
             bound.push_back({.where = where, .literal = pin_place(argument)});
         else
         {
-            auto const local = add_local(local_kind::let, parameters[i].name, x.type);
+            auto const local = add_local(local_kind::let, parameters[i].name, x.type, parameters[i].name);
             add_stmt(x.from, flat_let{.local = local, .value = argument});
             bound.push_back({.where = where, .local = local});
             argument_lets.push_back(local);

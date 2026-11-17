@@ -348,7 +348,7 @@ A host targeting 6.6 asks the `root_constant` fill of `draw_start` and the `none
 An `nvapi` fill lists one slot no binding declares, `g_NvidiaExt`, as `is_reserved` at space 13 and register 0: NVAPI's, a structured buffer of `stride` 256 with a counter.
 The host covers it as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot on its device (EMIT-265).
 Its `reserved` is `reserved_slot::nvapi_extension`.
-Under the `root_constant` fill a vertex entry point that takes the draw's start lists another, `sgl_draw_start` (EMIT-267).
+Under the `root_constant` fill a vertex entry point that takes the draw's start lists another, `sgl_draw_start` (EMIT-271).
 It is `is_reserved` with `reserved_slot::draw_start`, at space 9 and register 1, an 8-byte block.
 The host lays it out as two 32-bit root constants and writes the draw's first vertex and first instance there before every direct draw: an indexed draw's base vertex, not its first index.
 It refuses an indirect draw of a pipeline whose stages list it.

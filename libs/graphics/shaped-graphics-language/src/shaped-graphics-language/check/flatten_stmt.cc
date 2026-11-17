@@ -458,11 +458,12 @@ void sgl::check::impl::flattener::flatten_looped_for(origin from,
     auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
     auto const int_type = is_valid(first) ? entry.at(first).type : type_id::none;
     auto const walk = take_walk();
+    auto const written = !walk.has_value() && n != nullptr ? c.text_of(file(), n->where) : cc::string_view();
     auto const index = add_local(local_kind::index,
                                  walk.has_value() ? cc::string_view("k")
                                  : n != nullptr   ? c.text_of(file(), n->where)
                                                   : cc::string_view("i"),
-                                 int_type);
+                                 int_type, written);
     current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)},
                                 .local = index,
                                 .literal = walk.has_value()
@@ -637,8 +638,8 @@ void sgl::check::impl::flattener::flatten_inclusive_for(origin from,
     auto const outer = cc::move(block);
     block = {};
     auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
-    auto const index
-        = add_local(local_kind::var, n != nullptr ? c.text_of(file(), n->where) : cc::string_view("i"), int_type);
+    auto const index = add_local(local_kind::var, n != nullptr ? c.text_of(file(), n->where) : cc::string_view("i"),
+                                 int_type, n != nullptr ? c.text_of(file(), n->where) : cc::string_view());
     add_stmt(from, flat_var{.local = index, .value = local_ref(low, where)});
     current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
 
@@ -809,7 +810,7 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
         }
         // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
         auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let, c.text_of(file(), name->where),
-                                     tables().type_at(let->pattern));
+                                     tables().type_at(let->pattern), c.text_of(file(), name->where));
         // CHK-341: a `let mut` of `undefined()` is that local, with nothing to copy
         auto const is_undefined
             = ast::is_valid(let->value) && tables().target_at(let->value).kind == target_kind::undefined_value;

@@ -278,7 +278,7 @@ void writer::declare_handles()
                              .upper = lower,
                              .range = 1});
     }
-    // EMIT-128, EMIT-267: `ConstantBuffer<sgl_draw_start_block> sgl_draw_start` at `b1, space9`, the draw's start the
+    // EMIT-128, EMIT-271: `ConstantBuffer<sgl_draw_start_block> sgl_draw_start` at `b1, space9`, the draw's start the
     // host writes as root constants; no global of the program, so its handle stands past theirs as NVAPI's does
     if (reads_draw_start)
     {

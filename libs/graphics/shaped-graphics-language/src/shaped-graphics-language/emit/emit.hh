@@ -142,6 +142,17 @@ enum class sgl::emit::native_route : sgl::u8
     require,
 };
 
+/// What the native route writes of the `.sgl` source beside its program (EMIT-257).
+enum class sgl::emit::debug_info : sgl::u8
+{
+    /// Nothing: the binary is what it is without the source.
+    none,
+    /// Each operation's line and the sources it names, for a debugger to step.
+    lines,
+    /// The lines, and each source variable with its type and scope, for a debugger to show.
+    full,
+};
+
 /// What an emit writes beside the text itself; the default writes no line table, no `#line` and no diagnostics.
 struct sgl::emit::options
 {
@@ -165,8 +176,8 @@ struct sgl::emit::options
     /// How `hlsl-vulkan` and `hlsl-dx12` are written: the text for DXC, or SPIR-V and DXIL from SGL's own layer (ir/ir.hh),
     /// with no compiler behind it.
     native_route native = native_route::text;
-    /// Writes each operation's `.sgl` line into the native route's binary (EMIT-257); `files` must hold the sources.
-    bool native_line_table = false;
+    /// What the native route's binary carries of the source (EMIT-257); anything but `none` needs `files`.
+    debug_info native_debug_info = debug_info::none;
     /// A mesh entry point as one half of its polyfill rather than as a mesh stage, and a pixel entry point as the one
     /// that follows the vertex half; every other entry ignores it.
     mesh_form mesh = mesh_form::native;
@@ -220,7 +231,7 @@ struct sgl::emit::emitted_text
     /// (EMIT-265), and the text includes `nvHLSLExtns.h`.
     bool writes_nvapi = false;
     /// dx12 under the `root_constant` fill of `draw_start`: the entry point takes the draw's start, so the output declares
-    /// the block `sgl_draw_start` at `b1, space9`, which the host writes (EMIT-128, EMIT-267); and whether its body reads
+    /// the block `sgl_draw_start` at `b1, space9`, which the host writes (EMIT-128, EMIT-271); and whether its body reads
     /// the start, which is when the host must write it.
     bool declares_draw_start = false;
     bool reads_declared_draw_start = false;

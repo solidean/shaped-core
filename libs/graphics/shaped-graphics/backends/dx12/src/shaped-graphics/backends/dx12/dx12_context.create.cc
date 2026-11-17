@@ -13,6 +13,7 @@
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 #include <shaped-graphics/context/gpu_selector.hh>
+#include <shaped-graphics/context/native_debug_info.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
 #include <d3d12sdklayers.h>
@@ -801,7 +802,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_withhold_binding_arrays = config.withhold_binding_arrays;
     ctx->_withhold_primitive_index = config.withhold_primitive_index;
     ctx->_native_dxil = config.native_dxil;
-    ctx->_native_line_tables = config.native_line_tables;
+    ctx->_native_debug_info = sg::native_debug_info_from_environment(config.native_debug_info);
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
 

@@ -53,11 +53,17 @@ An indexed strip runs `prelude/geometry.sgl`'s `sg_geometry_strip_scan` first, w
 sg carries the scan on the pipeline, and metal dispatches it outside the pass before the stage, which splits the mesh route's pass for that draw alone.
 Four GPU tests on an M4: a triangle strip culled to show each triangle winds alike, an indexed strip with a restart in 16 and 32 bits, the primitive ids past it, and a line strip.
 
+2026-11-17: the strip scan is one workgroup of 256, no longer one thread, with two tree scans over each chunk of 256 windows.
+The windows that make a primitive are summed into ids, the restarts' positions folded by max into parities, and both carried to the next chunk.
+`geometry-polyfill-benchmark.cc`'s indexed strip, 512 rows of 1024 triangles restarted between rows, on an M4, 10 frames: one draw 595 to 59 ms by the compute route and 576 to 51 ms by the mesh route.
+Over 256 draws, 664 to 232 ms and 655 to 229 ms: every indexed strip draw splits the pass for its scan, by either route, so it costs what the compute route's 256 draws do.
+`sg - an indexed strip's primitive ids and windings hold past one workgroup of the strip scan` checks every pixel's id over 33 chunks, culled and not; dropping the carried restart fails it.
+
 ## Still open
 
 - **dx12 and vulkan draw it**, beside their native stage, so the two images can be compared and the benchmark run: a Windows machine's work.
   The compute half's layout twin needs the `sg_geometry_*` slots there, as the mesh polyfill's holds `sg_mesh_output`.
 - **webgpu draws it**, which needs `buffer_usage::readonly_buffer` on a vertex and an index buffer a polyfilled pipeline reads, since WebGPU binds no other as storage.
-- **The strip scan is one thread**, as the tessellation polyfill's scan is; a parallel scan of the restarts is the faster form, once measured.
+- **The strip scan is one workgroup**: about 4 ms of an M4's frame for half a million windows; a scan across workgroups is next, if a scene needs it.
 - **WebGPU's storage buffers**: the geometry stage reads `sg_geometry_strip` beside the other seven entries, one more against WebGPU's default of eight a stage.
 - Whether `vertex_index` on an indexed draw matches D3D's and vulkan's, which differ on the vertex offset.

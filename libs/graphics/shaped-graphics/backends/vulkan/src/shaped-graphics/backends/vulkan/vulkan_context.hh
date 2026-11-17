@@ -70,9 +70,9 @@ struct sg::backend::vulkan::vulkan_config
     /// Off by default, since keeping them costs more at pipeline creation than the statistics do.
     bool capture_driver_representations = false;
 
-    /// SGL's own SPIR-V carries each operation's `.sgl` line and the sources it names, for RenderDoc (EMIT-257).
+    /// What SGL's own SPIR-V carries of the source, for RenderDoc (EMIT-257); `SC_SG_NATIVE_DEBUG_INFO` overrides it.
     /// It changes no instruction, only the module's size, and does nothing for what DXC compiles.
-    bool native_line_tables = false;
+    sg::native_debug_info native_debug_info = sg::native_debug_info::none;
 
     /// Additionally enable the layer's *synchronization* validation, which tracks every resource access across
     /// submissions and reports hazards no other check can see — a read racing an earlier submission's write.
@@ -367,7 +367,7 @@ public:
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_spirv() const override { return _native_spirv; }
     [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
-    [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
+    [[nodiscard]] sg::native_debug_info native_debug_info() const override { return _native_debug_info; }
 
     /// Vulkan has every stage sg models, and most of the rest are device facts.
     [[nodiscard]] bool supports(sg::feature f) const override
@@ -1060,7 +1060,8 @@ public:
     /// `VK_NV_partitioned_acceleration_structure`, enabled with its entry points loaded.
     bool _partitioned_tlas = false;
     bool _native_spirv = false;
-    bool _native_line_tables = false; // vulkan_config::native_line_tables
+    sg::native_debug_info _native_debug_info
+        = sg::native_debug_info::none; // vulkan_config::native_debug_info, or the environment
     /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.
     bool _mesh_shader = false;
     PFN_vkCmdDrawMeshTasksEXT _cmd_draw_mesh_tasks = nullptr;

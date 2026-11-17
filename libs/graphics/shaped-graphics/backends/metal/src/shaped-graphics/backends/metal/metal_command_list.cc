@@ -1852,7 +1852,10 @@ void metal_command_list::bind_geometry_strip(sg::impl::geometry_polyfill_draw co
     auto* const encoder = compute_encoder();
     encoder->setComputePipelineState(scan->state());
     encoder->setArgumentTable(table);
-    encoder->dispatchThreads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+    // one workgroup, which walks every window
+    auto const size = scan->workgroup_size();
+    encoder->dispatchThreads(MTL::Size(NS::UInteger(size.x), 1, 1),
+                             MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
     if (_bound_compute != nullptr)
         encoder->setComputePipelineState(_bound_compute->state());
     // the stage reads what the scan wrote, after it

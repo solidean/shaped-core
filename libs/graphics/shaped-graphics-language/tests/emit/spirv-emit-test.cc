@@ -388,7 +388,7 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
                          .diagnostics = true,
                          .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
                          .native = sgl::emit::native_route::prefer,
-                         .native_line_table = true});
+                         .native_debug_info = sgl::emit::debug_info::lines});
                     REQUIRE(lined.has_value());
                     CHECK(validates(lined.value().spirv))
                         .dump("file", file)

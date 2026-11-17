@@ -489,6 +489,7 @@ if(SC_BUILD_TESTS)
         tests/check/subgroup-check-test.cc
         tests/check/image-check-test.cc
         tests/check/case-check-test.cc
+        tests/check/source-name-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
@@ -593,7 +594,12 @@ if(SC_BUILD_TESTS)
         tests/samples/matrices-sample-test.cc
         tests/samples/samples-test.cc
     )
-    sc_nexus_binary(shaped-graphics-language-test KINDS tests)
+    # Debug runs the compiler an order of magnitude slower, where the binary takes over two minutes against 14 s.
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        sc_nexus_binary(shaped-graphics-language-test KINDS tests TIMEOUT 300)
+    else()
+        sc_nexus_binary(shaped-graphics-language-test KINDS tests)
+    endif()
 
     # The spec's `sgl` fences are test input, read from the source tree so an edited example needs no reconfigure.
     sc_target_source_paths(shaped-graphics-language-test

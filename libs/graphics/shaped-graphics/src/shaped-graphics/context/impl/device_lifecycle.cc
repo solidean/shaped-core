@@ -1,5 +1,7 @@
 #include "device_lifecycle.hh"
 
+#include "gpu_capture.hh"
+
 #include <clean-core/common/assert.hh>
 
 #include <shared_mutex>
@@ -26,6 +28,8 @@ sg::impl::device_lifecycle_hold::device_lifecycle_hold()
               "device lifecycle lock");
     lifecycle_lock().lock();
     _owns = true;
+    // a capture tool sees only the devices created after it loaded
+    attach_gpu_capture();
 }
 
 sg::impl::device_lifecycle_hold::~device_lifecycle_hold()

@@ -62,7 +62,7 @@ struct slib::shader_binding_group
 /// Reserving it deletes the argument, the collision it could name, and the class of mistake at once: a group
 /// numbered 9 is refused instead, which is the one way the two could still meet.
 /// `b1` of it is SGL's: the draw's start a dx12 entry point reads under the `root_constant` fill of `draw_start`
-/// (SGL's EMIT-267), which slib never asks for and never lays out.
+/// (SGL's EMIT-271), which slib never asks for and never lays out.
 namespace slib
 {
 inline constexpr u32 inline_constants_space = 9;
