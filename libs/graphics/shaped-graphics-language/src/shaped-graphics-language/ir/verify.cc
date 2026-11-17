@@ -53,6 +53,8 @@ enum class shape : u8
     array_length,
     stage_load,
     stage_store,
+    /// A variable's description, which gives nothing (EMIT-267).
+    debug,
     atomic,
     atomic_store,
     no_result,
@@ -145,6 +147,8 @@ constexpr shape k_shapes[] = {
     shape::array_length,        // array_length
     shape::stage_load,          // stage_load
     shape::stage_store,         // stage_store
+    shape::debug,               // debug_value
+    shape::debug,               // debug_declare
     shape::atomic,              // atomic_load
     shape::atomic_store,        // atomic_store
     shape::atomic,              // atomic_exchange
@@ -523,7 +527,12 @@ private:
             auto const role = operand_role(inst.code, k);
             if (role == operand::block && !is_block(operands[k]))
                 return wrong("operand {} is no block", k);
-            if (role != operand::value)
+            if (k == 0 && is_debug(inst.code) && operands[k] >= u32(_p.debug_variables.size()))
+                return wrong("names variable {}, of {}", operands[k], _p.debug_variables.size());
+            // a debug operand of none is a variable optimized out (EMIT-267)
+            if (role == operand::debug && !is_valid(value_ref(operands[k])))
+                continue;
+            if (!names_a_value(role))
                 continue;
             auto const v = value_ref(operands[k]);
             if (!is_valid(v))
@@ -731,9 +740,10 @@ private:
     {
         auto const operands = _p.operands_of(i);
         auto const s = k_shapes[isize(i.code)];
-        auto const gives_nothing = s == shape::store || s == shape::stage_store || s == shape::atomic_store
-                                || s == shape::no_result || s == shape::image_write || s == shape::branch
-                                || s == shape::branch_conditional || s == shape::switch_ || s == shape::leaves;
+        auto const gives_nothing = s == shape::store || s == shape::stage_store || s == shape::debug
+                                || s == shape::atomic_store || s == shape::no_result || s == shape::image_write
+                                || s == shape::branch || s == shape::branch_conditional || s == shape::switch_
+                                || s == shape::leaves;
         if (gives_nothing)
         {
             if (gives_value(i))
@@ -771,6 +781,15 @@ private:
         case shape::any_result:
         case shape::no_result:
         case shape::leaves:
+            return;
+        case shape::debug:
+            need_count(operands, i.code == op::debug_value ? 3 : 2);
+            if (!_failure.empty())
+                return;
+            // `state_constant_tables` may have made the local a table, which holds the variable as well
+            if (i.code == op::debug_declare && is_valid(value_ref(operands[1])) && !is_local(value_ref(operands[1]))
+                && !is_global(value_ref(operands[1])))
+                return wrong("declares a variable in what is no local and no table");
             return;
         case shape::real:
             if (!is_real(i.type))

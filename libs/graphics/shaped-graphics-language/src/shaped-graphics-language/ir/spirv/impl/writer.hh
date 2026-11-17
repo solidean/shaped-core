@@ -34,7 +34,7 @@ private:
             return _globals + index_of(v);
         if (is_local(v))
             return _locals + index_of(v);
-        return _instructions + u32(v);
+        return _instruction_ids[u32(v)];
     }
     [[nodiscard]] u32 id_of_raw(u32 raw) const { return id_of(value_ref(raw)); }
 
@@ -139,6 +139,9 @@ private:
     u32 _globals = 0;
     u32 _locals = 0;
     u32 _instructions = 0;
+    /// Parallel to `_p.instructions`: each one's id, counted past the debug operations, which take none, so describing
+    /// variables moves no other id (EMIT-267).
+    cc::vector<u32> _instruction_ids;
     u32 _blocks = 0;
     u32 _glsl = 0;
     /// The entry point, and the function the program is written as, which only a control stage tells apart.

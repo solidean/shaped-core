@@ -149,6 +149,9 @@ private:
     void once_(check::flat_once const& s);
     void switch_(check::flat_switch const& s);
     void declare(check::local_id id, flat_expr_id value, bool is_mut);
+    /// EMIT-267: states that the source's local `id` holds `held`, a value, or is the IR local `held` where
+    /// `is_variable`; nothing where the compile asked for no variables or the source wrote no such local.
+    void describe(check::local_id id, value_ref held, bool is_variable);
     void assign(check::flat_assign const& a);
     void assign_swizzle(check::flat_member const& place_of_it, flat_expr_id value);
 
@@ -244,6 +247,8 @@ private:
     /// Parallel to `_e.locals`: an immutable local's value, or a mutable one's variable.
     cc::vector<value_ref> _locals;
     cc::vector<bool> _is_variable;
+    /// Parallel to `_e.locals`: its position in `program::debug_variables`, or `k_no_element` before it is described.
+    cc::vector<u32> _variable_of;
     /// Parallel to `_e.locals`: the first element of a geometry or tessellation parameter, or `k_no_element`.
     cc::vector<u32> _parameter_elements;
     /// What a `break` and a `continue` reach, innermost last.

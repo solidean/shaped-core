@@ -230,6 +230,8 @@ A `discard` is an operation with an effect and no terminator, so a pass keeps it
 A binding array is one global, and an `access_chain` picks the element, so DXIL makes that element's handle where the chain stands.
 `ir::write_spirv` ends the first, whose writer stands in `ir/spirv/`, and `ir::write_dxil` the second, whose backend stands in `ir/dxil/`.
 The optimizing passes stand in `ir/`, on values as they are, so each keeps every operation's statement and guarantee: `ir/passes.hh`, with `ir::simplify` beside it.
+At `full` (EMIT-267) lowering writes `debug_value` and `debug_declare` for each local the source wrote, and `construct_ssa` turns a promoted local's stores into values.
+Their operand has the role `operand::debug`: a use count reads `value` alone, so no pass decides differently, and a rewrite follows it through `names_a_value`.
 `ir::simplify` and `ir::flatten_branches` each take a `control_flow`, and keep structured control flow under `structured`.
 There a selection `simplify` decides branches to one side and leaves the other unreachable, as SPIR-V allows, and `flatten_branches` folds only a selection whose arms head nothing.
 SPIR-V's route runs both so, and `ir::regroup_lanes`, which gathers the phis SSA made per lane back into one phi of the vector.

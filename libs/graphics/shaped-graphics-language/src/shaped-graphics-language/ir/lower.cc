@@ -20,6 +20,7 @@ lowering::lowering(emit::impl::plan const& plan, program& out) : _plan(plan), _m
     _constant_slots.resize_to_filled(256, 0u);
     _locals.resize_to_filled(_e.locals.size(), value_ref::none);
     _is_variable.resize_to_filled(_e.locals.size(), false);
+    _variable_of.resize_to_filled(_e.locals.size(), k_no_element);
     _parameter_elements.resize_to_filled(_e.locals.size(), k_no_element);
     _block_globals.resize_to_filled(plan.group_blocks.size(), value_ref::none);
     _resource_globals.resize_to_filled(plan.resources.size(), value_ref::none);
@@ -183,6 +184,7 @@ void lowering::declare_stage_inputs()
         auto const loaded = add(op::stage_load, raw, operands);
         auto const declared = value_type(_e.at(input.local).type);
         _locals[index_of(input.local)] = raw == declared ? loaded : add(op::bitcast, declared, {loaded});
+        describe(input.local, _locals[index_of(input.local)], false);
     }
 }
 
@@ -316,6 +318,7 @@ void lowering::for_(flat_for const& s)
     auto const end = expr(s.end);
     auto const counter = add_local(_int, _e.at(s.index).name);
     add(op::store, type_ref::none, {counter, first});
+    describe(s.index, counter, true);
 
     auto const header = new_block();
     auto const test = new_block();
@@ -446,6 +449,7 @@ void lowering::declare(local_id id, flat_expr_id value, bool is_mut)
             _out.constants.push_back({.type = type, .is_undefined = true});
             _locals[position] = constant_at(u32(_out.constants.size() - 1));
         }
+        describe(id, _locals[position], is_mut);
         return;
     }
     // an array is reached by an index, which only a variable can take
@@ -453,6 +457,7 @@ void lowering::declare(local_id id, flat_expr_id value, bool is_mut)
     {
         if (is_valid(value))
             _locals[position] = expr(value);
+        describe(id, _locals[position], false);
         return;
     }
     auto const variable = add_local(type, l.name);
@@ -462,6 +467,29 @@ void lowering::declare(local_id id, flat_expr_id value, bool is_mut)
         add(op::store, type_ref::none, {variable, expr(value)});
     else if (l.is_zeroed)
         add(op::store, type_ref::none, {variable, null_of(type)});
+    describe(id, variable, true);
+}
+
+void lowering::describe(local_id id, value_ref held, bool is_variable)
+{
+    auto const& l = _e.at(id);
+    if (!_out.describes_variables || l.source_name.empty() || !is_valid(held))
+        return;
+    auto const position = index_of(id);
+    if (_variable_of[position] == k_no_element)
+    {
+        _variable_of[position] = u32(_out.debug_variables.size());
+        _out.debug_variables.push_back({.name_first = add_name(l.source_name),
+                                        .name_size = u32(l.source_name.size()),
+                                        .type = value_type(l.type),
+                                        .statement = _statement,
+                                        .is_parameter = l.kind == check::local_kind::parameter});
+    }
+    u32 const operands[] = {_variable_of[position], u32(held), 0u};
+    if (is_variable)
+        add(op::debug_declare, type_ref::none, cc::span<u32 const>(operands, 2));
+    else
+        add(op::debug_value, type_ref::none, cc::span<u32 const>(operands, 3));
 }
 
 void lowering::assign(flat_assign const& a)

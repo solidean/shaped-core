@@ -308,6 +308,9 @@ void writer::lower_block(block_ref b)
     _rows.clear();
     for (auto i = block.first; i + 1 < block.first + block.count && _failure.empty(); ++i)
     {
+        // EMIT-267: a variable's description is not written yet, and is no row of the module
+        if (is_debug(_p.instructions[i].code))
+            continue;
         locate(_p.instructions[i]);
         operation(i);
     }

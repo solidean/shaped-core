@@ -267,6 +267,9 @@ private:
         for (auto i = _head[b]; i != _tail[b]; i = _next[i])
         {
             auto const& inst = _p.instructions[i];
+            // a variable's description costs nothing and decides nothing (EMIT-267)
+            if (is_debug(inst.code))
+                continue;
             if (inst.code == op::phi || !may_speculate(inst.code))
                 return false;
             cost += cost_of(inst);
@@ -601,10 +604,10 @@ private:
         if (last.code == op::branch)
         {
             auto const to = _p.operands[last.first];
-            // nothing but phis on the way to a block that has them
+            // nothing but phis on the way to a block that has them; a variable's description goes with the block
             auto only_phis = true;
             for (auto i = _head[b]; i != _tail[b] && only_phis; i = _next[i])
-                only_phis = _p.instructions[i].code == op::phi;
+                only_phis = _p.instructions[i].code == op::phi || is_debug(_p.instructions[i].code);
             if (!_structured && only_phis && thread_through(b, to))
                 return outcome::changed;
             if (i64(to) == b || _incoming[to] != 1 || to == 0)

@@ -249,7 +249,7 @@ private:
             auto const start = u32(operands.size());
             for (auto k = isize(0); k < held.size(); ++k)
             {
-                if (operand_role(copy.code, k) != operand::value)
+                if (!names_a_value(operand_role(copy.code, k)))
                 {
                     operands.push_back(held[k]);
                     continue;

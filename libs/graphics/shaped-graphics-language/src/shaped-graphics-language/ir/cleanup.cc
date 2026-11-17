@@ -173,9 +173,11 @@ void sgl::ir::remove_unused(program& p)
         auto const local = local_root_of(p, value_ref(p.operands_of(inst)[0]));
         return local >= 0 && !is_read[local];
     };
+    // a debug operation stays while it stands, and keeps nothing alive: its operand is no use (EMIT-267)
     for (auto const& block : p.blocks)
         for (auto i = block.first; i < block.first + block.count; ++i)
-            if (has_effect(p.instructions[i].code) && !is_unobserved(p.instructions[i]))
+            if ((has_effect(p.instructions[i].code) && !is_unobserved(p.instructions[i]))
+                || is_debug(p.instructions[i].code))
                 keep(i);
     while (!stack.empty())
     {
@@ -209,8 +211,14 @@ void sgl::ir::remove_unused(program& p)
             auto const& inst = p.instructions[i];
             auto* const operands = p.operands.data() + inst.first;
             for (auto k = isize(0); k < isize(inst.count); ++k)
-                if (operand_role(inst.code, k) == operand::value && is_operation(value_ref(operands[k])))
-                    operands[k] = place[index_of(value_ref(operands[k]))];
+            {
+                auto const role = operand_role(inst.code, k);
+                if (!names_a_value(role) || !is_operation(value_ref(operands[k])))
+                    continue;
+                // what a debug operation named is gone, so the variable reads as optimized out from here
+                auto const target = index_of(value_ref(operands[k]));
+                operands[k] = role == operand::debug && !is_live[target] ? u32(value_ref::none) : place[target];
+            }
             kept.push_back(inst);
         }
         block.first = start;
@@ -380,7 +388,7 @@ void sgl::ir::share_common_values(program& p)
                 auto* const operands = p.operands.data() + inst.first;
                 for (auto k = isize(0); k < isize(inst.count); ++k)
                 {
-                    if (operand_role(inst.code, k) != operand::value || !is_local(value_ref(operands[k])))
+                    if (!names_a_value(operand_role(inst.code, k)) || !is_local(value_ref(operands[k])))
                         continue;
                     if (inst.code == op::store && k == 0)
                         continue;
@@ -422,7 +430,7 @@ void sgl::ir::share_common_values(program& p)
             auto const& i = p.instructions[index];
             auto* const operands = p.operands.data() + i.first;
             for (auto k = isize(0); k < isize(i.count); ++k)
-                if (operand_role(i.code, k) == operand::value)
+                if (names_a_value(operand_role(i.code, k)))
                     operands[k] = current(operands[k]);
             if (!may_share(p, i, is_final[index]))
                 continue;
@@ -638,7 +646,7 @@ namespace
         auto const held = p.operands_of(inst);
         auto const first = u32(operands.size());
         for (auto k = isize(0); k < held.size(); ++k)
-            operands.push_back(operand_role(inst.code, k) == operand::value ? moved(held[k]) : held[k]);
+            operands.push_back(names_a_value(operand_role(inst.code, k)) ? moved(held[k]) : held[k]);
         inst.first = first;
         kept.push_back(inst);
     };

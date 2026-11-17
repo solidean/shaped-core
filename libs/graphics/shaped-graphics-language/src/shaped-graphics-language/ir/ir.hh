@@ -401,6 +401,14 @@ enum class sgl::ir::op : sgl::u16
     stage_load,
     /// Operands: a position in `program::stage_elements` as a literal, the value, then an index likewise.
     stage_store,
+    /// Operands: a position in `program::debug_variables` as a literal, the value, then the variable's first leaf it
+    /// gives as a literal (EMIT-267).
+    /// From here on the variable holds the value, at its leaves from that one; a value of `none` is optimized out.
+    /// Nothing reads it and its value is no use, `operand::debug`, so no other operation changes for it.
+    debug_value,
+    /// Operands: a position in `program::debug_variables` as a literal, then the local that holds the variable whole.
+    /// The local is no use either, so `construct_ssa` promotes it as it would without, and turns this into values.
+    debug_declare,
     // ---- atomics: operands are the pointer, then the values
     atomic_load,
     atomic_store,
@@ -806,6 +814,21 @@ struct sgl::ir::source_place
     u32 calls_count = 0;
 };
 
+/// A local the source wrote, as a debugger lists it (EMIT-267).
+struct sgl::ir::debug_variable
+{
+    /// A range of `program::names`: the name as written.
+    u32 name_first = 0;
+    u32 name_size = 0;
+    /// The type of its value, which a debug value gives whole or from a leaf on.
+    type_ref type = type_ref::none;
+    /// The statement that declares it, a position in the flat entry point's `stmts`: its line and the calls it was
+    /// inlined through name its scope.
+    u32 statement = 0xffffffffu;
+    /// An entry point's parameter, which a debugger lists apart from its locals.
+    bool is_parameter = false;
+};
+
 /// What a writer states of the `.sgl` lines behind its operations; empty unless the compile asked for it (EMIT-257).
 struct sgl::ir::line_table
 {
@@ -866,6 +889,10 @@ struct sgl::ir::program
     check::float_level guarantee = check::float_level::fast;
     /// The `.sgl` lines each writer states beside its operations, where the compile asked for them.
     line_table lines;
+    /// The source variables a debugger lists, which `debug_value` and `debug_declare` name; filled for `full` alone (EMIT-267).
+    cc::vector<debug_variable> debug_variables;
+    /// The compile asked for `full`: lowering describes each local the source wrote.
+    bool describes_variables = false;
     /// The payloads it is handed or traces with, each once; DXIL states them, as DXC does for its `[raypayload]`s.
     cc::vector<payload_annotation> payloads;
 
@@ -910,6 +937,8 @@ enum class sgl::ir::operand : sgl::u8
     value,
     block,
     literal,
+    /// A value or a local a debug operation names (EMIT-267): no pass counts it as read, and every rewrite follows it.
+    debug,
 };
 
 namespace sgl::ir
@@ -917,6 +946,18 @@ namespace sgl::ir
 
 /// What position `at` of an operation of `code` holds, so a pass can rewrite operands it does not otherwise know.
 [[nodiscard]] operand operand_role(op code, isize at);
+
+/// Whether an operand of `role` names a value: what a rewrite renumbers or replaces, where a use count reads `value` alone.
+[[nodiscard]] constexpr bool names_a_value(operand role)
+{
+    return role == operand::value || role == operand::debug;
+}
+
+/// Whether `code` describes a variable for a debugger and computes nothing (EMIT-267).
+[[nodiscard]] constexpr bool is_debug(op code)
+{
+    return code == op::debug_value || code == op::debug_declare;
+}
 
 /// Whether running `code` does something other than give a value, so an unread one still has to run.
 [[nodiscard]] bool has_effect(op code);

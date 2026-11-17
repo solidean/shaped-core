@@ -242,3 +242,52 @@ TEST("sgl native lines - every entry point of the repo's SGL changes no instruct
     CC_LOG_INFO("{} native compiles keep every instruction with their line table", compared);
     CHECK(compared >= (nx::is_thorough() ? 500 : 40));
 }
+
+TEST("sgl native lines - describing every variable changes no instruction against the lines alone (EMIT-267)",
+     nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/**"))
+{
+    auto files = sources_under(nx::source_path(SGL_SG_SHADERS_DIR));
+    files.push_back_range(sources_under(nx::source_path(SGL_SR_SHADERS_DIR)));
+    files.push_back_range(sources_under(nx::source_path(SGL_CORPUS_DIR)));
+    REQUIRE(!files.empty());
+
+    // every pass sees the debug operations, and `ir::verify` checks the program after each of them where asserts are on
+    auto const stride = nx::is_thorough() ? 1 : 8;
+    auto compared = 0;
+    for (auto i = isize(0); i < files.size(); i += stride)
+    {
+        auto const source = read_all(files[i]);
+        auto const all = sgl::compile_all_to_text({.source = source, .targets = {sgl::emit::target::hlsl_vulkan}});
+        if (all.has_error())
+            continue;
+        for (auto const& entry : all.value())
+            for (auto const target : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})
+            {
+                auto const request = [&](sgl::emit::debug_info level)
+                {
+                    return sgl::compile_to_text({.source = source,
+                                                 .source_name = files[i],
+                                                 .entry_point = entry.entry_point,
+                                                 .target = target,
+                                                 .native = sgl::emit::native_route::prefer,
+                                                 .native_debug_info = level});
+                };
+                auto const lines = request(sgl::emit::debug_info::lines);
+                auto const full = request(sgl::emit::debug_info::full);
+                auto const at = cc::format("{} {}", files[i], entry.entry_point);
+                CHECK(lines.has_value() == full.has_value()).context(at);
+                if (lines.has_error() || full.has_error())
+                    continue;
+                CHECK(lines.value().native_gap == full.value().native_gap).context(at);
+                if (lines.value().spirv.empty() && lines.value().dxil.empty())
+                    continue;
+                ++compared;
+                if (target == sgl::emit::target::hlsl_vulkan)
+                    CHECK(same<u32>(without_lines(full.value().spirv), without_lines(lines.value().spirv))).context(at);
+                else
+                    CHECK(same<byte>(part_of(full.value().dxil, "DXIL"), part_of(lines.value().dxil, "DXIL"))).context(at);
+            }
+    }
+    CC_LOG_INFO("{} native compiles keep every instruction with their variables described", compared);
+    CHECK(compared > 0);
+}

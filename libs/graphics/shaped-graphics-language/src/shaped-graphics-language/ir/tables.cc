@@ -278,7 +278,7 @@ private:
                 auto* const operands = _p.operands.data() + inst.first;
                 for (auto k = isize(0); k < isize(inst.count); ++k)
                 {
-                    if (operand_role(inst.code, k) != operand::value)
+                    if (!names_a_value(operand_role(inst.code, k)))
                         continue;
                     auto const v = value_ref(operands[k]);
                     if (is_operation(v))
