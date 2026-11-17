@@ -3,6 +3,8 @@ created: 2026-11-13
 refs:
   - file: libs/graphics/shaped-graphics/tests/differential/corpus/texture_reads.sgl
   - test: "sg differential - every corpus entry point computes on the GPU what SGL's interpreter says"
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-17T09:04Z
 ---
 
 # texture_reads' gradient sample is 2.4% off the interpreter on metal
