@@ -209,6 +209,9 @@ constexpr auto k_primitive_stages = cc::string_view(
 
 TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles at DXC's 6.6 profiles, every stage")
 {
+#ifndef CC_OS_WINDOWS
+    SKIP("a DXIL compile reflects through the Windows SDK's d3d12shader.h, which the Linux DXC release does not ship");
+#endif
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
