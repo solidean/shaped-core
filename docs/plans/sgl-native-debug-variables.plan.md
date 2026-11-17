@@ -54,10 +54,19 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 ## P3: The IR half, shared by both writers
 
 - [ ] P3.1 `program::debug_variables`: source name, source type, kind, declaring statement; filled for `full` only
-- [ ] P3.2 The line table's call frames name their function, so a scope is a function rather than a file
+  - Note: a minted name cannot be told apart from a written one, and pass-made locals are not all `temporary`: `check`, `ends_search`, autodiff's `x`, `result`, `dx`
+  - Note: so `flat_local` gains the name as written, set only where a declaration is flattened (P3.8)
+- [ ] P3.8 `flat_local::source_name`, empty for a local no source wrote; set at `let` and `var` statements, parameters, inlined parameter bindings, `for` counters
+  - Note: `flattener::add_local` in check/flatten.cc; parameters around flatten.cc:1006-1078, inlined bindings in flatten_call.cc:622 and 747
+- [x] P3.2 The line table's call frames name their function, so a scope is a function rather than a file
+  - Note: a frame is a `check::call_site`; its callee is `call_records[files[file].call_at(call)].callee`, through an instance's tables for a generic call
+  - Outcome: `source_line::function`, filled by `source_lines::origin_of`; `ir::line_table::functions` and `source_place::function`
+  - Note: a call inside a generic function's instance stands past the file's tables and names no function yet; its frame keeps the file's scope
 - [ ] P3.3 `op::debug_value` and `op::debug_declare`, with `ir::verify`, `dump` and `operand_role`
 - [ ] P3.4 Lowering writes them: a value at each source `let`, parameter and `for` counter, a declare at each `var`; temporaries none
+  - Note: an immutable `let` that holds no array is no IR local but a value (lower.cc, `_locals[position] = expr(value)`), so its value op stands there
 - [ ] P3.5 `construct_ssa` turns a promoted local's declare and stores into per-scalar `debug_value`s
+  - Note: ssa.cc splits a promoted local into scalar slots (`add_slots`, `write_whole`); a store's value op names its first slot
 - [ ] P3.6 Every pass treats a debug op as no use and no content
   - Note: `remove_unused`, `share_common_values`, `hoist_common_values`, `flatten_branches`, `simplify`, `regroup_lanes`, `chain_sums`, `state_constant_tables`
 - [ ] P3.7 Test: `full` against `lines` leaves every non-debug operation the same, over the repo's SGL
@@ -129,4 +138,5 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: Plan created from the issue and a design conversation; D1 to D4 decided.
 - 2026-11-17: Two red differential corpus entries fixed on the way to pushing P1, both ties a vendor breaks its own way.
 - 2026-11-17: P2 done: one level through SGL, slib and sg, and `SC_SG_NATIVE_DEBUG_INFO` (D6).
+- 2026-11-17: P3 started: its design notes in P3.1 to P3.5 and P3.8; P3.2 done, each line naming the function it stands in.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.

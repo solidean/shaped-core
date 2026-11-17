@@ -711,6 +711,8 @@ struct sgl::check::source_line
     /// -1 for no line at all.
     i32 file = -1;
     i32 line = 0;
+    /// The function whose body the line stands in, where `source_lines::origin_of` knows it (EMIT-267).
+    symbol_id function = symbol_id::none;
 
     constexpr bool operator==(source_line const&) const = default;
 };

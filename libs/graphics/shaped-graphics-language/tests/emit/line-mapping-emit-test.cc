@@ -80,6 +80,18 @@ TEST("sgl emit - an inlined body maps to its own line, and names the call it was
     CHECK(y.inlined_from[0].file == y.at.file);
 }
 
+TEST("sgl emit - a line names the function it stands in: an inlined one its callee, its call the entry point")
+{
+    auto const e = compile(k_scaled, target::hlsl_dx12, false);
+    auto const y = origin_of_text(e, "* 2.0");
+    auto const v = origin_of_text(e, "values[id.x + 1]");
+    REQUIRE(y.inlined_from.size() == 1);
+    CHECK(sgl::check::is_valid(y.at.function));
+    CHECK(sgl::check::is_valid(v.at.function));
+    CHECK(y.at.function != y.inlined_from[0].function);
+    CHECK(y.inlined_from[0].function == v.at.function);
+}
+
 TEST("sgl emit - `#line` names the SGL line in HLSL and MSL, once per statement whose line the compiler would miss")
 {
     for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
