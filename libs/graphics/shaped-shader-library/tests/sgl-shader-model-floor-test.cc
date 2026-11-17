@@ -221,6 +221,7 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
     auto const stride = nx::is_thorough() ? 1 : 4;
     auto stages = cc::vector<sgl::check::stage>();
     auto compiled = 0;
+    auto reads_draw_start = 0;
     auto listed_seen = cc::vector<bool>::create_filled(isize(sizeof(k_not_compiled) / sizeof(k_not_compiled[0])), false);
     auto const has = [](cc::span<sgl::check::stage const> stages, sgl::check::stage s)
     {
@@ -255,15 +256,10 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
         }
         for (auto const& entry : all.value())
         {
-            // an entry that takes the draw's start is refused under the root-constant fill, as shaped-graphics-language's
-            // tests hold; any other error is the sweep's to report
+            // the root-constant fill takes an entry that takes the draw's start (EMIT-128), so every entry compiles
             if (!entry.text.has_value())
             {
-                CHECK(entry.text.error().contains("asks the root-constant fill of draw_start, which is not written "
-                                                  "yet"))
-                    .dump("file", file)
-                    .dump("entry", entry.entry_point)
-                    .dump("error", entry.text.error());
+                CHECK(false).dump("file", file).dump("entry", entry.entry_point).dump("error", entry.text.error());
                 continue;
             }
             auto const& e = entry.text.value();
@@ -304,6 +300,20 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
                 continue;
             }
             auto const built = at(ssc::dxc::shader_model::sm_6_6);
+            // the draw's start a vertex entry reads is the block at `b1, space9`, which DXC reflects where SGL lists it
+            for (auto const& b : e.bindings)
+                if (b.reserved == sgl::reserved_slot::draw_start && b.is_used && built.has_value())
+                {
+                    ++reads_draw_start;
+                    auto reflected = 0;
+                    for (auto const& r : built.value().bindings)
+                        if (r.space == u32(b.group) && r.index == u32(b.slot))
+                        {
+                            ++reflected;
+                            CHECK(r.type == sg::binding_type::constants_buffer).dump("entry", entry.entry_point);
+                        }
+                    CHECK(reflected == 1).dump("file", file).dump("entry", entry.entry_point);
+                }
             // a ray-tracing stage that states its payload's access qualifiers says so, which 6.6 takes only with the flag
             if (e.stage >= sgl::check::stage::raygen && e.text.contains("[raypayload]"))
                 CHECK((e.dxc_args.size() == 1 && e.dxc_args[0] == "-enable-payload-qualifiers"))
@@ -320,7 +330,10 @@ TEST("slib - with no feature granted and the 6.6 fills, SGL's dx12 text compiles
     auto stage_names = cc::string();
     for (auto const s : stages)
         stage_names.appendf("{}{}", stage_names.empty() ? "" : ", ", sgl::check::stage_name(s));
-    CC_LOG_INFO("{} dx12 texts compiled at Shader Model 6.6, of {}", compiled, stage_names);
+    CC_LOG_INFO("{} dx12 texts compiled at Shader Model 6.6, of {}; {} read the draw's start from root constants",
+                compiled, stage_names, reads_draw_start);
+    // the repo's vertex shaders read the draw's start, so a sweep that met none of them took no fill
+    CHECK(reads_draw_start > 0);
     // the whole sweep meets every entry the list names, so none stands there that no longer fails
     if (nx::is_thorough())
         for (auto i = isize(0); i < listed_seen.size(); ++i)

@@ -61,6 +61,8 @@ struct slib::shader_binding_group
 /// number left to choose — and every block in the tree chose 9, by hand and by convention.
 /// Reserving it deletes the argument, the collision it could name, and the class of mistake at once: a group
 /// numbered 9 is refused instead, which is the one way the two could still meet.
+/// `b1` of it is SGL's: the draw's start a dx12 entry point reads under the `root_constant` fill of `draw_start`
+/// (SGL's EMIT-267), which slib never asks for and never lays out.
 namespace slib
 {
 inline constexpr u32 inline_constants_space = 9;
@@ -77,7 +79,8 @@ inline constexpr u32 bound_samplers_space = 10;
 ///
 /// Inline constants — dx12 root constants, Vulkan push constants — reach a shader through
 /// `pipeline_layout_description::inline_constants` rather than through a group.
-/// The attribute takes no arguments: the register is always `b0` and the space is `inline_constants_space`.
+/// The attribute takes no arguments: the register is always `b0` and the space is `inline_constants_space`, whose
+/// `b1` is SGL's draw start and no block of slib's.
 ///
 /// The block's layout is here, because the generator emits a C++ mirror of it and `sizeof` is then simply true
 /// rather than asserted by hand.

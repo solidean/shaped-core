@@ -327,6 +327,9 @@ Its snapshots are persistent groups too.
 The **dx12** backend implements the full chain.
 A `pipeline_layout` becomes the root signature, composed from its group layouts' descriptor tables and baked static samplers.
 A trailing 32-bit-constants root parameter is appended where the layout declares inline constants.
+Those are `b0, space9`; `b1, space9` is SGL's draw start under its `root_constant` fill, which sg never lays out.
+Its dx12 context requires Shader Model 6.8, whose shaders read the draw's start natively.
+See SGL's [reserved-bindings.md](../../../shaped-graphics-language/docs/reserved-bindings.md).
 A `binding_group` allocates a range in the single shader-visible descriptor heap and translates each `raw_view` into a native CBV/SRV/UAV; a dispatch binds each slot's table and runs.
 That heap is **split by lifetime**, and the two halves use different allocators because their hazard models differ:
 

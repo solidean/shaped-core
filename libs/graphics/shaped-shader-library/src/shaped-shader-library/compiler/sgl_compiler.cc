@@ -499,8 +499,9 @@ private:
         }
         for (auto const& b : emitted.bindings)
         {
-            // a reserved slot is an nvapi fill's (EMIT-265), which slib asks for nowhere: sg's backends lay out no NVAPI
-            // slot, so a pipeline built without it would run with nothing covering what the code declares
+            // a reserved slot is an nvapi fill's (EMIT-265) or the root-constant fill's draw start (EMIT-267), neither of
+            // which slib asks for: sg's backends lay out neither, so a pipeline built without it would run with nothing
+            // covering what the code declares
             if (b.is_reserved)
                 return cc::error(cc::format("{} declares {}, a slot sg lays out none of", emitted.entry_point, b.emitted));
             auto binding = binding_of(b, shader.format, shader.stage);
