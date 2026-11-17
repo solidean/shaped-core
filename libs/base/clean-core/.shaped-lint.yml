@@ -138,6 +138,7 @@ rules:
       - src/clean-core/common/assert.cc
       - src/clean-core/error/crash_handler.cc
       - src/clean-core/memory/allocation.cc
+      - src/clean-core/memory/mimalloc_resource.cc
       - src/clean-core/platform/console.cc
       - src/clean-core/platform/native.cc
 

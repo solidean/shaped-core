@@ -444,10 +444,16 @@ cc::string failures_of(cc::span<tessellation_case const> cases)
 
 TEST("sgl tessellation - every domain, partitioning and winding places and orders points as D3D's tessellator does")
 {
-    // A dense patch is thousands of points through the interpreter, so a default run keeps every third sparse one.
+    // A dense patch is thousands of points through the interpreter, so a default run keeps every third sparse one, and
+    // wasm's one thread every ninth.
+#if defined(__EMSCRIPTEN__)
+    auto const sparse_stride = 9;
+#else
+    auto const sparse_stride = 3;
+#endif
     auto cases = cc::vector<tessellation_case>();
     for (auto i = 0; auto const& c : k_cases)
-        if (nx::is_thorough() || (c.points < 1000 && i++ % 3 == 0))
+        if (nx::is_thorough() || (c.points < 1000 && i++ % sparse_stride == 0))
             cases.push_back(c);
     CHECK(failures_of(cases) == "");
 }

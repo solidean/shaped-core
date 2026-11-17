@@ -7,6 +7,8 @@ refs:
   - file: libs/base/clean-core/src/clean-core/memory/mimalloc_resource.cc
   - test: "sgl checked modules - behind a layer of the whole library*"
   - issue: bug-cc-mimalloc-wasm-threads
+closed: 2026-11-17
+resolution: fixed
 ---
 
 # On single-threaded wasm, mimalloc's arenas exhaust the 2 GB heap a growing vector should fit in
@@ -64,3 +66,14 @@ So mimalloc is a few percent ahead on wasm at best, behind on blocks of 4 KiB an
 ## Done when
 
 The WASM job's `shaped-graphics-language-test` passes with the default allocator, and the chosen allocator's behavior on wasm is recorded in docs/platforms.md.
+
+## Resolution
+
+Fixed in c3b1eb028: on wasm the default resource keeps blocks of at most 1 KiB in mimalloc and hands larger ones to emscripten's malloc.
+Tuning mimalloc did not fit, measured on the whole test binary:
+- emscripten's own build flags for its port (64 MiB arenas, 16 KiB slices) still failed a 14 MB request;
+- capping arena objects at 1 MiB, so larger ones came from emmalloc directly, failed requests of 1.8 MB.
+
+Routed, on emscripten-release: `bench-vdoc-loop` 8000 ops 167 ms, `versioned-document-test` ~858 ms, the other two as with mimalloc.
+`shaped-graphics-language-test` runs whole on emscripten-relwithdebinfo, 110.8 s routed against 116.5 s on emscripten's malloc alone.
+docs/platforms.md records the split.
