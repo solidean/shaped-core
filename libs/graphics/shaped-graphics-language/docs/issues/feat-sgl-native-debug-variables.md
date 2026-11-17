@@ -7,6 +7,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/impl/writer_lines.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
   - test: native-line-table-test
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-17T11:43Z
 ---
 
 # Full debug info from the native writers: variables, types and scopes, past the line table
