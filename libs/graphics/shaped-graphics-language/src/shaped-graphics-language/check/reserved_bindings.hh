@@ -312,6 +312,8 @@ inline constexpr reserved_binding k_reserved_bindings[] = {
 
 /// The acceleration members `sg_acceleration_addresses` holds the address of; a trace of a later one is a native gap.
 inline constexpr u32 k_acceleration_address_capacity = 16;
+/// The bytes of that block: an address of 8 bytes per member, two to each `uint4` (EMIT-272).
+inline constexpr i32 k_acceleration_address_bytes = i32(k_acceleration_address_capacity) * 8;
 
 /// A debug window's header, in words, and the records behind it (EMIT-183).
 inline constexpr i32 k_debug_cursor_word = 0;

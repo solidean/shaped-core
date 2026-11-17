@@ -342,6 +342,14 @@ Space 9 already holds what a host writes as root constants at an address the int
 The first vertex of an indexed draw is its base vertex because SGL's `@vertex_index` is vulkan's, the fetched index plus the base, which is what `SV_StartVertexLocation` holds on 6.8.
 A host that wrote the first index would draw the wrong vertices without any error, so the rule says it.
 
+## EMIT-272
+
+A host that lays out its own pipelines builds its layout from the slots a compile lists, and the address block was never listed.
+Such a host could not know to cover set 3, binding 22, or to fill it, and a trace would read garbage addresses without any error.
+It is listed as the output declares it, the text's way and SGL's own SPIR-V's, so the list stays what a reflection of the output would find.
+The position rule is stated because the host has nothing else to fill the block by: it is the plan's numbering, which sg's own layout follows too.
+slib passes the slot over rather than refusing it, as it refuses the draw start's, since sg's vulkan layout holds and fills this one wherever an acceleration member stands.
+
 ## EMIT-269
 
 A ray set sizes its payloads, but a payload in no ray set, a callable's parameter among them, was sized nowhere.

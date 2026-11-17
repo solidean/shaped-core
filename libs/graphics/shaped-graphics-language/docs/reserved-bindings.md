@@ -1,7 +1,7 @@
 # Reserved bindings
 
 A reserved binding is a resource no program declares and sg binds itself.
-A program cannot name one, and the host never hears of one.
+A program cannot name one, and the host never hears of one, but for `sg_acceleration_addresses`, which a compile lists for a host that lays out its own pipelines (EMIT-272).
 `sg_debug`, the window `print` and `assert` write into, is the first, and more are planned.
 
 ## The contract
@@ -66,6 +66,9 @@ That is how vulkan traces a partitioned tlas, which `VK_EXT_descriptor_buffer` h
 - The HLSL a DXC route compiles declares it as `cbuffer sg_acceleration_addresses_block`, and the conversion as inline SPIR-V, `[[vk::ext_instruction(4447)]]`, which DXC has no builtin for.
   An element of an array of structures still names its descriptor there.
 sg's vulkan layout holds it wherever the layout holds an acceleration member, since any package may compile to SGL's own SPIR-V.
+`emitted_source::bindings` lists it on `hlsl-vulkan` with `is_reserved` and `reserved_slot::acceleration_addresses`, set 3, binding 22 and 128 bytes, wherever the output declares it (EMIT-272).
+That is for a host that lays out its own pipelines: it covers the block and fills each address at the position EMIT-272 states.
+slib passes the slot over, since sg holds and fills it already, and no dx12 compile lists it: dx12 traces through the structure's descriptor.
 
 `sg_mesh_output` and `sg_mesh_input` are one buffer of words, which a polyfilled mesh stage's compute half writes and its vertex half reads back (CHK-524).
 The compute half also reads `sg_dispatch_grid`, the threads sg dispatched it in, to number its workgroups.

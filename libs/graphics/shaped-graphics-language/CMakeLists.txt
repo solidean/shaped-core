@@ -544,6 +544,7 @@ if(SC_BUILD_TESTS)
         tests/emit/compute-emit-test.cc
         tests/emit/shader-model-emit-test.cc
         tests/emit/draw-start-emit-test.cc
+        tests/emit/acceleration-addresses-emit-test.cc
         tests/emit/subgroup-emit-test.cc
         tests/emit/image-emit-test.cc
         tests/emit/case-emit-test.cc

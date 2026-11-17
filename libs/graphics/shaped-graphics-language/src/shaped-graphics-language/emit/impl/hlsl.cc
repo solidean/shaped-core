@@ -156,7 +156,7 @@ public:
         auto const position = acceleration_address_position(p, resource);
         if (!_is_vulkan || position >= check::k_acceleration_address_capacity)
             return {};
-        return cc::format("sg_acceleration_from_address(sg_acceleration_addresses[{}].{})", position / 2,
+        return cc::format("sg_acceleration_from_address({}[{}].{})", k_acceleration_addresses_array, position / 2,
                           position % 2 == 0 ? "xy" : "zw");
     }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
@@ -549,9 +549,10 @@ public:
         {
             auto const& at
                 = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(emit::target::hlsl_vulkan)];
-            out.appendf("[[vk::binding({}, {})]] cbuffer sg_acceleration_addresses_block\n{{\n"
-                        "    uint4 sg_acceleration_addresses[{}];\n}};\n\n",
-                        at.slot, at.group, check::k_acceleration_address_capacity / 2);
+            out.appendf("[[vk::binding({}, {})]] cbuffer {}\n{{\n"
+                        "    uint4 {}[{}];\n}};\n\n",
+                        at.slot, at.group, k_acceleration_addresses_block, k_acceleration_addresses_array,
+                        check::k_acceleration_address_capacity / 2);
             out += "[[vk::ext_instruction(4447)]] // OpConvertUToAccelerationStructureKHR\n"
                    "RaytracingAccelerationStructure sg_acceleration_from_address(uint2 address);\n\n";
         }

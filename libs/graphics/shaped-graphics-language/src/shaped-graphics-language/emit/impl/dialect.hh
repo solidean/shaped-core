@@ -146,6 +146,8 @@ struct written_text
 {
     cc::string text;
     cc::vector<line_origin> lines;
+    /// The body reads an acceleration member by its address, through `sg_acceleration_addresses` (EMIT-272).
+    bool reads_acceleration_by_address = false;
 };
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.

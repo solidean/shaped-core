@@ -2,6 +2,7 @@
 
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/payload_access.hh>
@@ -635,6 +636,18 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         {
             result.text = ir::dump(program);
             is_native = true;
+            // EMIT-272: SGL's own SPIR-V declares the address block once a trace reads it, so it reads what it declares
+            if (!is_dxil)
+            {
+                auto const& at = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(t)];
+                for (auto const& g : program.globals)
+                    if (g.kind == ir::global_kind::constants && g.set == at.group && g.binding == at.slot)
+                    {
+                        result.declares_acceleration_addresses = true;
+                        result.reads_acceleration_addresses = true;
+                        result.acceleration_addresses_global = cc::string(program.name_at(g.name_first, g.name_size));
+                    }
+            }
         }
         else if (sources.native == native_route::prefer)
             result.native_gap = gap.value();
@@ -652,6 +665,13 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         auto written = impl::write_text(plan, impl::dialect_of(t), sources);
         result.text = cc::move(written.text);
         result.lines = cc::move(written.lines);
+        // EMIT-272: vulkan's text declares the address block wherever the entry point lists an acceleration member
+        if (t == target::hlsl_vulkan && impl::holds_acceleration_member(plan))
+        {
+            result.declares_acceleration_addresses = true;
+            result.reads_acceleration_addresses = written.reads_acceleration_by_address;
+            result.acceleration_addresses_global = cc::string(impl::k_acceleration_addresses_block);
+        }
         // the DXIL writer states no subgroup size, so the range is the text's alone
         result.states_wave_size_range = plan.states_wave_size_range;
         if (t == target::hlsl_dx12)
@@ -678,6 +698,15 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         layout.fields.push_back({.name = cc::string("first_vertex"), .offset = check::k_draw_start_first_vertex_offset});
         layout.fields.push_back(
             {.name = cc::string("first_instance"), .offset = check::k_draw_start_first_instance_offset});
+        result.layouts.push_back(cc::move(layout));
+    }
+    // EMIT-272: sg's address block is no binding of the program either, and its one array stands at byte 0
+    if (result.declares_acceleration_addresses)
+    {
+        auto layout = emitted_layout{.global = result.acceleration_addresses_global};
+        layout.fields.push_back({.name = cc::string(is_native ? impl::k_acceleration_addresses_member
+                                                              : impl::k_acceleration_addresses_array),
+                                 .offset = 0});
         result.layouts.push_back(cc::move(layout));
     }
     // a pixel stage that writes images alone has no target struct at all (CHK-418)

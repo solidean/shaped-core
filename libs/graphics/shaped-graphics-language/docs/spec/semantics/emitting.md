@@ -736,6 +736,19 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   That is because `@vertex_index` is vulkan's `VertexIndex`, which counts the base vertex in, and D3D12's `SV_VertexID` of an indexed draw leaves it out.
   A draw from vertex 0 writes `{0, 0}` all the same, since a root constant nobody wrote is undefined.
   A host refuses an indirect draw of such a pipeline, since SGL describes no draw and cannot.
+* **EMIT-272** On `hlsl-vulkan`, an entry point whose output declares `sg_acceleration_addresses` lists it as one slot no binding declares ([why](why/emitting.md#emit-272)).
+  Every vulkan trace of SGL's reads its acceleration structure by device address from that block, pipeline traces and ray queries alike (the reserved bindings page).
+  It is `is_reserved`, with `reserved = reserved_slot::acceleration_addresses`, of kind `constant`, at group 3 and slot 22, vulkan's set and binding, and `block_size` 128.
+  `emitted` and `layouts` name it as the output does: the text's `cbuffer sg_acceleration_addresses_block`, its array `sg_acceleration_addresses` at offset 0.
+  SGL's own SPIR-V names the global `sg_acceleration_addresses` and its array `values`, at offset 0.
+  The text declares it wherever the entry point lists an acceleration member, and SGL's own SPIR-V only once a trace reads it; the slot is listed exactly there.
+  It is `is_used` where the code traces through it, so SGL's own SPIR-V never lists it unused.
+  The host fills it before every dispatch, draw and trace of a pipeline whose stages use it, with the device address of each acceleration member.
+  A member's position k counts the entry point's `bindings` of kind `acceleration_structure` and `count` 1, not reserved, by `group` and then by `slot`.
+  Its address is the `uint4` at k / 2, `.xy` for an even k and `.zw` for an odd one, each address's low word first.
+  16 positions fit: a trace of a later member, or of an element of a binding array of structures, reads its descriptor in the text and is a native gap in SGL's own SPIR-V.
+  `hlsl-dx12` traces through the structure's descriptor on both routes, and lists no such slot; nor does any other target.
+  sg lays the block out and fills it itself wherever a vulkan layout holds an acceleration member, so slib passes the slot over.
 * **EMIT-260** A hit's `cluster_id` is read only where the device builds a BLAS from clusters, `clustered_geometry`, and is -1 everywhere else.
   The prelude asks with `has`, so no program names the feature, and an entry point on any other device needs nothing of it.
   SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.

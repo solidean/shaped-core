@@ -498,6 +498,21 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                    .slot = check::k_draw_start_register,
                                    .is_used = emitted.reads_declared_draw_start,
                                    .block_size = check::k_draw_start_bytes});
+    // EMIT-272: every vulkan trace of SGL's reads its structure's address from a block sg lays out and fills, listed
+    // wherever the output declares it, and used where a trace reads it
+    if (emitted.declares_acceleration_addresses)
+    {
+        auto const& at = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(target)];
+        result.bindings.push_back({.name = "acceleration_addresses",
+                                   .emitted = emitted.acceleration_addresses_global,
+                                   .kind = described_member_kind::constant,
+                                   .is_reserved = true,
+                                   .reserved = reserved_slot::acceleration_addresses,
+                                   .group = at.group,
+                                   .slot = at.slot,
+                                   .is_used = emitted.reads_acceleration_addresses,
+                                   .block_size = check::k_acceleration_address_bytes});
+    }
     // EMIT-266: what the entry consulted, each with what this target offers for it
     for (auto i = isize(0); i < check::k_feature_count; ++i)
         if (auto const f = check::feature(i); e.consulted.has(f))

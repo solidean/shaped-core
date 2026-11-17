@@ -142,7 +142,7 @@ struct sgl::all_text_request
     check::core_fills core;
 };
 
-/// Which slot an `interface_binding` the program never declared is: one the host lays out itself, on dx12 alone.
+/// Which slot an `interface_binding` the program never declared is: one the host lays out itself.
 /// A host that knows none of them refuses every one it does not know, by `is_reserved`, which keeps it safe.
 enum class sgl::reserved_slot : sgl::u8
 {
@@ -157,6 +157,15 @@ enum class sgl::reserved_slot : sgl::u8
     /// first vertex at byte 0 and the first instance at byte 4, each a `uint`, which the host writes as root constants
     /// before every direct draw of the pipeline, and whose indirect draws it refuses.
     draw_start,
+    /// vulkan's `sg_acceleration_addresses` (EMIT-272): a block of `block_size` bytes, `uint4[8]`, which every trace of
+    /// SGL's on vulkan reads its acceleration structure's device address from, rather than its descriptor.
+    /// The host fills it before every dispatch, draw and trace that uses it, with each acceleration member's address.
+    /// A member's position k counts the `bindings` of kind `acceleration_structure` and `count` 1, not reserved, by
+    /// `group` and then by `slot`.
+    /// Its address is `uint4` k / 2, `.xy` for an even k and `.zw` for an odd one, each address's low word first.
+    /// 16 positions fit, and EMIT-272 says what a trace past them does.
+    /// sg lays it out and fills it itself wherever a layout holds an acceleration member.
+    acceleration_addresses,
 };
 
 /// One slot the text declares for the host to bind: a block of constants or a resource, with every fact its API needs.
@@ -173,14 +182,14 @@ struct sgl::interface_binding
     bool is_inline = false;
     /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
     bool is_file_sampler = false;
-    /// A slot no binding of the program declares, which the host lays out itself, at register `slot` of space `group`;
+    /// A slot no binding of the program declares, which the host lays out itself, at the address `group` and `slot` give;
     /// `reserved` says which.
     bool is_reserved = false;
     /// Which reserved slot it is; `none` exactly where `is_reserved` is false.
     reserved_slot reserved = reserved_slot::none;
     /// The group it is listed at, counted without the `@inline` binding, and its slot there.
-    /// -1 and 0 for the `@inline` block, -1 and its index for a file-scope sampler, and the dx12 space and register of
-    /// a reserved slot.
+    /// -1 and 0 for the `@inline` block, -1 and its index for a file-scope sampler, and a reserved slot's address on the
+    /// target: the dx12 space and register, or the vulkan set and binding.
     i32 group = -1;
     i32 slot = 0;
     /// A binding array's length, taking `count` consecutive slots from `slot`; 1 for everything else.

@@ -235,6 +235,13 @@ struct sgl::emit::emitted_text
     /// the start, which is when the host must write it.
     bool declares_draw_start = false;
     bool reads_declared_draw_start = false;
+    /// vulkan: the output declares `sg_acceleration_addresses`, every acceleration member's device address, which sg
+    /// lays out and fills (EMIT-272); and whether its code traces through it, which is when the host must fill it.
+    /// The text declares it wherever the entry point lists an acceleration member, SGL's own SPIR-V once a trace reads
+    /// it; `acceleration_addresses_global` is the global it is read through, as that output names it.
+    bool declares_acceleration_addresses = false;
+    bool reads_acceleration_addresses = false;
+    cc::string acceleration_addresses_global;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -251,7 +258,11 @@ struct sgl::emit::emitted_text
             && states_wave_size_range == rhs.states_wave_size_range
             && states_payload_qualifiers == rhs.states_payload_qualifiers && writes_nvapi == rhs.writes_nvapi
             && declares_draw_start == rhs.declares_draw_start
-            && reads_declared_draw_start == rhs.reads_declared_draw_start && ast::impl::is_equal(errors, rhs.errors);
+            && reads_declared_draw_start == rhs.reads_declared_draw_start
+            && declares_acceleration_addresses == rhs.declares_acceleration_addresses
+            && reads_acceleration_addresses == rhs.reads_acceleration_addresses
+            && acceleration_addresses_global == rhs.acceleration_addresses_global
+            && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

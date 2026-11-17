@@ -25,6 +25,11 @@ static_assert(check::k_draw_start_space == k_inline_constants_space);
 /// What the text names that block and its struct; the prefix `sgl_` is kept from programs, so no name of theirs is it.
 inline constexpr auto k_draw_start_global = cc::string_view("sgl_draw_start");
 inline constexpr auto k_draw_start_block = cc::string_view("sgl_draw_start_block");
+/// What vulkan's text names `sg_acceleration_addresses`'s block, which DXC reflects it by, and the array in it (EMIT-272).
+inline constexpr auto k_acceleration_addresses_block = cc::string_view("sg_acceleration_addresses_block");
+inline constexpr auto k_acceleration_addresses_array = cc::string_view("sg_acceleration_addresses");
+/// What SGL's own SPIR-V names the array's member of that block; its global is `k_acceleration_addresses_array`.
+inline constexpr auto k_acceleration_addresses_member = cc::string_view("values");
 /// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
 inline constexpr auto k_bound_samplers_space = 10;
 
