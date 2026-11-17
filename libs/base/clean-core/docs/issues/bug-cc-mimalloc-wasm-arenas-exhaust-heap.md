@@ -29,6 +29,29 @@ The heap has reached emscripten's default 2 GB `ALLOW_MEMORY_GROWTH` ceiling by 
 - A vector growing through 25–31 MB therefore needs a fresh arena at each step that the earlier, smaller ones cannot serve, and wasm memory never shrinks.
 - emscripten's malloc merges freed regions, which is why it fits.
 
+## What mimalloc buys on wasm
+
+Measured 2026-11-17 on `emscripten-release` (Node, one thread), same machine, the default resource with `SC_MIMALLOC` on and off.
+mimalloc's native lead does not carry over: about 4× faster than the system malloc on small blocks on Windows, roughly even on wasm.
+
+`bench-alloc - mimalloc vs system, full sweep` (alloc+free cycles, M/s, mimalloc against emscripten's malloc):
+
+| size | 16–128 B | 256 B | 512 B | 1 KiB | 4 KiB | 16 KiB | 64 KiB |
+|---|---|---|---|---|---|---|---|
+| mimalloc | 41–43 | 42.7 | 43.1 | 23.2 | 11.8 | 10.0 | 7.2 |
+| system | 40–43 | 30.6 | 20.5 | 20.0 | 20.6 | 20.8 | 20.6 |
+
+Whole workloads, mimalloc on → off:
+
+| workload | on | off |
+|---|---|---|
+| `bench-vdoc-loop` 200 / 2000 / 8000 ops | 8.61 / 42 / 169 ms | 8.78 / 43 / 174 ms |
+| `versioned-document-test`, two runs | 864 / 872 ms | 1000 / 914 ms |
+| `babel-data-test`, two runs | 119 / 120 ms | 114 / 115 ms |
+| `typed-geometry-test`, two runs | 3.0 / 2.9 s | 3.1 / 3.1 s |
+
+So mimalloc is a few percent ahead on wasm at best, behind on blocks of 4 KiB and up, and costs the heap blowup above.
+
 ## Options, for a decision
 
 - `SC_MIMALLOC` defaults to OFF on emscripten, as bug-cc-mimalloc-wasm-threads already advises for threaded builds; wasm gives up mimalloc's small-allocation speed.
