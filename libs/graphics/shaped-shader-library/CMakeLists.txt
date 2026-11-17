@@ -210,7 +210,12 @@ if(SC_BUILD_TESTS)
         tests/binding/binding_groups-test.cc
         tests/binding/wgsl_declarations-test.cc
     )
-    sc_nexus_binary(shaped-shader-library-test KINDS tests)
+    # Debug runs SGL and DXC an order of magnitude slower, where the binary takes about four minutes under cl.exe.
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        sc_nexus_binary(shaped-shader-library-test KINDS tests TIMEOUT 600)
+    else()
+        sc_nexus_binary(shaped-shader-library-test KINDS tests)
+    endif()
 
     # The binding corpus is one data file both parsers are checked against -- this one, and the build-time
     # generator's once it exists. Baked in at configure time so the test needs no path into the source tree,
