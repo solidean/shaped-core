@@ -1198,8 +1198,14 @@ TEST("slib - an HLSL pixel stage whose path ends in a discard compiles through D
          "    return float4(1.0, 1.0, 1.0, 1.0)\n",
          false},
     };
+    // a DXIL compile reflects through the Windows SDK's d3d12shader.h, which the Linux DXC release does not ship
+#ifdef CC_OS_WINDOWS
+    sgl::emit::target const targets[] = {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan};
+#else
+    sgl::emit::target const targets[] = {sgl::emit::target::hlsl_vulkan};
+#endif
     for (auto const& c : cases)
-        for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+        for (auto const t : targets)
         {
             auto const e = sgl::compile_to_text({.source = c.source, .entry_point = "ps", .target = t});
             REQUIRE(e.has_value()).dump("case", c.what).dump("error", e.has_error() ? e.error() : cc::string());
