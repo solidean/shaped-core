@@ -463,16 +463,7 @@ struct planner
 
     /// Post-order, so a struct stands after every struct it holds, which HLSL needs and WGSL does not mind.
     /// `report[hit_attributes]` as a name every target takes: `report_hit_attributes`, minted.
-    cc::string instance_name(type_id type)
-    {
-        // a closing bracket is dropped, since every one ends the name or stands before another
-        auto name = cc::string();
-        // a constant argument such as `-1.5` is spelled with what no identifier holds, so each such character is `_`
-        for (auto const c : p.m.name_of(type))
-            if (c != ']' && c != ' ')
-                name += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ? c : '_';
-        return p.names.mint(name);
-    }
+    cc::string instance_name(type_id type) { return p.names.mint(p.m.instance_identifier_of(type)); }
 
     void need(type_id type, struct_role role)
     {

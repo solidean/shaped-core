@@ -1827,6 +1827,10 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   The bare name in a type position is the template itself, open in its parameters, which a call deduces as it deduces a type parameter.
   So the constructor mirrors the parameters: `pair(1, 2.5)` is a `pair[int, float]`, and an array's length binds the value parameter its type names.
   `name[T, 4](…)` constructs that instance, whose parameters the call then needs no argument to say.
+* **CHK-530** A struct of a module named as an instance of a generic struct of that module is named is `duplicate-declaration` at the struct ([why](why/checking.md#chk-530)).
+  That is `struct pair_float` beside a use of `pair[float]`.
+  The instance's name is EMIT-179's, and its detail names both.
+  The program's own module is a module here, and a struct of another module than the template's is named apart (EMIT-268), so it stays allowed.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
   A call may state generic arguments first, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`, `blur[3](c)`.
   Each is a type, or a constant `int`, `uint`, `bool` or `float` for a value parameter; two constants are one argument when their bits are, with every NaN one.
@@ -1903,7 +1907,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 |---|---|
 | `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
-| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
+| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |

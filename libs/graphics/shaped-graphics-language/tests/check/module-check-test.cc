@@ -166,3 +166,29 @@ TEST("sgl check - a module's operator applies where the module is used, and its 
     // EMIT-133: a module's file-scope sampler shares the program's index space
     CHECK(reports_with(library, "use samplers\n") == "");
 }
+
+TEST("sgl check - a struct named as an instance of its own module's generic struct is named is refused (CHK-530)")
+{
+    // the description names `pair[float]` `pair_float` (EMIT-179), so a struct of that name beside it would be named alike
+    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\nfun f(p: pair[float]) -> float "
+                           "=> p.a\n")
+          == "duplicate-declaration user:[pair_float] struct pair_float is named as the instance pair[float] of a "
+             "generic "
+             "struct is, which the host names pair_float too\n");
+    // without the instance nothing names it twice
+    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\nfun f(p: pair[int]) -> int => "
+                           "p.a\n")
+          == "");
+
+    // a module's own pair, inside the module
+    cc::string_view const both[] = {"module view\nstruct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\n"
+                                    "fun f(p: pair[float]) -> float => p.a\n"};
+    CHECK(reports_with(both, "use view\n")
+          == "duplicate-declaration lib.0:[pair_float] struct pair_float is named as the instance pair[float] of a "
+             "generic struct is, which the host names pair_float too\n");
+    // a module's `view.pair_float` beside the program's own `pair[float]` is named apart, and stays allowed
+    cc::string_view const theirs[] = {"module view\nstruct pair_float:\n    x: int\n"};
+    CHECK(reports_with(theirs, "use view\nstruct pair[T]:\n    a: T\nfun f(p: pair[float], q: view.pair_float) -> "
+                               "float => p.a\n")
+          == "");
+}

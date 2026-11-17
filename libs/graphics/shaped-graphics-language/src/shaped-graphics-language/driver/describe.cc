@@ -25,11 +25,7 @@ cc::string host_spelling(check::checked_module const& m, check::type_id type)
     auto const& t = m.at(type);
     if (t.kind != check::type_kind::structure || !check::is_valid(t.generic))
         return cc::string(m.name_of(type));
-    auto result = cc::string();
-    for (auto const c : m.name_of(type))
-        if (c != ']' && c != ' ')
-            result += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ? c : '_';
-    return result;
+    return m.instance_identifier_of(type);
 }
 
 /// What kind of sampler `member` is to a layout: a static one says so by its settings, a bound one by its declaration.

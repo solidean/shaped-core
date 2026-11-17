@@ -665,6 +665,17 @@ cc::string sgl::check::checked_module::qualified_name_of(symbol_id id) const
     return module.empty() ? cc::string(at(id).name) : cc::format("{}.{}", module, at(id).name);
 }
 
+cc::string sgl::check::checked_module::instance_identifier_of(type_id id) const
+{
+    // a closing bracket is dropped, since every one ends the name or stands before another, and a constant argument
+    // such as `-1.5` is spelled with what no identifier holds, so each such character is `_`
+    auto result = cc::string();
+    for (auto const c : name_of(id))
+        if (c != ']' && c != ' ')
+            result += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ? c : '_';
+    return result;
+}
+
 // ---- number literals ------------------------------------------------------------------------------------------------
 
 namespace

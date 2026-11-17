@@ -543,6 +543,13 @@ An error is reported at its line in the body, under the instantiations that reac
 A generic that nothing instantiates would otherwise go unchecked, which the warning says; a `test` that calls it is how its author checks it with chosen arguments.
 The checked once, opaque rule this replaces let a body only hand a value of `A` on, which was enough for the prelude's traces and for nothing a program would write.
 
+## CHK-530
+
+The host names an instance of a generic struct by an identifier, `pair_float` for `pair[float]`, since a C++ struct cannot be named `pair[float]` (EMIT-179).
+A struct the program names `pair_float` beside it would be named alike in the description, and a host generating a type of each name would declare one twice or take one for the other.
+The target text mints its own names and never meets the clash, so the refusal is for the host alone; renaming the struct is the program's to do, and SGL picks no other name for either.
+Another module's struct is named `m.pair_float` there, so only one module's own names can clash.
+
 ## CHK-339
 
 A generic struct takes the parameters a function does, so one rule says what a type parameter and a value parameter are.

@@ -528,6 +528,41 @@ void checker::warn_uninstantiated_generics(isize first)
     }
 }
 
+void checker::judge_instance_names(isize first_symbol, isize first_type)
+{
+    // the instances first, which are few, each with the identifier the host names it by
+    struct named_instance
+    {
+        isize type;
+        cc::string identifier;
+    };
+    auto instances = cc::vector<named_instance>();
+    for (auto i = isize(0); i < out.types.size(); ++i)
+        if (auto const& t = out.types[i]; t.kind == type_kind::structure && is_valid(t.generic) && is_valid(t.symbol))
+            instances.push_back({.type = i, .identifier = out.instance_identifier_of(type_id(i))});
+    if (instances.empty())
+        return;
+    for (auto k = isize(0); k < out.symbols.size(); ++k)
+    {
+        auto const& s = out.symbols[k];
+        if (s.kind != symbol_kind::structure || s.state != symbol_state::checked || !ast::is_valid(s.declaration))
+            continue;
+        for (auto const& instance : instances)
+        {
+            if (s.name != instance.identifier || (instance.type < first_type && k < first_symbol)
+                || out.foreign_module_of(symbol_id(k)) != out.foreign_module_of(out.types[instance.type].symbol))
+                continue;
+            auto const* const d = ast_of(s.file).at(s.declaration).node.try_as<ast::struct_decl>();
+            if (d == nullptr || !d->type_parameters.empty())
+                continue;
+            report(diagnostic_kind::duplicate_declaration, s.file, d->name,
+                   cc::format("struct {} is named as the instance {} of a generic struct is, which the host names {} "
+                              "too",
+                              s.name, out.name_of(type_id(instance.type)), instance.identifier));
+        }
+    }
+}
+
 i32 checker::existing_function_instance(symbol_id function, cc::span<type_id const> bindings) const
 {
     if (bindings.empty())
