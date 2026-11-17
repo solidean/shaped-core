@@ -10,6 +10,8 @@ use diff_targets
     return {
         over = float4(p.uv.x, s, 1.0 - p.uv.y, alpha)
         sum = float4(s * 4.0, p.uv.x * 100.0, 0.001 * p.uv.y, alpha)
-        darkest = float4(p.uv.y, 1.0 - s, p.uv.x * p.layer, 0.5)
+        // rgb10a2 keeps two bits of alpha, where 0.5 is a tie each vendor rounds its own way; 0.1 is a 0 everywhere,
+        // and the min of any clear
+        darkest = float4(p.uv.y, 1.0 - s, p.uv.x * p.layer, 0.1)
         difference = float4(s, p.uv.x * 2.0, 3.0 - p.uv.y, alpha)
     }

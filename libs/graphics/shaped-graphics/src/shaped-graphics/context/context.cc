@@ -12,6 +12,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/impl/gpu_capture.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
@@ -288,6 +289,7 @@ void context::advance_epoch()
 {
     _debug_windows.on_closing(current_epoch());
     do_advance_epoch();
+    impl::gpu_capture_on_epoch_opened(*this, current_epoch());
     _debug_windows.on_opened(current_epoch());
     _stats.add(stat::epochs_advanced);
 
@@ -608,6 +610,9 @@ cc::shared_async<raster_pipeline_handle> context::create_raster_pipeline_async(r
 
 void context::drain_at_shutdown()
 {
+    // A capture still open ends with everything submitted, before the device it captured goes.
+    impl::gpu_capture_on_shutdown(*this);
+
     // Three things, and in this order only.
     // An actor delivers a download's bytes only after the GPU finished writing them, so draining the actors first
     // would let a copy land behind us.
