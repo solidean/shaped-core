@@ -6,6 +6,10 @@
 #include <clean-core/memory/large_allocations.hh>
 #include <mimalloc.h>
 
+#if defined(__EMSCRIPTEN__)
+#include <cstdlib>
+#endif
+
 using namespace cc::primitive_defines;
 
 // mimalloc-backed implementation of cc::default_memory_resource.
@@ -13,6 +17,29 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+#if defined(__EMSCRIPTEN__)
+// **On wasm a block is mimalloc's exactly while its size is at most this**, and emscripten's malloc's above it.
+// wasm memory never shrinks and mimalloc never gives an arena back, so a growing vector strands an arena at every step
+// until the heap is gone (bug-cc-mimalloc-wasm-arenas-exhaust-heap); emscripten's malloc merges what is freed.
+// mimalloc is ahead of it up to 1 KiB there and 2-3.5x behind from 4 KiB, so the split costs no speed either.
+// Every size a caller passes is the block's current size, so routing on it finds the allocator that made the block.
+constexpr isize mi_max_bytes = 1024;
+
+isize large_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize alignment)
+{
+    void* p = nullptr;
+    auto const effective_alignment = alignment < isize(sizeof(void*)) ? isize(sizeof(void*)) : alignment;
+    *out_ptr = posix_memalign(&p, size_t(effective_alignment), size_t(min_bytes)) == 0 ? static_cast<byte*>(p) : nullptr;
+    if (*out_ptr == nullptr)
+        return -1;
+    cc::large_allocations::impl::on_allocate(*out_ptr, min_bytes);
+    // exactly min_bytes, so the block stays above mi_max_bytes for its whole life
+    return min_bytes;
+}
+#else
+constexpr isize mi_max_bytes = isize(1) << 62;
+#endif
+
 isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
 {
     CC_UNUSED(userdata);
@@ -27,6 +54,11 @@ isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, is
         return 0;
     }
 
+#if defined(__EMSCRIPTEN__)
+    if (min_bytes > mi_max_bytes)
+        return large_try_allocate_bytes(out_ptr, min_bytes, alignment);
+#endif
+
     void* p = mi_malloc_aligned(static_cast<size_t>(min_bytes), static_cast<size_t>(alignment));
     *out_ptr = static_cast<byte*>(p);
     if (p == nullptr)
@@ -39,7 +71,8 @@ isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, is
     // Report mimalloc's actual usable size (size-class rounding), clamped into
     // [min_bytes, max_bytes] so containers can claim the extra capacity for free.
     isize const usable = static_cast<isize>(mi_usable_size(p));
-    return usable < max_bytes ? usable : max_bytes;
+    isize const cap = max_bytes < mi_max_bytes ? max_bytes : mi_max_bytes;
+    return usable < cap ? usable : cap;
 }
 
 isize mi_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
@@ -56,13 +89,19 @@ void mi_deallocate_bytes(byte* p, isize bytes, isize alignment, void* userdata)
     CC_UNUSED(userdata);
 
     cc::large_allocations::impl::on_deallocate(p, bytes);
+#if defined(__EMSCRIPTEN__)
+    if (bytes > mi_max_bytes)
+    {
+        std::free(p);
+        return;
+    }
+#endif
     // mimalloc tracks the block's size and alignment internally, so a plain mi_free suffices.
     mi_free(p);
 }
 
 isize mi_try_resize_bytes_in_place(byte* p, isize old_bytes, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
 {
-    CC_UNUSED(old_bytes);
     CC_UNUSED(userdata);
 
     CC_ASSERT(p != nullptr, "cannot resize null pointer");
@@ -73,7 +112,12 @@ isize mi_try_resize_bytes_in_place(byte* p, isize old_bytes, isize min_bytes, is
     // An in-place resize succeeds iff min_bytes still fits the block's usable size, and the block never moves, so pointers into the allocation stay valid.
     // mi_usable_size rather than mi_expand: mi_expand is a documented no-op under mimalloc's padding/guard debug modes (MI_DEBUG / MI_SECURE), which would make every resize fail there.
     // mi_usable_size excludes the padding region, so reporting capacity up to it keeps writes inside the user block and leaves mimalloc's overflow canary intact.
-    isize const usable = static_cast<isize>(mi_usable_size(p));
+    // A block above mi_max_bytes is emscripten's malloc's, which resizes nothing in place, and a mimalloc block never
+    // grows past mi_max_bytes, which would hand it to the other allocator's free.
+    if (old_bytes > mi_max_bytes)
+        return -1;
+    isize const block = static_cast<isize>(mi_usable_size(p));
+    isize const usable = block < mi_max_bytes ? block : mi_max_bytes;
     if (min_bytes > usable)
     {
         return -1;

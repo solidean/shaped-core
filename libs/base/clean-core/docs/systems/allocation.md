@@ -52,6 +52,7 @@ A container selects a non-default allocator by seeding an empty allocation that 
 
 Two resources ship: `cc::default_memory_resource` and `cc::system_memory_resource` (platform `malloc`/`_aligned_malloc`).
 Which allocator backs the default is a build choice, and `CC_HAS_MIMALLOC` is what says: mimalloc under 1, and `cc::system_memory_resource` **itself** under 0, where the two names are one object.
+**On wasm, mimalloc keeps only blocks of at most 1 KiB**, and a larger one is emscripten's malloc's; [platforms.md](../../../../../docs/platforms.md#default-allocator-sc_mimalloc) says why.
 Pass `&cc::system_memory_resource` as a custom resource to bypass mimalloc for one allocation; that is always well defined, and it is simply a no-op where mimalloc is not in the build.
 `SC_MIMALLOC=OFF` is what selects the second world, and the `sanitize-*` presets set it — [platforms.md](../../../../../docs/platforms.md#default-allocator-sc_mimalloc) is the why.
 
