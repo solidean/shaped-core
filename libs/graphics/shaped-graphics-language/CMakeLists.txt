@@ -489,6 +489,7 @@ if(SC_BUILD_TESTS)
         tests/check/subgroup-check-test.cc
         tests/check/image-check-test.cc
         tests/check/case-check-test.cc
+        tests/check/source-name-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc

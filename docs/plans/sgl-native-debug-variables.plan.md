@@ -56,7 +56,9 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - [ ] P3.1 `program::debug_variables`: source name, source type, kind, declaring statement; filled for `full` only
   - Note: a minted name cannot be told apart from a written one, and pass-made locals are not all `temporary`: `check`, `ends_search`, autodiff's `x`, `result`, `dx`
   - Note: so `flat_local` gains the name as written, set only where a declaration is flattened (P3.8)
-- [ ] P3.8 `flat_local::source_name`, empty for a local no source wrote; set at `let` and `var` statements, parameters, inlined parameter bindings, `for` counters
+- [x] P3.8 `flat_local::source_name`, empty for a local no source wrote; set at `let` and `var` statements, parameters, inlined parameter bindings, `for` counters
+  - Outcome: `add_local`'s `written`; tests/check/source-name-check-test.cc pins the written names and a legalizer's local without one
+  - Note: an inlined parameter whose argument is substituted, a literal or another local, is no local and so not described yet
   - Note: `flattener::add_local` in check/flatten.cc; parameters around flatten.cc:1006-1078, inlined bindings in flatten_call.cc:622 and 747
 - [x] P3.2 The line table's call frames name their function, so a scope is a function rather than a file
   - Note: a frame is a `check::call_site`; its callee is `call_records[files[file].call_at(call)].callee`, through an instance's tables for a generic call
@@ -139,4 +141,5 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: Two red differential corpus entries fixed on the way to pushing P1, both ties a vendor breaks its own way.
 - 2026-11-17: P2 done: one level through SGL, slib and sg, and `SC_SG_NATIVE_DEBUG_INFO` (D6).
 - 2026-11-17: P3 started: its design notes in P3.1 to P3.5 and P3.8; P3.2 done, each line naming the function it stands in.
+- 2026-11-17: P3.8 done: a local keeps the name its declaration wrote.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.

@@ -217,7 +217,8 @@ auto sgl::check::impl::flattener::concrete(type_id type) -> type_id
     return result;
 }
 
-auto sgl::check::impl::flattener::add_local(local_kind kind, cc::string_view desired, type_id type) -> local_id
+auto sgl::check::impl::flattener::add_local(local_kind kind, cc::string_view desired, type_id type, cc::string_view written)
+    -> local_id
 {
     type = concrete(type);
     is_failed = is_failed || !c.is_sound(type);
@@ -225,6 +226,7 @@ auto sgl::check::impl::flattener::add_local(local_kind kind, cc::string_view des
     // `_` is a name nobody reads, and no name at all in WGSL
     entry.locals.push_back({.kind = kind,
                             .name = entry.names.mint(desired == "_" ? cc::string_view("unused") : desired),
+                            .source_name = desired == "_" ? cc::string() : cc::string(written),
                             .type = type,
                             .is_mut = kind == local_kind::var});
     return local_id(entry.locals.size() - 1);
@@ -1003,7 +1005,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         for (auto const& parameter : parameters)
             if (parameter.is_mut)
             {
-                auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
+                auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type, parameter.name);
                 f.entry.input = parameter.type;
                 f.current()->bound.push_back(
                     {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
@@ -1034,7 +1036,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                 auto const inlined = f.inline_bound(ast::expr_id::none, builder, arguments, slots, {}, bindings);
                 auto const value = f.add_expr(parameter.type, ast::expr_id::none,
                                               flat_block{.label = inlined.label, .body = inlined.body});
-                auto const local = f.add_local(local_kind::let, parameter.name, parameter.type);
+                auto const local = f.add_local(local_kind::let, parameter.name, parameter.type, parameter.name);
                 f.add_stmt({.file = s.file, .expr = ast::expr_id::none}, flat_let{.local = local, .value = value});
                 f.current()->bound.push_back(
                     {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
@@ -1064,7 +1066,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                 value = f.add_expr(parameter.type, ast::expr_id::none,
                                    flat_block{.label = inlined.label, .body = inlined.body});
             }
-            auto const local = f.add_local(local_kind::let, parameter.name, parameter.type);
+            auto const local = f.add_local(local_kind::let, parameter.name, parameter.type, parameter.name);
             f.add_stmt({.file = s.file, .expr = ast::expr_id::none}, flat_let{.local = local, .value = value});
             f.current()->bound.push_back(
                 {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
@@ -1075,7 +1077,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     // Every parameter is a local, in the order written: the stage struct at `locals[0]` when there is one.
     for (auto const& parameter : info.entry_stage >= stage::raygen ? cc::span<check::parameter const>() : parameters)
     {
-        auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
+        auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type, parameter.name);
         f.current()->bound.push_back(
             {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
         if (parameter.input != stage_input::none)
