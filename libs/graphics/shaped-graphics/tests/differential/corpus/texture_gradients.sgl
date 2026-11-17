@@ -1,0 +1,15 @@
+// differential: setup texels
+// differential: across relative 0.01
+// Samples at explicit gradients, whose level of detail the GPU computes from them, at four levels between and past the first mips.
+// A GPU may compute that level less exactly than its log2: Apple's M4 rounds it to a 256th and up to two 256ths low, measured.
+// A level that far off moves a blend of two hashed texels by up to 0.008, under the bound; an explicit level is exact there.
+// Every coordinate sits a quarter texel off an edge, so no footprint is a tie a device may break either way.
+use diff_texels
+
+@compute(64) fun gradients(@thread_id id: int3){diff_texels.io}:
+    let i = id.x
+    let uv = float2((((i % 16) as float) + 0.25) / 16.0, (((i / 16) as float) + 0.75) / 16.0)
+    diff_texels.io.output[4 * i] = diff_texels.io.source.sample(uv, diff_texels.io.linear, grad_x = float2(0.07, 0.0), grad_y = float2(0.0, 0.02))
+    diff_texels.io.output[4 * i + 1] = diff_texels.io.source.sample(uv, diff_texels.io.linear, grad_x = float2(0.1, 0.0), grad_y = float2(0.0, 0.03))
+    diff_texels.io.output[4 * i + 2] = diff_texels.io.source.sample(uv, diff_texels.io.linear, grad_x = float2(0.02, 0.0), grad_y = float2(0.0, 0.2))
+    diff_texels.io.output[4 * i + 3] = diff_texels.io.source.sample(uv, diff_texels.io.linear, grad_x = float2(0.03, 0.04), grad_y = float2(-0.04, 0.03))

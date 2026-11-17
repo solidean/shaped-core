@@ -10,6 +10,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <typed-geometry/scalar/half_float.hh>
+#include <typed-geometry/scalar/scalar.hh>
 
 using namespace cc::primitive_defines;
 
@@ -427,4 +428,82 @@ ASYNC_INVOCABLE_TEST("sg - an array of samplers binds each element, through a gr
     REQUIRE(replaced.size() == isize(count));
     for (auto i = 0; i < count; ++i)
         CHECK(near(replaced[i], i % 3 == 1 ? 0.3f : 1.0f)).context(cc::format("replaced thread {}: {}", i, replaced[i]));
+}
+ASYNC_INVOCABLE_TEST("sg - a level of detail from gradients is near their log2, and an explicit level is exact",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // Mip m holds m, so a trilinear sample reads its level of detail, swept over the first level in 64ths.
+    // Gradients of 2^level / size along x pick that level; a GPU computes its log2 less exactly than the explicit level.
+    // Measured on an M4: the level from gradients is a 256th step, up to two 256ths low, and the explicit one exact.
+    constexpr int size = 16;
+    constexpr int mips = 5;
+    constexpr int steps = 65;
+    auto const by_gradients = co_await shaders::sampling::sample_by_gradients.acquire_pipeline(*ctx);
+    auto const by_level = co_await shaders::sampling::sample_at.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampling::probe>();
+    auto const source
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                             .width = size,
+                                             .height = size,
+                                             .mip_levels = mips,
+                                             .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+    auto gradients = cc::vector<tg::vec4f>();
+    auto levels = cc::vector<tg::vec4f>();
+    for (auto i = 0; i < steps; ++i)
+    {
+        auto const level = float(i) / float(steps - 1);
+        auto const g = tg::pow(2.0f, level) / float(size);
+        gradients.push_back(tg::vec4f(0.5f, 0.5f, g, g * 0.25f));
+        levels.push_back(tg::vec4f(0.5f, 0.5f, level, 0));
+    }
+    auto const at_gradients
+        = ctx->persistent.create_buffer_from_data(cc::move(gradients), sg::buffer_usage::readonly_buffer);
+    auto const at_levels = ctx->persistent.create_buffer_from_data(cc::move(levels), sg::buffer_usage::readonly_buffer);
+
+    auto cmd = ctx->create_command_list();
+    for (auto mip = 0; mip < mips; ++mip)
+    {
+        auto const extent = size >> mip;
+        auto texels = cc::vector<float>();
+        for (auto i = 0; i < extent * extent; ++i)
+            texels.push_back_range(cc::span<float const>({float(mip), float(mip), float(mip), 1.0f}));
+        cmd->upload.bytes_to_texture(source.raw(), cc::as_bytes(cc::span<float const>(texels)), {.mip_level = mip});
+    }
+    auto const run = [&](auto const& pipeline, sg::buffer<tg::vec4f> const& at)
+    {
+        auto const values
+            = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(steps),
+                                                      sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                               shaders::sampling::probe{
+                                                                   .source = source.as_texture_view(),
+                                                                   .smp = {.mip_filter = sg::sampler_filter::linear},
+                                                                   .at = at.as_readonly_buffer(),
+                                                                   .values = values.as_readwrite_buffer(),
+                                                               });
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.bind_group(0, *group);
+        cmd->compute.dispatch_threads(steps);
+        return cmd->download.data_from_buffer(values);
+    };
+    auto const from_gradients = run(by_gradients, at_gradients);
+    auto const from_levels = run(by_level, at_levels);
+    ctx->submit_command_list(cc::move(cmd));
+    auto const read_gradients = co_await from_gradients.data();
+    auto const read_levels = co_await from_levels.data();
+
+    for (auto i = 0; i < steps; ++i)
+    {
+        auto const level = float(i) / float(steps - 1);
+        auto const g = read_gradients[i][0];
+        auto const l = read_levels[i][0];
+        CHECK((g - level <= 1.0f / 32 && level - g <= 1.0f / 32))
+            .context(cc::format("level {} from gradients read {}", level, g));
+        CHECK((l - level <= 1.0f / 256 && level - l <= 1.0f / 256))
+            .context(cc::format("explicit level {} read {}", level, l));
+    }
 }

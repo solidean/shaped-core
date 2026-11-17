@@ -1,5 +1,6 @@
 // differential: setup texels
-// Texture reads beside sampling: a texel loaded at a level, a gather of one channel, a sample at explicit gradients, and an offset sample.
+// Texture reads beside sampling: a texel loaded at a level and at the next, a gather of one channel, and an offset sample.
+// A sample at gradients is texture_gradients.sgl's, since a GPU picks its level less exactly than these reads are held.
 // Every coordinate sits a quarter texel off an edge, so no footprint is a tie a device may break either way.
 use diff_texels
 
@@ -10,7 +11,8 @@ use diff_texels
     let uv = float2((((i % 16) as float) + 0.25) / 16.0, (((i / 16) as float) + 0.75) / 16.0)
     diff_texels.io.output[4 * i] = diff_texels.io.source.load(xy, level)
     diff_texels.io.output[4 * i + 1] = diff_texels.io.source.gather(uv, diff_texels.io.nearest, component = texel_component.y)
-    diff_texels.io.output[4 * i + 2] = diff_texels.io.source.sample(uv, diff_texels.io.linear, grad_x = float2(0.07, 0.0), grad_y = float2(0.0, 0.02))
+    let next = min(level + 1, 4)
+    diff_texels.io.output[4 * i + 2] = diff_texels.io.source.load(int2((i % 16) >> next, (i / 16) >> next), next)
     let size = diff_texels.io.source.size(level)
     let offset = diff_texels.io.source.sample(uv, diff_texels.io.nearest, level = 0.0, offset = int2(-1, 2))
     diff_texels.io.output[4 * i + 3] = offset + float4((size.x as float) / 64.0, (size.y as float) / 64.0, 0.0, 0.0)
