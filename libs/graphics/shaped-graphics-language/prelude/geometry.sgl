@@ -2,31 +2,68 @@
 //
 // Everything `@internal` here is this file's own, and no program finds it.
 
+@internal @workgroup binding sg_geometry_strip_sums:
+    made: uint[256]
+    last: uint[256]
+
 /// What a window of an indexed strip makes, in window order: `id << 1 | parity` for the primitive it starts, its id
 /// counting the draw's primitives and its parity its place within its strip, or all ones where a restart index lies in
 /// it and it makes none.
-/// One thread walks the draw's indices, since a window's id and parity follow from every restart before it.
+/// One workgroup walks the windows a chunk of 256 at a time, with two tree scans within the chunk and their totals carried:
+/// a sum of the windows that make a primitive, which is the id, and a max of the restarts' positions, which is the parity.
 /// `sg_geometry_draw` is the draw's, its `[1].w` the corners of the strip's primitive.
-@internal @compute(1) fun sg_geometry_strip_scan(@thread_id id: int3){sg_geometry_draw, sg_geometry_indices, sg_geometry_strip}:
+@internal @compute(256) fun sg_geometry_strip_scan(@local_thread_index local: int){sg_geometry_draw, sg_geometry_indices, sg_geometry_strip, sg_geometry_strip_sums}:
     let draw = sg_geometry_draw.values[0]
     let more = sg_geometry_draw.values[1]
     let corners = more.w as int
-    let positions = (draw.y as int) + corners - 1
+    let windows = draw.y as int
     let is_half = draw.z == 1u
     let restart = if is_half => 65535u else 4294967295u
-    let mut last = -1
+    // the primitives made before the chunk, and one past the last restart's position before it, 0 for none
     let mut made = 0u
-    for q in 0 ..< positions:
-        // a 16-bit index is half of a word, the low half first
-        let at = draw.x + (q as uint) + more.y
-        let word = sg_geometry_indices.words[if is_half => at >> 1u else at]
-        let index = if is_half => (word >> ((at & 1u) * 16u)) & 65535u else word
-        if index == restart:
-            last = q
-        let p = q - (corners - 1)
-        if p >= 0:
-            if last >= p:
-                sg_geometry_strip.words[p as uint] = 4294967295u
+    let mut last = 0u
+    let mut first = 0
+    while first < windows:
+        let p = first + local
+        // whether window `p` holds a restart, and whether its own first position is one
+        let mut is_open = p < windows
+        let mut starts_restart = false
+        if p < windows:
+            for k in 0 ..< corners:
+                // a 16-bit index is half of a word, the low half first
+                let at = draw.x + ((p + k) as uint) + more.y
+                let word = sg_geometry_indices.words[if is_half => at >> 1u else at]
+                let index = if is_half => (word >> ((at & 1u) * 16u)) & 65535u else word
+                if index == restart:
+                    is_open = false
+                    if k == 0 => starts_restart = true
+        let own_made = if is_open => 1u else 0u
+        sg_geometry_strip_sums.made[local] = own_made
+        sg_geometry_strip_sums.last[local] = if starts_restart => (p + 1) as uint else 0u
+        workgroup_barrier()
+        // each step folds in the value `stride` places back, so a thread ends holding its chunk's fold up to itself
+        let mut stride = 1
+        while stride < 256:
+            let mut made_sum = sg_geometry_strip_sums.made[local]
+            let mut last_max = sg_geometry_strip_sums.last[local]
+            if local >= stride:
+                made_sum += sg_geometry_strip_sums.made[local - stride]
+                last_max = max(last_max, sg_geometry_strip_sums.last[local - stride])
+            workgroup_barrier()
+            sg_geometry_strip_sums.made[local] = made_sum
+            sg_geometry_strip_sums.last[local] = last_max
+            workgroup_barrier()
+            stride = stride << 1
+        if p < windows:
+            if is_open:
+                // an open window's own position is no restart, so the fold up to it is the last restart before it
+                let before = (max(last, sg_geometry_strip_sums.last[local]) as int) - 1
+                let id = made + sg_geometry_strip_sums.made[local] - 1u
+                sg_geometry_strip.words[p as uint] = (id << 1u) | (((p - before - 1) as uint) & 1u)
             else:
-                sg_geometry_strip.words[p as uint] = (made << 1u) | (((p - last - 1) as uint) & 1u)
-                made += 1u
+                sg_geometry_strip.words[p as uint] = 4294967295u
+        made += sg_geometry_strip_sums.made[255]
+        last = max(last, sg_geometry_strip_sums.last[255])
+        // no thread overwrites the sums before every thread has read the chunk's totals
+        workgroup_barrier()
+        first += 256

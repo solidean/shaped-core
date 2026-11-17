@@ -40,6 +40,15 @@ pipeline passed_on:
     cull = .none
     format = .rgba8_unorm
 
+// The same over an indexed triangle strip, so the polyfill's strip scan runs ahead of the stage.
+pipeline passed_on_strip:
+    vertex = bench_vs
+    geometry = passed_on_gs
+    pixel = bench_ps
+    topology = .triangle_strip
+    cull = .none
+    format = .rgba8_unorm
+
 pipeline billboards:
     vertex = bench_vs
     geometry = billboard_gs
