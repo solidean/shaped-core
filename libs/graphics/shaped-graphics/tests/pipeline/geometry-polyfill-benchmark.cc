@@ -16,6 +16,10 @@
 // A frame draws into a 1024 x 1024 target, either in one draw or in 256 draws of a 256th each, since the compute
 // route splits the render pass at every draw and the mesh route never does.
 // Two stages: one that passes 262 144 small triangles on, and one that grows 262 144 points into quads.
+// A third scene passes on an indexed triangle strip a grid row long, restarted between rows: 512 rows of 1024
+// triangles, so the strip scan runs ahead of the stage over 525 824 windows.
+
+using namespace cc::primitive_defines;
 
 namespace
 {
@@ -42,6 +46,64 @@ cc::vector<tg::vec2f> corners_of(bool is_points)
             }
         }
     return corners;
+}
+
+/// The corners of `grid` + 1 rows of `grid` + 1 points, row by row from the bottom.
+cc::vector<tg::vec2f> strip_corners()
+{
+    auto corners = cc::vector<tg::vec2f>();
+    auto const step = 2.0f / float(grid);
+    for (auto y = 0; y <= grid; ++y)
+        for (auto x = 0; x <= grid; ++x)
+            corners.push_back(tg::vec2f(-1.0f + float(x) * step, -1.0f + float(y) * step));
+    return corners;
+}
+
+/// Indices per row of strip_corners: a strip zigzagging between the row's top and bottom points, then a restart.
+constexpr int strip_row_indices = 2 * (grid + 1) + 1;
+
+cc::vector<u32> strip_indices()
+{
+    auto indices = cc::vector<u32>();
+    for (auto y = 0; y < grid; ++y)
+    {
+        for (auto x = 0; x <= grid; ++x)
+        {
+            indices.push_back(u32((y + 1) * (grid + 1) + x));
+            indices.push_back(u32(y * (grid + 1) + x));
+        }
+        indices.push_back(0xffffffffu);
+    }
+    return indices;
+}
+
+cc::shared_async<cc::unit> render_strip_frames(sg::context_handle ctx,
+                                               sg::raster_pipeline_handle pipeline,
+                                               sg::buffer<tg::vec2f> const* corners,
+                                               sg::buffer<u32> const* indices,
+                                               sg::texture_2d const* target,
+                                               int draws)
+{
+    // each draw takes whole rows, restart included
+    auto const each = (grid / draws) * strip_row_indices;
+    for (auto frame = 0; frame < frames_per_iteration; ++frame)
+    {
+        auto cmd = ctx->create_command_list();
+        {
+            auto pass = cmd->raster.render_to(
+                {.color_targets = {target->as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))},
+                 .target_set = sg::test::sgl_shaders::geometry_bench::bench_target::name});
+            pass.bind_pipeline(*pipeline);
+            pass.bind_vertex_buffer(corners->as_vertex_buffer());
+            pass.bind_index_buffer(indices->as_index_buffer());
+            for (auto d = 0; d < draws; ++d)
+                pass.draw_indexed({.index_range = {.offset = d * each, .size = each}});
+        }
+        (void)ctx->submit_command_list(cc::move(cmd));
+        ctx->advance_epoch();
+        co_await ctx->epochs_in_flight_completion(2);
+    }
+    co_await ctx->idle_completion();
 }
 
 cc::shared_async<cc::unit> render_frames(sg::context_handle ctx,
@@ -112,6 +174,21 @@ ASYNC_BENCHMARK("sg geometry polyfill - a frame through a geometry stage, by the
                                    route == sg::geometry_polyfill_route::mesh ? "mesh" : "compute"),
                         [&] { return render_frames(ctx, pipeline, corners, &target, draws); });
                 }
+        auto const grid_corners
+            = ctx->persistent.create_buffer_from_data(strip_corners(), sg::buffer_usage::vertex_buffer);
+        auto const grid_indices
+            = ctx->persistent.create_buffer_from_data(strip_indices(), sg::buffer_usage::index_buffer);
+        for (auto const draws : {1, 256})
+            for (auto const route : {sg::geometry_polyfill_route::compute, sg::geometry_polyfill_route::mesh})
+            {
+                ctx->set_geometry_polyfill_route(route);
+                auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(
+                    sg::test::sgl_shaders::geometry_bench::passed_on_strip);
+                (void)co_await nx::bench::run_async(
+                    cc::format("{} indexed strip, {} draw{}, {} route", factory.backend, draws, draws == 1 ? "" : "s",
+                               route == sg::geometry_polyfill_route::mesh ? "mesh" : "compute"),
+                    [&] { return render_strip_frames(ctx, pipeline, &grid_corners, &grid_indices, &target, draws); });
+            }
         ctx->set_geometry_polyfill(use_before);
         ctx->set_geometry_polyfill_route(route_before);
         co_await ctx->idle_completion();
