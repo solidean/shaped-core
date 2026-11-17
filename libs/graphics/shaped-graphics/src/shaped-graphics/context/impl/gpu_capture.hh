@@ -3,7 +3,7 @@
 #include <shaped-graphics/fwd.hh>
 
 // A GPU capture taken in process, by the tool `SC_SG_CAPTURE` names, of one epoch of the first context that reaches it.
-// docs/concepts/gpu-capture.md is the contract: the variables, which epoch, and what each tool writes.
+// libs/graphics/shaped-graphics/docs/concepts/gpu-capture.md is the contract: the variables, which epoch, and what each tool writes.
 //
 // The tool's library has to be in the process before the first device exists, or it sees nothing.
 // Every device creation takes `device_lifecycle_hold`, so its constructor attaches the tool, once per process.

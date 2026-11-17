@@ -7,7 +7,7 @@
 
     uv run libs/graphics/shaped-graphics/tools/gpu-capture/debug-pixel.py <capture.rdc> <x> <y> [--draw N] [--out result.json]
 
-A capture comes from any sg program run with `SC_SG_CAPTURE=renderdoc` (docs/concepts/gpu-capture.md).
+A capture comes from any sg program run with `SC_SG_CAPTURE=renderdoc` (libs/graphics/shaped-graphics/docs/concepts/gpu-capture.md).
 The replay runs in RenderDoc's own UI process, whose embedded Python is the only one with the `renderdoc` module, through renderdoc_replay.py beside this file.
 The result names each stage's debug files, the source variables, and every step's file, line, call stack and variables.
 """
