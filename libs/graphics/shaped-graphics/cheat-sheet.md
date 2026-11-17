@@ -331,6 +331,8 @@ sg::submission_token      // enum class : u64 — invalid=0, first=30000, not_su
 ctx.current_epoch()                     // sg::epoch — epoch new work records into
 ctx.completed_epoch()                   // sg::epoch — latest fully-finished epoch (reclaimable)
 ctx.advance_epoch()                     // void — close current epoch, open next. NEVER waits; bound the depth below
+// SC_SG_CAPTURE=renderdoc|pix captures the epoch the n-th advance opens (SC_SG_CAPTURE_EPOCH, default 1) into SC_SG_CAPTURE_FILE;
+//   no code change, headless too; docs/concepts/gpu-capture.md, and tools/gpu-capture/debug-pixel.py reads a .rdc back
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
 ctx.defer_until_retired(fn)             // void — run fn once the GPU is done with every epoch up to the current one;
                                         //   never inline (except past shutdown), in registration order, and before the
