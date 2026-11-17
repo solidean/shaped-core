@@ -311,6 +311,11 @@ rules:
     files: src/clean-core/platform/process_metrics.cc
 
   - kind: allow-include
+    value: [<psapi.h>]
+    reason: the commit charge the memory cap polls, without the thread snapshot a full usage query takes
+    files: src/clean-core/platform/resource_limits.cc
+
+  - kind: allow-include
     value: [<mach/mach.h>, <mach/task.h>]
     reason: task_info is Darwin's only per-process accounting
     files: src/clean-core/platform/process_metrics.cc

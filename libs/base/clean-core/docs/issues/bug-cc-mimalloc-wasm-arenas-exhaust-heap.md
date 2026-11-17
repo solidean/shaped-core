@@ -18,6 +18,9 @@ The heap has reached emscripten's default 2 GB `ALLOW_MEMORY_GROWTH` ceiling by 
 
 - Locally on `emscripten-relwithdebinfo`, the one test alone reproduces it: "requested [25308416, 25312512] bytes with alignment 64", after 89 of its 141 checks.
 - The same build with `SC_MIMALLOC=OFF`, so emscripten's malloc behind the default resource, passes all 141 checks.
+- The WASM threads + WebGPU job fails the same way, on `emscripten-threads-webgpu-relwithdebinfo` run without dev.py's timeout.
+  There "sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of the repo's SGL stays at Shader Model 6.6" fails a 30.9 MB request.
+  That binary also takes 56.6 s of its 60 s budget there, so it times out first whenever the runner is slower.
 - Natively the test peaks at 473 MiB alone, and the whole binary at 1.34 GiB with tests running in parallel.
 - Nothing in clean-core's allocator or the vendored mimalloc (v3.5.3, bumped 2026-10-22) changed since 2026-11-14, when this test last passed on WASM.
   The test's workload grew; the WASM job then failed at its build step until 2026-11-17, which hid the test.

@@ -15,6 +15,7 @@
 #if defined(CC_OS_WINDOWS)
 
 #include <clean-core/platform/win32_sanitized.hh>
+#include <psapi.h> // GetProcessMemoryInfo, the commit charge the memory cap watches
 
 #elif defined(CC_OS_MACOS) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
 
@@ -291,17 +292,23 @@ i64 watched_bytes()
         pages = pages * 10 + i64(text[at] - '0');
     return pages * i64(::sysconf(_SC_PAGESIZE));
 }
+#elif defined(CC_OS_WINDOWS)
+// The commit charge alone, not cc::query_process_usage: that counts threads through a system-wide snapshot, which at
+// ten polls a second was a third of a test run's busy samples.
+i64 watched_bytes()
+{
+    auto counters = PROCESS_MEMORY_COUNTERS_EX{};
+    counters.cb = sizeof(counters);
+    if (!::GetProcessMemoryInfo(::GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+                                sizeof(counters)))
+        return 0;
+    return i64(counters.PrivateUsage);
+}
 #else
 i64 watched_bytes()
 {
     auto const usage = cc::query_process_usage();
-    if (!usage.has_value())
-        return 0;
-#if defined(CC_OS_WINDOWS)
-    return usage.value().private_bytes;
-#else
-    return usage.value().resident_bytes;
-#endif
+    return usage.has_value() ? usage.value().resident_bytes : 0;
 }
 #endif
 
