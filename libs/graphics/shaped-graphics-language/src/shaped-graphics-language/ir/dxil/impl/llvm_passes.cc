@@ -56,6 +56,11 @@ void module_builder::for_each_value(inst_entry const& inst, Visit&& visit)
     case inst_code::return_void:
     case inst_code::unreachable:
         break;
+    case inst_code::debug_value:
+        // a constant's is stated later, and holds no value until then
+        if (ll_value(args[0]) != ll_value::none)
+            visit(args[0]);
+        break;
     case inst_code::element_pointer:
         for (auto k = u32(1); k < inst.count; ++k)
             visit(args[k]);
@@ -390,6 +395,14 @@ void module_builder::remove_unused()
         stack.pop_back();
         for_each_value(_instructions[at], mark);
     }
+    // EMIT-267: a variable's value is no use, so it stays while what it states does, and goes with it
+    for (auto i = isize(0); i < _instructions.size(); ++i)
+        if (_instructions[i].code == inst_code::debug_value)
+        {
+            auto const v = ll_value(_args[_instructions[i].first]);
+            is_live[i] = ll_is_constant(v) || ll_is_global(v) || ll_is_argument(v) || v == ll_value::none
+                      || (u32(v) < _results.size() && is_live[_results[u32(v)]]);
+        }
 
     // the results that are left, numbered as they come
     auto renumbered = cc::vector<u32>::create_filled(_results.size(), 0u);

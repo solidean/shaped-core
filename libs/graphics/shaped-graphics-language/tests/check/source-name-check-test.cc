@@ -50,8 +50,9 @@ TEST("sgl check - a local keeps the name its declaration wrote, for a debugger (
 
 TEST("sgl check - a local legalizing introduces has no source name, and the written ones keep theirs")
 {
-    // legalizing carries a block's value out in a local of its own, which the IR then lowers
-    auto const checked = check_program(grey_source("", "let v = if p.a > 0.0 => p.a else p.b\n"
+    // legalizing carries a block's value out in a local of its own, which the IR then lowers; one read inside an
+    // expression stays the pass's, where one a let copies whole becomes that let (rule L1) and takes its name
+    auto const checked = check_program(grey_source("", "let v = 1.0 + (if p.a > 0.0 => p.a else p.b)\n"
                                                        "let x = v * 2.0\n"));
     REQUIRE(reports_of(checked) == "");
     REQUIRE(checked.module.entry_points.size() == 1);

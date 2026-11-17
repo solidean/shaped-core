@@ -263,6 +263,12 @@ private:
     void locate(instruction const& i);
     /// The debug info the located instructions name: their files, scopes and inlined calls, after the passes ran.
     void write_debug_info();
+    /// EMIT-267: a `debug_value` as one `llvm.dbg.value` a leaf, each keyed to its variable and leaf in `_debug_keys`.
+    void describe(instruction const& i);
+    /// The `DIType` of `t` as DXC writes HLSL's, made once; 0 for a type a debugger shows no value of.
+    [[nodiscard]] u32 debug_type(type_ref t);
+    /// Each leaf of `t` as its bit offset in the packed value and its bits, in the order `leaf_at` numbers them.
+    void debug_leaves(type_ref t, cc::vector<u32>& offsets, cc::vector<u32>& sizes, u32& offset);
     [[nodiscard]] bool is_reachable(block_ref b) const { return _reachable[isize(b)]; }
     void find_reachable();
 
@@ -455,6 +461,19 @@ private:
     [[nodiscard]] static u8 overload_mask(module_builder const& m, ll_type overload);
 
     program const& _p;
+    /// EMIT-267: what each key of the module's `debug_value`s stands for, by key.
+    struct debug_key
+    {
+        u32 variable = 0;
+        u32 leaf = 0;
+        /// A constant whose leaf `constant_leaf` is stated once the debug info's constants are made, which keeps the
+        /// program's own constants what they are without it; `none` for a value the program computes.
+        value_ref constant = value_ref::none;
+        u32 constant_leaf = 0;
+    };
+    cc::vector<debug_key> _debug_keys;
+    /// Parallel to `_p.types`: each one's `DIType` once made, plus one; 0 before.
+    cc::vector<u32> _debug_types;
     module_builder _m;
     module_summary _summary;
     cc::string _failure;

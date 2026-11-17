@@ -91,19 +91,32 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
   - Outcome: native-line-table-test.cc: `full` against `lines`, same SPIR-V and the same DXIL part over the whole corpus, thorough included
 
 - [ ] P3.9 A value no operation keeps whole, such as an entry's stage struct `p`, described by its pieces rather than as optimized out
-- [ ] P3.10 `let lit = shade(...)` in sgl-cube is not described: find where legalizing moves a block's value past the local
+- [x] P3.10 `let lit = shade(...)` in sgl-cube is not described: find where legalizing moves a block's value past the local
+  - Outcome: rule L1 of legalize_lets.cc gave the temporary the let's name but not its source name; now both
 - [ ] P3.11 A promoted variable's value at a merge: a `debug_value` of each phi `construct_ssa` makes for its slots
 - [ ] P3.12 A debug value in an arm `flatten_branches` folds into a select states the arm's value on both paths; drop it there, or state the select
 - [ ] P3.13 A call in a generic function's instance names its function, through the instance's tables
+- [ ] P3.14 A let the legalizer splits into its lanes, read by them alone, describes each lane as a piece of the variable
+  - Note: `let v = float3(...)` read as `v.x`, `v.y`, `v.z` becomes lets `x`, `y`, `z`, which carry no source name
+- [ ] P3.15 An inlined parameter's variable stands in its callee's scope, as DXC's do, not in the caller's where its binding stands
+- [ ] P4.7 `llvm.dbg.declare` of a variable a local in memory holds, an array indexed at run time among them
 
 ## P4: DXIL
 
-- [ ] P4.1 Measure DXC's `-Zi` for variables on the DXC in `extern/dxc`: the metadata, `dbg.value`'s form in LLVM 3.7, vectors, matrices, structures, pieces
-- [ ] P4.2 A `DISubprogram` per inlined function, with `inlinedAt` through them
-- [ ] P4.3 Types: `DIBasicType`, `DICompositeType`, `DIDerivedType` as DXC writes SGL's types
-- [ ] P4.4 `DILocalVariable` and `llvm.dbg.value` with `DW_OP_bit_piece` for a promoted scalar; `llvm.dbg.declare` for a local left in memory
-- [ ] P4.5 DXC's validator and its disassembly of the `ILDB` take it; the `DXIL` part stays byte for byte
-- [ ] P4.6 The P1 script shows a local's value in PIX
+- [x] P4.1 Measure DXC's `-Zi` for variables on the DXC in `extern/dxc`: the metadata, `dbg.value`'s form in LLVM 3.7, vectors, matrices, structures, pieces
+  - Outcome: one `llvm.dbg.value(metadata <scalar>, i64 0, metadata !var, metadata !expr)` a lane
+  - Note: `DW_OP_bit_piece` in the packed bits where the variable has more than one, `DW_TAG_arg_variable` for a parameter
+- [x] P4.2 A `DISubprogram` per inlined function, with `inlinedAt` through them
+  - Outcome: `inlined_scope` keys by the line table's function, `<inlined>` only where it knows none
+- [x] P4.3 Types: `DIBasicType`, `DICompositeType`, `DIDerivedType` as DXC writes SGL's types
+  - Outcome: `writer::debug_type`: basic types, `vector<T, n>` and `matrix<T, r, c>` classes with lane members, arrays with a subrange, structs with bit offsets
+- [x] P4.4 `DILocalVariable` and `llvm.dbg.value` with `DW_OP_bit_piece` for a promoted scalar; `llvm.dbg.declare` for a local left in memory
+  - Outcome: the module builder's `debug_value`: debug-only types, globals and constants, function-local `METADATA_VALUE`s
+  - Note: a constant's leaves are made with the debug info; `dbg.declare` of a local left in memory is not written yet (P4.7)
+- [x] P4.5 DXC's validator and its disassembly of the `ILDB` take it; the `DXIL` part stays byte for byte
+  - Outcome: slib's tests validate every container of the corpus at `full`, and disassemble a variable, a vector's pieces and an inlined function's scope out of the `ILDB`
+- [x] P4.6 The P1 script shows a local's value in PIX
+  - Outcome: check-debugger.py `--backend dx12 --debug-info full` holds: RenderDoc lists lit, n, light and i, and the inlined parameters
 
 ## P5: SPIR-V
 
@@ -174,4 +187,5 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: D7 decided, with the sites P3.3 and P3.6 change; next session starts at P3.1 and P3.3.
 - 2026-11-17: P1.6 done: check-debugger.py, the debugger check P4 and P5 are held to at `full`.
 - 2026-11-17: P3.1, P3.3 to P3.7 done: `full` describes the source's locals through every pass and changes no instruction; gaps filed as P3.9 to P3.13.
+- 2026-11-17: P4.1 to P4.6 and P3.10 done: dx12 describes every variable, RenderDoc lists them, the DXIL part stays the same; P3.14, P3.15 and P4.7 filed.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.
