@@ -139,19 +139,14 @@ described_binding_member describe_resource(check::checked_module const& m,
 }
 
 
-/// EMIT-174: the column of a matrix, or the element of a one-dimensional array of builtins, and how many cross.
+/// EMIT-174: the column of a matrix, or the element of a one-dimensional array of builtins, and how many cross, as the
+/// emitter declares them (`emit_impl::edge_pieces_of`).
 cc::pair<cc::string, i32> pieces_of(check::checked_module const& m, check::type_id type)
 {
-    auto const name = m.name_of(type);
-    if (name == "mat2" || name == "mat3" || name == "mat4")
-    {
-        auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
-        return {cc::format("float{}", n), n};
-    }
-    if (m.builtin_type_of(type) == nullptr && m.at(type).kind == check::type_kind::array && m.at(type).count > 0
-        && m.builtin_type_of(m.at(type).element) != nullptr)
-        return {cc::string(m.name_of(m.at(type).element)), i32(m.at(type).count)};
-    return {};
+    auto const pieces = emit_impl::edge_pieces_of(m, type);
+    if (pieces.count == 0)
+        return {};
+    return {cc::string(m.name_of(pieces.piece)), pieces.count};
 }
 
 described_struct describe_struct(check::checked_module const& m, check::type_info const& t)
@@ -182,7 +177,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
                                   .pieces = pieces,
                                   .piece = cc::move(piece)});
         if (takes_location)
-            location += pieces > 0 ? pieces : 1;
+            location += t.edge == check::stage::vertex ? emit_impl::edge_locations_of(m, member.type) : 1;
     }
     return result;
 }
@@ -815,17 +810,19 @@ sgl::driver::impl::entry_interface sgl::driver::impl::entry_interface_of(check::
         auto index = isize(0);
         for (auto const& member : m.at(t.members))
         {
-            auto [piece, pieces] = pieces_of(m, member.type);
-            for (auto i = 0; i < cc::max(pieces, 1); ++i)
-                result.vertex_attributes.push_back({.name = member.name,
-                                                    .type = pieces > 0 ? piece : host_spelling(m, member.type),
-                                                    .semantic = semantics[index],
-                                                    .semantic_index = i,
-                                                    .location = location + i,
-                                                    .format = member.vertex_format,
-                                                    .stream = emit_impl::stream_of(member),
-                                                    .is_per_instance = member.is_per_instance});
-            location += cc::max(pieces, 1);
+            // the pieces and the locations as the emitter declares them, so the two never disagree
+            auto const pieces = emit_impl::edge_pieces_of(m, member.type);
+            for (auto i = 0; i < cc::max(pieces.count, 1); ++i)
+                result.vertex_attributes.push_back(
+                    {.name = member.name,
+                     .type = pieces.count > 0 ? cc::string(m.name_of(pieces.piece)) : host_spelling(m, member.type),
+                     .semantic = semantics[index],
+                     .semantic_index = i,
+                     .location = location + i * pieces.piece_locations,
+                     .format = member.vertex_format,
+                     .stream = emit_impl::stream_of(member),
+                     .is_per_instance = member.is_per_instance});
+            location += emit_impl::edge_locations_of(m, member.type);
             ++index;
         }
     }

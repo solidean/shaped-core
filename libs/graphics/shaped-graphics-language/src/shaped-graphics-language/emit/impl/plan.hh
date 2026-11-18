@@ -411,6 +411,23 @@ struct stage_input_spelling
 
 /// The buffer a vertex input member is read from (EMIT-92): its `@stream`, else `per_instance` or `per_vertex`.
 [[nodiscard]] cc::string stream_of(check::member_info const& member);
+
+/// EMIT-174: what a member crossing an edge is declared as, the same on every target: a matrix as its columns, and a
+/// one-dimensional array of builtins as its elements, `count` pieces of type `piece`, each taking `piece_locations`
+/// locations (CHK-454: two for a 64-bit three- or four-vector); `count` 0 for every other type.
+/// A target that carries no 64-bit value between stages splits such a value further into words (EMIT-196), which the
+/// emitter's planner adds on top of this; the description, a vertex entry point's attributes (EMIT-268) and the emitter
+/// all read the pieces and the locations from here.
+struct edge_pieces
+{
+    check::type_id piece = check::type_id::none;
+    i32 count = 0;
+    i32 piece_locations = 1;
+};
+[[nodiscard]] edge_pieces edge_pieces_of(check::checked_module const& m, check::type_id type);
+/// The locations a member of `type` takes at an edge: its pieces' (`edge_pieces_of`), else one, and two for a 64-bit
+/// three- or four-vector (CHK-454); the same on every target, word-split or not.
+[[nodiscard]] i32 edge_locations_of(check::checked_module const& m, check::type_id type);
 /// The dx12 semantic of each member of the `@vertex struct` `t`, parallel to its members (EMIT-28).
 /// The emitted text and the host's input layout both take them from here, so the two always name a member alike.
 [[nodiscard]] cc::vector<cc::string> vertex_semantics(check::checked_module const& m, check::type_info const& t);

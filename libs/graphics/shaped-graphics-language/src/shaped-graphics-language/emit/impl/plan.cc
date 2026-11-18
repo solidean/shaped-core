@@ -336,14 +336,6 @@ struct planner
         return members_of(p.m.at(range), has_locations);
     }
 
-    /// EMIT-174: the element of a one-dimensional array of builtins, or the column of a matrix, and how many cross.
-    struct edge_pieces
-    {
-        type_id piece = type_id::none;
-        i32 count = 0;
-        i32 piece_locations = 1;
-    };
-
     [[nodiscard]] type_id prelude_type_named(cc::string_view name) const
     {
         for (auto i = isize(0); i < p.m.types.size(); ++i)
@@ -352,31 +344,19 @@ struct planner
         return type_id::none;
     }
 
+    /// `edge_pieces_of`, and EMIT-196's words on a target that carries no 64-bit value between stages: a 64-bit value
+    /// as its words, and an array of them as its elements' words.
     [[nodiscard]] edge_pieces pieces_of(type_id type) const
     {
         if (!is_valid(type) || type == check::checked_module::error_type)
             return {};
-        if (auto const* const record = p.m.builtin_type_of(type))
-        {
-            auto const name = p.m.name_of(type);
-            if (name == "mat2" || name == "mat3" || name == "mat4")
-            {
-                auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
-                return {.piece = prelude_type_named(n == 2 ? "float2" : n == 3 ? "float3" : "float4"), .count = n};
-            }
-            if (auto const words = words_of(type); is_valid(words))
-                return {.piece = words, .count = word_pieces(p, type)};
-            return {};
-        }
+        if (auto const words = words_of(type); is_valid(words))
+            return {.piece = words, .count = word_pieces(p, type)};
         auto const& t = p.m.at(type);
-        if (t.kind == type_kind::array && t.count > 0 && p.m.builtin_type_of(t.element) != nullptr)
-        {
-            auto const words = words_of(t.element);
-            return {.piece = is_valid(words) ? words : t.element,
-                    .count = i32(t.count) * (is_valid(words) ? word_pieces(p, t.element) : 1),
-                    .piece_locations = !is_valid(words) && is_wide_64_bit(p, t.element) ? 2 : 1};
-        }
-        return {};
+        if (p.m.builtin_type_of(type) == nullptr && t.kind == type_kind::array && t.count > 0)
+            if (auto const words = words_of(t.element); is_valid(words))
+                return {.piece = words, .count = i32(t.count) * word_pieces(p, t.element)};
+        return edge_pieces_of(p.m, type);
     }
 
     /// EMIT-196: the uint2 or uint4 a 64-bit value crosses a link as where the target carries no 64-bit value between
@@ -390,12 +370,7 @@ struct planner
     }
 
     /// CHK-454: the locations a member of `type` takes on a link, a 64-bit three- or four-vector two of them.
-    [[nodiscard]] i32 locations_taken(type_id type) const
-    {
-        if (auto const split = pieces_of(type); split.count > 0)
-            return split.count * split.piece_locations;
-        return is_wide_64_bit(p, type) ? 2 : 1;
-    }
+    [[nodiscard]] i32 locations_taken(type_id type) const { return edge_locations_of(p.m, type); }
 
     cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations, i32 first_location = 0)
     {
@@ -967,6 +942,51 @@ bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::typ
     return m.builtin_type_of(type) != nullptr;
 }
 
+namespace
+{
+/// The prelude's builtin type of `name`, `float3`.
+[[nodiscard]] sgl::check::type_id builtin_named(sgl::check::checked_module const& m, cc::string_view name)
+{
+    for (auto i = isize(0); i < m.types.size(); ++i)
+        if (auto const type = sgl::check::type_id(i32(i)); m.builtin_type_of(type) != nullptr && m.name_of(type) == name)
+            return type;
+    return sgl::check::type_id::none;
+}
+
+/// CHK-454: a 64-bit three- or four-vector, which takes two locations at an edge.
+[[nodiscard]] bool is_wide_64_bit_type(sgl::check::checked_module const& m, sgl::check::type_id type)
+{
+    auto const* const record = sgl::check::is_valid(type) ? m.builtin_type_of(type) : nullptr;
+    return record != nullptr && sgl::check::is_64_bit(record->leaf_kind) && record->leaf_count >= 3
+        && record->leaf_count <= 4;
+}
+} // namespace
+
+sgl::emit::impl::edge_pieces sgl::emit::impl::edge_pieces_of(check::checked_module const& m, check::type_id type)
+{
+    if (!check::is_valid(type) || type == check::checked_module::error_type)
+        return {};
+    if (m.builtin_type_of(type) != nullptr)
+    {
+        auto const name = m.name_of(type);
+        if (name != "mat2" && name != "mat3" && name != "mat4")
+            return {};
+        auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
+        return {.piece = builtin_named(m, n == 2 ? "float2" : n == 3 ? "float3" : "float4"), .count = n};
+    }
+    auto const& t = m.at(type);
+    if (t.kind == check::type_kind::array && t.count > 0 && m.builtin_type_of(t.element) != nullptr)
+        return {.piece = t.element, .count = i32(t.count), .piece_locations = is_wide_64_bit_type(m, t.element) ? 2 : 1};
+    return {};
+}
+
+sgl::i32 sgl::emit::impl::edge_locations_of(check::checked_module const& m, check::type_id type)
+{
+    if (auto const pieces = edge_pieces_of(m, type); pieces.count > 0)
+        return pieces.count * pieces.piece_locations;
+    return is_wide_64_bit_type(m, type) ? 2 : 1;
+}
+
 cc::string sgl::emit::impl::stream_of(check::member_info const& member)
 {
     if (!member.stream.empty())
@@ -1013,6 +1033,8 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
         auto const is_matrix
             = record != nullptr
            && (m.name_of(member.type) == "mat2" || m.name_of(member.type) == "mat3" || m.name_of(member.type) == "mat4");
+        // An array of matrices crosses no edge: `edge_pieces_of` makes an array's element its piece, so lifting this
+        // takes a matrix's columns inside each element there first, which the attributes (EMIT-268) then state too.
         auto const is_carried = is_link && (is_matrix || (element != nullptr && element->crosses_edges));
         if ((record == nullptr || !record->crosses_edges) && !is_factor && !is_carried)
             report(error_kind::unsupported, info.symbol,

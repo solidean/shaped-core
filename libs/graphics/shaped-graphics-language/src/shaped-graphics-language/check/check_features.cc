@@ -222,7 +222,10 @@ void checker::judge_edge_16_bit(i32 file, source_span where, type_id type, bool 
         return;
     if (auto const found = sized_value_path(type, 16); !found.empty())
         unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
-    // CHK-454: a stage link carries a 64-bit value; no vertex input or target does
+    // CHK-454: a stage link carries a 64-bit value; no vertex input or target does.
+    // Before a vertex input takes one: dx12 and msl split a 64-bit value into words (EMIT-196), so the emitter's
+    // pieces of it differ by target, while a vertex entry point states its attributes alike on every target (EMIT-268)
+    // from `emit_impl::edge_pieces_of`, which splits no words; which of the two a vertex input follows is to decide.
     if (!is_link)
         if (auto const found = sized_value_path(type, 64); !found.empty())
             unsupported(file, where,
