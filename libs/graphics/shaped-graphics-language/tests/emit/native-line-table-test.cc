@@ -375,6 +375,64 @@ TEST("sgl native lines - a let read lane by lane, which the legalizer splits, is
     CHECK(lanes[2] == 2u);
 }
 
+TEST("sgl native lines - an inlined call's parameter is a variable of its callee, not of the caller where it is bound "
+     "(EMIT-267)")
+{
+    constexpr u32 k_debug_function = 20;
+    constexpr u32 k_debug_local_variable = 26;
+
+    // `v` is read twice, so the call binds it to a local of its own rather than reading the argument where it stands;
+    // `w` gives the callee a statement of its own, which a body of one expression folded into the call would not
+    auto const source = cc::string("binding work:\n"
+                                   "    values: mut buffer[float]\n"
+                                   "\n"
+                                   "fun twice(v: float) -> float:\n"
+                                   "    let w = v * v\n"
+                                   "    return w + v\n"
+                                   "\n"
+                                   "@compute(1) fun run(@thread_id id: int3){work}:\n"
+                                   "    work.values[1] = twice(work.values[0] * 2.0)\n");
+    auto e = sgl::compile_to_text({.source = source,
+                                   .source_name = "inlined.sgl",
+                                   .entry_point = "run",
+                                   .target = sgl::emit::target::hlsl_vulkan,
+                                   .native = sgl::emit::native_route::require,
+                                   .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto const& words = e.value().spirv;
+    auto const set = debug_set_of(words);
+    REQUIRE(set != 0);
+
+    auto strings = cc::vector<cc::pair<u32, cc::string_view>>();
+    auto const named = [&](u32 id, cc::string_view text)
+    {
+        for (auto const& [known, held] : strings)
+            if (known == id)
+                return held == text;
+        return false;
+    };
+    auto twice_function = u32(0);
+    auto v_scope = u32(0);
+    for (auto at = isize(5); at < words.size();)
+    {
+        auto const count = isize(words[at] >> 16);
+        auto const opcode = words[at] & 0xffffu;
+        REQUIRE(count > 0);
+        if (opcode == k_op_string)
+            strings.push_back({words[at + 1], cc::string_view(reinterpret_cast<char const*>(&words[at + 2]))});
+        if (opcode == k_op_ext_inst && words[at + 3] == set && words[at + 4] == k_debug_function
+            && named(words[at + 5], "twice"))
+            twice_function = words[at + 2];
+        // DebugLocalVariable: name, type, source, line, column, scope
+        if (opcode == k_op_ext_inst && words[at + 3] == set && words[at + 4] == k_debug_local_variable
+            && named(words[at + 5], "v"))
+            v_scope = words[at + 10];
+        at += count;
+    }
+    REQUIRE(twice_function != 0u);
+    CHECK(v_scope == twice_function);
+}
+
 TEST("sgl native lines - without the option a module carries no line, and with it no instruction else changes")
 {
     for (auto const target : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})

@@ -47,7 +47,11 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 
 ## P2: Scopes
 
-- [ ] P2.1 An inlined parameter's variable stands in its callee's scope (old P3.15)
+- [x] P2.1 An inlined parameter's variable stands in its callee's scope (old P3.15)
+  - Outcome: `flat_local::scope_through`, the calls the callee was inlined through; lowering places the parameter's variable and value at the first statement standing in exactly those calls
+  - Outcome: sgl-cube's `color` and `normal` are `shade`'s on both backends, listed in its frame
+  - Note: a statement id would not do: the legalizer compacts the tree into new ids and rewrites a body's statements, where it keeps the call sites and each statement's calls
+  - Note: a callee whose body folds into the call's own statement has no statement of its own, so its parameters stay in the caller
 - [ ] P2.2 A call inside a generic function's instance names its function, through the instance's tables (old P3.13)
 - [ ] P2.3 Lexical blocks: `DILexicalBlock` and `DebugLexicalBlock` scope a loop's and a branch's locals
 
@@ -82,3 +86,4 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 - 2026-11-18: P1.3 done: a split let is one variable, its lanes pieces of it; D1.
 - 2026-11-18: P1.1 to P1.3 shipped; P1.4 done: a stage struct shows the fields that are read.
 - 2026-11-18: P1.5 done: DXIL declares a local in memory; P1 done.
+- 2026-11-18: P2.1 done: an inlined parameter is its callee's variable.

@@ -189,6 +189,10 @@ struct sgl::check::flat_local
     /// shows it as part of the local the source wrote (EMIT-267); none for any other local.
     local_id piece_of = local_id::none;
     i32 piece_member = -1;
+    /// A parameter an inlined call bound: the calls the callee's body was inlined through, which a debugger scopes it in,
+    /// rather than the call's where its binding stands (EMIT-267); empty for any other local.
+    /// A range of `call_sites`, which every pass keeps as it is, where a statement of the body may be rewritten.
+    ast::range_of<call_site> scope_through;
     type_id type = type_id::none;
     bool is_mut = false;
     /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.

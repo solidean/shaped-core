@@ -705,6 +705,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     // A parameter is a value: a literal or an immutable local stands for it, and anything else is bound once.
     auto bound = cc::vector<bound_name>();
     auto argument_lets = cc::vector<local_id>();
+    auto const first_bound = entry.locals.size();
     for (auto k = isize(0); k < values.size(); ++k)
     {
         auto const i = filled[k];
@@ -783,6 +784,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     // a property's `=>:` block has its value through `yield`, which leaves the property's block
     if (property != nullptr && !ast::is_valid(source->value))
         current()->value_blocks.push_back(label);
+    auto const last_bound = entry.locals.size();
     // an arrow body of no value is a statement, such as `=> img.store(xy, v)`, which a leave would drop
     if (ast::is_valid(source->value) && result == checked_module::void_type)
         flatten_expr_stmt({.file = s.file, .expr = source->value}, source->value);
@@ -790,6 +792,10 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
         flatten_return({.file = s.file, .expr = source->value}, source->value);
     for (auto const stmt : ast().at(source->statements))
         flatten_stmt(stmt);
+    // EMIT-267: a bound parameter is the callee's variable, in its scope and through this call
+    for (auto l = first_bound; l < last_bound; ++l)
+        if (!entry.locals[l].source_name.empty())
+            entry.locals[l].scope_through = chain_range;
     frames.remove_back();
 
     // EMIT-180: an argument the body reads once, outside a loop, is written where it is read, as a builtin's would be;

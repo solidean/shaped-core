@@ -513,6 +513,14 @@ void lowering::describe(local_id id, value_ref held, bool is_variable)
     auto const statement = _statement;
     if (auto const body = _e.at(_e.body); _statement == 0xffffffffu && !body.empty())
         _statement = u32(index_of(body[0]));
+    // an inlined call's parameter is its callee's variable, placed at a statement of the callee's body
+    if (!l.scope_through.empty())
+        for (auto s = isize(0); s < _e.stmts.size(); ++s)
+            if (_e.stmts[s].inlined_through == l.scope_through)
+            {
+                _statement = u32(s);
+                break;
+            }
     if (_variable_of[position] == k_no_element)
     {
         _variable_of[position] = u32(_out.debug_variables.size());
