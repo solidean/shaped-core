@@ -103,6 +103,43 @@ TEST("sgl ir construct_ssa - a local written in two arms becomes a phi")
     CHECK(count_of(b.p, op::store) == 1);
 }
 
+TEST("sgl ir construct_ssa - a described variable takes the value its arms meet with, after the phi (EMIT-267)")
+{
+    auto b = program_builder();
+    auto const x = b.add_local();
+    b.p.debug_variables.push_back({.type = b.float_type});
+    b.blocks(4);
+    b.open(0);
+    b.add(op::debug_declare, b.void_type, {0, u32(x)});
+    b.select_merge(0, 3);
+    b.branch_if(b.yes, 1, 2);
+    b.open(1);
+    b.add(op::store, b.void_type, {u32(x), u32(b.one)});
+    b.branch(3);
+    b.open(2);
+    b.add(op::store, b.void_type, {u32(x), u32(b.two)});
+    b.branch(3);
+    b.open(3);
+    b.keep(b.add(op::load, b.float_type, {u32(x)}));
+    b.finish();
+    REQUIRE(refusal_of(b.p, control_flow::structured) == "");
+
+    construct_ssa(b.p);
+    CHECK(refusal_of(b.p, control_flow::structured) == "");
+    REQUIRE(count_of(b.p, op::phi) == 1);
+    // one value a store, and one the phi
+    CHECK(count_of(b.p, op::debug_value) == 3);
+    auto const& merge = b.p.blocks[3];
+    REQUIRE(merge.count >= 2);
+    CHECK(b.p.instructions[merge.first].code == op::phi);
+    auto const& stated = b.p.instructions[merge.first + 1];
+    REQUIRE(stated.code == op::debug_value);
+    auto const operands = b.p.operands_of(stated);
+    CHECK(operands[0] == 0u);
+    CHECK(operands[1] == merge.first);
+    CHECK(operands[2] == 0u);
+}
+
 TEST("sgl ir construct_ssa - one definition reaching a read leaves no phi")
 {
     auto b = program_builder();

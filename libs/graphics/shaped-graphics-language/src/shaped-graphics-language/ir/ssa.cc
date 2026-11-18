@@ -169,6 +169,7 @@ private:
             {
                 _local_slots[l] = u32(_slot_types.size());
                 add_slots(_p.at(_p.locals[l].type).element);
+                _slot_locals.resize_to_filled(_slot_types.size(), u32(l));
             }
     }
 
@@ -310,6 +311,7 @@ private:
     {
         auto const count = _pred_count[isize(b)];
         _phis.push_back({.block = b,
+                         .slot = slot,
                          .type = _slot_types[slot],
                          .first = u32(_phi_operands.size()),
                          .count = count,
@@ -614,11 +616,14 @@ private:
             if (!is_valid(_phis[i].replaced_by))
                 phi_order[cursor[isize(_phis[i].block)]++] = u32(i);
 
+        auto const is_described = [&](phi_node const& phi) { return _declared_as[_slot_locals[phi.slot]] != k_not_slot; };
         auto at = u32(0);
         for (auto const b : order)
         {
             for (auto k = first_phi[isize(b)]; k < first_phi[isize(b)] + phis_by_block[isize(b)]; ++k)
                 phi_place[phi_order[k]] = at++;
+            for (auto k = first_phi[isize(b)]; k < first_phi[isize(b)] + phis_by_block[isize(b)]; ++k)
+                at += is_described(_phis[phi_order[k]]) ? 1 : 0;
             for (auto i = _new_first[isize(b)]; i < _new_first[isize(b)] + _new_count[isize(b)]; ++i)
                 body_place[i] = at++;
         }
@@ -663,6 +668,21 @@ private:
                 }
                 instructions.push_back({.code = op::phi, .type = phi.type, .first = first, .count = phi.count * 2});
             }
+            // EMIT-267: a variable takes the value its slots meet with, stated after the block's last phi
+            for (auto k = first_phi[isize(b)]; k < first_phi[isize(b)] + phis_by_block[isize(b)]; ++k)
+            {
+                auto const& phi = _phis[phi_order[k]];
+                if (!is_described(phi))
+                    continue;
+                auto const local = _slot_locals[phi.slot];
+                auto const first = u32(operands.size());
+                operands.push_back(_declared_as[local]);
+                operands.push_back(phi_place[phi_order[k]]);
+                operands.push_back(phi.slot - _local_slots[local]);
+                auto const at_line = _new_count[isize(b)] > 0 ? _body[_new_first[isize(b)]].statement : 0xffffffffu;
+                instructions.push_back(
+                    {.code = op::debug_value, .type = type_ref::none, .first = first, .count = 3, .statement = at_line});
+            }
             for (auto i = _new_first[isize(b)]; i < _new_first[isize(b)] + _new_count[isize(b)]; ++i)
             {
                 auto copy = _body[i];
@@ -694,6 +714,7 @@ private:
     struct phi_node
     {
         block_ref block = block_ref::none;
+        u32 slot = 0;
         type_ref type = type_ref::none;
         /// A range of `_phi_operands`, parallel to the block's predecessors.
         u32 first = 0;
@@ -720,6 +741,8 @@ private:
     /// Parallel to `_p.locals`: its first slot, or `k_not_slot` for a local that stays one.
     cc::vector<u32> _local_slots;
     cc::vector<type_ref> _slot_types;
+    /// Parallel to `_slot_types`: the local each slot belongs to.
+    cc::vector<u32> _slot_locals;
     /// Parallel to `_p.instructions`: what each became, and where a chain into a promoted local landed.
     cc::vector<value_ref> _result;
     cc::vector<u32> _chain_slots;
