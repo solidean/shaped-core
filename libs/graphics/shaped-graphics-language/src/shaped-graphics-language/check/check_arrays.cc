@@ -408,6 +408,8 @@ void checker::judge_edge_arrays(i32 file, source_span where, type_id type, bool 
         if (m.factor != tessellation_factor::none || m.type == checked_module::error_type || !refused.empty())
             continue;
         auto const& t = out.at(m.type);
+        // An array of matrices is refused here first (a matrix is not `crosses_edges`); lifting it needs the emitter's
+        // `edge_pieces_of` changed first, see the note in emit/impl/plan.cc's `validate_edge_struct`.
         auto const is_carried = is_link && out.builtin_type_of(m.type) == nullptr && t.kind == type_kind::array
                              && t.count > 0 && out.builtin_type_of(t.element) != nullptr
                              && out.builtin_type_of(t.element)->crosses_edges;
