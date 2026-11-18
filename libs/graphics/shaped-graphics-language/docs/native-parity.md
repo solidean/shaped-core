@@ -238,6 +238,10 @@ Most of what `lines` adds is the text of every file a line names, the modules' i
 `full` adds 7% to 9% of compile time over `lines`, and 16% to 32% of bytes.
 Neither changes an instruction of the program, so neither is a cost a GPU sees.
 
+What a debugger shows of `full` is checked by `libs/graphics/shaped-graphics/tools/gpu-capture/check-debugger.py`, in RenderDoc on dx12 and vulkan.
+PIX shows the same locals with their values, checked by hand on 2026-11-18; its call stack names only the innermost inlined function.
+Global resources and columns are not described: RenderDoc and PIX show bindings from reflection, and SGL's lines are per statement.
+
 ## What each gap was
 
 * **SPIR-V ran no pass.**

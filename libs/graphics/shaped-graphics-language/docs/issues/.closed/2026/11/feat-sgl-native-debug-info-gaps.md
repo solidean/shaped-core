@@ -7,13 +7,13 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/impl/writer_lines.cc
   - test: native-line-table-test
   - file: docs/plans/sgl-native-debug-variables.plan.md
-claimed-by: Claude (for Julius)
-claimed-at: 2026-11-18T10:51Z
+closed: 2026-11-18
+resolution: fixed
 ---
 
 # Native debug info: the variables full does not describe yet, globals, lexical blocks and columns
 
-EMIT-267 landed with [feat-sgl-native-debug-variables](.closed/2026/11/feat-sgl-native-debug-variables.md): at `full` both native writers describe the locals the source wrote.
+EMIT-267 landed with [feat-sgl-native-debug-variables](feat-sgl-native-debug-variables.md): at `full` both native writers describe the locals the source wrote.
 RenderDoc lists them on dx12 and vulkan, checked by `libs/graphics/shaped-graphics/tools/gpu-capture/check-debugger.py --debug-info full`.
 This is what that issue asked for and did not reach, and what its plan found on the way.
 The plan's IDs are kept, so its notes and log still say where each came from.

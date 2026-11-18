@@ -232,6 +232,9 @@ A binding array is one global, and an `access_chain` picks the element, so DXIL 
 The optimizing passes stand in `ir/`, on values as they are, so each keeps every operation's statement and guarantee: `ir/passes.hh`, with `ir::simplify` beside it.
 At `full` (EMIT-267) lowering writes `debug_value` and `debug_declare` for each local the source wrote, and `construct_ssa` turns a promoted local's stores into values.
 Their operand has the role `operand::debug`: a use count reads `value` alone, so no pass decides differently, and a rewrite follows it through `names_a_value`.
+A pass that changes where a value lives restates it: SSA describes the phis it keeps, and `flatten_branches` drops an arm's values of a mutable variable.
+`remove_unused` states a dead construct a description names by its live parts.
+A type only a description names is `is_debug_only`, which SPIR-V declares no type for, and the line table's `blocks` give each place its lexical block.
 DXIL writes them in `dxil/impl/writer_lines.cc`, and SPIR-V in `spirv/impl/writer_variables.cc`, whose ids are handles until every other id is taken.
 `ir::simplify` and `ir::flatten_branches` each take a `control_flow`, and keep structured control flow under `structured`.
 There a selection `simplify` decides branches to one side and leaves the other unreachable, as SPIR-V allows, and `flatten_branches` folds only a selection whose arms head nothing.

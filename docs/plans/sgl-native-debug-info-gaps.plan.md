@@ -1,9 +1,8 @@
 ---
 title: SGL native debug info gaps
-status: active
+status: done
 created: 2026-11-18
 updated: 2026-11-18
-issue: feat-sgl-native-debug-info-gaps
 ---
 
 # SGL native debug info gaps
@@ -14,7 +13,7 @@ At `full`, a debugger shows every variable the source wrote with its right value
 That covers values at merges and folded branches, split lets, stage structs, and locals left in memory, each in the scope it was written in.
 Global resources and columns are described as DXC describes them, and PIX is confirmed to show a value.
 `lines` and `none` stay byte for byte, and `full` still changes no instruction (EMIT-267).
-The issue is [feat-sgl-native-debug-info-gaps](../../libs/graphics/shaped-graphics-language/docs/issues/feat-sgl-native-debug-info-gaps.md).
+The issue is [feat-sgl-native-debug-info-gaps](../../libs/graphics/shaped-graphics-language/docs/issues/.closed/2026/11/feat-sgl-native-debug-info-gaps.md).
 Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), named in each task.
 
 ## Context
@@ -62,14 +61,21 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 
 ## P3: What is not described at all
 
-- [ ] P3.1 Global resources: `DIGlobalVariable` and `DebugGlobalVariable` for bindings, as DXC writes them
-- [ ] P3.2 Columns: the line table carries a column, and both writers state it
+- [-] P3.1 Global resources: `DIGlobalVariable` and `DebugGlobalVariable` for bindings, as DXC writes them
+  - Note: dropped (D2): DXC's DXIL global carries no value, and both debuggers show bindings from reflection
+- [-] P3.2 Columns: the line table carries a column, and both writers state it
+  - Note: dropped (D2): SGL's lines are per statement, so a column would mark only where one starts, and it would change what `lines` writes
 
 ## P4: Confirm and close
 
-- [ ] P4.1 PIX shows an SGL local's value on a dx12 capture
-- [ ] P4.2 check-debugger.py checks what P1 to P3 added: a value after a merge, a split let, a stage struct
-- [ ] P4.3 Spec, architecture and native-parity docs say what landed; the issue closes
+- [x] P4.1 PIX shows an SGL local's value on a dx12 capture
+  - Outcome: checked by hand in PIX 2610.28 on sgl-cube's centre pixel: `cube.sgl` source, `n` lane by lane, `i` and `light` with the values the shader gives there
+  - Note: PIX's call stack names only `shade`, where RenderDoc names `main_ps` too; filed as feat-sgl-native-debug-pix-inlined-frames
+  - Note: replaying a `.wpix` needs Windows developer mode; the performance-counter warning does not block debugging
+- [x] P4.2 check-debugger.py checks what P1 to P3 added: a value after a merge, a split let, a stage struct
+  - Outcome: it expects `p`, and that line 59 lists none of shade's block-scoped `n`, `light`, `i`
+  - Note: a merge's value and a split let have no expectation there, since debug-pixel.py reads no values and sgl-cube splits no let; the IR and emit tests hold them
+- [x] P4.3 Spec, architecture and native-parity docs say what landed; the issue closes
 
 ## Decisions
 
@@ -80,6 +86,13 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
   The SPIR-V writer numbers and declares only the others.
 - **Why:** Passes after lowering add types too (`state_constant_tables`), so the debugger's types cannot simply come last; DXIL interns its own types by use and needs nothing.
 - **Alternatives:** A boundary index past which types are the debugger's; a separate table of debug types with references of their own.
+
+### D2: Global resources and columns are not described (2026-11-18) [P3.1, P3.2]
+
+- **Context:** The issue listed both; DXC writes them.
+- **Decision:** Drop both, decided with Julius.
+- **Why:** DXC's DXIL global carries no value and both debuggers show bindings from reflection; SGL's line table is per statement, so a column marks only a statement's start and changes `lines`.
+- **Alternatives:** A source line per IR global with resource types; columns from `source_lines::line_at`.
 
 ## Deviations
 
@@ -101,3 +114,4 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 - 2026-11-18: P2.1 done: an inlined parameter is its callee's variable.
 - 2026-11-18: P1.4 to P2.1 shipped; P2.2 done: a call in a generic instance names its function.
 - 2026-11-18: P2.3 done: lexical blocks; P2 done.
+- 2026-11-18: P3 dropped (D2); P4.1 checked in PIX by hand, P4.2 and P4.3 done; the plan is done and the issue closes.

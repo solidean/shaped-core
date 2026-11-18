@@ -35,6 +35,9 @@ CUBE_VARIABLES = {"lit", "n", "light", "i", "p"}
 # The lines that only state a value, which a debugger may step onto once variables are described: SPIR-V states each
 # value at its line, as DXC's does, where DXIL's dbg.value is no step: `let mut light = 0.25`, and shade's call.
 CUBE_STATING_LINES = {50, 58}
+# shade's locals live in the lexical block of its else arm, so back in main_ps at its return none of them is listed.
+CUBE_RETURN_LINE = 59
+CUBE_SCOPED_TO_SHADE = {"n", "light", "i"}
 
 
 def capture(backend: str, debug_info: str, into: pathlib.Path) -> pathlib.Path | None:
@@ -100,6 +103,14 @@ def check(backend: str, debug_info: str, result: dict) -> list[str]:
         listed |= {name.split(".")[0] for name in listed}
         if missing := CUBE_VARIABLES - listed:
             wrong.append(f"{backend}: the debugger lists no variable {sorted(missing)}; it lists {sorted(listed)}")
+        at_return = {
+            v["name"].split(".")[0]
+            for s in result.get("steps", [])
+            if s.get("line") == CUBE_RETURN_LINE and (s.get("file") or "").endswith(CUBE_FILE)
+            for v in s.get("vars", [])
+        }
+        if leaked := at_return & CUBE_SCOPED_TO_SHADE:
+            wrong.append(f"{backend}: line {CUBE_RETURN_LINE} still lists shade's {sorted(leaked)}, out of their scope")
     return wrong
 
 
