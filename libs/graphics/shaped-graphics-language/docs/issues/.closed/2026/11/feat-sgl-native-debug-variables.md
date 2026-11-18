@@ -7,8 +7,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/impl/writer_lines.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
   - test: native-line-table-test
-claimed-by: Claude (for Julius Nehring-Wirxel)
-claimed-at: 2026-11-17T11:43Z
+closed: 2026-11-18
+resolution: fixed
 ---
 
 # Full debug info from the native writers: variables, types and scopes, past the line table
@@ -42,6 +42,6 @@ This issue is the rest of what DXC's `-Zi` and `-fspv-debug=vulkan-with-source` 
 - **The IR has the names.** `ir::local` keeps a variable's name and `ir::member` a member's, so the source of a description exists before SSA.
 - **Hypothesis: SSA is the hard part.** Once a local becomes SSA values, a description has to follow it through `DebugValue` or `llvm.dbg.value` at each def.
   Whether the passes keep enough to do that, or each pass has to carry the variable along, is not yet looked at.
-- **No debugger has read the line table yet** ([feat-sgl-native-line-table](.closed/2026/11/feat-sgl-native-line-table.md#not-confirmed)).
+- **No debugger has read the line table yet** ([feat-sgl-native-line-table](feat-sgl-native-line-table.md#not-confirmed)).
   Driving RenderDoc and PIX on the line table first would show what the format checks miss, before more goes on top of it.
 - **Done means a debugger shows it**: a local's value at a breakpoint in RenderDoc on vulkan and in PIX on dx12, with `spirv-val` and DXC's validator still passing.

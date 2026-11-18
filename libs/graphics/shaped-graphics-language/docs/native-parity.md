@@ -224,6 +224,20 @@ Every other entry stands within about 10% of DXC's operations, and most below it
 DXIL's bytes run 5% to 20% over DXC's even where the operations match, imgui's being 30 against 30.
 That is the container rather than the code: DXC's side is stripped of reflection and debug parts here, and the gap does not grow with the code.
 
+## Debug info
+
+What EMIT-257's lines and EMIT-267's variables cost on viewer `path_trace`, the shader with the most to say, on 2026-11-18.
+The numbers are release builds' best of 40 compiles, from slib's benchmark "the viewer's tracer through SGL's own binaries at each level of debug info".
+
+| target | `none` | `lines` | `full` |
+|---|---:|---:|---:|
+| dxil | 7.9 ms, 25,864 bytes | 9.8 ms, 304,076 bytes | 10.7 ms, 352,620 bytes |
+| spirv | 7.8 ms, 47,628 bytes | 8.1 ms, 217,356 bytes | 8.8 ms, 286,128 bytes |
+
+Most of what `lines` adds is the text of every file a line names, the modules' included, which a debugger shows without opening them.
+`full` adds 7% to 9% of compile time over `lines`, and 16% to 32% of bytes.
+Neither changes an instruction of the program, so neither is a cost a GPU sees.
+
 ## What each gap was
 
 * **SPIR-V ran no pass.**

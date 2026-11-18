@@ -1,6 +1,6 @@
 ---
 title: SGL native debug variables
-status: active
+status: done
 created: 2026-11-17
 updated: 2026-11-18
 issue: feat-sgl-native-debug-variables
@@ -13,7 +13,7 @@ issue: feat-sgl-native-debug-variables
 SGL's own DXIL and SPIR-V carry full debug info when asked: each source variable with its value and type, in the scope of the function it was written in, inlined calls included.
 Done means a debugger shows an SGL local's value at a breakpoint, PIX on dx12 and RenderDoc on vulkan, checked by a script rather than by hand.
 Asking for less writes what EMIT-257 writes today, byte for byte, and asking for nothing writes what it wrote before.
-The issue is [feat-sgl-native-debug-variables](../../libs/graphics/shaped-graphics-language/docs/issues/feat-sgl-native-debug-variables.md).
+The issue is [feat-sgl-native-debug-variables](../../libs/graphics/shaped-graphics-language/docs/issues/.closed/2026/11/feat-sgl-native-debug-variables.md).
 
 ## Context
 
@@ -90,16 +90,17 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - [x] P3.7 Test: `full` against `lines` leaves every non-debug operation the same, over the repo's SGL
   - Outcome: native-line-table-test.cc: `full` against `lines`, same SPIR-V and the same DXIL part over the whole corpus, thorough included
 
-- [ ] P3.9 A value no operation keeps whole, such as an entry's stage struct `p`, described by its pieces rather than as optimized out
+- [>] P3.9 A value no operation keeps whole, such as an entry's stage struct `p`, described by its pieces rather than as optimized out
 - [x] P3.10 `let lit = shade(...)` in sgl-cube is not described: find where legalizing moves a block's value past the local
   - Outcome: rule L1 of legalize_lets.cc gave the temporary the let's name but not its source name; now both
-- [ ] P3.11 A promoted variable's value at a merge: a `debug_value` of each phi `construct_ssa` makes for its slots
-- [ ] P3.12 A debug value in an arm `flatten_branches` folds into a select states the arm's value on both paths; drop it there, or state the select
-- [ ] P3.13 A call in a generic function's instance names its function, through the instance's tables
-- [ ] P3.14 A let the legalizer splits into its lanes, read by them alone, describes each lane as a piece of the variable
+- [>] P3.11 A promoted variable's value at a merge: a `debug_value` of each phi `construct_ssa` makes for its slots
+- [>] P3.12 A debug value in an arm `flatten_branches` folds into a select states the arm's value on both paths; drop it there, or state the select
+- [>] P3.13 A call in a generic function's instance names its function, through the instance's tables
+- [>] P3.14 A let the legalizer splits into its lanes, read by them alone, describes each lane as a piece of the variable
   - Note: `let v = float3(...)` read as `v.x`, `v.y`, `v.z` becomes lets `x`, `y`, `z`, which carry no source name
-- [ ] P3.15 An inlined parameter's variable stands in its callee's scope, as DXC's do, not in the caller's where its binding stands
-- [ ] P4.7 `llvm.dbg.declare` of a variable a local in memory holds, an array indexed at run time among them
+- [>] P3.15 An inlined parameter's variable stands in its callee's scope, as DXC's do, not in the caller's where its binding stands
+- [>] P4.7 `llvm.dbg.declare` of a variable a local in memory holds, an array indexed at run time among them
+  - Note: P3.9, P3.11 to P3.15 and P4.7 moved to feat-sgl-native-debug-info-gaps, with lexical blocks, globals, columns and a PIX check (X2)
 
 ## P4: DXIL
 
@@ -136,8 +137,10 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 
 ## P6: Close
 
-- [ ] P6.1 Measure size and compile time of `full` against `lines` and `none` on the viewer's `path_trace`
-- [ ] P6.2 Spec, architecture and native-parity docs say what landed; the issue closes
+- [x] P6.1 Measure size and compile time of `full` against `lines` and `none` on the viewer's `path_trace`
+  - Outcome: slib's tracer benchmark at each level; `full` adds 7% to 9% of compile time over `lines` and 16% to 32% of bytes, in native-parity.md's "Debug info"
+- [x] P6.2 Spec, architecture and native-parity docs say what landed; the issue closes
+  - Outcome: EMIT-267 in emitting.md names both writers, architecture.md where each writes it; the gaps go on in feat-sgl-native-debug-info-gaps (X2)
 
 ## Decisions
 
@@ -197,6 +200,12 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - **Why:** SPIR-V states a value at its line, as DXC's does, and RenderDoc makes that a step; DXIL's `dbg.value` is no step.
 - **Impact:** None on DXIL; on SPIR-V a debugger stops on a declaration and at the call that binds an inlined function's parameters.
 
+### X2: The gaps and the issue's remaining asks move to an issue of their own (2026-11-18) [P3.9, P3.11, P3.12, P3.13, P3.14, P3.15, P4.7, P6.2]
+- **Planned:** The issue closes with the plan.
+- **Actual:** It closes with seven gap tasks open, which move with lexical blocks, global resources, columns and a PIX check to feat-sgl-native-debug-info-gaps.
+- **Why:** The goal holds, a debugger lists an SGL local's value on both backends; what is left is each a step of its own, none of which blocks it.
+- **Impact:** PIX is not yet confirmed to show a value; RenderDoc reads dx12's captures in its place.
+
 ## Log
 
 - 2026-11-17: Plan created from the issue and a design conversation; D1 to D4 decided.
@@ -210,3 +219,4 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: P4.1 to P4.6 and P3.10 done: dx12 describes every variable, RenderDoc lists them, the DXIL part stays the same; P3.14, P3.15 and P4.7 filed.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.
 - 2026-11-18: P5 done: vulkan describes every variable with `NonSemantic.Shader.DebugInfo.100` (D8), RenderDoc lists them, spirv-val takes the corpus; X1.
+- 2026-11-18: P6 done: measured in native-parity.md; the gaps moved to feat-sgl-native-debug-info-gaps (X2), and the issue closes.

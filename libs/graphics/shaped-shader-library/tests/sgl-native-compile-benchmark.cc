@@ -174,8 +174,9 @@ BENCHMARK("slib - a vertex and pixel pair through SGL's own binaries against DXC
     }
 }
 
-// EMIT-257: what a line table costs, on the shader with the most lines to say, whose modules reach several files.
-BENCHMARK("slib - the viewer's tracer through SGL's own binaries with and without their line table, best of N")
+// EMIT-257 and EMIT-267: what a line table and the variables cost, on the shader with the most lines to say, whose
+// modules reach several files.
+BENCHMARK("slib - the viewer's tracer through SGL's own binaries at each level of debug info, best of N")
 {
     auto names = cc::vector<cc::string>();
     auto sources = cc::vector<cc::string>();
@@ -201,29 +202,29 @@ BENCHMARK("slib - the viewer's tracer through SGL's own binaries with and withou
     {
         auto const is_dx12 = target == sgl::emit::target::hlsl_dx12;
         auto bytes = isize(0);
-        auto const compile = [&](bool line_table)
+        auto const compile = [&](sgl::emit::debug_info level)
         {
-            return best_of(
-                40,
-                [&]
-                {
-                    auto written = sgl::compile_to_text(
-                        {.source = source,
-                         .source_name = path,
-                         .library = library,
-                         .entry_point = "path_trace",
-                         .target = target,
-                         .native = sgl::emit::native_route::require,
-                         .native_debug_info = line_table ? sgl::emit::debug_info::lines : sgl::emit::debug_info::none});
-                    REQUIRE(written.has_value());
-                    bytes = is_dx12 ? written.value().dxil.size() : written.value().spirv.size() * 4;
-                });
+            return best_of(40,
+                           [&]
+                           {
+                               auto written = sgl::compile_to_text({.source = source,
+                                                                    .source_name = path,
+                                                                    .library = library,
+                                                                    .entry_point = "path_trace",
+                                                                    .target = target,
+                                                                    .native = sgl::emit::native_route::require,
+                                                                    .native_debug_info = level});
+                               REQUIRE(written.has_value());
+                               bytes = is_dx12 ? written.value().dxil.size() : written.value().spirv.size() * 4;
+                           });
         };
-        auto const off = compile(false);
-        auto const off_bytes = bytes;
-        auto const on = compile(true);
-        CC_LOG_INFO("{}: {} ms and {} bytes without the line table, {} ms and {} bytes with it",
-                    is_dx12 ? "dxil" : "spirv", off, off_bytes, on, bytes);
+        auto const none = compile(sgl::emit::debug_info::none);
+        auto const none_bytes = bytes;
+        auto const lines = compile(sgl::emit::debug_info::lines);
+        auto const lines_bytes = bytes;
+        auto const full = compile(sgl::emit::debug_info::full);
+        CC_LOG_INFO("{}: none {} ms and {} bytes, lines {} ms and {} bytes, full {} ms and {} bytes",
+                    is_dx12 ? "dxil" : "spirv", none, none_bytes, lines, lines_bytes, full, bytes);
     }
 }
 
