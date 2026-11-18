@@ -176,6 +176,26 @@ TEST("slib - SGL's DXIL with its variables passes the validator, and DXC reads e
     CHECK(pieces.value().contains("name: \"v\""));
     CHECK(pieces.value().contains("!DIExpression(DW_OP_bit_piece, 64, 32)"));
     CHECK(pieces.value().contains("name: \"vector<float, 3>\""));
+
+    // an array indexed at run time stays in memory, which `llvm.dbg.declare` names whole, as DXC's does
+    auto const table = sgl::compile_to_text({.source = "binding work:\n"
+                                                       "    values: mut buffer[float]\n"
+                                                       "\n"
+                                                       "@compute(1) fun run(@thread_id id: int3){work}:\n"
+                                                       "    let mut table = [work.values[0], work.values[1], 2.0]\n"
+                                                       "    table[id.x % 3] = 5.0\n"
+                                                       "    work.values[3] = table[(id.x + 1) % 3]\n",
+                                             .source_name = "table.sgl",
+                                             .entry_point = "run",
+                                             .target = sgl::emit::target::hlsl_dx12,
+                                             .native = sgl::emit::native_route::require,
+                                             .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(table.has_value()).dump("error", table.has_error() ? table.error() : cc::string());
+    CHECK(!compiler.value().validate(table.value().dxil).has_value());
+    auto const declared = compiler.value().disassemble(part_as_program(table.value().dxil, "ILDB"));
+    REQUIRE(declared.has_value());
+    CHECK(declared.value().contains("call void @llvm.dbg.declare(metadata [3 x float]*"));
+    CHECK(declared.value().contains("name: \"table\""));
 }
 
 TEST("slib - every entry point SGL's DXIL lowers passes the validator with its line table")

@@ -605,6 +605,7 @@ fn main_ps(p: pixel_input) -> target_ {
   Asking for `full` changes no instruction but the debug ones, as `lines` changes none.
   DXIL states each lane of a value as DXC's `-Zi` does, a `llvm.dbg.value` in the `ILDB` part.
   It is a `DW_OP_bit_piece` of the packed variable where the variable has more than one lane, and each variable a `DILocalVariable` of its function's `DISubprogram`.
+  A variable a local in memory holds, an array indexed at run time among them, is named whole by `llvm.dbg.declare` of its memory.
   SPIR-V carries `NonSemantic.Shader.DebugInfo.100` as DXC's `-fspv-debug=vulkan-with-source` does, and its `DebugLine` stands in place of EMIT-257's `OpLine`.
   Each variable is a `DebugLocalVariable` of its function's `DebugFunction`, and each value a `DebugValue`, indexed down to the part of the variable it gives.
   Every id the debug info takes comes after every other, so the module's own instructions keep theirs.

@@ -254,13 +254,17 @@ public:
     /// States `value` for a debugger, an `llvm.dbg.value`; `key` names its variable and expression in `set_debug_values`.
     /// No pass keeps `value` alive for it, and one whose value goes goes with it.
     void debug_value(ll_value value, u32 key);
+    /// States that `pointer` holds the variable of `key`, an `llvm.dbg.declare`, which keeps it as alive as `debug_value`
+    /// keeps its value: not at all.
+    void debug_declare(ll_value pointer, u32 key);
     /// What a `debug_value` of each key names: metadata ids, as `md_record` gives them.
     struct debug_value_metadata
     {
         u32 variable = 0;
         u32 expression = 0;
     };
-    /// Declares `llvm.dbg.value` and names what each key of `debug_value` stands for, after `begin_debug_metadata`.
+    /// Declares `llvm.dbg.value` and `llvm.dbg.declare`, and names what each key of `debug_value` and `debug_declare`
+    /// stands for, after `begin_debug_metadata`.
     void set_debug_values(cc::vector<debug_value_metadata> values);
     /// What the `debug_value` of `key` states, for one added with `none` before the constant it states could be made.
     void set_debug_operand(u32 key, ll_value value);
@@ -440,6 +444,8 @@ private:
         unreachable,
         /// Operands: the value, then the key into `_debug_values`; written as a call of `_debug_declaration`.
         debug_value,
+        /// Operands: the pointer to the variable's memory, then the key; written as a call of `_debug_declare`.
+        debug_declare,
     };
     struct inst_entry
     {
@@ -512,6 +518,7 @@ private:
     /// EMIT-267: by key, what each `debug_value` names; `llvm.dbg.value`, and the `i64 0` every call of it passes.
     cc::vector<debug_value_metadata> _debug_values;
     ll_value _debug_declaration = ll_value::none;
+    ll_value _debug_declare = ll_value::none;
     ll_value _debug_zero = ll_value::none;
     u32 _location = 0;
     cc::vector<inst_entry> _instructions;

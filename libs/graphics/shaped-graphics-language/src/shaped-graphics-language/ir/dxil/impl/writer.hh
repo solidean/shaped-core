@@ -265,6 +265,8 @@ private:
     void write_debug_info();
     /// EMIT-267: a `debug_value` as one `llvm.dbg.value` a leaf, each keyed to its variable and leaf in `_debug_keys`.
     void describe(instruction const& i);
+    /// EMIT-267: an `llvm.dbg.declare` of a variable a local in memory holds.
+    void declare(instruction const& i);
     /// The `DIType` of `t` as DXC writes HLSL's, made once; 0 for a type a debugger shows no value of.
     [[nodiscard]] u32 debug_type(type_ref t);
     /// Each leaf of `t` as its bit offset in the packed value and its bits, in the order `leaf_at` numbers them.
@@ -473,6 +475,8 @@ private:
         /// program's own constants what they are without it; `none` for a value the program computes.
         value_ref constant = value_ref::none;
         u32 constant_leaf = 0;
+        /// An `llvm.dbg.declare` of the variable's memory, which names the variable whole.
+        bool is_declare = false;
     };
     cc::vector<debug_key> _debug_keys;
     /// Parallel to `_p.types`: each one's `DIType` once made, plus one; 0 before.

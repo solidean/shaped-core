@@ -41,7 +41,9 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
   - Outcome: `remove_unused` states a dead `construct`'s live parts, each from its leaf on, where it wrote `none`; RenderDoc lists `p.color` and `p.normal` on dx12 and vulkan
   - Outcome: an entry point's parameter takes the body's first statement for its place, where it had none: dx12 put it in an unnamed scope with no location
   - Note: check-debugger.py expects `p` now; `program::leaves_of` replaces lowering's own count
-- [ ] P1.5 DXIL writes `llvm.dbg.declare` for a variable a local in memory holds, an array indexed at run time among them (old P4.7)
+- [x] P1.5 DXIL writes `llvm.dbg.declare` for a variable a local in memory holds, an array indexed at run time among them (old P4.7)
+  - Outcome: the module builder's `debug_declare`, kept no more alive than `debug_value`; DXC's validator takes it and its disassembly reads `dbg.declare(metadata [3 x float]* ...)`
+  - Note: a local of several kinds of scalar is several arrays, whose leaves no single declaration lays out; it is not declared yet
 
 ## P2: Scopes
 
@@ -79,3 +81,4 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 - 2026-11-18: P1.2 done: a folded arm states no value of a path's variable.
 - 2026-11-18: P1.3 done: a split let is one variable, its lanes pieces of it; D1.
 - 2026-11-18: P1.1 to P1.3 shipped; P1.4 done: a stage struct shows the fields that are read.
+- 2026-11-18: P1.5 done: DXIL declares a local in memory; P1 done.

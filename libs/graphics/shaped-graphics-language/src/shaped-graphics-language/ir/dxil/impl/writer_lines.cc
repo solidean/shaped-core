@@ -182,7 +182,7 @@ void writer::write_debug_info()
             auto at = u32(0);
             debug_leaves(v.type, offsets, sizes, at);
             auto expression = whole;
-            if (offsets.size() > 1 && key.leaf < offsets.size())
+            if (!key.is_declare && offsets.size() > 1 && key.leaf < offsets.size())
             {
                 u64 const fields[] = {0, k_dw_op_bit_piece, offsets[key.leaf], sizes[key.leaf]};
                 expression = _m.md_record(k_di_expression, fields);
@@ -237,11 +237,37 @@ void writer::write_debug_info()
     _m.md_named("dx.source.args", nothing);
 }
 
+void writer::declare(instruction const& i)
+{
+    auto const local = value_ref(_p.operands_of(i)[1]);
+    if (!is_local(local) || _local_memory[index_of(local)] < 0)
+        return;
+    // a local is one array per kind of scalar, so only one holding a single kind lays its leaves out as the variable
+    // does; one of several kinds is not declared yet
+    auto const& memory = _memories[isize(_local_memory[index_of(local)])];
+    auto pointer = ll_value::none;
+    for (auto const held : memory.storage)
+    {
+        if (held == ll_value::none)
+            continue;
+        if (pointer != ll_value::none)
+            return;
+        pointer = held;
+    }
+    if (pointer == ll_value::none)
+        return;
+    locate(i);
+    _m.debug_declare(pointer, u32(_debug_keys.size()));
+    _debug_keys.push_back({.variable = _p.operands_of(i)[0], .is_declare = true});
+}
+
 void writer::describe(instruction const& i)
 {
-    if (!_p.describes_variables || i.code != op::debug_value || _p.lines.is_empty())
+    if (!_p.describes_variables || !is_debug(i.code) || _p.lines.is_empty())
         return;
     auto const operands = _p.operands_of(i);
+    if (i.code == op::debug_declare)
+        return declare(i);
     auto const value = value_ref(operands[1]);
     // a value a pass removed is optimized out from here, which no dbg.value is stated for yet
     if (!is_valid(value))

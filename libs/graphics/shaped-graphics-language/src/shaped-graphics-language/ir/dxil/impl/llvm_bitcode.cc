@@ -223,6 +223,8 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
             is_kept[ll_index(ll_value(_args[inst.first]))] = true;
         else if (inst.code == inst_code::debug_value && writes_variables)
             is_kept[ll_index(_debug_declaration)] = true;
+        else if (inst.code == inst_code::debug_declare && writes_variables)
+            is_kept[ll_index(_debug_declare)] = true;
     auto global_numbers = cc::vector<u32>::create_filled(_globals.size(), 0u);
     auto global_count = u32(0);
     for (auto g = isize(0); g < _globals.size(); ++g)
@@ -519,13 +521,15 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
             auto any = false;
             for (auto block_at = first_block; block_at < end_block && !any; ++block_at)
                 for (auto i = _blocks[block_at].first; i < _blocks[block_at].first + _blocks[block_at].count; ++i)
-                    any = any || _instructions[i].code == inst_code::debug_value;
+                    any = any || _instructions[i].code == inst_code::debug_value
+                       || _instructions[i].code == inst_code::debug_declare;
             if (any)
             {
                 out.enter_block(k_block_metadata, 3);
                 for (auto block_at = first_block; block_at < end_block; ++block_at)
                     for (auto i = _blocks[block_at].first; i < _blocks[block_at].first + _blocks[block_at].count; ++i)
-                        if (_instructions[i].code == inst_code::debug_value)
+                        if (_instructions[i].code == inst_code::debug_value
+                            || _instructions[i].code == inst_code::debug_declare)
                         {
                             auto const value = _args[_instructions[i].first];
                             out.record(k_md_value, {u64(u32(type_of(ll_value(value)))), u64(local_number(value))});
@@ -542,7 +546,7 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
             {
                 auto const& inst = _instructions[i];
                 // a write without the debug info has no such instruction, nor its place
-                if (inst.code == inst_code::debug_value && !writes_variables)
+                if ((inst.code == inst_code::debug_value || inst.code == inst_code::debug_declare) && !writes_variables)
                 {
                     --position;
                     continue;
@@ -661,6 +665,20 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                     scratch.push_back(relative(u32(_debug_declaration)));
                     scratch.push_back(metadata_relative(u32(metadata_end) + local_metadata++));
                     scratch.push_back(relative(u32(_debug_zero)));
+                    scratch.push_back(metadata_relative(named.variable - 1));
+                    scratch.push_back(metadata_relative(named.expression - 1));
+                    out.record(k_inst_call, scratch);
+                    break;
+                }
+                case inst_code::debug_declare:
+                {
+                    auto const& named = _debug_values[args[1]];
+                    scratch.clear();
+                    scratch.push_back(0);
+                    scratch.push_back(1u << 15); // the function's type is stated
+                    scratch.push_back(u32(_globals[ll_index(_debug_declare)].type));
+                    scratch.push_back(relative(u32(_debug_declare)));
+                    scratch.push_back(metadata_relative(u32(metadata_end) + local_metadata++));
                     scratch.push_back(metadata_relative(named.variable - 1));
                     scratch.push_back(metadata_relative(named.expression - 1));
                     out.record(k_inst_call, scratch);

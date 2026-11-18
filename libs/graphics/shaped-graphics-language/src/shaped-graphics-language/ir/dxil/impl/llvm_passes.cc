@@ -57,6 +57,7 @@ void module_builder::for_each_value(inst_entry const& inst, Visit&& visit)
     case inst_code::unreachable:
         break;
     case inst_code::debug_value:
+    case inst_code::debug_declare:
         // a constant's is stated later, and holds no value until then
         if (ll_value(args[0]) != ll_value::none)
             visit(args[0]);
@@ -397,7 +398,7 @@ void module_builder::remove_unused()
     }
     // EMIT-267: a variable's value is no use, so it stays while what it states does, and goes with it
     for (auto i = isize(0); i < _instructions.size(); ++i)
-        if (_instructions[i].code == inst_code::debug_value)
+        if (_instructions[i].code == inst_code::debug_value || _instructions[i].code == inst_code::debug_declare)
         {
             auto const v = ll_value(_args[_instructions[i].first]);
             is_live[i] = ll_is_constant(v) || ll_is_global(v) || ll_is_argument(v) || v == ll_value::none

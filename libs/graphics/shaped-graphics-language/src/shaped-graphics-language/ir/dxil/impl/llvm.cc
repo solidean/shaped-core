@@ -370,6 +370,12 @@ void module_builder::debug_value(ll_value value, u32 key)
     (void)push(inst_code::debug_value, _void, args);
 }
 
+void module_builder::debug_declare(ll_value pointer, u32 key)
+{
+    u32 const args[] = {u32(pointer), key};
+    (void)push(inst_code::debug_declare, _void, args);
+}
+
 void module_builder::set_debug_operand(u32 key, ll_value value)
 {
     for (auto const& inst : _instructions)
@@ -382,6 +388,8 @@ void module_builder::set_debug_values(cc::vector<debug_value_metadata> values)
     _debug_values = cc::move(values);
     ll_type const params[] = {_metadata_type, _i64, _metadata_type, _metadata_type};
     _debug_declaration = add_function("llvm.dbg.value", function(_void, params), 0, true);
+    ll_type const declare_params[] = {_metadata_type, _metadata_type, _metadata_type};
+    _debug_declare = add_function("llvm.dbg.declare", function(_void, declare_params), 0, true);
     _debug_zero = constant_int(_i64, 0);
 }
 
@@ -418,7 +426,10 @@ ll_value module_builder::shared_factor(ll_value left, ll_value right) const
     constexpr auto look_back = isize(16);
     auto start = _instructions.size();
     for (auto seen = isize(0); start > 0 && seen < look_back; --start)
-        seen += _instructions[start - 1].code == inst_code::debug_value ? 0 : 1;
+        seen += _instructions[start - 1].code == inst_code::debug_value
+                     || _instructions[start - 1].code == inst_code::debug_declare
+                  ? 0
+                  : 1;
     for (auto i = start; i < _instructions.size(); ++i)
     {
         auto const& inst = _instructions[i];
