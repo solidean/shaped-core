@@ -1083,7 +1083,7 @@ auto sgl::check::impl::flattener::target_call(ast::expr_id id,
         auto copies = cc::vector<flat_expr_id>();
         for (auto p = isize(0); p < slots.size(); ++p)
             copies.push_back(slots[p] >= 0 ? again(bound[slots[p]], id) : flat_expr_id::none);
-        auto const chain = chain_through(id);
+        auto const chain = chain_through(id, callee);
         raise_float_level(callee);
         frames.push_back({.function = callee, .file = s.file, .chain = chain});
         for (auto p = isize(0); p < slots.size(); ++p)

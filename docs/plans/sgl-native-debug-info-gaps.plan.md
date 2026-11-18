@@ -52,7 +52,9 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
   - Outcome: sgl-cube's `color` and `normal` are `shade`'s on both backends, listed in its frame
   - Note: a statement id would not do: the legalizer compacts the tree into new ids and rewrites a body's statements, where it keeps the call sites and each statement's calls
   - Note: a callee whose body folds into the call's own statement has no statement of its own, so its parameters stay in the caller
-- [ ] P2.2 A call inside a generic function's instance names its function, through the instance's tables (old P3.13)
+- [x] P2.2 A call inside a generic function's instance names its function, through the instance's tables (old P3.13)
+  - Outcome: `call_site::callee`, set where the inliner makes the site; `source_lines::origin_of` names a frame by it, where it read the file's tables
+  - Deviation: no instance's tables are read: the inliner knows the callee as it inlines, which is simpler and holds for every call
 - [ ] P2.3 Lexical blocks: `DILexicalBlock` and `DebugLexicalBlock` scope a loop's and a branch's locals
 
 ## P3: What is not described at all
@@ -87,3 +89,4 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 - 2026-11-18: P1.1 to P1.3 shipped; P1.4 done: a stage struct shows the fields that are read.
 - 2026-11-18: P1.5 done: DXIL declares a local in memory; P1 done.
 - 2026-11-18: P2.1 done: an inlined parameter is its callee's variable.
+- 2026-11-18: P1.4 to P2.1 shipped; P2.2 done: a call in a generic instance names its function.

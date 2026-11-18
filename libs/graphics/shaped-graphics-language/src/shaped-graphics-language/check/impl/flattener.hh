@@ -774,7 +774,7 @@ struct flattener
     };
 
     /// The call sites a node inlined through `call` stands under: the current frame's, then `call`.
-    ast::range_of<call_site> chain_through(ast::expr_id call);
+    ast::range_of<call_site> chain_through(ast::expr_id call, symbol_id callee);
 
     /// Binds a value to parameter `p` in the current frame: a literal or an immutable local stands for it, and
     /// anything else is bound once by a `let` of the block being written.

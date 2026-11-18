@@ -51,9 +51,12 @@ line_origin source_lines::origin_of(flat_entry_point const& e, flat_stmt const& 
         if (i < 0)
             return e.function;
         auto const& site = calls[i];
+        if (is_valid(site.callee))
+            return site.callee;
         if (site.file < 0 || site.file >= m.files.size() || !ast::is_valid(site.call))
             return symbol_id::none;
-        // a call in a generic function's instance stands past the file's own tables, and names no function here
+        // a call site the inliner made names its callee; a call in a generic function's instance stands past the file's
+        // own tables, so they are only what a site made elsewhere falls back on
         auto const& calls_of = m.files[site.file].call_of;
         if (ast::index_of(site.call) >= calls_of.size())
             return symbol_id::none;

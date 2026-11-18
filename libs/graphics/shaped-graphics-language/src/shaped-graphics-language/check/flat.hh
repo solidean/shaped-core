@@ -160,6 +160,9 @@ struct sgl::check::call_site
 {
     i32 file = 0;
     ast::expr_id call = ast::expr_id::none;
+    /// The function it calls, which a debugger names its frame by; a call in a generic function's instance stands past
+    /// its file's tables, so the call alone cannot say.
+    symbol_id callee = symbol_id::none;
 
     constexpr bool operator==(call_site const&) const = default;
 };

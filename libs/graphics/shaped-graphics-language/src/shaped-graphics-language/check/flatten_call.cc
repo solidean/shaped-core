@@ -591,12 +591,12 @@ void sgl::check::impl::flattener::flatten_if_branches(origin from,
     add_stmt(from, flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
 }
 
-auto sgl::check::impl::flattener::chain_through(ast::expr_id call) -> ast::range_of<call_site>
+auto sgl::check::impl::flattener::chain_through(ast::expr_id call, symbol_id callee) -> ast::range_of<call_site>
 {
     // The chain is copied first, since `call_sites` grows under the span that names it.
     auto chain = cc::vector<call_site>();
     chain.push_back_range(entry.at(current()->chain));
-    chain.push_back({.file = file(), .call = call});
+    chain.push_back({.file = file(), .call = call, .callee = callee});
     auto const range = ast::range_of<call_site>{.first = u32(entry.call_sites.size()), .count = u32(chain.size())};
     entry.call_sites.push_back_range(chain);
     return range;
@@ -696,7 +696,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
         return {};
     }
 
-    auto const chain_range = chain_through(call);
+    auto const chain_range = chain_through(call, callee);
 
     auto const label = add_label(s.name);
     auto const outer = cc::move(block);

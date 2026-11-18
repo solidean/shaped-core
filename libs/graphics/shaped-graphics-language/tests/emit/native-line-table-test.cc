@@ -433,6 +433,62 @@ TEST("sgl native lines - an inlined call's parameter is a variable of its callee
     CHECK(v_scope == twice_function);
 }
 
+TEST("sgl native lines - a call inside a generic function's instance names the function it calls (EMIT-267)")
+{
+    constexpr u32 k_debug_function = 20;
+
+    auto const source = cc::string("binding work:\n"
+                                   "    values: mut buffer[float]\n"
+                                   "\n"
+                                   "fun halved(v: float) -> float:\n"
+                                   "    let h = v * 0.5\n"
+                                   "    return h + v * h\n"
+                                   "\n"
+                                   "fun twice[T](x: T) -> T:\n"
+                                   "    let y = halved(x)\n"
+                                   "    return y + y * x\n"
+                                   "\n"
+                                   "@compute(1) fun run(@thread_id id: int3){work}:\n"
+                                   "    let a = work.values[0]\n"
+                                   "    work.values[1] = twice[float](a)\n");
+    auto e = sgl::compile_to_text({.source = source,
+                                   .source_name = "generic.sgl",
+                                   .entry_point = "run",
+                                   .target = sgl::emit::target::hlsl_vulkan,
+                                   .native = sgl::emit::native_route::require,
+                                   .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto const& words = e.value().spirv;
+    auto const set = debug_set_of(words);
+    REQUIRE(set != 0);
+
+    auto strings = cc::vector<cc::pair<u32, cc::string_view>>();
+    auto functions = cc::vector<cc::string_view>();
+    for (auto at = isize(5); at < words.size();)
+    {
+        auto const count = isize(words[at] >> 16);
+        auto const opcode = words[at] & 0xffffu;
+        REQUIRE(count > 0);
+        if (opcode == k_op_string)
+            strings.push_back({words[at + 1], cc::string_view(reinterpret_cast<char const*>(&words[at + 2]))});
+        if (opcode == k_op_ext_inst && words[at + 3] == set && words[at + 4] == k_debug_function)
+            for (auto const& [id, text] : strings)
+                if (id == words[at + 5])
+                    functions.push_back(text);
+        at += count;
+    }
+    auto const holds = [&](cc::string_view name)
+    {
+        for (auto const f : functions)
+            if (f == name)
+                return true;
+        return false;
+    };
+    CHECK(holds("twice"));
+    CHECK(holds("halved"));
+    CHECK(!holds("<inlined>"));
+}
+
 TEST("sgl native lines - without the option a module carries no line, and with it no instruction else changes")
 {
     for (auto const target : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})
