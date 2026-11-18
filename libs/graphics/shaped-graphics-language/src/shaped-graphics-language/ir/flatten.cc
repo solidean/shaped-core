@@ -303,6 +303,24 @@ private:
         return index;
     }
 
+    /// EMIT-267: an arm that runs on both paths states no value of a variable that depends on the path; where the
+    /// arms meet, the variable's description of the merge's phi becomes the select's.
+    void drop_path_values(isize arm)
+    {
+        for (auto i = _head[arm], next = k_nothing; i != _tail[arm]; i = next)
+        {
+            next = _next[i];
+            auto const& inst = _p.instructions[i];
+            if (inst.code != op::debug_value || !_p.debug_variables[_p.operands[inst.first]].is_mutable)
+                continue;
+            if (_previous[i] != k_nothing)
+                _next[_previous[i]] = next;
+            else
+                _head[arm] = next;
+            _previous[next] = _previous[i];
+        }
+    }
+
     /// The body of `from`, all but its terminator, ahead of the terminator of `into`.
     void splice_body(isize from, isize into)
     {
@@ -534,9 +552,15 @@ private:
         }
 
         if (is_yes)
+        {
+            drop_path_values(isize(yes));
             splice_body(isize(yes), b);
+        }
         if (is_no)
+        {
+            drop_path_values(isize(no));
             splice_body(isize(no), b);
+        }
         // each phi of the merge: what either way gave is now one value, from this block
         auto const from_yes = is_yes ? yes : u32(b);
         auto const from_no = is_no ? no : u32(b);

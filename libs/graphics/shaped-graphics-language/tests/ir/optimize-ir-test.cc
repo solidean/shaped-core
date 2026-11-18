@@ -419,6 +419,49 @@ TEST("sgl ir flatten_branches - a branch around little is a select, carrying the
     CHECK(only(b.p, op::fadd).statement == 4);
 }
 
+TEST("sgl ir flatten_branches - a variable the arms assign takes the select, and a let of an arm keeps its value "
+     "(EMIT-267)")
+{
+    auto b = program_builder();
+    b.p.debug_variables.push_back({.type = b.float_type, .is_mutable = true});
+    b.p.debug_variables.push_back({.type = b.float_type});
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    b.open(1);
+    auto const then_value = b.add(op::fadd, b.float_type, {u32(x), u32(b.one)});
+    b.add(op::debug_value, b.void_type, {1, u32(then_value), 0});
+    b.add(op::debug_value, b.void_type, {0, u32(then_value), 0});
+    b.branch(3);
+    b.open(2);
+    b.add(op::debug_value, b.void_type, {0, u32(b.two), 0});
+    b.branch(3);
+    b.open(3);
+    auto const joined = b.add(op::phi, b.float_type, {u32(then_value), 1, u32(b.two), 2});
+    b.add(op::debug_value, b.void_type, {0, u32(joined), 0});
+    b.keep(joined);
+    b.finish();
+    require_whole(b.p, control_flow::structured);
+
+    flatten_branches(b.p);
+    require_whole(b.p, control_flow::unstructured);
+    REQUIRE(b.p.blocks.size() == 1);
+    auto const& chosen = only(b.p, op::select);
+    auto const select_at = u32(&chosen - b.p.instructions.data());
+    auto stated_mutable = cc::vector<u32>();
+    auto stated_let = cc::vector<u32>();
+    for (auto const& i : b.p.instructions)
+        if (i.code == op::debug_value)
+            (b.p.operands_of(i)[0] == 0 ? stated_mutable : stated_let).push_back(b.p.operands_of(i)[1]);
+    // neither arm's value of the variable runs on both paths; the merge's states the select
+    REQUIRE(stated_mutable.size() == 1);
+    CHECK(stated_mutable[0] == select_at);
+    REQUIRE(stated_let.size() == 1);
+    CHECK(b.p.instructions[stated_let[0]].code == op::fadd);
+}
+
 TEST("sgl ir flatten_branches - neither an effect nor what can trap runs on a path that did not ask")
 {
     for (auto const has_effect_in_arm : {true, false})

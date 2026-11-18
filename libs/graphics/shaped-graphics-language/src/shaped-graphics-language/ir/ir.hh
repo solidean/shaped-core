@@ -827,6 +827,8 @@ struct sgl::ir::debug_variable
     u32 statement = 0xffffffffu;
     /// An entry point's parameter, which a debugger lists apart from its locals.
     bool is_parameter = false;
+    /// A `var` or a `for` counter, whose value depends on the path taken; a `let` or a parameter has one value.
+    bool is_mutable = false;
 };
 
 /// What a writer states of the `.sgl` lines behind its operations; empty unless the compile asked for it (EMIT-257).

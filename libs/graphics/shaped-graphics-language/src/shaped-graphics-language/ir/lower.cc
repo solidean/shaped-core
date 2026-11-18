@@ -486,6 +486,7 @@ void lowering::describe(local_id id, value_ref held, bool is_variable)
                                         .statement = _statement,
                                         .is_parameter = l.kind == check::local_kind::parameter});
     }
+    _out.debug_variables[_variable_of[position]].is_mutable |= is_variable;
     u32 const operands[] = {_variable_of[position], u32(held), 0u};
     if (is_variable)
         add(op::debug_declare, type_ref::none, cc::span<u32 const>(operands, 2));
