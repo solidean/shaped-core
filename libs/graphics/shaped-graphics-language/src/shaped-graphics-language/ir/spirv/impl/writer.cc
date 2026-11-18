@@ -7,6 +7,13 @@ using namespace sgl::ir::spirv::impl;
 cc::vector<u32> writer::run()
 {
     number_everything();
+    if (writes_debug_info())
+    {
+        _debug_set = debug_handle();
+        _debug_expression = debug_handle();
+        _debug_unit = debug_handle();
+        _debug_unit_source = debug_handle();
+    }
     write_types();
     write_constants();
     write_stage_elements();
@@ -16,7 +23,10 @@ cc::vector<u32> writer::run()
     if (_p.stage == check::stage::tessellation_control)
         write_control_entry();
     write_entry();
-    declare_files();
+    if (writes_debug_info())
+        declare_debug_info();
+    else
+        declare_files();
     return assembled();
 }
 
@@ -195,14 +205,42 @@ void writer::write_function()
                     emit(_code, spv::Variable,
                          {pointer_to(spv::FunctionStorage, id_of(_p.instructions[i].type)), _instruction_ids[i],
                           spv::FunctionStorage});
+        if (k == 0 && writes_debug_info())
+            debug_function_head();
+        // EMIT-267: a debug instruction may not stand among the phis that open a block, so what describes one waits
+        auto among_phis = writes_debug_info();
+        _debug_pending.clear();
+        auto const end_phis = [&]
+        {
+            among_phis = false;
+            for (auto const pending : _debug_pending)
+                describe(pending);
+        };
         for (auto i = b.first; i + 1 < b.first + b.count; ++i)
         {
-            // EMIT-267: a variable's description is not written yet, and states no line of its own
-            if (is_debug(_p.instructions[i].code))
+            auto const code = _p.instructions[i].code;
+            if (is_debug(code))
+            {
+                if (!writes_debug_info())
+                    continue;
+                if (among_phis)
+                    _debug_pending.push_back(i);
+                else
+                    describe(i);
                 continue;
+            }
+            if (among_phis && code == op::phi)
+            {
+                instruction_of(i);
+                continue;
+            }
+            if (among_phis)
+                end_phis();
             line_before(i);
             instruction_of(i);
         }
+        if (among_phis)
+            end_phis();
         line_before(b.first + b.count - 1);
         terminator(b, _p.instructions[b.first + b.count - 1]);
     }
@@ -280,6 +318,13 @@ cc::vector<u32> writer::assembled()
         out.push_back(_glsl);
         string_into(out, text);
     }
+    if (_debug_set_id != 0)
+    {
+        constexpr auto text = cc::string_view("NonSemantic.Shader.DebugInfo.100");
+        head(out, spv::ExtInstImport, 2 + string_words(text));
+        out.push_back(_debug_set_id);
+        string_into(out, text);
+    }
     emit(out, spv::MemoryModel, {0u, 1u}); // Logical, GLSL450
     out.push_back_range(_entry);
     out.push_back_range(_modes);
@@ -287,6 +332,7 @@ cc::vector<u32> writer::assembled()
     out.push_back_range(_names);
     out.push_back_range(_annotations);
     out.push_back_range(_declarations);
+    out.push_back_range(_debug_declarations);
     out.push_back_range(_code);
     return out;
 }

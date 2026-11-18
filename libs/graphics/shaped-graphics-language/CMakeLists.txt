@@ -76,6 +76,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/spirv/impl/writer_declarations.cc
     src/shaped-graphics-language/ir/spirv/impl/writer_lines.cc
     src/shaped-graphics-language/ir/spirv/impl/writer_operations.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer_variables.cc
     src/shaped-graphics-language/ir/dominance.cc
     src/shaped-graphics-language/ir/simplify.cc
     src/shaped-graphics-language/ir/ssa.cc

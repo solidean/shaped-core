@@ -2,7 +2,7 @@
 title: SGL native debug variables
 status: active
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 issue: feat-sgl-native-debug-variables
 ---
 
@@ -120,11 +120,19 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 
 ## P5: SPIR-V
 
-- [ ] P5.1 `NonSemantic.Shader.DebugInfo.100`: import, `DebugCompilationUnit`, `DebugSource`, `DebugFunction`, `DebugScope`, `DebugInlinedAt`, `DebugLine`
-- [ ] P5.2 Types: `DebugTypeBasic`, `DebugTypeVector`, `DebugTypeMatrix`, `DebugTypeComposite`, `DebugTypeArray`
-- [ ] P5.3 `DebugLocalVariable` with `DebugValue` and `DebugDeclare`
-- [ ] P5.4 `spirv-val` takes it, and every other id stays the one it is without it
-- [ ] P5.5 The P1 script shows a local's value in RenderDoc
+- [x] P5.1 `NonSemantic.Shader.DebugInfo.100`: import, `DebugCompilationUnit`, `DebugSource`, `DebugFunction`, `DebugScope`, `DebugInlinedAt`, `DebugLine`
+  - Outcome: measured against DXC's `-fspv-debug=vulkan-with-source` first: no `OpLine`, every number an `OpConstant`, a `DebugValue` indexed into a composite
+  - Outcome: `spirv/impl/writer_variables.cc`; `DebugLine` replaces `OpLine` at `full` (D8), and a debug instruction among a block's phis waits for the last of them
+- [x] P5.2 Types: `DebugTypeBasic`, `DebugTypeVector`, `DebugTypeMatrix`, `DebugTypeComposite`, `DebugTypeArray`
+- [x] P5.3 `DebugLocalVariable` with `DebugValue` and `DebugDeclare`
+  - Outcome: a value giving part of its variable is indexed down to that part from its first leaf; `DebugDeclare` names a local left in memory, which DXIL does not yet (P4.7)
+  - Note: a value optimized out states nothing, as on DXIL
+- [x] P5.4 `spirv-val` takes it, and every other id stays the one it is without it
+  - Outcome: the fixtures' spirv-val test validates each sampled module at `full` too, all of them under `--thorough`
+  - Outcome: `without_lines` drops what takes an id from the debug import on, so the EMIT-267 test holds every other instruction of SPIR-V too, over 808 compiles thorough
+- [x] P5.5 The P1 script shows a local's value in RenderDoc
+  - Outcome: check-debugger.py `--backend both --debug-info full` holds: vulkan lists lit, n, light and i
+  - Deviation: at `full` a step may stand on a line that only states a value (X1)
 
 ## P6: Close
 
@@ -175,7 +183,19 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - **Why:** About 28 sites count uses and 9 rewrite operands; changing the 9 is safer than teaching the 28 to skip debug ops one by one.
 - **Alternatives:** Debug ops whose operands are `value` and a skip at each counting site; a side table outside the instruction stream, which every renumbering would have to remap.
 
+### D8: SPIR-V's `full` writes the debug set's lines in place of `OpLine` (2026-11-18) [P5.1]
+- **Context:** `NonSemantic.Shader.DebugInfo.100` has its own `DebugLine`, scoped by `DebugScope`; EMIT-257 writes core `OpLine`s.
+- **Decision:** At `full` only the debug set's lines and scopes are written, as DXC does; `lines` keeps `OpLine` and `OpSource`.
+- **Why:** A reader of the debug set takes its lines with their scopes and inlined calls, which `OpLine` cannot carry, and two line tables can disagree.
+- **Alternatives:** Both line tables at `full`; the debug set at `lines` too, which would grow `lines` by the constants and scopes it needs.
+
 ## Deviations
+
+### X1: At `full` a debugger steps onto a line that only states a value (2026-11-18) [P5.5]
+- **Planned:** check-debugger.py holds `full` to the steps of `lines`.
+- **Actual:** At `full` it also allows cube.sgl's lines 50 and 58, `let mut light = 0.25` and shade's call, where SPIR-V states a value and nothing else.
+- **Why:** SPIR-V states a value at its line, as DXC's does, and RenderDoc makes that a step; DXIL's `dbg.value` is no step.
+- **Impact:** None on DXIL; on SPIR-V a debugger stops on a declaration and at the call that binds an inlined function's parameters.
 
 ## Log
 
@@ -189,3 +209,4 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: P3.1, P3.3 to P3.7 done: `full` describes the source's locals through every pass and changes no instruction; gaps filed as P3.9 to P3.13.
 - 2026-11-17: P4.1 to P4.6 and P3.10 done: dx12 describes every variable, RenderDoc lists them, the DXIL part stays the same; P3.14, P3.15 and P4.7 filed.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.
+- 2026-11-18: P5 done: vulkan describes every variable with `NonSemantic.Shader.DebugInfo.100` (D8), RenderDoc lists them, spirv-val takes the corpus; X1.

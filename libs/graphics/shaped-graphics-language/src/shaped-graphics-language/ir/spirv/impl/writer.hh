@@ -10,7 +10,7 @@
 /// One `ir::program` as a SPIR-V module, each logical section of it a list of words until `assembled` lays them out.
 ///
 /// writer.cc holds the walk, the control flow and the module's frame, writer_declarations.cc types, constants, globals
-/// and the entry point, and writer_operations.cc the operations.
+/// and the entry point, writer_operations.cc the operations, writer_lines.cc and writer_variables.cc the debug info.
 /// Every table a new case adds a row to stands in the file of its topic.
 namespace sgl::ir::spirv::impl
 {
@@ -65,9 +65,52 @@ private:
     /// States the line of instruction `index` before it, where the line table has one and it changed.
     void line_before(u32 index);
     /// Forgets the line stated, which a block's label ends.
-    void forget_line() { _line_file = -1; }
+    void forget_line()
+    {
+        _line_file = -1;
+        _debug_scope_stated = 0;
+        _debug_inlined_stated = 0;
+    }
     /// Gives each file a line named its `OpString` and `OpSource`, the last ids of the module, so no other id moves.
     void declare_files();
+
+    // ---- writer_variables.cc (EMIT-267)
+    /// At `full` the module carries `NonSemantic.Shader.DebugInfo.100` in place of `OpLine`: scopes, inlined calls,
+    /// lines and variables, as DXC's `-fspv-debug=vulkan-with-source` writes them.
+    [[nodiscard]] bool writes_debug_info() const { return _p.describes_variables && !_p.lines.is_empty(); }
+    /// A debug id named before the module's other ids are all taken, which `declare_debug_info` gives its number.
+    [[nodiscard]] u32 debug_handle() { return k_debug_handle | _debug_handles++; }
+    /// The handle of the `uint` constant `value` a debug instruction names.
+    [[nodiscard]] u32 debug_literal(u32 value);
+    /// An `OpExtInst` of the debug set into `out`, its handles noted in `patches` to be numbered at the end.
+    void debug_instruction(cc::vector<u32>& out,
+                           cc::vector<isize>& patches,
+                           u32 instruction,
+                           std::initializer_list<u32> operands);
+    void debug_instruction(cc::vector<u32>& out,
+                           cc::vector<isize>& patches,
+                           u32 result,
+                           u32 instruction,
+                           cc::span<u32 const> operands);
+    /// An `OpString` in the debug section, by handle.
+    [[nodiscard]] u32 debug_string(cc::string_view text);
+    /// The handle of the scope statement place `place` stands in, and of the chain of calls it was inlined through.
+    [[nodiscard]] u32 debug_scope_of(source_place const& place);
+    [[nodiscard]] u32 debug_scope(i32 file, i32 function);
+    [[nodiscard]] u32 debug_inlined_at(source_place const& place);
+    /// `DebugScope` and `DebugLine` for instruction `index`, where they changed.
+    void debug_line_before(u32 index);
+    /// The function's scope and `DebugFunctionDefinition`, at the head of its first block.
+    void debug_function_head();
+    /// A `debug_value` as a `DebugValue`, or a `debug_declare` as a `DebugDeclare`, where the value is written.
+    void describe(u32 index);
+    /// The handle of `t`'s `DebugType*`; 0 for a type a debugger shows no value of.
+    [[nodiscard]] u32 debug_type(type_ref t);
+    [[nodiscard]] u32 leaves_of(type_ref t) const;
+    /// The indexes from variable type `t` down to the part of type `part` that begins at leaf `leaf`; false where none.
+    [[nodiscard]] bool debug_indexes(type_ref t, u32 leaf, type_ref part, cc::vector<u32>& indexes) const;
+    /// Writes every global debug instruction, gives each handle its id past every other, and patches them in.
+    void declare_debug_info();
 
     // ---- writer_declarations.cc
     [[nodiscard]] u32 storage_of(storage s) const;
@@ -167,6 +210,64 @@ private:
     /// The line last stated in the block being written; -1 for none.
     i32 _line_file = -1;
     i32 _line = 0;
+    // ---- EMIT-267, at `full`
+    static constexpr u32 k_debug_handle = 0x80000000u;
+    struct debug_scope_info
+    {
+        i32 file = -1;
+        /// A position in `line_table::functions`; -1 for the entry point, -2 for an inlined body no function names.
+        i32 function = -1;
+        i32 line = 0;
+        u32 handle = 0;
+    };
+    struct debug_inlined
+    {
+        i32 line = 0;
+        u32 scope = 0;
+        u32 parent = 0;
+        u32 handle = 0;
+    };
+    struct debug_variable_info
+    {
+        u32 handle = 0;
+        u32 scope = 0;
+    };
+    struct debug_type_info
+    {
+        u32 handle = 0;
+        bool is_made = false;
+    };
+    u32 _debug_handles = 0;
+    u32 _debug_set = 0;
+    u32 _debug_expression = 0;
+    /// Per file of the line table: its `DebugSource`, 0 until a line names it.
+    cc::vector<u32> _debug_sources;
+    cc::vector<debug_scope_info> _debug_scopes;
+    cc::vector<debug_inlined> _debug_inlined;
+    /// Per `program::debug_variables`: its `DebugLocalVariable`, 0 until a value is stated of it.
+    cc::vector<debug_variable_info> _debug_variables;
+    cc::vector<debug_type_info> _debug_types;
+    cc::vector<literal> _debug_literals;
+    /// `OpString`s of the debug info, by handle, which `declare_debug_info` writes ahead of the names.
+    cc::vector<cc::string_view> _debug_string_texts;
+    cc::vector<u32> _debug_string_handles;
+    /// The global debug instructions, written last, and where in them and in `_code` a handle stands.
+    cc::vector<u32> _debug_declarations;
+    cc::vector<isize> _debug_code_patches;
+    /// Each type's instructions as `debug_type` makes them, which stand after the sources and the unit.
+    cc::vector<u32> _debug_type_words;
+    cc::vector<isize> _debug_type_patches;
+    u32 _debug_unit = 0;
+    /// The entry point's `DebugSource`, which a type names before the entry point's file is known.
+    u32 _debug_unit_source = 0;
+    /// The import's id, once handles have theirs.
+    u32 _debug_set_id = 0;
+    /// The scope and inlined call last stated in the block being written, and its line; 0 and -1 for none.
+    u32 _debug_scope_stated = 0;
+    u32 _debug_inlined_stated = 0;
+    /// Debug operations among a block's phis, which stand after the last of them.
+    cc::vector<u32> _debug_pending;
+
     cc::vector<u32> _annotations;
     cc::vector<u32> _declarations;
     cc::vector<u32> _code;

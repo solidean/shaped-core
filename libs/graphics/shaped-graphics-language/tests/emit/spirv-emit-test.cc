@@ -377,24 +377,26 @@ ASYNC_TEST("sgl spirv - every entry point of the fixtures that lowers is what sp
                 n.recording += e.value().debug_sites.empty() ? 0 : 1;
                 CHECK(validates(e.value().spirv)).dump("file", file).dump("entry", entry.entry_point);
 
-                // EMIT-257: the line table is SPIR-V spirv-val takes too, every eighth module, and each under --thorough
+                // EMIT-257 and EMIT-267: the line table and the variables are SPIR-V spirv-val takes too, every eighth
+                // module, and each under --thorough
                 if (nx::is_thorough() || lined_modules++ % 8 == 0)
-                {
-                    auto const lined = sgl::compile_to_text(
-                        {.source = source,
-                         .source_name = file,
-                         .entry_point = entry.entry_point,
-                         .target = sgl::emit::target::hlsl_vulkan,
-                         .diagnostics = true,
-                         .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
-                         .native = sgl::emit::native_route::prefer,
-                         .native_debug_info = sgl::emit::debug_info::lines});
-                    REQUIRE(lined.has_value());
-                    CHECK(validates(lined.value().spirv))
-                        .dump("file", file)
-                        .dump("entry", entry.entry_point)
-                        .dump("with", "its line table");
-                }
+                    for (auto const level : {sgl::emit::debug_info::lines, sgl::emit::debug_info::full})
+                    {
+                        auto const lined = sgl::compile_to_text(
+                            {.source = source,
+                             .source_name = file,
+                             .entry_point = entry.entry_point,
+                             .target = sgl::emit::target::hlsl_vulkan,
+                             .diagnostics = true,
+                             .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                             .native = sgl::emit::native_route::prefer,
+                             .native_debug_info = level});
+                        REQUIRE(lined.has_value());
+                        CHECK(validates(lined.value().spirv))
+                            .dump("file", file)
+                            .dump("entry", entry.entry_point)
+                            .dump("with", level == sgl::emit::debug_info::full ? "its variables" : "its line table");
+                    }
 
                 // each profile, nothing here running what it guards; a report writes through the debug buffer
                 for (auto const guard : {sgl::check::undefined_guard::abort, sgl::check::undefined_guard::report,

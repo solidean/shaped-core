@@ -31,6 +31,9 @@ CUBE_LINES = {41, 47, 49, 51, 52, 54, 55, 59}
 CUBE_PIXEL = (640, 360)
 # The locals a debugger lists once variables are described (EMIT-267); checked at `full`.
 CUBE_VARIABLES = {"lit", "n", "light", "i"}
+# The lines that only state a value, which a debugger may step onto once variables are described: SPIR-V states each
+# value at its line, as DXC's does, where DXIL's dbg.value is no step: `let mut light = 0.25`, and shade's call.
+CUBE_STATING_LINES = {50, 58}
 
 
 def capture(backend: str, debug_info: str, into: pathlib.Path) -> pathlib.Path | None:
@@ -86,7 +89,8 @@ def check(backend: str, debug_info: str, result: dict) -> list[str]:
     lines = {s["line"] for s in result.get("steps", []) if s.get("file", "") and s["file"].endswith(CUBE_FILE)}
     if missing := CUBE_LINES - lines:
         wrong.append(f"{backend}: no step stands on line(s) {sorted(missing)} of {CUBE_FILE}; stepped {sorted(lines)}")
-    if extra := lines - CUBE_LINES:
+    allowed = CUBE_LINES | CUBE_STATING_LINES if debug_info == "full" else CUBE_LINES
+    if extra := lines - allowed:
         wrong.append(f"{backend}: steps stand on line(s) {sorted(extra)} of {CUBE_FILE}, which no statement of the pixel's path holds")
     if debug_info == "full":
         listed = {v["name"] for s in result.get("steps", []) for v in s.get("vars", [])}

@@ -32,6 +32,10 @@ constexpr u32 k_op_source_continued = 2;
 constexpr u32 k_op_source = 3;
 constexpr u32 k_op_string = 7;
 constexpr u32 k_op_line = 8;
+constexpr u32 k_op_ext_inst_import = 11;
+constexpr u32 k_op_ext_inst = 12;
+constexpr u32 k_op_type_int = 21;
+constexpr u32 k_op_constant = 43;
 constexpr u32 k_op_no_line = 317;
 constexpr u32 k_op_fmul = 133;
 
@@ -57,16 +61,43 @@ constexpr u32 k_op_fmul = 133;
         || opcode == k_op_no_line;
 }
 
+/// The id of the module's `NonSemantic.Shader.DebugInfo.100` import, or 0.
+[[nodiscard]] u32 debug_set_of(cc::span<u32 const> words)
+{
+    for (auto at = isize(5); at < words.size();)
+    {
+        auto const count = isize(words[at] >> 16);
+        if (count == 0)
+            break;
+        if ((words[at] & 0xffffu) == k_op_ext_inst_import
+            && cc::string_view(reinterpret_cast<char const*>(&words[at + 2])).starts_with("NonSemantic.Shader.DebugInfo"))
+            return words[at + 1];
+        at += count;
+    }
+    return 0;
+}
+
 /// The module's instructions after its header, with the debug ones left out.
+/// The debug info's ids come after every other (EMIT-267), so what takes an id from its import on is the debug info's.
 [[nodiscard]] cc::vector<u32> without_lines(cc::span<u32 const> words)
 {
+    auto const set = debug_set_of(words);
+    auto const is_debug_info = [&](isize at)
+    {
+        auto const opcode = words[at] & 0xffffu;
+        if (set == 0)
+            return false;
+        if (opcode == k_op_ext_inst_import || opcode == k_op_type_int)
+            return words[at + 1] >= set;
+        return (opcode == k_op_ext_inst || opcode == k_op_constant) && words[at + 2] >= set;
+    };
     auto kept = cc::vector<u32>();
     for (auto at = isize(5); at < words.size();)
     {
         auto const count = isize(words[at] >> 16);
         if (count == 0)
             break;
-        if (!is_debug_line(words[at] & 0xffffu))
+        if (!is_debug_line(words[at] & 0xffffu) && !is_debug_info(at))
             for (auto k = isize(0); k < count && at + k < words.size(); ++k)
                 kept.push_back(words[at + k]);
         at += count;
@@ -173,6 +204,115 @@ TEST("sgl native lines - SPIR-V names each operation's .sgl line, an inlined one
     CHECK(names(12));
     // SPIR-V's core lines carry no call, so an inlined statement names its own line
     CHECK(multiplied_on == 7u);
+}
+
+TEST("sgl native lines - SPIR-V at full describes each variable, its scope and the call it was inlined through "
+     "(EMIT-267)")
+{
+    constexpr u32 k_debug_function = 20;
+    constexpr u32 k_debug_inlined_at = 25;
+    constexpr u32 k_debug_local_variable = 26;
+    constexpr u32 k_debug_value = 29;
+    constexpr u32 k_debug_line = 103;
+
+    // a vector read whole, which a debugger shows lane by lane
+    auto source = cc::string(k_lines);
+    source += "    let v = float3(work.values[2], work.values[3], 2.0)\n"
+              "    work.values[4] = dot(v, v)\n";
+    auto e = sgl::compile_to_text({.source = source,
+                                   .source_name = "lines.sgl",
+                                   .entry_point = "run",
+                                   .target = sgl::emit::target::hlsl_vulkan,
+                                   .native = sgl::emit::native_route::require,
+                                   .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto const& words = e.value().spirv;
+    auto const set = debug_set_of(words);
+    REQUIRE(set != 0);
+
+    struct named
+    {
+        u32 id;
+        cc::string_view text;
+    };
+    struct constant
+    {
+        u32 id;
+        u32 value;
+    };
+    auto strings = cc::vector<named>();
+    auto constants = cc::vector<constant>();
+    auto const text_of = [&](u32 id)
+    {
+        for (auto const& n : strings)
+            if (n.id == id)
+                return n.text;
+        return cc::string_view();
+    };
+    auto const value_of = [&](u32 id)
+    {
+        for (auto const& c : constants)
+            if (c.id == id)
+                return c.value;
+        return u32(0);
+    };
+    auto variables = cc::vector<cc::string_view>();
+    auto functions = cc::vector<cc::string_view>();
+    auto lines = cc::vector<u32>();
+    auto inlined = 0;
+    auto values = 0;
+    auto indexed_values = 0;
+    auto core_lines = 0;
+    for (auto at = isize(5); at < words.size();)
+    {
+        auto const count = isize(words[at] >> 16);
+        auto const opcode = words[at] & 0xffffu;
+        REQUIRE(count > 0);
+        if (opcode == k_op_string)
+            strings.push_back({words[at + 1], cc::string_view(reinterpret_cast<char const*>(&words[at + 2]))});
+        if (opcode == k_op_constant && count == 4)
+            constants.push_back({words[at + 2], words[at + 3]});
+        core_lines += opcode == k_op_line ? 1 : 0;
+        if (opcode == k_op_ext_inst && words[at + 3] == set)
+        {
+            auto const instruction = words[at + 4];
+            if (instruction == k_debug_local_variable)
+                variables.push_back(text_of(words[at + 5]));
+            if (instruction == k_debug_function)
+                functions.push_back(text_of(words[at + 5]));
+            if (instruction == k_debug_inlined_at)
+                ++inlined;
+            if (instruction == k_debug_value)
+            {
+                ++values;
+                indexed_values += count > 8 ? 1 : 0;
+            }
+            if (instruction == k_debug_line)
+                lines.push_back(value_of(words[at + 6]));
+        }
+        at += count;
+    }
+    auto const holds = [](auto const& in, auto const& wanted)
+    {
+        for (auto const& n : in)
+            if (n == wanted)
+                return true;
+        return false;
+    };
+    // the debug info's own lines stand in place of the core ones, as DXC writes them
+    CHECK(core_lines == 0);
+    CHECK(holds(lines, 11u));
+    CHECK(holds(lines, 12u));
+    CHECK(holds(lines, 7u));
+    CHECK(holds(functions, cc::string_view("run")));
+    CHECK(holds(functions, cc::string_view("clamped")));
+    CHECK(inlined > 0);
+    CHECK(holds(variables, cc::string_view("x")));
+    CHECK(holds(variables, cc::string_view("y")));
+    CHECK(holds(variables, cc::string_view("v")));
+    CHECK(values > 0);
+    // `v` is read whole, so its value is stated whole and needs no index
+    CHECK(indexed_values == 0);
 }
 
 TEST("sgl native lines - without the option a module carries no line, and with it no instruction else changes")

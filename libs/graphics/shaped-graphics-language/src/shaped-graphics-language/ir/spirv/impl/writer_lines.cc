@@ -14,6 +14,8 @@ void writer::line_before(u32 index)
 {
     if (_p.lines.is_empty())
         return;
+    if (writes_debug_info())
+        return debug_line_before(index);
     // SPIR-V has no inlining in its core lines, so a line names the innermost place, where the operation stands
     auto const place = _p.lines.place_of(_p.instructions[index].statement);
     if (place.file < 0 || place.file >= i32(_p.lines.names.size()))
