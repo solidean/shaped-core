@@ -1,6 +1,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
+#include <sv_shaders.hh>
 
 using namespace cc::primitive_defines;
 
@@ -47,4 +48,10 @@ TEST("sv - the bindless layout is module tracer's, one binding per table")
     CHECK(buffers.type == sg::binding_type::bytes);
     CHECK(buffers.access == sg::access_mode::read);
     CHECK(!buffers.texture_dimension.has_value());
+}
+
+TEST("sv - module tracer's @inline block is generated under the module's host name (CHK-171)")
+{
+    // the shader's interface names it `tracer.wavefront_step`, and so does the inline binding slib generates for it
+    CHECK(sv::shaders::tracer::wavefront_step::inline_binding().name == cc::string_view("tracer.wavefront_step"));
 }

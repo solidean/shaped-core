@@ -73,10 +73,10 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
             list.write(cc::string_view(name));
     }
     if (b.block_slot >= 0)
-    {
         o.write("block_slot", b.block_slot);
+    // an `@inline` binding's block takes no slot and is named all the same, which slib's inline binding names it by
+    if (!b.block_host_name.empty())
         o.write("block_host_name", cc::string_view(b.block_host_name));
-    }
     auto members = o.write_array("members");
     for (auto const& m : b.members)
     {
@@ -612,4 +612,25 @@ TEST("sgl describe - each entry point's JSON names its vertex input, its payload
     CHECK(shade["attributes_shape"].as_string() == cc::string_view(described.value().entry_points[1].attributes_shape));
     CHECK(shade["attributes_shape"].as_string().size() == 32);
     CHECK(shade["attribute_size"].as_double() == 12);
+}
+
+// CHK-171: a module's `@inline` block is named by the module, which slib's generated inline binding reads from here
+TEST("sgl describe - a module's @inline binding's JSON names its block by the module")
+{
+    sgl::library_file const library[] = {{.name = "push.sgl",
+                                          .source = "module push\n"
+                                                    "@inline binding constants:\n"
+                                                    "    scale: float\n"}};
+    auto const described = sgl::describe({.library = library, .module = "push"});
+    REQUIRE(described.has_value());
+    auto const json = to_json(described.value());
+    REQUIRE(json.has_value());
+    auto const doc = babel::json::read(cc::string_view(json.value()));
+    REQUIRE(doc.has_value());
+    auto const bindings = doc.value().root()["bindings"];
+    REQUIRE(bindings.size() == 1);
+    CHECK(bindings[0]["inline"].as_bool());
+    CHECK(bindings[0]["block_host_name"].as_string() == "push.constants");
+    // and it takes no slot, which slib reads as no group block
+    CHECK(!bindings[0]["block_slot"].is_valid());
 }
