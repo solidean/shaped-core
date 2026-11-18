@@ -181,6 +181,9 @@ struct sgl::ir::type
     /// A structure's name, a range of `program::names`.
     u32 name_first = 0;
     u32 name_size = 0;
+    /// Named by a debug variable alone, which a writer describes and declares no type for (EMIT-267): a split let's
+    /// whole, which no operation holds.
+    bool is_debug_only = false;
 };
 
 /// A math function, whose name every target knows differently.

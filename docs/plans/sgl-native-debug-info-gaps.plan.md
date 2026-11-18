@@ -29,8 +29,14 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
   - Outcome: `lay_out` states each kept phi of a declared local's slot after the block's last phi; sgl-cube's `light` after its loop reads the merge's phi on vulkan
   - Note: only a phi a read made is described: a phi for the debugger alone would be an instruction `full` adds, so a variable written in both arms and never read after reads as the last arm's
   - Files: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/ssa.cc, tests/ir/passes-ir-test.cc
-- [ ] P1.2 A debug value in an arm `flatten_branches` folds into a select states the select, or is dropped (old P3.12)
-- [ ] P1.3 A let the legalizer splits into its lanes keeps its source name, each lane described as a piece of it (old P3.14)
+- [x] P1.2 A debug value in an arm `flatten_branches` folds into a select states the select, or is dropped (old P3.12)
+  - Outcome: `drop_path_values` drops an arm's values of a mutable variable before it splices the arm; the merge phi's value (P1.1) becomes the select's
+  - Note: a `let` of an arm keeps its value, which no path changes; `debug_variable::is_mutable` tells them apart
+  - Commit: f739334a8
+- [x] P1.3 A let the legalizer splits into its lanes keeps its source name, each lane described as a piece of it (old P3.14)
+  - Outcome: `flat_local::piece_of` and `piece_member`, set by L4's `split_at`; lowering describes a piece as its whole from the piece's first leaf on
+  - Outcome: the split lets stand on the construction's line, where they stood on line 1 before, at `lines` too
+  - Note: the whole's type may be one no operation holds, which a writer must not declare (D1)
 - [ ] P1.4 A value no operation keeps whole, a stage struct `p` above all, described by its pieces (old P3.9)
 - [ ] P1.5 DXIL writes `llvm.dbg.declare` for a variable a local in memory holds, an array indexed at run time among them (old P4.7)
 
@@ -53,9 +59,19 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 
 ## Decisions
 
+### D1: A type only a debug variable names is flagged, and SPIR-V gives it no id (2026-11-18) [P1.3]
+
+- **Context:** A split let's whole, `float2` of doubles say, may have a type no operation holds; lowering it for the debug variable added an `OpTypeVector` at `full`, which the EMIT-267 test caught.
+- **Decision:** `ir::type::is_debug_only`, set on what lowering makes while describing, and cleared with what the type is made of once real code asks for it.
+  The SPIR-V writer numbers and declares only the others.
+- **Why:** Passes after lowering add types too (`state_constant_tables`), so the debugger's types cannot simply come last; DXIL interns its own types by use and needs nothing.
+- **Alternatives:** A boundary index past which types are the debugger's; a separate table of debug types with references of their own.
+
 ## Deviations
 
 ## Log
 
 - 2026-11-18: Plan created from the issue; the issue claimed.
 - 2026-11-18: P1.1 done: a variable takes its merge's value.
+- 2026-11-18: P1.2 done: a folded arm states no value of a path's variable.
+- 2026-11-18: P1.3 done: a split let is one variable, its lanes pieces of it; D1.

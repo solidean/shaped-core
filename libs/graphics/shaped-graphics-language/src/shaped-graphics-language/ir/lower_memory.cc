@@ -25,11 +25,30 @@ constexpr auto k_storage_classes = isize(storage::image) + 1;
 
 type_ref lowering::intern(ir::type const& t)
 {
-    for (auto i = isize(0); i < _out.types.size(); ++i)
+    auto result = type_ref::none;
+    for (auto i = isize(0); i < _out.types.size() && !ir::is_valid(result); ++i)
         if (_out.types[i].kind != type_kind::structure && is_same(_out.types[i], t))
-            return type_ref(i);
-    _out.types.push_back(t);
-    return type_ref(_out.types.size() - 1);
+            result = type_ref(i);
+    if (!ir::is_valid(result))
+    {
+        _out.types.push_back(t);
+        _out.types.back().is_debug_only = _describing;
+        result = type_ref(_out.types.size() - 1);
+    }
+    if (!_describing)
+        make_real(result);
+    return result;
+}
+
+void lowering::make_real(type_ref t)
+{
+    if (!ir::is_valid(t) || !_out.types[isize(t)].is_debug_only)
+        return;
+    _out.types[isize(t)].is_debug_only = false;
+    auto const info = _out.types[isize(t)];
+    make_real(info.element);
+    for (auto i = u32(0); i < info.member_count; ++i)
+        make_real(_out.members[info.first_member + i].type);
 }
 
 type_ref lowering::scalar_type(value_kind kind)
@@ -126,7 +145,11 @@ type_ref lowering::value_type(type_id t)
         return type_ref::none;
     auto& memo = _value_types[index_of(t)];
     if (ir::is_valid(memo))
+    {
+        if (!_describing)
+            make_real(memo);
         return memo;
+    }
 
     auto result = type_ref::none;
     auto const& info = _m.at(t);
@@ -195,7 +218,8 @@ type_ref lowering::value_type(type_id t)
                                   .first_member = first,
                                   .member_count = u32(parts.size()),
                                   .name_first = name_first,
-                                  .name_size = u32(name.size())});
+                                  .name_size = u32(name.size()),
+                                  .is_debug_only = _describing});
             result = type_ref(_out.types.size() - 1);
             break;
         }

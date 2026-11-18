@@ -198,13 +198,16 @@ void writer::write_types()
 {
     require(spv::Shader);
     for (auto i = isize(0); i < _p.types.size(); ++i)
-        if (_p.types[i].kind == type_kind::int_ && _p.types[i].width == 32 && !_p.types[i].is_signed)
+        if (_p.types[i].kind == type_kind::int_ && _p.types[i].width == 32 && !_p.types[i].is_signed
+            && !_p.types[i].is_debug_only)
             _uint = type_ref(i);
 
     for (auto i = isize(0); i < _p.types.size(); ++i)
     {
         auto const& t = _p.types[i];
-        auto const id = _types + u32(i);
+        auto const id = _type_ids[i];
+        if (t.is_debug_only)
+            continue;
         switch (t.kind)
         {
         case type_kind::void_:
@@ -429,8 +432,8 @@ void writer::write_stage_elements()
         if (e.system == built_in::domain_location)
             for (auto t = isize(0); t < _p.types.size(); ++t)
                 if (_p.types[t].kind == type_kind::vector && _p.types[t].count == 3
-                    && _p.types[t].element == _p.at(e.type).element)
-                    held = _types + u32(t);
+                    && _p.types[t].element == _p.at(e.type).element && !_p.types[t].is_debug_only)
+                    held = _type_ids[t];
         auto const count = e.system == built_in::sample_mask ? u32(1)
                          : e.system == built_in::tess_edge   ? k_outer_factors
                          : e.system == built_in::tess_inside ? k_inner_factors
@@ -716,7 +719,7 @@ void writer::write_entry()
     // what no operation can say: a whole entry point's float behaviour, by width
     if (_p.guarantee != check::float_level::fast)
         for (auto const& t : _p.types)
-            if (t.kind == type_kind::float_)
+            if (t.kind == type_kind::float_ && !t.is_debug_only)
             {
                 require(spv::SignedZeroInfNanPreserve);
                 emit(_modes, spv::ExecutionMode, {_function, 4461u, u32(t.width)});

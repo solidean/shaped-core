@@ -24,7 +24,7 @@ public:
 private:
     void number_everything();
 
-    [[nodiscard]] u32 id_of(type_ref t) const { return _types + u32(t); }
+    [[nodiscard]] u32 id_of(type_ref t) const { return _type_ids[isize(t)]; }
     [[nodiscard]] u32 id_of(block_ref b) const { return _blocks + u32(b); }
     [[nodiscard]] u32 id_of(value_ref v) const
     {
@@ -165,7 +165,8 @@ private:
     };
 
     program const& _p;
-    u32 _types = 0;
+    /// Parallel to `program::types`: each one's id, 0 for one a debug variable alone names (EMIT-267).
+    cc::vector<u32> _type_ids;
     u32 _constants = 0;
     u32 _elements = 0;
     /// Parallel to `program::stage_elements`: the variable each reads, one per element but a shared tessellation factor.

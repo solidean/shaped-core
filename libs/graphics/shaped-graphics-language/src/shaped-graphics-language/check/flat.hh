@@ -185,6 +185,10 @@ struct sgl::check::flat_local
     cc::string name;
     /// The name as the source wrote it, for a debugger (EMIT-267); empty for a local a pass introduced.
     cc::string source_name;
+    /// A let a pass split out of another local's fields: that local, and which field this one holds, so a debugger
+    /// shows it as part of the local the source wrote (EMIT-267); none for any other local.
+    local_id piece_of = local_id::none;
+    i32 piece_member = -1;
     type_id type = type_id::none;
     bool is_mut = false;
     /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.

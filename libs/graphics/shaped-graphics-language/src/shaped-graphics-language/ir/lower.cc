@@ -471,11 +471,63 @@ void lowering::declare(local_id id, flat_expr_id value, bool is_mut)
     describe(id, variable, true);
 }
 
+namespace
+{
+[[nodiscard]] u32 leaves_in(program const& p, type_ref t)
+{
+    auto const& info = p.at(t);
+    switch (info.kind)
+    {
+    case ir::type_kind::vector:
+    case ir::type_kind::matrix:
+    case ir::type_kind::array:
+        return info.count * leaves_in(p, info.element);
+    case ir::type_kind::structure:
+    {
+        auto count = u32(0);
+        for (auto i = u32(0); i < info.member_count; ++i)
+            count += leaves_in(p, p.members[info.first_member + i].type);
+        return count;
+    }
+    default:
+        return 1;
+    }
+}
+
+/// The first leaf of a value of `t` that its field `member` holds.
+[[nodiscard]] u32 first_leaf_of(program const& p, type_ref t, i32 member)
+{
+    auto const& info = p.at(t);
+    if (info.kind != ir::type_kind::structure)
+        return u32(member) * leaves_in(p, info.element);
+    auto leaf = u32(0);
+    for (auto i = u32(0); i < u32(member); ++i)
+        leaf += leaves_in(p, p.members[info.first_member + i].type);
+    return leaf;
+}
+} // namespace
+
 void lowering::describe(local_id id, value_ref held, bool is_variable)
 {
-    auto const& l = _e.at(id);
-    if (!_out.describes_variables || l.source_name.empty() || !is_valid(held))
+    if (!_out.describes_variables || !is_valid(held))
         return;
+    // a piece of a split local is that local's value from the piece's first leaf on, though no operation holds the
+    // whole, so the types made for it here are the debugger's alone
+    _describing = true;
+    auto leaf = u32(0);
+    while (_e.at(id).source_name.empty() && is_valid(_e.at(id).piece_of))
+    {
+        auto const whole = _e.at(id).piece_of;
+        leaf += first_leaf_of(_out, value_type(_e.at(whole).type), _e.at(id).piece_member);
+        id = whole;
+        is_variable = false;
+    }
+    auto const& l = _e.at(id);
+    if (l.source_name.empty())
+    {
+        _describing = false;
+        return;
+    }
     auto const position = index_of(id);
     if (_variable_of[position] == k_no_element)
     {
@@ -487,7 +539,8 @@ void lowering::describe(local_id id, value_ref held, bool is_variable)
                                         .is_parameter = l.kind == check::local_kind::parameter});
     }
     _out.debug_variables[_variable_of[position]].is_mutable |= is_variable;
-    u32 const operands[] = {_variable_of[position], u32(held), 0u};
+    _describing = false;
+    u32 const operands[] = {_variable_of[position], u32(held), leaf};
     if (is_variable)
         add(op::debug_declare, type_ref::none, cc::span<u32 const>(operands, 2));
     else

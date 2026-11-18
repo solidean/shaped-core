@@ -943,6 +943,9 @@ struct let_simplifier
         arguments.push_back_range(e().at(e().at(construct).node.as<flat_construct>().arguments));
         auto fields = cc::vector<local_id>();
         auto lets = stmt_list();
+        // each field's let stands where the construction was written, on its line and in its calls
+        out.from = e().at(at).from;
+        out.inlined_through = e().at(at).inlined_through;
         for (auto i = isize(0); i < arguments.size(); ++i)
         {
             // a field built from a local nothing writes is that local
@@ -955,6 +958,8 @@ struct let_simplifier
             auto const name = cc::string(m().at(members)[i].name);
             auto const type = m().at(members)[i].type;
             auto const field = out.add_local(local_kind::let, name, type);
+            out.e.locals[index_of(field)].piece_of = local;
+            out.e.locals[index_of(field)].piece_member = i32(i);
             fields.push_back(field);
             lets.push_back(out.let(field, arguments[i]));
         }

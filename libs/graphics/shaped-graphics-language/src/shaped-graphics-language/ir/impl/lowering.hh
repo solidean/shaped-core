@@ -157,6 +157,8 @@ private:
 
     // ---- lower_memory.cc: types, and where values live
     [[nodiscard]] type_ref intern(type const& t);
+    /// `t` and every type it is made of are a program's own, no longer for a debugger alone (EMIT-267).
+    void make_real(type_ref t);
     [[nodiscard]] type_ref scalar_type(check::value_kind kind);
     [[nodiscard]] type_ref vector_type(type_ref element, u32 lanes);
     [[nodiscard]] type_ref pointer_type(type_ref element, storage space);
@@ -268,6 +270,8 @@ private:
 
     /// Parallel to `_m.types`.
     cc::vector<type_ref> _value_types;
+    /// Types made while this is set are for a debug variable alone (EMIT-267).
+    bool _describing = false;
     struct memory_entry
     {
         type_id type = type_id::none;

@@ -315,6 +315,66 @@ TEST("sgl native lines - SPIR-V at full describes each variable, its scope and t
     CHECK(indexed_values == 0);
 }
 
+TEST("sgl native lines - a let read lane by lane, which the legalizer splits, is one variable stated lane by lane "
+     "(EMIT-267)")
+{
+    constexpr u32 k_debug_local_variable = 26;
+    constexpr u32 k_debug_value = 29;
+
+    auto const source = cc::string("binding work:\n"
+                                   "    values: mut buffer[float]\n"
+                                   "\n"
+                                   "@compute(1) fun run(@thread_id id: int3){work}:\n"
+                                   "    let v = float3(work.values[0], work.values[1], work.values[2])\n"
+                                   "    work.values[3] = v.x * v.y + v.z\n");
+    auto e = sgl::compile_to_text({.source = source,
+                                   .source_name = "lanes.sgl",
+                                   .entry_point = "run",
+                                   .target = sgl::emit::target::hlsl_vulkan,
+                                   .native = sgl::emit::native_route::require,
+                                   .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto const& words = e.value().spirv;
+    auto const set = debug_set_of(words);
+    REQUIRE(set != 0);
+
+    auto v_string = u32(0);
+    auto v_variable = u32(0);
+    auto constants = cc::vector<cc::pair<u32, u32>>();
+    auto lanes = cc::vector<u32>();
+    auto variables = 0;
+    for (auto at = isize(5); at < words.size();)
+    {
+        auto const count = isize(words[at] >> 16);
+        auto const opcode = words[at] & 0xffffu;
+        REQUIRE(count > 0);
+        if (opcode == k_op_string && cc::string_view(reinterpret_cast<char const*>(&words[at + 2])) == "v")
+            v_string = words[at + 1];
+        if (opcode == k_op_constant && count == 4)
+            constants.push_back({words[at + 2], words[at + 3]});
+        if (opcode == k_op_ext_inst && words[at + 3] == set && words[at + 4] == k_debug_local_variable)
+        {
+            ++variables;
+            if (words[at + 5] == v_string)
+                v_variable = words[at + 2];
+        }
+        if (opcode == k_op_ext_inst && words[at + 3] == set && words[at + 4] == k_debug_value
+            && words[at + 5] == v_variable && count == 9)
+            for (auto const& [id, value] : constants)
+                if (id == words[at + 8])
+                    lanes.push_back(value);
+        at += count;
+    }
+    // the lanes' own lets are no variables of their own, and `v`'s value is stated from each lane on
+    CHECK(v_variable != 0u);
+    CHECK(variables == 1).dump("variables", variables);
+    cc::sort(lanes);
+    REQUIRE(lanes.size() == 3);
+    CHECK(lanes[0] == 0u);
+    CHECK(lanes[1] == 1u);
+    CHECK(lanes[2] == 2u);
+}
+
 TEST("sgl native lines - without the option a module carries no line, and with it no instruction else changes")
 {
     for (auto const target : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})

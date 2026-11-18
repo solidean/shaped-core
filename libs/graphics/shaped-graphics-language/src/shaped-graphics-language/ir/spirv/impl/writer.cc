@@ -39,7 +39,10 @@ void writer::number_everything()
         next += u32(count);
         return first;
     };
-    _types = take(_p.types.size());
+    _type_ids.resize_to_filled(_p.types.size(), 0u);
+    for (auto i = isize(0); i < _p.types.size(); ++i)
+        if (!_p.types[i].is_debug_only)
+            _type_ids[i] = take(1);
     _constants = take(_p.constants.size());
     _elements = take(_p.stage_elements.size());
     _globals = take(_p.globals.size());
@@ -253,7 +256,7 @@ void writer::write_control_entry()
     constexpr u32 k_scope_invocation = 4;
     auto bool_type = type_ref::none;
     for (auto i = isize(0); i < _p.types.size(); ++i)
-        if (_p.types[i].kind == type_kind::bool_)
+        if (_p.types[i].kind == type_kind::bool_ && !_p.types[i].is_debug_only)
             bool_type = type_ref(i);
 
     name(_body, _p.name_at(_p.primitive.body_name_first, _p.primitive.body_name_size));

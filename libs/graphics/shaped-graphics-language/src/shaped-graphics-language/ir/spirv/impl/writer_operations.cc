@@ -368,7 +368,7 @@ void writer::tess_coord(instruction const& i, u32 id)
     auto three = type_ref::none;
     for (auto t = isize(0); t < _p.types.size(); ++t)
         if (_p.types[t].kind == type_kind::vector && _p.types[t].count == 3
-            && _p.types[t].element == _p.at(i.type).element)
+            && _p.types[t].element == _p.at(i.type).element && !_p.types[t].is_debug_only)
             three = type_ref(t);
     if (i.type == three)
         return emit(_code, spv::Load, {id_of(i.type), id, _elements + element});
