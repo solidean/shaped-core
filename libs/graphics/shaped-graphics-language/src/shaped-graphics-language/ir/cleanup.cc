@@ -189,6 +189,39 @@ void sgl::ir::remove_unused(program& p)
                 keep(index_of(value_ref(operands[k])));
     }
 
+    // EMIT-267: a value no operation keeps whole is described by the parts it was built of, each from its leaf on
+    struct piece
+    {
+        u32 value = 0;
+        u32 leaf = 0;
+    };
+    auto pieces = cc::vector<cc::vector<piece>>::create_defaulted(p.instructions.size());
+    auto const split = [&](auto const& self, cc::vector<piece>& into, value_ref v, u32 leaf) -> void
+    {
+        if (!is_operation(v) || is_live[index_of(v)])
+        {
+            into.push_back({.value = u32(v), .leaf = leaf});
+            return;
+        }
+        auto const& built = p.instructions[index_of(v)];
+        if (built.code != op::construct)
+            return;
+        for (auto const part : p.operands_of(built))
+        {
+            self(self, into, value_ref(part), leaf);
+            leaf += p.leaves_of(p.type_of(value_ref(part)));
+        }
+    };
+    for (auto i = isize(0); i < p.instructions.size(); ++i)
+    {
+        auto const& inst = p.instructions[i];
+        if (!is_live[i] || inst.code != op::debug_value)
+            continue;
+        auto const v = value_ref(p.operands_of(inst)[1]);
+        if (is_operation(v) && !is_live[index_of(v)] && p.instructions[index_of(v)].code == op::construct)
+            split(split, pieces[i], v, p.operands_of(inst)[2]);
+    }
+
     auto const order = blocks_in_order(p);
     auto place = cc::vector<u32>::create_filled(p.instructions.size(), 0u);
     auto next = u32(0);
@@ -197,7 +230,10 @@ void sgl::ir::remove_unused(program& p)
         auto const& block = p.blocks[isize(b)];
         for (auto i = block.first; i < block.first + block.count; ++i)
             if (is_live[i])
-                place[i] = next++;
+            {
+                place[i] = next;
+                next += pieces[i].empty() ? 1 : u32(pieces[i].size());
+            }
     }
     auto kept = cc::vector<instruction>::create_with_capacity(isize(next));
     for (auto const b : order)
@@ -209,6 +245,22 @@ void sgl::ir::remove_unused(program& p)
             if (!is_live[i])
                 continue;
             auto const& inst = p.instructions[i];
+            if (!pieces[i].empty())
+            {
+                for (auto const& part : pieces[i])
+                {
+                    auto const value
+                        = is_operation(value_ref(part.value)) ? place[index_of(value_ref(part.value))] : part.value;
+                    auto const first = u32(p.operands.size());
+                    p.operands.push_back(p.operands_of(inst)[0]);
+                    p.operands.push_back(value);
+                    p.operands.push_back(part.leaf);
+                    auto copy = inst;
+                    copy.first = first;
+                    kept.push_back(copy);
+                }
+                continue;
+            }
             auto* const operands = p.operands.data() + inst.first;
             for (auto k = isize(0); k < isize(inst.count); ++k)
             {

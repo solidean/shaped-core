@@ -473,36 +473,15 @@ void lowering::declare(local_id id, flat_expr_id value, bool is_mut)
 
 namespace
 {
-[[nodiscard]] u32 leaves_in(program const& p, type_ref t)
-{
-    auto const& info = p.at(t);
-    switch (info.kind)
-    {
-    case ir::type_kind::vector:
-    case ir::type_kind::matrix:
-    case ir::type_kind::array:
-        return info.count * leaves_in(p, info.element);
-    case ir::type_kind::structure:
-    {
-        auto count = u32(0);
-        for (auto i = u32(0); i < info.member_count; ++i)
-            count += leaves_in(p, p.members[info.first_member + i].type);
-        return count;
-    }
-    default:
-        return 1;
-    }
-}
-
 /// The first leaf of a value of `t` that its field `member` holds.
 [[nodiscard]] u32 first_leaf_of(program const& p, type_ref t, i32 member)
 {
     auto const& info = p.at(t);
     if (info.kind != ir::type_kind::structure)
-        return u32(member) * leaves_in(p, info.element);
+        return u32(member) * p.leaves_of(info.element);
     auto leaf = u32(0);
     for (auto i = u32(0); i < u32(member); ++i)
-        leaf += leaves_in(p, p.members[info.first_member + i].type);
+        leaf += p.leaves_of(p.members[info.first_member + i].type);
     return leaf;
 }
 } // namespace
@@ -529,6 +508,11 @@ void lowering::describe(local_id id, value_ref held, bool is_variable)
         return;
     }
     auto const position = index_of(id);
+    // an entry point's parameter is described ahead of every statement, and takes the body's first for its place, as a
+    // debugger needs a line and a scope to show it in
+    auto const statement = _statement;
+    if (auto const body = _e.at(_e.body); _statement == 0xffffffffu && !body.empty())
+        _statement = u32(index_of(body[0]));
     if (_variable_of[position] == k_no_element)
     {
         _variable_of[position] = u32(_out.debug_variables.size());
@@ -545,6 +529,7 @@ void lowering::describe(local_id id, value_ref held, bool is_variable)
         add(op::debug_declare, type_ref::none, cc::span<u32 const>(operands, 2));
     else
         add(op::debug_value, type_ref::none, cc::span<u32 const>(operands, 3));
+    _statement = statement;
 }
 
 void lowering::assign(flat_assign const& a)

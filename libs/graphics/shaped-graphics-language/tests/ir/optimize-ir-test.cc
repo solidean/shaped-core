@@ -72,6 +72,29 @@ TEST("sgl ir remove_unused - what nothing reads goes, and what has an effect kee
     CHECK(only(b.p, op::fadd).statement == 7);
 }
 
+TEST("sgl ir remove_unused - a variable whose built value goes is stated by the parts that stay, each from its leaf "
+     "(EMIT-267)")
+{
+    auto b = program_builder();
+    b.p.debug_variables.push_back({.type = b.float2_type});
+    b.blocks(1);
+    b.open(0);
+    auto const read = unknown(b);
+    auto const unread = b.add(op::fmul, b.float_type, {u32(read), u32(b.two)});
+    auto const built = b.add(op::construct, b.float2_type, {u32(unread), u32(read)});
+    b.add(op::debug_value, b.void_type, {0, u32(built), 0});
+    b.keep(read);
+    b.finish();
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::construct) == 0);
+    // the lane nothing keeps is optimized out, and the other is stated at its own leaf
+    auto const& stated = only(b.p, op::debug_value);
+    auto const operands = b.p.operands_of(stated);
+    CHECK(b.p.instructions[operands[1]].code == op::load);
+    CHECK(operands[2] == 1u);
+}
+
 TEST("sgl ir remove_unused - phis that only read each other go, though each is read")
 {
     auto b = program_builder();

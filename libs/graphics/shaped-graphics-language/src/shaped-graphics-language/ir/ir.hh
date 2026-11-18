@@ -927,6 +927,8 @@ struct sgl::ir::program
             return locals[index_of(v)].type;
         return instructions[index_of(v)].type;
     }
+    /// The scalars a value of `t` is made of, which a debug value counts its leaves in (EMIT-267).
+    [[nodiscard]] u32 leaves_of(type_ref t) const;
 };
 
 namespace sgl::ir

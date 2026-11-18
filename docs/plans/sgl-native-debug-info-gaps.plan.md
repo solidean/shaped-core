@@ -37,7 +37,10 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
   - Outcome: `flat_local::piece_of` and `piece_member`, set by L4's `split_at`; lowering describes a piece as its whole from the piece's first leaf on
   - Outcome: the split lets stand on the construction's line, where they stood on line 1 before, at `lines` too
   - Note: the whole's type may be one no operation holds, which a writer must not declare (D1)
-- [ ] P1.4 A value no operation keeps whole, a stage struct `p` above all, described by its pieces (old P3.9)
+- [x] P1.4 A value no operation keeps whole, a stage struct `p` above all, described by its pieces (old P3.9)
+  - Outcome: `remove_unused` states a dead `construct`'s live parts, each from its leaf on, where it wrote `none`; RenderDoc lists `p.color` and `p.normal` on dx12 and vulkan
+  - Outcome: an entry point's parameter takes the body's first statement for its place, where it had none: dx12 put it in an unnamed scope with no location
+  - Note: check-debugger.py expects `p` now; `program::leaves_of` replaces lowering's own count
 - [ ] P1.5 DXIL writes `llvm.dbg.declare` for a variable a local in memory holds, an array indexed at run time among them (old P4.7)
 
 ## P2: Scopes
@@ -75,3 +78,4 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 - 2026-11-18: P1.1 done: a variable takes its merge's value.
 - 2026-11-18: P1.2 done: a folded arm states no value of a path's variable.
 - 2026-11-18: P1.3 done: a split let is one variable, its lanes pieces of it; D1.
+- 2026-11-18: P1.1 to P1.3 shipped; P1.4 done: a stage struct shows the fields that are read.

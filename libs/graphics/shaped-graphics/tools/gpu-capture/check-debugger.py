@@ -30,7 +30,8 @@ CUBE_FILE = "cube.sgl"
 CUBE_LINES = {41, 47, 49, 51, 52, 54, 55, 59}
 CUBE_PIXEL = (640, 360)
 # The locals a debugger lists once variables are described (EMIT-267); checked at `full`.
-CUBE_VARIABLES = {"lit", "n", "light", "i"}
+# `p` is the stage's input, which no operation keeps whole: a debugger shows the fields that are read.
+CUBE_VARIABLES = {"lit", "n", "light", "i", "p"}
 # The lines that only state a value, which a debugger may step onto once variables are described: SPIR-V states each
 # value at its line, as DXC's does, where DXIL's dbg.value is no step: `let mut light = 0.25`, and shade's call.
 CUBE_STATING_LINES = {50, 58}

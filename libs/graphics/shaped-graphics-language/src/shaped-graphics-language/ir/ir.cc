@@ -257,6 +257,27 @@ cc::string sgl::ir::type_name(program const& p, type_ref t)
     return out;
 }
 
+sgl::u32 sgl::ir::program::leaves_of(type_ref t) const
+{
+    auto const& info = at(t);
+    switch (info.kind)
+    {
+    case type_kind::vector:
+    case type_kind::matrix:
+    case type_kind::array:
+        return info.count * leaves_of(info.element);
+    case type_kind::structure:
+    {
+        auto count = u32(0);
+        for (auto i = u32(0); i < info.member_count; ++i)
+            count += leaves_of(members[info.first_member + i].type);
+        return count;
+    }
+    default:
+        return 1;
+    }
+}
+
 sgl::ir::operand sgl::ir::operand_role(op code, isize at)
 {
     switch (code)
