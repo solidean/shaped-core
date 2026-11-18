@@ -1830,10 +1830,14 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   The bare name in a type position is the template itself, open in its parameters, which a call deduces as it deduces a type parameter.
   So the constructor mirrors the parameters: `pair(1, 2.5)` is a `pair[int, float]`, and an array's length binds the value parameter its type names.
   `name[T, 4](…)` constructs that instance, whose parameters the call then needs no argument to say.
-* **CHK-530** A struct of a module named as an instance of a generic struct of that module is named is `duplicate-declaration` at the struct ([why](why/checking.md#chk-530)).
-  That is `struct pair_float` beside a use of `pair[float]`.
+* **CHK-530** A struct of a module named as an instance of a generic struct of that module the host sees is named is `duplicate-declaration` at the struct ([why](why/checking.md#chk-530)).
+  That is `struct pair_float` beside a binding that holds a `pair[float]`.
+  Two such instances of one module named alike, `pair[a_b]` and `pair_a[b]`, are `duplicate-declaration` at the later one's template.
   The instance's name is EMIT-179's, and its detail names both.
-  The program's own module is a module here, and a struct of another module than the template's is named apart (EMIT-268), so it stays allowed.
+  The host sees an instance where a binding's member, constant or buffer element, an `@vertex struct`, a payload or attributes holds it, or a struct one of them holds does.
+  A payload is an entry point's (EMIT-269), a ray set's ray type's or a callables table's parameter, and attributes are EMIT-270's `A`.
+  Every such instance is closed; an open one, `pair[T]` in a generic function, one only the prelude makes, and one a body only holds in a local are not counted.
+  The program's own module and the prelude are one module here, and a struct of another module than the template's is named apart (EMIT-268), so it stays allowed.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
   A call may state generic arguments first, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`, `blur[3](c)`.
   Each is a type, or a constant `int`, `uint`, `bool` or `float` for a value parameter; two constants are one argument when their bits are, with every NaN one.

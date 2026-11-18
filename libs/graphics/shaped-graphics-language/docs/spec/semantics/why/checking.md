@@ -551,6 +551,8 @@ The host names an instance of a generic struct by an identifier, `pair_float` fo
 A struct the program names `pair_float` beside it would be named alike in the description, and a host generating a type of each name would declare one twice or take one for the other.
 The target text mints its own names and never meets the clash, so the refusal is for the host alone; renaming the struct is the program's to do, and SGL picks no other name for either.
 Another module's struct is named `m.pair_float` there, so only one module's own names can clash.
+Only an instance the host sees is counted, since one it never sees takes no name in the description.
+So a struct named `exchange_result_int` clashes with nothing merely because the prelude's atomics return `exchange_result[int]`.
 
 ## CHK-339
 

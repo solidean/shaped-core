@@ -167,28 +167,80 @@ TEST("sgl check - a module's operator applies where the module is used, and its 
     CHECK(reports_with(library, "use samplers\n") == "");
 }
 
-TEST("sgl check - a struct named as an instance of its own module's generic struct is named is refused (CHK-530)")
+TEST("sgl check - a struct named as an instance of its own module's generic struct the host sees is named is refused "
+     "(CHK-530)")
 {
-    // the description names `pair[float]` `pair_float` (EMIT-179), so a struct of that name beside it would be named alike
-    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\nfun f(p: pair[float]) -> float "
-                           "=> p.a\n")
-          == "duplicate-declaration user:[pair_float] struct pair_float is named as the instance pair[float] of a "
-             "generic "
-             "struct is, which the host names pair_float too\n");
+    constexpr auto pair = cc::string_view("struct pair[T]:\n    a: T\n");
+    constexpr auto refusal
+        = cc::string_view("struct pair_float is named as the instance pair[float] of a generic struct "
+                          "is, which the host names pair_float too\n");
+    // the description names `pair[float]` `pair_float` (EMIT-179), so a struct of that name beside a binding holding it
+    // would be named alike
+    CHECK(reports_with(
+              {}, cc::format("{}struct pair_float:\n    x: int\nbinding data:\n    xs: buffer[pair[float]]\n", pair))
+          == cc::format("duplicate-declaration user:[pair_float] {}", refusal));
+    // and so through a struct the binding holds, and in a constant block
+    CHECK(reports_with({}, cc::format("{}struct pair_float:\n    x: int\nstruct holder:\n    p: pair[float]\n"
+                                      "binding data:\n    xs: buffer[holder]\n",
+                                      pair))
+          == cc::format("duplicate-declaration user:[pair_float] {}", refusal));
+    CHECK(reports_with({}, cc::format("{}struct pair_float:\n    x: int\nbinding data:\n    p: pair[float]\n", pair))
+          == cc::format("duplicate-declaration user:[pair_float] {}", refusal));
+    // a ray-tracing stage's payload is the host's too (EMIT-269)
+    CHECK(reports_with({}, cc::format("require raytracing_pipeline\n{}struct pair_float:\n    x: int\n"
+                                      "@miss fun sky(p: mut pair[float]):\n    p.a = 1.0\n",
+                                      pair))
+          == cc::format("duplicate-declaration user:[pair_float] {}", refusal));
     // without the instance nothing names it twice
-    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\nfun f(p: pair[int]) -> int => "
-                           "p.a\n")
+    CHECK(reports_with({},
+                       cc::format("{}struct pair_float:\n    x: int\nbinding data:\n    xs: buffer[pair[int]]\n", pair))
           == "");
 
     // a module's own pair, inside the module
     cc::string_view const both[] = {"module view\nstruct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\n"
-                                    "fun f(p: pair[float]) -> float => p.a\n"};
-    CHECK(reports_with(both, "use view\n")
-          == "duplicate-declaration lib.0:[pair_float] struct pair_float is named as the instance pair[float] of a "
-             "generic struct is, which the host names pair_float too\n");
+                                    "binding data:\n    xs: buffer[pair[float]]\n"};
+    CHECK(reports_with(both, "use view\n") == cc::format("duplicate-declaration lib.0:[pair_float] {}", refusal));
     // a module's `view.pair_float` beside the program's own `pair[float]` is named apart, and stays allowed
     cc::string_view const theirs[] = {"module view\nstruct pair_float:\n    x: int\n"};
-    CHECK(reports_with(theirs, "use view\nstruct pair[T]:\n    a: T\nfun f(p: pair[float], q: view.pair_float) -> "
-                               "float => p.a\n")
+    CHECK(reports_with(theirs, cc::format("use view\n{}binding data:\n    xs: buffer[pair[float]]\n"
+                                          "    ys: buffer[view.pair_float]\n",
+                                          pair))
+          == "");
+}
+
+TEST("sgl check - two instances of one module's generic structs the host names alike are refused (CHK-530)")
+{
+    // `pair[a_b]` and `pair_a[b]` are both `pair_a_b` to the host, which the target text tells apart by minting
+    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_a[T]:\n    b: T\nstruct a_b:\n    x: float\n"
+                           "struct b:\n    y: float\nbinding data:\n    xs: buffer[pair[a_b]]\n    ys: "
+                           "buffer[pair_a[b]]\n")
+          == "duplicate-declaration user:[pair_a] the instances pair[a_b] and pair_a[b] of generic structs are both "
+             "named pair_a_b by the host\n");
+    // one the host never sees names nothing
+    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_a[T]:\n    b: T\nstruct a_b:\n    x: float\n"
+                           "struct b:\n    y: float\nbinding data:\n    xs: buffer[pair[a_b]]\n"
+                           "fun f(p: pair_a[b]) -> float => p.b.y\n")
+          == "");
+}
+
+TEST("sgl check - an instance the host never sees takes no name a struct could clash with (CHK-530)")
+{
+    // the prelude's atomics make `exchange_result[int]`, which no binding of this program holds
+    CHECK(reports_with({}, "struct exchange_result_int:\n    x: int\nbinding data:\n    ys: mut "
+                           "buffer[exchange_result_int]\n")
+          == "");
+    // an open instance, `pair[T]` in a generic function, is no type the host meets
+    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_T:\n    x: int\nfun first[T](p: pair[T]) -> T => "
+                           "p.a\n"
+                           "binding data:\n    ys: mut buffer[pair_T]\n"
+                           "@compute(1) fun run(@thread_id id: int3){data}:\n"
+                           "    data.ys[id.x] = pair_T(first(pair[int](3)))\n")
+          == "");
+    // nor is one a body holds only in a local
+    CHECK(reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\n"
+                           "binding data:\n    ys: mut buffer[pair_float]\n"
+                           "@compute(1) fun run(@thread_id id: int3){data}:\n"
+                           "    let p = pair[float](1.0)\n"
+                           "    data.ys[id.x] = pair_float(p.a as int)\n")
           == "");
 }
