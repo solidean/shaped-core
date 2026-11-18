@@ -962,7 +962,8 @@ def emit_inline_impl(package: str, memory: dict[str, int], namespace: str, file:
     words = (binding["block_size"] + 3) // 4 * 4
     out.append(f"\nsg::binding {qualified}::inline_binding()\n{{\n")
     out.append("    // dx12 reads it at b0 in slib's reserved space; vulkan and WebGPU read only the kind and the size.\n")
-    out.append(f'    return {{.name = "{name}",\n')
+    # a module's block by its qualified name, as the shader's interface names it (CHK-171)
+    out.append(f'    return {{.name = "{binding.get("block_host_name") or name}",\n')
     out.append("            .space = slib::inline_constants_space,\n")
     out.append("            .index = 0u,\n")
     out.append("            .count = 1u,\n")

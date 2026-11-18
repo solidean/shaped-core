@@ -123,8 +123,9 @@ struct sgl::described_binding
     cc::vector<described_binding_member> members;
     /// Where the last constant ends; 0 without one.
     i32 block_size = 0;
-    /// A group's constant block: its slot, which is 0, and the name the host binds it by, which is the binding's own.
-    /// -1 and empty for an `@inline` binding and for a group without a plain member.
+    /// A group's constant block: its slot, which is 0, and the name the host binds it by, which is the binding's own,
+    /// `view.frame` for a module's (CHK-171).
+    /// An `@inline` binding's block takes no slot, -1, and is named so too; a group without a plain member is -1 and empty.
     i32 block_slot = -1;
     cc::string block_host_name;
     /// The binding's structural hash (`check::structural_hash`), its members and its layout rule, as 32 hex digits:

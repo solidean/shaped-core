@@ -690,6 +690,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
                                       .offset = placed.offsets[i],
                                       .size = placed.sizes[i]});
         result.block_size = placed.size;
+        result.block_host_name = host;
         return result;
     }
 

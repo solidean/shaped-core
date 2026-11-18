@@ -976,3 +976,26 @@ TEST("sgl describe - a module's binding is named by its module wherever the host
         CHECK(c.value().footprint[3].host_name == "sky.near");
     }
 }
+
+TEST("sgl describe - a module's @inline binding's block is named by the module, the program's own bare (CHK-171)")
+{
+    // slib's generated inline binding names the block by `block_host_name`, as the shader's interface names it
+    sgl::library_file const library[] = {{.name = "push.sgl",
+                                          .source = "module push\n"
+                                                    "@inline binding constants:\n"
+                                                    "    scale: float\n"}};
+    auto const module = sgl::describe({.library = library, .module = "push"});
+    if (module.has_error())
+        FAIL(module.error());
+    REQUIRE(module.value().bindings.size() == 1);
+    auto const& theirs = module.value().bindings[0];
+    CHECK(theirs.is_inline);
+    CHECK(theirs.block_slot == -1);
+    CHECK(theirs.block_host_name == "push.constants");
+
+    auto const own = sgl::describe({.source = "@inline binding constants:\n    scale: float\n", .source_name = "t.sgl"});
+    if (own.has_error())
+        FAIL(own.error());
+    REQUIRE(own.value().bindings.size() == 1);
+    CHECK(own.value().bindings[0].block_host_name == "constants");
+}

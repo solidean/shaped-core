@@ -595,6 +595,18 @@ def an_inline_block_naming_an_option_is_refused_in_words_of_its_own():
 
 
 @test
+def an_inline_blocks_binding_is_named_by_its_host_name_a_modules_qualified():
+    # CHK-171: the shader's interface names a module's `@inline binding` `view.push`, and sg pairs the layout's block
+    # with it, so the generated binding names it alike; the file's own is bare
+    member = {"kind": "constant", "name": "scale", "type": "float", "offset": 0, "size": 4}
+    theirs = {"name": "push", "inline": True, "block_size": 4, "block_host_name": "view.push", "members": [member]}
+    expect_in('return {.name = "view.push",', sgl_host_code.emit_inline_impl("pkg", {}, "::sgl_modules::view", FILE,
+                                                                              theirs), "the module's block")
+    own = {"name": "push", "inline": True, "block_size": 4, "block_host_name": "push", "members": [member]}
+    expect_in('return {.name = "push",', sgl_host_code.emit_inline_impl("pkg", {}, "ns", FILE, own), "the file's own")
+
+
+@test
 def an_options_struct_is_a_generated_name_like_any_other():
     entries = sgl_description.SglEntries(option_structs={FILE.path: "options"},
                                          bindings=[(FILE, {**GROUP, "name": "options"})])
