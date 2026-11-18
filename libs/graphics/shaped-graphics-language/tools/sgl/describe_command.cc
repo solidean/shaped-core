@@ -208,6 +208,22 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
     }
     // EMIT-268 to EMIT-270: what the signature hands a pipeline, which a host that builds its own pipelines reads
     o.write("vertex_input", cc::string_view(e.vertex_input));
+    {
+        auto list = o.write_array("vertex_attributes");
+        for (auto const& a : e.vertex_attributes)
+        {
+            auto ao = list.write_object(babel::json::layout::compact);
+            ao.write("name", cc::string_view(a.name));
+            ao.write("type", cc::string_view(a.type));
+            ao.write("semantic", cc::string_view(a.semantic));
+            ao.write("semantic_index", a.semantic_index);
+            ao.write("location", a.location);
+            if (!a.format.empty())
+                ao.write("format", cc::string_view(a.format));
+            ao.write("stream", cc::string_view(a.stream));
+            ao.write("per_instance", a.is_per_instance);
+        }
+    }
     o.write("payload", cc::string_view(e.payload));
     o.write("payload_shape", cc::string_view(e.payload_shape));
     o.write("payload_size", e.payload_size);
@@ -633,4 +649,46 @@ TEST("sgl describe - a module's @inline binding's JSON names its block by the mo
     CHECK(bindings[0]["block_host_name"].as_string() == "push.constants");
     // and it takes no slot, which slib reads as no group block
     CHECK(!bindings[0]["block_slot"].is_valid());
+}
+
+// EMIT-268: a vertex entry point's attributes, one record per attribute in location order, `format` only where `@format`
+// states one
+TEST("sgl describe - a vertex entry point's JSON lists its vertex attributes")
+{
+    auto const described
+        = sgl::describe({.source = "@vertex struct mesh_vertex:\n"
+                                   "    position: pos3\n"
+                                   "    @per_instance @format(.rgba8_unorm) tint: float4\n"
+                                   "struct varyings:\n"
+                                   "    @position position: hpos4\n"
+                                   "@vertex fun fed(v: mesh_vertex) -> varyings:\n"
+                                   "    return { position = hpos4(v.position.x + v.tint.x, 0.0, 0.0, 1.0) }\n"
+                                   "@compute(1) fun work(@thread_id id: int3):\n"
+                                   "    let x = id.x\n",
+                         .source_name = "t.sgl"});
+    REQUIRE(described.has_value());
+    auto const json = to_json(described.value());
+    REQUIRE(json.has_value());
+    auto const doc = babel::json::read(cc::string_view(json.value()));
+    REQUIRE(doc.has_value());
+    auto const entries = doc.value().root()["entry_points"];
+    REQUIRE(entries.size() == 2);
+    auto const attributes = entries[0]["vertex_attributes"];
+    REQUIRE(attributes.size() == 2);
+    CHECK(attributes[0]["name"].as_string() == "position");
+    CHECK(attributes[0]["type"].as_string() == "pos3");
+    CHECK(attributes[0]["semantic"].as_string() == "POSITION");
+    CHECK(attributes[0]["semantic_index"].as_double(-1) == 0);
+    CHECK(attributes[0]["location"].as_double(-1) == 0);
+    CHECK(!attributes[0].has("format"));
+    CHECK(attributes[0]["stream"].as_string() == "per_vertex");
+    CHECK(!attributes[0]["per_instance"].as_bool(true));
+    CHECK(attributes[1]["name"].as_string() == "tint");
+    CHECK(attributes[1]["location"].as_double() == 1);
+    CHECK(attributes[1]["format"].as_string() == "rgba8_unorm");
+    CHECK(attributes[1]["stream"].as_string() == "per_instance");
+    CHECK(attributes[1]["per_instance"].as_bool());
+    // every other entry point states the key, empty
+    CHECK(entries[1]["vertex_attributes"].is_array());
+    CHECK(entries[1]["vertex_attributes"].size() == 0);
 }

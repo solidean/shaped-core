@@ -26,6 +26,8 @@ r.value().entry_point                      // the name the text declares, which 
 r.value().bound_names                      // { emitted, host } per resource: `work_values` is what the host binds as `work.values`
 r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
 r.value().vertex_input                     // a vertex entry point's `@vertex struct`; empty without one, and for other stages (EMIT-268)
+r.value().vertex_attributes                // its input layout, an attribute a member or a piece in location order: name, type, semantic,
+                                           // semantic_index, location, format, stream, is_per_instance; wherever the struct is declared
 r.value().payload  .payload_shape  .payload_size     // a ray-tracing stage's payload or a callable's parameter (EMIT-269)
 r.value().attributes  .attributes_shape  .attribute_size  // a procedural hit's or an intersection's `A`; a triangle hit: 8 bytes, no name (EMIT-270)
                                            // each struct by its host name: `view.radiance` for a module's, `pair_float` for `pair[float]`;
@@ -95,7 +97,7 @@ d.value().bindings                         // name, is_inline, members (constant
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint,
                                            // samplers: the file-scope samplers its code reaches,
-                                           // vertex_input, payload / payload_shape / payload_size, attributes / attributes_shape /
+                                           // vertex_input, vertex_attributes, payload / payload_shape / payload_size, attributes / attributes_shape /
                                            // attribute_size: what its signature hands its pipeline (EMIT-268 to EMIT-270)
 d.value().samplers                         // the file-scope samplers: name, index (declaration order), sampler_type, settings, shape
 d.value().options                          // every `@option const`: name, type (`bool`, `int`, `float`, `uint`, an enum's name), value

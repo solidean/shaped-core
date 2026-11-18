@@ -600,3 +600,156 @@ TEST("sgl entry interface - every struct the description names is its host name,
     CHECK(members[2].type == "particle");
     CHECK(members[3].type == "view.glow[2]");
 }
+
+namespace
+{
+/// A vertex input of every kind of member a layout distinguishes: a plain one, a `@format`, a `@stream`, an array, a
+/// matrix and a `@per_instance` one, in one stream of its own.
+constexpr auto k_mesh_vertex = cc::string_view("@vertex struct mesh_vertex:\n"
+                                               "    position: pos3\n"
+                                               "    @format(.rgba8_unorm) tint: float4\n"
+                                               "    @stream(normals) normal: vec3\n"
+                                               "    uv: float2[2]\n"
+                                               "    @per_instance frame: mat4\n"
+                                               "    @per_instance @stream(instances) scale: float\n");
+
+/// A vertex entry point that reads every member of `mesh_vertex`, named as `name` reaches it.
+[[nodiscard]] cc::string vertex_entry_of(cc::string_view name)
+{
+    return cc::format("struct varyings:\n"
+                      "    @position position: hpos4\n"
+                      "@vertex fun fed(v: {}) -> varyings:\n"
+                      "    return {{ position = v.frame * hpos4(v.position.x * v.scale + v.uv[1].x + v.tint.x + "
+                      "v.normal.x, v.position.y, v.position.z, 1.0) }}\n",
+                      name);
+}
+
+/// `mesh_vertex`'s attributes as `vertex_attributes` states them: one line each, a piece of `uv` and of `frame` each.
+constexpr auto k_mesh_attributes = cc::string_view("position pos3 POSITION0 @0 per_vertex\n"
+                                                   "tint float4 TINT0 @1 rgba8_unorm per_vertex\n"
+                                                   "normal vec3 NORMAL0 @2 normals\n"
+                                                   "uv float2 UV0 @3 per_vertex\n"
+                                                   "uv float2 UV1 @4 per_vertex\n"
+                                                   "frame float4 FRAME0 @5 per_instance per_instance\n"
+                                                   "frame float4 FRAME1 @6 per_instance per_instance\n"
+                                                   "frame float4 FRAME2 @7 per_instance per_instance\n"
+                                                   "frame float4 FRAME3 @8 per_instance per_instance\n"
+                                                   "scale float SCALE0 @9 instances per_instance\n");
+
+/// `attributes` one line each: name, type, semantic and its index, location, format where stated, stream, and the rate.
+[[nodiscard]] cc::string layout_text(cc::span<sgl::described_vertex_attribute const> attributes)
+{
+    auto text = cc::string();
+    for (auto const& a : attributes)
+        text += cc::format("{} {} {}{} @{}{}{} {}{}\n", a.name, a.type, a.semantic, a.semantic_index, a.location,
+                           a.format.empty() ? "" : " ", a.format, a.stream, a.is_per_instance ? " per_instance" : "");
+    return text;
+}
+
+/// That `fed` of `source` states `vertex_input` and `k_mesh_attributes` in describe and on every target, wherever
+/// `mesh_vertex` is declared, and that `describe` describes no struct the source does not declare.
+void check_mesh_layout(cc::string_view source,
+                       cc::span<sgl::library_file const> library,
+                       cc::string_view vertex_input,
+                       bool is_own)
+{
+    auto const d = sgl::describe({.source = source, .source_name = "t.sgl", .library = library});
+    if (d.has_error())
+        FAIL(d.error());
+    auto const& e = entry_named(d.value(), "fed");
+    CHECK(e.vertex_input == vertex_input);
+    CHECK(layout_text(e.vertex_attributes) == k_mesh_attributes);
+    // the struct is declared once: the description of the file holding it is where its C++ type comes from
+    CHECK(d.value().structs.size() == (is_own ? 1 : 0));
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::wgsl, target::msl})
+    {
+        auto const c = sgl::compile_to_text(
+            {.source = source, .source_name = "t.sgl", .library = library, .entry_point = "fed", .target = t});
+        if (c.has_error())
+            FAIL(c.error());
+        CHECK(c.value().vertex_input == vertex_input);
+        CHECK(layout_text(c.value().vertex_attributes) == k_mesh_attributes);
+    }
+}
+} // namespace
+
+TEST("sgl entry interface - a vertex entry point states every attribute it reads, a matrix's and an array's a piece "
+     "each (EMIT-268)")
+{
+    check_mesh_layout(cc::format("{}{}", k_mesh_vertex, vertex_entry_of("mesh_vertex")), {}, "mesh_vertex", true);
+}
+
+TEST("sgl entry interface - the attributes match what the text declares, on dx12 and on vulkan (EMIT-268)")
+{
+    auto const source = cc::format("{}{}", k_mesh_vertex, vertex_entry_of("mesh_vertex"));
+    auto const dx12 = sgl::compile_to_text({.source = source, .entry_point = "fed", .target = target::hlsl_dx12});
+    auto const vulkan = sgl::compile_to_text({.source = source, .entry_point = "fed", .target = target::hlsl_vulkan});
+    REQUIRE(dx12.has_value());
+    REQUIRE(vulkan.has_value());
+    // each attribute's semantic at its index, `UV1`, and its location, as the two texts declare the pieces
+    CHECK(dx12.value().text.contains("float2 uv_1 : UV1;"));
+    CHECK(dx12.value().text.contains("float4 frame_3 : FRAME3;"));
+    CHECK(vulkan.value().text.contains("[[vk::location(4)]] float2 uv_1 : UV1;"));
+    CHECK(vulkan.value().text.contains("[[vk::location(9)]] float scale : SCALE;"));
+    // and as the declaring file's own description has its members, the struct a host generates its C++ type from
+    auto const d = sgl::describe({.source = source, .source_name = "t.sgl"});
+    REQUIRE(d.has_value());
+    auto const* declared = static_cast<sgl::described_struct const*>(nullptr);
+    for (auto const& s : d.value().structs)
+        if (s.name == "mesh_vertex")
+            declared = &s;
+    REQUIRE(declared != nullptr);
+    for (auto const& a : dx12.value().vertex_attributes)
+        for (auto const& member : declared->members)
+            if (member.name == a.name)
+            {
+                CHECK(a.semantic == member.semantic);
+                CHECK(a.location == member.location + a.semantic_index);
+                CHECK(a.format == member.format);
+                CHECK(a.stream == member.stream);
+                CHECK(a.is_per_instance == member.is_per_instance);
+                CHECK(a.type == (member.pieces > 0 ? member.piece : member.type));
+            }
+}
+
+TEST("sgl entry interface - a module's vertex input states its attributes where the module declares it (EMIT-268)")
+{
+    // a used module, by the module's name rather than the alias
+    auto const meshes_source = cc::format("module meshes\n{}", k_mesh_vertex);
+    sgl::library_file const meshes[] = {{.name = "meshes.sgl", .source = meshes_source}};
+    SECTION("used")
+    {
+        check_mesh_layout(cc::format("use meshes as m\n{}", vertex_entry_of("m.mesh_vertex")), meshes,
+                          "meshes.mesh_vertex", false);
+    }
+    // a dotted module, which `use a.b` binds as `b` (CHK-347)
+    auto const dotted_source = cc::format("module sv.meshes\n{}", k_mesh_vertex);
+    sgl::library_file const dotted[] = {{.name = "sv/meshes.sgl", .source = dotted_source}};
+    SECTION("dotted")
+    {
+        check_mesh_layout(cc::format("use sv.meshes\n{}", vertex_entry_of("meshes.mesh_vertex")), dotted,
+                          "sv.meshes.mesh_vertex", false);
+    }
+    // another file of the module the source joins, whose struct the source names bare as its own module's
+    SECTION("joined")
+    {
+        check_mesh_layout(cc::format("module meshes\n{}", vertex_entry_of("mesh_vertex")), meshes, "mesh_vertex", false);
+    }
+}
+
+TEST("sgl entry interface - every other entry point states no vertex attribute (EMIT-268)")
+{
+    // a vertex entry point that draws from no vertex buffer, and a stage of another kind
+    auto const d = sgl::describe({.source = "struct varyings:\n    @position position: hpos4\n"
+                                            "@vertex fun bare(@vertex_index i: int) -> varyings:\n"
+                                            "    return { position = hpos4(float(i), 0.0, 0.0, 1.0) }\n"
+                                            "@compute(1) fun work(@thread_id id: int3):\n    let x = id.x\n",
+                                  .source_name = "t.sgl"});
+    if (d.has_error())
+        FAIL(d.error());
+    for (auto const& e : d.value().entry_points)
+    {
+        CHECK(e.vertex_input.empty());
+        CHECK(e.vertex_attributes.empty());
+    }
+}

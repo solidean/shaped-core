@@ -63,6 +63,7 @@ struct described_file_sampler;
 struct described_binding_member;
 struct described_binding;
 struct described_struct_member;
+struct described_vertex_attribute;
 struct described_struct;
 struct described_memory_member;
 struct described_memory_struct;

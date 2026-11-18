@@ -157,6 +157,26 @@ struct sgl::described_struct_member
     cc::string piece;
 };
 
+/// One attribute of the vertex input an entry point reads, as its input layout names it (EMIT-268).
+/// A matrix or array member is one per piece, its columns or its elements, each at the member's semantic and its own
+/// index and at the member's location plus that index (EMIT-174).
+struct sgl::described_vertex_attribute
+{
+    /// The member's own name, bare, as `described_struct_member::name` has it; a piece's too.
+    cc::string name;
+    /// Its type as SGL spells it, a piece's for a matrix or array member: `float3` for a column of a `mat3`.
+    cc::string type;
+    /// Its dx12 semantic (EMIT-28), and its index there: 0 for a member, the piece's position for a piece.
+    cc::string semantic;
+    i32 semantic_index = 0;
+    i32 location = 0;
+    /// Its `sg::vertex_attribute_format` where `@format` states one; empty for its type's own.
+    cc::string format;
+    /// The buffer it is read from (EMIT-92): its `@stream`, else `per_instance` or `per_vertex`; never empty.
+    cc::string stream;
+    bool is_per_instance = false;
+};
+
 /// A `@vertex struct` or a `@pixel struct`.
 struct sgl::described_struct
 {
@@ -221,6 +241,9 @@ struct sgl::described_entry_point
     /// A vertex entry point's `@vertex struct`, which `structs` describes; `m.name` for another module's (EMIT-268).
     /// Empty for every other stage and for a vertex entry point that draws from no vertex buffer.
     cc::string vertex_input;
+    /// Every attribute that struct hands the entry point, in location order, wherever the struct is declared (EMIT-268).
+    /// Empty where `vertex_input` is.
+    cc::vector<described_vertex_attribute> vertex_attributes;
     /// A ray-tracing stage's payload, or a callable's parameter, by its host name, its structural hash as 32 hex digits,
     /// and its bytes (EMIT-269).
     /// Empty and 0 for any other stage and for a stage without one.

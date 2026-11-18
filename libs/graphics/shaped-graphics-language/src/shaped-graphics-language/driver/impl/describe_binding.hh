@@ -30,8 +30,10 @@ namespace sgl::driver::impl
 /// Each struct is named by `host_type_name_of`.
 struct entry_interface
 {
-    /// A vertex entry point's `@vertex struct`; empty for every other entry point.
+    /// A vertex entry point's `@vertex struct`, and every attribute it hands the entry point in location order; empty
+    /// for every other entry point.
     cc::string vertex_input;
+    cc::vector<described_vertex_attribute> vertex_attributes;
     /// A ray-tracing stage's payload, or a callable's parameter: its name, its structural hash as 32 hex digits and its
     /// bytes; empty and 0 for any other stage and for a stage without one.
     cc::string payload;

@@ -446,6 +446,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     // form the text took
     auto facts = driver::impl::entry_interface_of(m, e);
     result.vertex_input = cc::move(facts.vertex_input);
+    result.vertex_attributes = cc::move(facts.vertex_attributes);
     result.payload = cc::move(facts.payload);
     result.payload_shape = cc::move(facts.payload_shape);
     result.payload_size = facts.payload_size;

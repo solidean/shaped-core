@@ -269,7 +269,10 @@ slib does that as the compile settles, which is why no target's identifier rules
 A host may build its pipelines in its own code rather than from `pipeline` declarations, and it still needs what each entry point hands its pipeline.
 A declaration names no vertex input: it follows from the vertex entry point's signature (the pipelines file's "What the entry points state is not a setting").
 So reporting it only on a declared pipeline left such a host matching each vertex shader to its struct by hand, though the pixel side, `target_struct`, was already reported per entry point.
-The members stay on the struct's description, which every entry point taking the struct shares, so `compile_to_text` names the struct and `describe` describes it, as for the target struct.
+The struct's own description stays the one place a host generates its type from, since every entry point taking the struct shares it.
+Its layout is stated per entry point too, `vertex_attributes`, as DXIL states an input signature, because a host reading only the struct's name had to find its members in a description.
+The description of a file lists only that file's declarations, so a vertex entry point drawing from a module's struct, or from another file's of the module it joins, left the host without its layout.
+An attribute is what the input layout lists, a piece of a matrix or array apiece, so a host builds the layout from it as it reads it, with no rule of EMIT-174 to apply on its side.
 
 Every struct the description names is named by its host name, `m.name` for a module's, because a bare name is ambiguous: a program may declare `radiance` and use a module that declares one too.
 A payload, a ray set's payloads and a memory struct named bare would then name two structs alike, and a host matching them by name would take one for the other.

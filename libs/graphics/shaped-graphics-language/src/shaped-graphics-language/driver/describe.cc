@@ -309,6 +309,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
         result.samplers.push_back(m.qualified_name_of(id));
     auto facts = driver::impl::entry_interface_of(m, e);
     result.vertex_input = cc::move(facts.vertex_input);
+    result.vertex_attributes = cc::move(facts.vertex_attributes);
     result.payload = cc::move(facts.payload);
     result.payload_shape = cc::move(facts.payload_shape);
     result.payload_size = facts.payload_size;
@@ -804,7 +805,30 @@ sgl::driver::impl::entry_interface sgl::driver::impl::entry_interface_of(check::
     auto result = entry_interface();
     // CHK-88, CHK-89: a vertex entry point's stage struct is its vertex input, and one that takes none has none
     if (e.entry_stage == check::stage::vertex && check::is_valid(e.input))
+    {
         result.vertex_input = host_type_name_of(m, e.input);
+        // EMIT-268: its attributes as the input layout names them, read from the struct wherever it is declared, a
+        // matrix or array member a piece each (EMIT-174)
+        auto const& t = m.at(e.input);
+        auto const semantics = emit_impl::vertex_semantics(m, t);
+        auto location = 0;
+        auto index = isize(0);
+        for (auto const& member : m.at(t.members))
+        {
+            auto [piece, pieces] = pieces_of(m, member.type);
+            for (auto i = 0; i < cc::max(pieces, 1); ++i)
+                result.vertex_attributes.push_back({.name = member.name,
+                                                    .type = pieces > 0 ? piece : host_spelling(m, member.type),
+                                                    .semantic = semantics[index],
+                                                    .semantic_index = i,
+                                                    .location = location + i,
+                                                    .format = member.vertex_format,
+                                                    .stream = emit_impl::stream_of(member),
+                                                    .is_per_instance = member.is_per_instance});
+            location += cc::max(pieces, 1);
+            ++index;
+        }
+    }
     // CHK-328: a ray-tracing stage's payload is its one `mut` parameter, a callable's its parameter
     if (e.entry_stage >= check::stage::raygen && check::is_valid(e.input))
     {

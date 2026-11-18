@@ -243,9 +243,11 @@ struct sgl::emitted_source
     cc::string target_struct;
     /// A vertex entry point's `@vertex struct`, named as `target_struct` is; empty for every other stage and for a vertex
     /// entry point that draws from no vertex buffer (EMIT-268).
-    /// Its members' locations, formats, semantics and streams are not here: `describe` describes the struct of this name
-    /// in its `structs`, which is what a host's input layout is built from.
+    /// The struct's own description, the C++ type a host generates, is the declaring file's `structs`.
     cc::string vertex_input;
+    /// Every attribute that struct hands the entry point, in location order, as `described_entry_point` has them: what an
+    /// input layout is built from, wherever the struct is declared (EMIT-268); empty where `vertex_input` is.
+    cc::vector<described_vertex_attribute> vertex_attributes;
     /// A ray-tracing stage's payload, or a callable's parameter, its structural hash as 32 hex digits, and its bytes, as
     /// `described_entry_point` has them (EMIT-269); empty and 0 for any other stage and for a stage without one.
     cc::string payload;
