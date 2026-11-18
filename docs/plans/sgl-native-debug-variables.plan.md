@@ -3,7 +3,6 @@ title: SGL native debug variables
 status: done
 created: 2026-11-17
 updated: 2026-11-18
-issue: feat-sgl-native-debug-variables
 ---
 
 # SGL native debug variables
