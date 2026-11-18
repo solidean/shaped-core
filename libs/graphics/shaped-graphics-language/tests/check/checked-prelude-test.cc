@@ -1350,3 +1350,54 @@ TEST("sgl checked modules - relocating shaped-viewer's chain past an edit of its
     cc::println("relocating {} links: {:.2f} ms a round", order.size() - 1,
                 (cc::current_time_steady_secs() - started) * 1000 / 40);
 }
+
+TEST("sgl checked modules - an instance a layer's module makes and only the program's binding shows is judged behind "
+     "the layer as beside it (CHK-530)")
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    struct layered_case
+    {
+        cc::string_view module;
+        cc::string_view program;
+        bool is_refused;
+    };
+    // the module's struct holds each instance, which no root of the layer reaches, so its layer is clean; the program's
+    // binding holding that struct is what shows the instance to the host
+    layered_case const cases[] = {
+        {.module = "module view\nstruct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\n"
+                   "struct holder:\n    p: pair[float]\n",
+         .program = "use view\nbinding data:\n    xs: buffer[view.holder]\n",
+         .is_refused = true},
+        {.module = "module view\nstruct pair[T]:\n    a: T\nstruct pair_a[T]:\n    b: T\nstruct a_b:\n    x: float\n"
+                   "struct b:\n    y: float\nbinding seen:\n    xs: buffer[pair[a_b]]\nstruct holder:\n    p: "
+                   "pair_a[b]\n",
+         .program = "use view\nbinding data:\n    ys: buffer[view.holder]\n",
+         .is_refused = true},
+        {.module = "module view\nstruct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\n"
+                   "struct holder:\n    p: pair[int]\n",
+         .program = "use view\nbinding data:\n    xs: buffer[view.holder]\n",
+         .is_refused = false},
+    };
+    for (auto const& c : cases)
+    {
+        auto const module_file = sgl::parse(c.module);
+        auto const module_ast = sgl::ast::build(module_file);
+        auto const library = cc::vector<sgl::check::module_file>{{.file = module_file, .ast = module_ast}};
+        auto const program_file = sgl::parse(c.program);
+        auto const program_ast = sgl::ast::build(program_file);
+        auto const user = sgl::check::module_file{.file = program_file, .ast = program_ast};
+
+        auto const layer = sgl::check::check_modules(*checked, library, user);
+        REQUIRE(layer.has_value());
+        auto const beside = sgl::check::check(*checked, library, user);
+        auto const behind = sgl::check::check(layer.value(), library, user);
+        CHECK(beside.diagnostics.size() == (c.is_refused ? 1 : 0));
+        CHECK(behind.diagnostics.size() == beside.diagnostics.size());
+        for (auto i = isize(0); i < cc::min(behind.diagnostics.size(), beside.diagnostics.size()); ++i)
+        {
+            CHECK(behind.diagnostics[i].what.kind == sgl::diagnostic_kind::duplicate_declaration);
+            CHECK(behind.diagnostics[i].detail == beside.diagnostics[i].detail);
+        }
+    }
+}
