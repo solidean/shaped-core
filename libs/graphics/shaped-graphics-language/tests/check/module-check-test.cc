@@ -199,7 +199,11 @@ TEST("sgl check - a struct named as an instance of its own module's generic stru
     // a module's own pair, inside the module
     cc::string_view const both[] = {"module view\nstruct pair[T]:\n    a: T\nstruct pair_float:\n    x: int\n"
                                     "binding data:\n    xs: buffer[pair[float]]\n"};
-    CHECK(reports_with(both, "use view\n") == cc::format("duplicate-declaration lib.0:[pair_float] {}", refusal));
+    // the program names both by the module, `view.pair_float` and `view.pair[float]`
+    CHECK(reports_with(both, "use view\n")
+          == "duplicate-declaration lib.0:[pair_float] struct view.pair_float is named as the instance "
+             "view.pair[float] "
+             "of a generic struct is, which the host names pair_float too\n");
     // a module's `view.pair_float` beside the program's own `pair[float]` is named apart, and stays allowed
     cc::string_view const theirs[] = {"module view\nstruct pair_float:\n    x: int\n"};
     CHECK(reports_with(theirs, cc::format("use view\n{}binding data:\n    xs: buffer[pair[float]]\n"
@@ -243,4 +247,60 @@ TEST("sgl check - an instance the host never sees takes no name a struct could c
                            "    let p = pair[float](1.0)\n"
                            "    data.ys[id.x] = pair_float(p.a as int)\n")
           == "");
+}
+
+TEST("sgl check - a prelude struct clashes with an instance only where the host sees it (CHK-530)")
+{
+    // the prelude's internal `walk_space` and `triangle_hit` are named in no description of this program
+    CHECK(reports_with({}, "struct walk[T]:\n    a: T\nstruct space:\n    x: float\nbinding data:\n"
+                           "    xs: buffer[walk[space]]\n")
+          == "");
+    CHECK(reports_with({}, "struct triangle[T]:\n    a: T\nstruct hit:\n    x: float\nbinding data:\n"
+                           "    xs: buffer[triangle[hit]]\n")
+          == "");
+    // a binding that holds `triangle_hit` names it, and the report stands at the program's template, not in the prelude
+    CHECK(reports_with({}, "struct triangle[T]:\n    a: T\nstruct hit:\n    x: float\nbinding data:\n"
+                           "    xs: buffer[triangle[hit]]\n    ys: buffer[triangle_hit]\n")
+          == "duplicate-declaration user:[triangle] struct triangle_hit is named as the instance triangle[hit] of a "
+             "generic struct is, which the host names triangle_hit too\n");
+}
+
+TEST("sgl check - a clash with an instance of the prelude is reported on the program's side (CHK-530)")
+{
+    // `exchange[result_float]` is the program's, `exchange_result[float]` the prelude's: the report stands at the
+    // program's template, never inside the prelude
+    CHECK(reports_with({}, "struct exchange[T]:\n    a: T\nstruct result_float:\n    x: float\nbinding data:\n"
+                           "    xs: buffer[exchange[result_float]]\n    ys: buffer[exchange_result[float]]\n")
+          == "duplicate-declaration user:[exchange] the instances exchange[result_float] and exchange_result[float] of "
+             "generic structs are both named exchange_result_float by the host\n");
+    // with no template of the program's, at the binding that shows the instances to the host
+    CHECK(reports_with({}, "binding data:\n    ys: buffer[exchange_result[float]]\n    zs: "
+                           "buffer[exchange_result[int]]\n"
+                           "struct exchange_result_int:\n    x: int\n")
+          == "duplicate-declaration user:[exchange_result_int] struct exchange_result_int is named as the instance "
+             "exchange_result[int] of a generic struct is, which the host names exchange_result_int too\n");
+}
+
+TEST("sgl check - instances named alike are named with their modules, and said once however many (CHK-530)")
+{
+    // `pair[b]` and `pair[view.b]` are both `pair_b` to the host, and the detail tells them apart
+    cc::string_view const view[] = {"module view\nstruct b:\n    y: float\n"};
+    CHECK(reports_with(view, "use view\nstruct pair[T]:\n    a: T\nstruct b:\n    x: float\nbinding data:\n"
+                             "    xs: buffer[pair[b]]\n    ys: buffer[pair[view.b]]\n")
+          == "duplicate-declaration user:[pair] the instances pair[b] and pair[view.b] of generic structs are both "
+             "named "
+             "pair_b by the host\n");
+    // three instances named `pair_a_b` are one report, and the struct of that name one more
+    CHECK(
+        reports_with({}, "struct pair[T]:\n    a: T\nstruct pair_a[T]:\n    b: T\nstruct a[T]:\n    c: T\n"
+                         "struct b:\n    y: float\nstruct a_b:\n    z: float\nstruct pair_a_b:\n    x: int\n"
+                         "binding data:\n    xs: buffer[pair[a[b]]]\n    ys: buffer[pair_a[b]]\n    zs: "
+                         "buffer[pair[a_b]]\n")
+        == "duplicate-declaration user:[a_b] struct a_b is named as the instance a[b] of a generic struct is, which "
+           "the "
+           "host names a_b too\n"
+           "duplicate-declaration user:[pair] the instances pair[a[b]], pair_a[b] and pair[a_b] of generic structs are "
+           "all named pair_a_b by the host\n"
+           "duplicate-declaration user:[pair_a_b] struct pair_a_b is named as the instances pair[a[b]], pair_a[b] and "
+           "pair[a_b] of generic structs are, which the host names pair_a_b too\n");
 }

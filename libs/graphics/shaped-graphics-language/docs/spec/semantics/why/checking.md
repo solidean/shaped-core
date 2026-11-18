@@ -553,6 +553,8 @@ The target text mints its own names and never meets the clash, so the refusal is
 Another module's struct is named `m.pair_float` there, so only one module's own names can clash.
 Only an instance the host sees is counted, since one it never sees takes no name in the description.
 So a struct named `exchange_result_int` clashes with nothing merely because the prelude's atomics return `exchange_result[int]`.
+The prelude's own structs, `walk_space` among them, stand in a description only where a root of the program reaches one, so they clash only there.
+A report stands where the program can act on it, since a span inside the prelude names a line the author cannot change.
 
 ## CHK-339
 
