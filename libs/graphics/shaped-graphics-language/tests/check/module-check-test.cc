@@ -279,6 +279,13 @@ TEST("sgl check - a clash with an instance of the prelude is reported on the pro
                            "struct exchange_result_int:\n    x: int\n")
           == "duplicate-declaration user:[exchange_result_int] struct exchange_result_int is named as the instance "
              "exchange_result[int] of a generic struct is, which the host names exchange_result_int too\n");
+    // two instances of the prelude's own template named alike: no template is the program's, so the report stands at
+    // the binding whose walk shows the last of them to the host
+    CHECK(reports_with({}, "struct float_4:\n    x: float\nbinding data:\n    xs: buffer[exchange_result[float_4]]\n"
+                           "binding more:\n    ys: buffer[exchange_result[float[4]]]\n")
+          == "duplicate-declaration user:[more] the instances exchange_result[float_4] and exchange_result[float[4]] "
+             "of "
+             "generic structs are both named exchange_result_float_4 by the host\n");
 }
 
 TEST("sgl check - instances named alike are named with their modules, and said once however many (CHK-530)")
