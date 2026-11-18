@@ -23,6 +23,7 @@ constexpr u32 k_di_composite_type = 18;
 constexpr u32 k_di_subroutine_type = 19;
 constexpr u32 k_di_compile_unit = 20;
 constexpr u32 k_di_subprogram = 21;
+constexpr u32 k_di_lexical_block = 22;
 constexpr u32 k_di_local_variable = 28;
 constexpr u32 k_di_expression = 29;
 
@@ -126,8 +127,28 @@ void writer::write_debug_info()
         }
         return scope;
     };
-    auto const scope_of = [&](source_place const& place)
+    auto const function_scope_of = [&](source_place const& place)
     { return place.calls_count == 0 && place.file == entry_file ? entry : inlined_scope(place.file, place.function); };
+    // EMIT-267: a block of the line table in the function scope its place stands in, made with its parents on first use
+    auto blocks = cc::vector<u32>::create_filled(lines.blocks.size(), 0u);
+    auto const block_scope = [&](auto const& self, i32 b, u32 function) -> u32
+    {
+        if (blocks[b] != 0)
+            return blocks[b];
+        auto const& block = lines.blocks[b];
+        auto const parent = block.parent >= 0 ? self(self, block.parent, function) : function;
+        auto const file = block.file >= 0 && block.file < file_count && files[block.file] != 0 ? files[block.file]
+                                                                                               : files[entry_file];
+        u64 const fields[] = {0, parent, file, u64(block.line), 0};
+        blocks[b] = _m.md_record(k_di_lexical_block, fields);
+        return blocks[b];
+    };
+    auto const scope_of = [&](source_place const& place)
+    {
+        auto const function = function_scope_of(place);
+        return place.block >= 0 && place.block < blocks.size() ? block_scope(block_scope, place.block, function)
+                                                               : function;
+    };
 
     // each location's scope, and the chain of calls it was inlined through, outermost first
     auto locations = cc::vector<module_builder::debug_location>::create_defaulted(count);

@@ -489,6 +489,74 @@ TEST("sgl native lines - a call inside a generic function's instance names the f
     CHECK(!holds("<inlined>"));
 }
 
+TEST("sgl native lines - a variable declared in an arm is scoped to the arm's block, in its function (EMIT-267)")
+{
+    constexpr u32 k_debug_function = 20;
+    constexpr u32 k_debug_lexical_block = 21;
+    constexpr u32 k_debug_local_variable = 26;
+
+    auto const source = cc::string("binding work:\n"
+                                   "    values: mut buffer[float]\n"
+                                   "\n"
+                                   "@compute(1) fun run(@thread_id id: int3){work}:\n"
+                                   "    let a = work.values[0]\n"
+                                   "    if a > 1.0:\n"
+                                   "        let b = a * work.values[2]\n"
+                                   "        work.values[1] = b * b\n");
+    auto e = sgl::compile_to_text({.source = source,
+                                   .source_name = "blocks.sgl",
+                                   .entry_point = "run",
+                                   .target = sgl::emit::target::hlsl_vulkan,
+                                   .native = sgl::emit::native_route::require,
+                                   .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(e.has_value()).dump("error", e.has_error() ? e.error() : cc::string());
+    auto const& words = e.value().spirv;
+    auto const set = debug_set_of(words);
+    REQUIRE(set != 0);
+
+    auto strings = cc::vector<cc::pair<u32, cc::string_view>>();
+    auto const named = [&](u32 id, cc::string_view text)
+    {
+        for (auto const& [known, held] : strings)
+            if (known == id)
+                return held == text;
+        return false;
+    };
+    auto function = u32(0);
+    auto blocks = cc::vector<cc::pair<u32, u32>>();
+    auto a_scope = u32(0);
+    auto b_scope = u32(0);
+    for (auto at = isize(5); at < words.size();)
+    {
+        auto const count = isize(words[at] >> 16);
+        auto const opcode = words[at] & 0xffffu;
+        REQUIRE(count > 0);
+        if (opcode == k_op_string)
+            strings.push_back({words[at + 1], cc::string_view(reinterpret_cast<char const*>(&words[at + 2]))});
+        if (opcode == k_op_ext_inst && words[at + 3] == set)
+        {
+            auto const instruction = words[at + 4];
+            if (instruction == k_debug_function)
+                function = words[at + 2];
+            // DebugLexicalBlock: source, line, column, parent
+            if (instruction == k_debug_lexical_block)
+                blocks.push_back({words[at + 2], words[at + 8]});
+            if (instruction == k_debug_local_variable && named(words[at + 5], "a"))
+                a_scope = words[at + 10];
+            if (instruction == k_debug_local_variable && named(words[at + 5], "b"))
+                b_scope = words[at + 10];
+        }
+        at += count;
+    }
+    REQUIRE(function != 0u);
+    CHECK(a_scope == function);
+    auto b_parent = u32(0);
+    for (auto const& [block, parent] : blocks)
+        if (block == b_scope)
+            b_parent = parent;
+    CHECK(b_parent == function).dump("blocks", blocks.size());
+}
+
 TEST("sgl native lines - without the option a module carries no line, and with it no instruction else changes")
 {
     for (auto const target : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})

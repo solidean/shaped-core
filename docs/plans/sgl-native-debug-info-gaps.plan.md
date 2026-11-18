@@ -54,8 +54,11 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
   - Note: a callee whose body folds into the call's own statement has no statement of its own, so its parameters stay in the caller
 - [x] P2.2 A call inside a generic function's instance names its function, through the instance's tables (old P3.13)
   - Outcome: `call_site::callee`, set where the inliner makes the site; `source_lines::origin_of` names a frame by it, where it read the file's tables
-  - Deviation: no instance's tables are read: the inliner knows the callee as it inlines, which is simpler and holds for every call
-- [ ] P2.3 Lexical blocks: `DILexicalBlock` and `DebugLexicalBlock` scope a loop's and a branch's locals
+  - Deviation: no instance's tables are read; the inliner records the callee (X1)
+- [x] P2.3 Lexical blocks: `DILexicalBlock` and `DebugLexicalBlock` scope a loop's and a branch's locals
+  - Outcome: `line_table::blocks` and `source_place::block`, from a walk of the legalized tree; an `if` arm, a loop's body and a case's arm open one
+  - Outcome: a statement stands in the innermost block of its own calls, so an inlined body starts again at its function; sgl-cube's `n`, `light` and `i` are listed only inside `shade`'s else arm
+  - Note: a `for` counter is scoped where the `for` stands, not to its body as DXC scopes one
 
 ## P3: What is not described at all
 
@@ -80,6 +83,13 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 
 ## Deviations
 
+### X1: A call site records its callee, in place of reading an instance's tables (2026-11-18) [P2.2]
+
+- **Planned:** Name a call inside a generic function's instance through the instance's tables.
+- **Actual:** `call_site::callee`, set where the inliner makes the site, and the line table reads it first.
+- **Why:** The inliner knows the callee as it inlines, for every call; the tables would need the instance threaded through to `source_lines`.
+- **Impact:** None beyond the field; a site made elsewhere still falls back on the file's tables.
+
 ## Log
 
 - 2026-11-18: Plan created from the issue; the issue claimed.
@@ -90,3 +100,4 @@ Its items keep the IDs of [the first plan](sgl-native-debug-variables.plan.md), 
 - 2026-11-18: P1.5 done: DXIL declares a local in memory; P1 done.
 - 2026-11-18: P2.1 done: an inlined parameter is its callee's variable.
 - 2026-11-18: P1.4 to P2.1 shipped; P2.2 done: a call in a generic instance names its function.
+- 2026-11-18: P2.3 done: lexical blocks; P2 done.

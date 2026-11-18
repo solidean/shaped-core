@@ -9,6 +9,7 @@
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 #include <shaped-graphics-language/ir/pipeline.hh>
+#include <shaped-graphics-language/legalize/impl/walk.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
@@ -215,6 +216,52 @@ namespace
             table.calls.push_back({.file = call.file, .line = call.line, .function = function_of(call.function)});
         table.statements.push_back(place);
     }
+
+    // EMIT-267: each body the source nests opens a block; a statement stands in the innermost one of its own calls, so
+    // an inlined function's statements start again at its body
+    struct open_block
+    {
+        i32 index = -1;
+        ast::range_of<check::call_site> calls;
+    };
+    auto open = cc::vector<open_block>();
+    auto const innermost = [&](check::flat_stmt const& s)
+    {
+        for (auto i = open.size(); i > 0; --i)
+            if (open[i - 1].calls == s.inlined_through)
+                return open[i - 1].index;
+        return i32(-1);
+    };
+    auto const walk = [&](auto const& self, ast::range_of<check::flat_stmt_id> range, int depth) -> void
+    {
+        if (!check::impl::is_known(e, range) || depth > 256)
+            return;
+        for (auto const id : e.at(range))
+        {
+            if (!check::impl::is_known(e, id))
+                continue;
+            auto const& s = e.at(id);
+            auto& place = table.statements[check::index_of(id)];
+            place.block = innermost(s);
+            auto const opens = s.node.is<check::flat_if>() || s.node.is<check::flat_loop>()
+                            || s.node.is<check::flat_while>() || s.node.is<check::flat_for>()
+                            || s.node.is<check::flat_case>() || s.node.is<check::flat_switch>();
+            check::impl::for_each_body_of(
+                e, s,
+                [&](ast::range_of<check::flat_stmt_id> inner)
+                {
+                    if (opens)
+                    {
+                        table.blocks.push_back({.parent = place.block, .file = place.file, .line = place.line});
+                        open.push_back({.index = i32(table.blocks.size() - 1), .calls = s.inlined_through});
+                    }
+                    self(self, inner, depth + 1);
+                    if (opens)
+                        open.pop_back();
+                });
+        }
+    };
+    walk(walk, e.body, 0);
     return table;
 }
 } // namespace

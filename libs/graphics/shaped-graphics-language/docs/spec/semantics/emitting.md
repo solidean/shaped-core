@@ -600,6 +600,7 @@ fn main_ps(p: pixel_input) -> target_ {
 * **EMIT-267** Asked for `full`, a native route writes EMIT-257's lines and describes each local the source wrote: a `let`, a `var`, a parameter and a `for` counter.
   A local a pass introduced is not described.
   Each is described under its name as written, with its type, in the scope of the function it was written in, inlined calls included.
+  A variable declared in an `if` arm, a loop's body or a case's arm is scoped to that body, a lexical block of its function.
   Its value is stated where the source gives it one, and follows it wherever a pass moves or splits it; where the value no longer exists, it reads as optimized out.
   Where two paths meet with different values of a variable, it takes the one they meet with from there on.
   Asking for `full` changes no instruction but the debug ones, as `lines` changes none.

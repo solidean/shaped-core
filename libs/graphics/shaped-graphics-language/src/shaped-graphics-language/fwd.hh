@@ -456,6 +456,7 @@ struct primitive_stage;
 struct global;
 struct local;
 struct source_place;
+struct lexical_block;
 struct line_table;
 struct debug_variable;
 struct payload_annotation;

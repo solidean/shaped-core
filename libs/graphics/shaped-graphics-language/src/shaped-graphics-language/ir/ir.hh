@@ -815,6 +815,19 @@ struct sgl::ir::source_place
     /// A range of `line_table::calls`: the calls it was inlined through, innermost first.
     u32 calls_first = 0;
     u32 calls_count = 0;
+    /// A position in `line_table::blocks`: the innermost one of its function it stands in; -1 for the function's body.
+    i32 block = -1;
+};
+
+/// A body the source nests in a function's, an `if` arm's or a loop's, which scopes the variables declared in it
+/// (EMIT-267).
+struct sgl::ir::lexical_block
+{
+    /// A position in `line_table::blocks`, ahead of this one; -1 where it stands in its function's body.
+    i32 parent = -1;
+    /// Where the statement that opens it stands.
+    i32 file = -1;
+    i32 line = 0;
 };
 
 /// A local the source wrote, as a debugger lists it (EMIT-267).
@@ -846,6 +859,8 @@ struct sgl::ir::line_table
     cc::vector<source_place> calls;
     /// The name of each function a place stands in, each once (EMIT-267).
     cc::vector<cc::string> functions;
+    /// Each nested body a place stands in, its parent ahead of it (EMIT-267).
+    cc::vector<lexical_block> blocks;
 
     [[nodiscard]] bool is_empty() const { return statements.empty(); }
     /// The place of statement `s`, or one with no file.

@@ -26,6 +26,7 @@ enum : u32
     type_composite = 10,
     type_member = 11,
     function = 20,
+    lexical_block = 21,
     scope = 23,
     inlined_at = 25,
     local_variable = 26,
@@ -150,6 +151,23 @@ u32 writer::debug_scope(i32 file, i32 function)
 
 u32 writer::debug_scope_of(source_place const& place)
 {
+    auto const function = debug_function_scope_of(place);
+    return place.block >= 0 && place.block < _p.lines.blocks.size() ? debug_block(place.block, function) : function;
+}
+
+u32 writer::debug_block(i32 block, u32 function)
+{
+    if (_debug_blocks.empty())
+        _debug_blocks.resize_to_defaulted(_p.lines.blocks.size());
+    auto const parent = _p.lines.blocks[block].parent;
+    auto const parent_scope = parent >= 0 ? debug_block(parent, function) : function;
+    if (_debug_blocks[block].handle == 0)
+        _debug_blocks[block] = {.handle = debug_handle(), .parent = parent_scope};
+    return _debug_blocks[block].handle;
+}
+
+u32 writer::debug_function_scope_of(source_place const& place)
+{
     // a place inlined through no call stands in the entry point's own body
     if (place.calls_count == 0)
         return debug_scope(place.file, -1);
@@ -185,8 +203,9 @@ void writer::debug_line_before(u32 index)
     if (place.file < 0 || place.file >= i32(_p.lines.names.size()))
         return;
     auto const scope = debug_scope_of(place);
+    auto const function = debug_function_scope_of(place);
     for (auto& s : _debug_scopes)
-        if (s.handle == scope && (s.line == 0 || place.line < s.line))
+        if (s.handle == function && (s.line == 0 || place.line < s.line))
             s.line = place.line;
     auto const inlined = debug_inlined_at(place);
     if (scope != _debug_scope_stated || inlined != _debug_inlined_stated)
@@ -548,6 +567,15 @@ void writer::declare_debug_info()
                              line};
         debug_instruction(body, body_patches, s.handle, debug::function, words);
     }
+    // a block's parent is made before it, so stands ahead of it
+    for (auto b = isize(0); b < _debug_blocks.size(); ++b)
+        if (auto const& made = _debug_blocks[b]; made.handle != 0)
+        {
+            auto const& block = lines.blocks[b];
+            u32 const words[]
+                = {source_of(block.file), debug_literal(u32(cc::max(block.line, 1))), debug_literal(1), made.parent};
+            debug_instruction(body, body_patches, made.handle, debug::lexical_block, words);
+        }
     for (auto const& at : _debug_inlined)
     {
         if (at.parent != 0)

@@ -161,6 +161,8 @@ TEST("slib - SGL's DXIL with its variables passes the validator, and DXC reads e
     CHECK(t.contains("!DILocalVariable(tag: DW_TAG_auto_variable, name: \"x\""));
     CHECK(t.contains("!DILocalVariable(tag: DW_TAG_auto_variable, name: \"y\""));
     CHECK(t.contains("!DISubprogram(name: \"clamped\""));
+    // the `if` arm's statement stands in a block of clamped's own
+    CHECK(t.contains("!DILexicalBlock(scope:"));
 
     // a vector is stated by its lanes, each a piece of the variable, as DXC states HLSL's
     auto const vectors = sgl::compile_to_text({.source = k_vectors,

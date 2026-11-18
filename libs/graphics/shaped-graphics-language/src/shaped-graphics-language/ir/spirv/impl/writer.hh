@@ -95,7 +95,11 @@ private:
     /// An `OpString` in the debug section, by handle.
     [[nodiscard]] u32 debug_string(cc::string_view text);
     /// The handle of the scope statement place `place` stands in, and of the chain of calls it was inlined through.
+    /// The innermost scope `place` stands in: its block, or its function's body.
     [[nodiscard]] u32 debug_scope_of(source_place const& place);
+    [[nodiscard]] u32 debug_function_scope_of(source_place const& place);
+    /// Block `block` of the line table, in the function scope `function`, made with its parents on first use.
+    [[nodiscard]] u32 debug_block(i32 block, u32 function);
     [[nodiscard]] u32 debug_scope(i32 file, i32 function);
     [[nodiscard]] u32 debug_inlined_at(source_place const& place);
     /// `DebugScope` and `DebugLine` for instruction `index`, where they changed.
@@ -244,6 +248,13 @@ private:
     /// Per file of the line table: its `DebugSource`, 0 until a line names it.
     cc::vector<u32> _debug_sources;
     cc::vector<debug_scope_info> _debug_scopes;
+    /// Parallel to `line_table::blocks` once one is used: its `DebugLexicalBlock` and its parent scope, 0 before.
+    struct debug_block_info
+    {
+        u32 handle = 0;
+        u32 parent = 0;
+    };
+    cc::vector<debug_block_info> _debug_blocks;
     cc::vector<debug_inlined> _debug_inlined;
     /// Per `program::debug_variables`: its `DebugLocalVariable`, 0 until a value is stated of it.
     cc::vector<debug_variable_info> _debug_variables;
