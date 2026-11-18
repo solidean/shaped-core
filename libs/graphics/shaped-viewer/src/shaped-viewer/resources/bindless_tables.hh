@@ -38,7 +38,8 @@ namespace sv
 /// The manager's group is laid out as the whole binding, which adds the material sampler palette after them as static samplers.
 [[nodiscard]] cc::span<sg::binding const> bindless_bindings();
 
-/// The shader-visible binding name of `t` — `bindless.textures_2d` and friends, as the module's reflection names it.
+/// The shader-visible binding name of `t` — `tracer.bindless.textures_2d` and friends, as the module's reflection names
+/// it (CHK-171).
 [[nodiscard]] cc::string_view name_of(bindless_table t);
 
 /// Texture table `t` as an array declaration takes it, the handle the module generates; `t` must not be `buffers`.
