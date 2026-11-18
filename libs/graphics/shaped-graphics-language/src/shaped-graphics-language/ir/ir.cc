@@ -86,6 +86,8 @@ constexpr cc::string_view k_names[] = {
     "array_length",
     "stage_load",
     "stage_store",
+    "debug_value",
+    "debug_declare",
     "atomic_load",
     "atomic_store",
     "atomic_exchange",
@@ -268,6 +270,9 @@ sgl::ir::operand sgl::ir::operand_role(op code, isize at)
     case op::stage_load:
     case op::stage_store:
         return at == 0 ? operand::literal : operand::value;
+    case op::debug_value:
+    case op::debug_declare:
+        return at == 1 ? operand::debug : operand::literal;
     case op::phi:
         return at % 2 == 0 ? operand::value : operand::block;
     case op::branch:
@@ -375,6 +380,13 @@ cc::string sgl::ir::dump(program const& p)
                 out += " ";
                 if (k == 0 && (instruction.code == op::stage_load || instruction.code == op::stage_store))
                     out.appendf("e{}", operands[k]);
+                else if (k == 0 && is_debug(instruction.code))
+                {
+                    auto const& v = p.debug_variables[operands[k]];
+                    out.appendf("v{}:{}", operands[k], p.name_at(v.name_first, v.name_size));
+                }
+                else if (k == 2 && instruction.code == op::debug_value)
+                    out.appendf("{}", operands[k]);
                 else
                     append_value(out, p, value_ref(operands[k]));
             }

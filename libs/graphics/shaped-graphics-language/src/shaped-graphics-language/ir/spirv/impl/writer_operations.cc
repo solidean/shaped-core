@@ -545,7 +545,7 @@ void writer::instruction_of(u32 index)
     if (_unwritten[index])
         return;
     auto const& i = _p.instructions[index];
-    auto const id = _instructions + index;
+    auto const id = _instruction_ids[index];
     auto const operands = _p.operands_of(i);
     auto const& rule = k_rule_of.rules[isize(i.code)];
     if (i.guarantee != check::float_level::fast && rule.keeps_contraction)

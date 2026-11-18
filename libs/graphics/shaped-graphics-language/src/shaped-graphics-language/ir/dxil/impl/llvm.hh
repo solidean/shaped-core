@@ -240,12 +240,30 @@ public:
     void set_debug_locations(cc::vector<debug_location> locations) { _debug_locations = cc::move(locations); }
     /// The metadata and named metadata added from here on are the debug info's, which a write without it leaves out.
     /// So are the constants added from here on, which only the debug info's metadata may name.
+    /// So are the types and the globals added from here on, which only the debug info's calls name.
     void begin_debug_metadata()
     {
         _debug_metadata_from = u32(_metadata.size());
         _debug_named_from = u32(_named.size());
         _debug_constants_from = u32(_constants.size());
+        _debug_types_from = u32(_types.size());
+        _debug_globals_from = u32(_globals.size());
     }
+
+    // ---- variables (EMIT-267), which only `write(..., with_debug_info)` states
+    /// States `value` for a debugger, an `llvm.dbg.value`; `key` names its variable and expression in `set_debug_values`.
+    /// No pass keeps `value` alive for it, and one whose value goes goes with it.
+    void debug_value(ll_value value, u32 key);
+    /// What a `debug_value` of each key names: metadata ids, as `md_record` gives them.
+    struct debug_value_metadata
+    {
+        u32 variable = 0;
+        u32 expression = 0;
+    };
+    /// Declares `llvm.dbg.value` and names what each key of `debug_value` stands for, after `begin_debug_metadata`.
+    void set_debug_values(cc::vector<debug_value_metadata> values);
+    /// What the `debug_value` of `key` states, for one added with `none` before the constant it states could be made.
+    void set_debug_operand(u32 key, ll_value value);
 
     // ---- the one function body; blocks are written in the order they are added
     /// Marks where the next function body starts: the blocks added from here on are its own.
@@ -420,6 +438,8 @@ private:
         switch_,
         return_void,
         unreachable,
+        /// Operands: the value, then the key into `_debug_values`; written as a call of `_debug_declaration`.
+        debug_value,
     };
     struct inst_entry
     {
@@ -486,7 +506,13 @@ private:
     u32 _debug_metadata_from = 0xffffffffu;
     u32 _debug_named_from = 0xffffffffu;
     u32 _debug_constants_from = 0xffffffffu;
+    u32 _debug_types_from = 0xffffffffu;
+    u32 _debug_globals_from = 0xffffffffu;
     cc::vector<debug_location> _debug_locations;
+    /// EMIT-267: by key, what each `debug_value` names; `llvm.dbg.value`, and the `i64 0` every call of it passes.
+    cc::vector<debug_value_metadata> _debug_values;
+    ll_value _debug_declaration = ll_value::none;
+    ll_value _debug_zero = ll_value::none;
     u32 _location = 0;
     cc::vector<inst_entry> _instructions;
     cc::vector<u32> _args;

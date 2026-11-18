@@ -314,12 +314,14 @@ void lowering::hold_parameter(check::local_id id, value_ref value)
     if (!local.is_mut && !holds_array(type))
     {
         _locals[position] = value;
+        describe(id, value, false);
         return;
     }
     auto const variable = add_local(type, local.name);
     _is_variable[position] = true;
     _locals[position] = variable;
     add(op::store, type_ref::none, {variable, value});
+    describe(id, variable, true);
 }
 
 void lowering::check_links()

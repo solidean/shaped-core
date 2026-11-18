@@ -626,7 +626,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     {
         auto program = ir::program();
         if (sources.native_debug_info != debug_info::none && !sources.files.empty())
+        {
             program.lines = line_table_of(m, plan.e, sources);
+            program.describes_variables = sources.native_debug_info == debug_info::full;
+        }
         auto const is_dxil = t == target::hlsl_dx12;
         auto const gap
             = is_dxil ? ir::compile_dxil(plan, program, result.dxil) : ir::compile_spirv(plan, program, result.spirv);

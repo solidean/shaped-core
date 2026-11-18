@@ -215,15 +215,23 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     // The validator refuses an operation declared and never called, which a call the passes removed leaves behind.
     // So a declaration nothing calls is left out as the module is written, and a global's number is its place among
     // the ones kept: renumbering the module instead would leave stale every global value the writer holds.
+    // EMIT-267: variables are written where the debug info is and `set_debug_values` named what they stand for
+    auto const writes_variables = with_debug_info && ll_is_global(_debug_declaration);
     auto is_kept = cc::vector<bool>::create_filled(_globals.size(), false);
     for (auto const& inst : _instructions)
         if (inst.code == inst_code::call)
             is_kept[ll_index(ll_value(_args[inst.first]))] = true;
+        else if (inst.code == inst_code::debug_value && writes_variables)
+            is_kept[ll_index(_debug_declaration)] = true;
     auto global_numbers = cc::vector<u32>::create_filled(_globals.size(), 0u);
     auto global_count = u32(0);
     for (auto g = isize(0); g < _globals.size(); ++g)
     {
-        is_kept[g] = is_kept[g] || !_globals[g].is_declaration;
+        // what only the debug info's calls name is no global of a write without it (EMIT-267)
+        if (!with_debug_info && g >= isize(_debug_globals_from))
+            is_kept[g] = false;
+        else
+            is_kept[g] = is_kept[g] || !_globals[g].is_declaration;
         global_numbers[g] = global_count;
         global_count += is_kept[g] ? 1 : 0;
     }
@@ -287,9 +295,11 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     }
 
     out.enter_block(k_block_type, 4);
-    out.record(k_type_numentry, {u64(_types.size())});
+    // the debug info's types come last and only its calls name one, so a write without it leaves them out
+    auto const type_count = with_debug_info ? _types.size() : cc::min(_types.size(), isize(_debug_types_from));
+    out.record(k_type_numentry, {u64(type_count)});
     auto scratch = cc::vector<u64>();
-    for (auto const& t : _types)
+    for (auto const& t : cc::span<type_entry const>(_types.data(), type_count))
     {
         switch (t.code)
         {
@@ -501,12 +511,42 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         auto marked = cc::vector<u32>();
         auto position = u32(0);
         auto last_location = u32(0);
+
+        // EMIT-267: what each `dbg.value` states, as function-local metadata, ids following the module's
+        auto local_metadata = u32(0);
+        if (writes_variables)
+        {
+            auto any = false;
+            for (auto block_at = first_block; block_at < end_block && !any; ++block_at)
+                for (auto i = _blocks[block_at].first; i < _blocks[block_at].first + _blocks[block_at].count; ++i)
+                    any = any || _instructions[i].code == inst_code::debug_value;
+            if (any)
+            {
+                out.enter_block(k_block_metadata, 3);
+                for (auto block_at = first_block; block_at < end_block; ++block_at)
+                    for (auto i = _blocks[block_at].first; i < _blocks[block_at].first + _blocks[block_at].count; ++i)
+                        if (_instructions[i].code == inst_code::debug_value)
+                        {
+                            auto const value = _args[_instructions[i].first];
+                            out.record(k_md_value, {u64(u32(type_of(ll_value(value)))), u64(local_number(value))});
+                        }
+                out.exit_block();
+            }
+        }
+        // a metadata operand of a call is its id relative to the value it would be, as LLVM 3.7 numbers it
+        auto const metadata_relative = [&](u32 id) -> u64 { return u64(u32(next - id)); };
         for (auto block_at = first_block; block_at < end_block; ++block_at)
         {
             auto const& b = _blocks[block_at];
             for (auto i = b.first; i < b.first + b.count; ++i, ++position)
             {
                 auto const& inst = _instructions[i];
+                // a write without the debug info has no such instruction, nor its place
+                if (inst.code == inst_code::debug_value && !writes_variables)
+                {
+                    --position;
+                    continue;
+                }
                 if (inst.code == inst_code::element_pointer && inst.sub == k_ll_nonuniform)
                     marked.push_back(position);
                 auto const args = cc::span<u32 const>(_args.data() + inst.first, isize(inst.count));
@@ -611,6 +651,21 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                 case inst_code::unreachable:
                     out.record(k_inst_unreachable, {});
                     break;
+                case inst_code::debug_value:
+                {
+                    auto const& named = _debug_values[args[1]];
+                    scratch.clear();
+                    scratch.push_back(0);
+                    scratch.push_back(1u << 15); // the function's type is stated
+                    scratch.push_back(u32(_globals[ll_index(_debug_declaration)].type));
+                    scratch.push_back(relative(u32(_debug_declaration)));
+                    scratch.push_back(metadata_relative(u32(metadata_end) + local_metadata++));
+                    scratch.push_back(relative(u32(_debug_zero)));
+                    scratch.push_back(metadata_relative(named.variable - 1));
+                    scratch.push_back(metadata_relative(named.expression - 1));
+                    out.record(k_inst_call, scratch);
+                    break;
+                }
                 }
                 // EMIT-257: an instruction's location follows it, and one the same as the last is said again for free
                 if (with_debug_info && inst.location != 0 && inst.location <= u32(_debug_locations.size()))

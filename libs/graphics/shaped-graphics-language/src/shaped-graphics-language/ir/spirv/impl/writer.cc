@@ -34,7 +34,14 @@ void writer::number_everything()
     _elements = take(_p.stage_elements.size());
     _globals = take(_p.globals.size());
     _locals = take(_p.locals.size());
-    _instructions = take(_p.instructions.size());
+    auto described = isize(0);
+    for (auto const& i : _p.instructions)
+        described += is_debug(i.code) ? 1 : 0;
+    _instructions = take(_p.instructions.size() - described);
+    _instruction_ids = cc::vector<u32>::create_filled(_p.instructions.size(), 0u);
+    for (auto i = isize(0), next = isize(0); i < _p.instructions.size(); ++i)
+        if (!is_debug(_p.instructions[i].code))
+            _instruction_ids[i] = _instructions + u32(next++);
     _blocks = take(_p.blocks.size());
     _glsl = take(1);
     _function = take(1);
@@ -186,10 +193,13 @@ void writer::write_function()
                 if (_p.instructions[i].code == op::ray_query_begin || _p.instructions[i].code == op::hit_object_trace
                     || _p.instructions[i].code == op::trace_reorder_execute)
                     emit(_code, spv::Variable,
-                         {pointer_to(spv::FunctionStorage, id_of(_p.instructions[i].type)), _instructions + u32(i),
+                         {pointer_to(spv::FunctionStorage, id_of(_p.instructions[i].type)), _instruction_ids[i],
                           spv::FunctionStorage});
         for (auto i = b.first; i + 1 < b.first + b.count; ++i)
         {
+            // EMIT-267: a variable's description is not written yet, and states no line of its own
+            if (is_debug(_p.instructions[i].code))
+                continue;
             line_before(i);
             instruction_of(i);
         }

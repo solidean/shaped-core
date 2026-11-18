@@ -308,6 +308,12 @@ void writer::lower_block(block_ref b)
     _rows.clear();
     for (auto i = block.first; i + 1 < block.first + block.count && _failure.empty(); ++i)
     {
+        // EMIT-267: a variable's value is stated beside the rows, never as one
+        if (is_debug(_p.instructions[i].code))
+        {
+            describe(_p.instructions[i]);
+            continue;
+        }
         locate(_p.instructions[i]);
         operation(i);
     }

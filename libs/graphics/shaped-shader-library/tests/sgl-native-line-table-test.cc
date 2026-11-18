@@ -30,6 +30,14 @@ constexpr cc::string_view k_lines = "binding work:\n"                           
                                     "    let x = work.values[0]\n"                      // 11
                                     "    work.values[1] = clamped(x)\n";                // 12
 
+/// A vector local read whole, which a debugger shows lane by lane; one read by its lanes alone the legalizer splits.
+constexpr cc::string_view k_vectors = "binding work:\n"
+                                      "    values: mut buffer[float]\n"
+                                      "\n"
+                                      "@compute(1) fun run(@thread_id id: int3){work}:\n"
+                                      "    let v = float3(work.values[0], work.values[1], 2.0)\n"
+                                      "    work.values[2] = dot(v, v)\n";
+
 [[nodiscard]] u32 u32_at(cc::span<byte const> bytes, isize at)
 {
     return u32(bytes[at]) | u32(bytes[at + 1]) << 8 | u32(bytes[at + 2]) << 16 | u32(bytes[at + 3]) << 24;
@@ -128,6 +136,48 @@ TEST("slib - SGL's DXIL with its line table passes the validator, and DXC reads 
     CHECK(t.contains("fun clamped(x: float) -> float:"));
 }
 
+TEST("slib - SGL's DXIL with its variables passes the validator, and DXC reads each variable out of it (EMIT-267)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const e = sgl::compile_to_text({.source = k_lines,
+                                         .source_name = "lines.sgl",
+                                         .entry_point = "run",
+                                         .target = sgl::emit::target::hlsl_dx12,
+                                         .native = sgl::emit::native_route::require,
+                                         .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(e.has_value());
+    auto const refused = compiler.value().validate(e.value().dxil);
+    CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+
+    auto const debug = part_as_program(e.value().dxil, "ILDB");
+    REQUIRE(!debug.empty());
+    auto const text = compiler.value().disassemble(debug);
+    REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error().to_string() : cc::string());
+    auto const& t = text.value();
+    // each variable stated by `llvm.dbg.value`, and clamped's own in clamped's scope
+    CHECK(t.contains("call void @llvm.dbg.value(metadata"));
+    CHECK(t.contains("!DILocalVariable(tag: DW_TAG_auto_variable, name: \"x\""));
+    CHECK(t.contains("!DILocalVariable(tag: DW_TAG_auto_variable, name: \"y\""));
+    CHECK(t.contains("!DISubprogram(name: \"clamped\""));
+
+    // a vector is stated by its lanes, each a piece of the variable, as DXC states HLSL's
+    auto const vectors = sgl::compile_to_text({.source = k_vectors,
+                                               .source_name = "vectors.sgl",
+                                               .entry_point = "run",
+                                               .target = sgl::emit::target::hlsl_dx12,
+                                               .native = sgl::emit::native_route::require,
+                                               .native_debug_info = sgl::emit::debug_info::full});
+    REQUIRE(vectors.has_value());
+    CHECK(!compiler.value().validate(vectors.value().dxil).has_value());
+    auto const pieces = compiler.value().disassemble(part_as_program(vectors.value().dxil, "ILDB"));
+    REQUIRE(pieces.has_value());
+    CHECK(pieces.value().contains("name: \"v\""));
+    CHECK(pieces.value().contains("!DIExpression(DW_OP_bit_piece, 64, 32)"));
+    CHECK(pieces.value().contains("name: \"vector<float, 3>\""));
+}
+
 TEST("slib - every entry point SGL's DXIL lowers passes the validator with its line table")
 {
     auto compiler = ssc::dxc::compiler::create();
@@ -151,19 +201,24 @@ TEST("slib - every entry point SGL's DXIL lowers passes the validator with its l
         {
             if (seen++ % stride != 0)
                 continue;
-            auto const e = sgl::compile_to_text({.source = source,
-                                                 .source_name = file,
-                                                 .entry_point = entry.entry_point,
-                                                 .target = sgl::emit::target::hlsl_dx12,
-                                                 .native = sgl::emit::native_route::prefer,
-                                                 .native_debug_info = sgl::emit::debug_info::lines});
-            if (e.has_error() || e.value().dxil.empty())
-                continue;
-            ++validated;
-            auto const refused = compiler.value().validate(e.value().dxil);
-            CHECK(!refused.has_value())
-                .context(cc::format("{} {}", file, entry.entry_point))
-                .dump("validator", refused.value_or(cc::string()));
+            // the lines alone, and every variable beside them (EMIT-267)
+            for (auto const level : {sgl::emit::debug_info::lines, sgl::emit::debug_info::full})
+            {
+                auto const e = sgl::compile_to_text({.source = source,
+                                                     .source_name = file,
+                                                     .entry_point = entry.entry_point,
+                                                     .target = sgl::emit::target::hlsl_dx12,
+                                                     .native = sgl::emit::native_route::prefer,
+                                                     .native_debug_info = level});
+                if (e.has_error() || e.value().dxil.empty())
+                    continue;
+                ++validated;
+                auto const refused = compiler.value().validate(e.value().dxil);
+                CHECK(!refused.has_value())
+                    .context(cc::format("{} {} at {}", file, entry.entry_point,
+                                        level == sgl::emit::debug_info::full ? "full" : "lines"))
+                    .dump("validator", refused.value_or(cc::string()));
+            }
         }
     }
     CC_LOG_INFO("{} DXIL containers with a line table passed the validator", validated);

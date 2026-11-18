@@ -757,6 +757,8 @@ struct let_simplifier
                 continue;
             replaced[index_of(local)] = ref->local;
             out.e.locals[index_of(ref->local)].name = e().at(local).name;
+            // the temporary is the source's local now, which a debugger lists under its name (EMIT-267)
+            out.e.locals[index_of(ref->local)].source_name = e().at(local).source_name;
             drop(list[i]);
         }
     }

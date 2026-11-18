@@ -194,7 +194,7 @@ private:
                 for (auto k = isize(0); k < isize(inst.count); ++k)
                 {
                     auto const v = value_ref(operands[k]);
-                    if (operand_role(inst.code, k) == operand::value && is_constant(v)
+                    if (names_a_value(operand_role(inst.code, k)) && is_constant(v)
                         && canonical[index_of(v)] != 0xffffffffu)
                         operands[k] = u32(constant_at(canonical[index_of(v)]));
                 }
@@ -1289,7 +1289,7 @@ private:
                 }
                 else
                     for (auto k = isize(0); k < held.size(); ++k)
-                        operands.push_back(operand_role(copy.code, k) == operand::value ? moved(held[k]) : held[k]);
+                        operands.push_back(names_a_value(operand_role(copy.code, k)) ? moved(held[k]) : held[k]);
                 copy.first = first;
                 instructions.push_back(copy);
             }

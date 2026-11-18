@@ -91,6 +91,8 @@ def check(backend: str, debug_info: str, result: dict) -> list[str]:
     if debug_info == "full":
         listed = {v["name"] for s in result.get("steps", []) for v in s.get("vars", [])}
         listed |= {v["name"] for v in result.get("source_vars", [])}
+        # RenderDoc lists a vector by its lanes, `n.x`, `n.y` and `n.z`
+        listed |= {name.split(".")[0] for name in listed}
         if missing := CUBE_VARIABLES - listed:
             wrong.append(f"{backend}: the debugger lists no variable {sorted(missing)}; it lists {sorted(listed)}")
     return wrong

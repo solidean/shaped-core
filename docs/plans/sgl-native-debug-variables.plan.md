@@ -55,7 +55,8 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 
 ## P3: The IR half, shared by both writers
 
-- [ ] P3.1 `program::debug_variables`: source name, source type, kind, declaring statement; filled for `full` only
+- [x] P3.1 `program::debug_variables`: source name, source type, kind, declaring statement; filled for `full` only
+  - Outcome: `ir::debug_variable` and `program::debug_variables`, with `describes_variables` set for `full`
   - Note: a minted name cannot be told apart from a written one, and pass-made locals are not all `temporary`: `check`, `ends_search`, autodiff's `x`, `result`, `dx`
   - Note: so `flat_local` gains the name as written, set only where a declaration is flattened (P3.8)
 - [x] P3.8 `flat_local::source_name`, empty for a local no source wrote; set at `let` and `var` statements, parameters, inlined parameter bindings, `for` counters
@@ -66,15 +67,19 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
   - Note: a frame is a `check::call_site`; its callee is `call_records[files[file].call_at(call)].callee`, through an instance's tables for a generic call
   - Outcome: `source_line::function`, filled by `source_lines::origin_of`; `ir::line_table::functions` and `source_place::function`
   - Note: a call inside a generic function's instance stands past the file's tables and names no function yet; its frame keeps the file's scope
-- [ ] P3.3 `op::debug_value` and `op::debug_declare`, with `ir::verify`, `dump` and `operand_role` (D7)
+- [x] P3.3 `op::debug_value` and `op::debug_declare`, with `ir::verify`, `dump` and `operand_role` (D7)
+  - Outcome: both ops after `stage_store`, `operand::debug`, `names_a_value`, `is_debug`; verify has a `debug` shape; both writers skip them; SPIR-V numbers its ids past them
   - Note: place both after `stage_store`, outside `has_effect`'s ranges and `gives_only_a_value`, so no pass shares, hoists or speculates them
   - Note: `debug_value`: literal variable, value (role `debug`), literal first leaf; `debug_declare`: literal variable, local (role `debug`)
   - Note: writers skip both until P4 and P5, and `remove_unused` keeps a debug op while its operand lives
-- [ ] P3.4 Lowering writes them: a value at each source `let`, parameter and `for` counter, a declare at each `var`; temporaries none
+- [x] P3.4 Lowering writes them: a value at each source `let`, parameter and `for` counter, a declare at each `var`; temporaries none
+  - Outcome: `lowering::describe` at `declare`, the `for` counter, stage inputs and `hold_parameter`
   - Note: an immutable `let` that holds no array is no IR local but a value (lower.cc, `_locals[position] = expr(value)`), so its value op stands there
-- [ ] P3.5 `construct_ssa` turns a promoted local's declare and stores into per-scalar `debug_value`s
+- [x] P3.5 `construct_ssa` turns a promoted local's declare and stores into per-scalar `debug_value`s
+  - Outcome: `find_declared` collects the declarations; a store into a declared promoted local, whole or through a chain, states `debug_value` at its leaf
   - Note: ssa.cc splits a promoted local into scalar slots (`add_slots`, `write_whole`); a store's value op names its first slot
-- [ ] P3.6 Every pass treats a debug op as no use and no content (D7)
+- [x] P3.6 Every pass treats a debug op as no use and no content (D7)
+  - Outcome: the rewriters take `names_a_value`; `remove_unused` keeps a debug op and writes `none` where its value went; `flatten_branches` ignores them when it sizes an arm or threads a block
   - Note: the ~28 `operand::value` checks skip the `debug` role by themselves: liveness, use counts, local reads, SSA's promotability
   - Note: the generic rewriters must take it too, through one helper
   - Note: renumbering at cleanup.cc:213, flatten.cc:131 and tables.cc:285; replacing at cleanup.cc:426 and 462, flatten.cc:328 and tables.cc:287
@@ -82,16 +87,36 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
   - Note: a rewriter whose target was removed writes `value_ref::none`, which a writer states as optimized out; ssa.cc's `lay_out` renumbers too
   - Note: `flatten_branches` must not count a debug op as content of an arm, nor `chain_sums` as a second read
   - Note: `remove_unused`, `share_common_values`, `hoist_common_values`, `flatten_branches`, `simplify`, `regroup_lanes`, `chain_sums`, `state_constant_tables`
-- [ ] P3.7 Test: `full` against `lines` leaves every non-debug operation the same, over the repo's SGL
+- [x] P3.7 Test: `full` against `lines` leaves every non-debug operation the same, over the repo's SGL
+  - Outcome: native-line-table-test.cc: `full` against `lines`, same SPIR-V and the same DXIL part over the whole corpus, thorough included
+
+- [ ] P3.9 A value no operation keeps whole, such as an entry's stage struct `p`, described by its pieces rather than as optimized out
+- [x] P3.10 `let lit = shade(...)` in sgl-cube is not described: find where legalizing moves a block's value past the local
+  - Outcome: rule L1 of legalize_lets.cc gave the temporary the let's name but not its source name; now both
+- [ ] P3.11 A promoted variable's value at a merge: a `debug_value` of each phi `construct_ssa` makes for its slots
+- [ ] P3.12 A debug value in an arm `flatten_branches` folds into a select states the arm's value on both paths; drop it there, or state the select
+- [ ] P3.13 A call in a generic function's instance names its function, through the instance's tables
+- [ ] P3.14 A let the legalizer splits into its lanes, read by them alone, describes each lane as a piece of the variable
+  - Note: `let v = float3(...)` read as `v.x`, `v.y`, `v.z` becomes lets `x`, `y`, `z`, which carry no source name
+- [ ] P3.15 An inlined parameter's variable stands in its callee's scope, as DXC's do, not in the caller's where its binding stands
+- [ ] P4.7 `llvm.dbg.declare` of a variable a local in memory holds, an array indexed at run time among them
 
 ## P4: DXIL
 
-- [ ] P4.1 Measure DXC's `-Zi` for variables on the DXC in `extern/dxc`: the metadata, `dbg.value`'s form in LLVM 3.7, vectors, matrices, structures, pieces
-- [ ] P4.2 A `DISubprogram` per inlined function, with `inlinedAt` through them
-- [ ] P4.3 Types: `DIBasicType`, `DICompositeType`, `DIDerivedType` as DXC writes SGL's types
-- [ ] P4.4 `DILocalVariable` and `llvm.dbg.value` with `DW_OP_bit_piece` for a promoted scalar; `llvm.dbg.declare` for a local left in memory
-- [ ] P4.5 DXC's validator and its disassembly of the `ILDB` take it; the `DXIL` part stays byte for byte
-- [ ] P4.6 The P1 script shows a local's value in PIX
+- [x] P4.1 Measure DXC's `-Zi` for variables on the DXC in `extern/dxc`: the metadata, `dbg.value`'s form in LLVM 3.7, vectors, matrices, structures, pieces
+  - Outcome: one `llvm.dbg.value(metadata <scalar>, i64 0, metadata !var, metadata !expr)` a lane
+  - Note: `DW_OP_bit_piece` in the packed bits where the variable has more than one, `DW_TAG_arg_variable` for a parameter
+- [x] P4.2 A `DISubprogram` per inlined function, with `inlinedAt` through them
+  - Outcome: `inlined_scope` keys by the line table's function, `<inlined>` only where it knows none
+- [x] P4.3 Types: `DIBasicType`, `DICompositeType`, `DIDerivedType` as DXC writes SGL's types
+  - Outcome: `writer::debug_type`: basic types, `vector<T, n>` and `matrix<T, r, c>` classes with lane members, arrays with a subrange, structs with bit offsets
+- [x] P4.4 `DILocalVariable` and `llvm.dbg.value` with `DW_OP_bit_piece` for a promoted scalar; `llvm.dbg.declare` for a local left in memory
+  - Outcome: the module builder's `debug_value`: debug-only types, globals and constants, function-local `METADATA_VALUE`s
+  - Note: a constant's leaves are made with the debug info; `dbg.declare` of a local left in memory is not written yet (P4.7)
+- [x] P4.5 DXC's validator and its disassembly of the `ILDB` take it; the `DXIL` part stays byte for byte
+  - Outcome: slib's tests validate every container of the corpus at `full`, and disassemble a variable, a vector's pieces and an inlined function's scope out of the `ILDB`
+- [x] P4.6 The P1 script shows a local's value in PIX
+  - Outcome: check-debugger.py `--backend dx12 --debug-info full` holds: RenderDoc lists lit, n, light and i, and the inlined parameters
 
 ## P5: SPIR-V
 
@@ -161,4 +186,6 @@ Before anything goes on top of it, a script shows that a debugger reads what EMI
 - 2026-11-17: P3.8 done: a local keeps the name its declaration wrote.
 - 2026-11-17: D7 decided, with the sites P3.3 and P3.6 change; next session starts at P3.1 and P3.3.
 - 2026-11-17: P1.6 done: check-debugger.py, the debugger check P4 and P5 are held to at `full`.
+- 2026-11-17: P3.1, P3.3 to P3.7 done: `full` describes the source's locals through every pass and changes no instruction; gaps filed as P3.9 to P3.13.
+- 2026-11-17: P4.1 to P4.6 and P3.10 done: dx12 describes every variable, RenderDoc lists them, the DXIL part stays the same; P3.14, P3.15 and P4.7 filed.
 - 2026-11-17: P1 done but P1.6: `SC_SG_CAPTURE` (D5) and debug-pixel.py show RenderDoc reading EMIT-257's lines on dx12 and vulkan; PIX captures dx12.

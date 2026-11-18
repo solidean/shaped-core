@@ -602,6 +602,8 @@ fn main_ps(p: pixel_input) -> target_ {
   Each is described under its name as written, with its type, in the scope of the function it was written in, inlined calls included.
   Its value is stated where the source gives it one, and follows it wherever a pass moves or splits it; where the value no longer exists, it reads as optimized out.
   Asking for `full` changes no instruction but the debug ones, as `lines` changes none.
+  DXIL states each lane of a value as DXC's `-Zi` does, a `llvm.dbg.value` in the `ILDB` part.
+  It is a `DW_OP_bit_piece` of the packed variable where the variable has more than one lane, and each variable a `DILocalVariable` of its function's `DISubprogram`.
 
 ## Diagnostics
 

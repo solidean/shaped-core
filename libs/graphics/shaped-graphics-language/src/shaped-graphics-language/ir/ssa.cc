@@ -35,6 +35,8 @@ public:
         find_predecessors();
         _result.resize_to_filled(_p.instructions.size(), value_ref::none);
         _chain_slots.resize_to_filled(_p.instructions.size(), k_not_slot);
+        _chain_locals.resize_to_filled(_p.instructions.size(), k_not_slot);
+        find_declared();
         _chain_types.resize_to_filled(_p.instructions.size(), type_ref::none);
         _new_first.resize_to_filled(_p.blocks.size(), 0u);
         _new_count.resize_to_filled(_p.blocks.size(), 0u);
@@ -167,6 +169,20 @@ private:
             {
                 _local_slots[l] = u32(_slot_types.size());
                 add_slots(_p.at(_p.locals[l].type).element);
+            }
+    }
+
+    /// EMIT-267: the variable each promoted local is declared as, wherever its declaration stands; a promoted local's
+    /// declaration goes, and each store into it states the value instead.
+    void find_declared()
+    {
+        _declared_as.resize_to_filled(_p.locals.size(), k_not_slot);
+        for (auto const& inst : _p.instructions)
+            if (inst.code == op::debug_declare)
+            {
+                auto const local = value_ref(_p.operands_of(inst)[1]);
+                if (is_local(local) && _local_slots[index_of(local)] != k_not_slot)
+                    _declared_as[index_of(local)] = _p.operands_of(inst)[0];
             }
     }
 
@@ -477,30 +493,47 @@ private:
             walk_chain(operands.subspan(1), slot, type);
             _chain_slots[index] = slot;
             _chain_types[index] = type;
+            _chain_locals[index] = index_of(value_ref(operands[0]));
             return;
         }
+        if (inst.code == op::debug_declare && is_local(value_ref(operands[1]))
+            && _local_slots[index_of(value_ref(operands[1]))] != k_not_slot)
+            return;
         if (inst.code == op::load || inst.code == op::store)
         {
             auto const pointer = value_ref(operands[0]);
             auto slot = k_not_slot;
             auto type = type_ref::none;
+            auto local = k_not_slot;
             if (is_local(pointer) && _local_slots[index_of(pointer)] != k_not_slot)
             {
                 slot = _local_slots[index_of(pointer)];
                 type = _p.at(_p.locals[index_of(pointer)].type).element;
+                local = index_of(pointer);
             }
             else if (is_valid(pointer) && !is_constant(pointer) && !is_global(pointer) && !is_local(pointer)
                      && _chain_slots[index_of(pointer)] != k_not_slot)
             {
                 slot = _chain_slots[index_of(pointer)];
                 type = _chain_types[index_of(pointer)];
+                local = _chain_locals[index_of(pointer)];
             }
             if (slot != k_not_slot)
             {
                 if (inst.code == op::load)
                     _result[index] = read_whole(type, slot);
                 else
-                    write_whole(type, translated(operands[1]), slot);
+                {
+                    auto const first = slot;
+                    auto const value = translated(operands[1]);
+                    write_whole(type, value, slot);
+                    // EMIT-267: the variable holds what was stored, from the leaf the store reached on
+                    if (local != k_not_slot && _declared_as[local] != k_not_slot)
+                    {
+                        u32 const described[] = {_declared_as[local], u32(value), first - _local_slots[local]};
+                        (void)emit(op::debug_value, type_ref::none, described);
+                    }
+                }
                 return;
             }
         }
@@ -510,7 +543,7 @@ private:
         auto const first = u32(_operands.size());
         for (auto k = isize(0); k < operands.size(); ++k)
         {
-            auto const is_value = operand_role(inst.code, k) == operand::value;
+            auto const is_value = names_a_value(operand_role(inst.code, k));
             _operands.push_back(is_value && !is_program_phi ? u32(translated(operands[k])) : operands[k]);
         }
         auto copy = inst;
@@ -637,7 +670,7 @@ private:
                 auto const held = cc::span<u32 const>(_operands.data() + copy.first, isize(copy.count));
                 for (auto k = isize(0); k < held.size(); ++k)
                 {
-                    if (operand_role(copy.code, k) != operand::value)
+                    if (!names_a_value(operand_role(copy.code, k)))
                     {
                         operands.push_back(held[k]);
                         continue;
@@ -691,6 +724,10 @@ private:
     cc::vector<value_ref> _result;
     cc::vector<u32> _chain_slots;
     cc::vector<type_ref> _chain_types;
+    /// Parallel to `_p.instructions`: the promoted local a chain reaches into.
+    cc::vector<u32> _chain_locals;
+    /// Parallel to `_p.locals`: the debug variable a promoted local is declared as, or `k_not_slot` (EMIT-267).
+    cc::vector<u32> _declared_as;
 
     cc::vector<u32> _pred_first;
     cc::vector<u32> _pred_count;
