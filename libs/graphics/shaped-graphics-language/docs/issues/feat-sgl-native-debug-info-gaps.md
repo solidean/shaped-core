@@ -7,6 +7,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/impl/writer_lines.cc
   - test: native-line-table-test
   - file: docs/plans/sgl-native-debug-variables.plan.md
+claimed-by: Claude (for Julius)
+claimed-at: 2026-11-18T10:51Z
 ---
 
 # Native debug info: the variables full does not describe yet, globals, lexical blocks and columns
