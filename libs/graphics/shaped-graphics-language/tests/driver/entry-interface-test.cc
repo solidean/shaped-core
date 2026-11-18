@@ -712,6 +712,42 @@ TEST("sgl entry interface - the attributes match what the text declares, on dx12
             }
 }
 
+TEST("sgl entry interface - every attribute is where each text target declares it, a piece by its own name (EMIT-268)")
+{
+    // every record against every text target's declaration of it: dx12's semantic, vulkan's, WGSL's and MSL's location,
+    // a piece declared as `<member>_<i>` (EMIT-174); the records are one list for every target
+    auto const source = cc::format("{}{}", k_mesh_vertex, vertex_entry_of("mesh_vertex"));
+    auto const reference = sgl::compile_to_text({.source = source, .entry_point = "fed", .target = target::hlsl_dx12});
+    REQUIRE(reference.has_value());
+    auto const& attributes = reference.value().vertex_attributes;
+    REQUIRE(attributes.size() == 10);
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::wgsl, target::msl})
+    {
+        auto const r = sgl::compile_to_text({.source = source, .entry_point = "fed", .target = t});
+        REQUIRE(r.has_value());
+        auto const& text = r.value().text;
+        REQUIRE(r.value().vertex_attributes.size() == attributes.size());
+        for (auto i = isize(0); i < attributes.size(); ++i)
+        {
+            auto const& a = attributes[i];
+            CHECK(r.value().vertex_attributes[i].location == a.location);
+            CHECK(r.value().vertex_attributes[i].semantic == a.semantic);
+            auto pieces = 0;
+            for (auto const& other : attributes)
+                pieces += other.name == a.name ? 1 : 0;
+            auto const emitted = pieces > 1 ? cc::format("{}_{}", a.name, a.semantic_index) : cc::string(a.name);
+            auto const semantic = pieces > 1 ? cc::format("{}{}", a.semantic, a.semantic_index) : cc::string(a.semantic);
+            auto const declared = t == target::hlsl_dx12   ? cc::format(" {} : {};", emitted, semantic)
+                                : t == target::hlsl_vulkan ? cc::format("[[vk::location({})]] ", a.location)
+                                : t == target::wgsl        ? cc::format("@location({}) {}:", a.location, emitted)
+                                                           : cc::format(" {} [[attribute({})]];", emitted, a.location);
+            CHECK(text.contains(declared));
+            if (t == target::hlsl_vulkan)
+                CHECK(text.contains(cc::format(" {} : {};", emitted, semantic)));
+        }
+    }
+}
+
 TEST("sgl entry interface - a module's vertex input states its attributes where the module declares it (EMIT-268)")
 {
     // a used module, by the module's name rather than the alias
