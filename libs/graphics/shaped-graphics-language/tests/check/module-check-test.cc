@@ -273,7 +273,7 @@ TEST("sgl check - a clash with an instance of the prelude is reported on the pro
                            "    xs: buffer[exchange[result_float]]\n    ys: buffer[exchange_result[float]]\n")
           == "duplicate-declaration user:[exchange] the instances exchange[result_float] and exchange_result[float] of "
              "generic structs are both named exchange_result_float by the host\n");
-    // with no template of the program's, at the binding that shows the instances to the host
+    // a struct the program declares is reported at its own name, beside an instance of the prelude's template
     CHECK(reports_with({}, "binding data:\n    ys: buffer[exchange_result[float]]\n    zs: "
                            "buffer[exchange_result[int]]\n"
                            "struct exchange_result_int:\n    x: int\n")

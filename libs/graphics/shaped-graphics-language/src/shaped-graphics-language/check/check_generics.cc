@@ -671,7 +671,8 @@ void checker::judge_instance_names(isize first_symbol, isize first_type)
         else if (auto const* const b = node.try_as<ast::binding_decl>())
             name = b->name;
         else if (auto const* const p = node.try_as<ast::pipeline_decl>())
-            name = p->name;
+            // an unnamed `pipeline:` has no name, so a report stands at its whole declaration
+            name = p->name.empty() ? span_of(s.file, s.declaration) : p->name;
         else
             return false;
         return true;
@@ -732,12 +733,17 @@ void checker::judge_instance_names(isize first_symbol, isize first_type)
             auto const& s = out.symbols[k];
             if (s.kind != symbol_kind::structure || s.state != symbol_state::checked || !ast::is_valid(s.declaration)
                 || !out.is_reached_file(s.file) || s.name != g.identifier
-                || out.foreign_module_of(symbol_id(k)) != g.module || (!g.is_new && k < first_symbol))
+                || out.foreign_module_of(symbol_id(k)) != g.module)
+                continue;
+            // a prelude struct is new to this layer too where only this layer's roots show it to the host
+            auto const is_prelude = s.file < out.prelude_files;
+            auto const is_newly_seen
+                = is_prelude && is_valid(s.type) && seen[index_of(s.type)] != 0 && seen_before[index_of(s.type)] == 0;
+            if (!g.is_new && k < first_symbol && !is_newly_seen)
                 continue;
             auto const* const d = ast_of(s.file).at(s.declaration).node.try_as<ast::struct_decl>();
             if (d == nullptr || !d->type_parameters.empty())
                 continue;
-            auto const is_prelude = s.file < out.prelude_files;
             if (is_prelude && (!is_valid(s.type) || seen[index_of(s.type)] == 0))
                 continue;
             auto const detail = g.types.size() == 1
