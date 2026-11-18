@@ -193,7 +193,10 @@ const light_kind_sun: i32 = 2;
   An attribute is a member, or a piece of a matrix or array member (EMIT-174), which takes the member's semantic at its own index and the member's location plus that index.
   Each states the member's bare `name`, and its `type` as SGL spells it, the piece's for a piece: `float4` for a column of a `mat4`.
   Each states its `semantic` (EMIT-28), `semantic_index` and `location`, its `format` where `@format` states one, its `stream` (EMIT-92), and whether it `is_per_instance`.
-  `sgl describe` writes `per_instance` for the last, and leaves `format` out where it is empty.
+  A piece repeats its member's `format`, `stream` and rate.
+  `stream` is never empty: without `@stream` it is `per_instance` or `per_vertex`, as EMIT-92 names the buffer.
+  `sgl describe` writes `per_instance` for the rate, and leaves `format` out where it is empty.
+  Like `vertex_input`, they describe the entry point as written, so a polyfilled vertex stage, whose form reads its vertices otherwise, reads none of them.
   They are the same on every target, and the entry point states them wherever the struct is declared: in the source, in a module it uses, dotted or not, or in another file of the module it joins.
   The struct itself is described once, in the description of the file that declares it, which is where a host generates its type from.
   Both are empty for a vertex entry point that takes no stage struct and for every other stage.
