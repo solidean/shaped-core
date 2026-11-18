@@ -1195,6 +1195,11 @@ struct checker
     [[nodiscard]] type_id type_argument_of(i32 file, ast::expr_id expr, function_scope const* scope, type_id parameter);
     /// The warning for each generic function of the program that nothing instantiated (CHK-338).
     void warn_uninstantiated_generics(isize first);
+    /// CHK-530: a struct named as an instance of a generic struct of its own module the host sees is named, and two
+    /// or more such instances named alike, which the description would name alike, are refused, one report a name and
+    /// a struct; a clash with a struct from `first_symbol` on, an instance from `first_type` on, or an instance only
+    /// this layer's roots make seen is judged.
+    void judge_instance_names(isize first_symbol, isize first_type);
     /// The instance whose body is being checked, whose tables `set_type` and `set_target` write; -1 for none.
     i32 current_instance = -1;
     cc::vector<instantiation> instantiating;

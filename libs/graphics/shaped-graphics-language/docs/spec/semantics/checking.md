@@ -503,6 +503,9 @@ fun shade(k: float) -> float:
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
 * **CHK-46** A binding is no value: its bare name in an expression is `unsupported-yet`.
 * **CHK-171** A buffer member is known to the host by its path, `binding.member`, and a group's constant block by the binding's name ([why](why/checking.md#chk-171)).
+  A module's binding is named as the program names it (CHK-348), `view.frame.exposure` and `view.frame`, whatever alias its `use` gave the module.
+  So is it in the module's own description, so a group generated from the module and a shader that lists the binding name it alike.
+  Every name of a binding the host reads says so: the interface's, the description's, a footprint's, an entry point's list and a pipeline's layout.
 * **CHK-198** A texture, an image and a sampler are types of a binding member, as a buffer is, and none is a value: [bindings.md](../bindings.md) is the model.
   Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture_2d[float4]`, `out image_2d[.rgba8_unorm]`.
 * **CHK-199** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.
@@ -1827,6 +1830,18 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   The bare name in a type position is the template itself, open in its parameters, which a call deduces as it deduces a type parameter.
   So the constructor mirrors the parameters: `pair(1, 2.5)` is a `pair[int, float]`, and an array's length binds the value parameter its type names.
   `name[T, 4](…)` constructs that instance, whose parameters the call then needs no argument to say.
+* **CHK-530** A struct of a module named as an instance of a generic struct of that module the host sees is named is `duplicate-declaration` ([why](why/checking.md#chk-530)).
+  That is `struct pair_float` beside a binding that holds a `pair[float]`.
+  The program's and a module's struct clash whether or not the host sees it, and a prelude struct only where it does, as a binding holding `triangle_hit` does.
+  Two or more such instances of one module named alike, `pair[a_b]` and `pair_a[b]`, are one `duplicate-declaration`, and a struct of that name is one more.
+  The name is EMIT-179's, and the detail names every instance as the program does, its arguments' modules too: `pair[b]` and `pair[view.b]`.
+  A report stands on the program's side, never in the prelude.
+  A struct the program or a module declares is reported at its name.
+  Anything else is reported at the last instance's template where the program or a module declares one, and otherwise at the declaration that shows that instance to the host.
+  The host sees an instance where a binding's member, constant or buffer element, an `@vertex struct`, a payload or attributes holds it, or a struct one of them holds does.
+  A payload is an entry point's (EMIT-269), a ray set's ray type's or a callables table's parameter, and attributes are EMIT-270's `A`.
+  Every such instance is closed; an open one, `pair[T]` in a generic function, one only the prelude makes, and one a body only holds in a local are not counted.
+  The program's own module and the prelude are one module here, and a struct of another module than the template's is named apart (EMIT-268), so it stays allowed.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
   A call may state generic arguments first, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`, `blur[3](c)`.
   Each is a type, or a constant `int`, `uint`, `bool` or `float` for a value parameter; two constants are one argument when their bits are, with every NaN one.
@@ -1903,7 +1918,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 |---|---|
 | `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-522, CHK-523, CHK-526, CHK-524, CHK-525, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
-| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
+| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351, CHK-530 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |

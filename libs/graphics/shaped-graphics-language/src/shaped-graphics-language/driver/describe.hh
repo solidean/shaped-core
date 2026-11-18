@@ -15,8 +15,16 @@
 /// This is the seam between the compiler and a build that writes C++, and it knows nothing about that C++.
 /// A type is named as SGL spells it, `float3` or `mat4`, and mapping it to a host type is the reader's job.
 /// It holds only what the file itself declares: a module it `use`s describes its own declarations.
-/// A name of such a module the file writes is spelled as the file spells it, `view.frame`, and a struct of one carries
-/// the module's name, so the host refers to that module's type rather than generating a second one.
+/// A name of such a module the file writes is spelled as the program names it, `view.frame`, whatever name the file's
+/// `use` gave the module, so the host refers to that module's declaration rather than generating a second one.
+///
+/// **Every struct name in the description is the struct's host name**: `m.name` for another module's struct (CHK-348),
+/// bare for the described source's own, and an instance of a generic struct as the target text names it,
+/// `pair_float_int` (EMIT-179), qualified by its template's module.
+/// That holds wherever a struct is named: an entry point's vertex input, payload and attributes, a pipeline's vertex input
+/// and target set and its frozen lines, a ray set's payloads, a callables table's parameter, a memory struct and a
+/// member's type, an array of a struct as its element with its lengths, `view.light[4]`.
+/// So two structs of one bare name, the source's own and a module's, are never named alike.
 
 /// What a binding member is to the host.
 enum class sgl::described_member_kind : sgl::u8
@@ -115,8 +123,9 @@ struct sgl::described_binding
     cc::vector<described_binding_member> members;
     /// Where the last constant ends; 0 without one.
     i32 block_size = 0;
-    /// A group's constant block: its slot, which is 0, and the name the host binds it by, which is the binding's own.
-    /// -1 and empty for an `@inline` binding and for a group without a plain member.
+    /// A group's constant block: its slot, which is 0, and the name the host binds it by, which is the binding's own,
+    /// `view.frame` for a module's (CHK-171).
+    /// An `@inline` binding's block takes no slot, -1, and is named so too; a group without a plain member is -1 and empty.
     i32 block_slot = -1;
     cc::string block_host_name;
     /// The binding's structural hash (`check::structural_hash`), its members and its layout rule, as 32 hex digits:
@@ -163,6 +172,7 @@ struct sgl::described_struct
 struct sgl::described_memory_member
 {
     cc::string name;
+    /// A struct's by its host name, `view.light` for a module's.
     cc::string type;
     i32 offset = 0;
     i32 size = 0;
@@ -172,6 +182,7 @@ struct sgl::described_memory_member
 /// A struct in both a constant block and a storage buffer is `layout-conflict`, so each has exactly one layout.
 struct sgl::described_memory_struct
 {
+    /// Its host name: `view.light` for another module's, which `module` then names too.
     cc::string name;
     /// The module it is declared in where that is not the described source's own, so the host names that module's
     /// type rather than generating one; empty otherwise.
@@ -207,10 +218,21 @@ struct sgl::described_entry_point
     cc::vector<check::slot_footprint> footprint;
     /// The file-scope samplers its code reaches, which its pipeline layout carries, in index order.
     cc::vector<cc::string> samplers;
-    /// A ray-tracing stage's payload, or a callable's parameter, and its structural hash as 32 hex digits.
-    /// Both empty for any other stage and for a stage without one.
+    /// A vertex entry point's `@vertex struct`, which `structs` describes; `m.name` for another module's (EMIT-268).
+    /// Empty for every other stage and for a vertex entry point that draws from no vertex buffer.
+    cc::string vertex_input;
+    /// A ray-tracing stage's payload, or a callable's parameter, by its host name, its structural hash as 32 hex digits,
+    /// and its bytes (EMIT-269).
+    /// Empty and 0 for any other stage and for a stage without one.
     cc::string payload;
     cc::string payload_shape;
+    i32 payload_size = 0;
+    /// A procedural closest or any hit's attributes, or what an intersection reports, by its host name, and its
+    /// structural hash as 32 hex digits (EMIT-270); both empty for a triangle hit and for every other stage.
+    cc::string attributes;
+    cc::string attributes_shape;
+    /// A hit's or an intersection's attributes in bytes, 8 for a triangle's barycentrics; 0 for every other stage.
+    i32 attribute_size = 0;
     /// The options it reaches, by name in declaration order (CHK-355): each distinct set of their values is one compile.
     cc::vector<cc::string> options;
 };
@@ -274,7 +296,7 @@ struct sgl::described_pipeline
 struct sgl::described_ray_set
 {
     cc::string name;
-    /// Each ray type's name, and the struct its payload is.
+    /// Each ray type's name, and the struct its payload is, by its host name.
     cc::vector<cc::string> rays;
     cc::vector<cc::string> payloads;
     /// Parallel to `payloads`: the bytes each takes in a trace's payload, and its structural hash as 32 hex digits.
@@ -302,6 +324,7 @@ struct sgl::described_hit_group
 struct sgl::described_callables
 {
     cc::string name;
+    /// The parameter's type, a struct by its host name.
     cc::string parameter;
     /// The parameter's structural hash, as 32 hex digits.
     cc::string parameter_shape;
@@ -334,7 +357,8 @@ struct sgl::described_raytracing_pipeline
     /// Every callable of the module's tables, in their order, which the pipeline's callable section holds first.
     cc::vector<cc::string> callables;
     bool has_host_callables = false;
-    /// The parameter a host's callable takes, and its structural hash; both empty without `.host` callables.
+    /// The parameter a host's callable takes, a struct by its host name, and its structural hash; both empty without
+    /// `.host` callables.
     cc::string host_callable_parameter;
     cc::string host_callable_shape;
     /// The file-scope samplers any of its shaders reaches, its callables included, in index order.

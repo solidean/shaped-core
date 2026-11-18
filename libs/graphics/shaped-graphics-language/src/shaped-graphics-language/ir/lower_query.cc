@@ -79,9 +79,12 @@ value_ref lowering::acceleration_by_address(i32 index)
         auto const& at
             = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(emit::target::hlsl_vulkan)];
         auto const values = array_type(quad, check::k_acceleration_address_capacity / 2, 16);
-        auto const member_name = add_name("values");
-        _out.members.push_back({.type = values, .offset = 0, .name_first = member_name, .name_size = 6});
-        constexpr auto block_name = cc::string_view("sg_acceleration_addresses_block");
+        auto const member_name = add_name(emit::impl::k_acceleration_addresses_member);
+        _out.members.push_back({.type = values,
+                                .offset = 0,
+                                .name_first = member_name,
+                                .name_size = u32(emit::impl::k_acceleration_addresses_member.size())});
+        constexpr auto block_name = emit::impl::k_acceleration_addresses_block;
         auto const block_first = add_name(block_name);
         _out.types.push_back({.kind = type_kind::structure,
                               .is_block = true,
@@ -94,7 +97,7 @@ value_ref lowering::acceleration_by_address(i32 index)
                                               .set = at.group,
                                               .binding = at.slot,
                                               .is_read_only = true},
-                                             "sg_acceleration_addresses");
+                                             emit::impl::k_acceleration_addresses_array);
     }
     // two addresses a uint4, each low word first, which the conversion takes as a uint2
     auto const element = add(op::access_chain, pointer_type(quad, storage::uniform),

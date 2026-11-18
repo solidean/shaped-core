@@ -70,6 +70,8 @@ struct writer
     /// EMIT-174: a member held as pieces that a write reaches into, and the local it is gathered in meanwhile.
     flat_expr_id gathered_member = flat_expr_id::none;
     cc::string gathered_name;
+    /// EMIT-272: the body read an acceleration member by its address, which the host then fills.
+    bool reads_acceleration_by_address = false;
 
     /// EMIT-181: the files the line table reads, and the statement whose source line the next line writes.
     options const& sources;
@@ -1456,6 +1458,7 @@ struct writer
                     auto by_address = p.m.at(p.resources[found].type).kind == type_kind::acceleration_structure
                                         ? d.acceleration_by_address(p, found)
                                         : cc::string();
+                    reads_acceleration_by_address = reads_acceleration_by_address || !by_address.empty();
                     result = {.text = by_address.empty() ? p.resources[found].name : cc::move(by_address)};
                     return;
                 }
@@ -2101,5 +2104,7 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
     }
     w.out += "}\n";
     d.write_function_tail(w.out, p);
-    return {.text = cc::move(w.out), .lines = cc::move(w.lines)};
+    return {.text = cc::move(w.out),
+            .lines = cc::move(w.lines),
+            .reads_acceleration_by_address = w.reads_acceleration_by_address};
 }

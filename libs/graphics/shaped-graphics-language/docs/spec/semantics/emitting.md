@@ -180,6 +180,17 @@ const light_kind_sun: i32 = 2;
 * **EMIT-94** A stream changes nothing in the text: it is which buffer the host reads a member from, and a location stays the member's position ([why](why/emitting.md#emit-94)).
 * **EMIT-95** The text of an entry point comes with the pair of every resource and constant buffer it declares, samplers included.
   The pair is the name it minted, and the host name CHK-171 gives ([why](why/emitting.md#emit-95)).
+* **EMIT-268** An entry point's description and its compiled text name its **vertex input** ([why](why/emitting.md#emit-268)).
+  That is a vertex entry point's stage struct, the `@vertex struct` it draws from (CHK-88, CHK-89).
+  It is `vertex_input` on `described_entry_point`, on `emitted_source` and on each entry point `sgl describe` writes.
+  It names the struct by its **host name**, which is how the description names every struct.
+  That is `m.name` for a module's (CHK-348), whatever alias the program's `use` gave the module, and bare for the program's own.
+  An instance of a generic struct is named as EMIT-179 names it, qualified by its template's module.
+  So the program's own struct and a module's of the same bare name are never named alike, here, in EMIT-269's and EMIT-270's fields, or anywhere else the description names a struct.
+  It is empty for a vertex entry point that takes no stage struct, which draws from no vertex buffer, and for every other stage.
+  A polyfilled compile reports the entry point as written, not the form its polyfill made of it, and so do EMIT-269 and EMIT-270.
+  What an input layout needs of the members, their locations, formats, semantics and streams, is the struct's own description in `describe`'s `structs`.
+  A `pipeline` declaration's `vertex_input` is its vertex stage's.
 
 | stage | parameter | result |
 |---|---|---|
@@ -369,9 +380,11 @@ binding affine:
 * **EMIT-128** HLSL counts a vertex and an instance from the draw's base, on dx12 and on vulkan through DXC alike, so the text adds where the draw started back.
   vulkan reads it as `[[vk::builtin("BaseVertex")]]` and `[[vk::builtin("BaseInstance")]]`, which every shader model has, and so does `@first_instance`.
   dx12 reads it as `SV_StartVertexLocation` and `SV_StartInstanceLocation`, Shader Model 6.8's, under the `native` fill of `draw_start`, the default (EMIT-265).
-  Under its `root_constant` fill a dx12 compile of an entry point that takes `@vertex_index`, `@instance_index` or `@first_instance` is `unsupported`, on both routes.
-  The detail names the input and the fill.
-  That refusal is interim: the fill's lowering, which hands the draw's start over in a root constant, replaces it.
+  Under its `root_constant` fill dx12 reads it from `sgl_draw_start`, a block of root constants at `register(b1, space9)`, on both routes, at Shader Model 6.6.
+  The block holds the first vertex at byte 0 and the first instance at byte 4, each a `uint`, and EMIT-271 is how a host writes them.
+  `@vertex_index` is `SV_VertexID` plus the first vertex, `@instance_index` `SV_InstanceID` plus the first instance, and `@first_instance` the first instance itself.
+  The first vertex is what `SV_StartVertexLocation` would hold: a draw's first vertex, and an indexed draw's base vertex.
+  A polyfill form under that fill is `unsupported`, naming the form and the fill, since sg draws one, indirectly too.
 * **EMIT-129** A stage link's member carries its interpolation: HLSL's `nointerpolation`, `noperspective`, `centroid` and `sample`, and WGSL's `@interpolate(…)`.
   MSL names each combination as one attribute: `flat`, `centroid_perspective`, `center_no_perspective` and their like.
   The default, perspective at the centre, is written by none of them.
@@ -467,6 +480,7 @@ fn main_ps(p: pixel_input) -> target_ {
   So a stage of either route links against a stage of the text route, in both directions.
   A pixel stage's `@position.w` on SPIR-V is the reciprocal of `FragCoord.w`, as `-fvk-use-dx-position-w` writes it.
   `@vertex_index` and `@instance_index` add the draw's base on DXIL alone (EMIT-128), since `VertexIndex` and `InstanceIndex` already hold it.
+  DXIL reads that base through `startVertexLocation` and `startInstanceLocation` under the `native` fill, and as lanes 0 and 1 of row 0 of `sgl_draw_start` under the `root_constant` fill.
   A 64-bit link crosses as its words on DXIL (EMIT-196) and as itself on SPIR-V, and a pixel stage's second struct is what a mesh stage wrote per primitive (CHK-489), `PerPrimitiveEXT` on SPIR-V.
   A link of 16-bit numbers is `unsupported` so far.
 * **EMIT-237** DXIL's `dx.viewIdState` and `PSV0` state that every declared input lane reaches every declared output lane.
@@ -667,6 +681,18 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   On DXIL `dx.op.allocateRayQuery2` with the flag that allows them, at Shader Model 6.9, a library's function row included.
   dx12's `nvapi` fill of the feature states none of it, at 6.6: NVIDIA's driver applies a structure's micromaps to every trace itself (EMIT-265).
   NVAPI has no flag that forces a query's trace to 2 states, so under that fill a trace whose flags force them, or are no constant, is `unsupported`, naming that.
+* **EMIT-269** An entry point's description and its compiled text state its **payload**, a ray-tracing stage's `mut` parameter or a callable's parameter (CHK-328) ([why](why/emitting.md#emit-269)).
+  They are `payload`, `payload_shape` and `payload_size` on `described_entry_point`, on `emitted_source` and on each entry point `sgl describe` writes.
+  That is its host name (EMIT-268), its structural hash and its bytes.
+  The bytes count a word per scalar and per enum, as a ray set's `payload_sizes` do.
+  A stage without a payload states an empty name and shape, and 0 bytes.
+* **EMIT-270** An entry point's description and its compiled text state its **hit attributes** ([why](why/emitting.md#emit-270)).
+  They are `attributes`, `attributes_shape` and `attribute_size`, in the same places as its payload.
+  A closest or any hit that takes a `triangle_hit` or a `triangle_candidate` states 8 bytes, a triangle's barycentrics, and no name.
+  One that takes a `procedural_hit[A]` or a `procedural_candidate[A]`, and an intersection that returns `report[A]`, states `A`.
+  That is its host name (EMIT-268), its structural hash and its bytes, counted as a payload's are (CHK-342).
+  Every other stage states an empty name and shape, and 0 bytes.
+  A host building its own ray-tracing pipeline takes the largest `attribute_size` of its shaders as the pipeline's, which is what a `@raytracing pipeline` derives from its groups.
 * **EMIT-264** A `hlsl-dx12` compile reports the DXIL shader model its output needs, `emitted_source::dxil_shader_model`, on both routes.
   It is the highest that `check::dxil_shader_model_of` gives of each feature the entry point needs in its fill, and of each core construct written natively; 6.6 where none needs more.
   Natively `shader_execution_reordering` and `opacity_micromap` need 6.9 and `clustered_geometry` 6.10, and the `draw_start` and `wave_size` core constructs 6.8; every other fill needs 6.6.
@@ -704,6 +730,35 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A bake compiles a variant per choice on each axis, each fill or the feature not granted, and a host runs the first its device takes, most demanding first.
   `sgl::variant_key::of` names one variant, its fills in feature order whatever order they came in, so two keys of one variant are equal; a feature named twice is an error.
   Its `to_string` is `feature=fill` for each granted feature in feature order, then `draw_start=` and `wave_size=` where not `native`, joined by `;`.
+* **EMIT-271** Under the `root_constant` fill of `draw_start`, a dx12 vertex entry point that takes the draw's start lists one slot no binding declares ([why](why/emitting.md#emit-271)).
+  It takes the draw's start where it takes `@vertex_index`, `@instance_index` or `@first_instance` (EMIT-128).
+  It is `is_reserved`, with `reserved = reserved_slot::draw_start`, of kind `constant`, at group 9 and slot 1, the space and register of `b1, space9`, and `block_size` 8.
+  `layouts` lays out `sgl_draw_start`: `first_vertex` at offset 0 and `first_instance` at offset 4.
+  It is listed wherever the entry point takes one of them, and `is_used` where its body reads one; an entry point that takes none lists none, so no pixel or compute stage does.
+  NVAPI's slot (EMIT-265) is `reserved_slot::nvapi_extension`, so a host tells the two apart, and one that knows neither refuses both by `is_reserved`.
+  The host lays the slot out as 32-bit root constants, two of them, in the root signature of every pipeline whose stages list it.
+  Before every direct draw of such a pipeline it writes the draw's first vertex and its first instance there: `StartVertexLocation` and `StartInstanceLocation` for `DrawInstanced`.
+  For `DrawIndexedInstanced` the first vertex is `BaseVertexLocation`, the base vertex written as its bits, and not the first index.
+  That is because `@vertex_index` is vulkan's `VertexIndex`, which counts the base vertex in, and D3D12's `SV_VertexID` of an indexed draw leaves it out.
+  A draw from vertex 0 writes `{0, 0}` all the same, since a root constant nobody wrote is undefined.
+  A host refuses an indirect draw of such a pipeline, since SGL describes no draw and cannot.
+* **EMIT-272** On `hlsl-vulkan`, an entry point whose output declares `sg_acceleration_addresses` lists it as one slot no binding declares ([why](why/emitting.md#emit-272)).
+  Every vulkan trace of SGL's reads its acceleration structure by device address from that block, pipeline traces and ray queries alike (the reserved bindings page).
+  It is `is_reserved`, with `reserved = reserved_slot::acceleration_addresses`, of kind `constant`, at group 3 and slot 22, vulkan's set and binding, and `block_size` 128.
+  `emitted` and `layouts` name it as the output does: the text's `cbuffer sg_acceleration_addresses_block`, its array `sg_acceleration_addresses` at offset 0.
+  SGL's own SPIR-V names the global `sg_acceleration_addresses` and its array `values`, at offset 0.
+  The text declares it wherever the entry point lists an acceleration member, and SGL's own SPIR-V only once a trace reads it; the slot is listed exactly there.
+  It is `is_used` where the code traces through it, so SGL's own SPIR-V never lists it unused.
+  The host fills it before every dispatch, draw and trace of a pipeline whose stages use it, with the device address of each acceleration member.
+  An acceleration binding is one of the entry point's `bindings`, not reserved, of kind `acceleration_structure`: a member, or a binding array of them.
+  Its position k is the number of acceleration bindings ordered before it, by `group` and then by `slot`.
+  A binding array takes one position, whatever its `count`, and no trace reads the address there: a trace of its element reads the element's descriptor.
+  The address of position k is the `uint4` at k / 2, `.xy` for an even k and `.zw` for an odd one, each address's low word first.
+  The stages of one pipeline list the same binding at every position they share (CHK-184), so a position means the same member in each of them.
+  So the host fills one block per pipeline, from the longest list, its layout's, and writes 0 at a position nothing is bound at, as sg does.
+  16 positions fit: a trace of a member past them reads its descriptor in the text and is a native gap in SGL's own SPIR-V, as a trace of a binding array's element is.
+  `hlsl-dx12` traces through the structure's descriptor on both routes, and lists no such slot; nor does any other target.
+  sg lays the block out and fills it itself wherever a vulkan layout holds an acceleration member, so slib passes the slot over.
 * **EMIT-260** A hit's `cluster_id` is read only where the device builds a BLAS from clusters, `clustered_geometry`, and is -1 everywhere else.
   The prelude asks with `has`, so no program names the feature, and an entry point on any other device needs nothing of it.
   SGL's SPIR-V writes `OpRayQueryGetIntersectionClusterIdNV` and `ClusterIDNV`, with `SPV_NV_cluster_acceleration_structure`'s capability.

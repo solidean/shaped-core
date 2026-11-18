@@ -528,6 +528,241 @@ void checker::warn_uninstantiated_generics(isize first)
     }
 }
 
+namespace
+{
+/// Marks in `seen` every type `type` reaches, through a struct's members and an array's or a buffer's element, which is
+/// what a host sees of it (CHK-530), and records in `root` the symbol whose walk first reached each.
+/// `seen` also keeps a type from being walked twice.
+void mark_host_types(checked_module const& m, type_id type, i32 symbol, cc::vector<u8>& seen, cc::vector<i32>& root)
+{
+    if (!is_valid(type) || seen[index_of(type)] != 0)
+        return;
+    seen[index_of(type)] = 1;
+    root[index_of(type)] = symbol;
+    auto const& t = m.at(type);
+    if (t.kind == type_kind::array || t.kind == type_kind::buffer)
+        mark_host_types(m, t.element, symbol, seen, root);
+    if (t.kind == type_kind::structure && !t.is_template)
+        for (auto const& member : m.at(t.members))
+            mark_host_types(m, member.type, symbol, seen, root);
+}
+
+/// Whether `type` is an instance of a generic struct.
+[[nodiscard]] bool is_struct_instance(checked_module const& m, type_id type)
+{
+    auto const& t = m.at(type);
+    return t.kind == type_kind::structure && is_valid(t.generic) && is_valid(t.symbol) && !t.is_template;
+}
+
+/// `type` as the program names it from outside any scope, every struct in it module-qualified: `pair[view.b]` where
+/// the type's own spelling says `pair[b]` (CHK-348).
+[[nodiscard]] cc::string program_spelling(checked_module const& m, type_id type)
+{
+    auto const& t = m.at(type);
+    if (is_struct_instance(m, type))
+    {
+        auto result = cc::format("{}[", m.qualified_name_of(t.symbol));
+        auto const arguments = m.at(t.arguments);
+        for (auto i = isize(0); i < arguments.size(); ++i)
+            result.appendf("{}{}", i == 0 ? "" : ", ", program_spelling(m, arguments[i]));
+        return result + "]";
+    }
+    if (t.kind == type_kind::structure && is_valid(t.symbol) && !is_valid(t.tangent_of))
+        return m.qualified_name_of(t.symbol);
+    if (t.kind == type_kind::array)
+    {
+        auto const spelled = m.name_of(type);
+        auto const element = m.name_of(t.element);
+        if (spelled.starts_with(element))
+            return program_spelling(m, t.element) + cc::string(spelled.subview(element.size()));
+    }
+    return cc::string(m.name_of(type));
+}
+
+/// The instances of a list as a detail names them: `a`, `a and b`, `a, b and c`.
+[[nodiscard]] cc::string listed(cc::span<cc::string const> names)
+{
+    auto result = cc::string();
+    for (auto i = isize(0); i < names.size(); ++i)
+        result.appendf("{}{}", i == 0 ? "" : i + 1 == names.size() ? " and " : ", ", names[i]);
+    return result;
+}
+} // namespace
+
+void checker::judge_instance_names(isize first_symbol, isize first_type)
+{
+    // CHK-530: the instances the host sees are those its roots reach: a binding's members, an `@vertex struct` and a
+    // pipeline's vertex input, a ray set's payloads, a callables table's parameter, and an entry point's payload and
+    // attributes.
+    // None of them is generic, so every instance they reach is closed.
+    // The roots of the layers below are walked apart too, so a clash a layer below judged already is judged again only
+    // where a root of this layer makes one of its instances seen.
+    auto seen_before = cc::vector<u8>::create_filled(out.types.size(), u8(0));
+    auto seen = cc::vector<u8>::create_filled(out.types.size(), u8(0));
+    auto root_before = cc::vector<i32>::create_filled(out.types.size(), -1);
+    auto root_of = cc::vector<i32>::create_filled(out.types.size(), -1);
+    auto const root = [&](isize symbol, type_id type)
+    {
+        if (symbol < first_symbol)
+            mark_host_types(out, type, i32(symbol), seen_before, root_before);
+        mark_host_types(out, type, i32(symbol), seen, root_of);
+    };
+    for (auto k = isize(0); k < out.symbols.size(); ++k)
+    {
+        auto const& s = out.symbols[k];
+        if (s.state != symbol_state::checked || s.file < out.prelude_files || !out.is_reached_file(s.file))
+            continue;
+        if (s.kind == symbol_kind::binding && s.info >= 0)
+        {
+            auto const& b = out.bindings[s.info];
+            if (!b.is_workgroup)
+                for (auto const& member : out.at(b.members))
+                    root(k, member.type);
+        }
+        else if (s.kind == symbol_kind::pipeline && s.info >= 0)
+        {
+            auto const& p = out.pipelines[s.info];
+            root(k, p.vertex_input);
+            root(k, p.callable_parameter);
+        }
+        else if (s.kind == symbol_kind::structure && is_valid(s.type) && ast::is_valid(s.declaration))
+        {
+            auto const* const d = ast_of(s.file).at(s.declaration).node.try_as<ast::struct_decl>();
+            if (out.at(s.type).edge == stage::vertex || (d != nullptr && d->is_ray_set))
+                root(k, s.type);
+        }
+        else if (s.kind == symbol_kind::function && s.info >= 0)
+        {
+            auto const& f = out.functions[s.info];
+            if (f.entry_stage == stage::vertex)
+                for (auto const& parameter : out.at(f.parameters))
+                    root(k, parameter.type);
+            if (f.entry_stage < stage::raygen)
+                continue;
+            // CHK-328: the payload is the `mut` parameter, a callable's its parameter; the attributes are what a
+            // procedural hit or candidate carries and what an intersection reports, not the prelude's struct around them
+            for (auto const& parameter : out.at(f.parameters))
+            {
+                if (parameter.is_mut || f.entry_stage == stage::callable)
+                    root(k, parameter.type);
+                else if (is_struct_instance(out, parameter.type))
+                {
+                    auto const& t = out.at(parameter.type);
+                    auto const name = out.at(t.symbol).name;
+                    if (name == "procedural_hit" || name == "procedural_candidate")
+                        root(k, t.element);
+                }
+            }
+            if (f.entry_stage == stage::intersection && is_valid(f.result) && is_struct_instance(out, f.result))
+                root(k, out.at(f.result).element);
+        }
+    }
+
+    // The name of a declaration the program or a module writes, where a report stands; false for any other.
+    auto const name_of_declaration = [&](symbol const& s, source_span& name)
+    {
+        if (s.file < out.prelude_files || !ast::is_valid(s.declaration))
+            return false;
+        auto const& node = ast_of(s.file).at(s.declaration).node;
+        if (auto const* const f = node.try_as<ast::fun_decl>())
+            name = f->name;
+        else if (auto const* const st = node.try_as<ast::struct_decl>())
+            name = st->name;
+        else if (auto const* const b = node.try_as<ast::binding_decl>())
+            name = b->name;
+        else if (auto const* const p = node.try_as<ast::pipeline_decl>())
+            // an unnamed `pipeline:` has no name, so a report stands at its whole declaration
+            name = p->name.empty() ? span_of(s.file, s.declaration) : p->name;
+        else
+            return false;
+        return true;
+    };
+
+    // The instances the host sees, by the identifier it names them by within their template's module (EMIT-179).
+    struct named_group
+    {
+        cc::string identifier;
+        cc::string_view module;
+        cc::vector<isize> types;
+        bool is_new = false;
+    };
+    auto groups = cc::vector<named_group>();
+    for (auto i = isize(0); i < out.types.size(); ++i)
+    {
+        if (seen[i] == 0 || !is_struct_instance(out, type_id(i)))
+            continue;
+        auto identifier = out.instance_identifier_of(type_id(i));
+        auto const module = out.foreign_module_of(out.types[i].symbol);
+        auto* group = static_cast<named_group*>(nullptr);
+        for (auto& g : groups)
+            if (g.identifier == identifier && g.module == module)
+                group = &g;
+        if (group == nullptr)
+            group = &groups.emplace_back(named_group{.identifier = cc::move(identifier), .module = module});
+        group->types.push_back(i);
+        // new to this layer where it was made here, or where only this layer's roots make it seen
+        group->is_new = group->is_new || i >= first_type || seen_before[i] == 0;
+    }
+
+    for (auto const& g : groups)
+    {
+        auto names = cc::vector<cc::string>();
+        for (auto const type : g.types)
+            names.push_back(program_spelling(out, type_id(type)));
+        // where a report of the group stands, on the program's side: the last instance's template the program or a
+        // module declares, else the root that shows the last instance to the host
+        auto file = i32(-1);
+        auto where = source_span();
+        for (auto i = g.types.size() - 1; i >= 0 && file < 0; --i)
+            if (auto const& t = out.at(out.types[g.types[i]].symbol); name_of_declaration(t, where))
+                file = t.file;
+        for (auto i = g.types.size() - 1; i >= 0 && file < 0; --i)
+            if (auto const r = root_of[g.types[i]]; r >= 0 && name_of_declaration(out.symbols[r], where))
+                file = out.symbols[r].file;
+
+        // two or more instances the host names alike, said once
+        if (g.types.size() > 1 && g.is_new && file >= 0)
+            report(diagnostic_kind::duplicate_declaration, file, where,
+                   cc::format("the instances {} of generic structs are {} named {} by the host", listed(names),
+                              g.types.size() == 2 ? "both" : "all", g.identifier));
+
+        // a struct of the group's module named so, once each: the program's and a module's whether or not the host
+        // sees it, the prelude's only where it does, reported then on the program's side
+        for (auto k = isize(0); k < out.symbols.size(); ++k)
+        {
+            auto const& s = out.symbols[k];
+            if (s.kind != symbol_kind::structure || s.state != symbol_state::checked || !ast::is_valid(s.declaration)
+                || !out.is_reached_file(s.file) || s.name != g.identifier
+                || out.foreign_module_of(symbol_id(k)) != g.module)
+                continue;
+            // a prelude struct is new to this layer too where only this layer's roots show it to the host
+            auto const is_prelude = s.file < out.prelude_files;
+            auto const is_newly_seen
+                = is_prelude && is_valid(s.type) && seen[index_of(s.type)] != 0 && seen_before[index_of(s.type)] == 0;
+            if (!g.is_new && k < first_symbol && !is_newly_seen)
+                continue;
+            auto const* const d = ast_of(s.file).at(s.declaration).node.try_as<ast::struct_decl>();
+            if (d == nullptr || !d->type_parameters.empty())
+                continue;
+            if (is_prelude && (!is_valid(s.type) || seen[index_of(s.type)] == 0))
+                continue;
+            auto const detail = g.types.size() == 1
+                                  ? cc::format("struct {} is named as the instance {} of a generic struct is, which "
+                                               "the host names {} "
+                                               "too",
+                                               out.qualified_name_of(symbol_id(k)), names[0], g.identifier)
+                                  : cc::format("struct {} is named as the instances {} of generic structs are, which "
+                                               "the host names {} "
+                                               "too",
+                                               out.qualified_name_of(symbol_id(k)), listed(names), g.identifier);
+            if (!is_prelude)
+                report(diagnostic_kind::duplicate_declaration, s.file, d->name, detail);
+            else if (file >= 0)
+                report(diagnostic_kind::duplicate_declaration, file, where, detail);
+        }
+    }
+}
+
 i32 checker::existing_function_instance(symbol_id function, cc::span<type_id const> bindings) const
 {
     if (bindings.empty())

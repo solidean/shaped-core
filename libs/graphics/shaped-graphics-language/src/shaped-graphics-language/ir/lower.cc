@@ -132,6 +132,7 @@ void lowering::run()
     }
     _out.sees_micromaps = _plan.states_micromaps;
     _out.reorders_through_nvapi = _plan.reorders_through_nvapi;
+    _out.draw_start_in_root_constants = _plan.draw_start_in_root_constants;
 
     open_block(new_block());
     if (is_raster)

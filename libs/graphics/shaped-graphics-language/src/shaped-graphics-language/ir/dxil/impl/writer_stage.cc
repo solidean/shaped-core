@@ -225,8 +225,12 @@ void writer::stage_load(u32 index, instruction const& i)
         ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(op)].number)};
         return call(op, _m.int_type(), args);
     };
+    // EMIT-128: the draw's start, from Shader Model 6.8's operations, or from the block the host writes under the
+    // root-constant fill (EMIT-271), which needs no more than 6.6
     auto const start_of = [&](dx_op op)
     {
+        if (_draw_start != ll_value::none)
+            return draw_start_lane(op == dx_op::start_vertex_location ? 0 : 1);
         _uses.start_location = true;
         return value_of(op);
     };
@@ -303,6 +307,19 @@ void writer::stage_load(u32 index, instruction const& i)
     else
         _scratch.push_back_range(_loaded);
     define(index);
+}
+
+ll_value writer::draw_start_lane(u32 lane)
+{
+    auto const type = _m.int_type();
+    auto const row = _m.constant_i32(0);
+    for (auto const& known : _rows)
+        if (known.handle == _draw_start && known.row == row && known.overload == type)
+            return _m.extract_value(known.fetched, lane);
+    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::cbuffer_load_legacy)].number), _draw_start, row};
+    auto const fetched = call(dx_op::cbuffer_load_legacy, type, args, true);
+    _rows.push_back({.handle = _draw_start, .row = row, .overload = type, .fetched = fetched});
+    return _m.extract_value(fetched, lane);
 }
 
 void writer::stage_store(instruction const& i)

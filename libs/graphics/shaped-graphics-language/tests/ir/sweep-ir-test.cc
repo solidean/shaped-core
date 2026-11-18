@@ -158,7 +158,7 @@ struct module_library
 } // namespace
 
 // EMIT-264: with no feature granted and the 6.6 core fills, nothing SGL writes for dx12 needs more than 6.6, either route.
-// An entry that takes the draw's start is refused instead, until the root-constant fill is written.
+// An entry that takes the draw's start reads it from the block the host writes (EMIT-128, EMIT-271), so none is refused.
 // Every file of sg's, sr's and sv's shaders and of the corpus is swept with the repo's modules, a fourth by default and all
 // under --thorough; every one compiles, so a file that does not fails the sweep.
 // SGL's own DXIL states its model in the container; the text's is checked by DXC at the 6.6 profiles in slib's tests.
@@ -184,8 +184,8 @@ TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of th
 #endif
     auto native_stages = cc::vector<sgl::check::stage>();
     auto text_stages = cc::vector<sgl::check::stage>();
-    auto refused = 0;
     auto swept = 0;
+    auto reads_draw_start = 0;
     auto const has = [](cc::span<sgl::check::stage const> stages, sgl::check::stage s)
     {
         for (auto const t : stages)
@@ -193,8 +193,6 @@ TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of th
                 return true;
         return false;
     };
-    auto const is_draw_start_refusal = [](cc::string_view error)
-    { return error.contains("asks the root-constant fill of draw_start, which is not written yet"); };
     for (auto i = isize(0); i < files.size(); i += stride)
     {
         auto const& file = files[i];
@@ -220,17 +218,19 @@ TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of th
                                                      .target = sgl::emit::target::hlsl_dx12,
                                                      .core = six_six_fills,
                                                      .native = native});
+                // the root-constant fill refuses nothing a device that grants nothing compiles
                 if (e.has_error())
                 {
-                    // the one refusal of a device that grants nothing, which a root constant lowering replaces later
-                    CHECK(is_draw_start_refusal(e.error()))
-                        .dump("file", file)
-                        .dump("entry", entry.entry_point)
-                        .dump("error", e.error());
-                    ++refused;
+                    CHECK(false).dump("file", file).dump("entry", entry.entry_point).dump("error", e.error());
                     continue;
                 }
                 CHECK(e.value().dxil_shader_model == six_six).dump("file", file).dump("entry", entry.entry_point);
+                for (auto const& b : e.value().bindings)
+                    if (b.reserved == sgl::reserved_slot::draw_start)
+                    {
+                        ++reads_draw_start;
+                        CHECK(e.value().stage == sgl::check::stage::vertex).dump("entry", entry.entry_point);
+                    }
                 auto& stages = e.value().dxil.empty() ? text_stages : native_stages;
                 if (!has(stages, e.value().stage))
                     stages.push_back(e.value().stage);
@@ -258,9 +258,11 @@ TEST("sgl ir - with no feature granted and the 6.6 fills, every dx12 entry of th
             names.appendf("{}{}", names.empty() ? "" : ", ", sgl::check::stage_name(s));
         return names;
     };
-    CC_LOG_INFO("at Shader Model 6.6, {} files swept: SGL's DXIL of {}; the text of {}; {} refused for the draw's "
-                "start",
-                swept, names_of(native_stages), names_of(text_stages), refused);
+    CC_LOG_INFO("at Shader Model 6.6, {} files swept: SGL's DXIL of {}; the text of {}; {} compiles read the draw's "
+                "start from root constants",
+                swept, names_of(native_stages), names_of(text_stages), reads_draw_start);
+    // the repo's vertex shaders read the draw's start, so a sweep that met none of them took no fill
+    CHECK(reads_draw_start > 0);
     // the stages every sampled run reaches on both routes
     for (auto const s : {sgl::check::stage::vertex, sgl::check::stage::pixel, sgl::check::stage::compute})
     {

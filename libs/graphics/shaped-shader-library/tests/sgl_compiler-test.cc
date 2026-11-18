@@ -182,6 +182,44 @@ TEST("slib sgl compiler - the flattened source is the emitted text, with its fin
     CHECK(text.value().source.contains("fn main_vs(v: cube_vertex) -> pixel_input"));
 }
 
+TEST("slib sgl compiler - a vulkan trace's acceleration addresses are sg's, so the edge passes their slot over")
+{
+    // EMIT-272: SGL lists sg_acceleration_addresses as a reserved slot, which sg's vulkan layout holds and fills itself
+    auto const compiler = slib::create_sgl_compiler(
+        std::make_unique<slib_test::fake_compiler>(slib::shader_language::hlsl, sg::shader_format::spirv));
+    auto resolve = [](cc::string_view) -> cc::optional<cc::string> { return cc::nullopt; };
+    constexpr auto source = cc::string_view("require ray_query\n"
+                                            "binding frame:\n"
+                                            "    world: acceleration_structure[.triangles]\n"
+                                            "    output: mut buffer[float]\n"
+                                            "@compute(1) fun query(@thread_id id: int3){frame}:\n"
+                                            "    let h = frame.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction "
+                                            "= vec3(0.0, 0.0, 1.0)), flags = "
+                                            "ray_flags.force_opaque)\n"
+                                            "    frame.output[id.x] = h.t\n");
+    for (auto const native : {false, true})
+        SECTION("{}", native ? "SGL's own SPIR-V" : "the text")
+        {
+            auto const preprocessed = compiler->preprocess({.source = cc::string(source),
+                                                            .entry_point = "query",
+                                                            .stage = sg::shader_stage::compute,
+                                                            .native_spirv = native},
+                                                           resolve);
+            if (preprocessed.has_error())
+                FAIL(preprocessed.error().to_string());
+            auto const& p = preprocessed.value();
+            // the program's two members, and no slot of sg's
+            REQUIRE(p.declared_bindings.size() == 2);
+            CHECK(p.declared_bindings[0].name == "frame.world");
+            CHECK(p.declared_bindings[1].name == "frame.output");
+            CHECK(p.bytecode.empty() == !native);
+            // what it declares the addresses in is laid out as the output states it, for the reflection to confirm
+            auto const block = native ? cc::string_view("sg_acceleration_addresses")
+                                      : cc::string_view("sg_acceleration_addresses_block");
+            CHECK(p.layouts.values().any([&](slib::block_layout const& l) { return l.global == block; }));
+        }
+}
+
 TEST("slib sgl compiler - the cube becomes WGSL that slib's own reader reflects", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;

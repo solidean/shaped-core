@@ -1,7 +1,7 @@
 # Reserved bindings
 
 A reserved binding is a resource no program declares and sg binds itself.
-A program cannot name one, and the host never hears of one.
+A program cannot name one, and the host never hears of one, but for `sg_acceleration_addresses`, which a compile lists for a host that lays out its own pipelines (EMIT-272).
 `sg_debug`, the window `print` and `assert` write into, is the first, and more are planned.
 
 ## The contract
@@ -47,6 +47,11 @@ On metal a ray-tracing pipeline's raygen alone takes `sg_debug` at its slot, and
 It covers it as a UAV with a counter in a descriptor table, binds a null or a valid buffer there, and enables the slot on its device; sg lays out none, and slib refuses it.
 `emitted_source::bindings` lists it with `is_reserved`, DXC's reflection as `sg::compiled_shader::reserved_slots`, and no entry here takes space 13.
 
+`b1, space9` on dx12 is no entry of this table either, but SGL's draw start: the block `sgl_draw_start` a vertex entry point reads under the `root_constant` fill of `draw_start` (EMIT-128).
+The host lays it out as two 32-bit root constants and writes the draw's first vertex and first instance there before every direct draw (EMIT-271).
+`emitted_source::bindings` lists it with `is_reserved` and `reserved_slot::draw_start`, and DXC's reflection as a plain constant buffer at that address.
+sg lays out none: its dx12 context requires Shader Model 6.8 and slib compiles the `native` fill, so no shader of sg's reads it, slib refuses it, and no entry here may take it.
+
 `sg_array_lengths` is a block of 16 lengths, `uint4[4]`, one per unbounded binding array of the bound groups in the order of their groups.
 sg writes it at each dispatch and draw from the groups bound, beside the roots, and an emit for dx12 or vulkan rewrites `xs.length` into a read of it (CHK-491).
 
@@ -54,13 +59,16 @@ sg writes it at each dispatch and draw from the groups bound, beside the roots, 
 A pipeline of such a shader is built over its layout's twin that holds it, `pipeline_layout_description::dispatch_grid`, so no other layout pays for it.
 
 `sg_acceleration_addresses` is every acceleration member's device address, `uint4[8]`, two a vector and each low word first, by the member's position.
-That position is the layout's acceleration members group by group, each group's by slot: the numbering the software roots use.
+That position is the layout's acceleration members group by group, each group's by slot, a binding array of them as one: the numbering the software roots use.
 **Every vulkan trace of SGL's reads its structure by it**, through `OpConvertUToAccelerationStructureKHR`, rather than through its descriptor.
 That is how vulkan traces a partitioned tlas, which `VK_EXT_descriptor_buffer` has no descriptor for.
 - SGL's own SPIR-V declares it in `lowering::acceleration_by_address`, so it has no prelude declaration; an element of an array of structures is a native gap there.
 - The HLSL a DXC route compiles declares it as `cbuffer sg_acceleration_addresses_block`, and the conversion as inline SPIR-V, `[[vk::ext_instruction(4447)]]`, which DXC has no builtin for.
   An element of an array of structures still names its descriptor there.
 sg's vulkan layout holds it wherever the layout holds an acceleration member, since any package may compile to SGL's own SPIR-V.
+`emitted_source::bindings` lists it on `hlsl-vulkan` with `is_reserved` and `reserved_slot::acceleration_addresses`, set 3, binding 22 and 128 bytes, wherever the output declares it (EMIT-272).
+That is for a host that lays out its own pipelines: it covers the block and fills each address at the position EMIT-272 states.
+slib passes the slot over, since sg holds and fills it already, and no dx12 compile lists it: dx12 traces through the structure's descriptor.
 
 `sg_mesh_output` and `sg_mesh_input` are one buffer of words, which a polyfilled mesh stage's compute half writes and its vertex half reads back (CHK-524).
 The compute half also reads `sg_dispatch_grid`, the threads sg dispatched it in, to number its workgroups.

@@ -264,6 +264,18 @@ A target's compiler reflects the names the text declares, and those follow each 
 The host binds by the path instead, so whoever compiles the text renames what the compiler reflected, and needs the pairs to do it.
 slib does that as the compile settles, which is why no target's identifier rules ever reach sg.
 
+## EMIT-268
+
+A host may build its pipelines in its own code rather than from `pipeline` declarations, and it still needs what each entry point hands its pipeline.
+A declaration names no vertex input: it follows from the vertex entry point's signature (the pipelines file's "What the entry points state is not a setting").
+So reporting it only on a declared pipeline left such a host matching each vertex shader to its struct by hand, though the pixel side, `target_struct`, was already reported per entry point.
+The members stay on the struct's description, which every entry point taking the struct shares, so `compile_to_text` names the struct and `describe` describes it, as for the target struct.
+
+Every struct the description names is named by its host name, `m.name` for a module's, because a bare name is ambiguous: a program may declare `radiance` and use a module that declares one too.
+A payload, a ray set's payloads and a memory struct named bare would then name two structs alike, and a host matching them by name would take one for the other.
+The module's name, not the program's alias, is what the host knows a module by, which is how `vertex_input` and `target_struct` already named a module's struct.
+An instance of a generic struct takes EMIT-179's name, since that is what the host's C++ calls it, and SGL's own spelling, `pair[float]`, is no identifier.
+
 ## EMIT-135
 
 WebGPU has no ray query, and a portable shader that traces is worth more than one refused on a whole platform.
@@ -320,6 +332,37 @@ A preference is only a hint then, which the host still has beside the text.
 What a shader model adds is often what a device has some other way, so a target's form of a construct is a choice beside whether the device has it.
 NVIDIA's devices reorder and see micromaps through NVAPI at 6.6, and a draw's start can arrive in a root constant, so a fill names that choice per construct.
 A feature stays what the device can do, and its fill how this compile writes it, which keeps the features one list across every target.
+
+## EMIT-271
+
+The draw's start is a block of its own, not two members appended to the `@inline` block.
+An `@inline` block whose size depends on the target would break the host types generated from it, the one block every stage of a pipeline shares, and its 128-byte cap on dx12 alone.
+Its offsets would follow the program's last member too, so a host would have to read them from the interface; at fixed offsets it writes two words with no lookup.
+Space 9 already holds what a host writes as root constants at an address the interface names, so `b1` of it costs no new reserved space and touches no contract of sg's.
+The first vertex of an indexed draw is its base vertex because SGL's `@vertex_index` is vulkan's, the fetched index plus the base, which is what `SV_StartVertexLocation` holds on 6.8.
+A host that wrote the first index would draw the wrong vertices without any error, so the rule says it.
+
+## EMIT-272
+
+A host that lays out its own pipelines builds its layout from the slots a compile lists, and the address block was never listed.
+Such a host could not know to cover set 3, binding 22, or to fill it, and a trace would read garbage addresses without any error.
+It is listed as the output declares it, the text's way and SGL's own SPIR-V's, so the list stays what a reflection of the output would find.
+The position rule is stated because the host has nothing else to fill the block by: it is the plan's numbering, which sg's own layout follows too.
+slib passes the slot over rather than refusing it, as it refuses the draw start's, since sg's vulkan layout holds and fills this one wherever an acceleration member stands.
+
+## EMIT-269
+
+A ray set sizes its payloads, but a payload in no ray set, a callable's parameter among them, was sized nowhere.
+A host compiling single entry points matched a stage's payload to a set by name to size it.
+The size is the checker's `ray_data_bytes`, the one count a ray set and a `@raytracing pipeline` take too, so the three cannot disagree.
+
+## EMIT-270
+
+A `@raytracing pipeline` derives its attribute size from its groups, and with `.host` it takes the 32-byte cap, since a host's group is compiled apart.
+A host that builds its own table knows its shaders, and each shader's signature fixes what it takes.
+An entry point names its `A`, and one entry point cannot serve a triangle group and a procedural one (CHK-330).
+So each states its size, and the table's is the largest of them rather than the cap.
+The name and the shape let a host check a procedural group's hits against what its intersection reports, as CHK-330 checks a declared group.
 
 ## EMIT-149
 

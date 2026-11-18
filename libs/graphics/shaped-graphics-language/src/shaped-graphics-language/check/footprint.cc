@@ -186,7 +186,7 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                     auto slot = s;
                     if (member < 0)
                     {
-                        slot.host_name = symbol.name;
+                        slot.host_name = m.qualified_name_of(binding);
                         slot.view = slot_view::constants;
                     }
                     else
@@ -196,7 +196,7 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                         while (m.at(element).kind == type_kind::array)
                             element = m.at(element).element;
                         auto const& type = m.at(element);
-                        slot.host_name = cc::format("{}.{}", symbol.name, members[member].name);
+                        slot.host_name = cc::format("{}.{}", m.qualified_name_of(binding), members[member].name);
                         slot.view
                             = type.kind == type_kind::image || type.is_mut ? slot_view::storage : slot_view::read_only;
                     }

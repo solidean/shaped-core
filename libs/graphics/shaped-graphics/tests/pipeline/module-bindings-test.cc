@@ -7,6 +7,7 @@
 #include <sgl_modules/marking.hh>
 #include <sgl_modules/marking/tints.hh>
 #include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-graphics/resource/texture.hh>
@@ -76,6 +77,48 @@ ASYNC_INVOCABLE_TEST("sg - one group of a module's binding serves pipelines of t
     {
         CHECK(u8(bytes[i * 4 + 0]) == 0);
         CHECK(u8(bytes[i * 4 + 2]) == 255);
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a file's binding named as a module's is a group of its own, each matched by its host name",
+                     (sg::context_handle const& ctx))
+{
+    // `marks` and `marking.marks` stand in one pipeline's layout, and sg matches each group's views to the shader's
+    // slots by host name, `marks.hits` and `marking.marks.hits`, so each lands where its own shader writes it (CHK-171)
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    constexpr auto count = 64;
+    auto const pipeline = co_await shaders::module_twin::twin.acquire_pipeline(*ctx);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const theirs = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(count, 0.0f), usage);
+    auto const own = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(count, 0.0f), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const module_layout = ctx->cached.acquire_binding_group_layout<sgl_modules::marking::marks>();
+    auto const module_group = ctx->transient.create_binding_group(
+        *cmd, module_layout,
+        sgl_modules::marking::marks{.tint = tg::vec4f(10, 0, 0, 1), .hits = theirs.as_readwrite_buffer()});
+    auto const own_layout = ctx->cached.acquire_binding_group_layout<shaders::module_twin::marks>();
+    auto const own_group = ctx->transient.create_binding_group(
+        *cmd, own_layout, shaders::module_twin::marks{.hits = own.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *module_group);
+    cmd->compute.bind_group(1, *own_group);
+    cmd->compute.dispatch_threads(count);
+    auto const theirs_back = cmd->download.data_from_buffer(theirs);
+    auto const own_back = cmd->download.data_from_buffer(own);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_theirs = co_await theirs_back.data();
+    auto const got_own = co_await own_back.data();
+    REQUIRE(got_theirs.size() == count);
+    REQUIRE(got_own.size() == count);
+    for (auto i = 0; i < count; ++i)
+    {
+        CHECK(got_theirs[i] == 10.0f + float(i));
+        CHECK(got_own[i] == 100.0f + float(i));
     }
 }
 

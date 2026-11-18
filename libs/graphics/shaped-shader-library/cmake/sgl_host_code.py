@@ -308,11 +308,12 @@ def modules_used(entries: SglEntries) -> list[str]:
 def memory_structs_of(entries: SglEntries, path: str) -> dict[str, tuple[str, int]]:
     """Every struct file `path` places in GPU memory, by name: its C++ spelling, and its size.
 
-    The file's own are named as SGL names them, within its namespace; another module's through that module's namespace.
+    Each is keyed by its host name, as the description names every struct: the file's own bare, within its namespace,
+    and another module's as `m.name`, through that module's namespace.
     """
     out = {s["name"]: (s["name"], s["size"]) for f, s in entries.memory_structs if f.path == path}
-    for name, (module, size) in entries.foreign_structs.items():
-        out.setdefault(name, (cpp_name(f"{module}.{name}"), size))
+    for name, (_, size) in entries.foreign_structs.items():
+        out.setdefault(name, (cpp_name(name), size))
     return out
 
 
@@ -961,7 +962,8 @@ def emit_inline_impl(package: str, memory: dict[str, int], namespace: str, file:
     words = (binding["block_size"] + 3) // 4 * 4
     out.append(f"\nsg::binding {qualified}::inline_binding()\n{{\n")
     out.append("    // dx12 reads it at b0 in slib's reserved space; vulkan and WebGPU read only the kind and the size.\n")
-    out.append(f'    return {{.name = "{name}",\n')
+    # a module's block by its qualified name, as the shader's interface names it (CHK-171)
+    out.append(f'    return {{.name = "{binding.get("block_host_name") or name}",\n')
     out.append("            .space = slib::inline_constants_space,\n")
     out.append("            .index = 0u,\n")
     out.append("            .count = 1u,\n")

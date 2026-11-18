@@ -321,6 +321,8 @@ No target binds by name: HLSL by register, SPIR-V by set and binding, WGSL by `@
 So the host name need not be an identifier of any target, and the path is the one name that is injective and needs no rule for a reader to learn.
 `a_b.c` and `a.b_c` stay two buffers, where any identifier built from them would clash.
 The identifier a target writes is the emitter's to mint (EMIT-85), and the text reports the pair (EMIT-95).
+A module's binding is qualified because a program may declare a binding of the same name, `sky` beside `scenes.sky`, and both may stand in one pipeline's layout.
+Named bare, the two would be one name to sg, which matches a view to its slot by it.
 
 ## CHK-197
 
@@ -542,6 +544,17 @@ A name resolves where the body is written, so what is visible at a call never ch
 An error is reported at its line in the body, under the instantiations that reached it, and once however many instances repeat it.
 A generic that nothing instantiates would otherwise go unchecked, which the warning says; a `test` that calls it is how its author checks it with chosen arguments.
 The checked once, opaque rule this replaces let a body only hand a value of `A` on, which was enough for the prelude's traces and for nothing a program would write.
+
+## CHK-530
+
+The host names an instance of a generic struct by an identifier, `pair_float` for `pair[float]`, since a C++ struct cannot be named `pair[float]` (EMIT-179).
+A struct the program names `pair_float` beside it would be named alike in the description, and a host generating a type of each name would declare one twice or take one for the other.
+The target text mints its own names and never meets the clash, so the refusal is for the host alone; renaming the struct is the program's to do, and SGL picks no other name for either.
+Another module's struct is named `m.pair_float` there, so only one module's own names can clash.
+Only an instance the host sees is counted, since one it never sees takes no name in the description.
+So a struct named `exchange_result_int` clashes with nothing merely because the prelude's atomics return `exchange_result[int]`.
+The prelude's own structs, `walk_space` among them, stand in a description only where a root of the program reaches one, so they clash only there.
+A report stands where the program can act on it, since a span inside the prelude names a line the author cannot change.
 
 ## CHK-339
 

@@ -57,7 +57,8 @@ struct sgl::text_request
     /// offer are each an error of the request.
     cc::span<check::feature_fill const> fills;
     /// How the core constructs are written (EMIT-265); `native` for both is the default, at Shader Model 6.8 on dx12.
-    /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`.
+    /// A host compiling dx12 for Shader Model 6.6 asks `{.draw_start = root_constant, .wave_size = none}`, and then
+    /// writes the draw's start into the slot an entry point that takes it lists (EMIT-271).
     check::core_fills core;
     /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
     emit::native_route native = emit::native_route::text;
@@ -141,6 +142,34 @@ struct sgl::all_text_request
     check::core_fills core;
 };
 
+/// Which slot an `interface_binding` the program never declared is: one the host lays out itself.
+/// A host that knows none of them refuses every one it does not know, by `is_reserved`, which keeps it safe.
+enum class sgl::reserved_slot : sgl::u8
+{
+    /// A binding of the program, which is no reserved slot.
+    none,
+    /// NVAPI's shader extension slot, the counter UAV an `nvapi` fill talks to NVIDIA's driver through (EMIT-265).
+    /// It is a structured buffer of `stride` bytes with a counter, which no root descriptor can be: the host covers it
+    /// as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot
+    /// on its device.
+    nvapi_extension,
+    /// The draw's start under the `root_constant` fill of `draw_start` (EMIT-271): a block of `block_size` bytes, the
+    /// first vertex at byte 0 and the first instance at byte 4, each a `uint`, which the host writes as root constants
+    /// before every direct draw of the pipeline, and whose indirect draws it refuses.
+    draw_start,
+    /// vulkan's `sg_acceleration_addresses` (EMIT-272): a block of `block_size` bytes, `uint4[8]`, which every trace of
+    /// SGL's on vulkan reads its acceleration structure's device address from, rather than its descriptor.
+    /// The host fills it before every dispatch, draw and trace that uses it, with each acceleration member's address.
+    /// An acceleration binding's position k is the number of `bindings` of kind `acceleration_structure`, not reserved,
+    /// ordered before it by `group` and then by `slot`; a binding array of them takes one position, whose address no
+    /// trace reads.
+    /// Its address is `uint4` k / 2, `.xy` for an even k and `.zw` for an odd one, each address's low word first.
+    /// Positions agree across a pipeline's stages (CHK-184), so the host fills one block per pipeline, 0 where nothing
+    /// is bound; 16 positions fit, and EMIT-272 says what a trace past them does.
+    /// sg lays it out and fills it itself wherever a layout holds an acceleration member.
+    acceleration_addresses,
+};
+
 /// One slot the text declares for the host to bind: a block of constants or a resource, with every fact its API needs.
 /// Enums are spelled as the sg enum value they are, as `sgl describe` spells them; empty where a fact does not apply.
 struct sgl::interface_binding
@@ -155,15 +184,14 @@ struct sgl::interface_binding
     bool is_inline = false;
     /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
     bool is_file_sampler = false;
-    /// A slot no binding of the program declares, which the host lays out itself: NVAPI's shader extension slot, the
-    /// counter UAV an `nvapi` fill talks to NVIDIA's driver through (EMIT-265), at register `slot` of space `group`.
-    /// It is a structured buffer of `stride` bytes with a counter, which no root descriptor can be: the host covers it
-    /// as a UAV in a descriptor table of its root signature, binds a null or a valid buffer there, and enables the slot
-    /// on its device.
+    /// A slot no binding of the program declares, which the host lays out itself, at the address `group` and `slot` give;
+    /// `reserved` says which.
     bool is_reserved = false;
+    /// Which reserved slot it is; `none` exactly where `is_reserved` is false.
+    reserved_slot reserved = reserved_slot::none;
     /// The group it is listed at, counted without the `@inline` binding, and its slot there.
-    /// -1 and 0 for the `@inline` block, -1 and its index for a file-scope sampler, and the dx12 space and register of
-    /// a reserved slot.
+    /// -1 and 0 for the `@inline` block, -1 and its index for a file-scope sampler, and a reserved slot's address on the
+    /// target: the dx12 space and register, or the vulkan set and binding.
     i32 group = -1;
     i32 slot = 0;
     /// A binding array's length, taking `count` consecutive slots from `slot`; 1 for everything else.
@@ -213,6 +241,23 @@ struct sgl::emitted_source
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;
     cc::string target_struct;
+    /// A vertex entry point's `@vertex struct`, named as `target_struct` is; empty for every other stage and for a vertex
+    /// entry point that draws from no vertex buffer (EMIT-268).
+    /// Its members' locations, formats, semantics and streams are not here: `describe` describes the struct of this name
+    /// in its `structs`, which is what a host's input layout is built from.
+    cc::string vertex_input;
+    /// A ray-tracing stage's payload, or a callable's parameter, its structural hash as 32 hex digits, and its bytes, as
+    /// `described_entry_point` has them (EMIT-269); empty and 0 for any other stage and for a stage without one.
+    cc::string payload;
+    cc::string payload_shape;
+    i32 payload_size = 0;
+    /// A procedural closest or any hit's attributes, or what an intersection reports, and its structural hash as 32 hex
+    /// digits (EMIT-270); both empty for a triangle hit and for every other stage.
+    cc::string attributes;
+    cc::string attributes_shape;
+    /// A hit's or an intersection's attributes in bytes, 8 for a triangle's barycentrics; 0 for every other stage.
+    /// A host building its own ray-tracing pipeline takes the largest of its shaders' as its attribute size.
+    i32 attribute_size = 0;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
     /// A `hlsl-dx12` compile's: the DXIL shader model the output needs, which a host compiles the text at (EMIT-264).

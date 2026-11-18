@@ -544,6 +544,8 @@ if(SC_BUILD_TESTS)
         tests/emit/auto-workgroup-test.cc
         tests/emit/compute-emit-test.cc
         tests/emit/shader-model-emit-test.cc
+        tests/emit/draw-start-emit-test.cc
+        tests/emit/acceleration-addresses-emit-test.cc
         tests/emit/subgroup-emit-test.cc
         tests/emit/image-emit-test.cc
         tests/emit/case-emit-test.cc
@@ -584,6 +586,7 @@ if(SC_BUILD_TESTS)
         tests/driver/target-type-test.cc
         tests/driver/target-layout-test.cc
         tests/driver/describe-test.cc
+        tests/driver/entry-interface-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc
 
@@ -593,9 +596,12 @@ if(SC_BUILD_TESTS)
         tests/samples/matrices-sample-test.cc
         tests/samples/samples-test.cc
     )
-    # Debug runs the compiler an order of magnitude slower, where the binary takes over two minutes against 14 s.
+    # The binary takes 14 s on relwithdebinfo, two minutes on Debug and over five on a Debug CI runner, and a minute on
+    # wasm's one thread, so the slow builds get room rather than a margin they outgrow with the next test.
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        sc_nexus_binary(shaped-graphics-language-test KINDS tests TIMEOUT 300)
+        sc_nexus_binary(shaped-graphics-language-test KINDS tests TIMEOUT 900)
+    elseif(EMSCRIPTEN)
+        sc_nexus_binary(shaped-graphics-language-test KINDS tests TIMEOUT 180)
     else()
         sc_nexus_binary(shaped-graphics-language-test KINDS tests)
     endif()

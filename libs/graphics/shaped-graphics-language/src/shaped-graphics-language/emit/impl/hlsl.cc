@@ -156,7 +156,7 @@ public:
         auto const position = acceleration_address_position(p, resource);
         if (!_is_vulkan || position >= check::k_acceleration_address_capacity)
             return {};
-        return cc::format("sg_acceleration_from_address(sg_acceleration_addresses[{}].{})", position / 2,
+        return cc::format("sg_acceleration_from_address({}[{}].{})", k_acceleration_addresses_array, position / 2,
                           position % 2 == 0 ? "xy" : "zw");
     }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
@@ -549,9 +549,10 @@ public:
         {
             auto const& at
                 = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(emit::target::hlsl_vulkan)];
-            out.appendf("[[vk::binding({}, {})]] cbuffer sg_acceleration_addresses_block\n{{\n"
-                        "    uint4 sg_acceleration_addresses[{}];\n}};\n\n",
-                        at.slot, at.group, check::k_acceleration_address_capacity / 2);
+            out.appendf("[[vk::binding({}, {})]] cbuffer {}\n{{\n"
+                        "    uint4 {}[{}];\n}};\n\n",
+                        at.slot, at.group, k_acceleration_addresses_block, k_acceleration_addresses_array,
+                        check::k_acceleration_address_capacity / 2);
             out += "[[vk::ext_instruction(4447)]] // OpConvertUToAccelerationStructureKHR\n"
                    "RaytracingAccelerationStructure sg_acceleration_from_address(uint2 address);\n\n";
         }
@@ -559,6 +560,13 @@ public:
             out += _is_vulkan ? k_query_cluster_vulkan : k_query_cluster_dx12;
         if (calls_builtin(p, "hit_cluster_id"))
             out += _is_vulkan ? k_hit_cluster_vulkan : k_hit_cluster_dx12;
+
+        // EMIT-128, EMIT-271: the draw's start the host writes as root constants, beside the inline constants' `b0`
+        if (p.draw_start_in_root_constants)
+            out.appendf("struct {}\n{{\n    uint first_vertex;\n    uint first_instance;\n}};\n"
+                        "ConstantBuffer<{}> {} : register(b{}, space{});\n\n",
+                        k_draw_start_block, k_draw_start_block, k_draw_start_global, check::k_draw_start_register,
+                        check::k_draw_start_space);
 
         if (!p.constants.has_value())
             return;
@@ -746,6 +754,9 @@ public:
             if (!spelled.hlsl_read.empty())
                 continue;
             auto const input = p.e.stage_inputs[i].input;
+            // EMIT-128: under the root-constant fill `@first_instance` is the block's, and no parameter at all
+            if (p.draw_start_in_root_constants && input == check::stage_input::first_instance)
+                continue;
             // EMIT-128: where the draw started is vulkan's `BaseInstance`, which every shader model reads
             if (_is_vulkan && input == check::stage_input::first_instance)
                 parameters.push_back(cc::format("[[vk::builtin(\"BaseInstance\")]] uint {} : SGL_BASE_INSTANCE",
@@ -754,7 +765,8 @@ public:
                 parameters.push_back(
                     cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
             // EMIT-128: HLSL counts from the draw's base, so the text adds where the draw started.
-            // dx12 reads it as Shader Model 6.8's system values, and vulkan as its builtins.
+            // dx12 reads it as Shader Model 6.8's system values, or from `sgl_draw_start` under the root-constant fill,
+            // which takes no parameter; vulkan reads it as its builtins.
             // An instance's base is `@first_instance` itself where the entry takes that, since a semantic is taken once.
             auto takes_first_instance = false;
             for (auto const& other : p.e.stage_inputs)

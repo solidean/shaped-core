@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/driver/impl/describe_binding.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
+#include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/legalize/impl/polyfill.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 #include <shaped-graphics-language/test/run_tests.hh>
@@ -54,9 +55,9 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
         if (m.bindings[s.info].is_workgroup)
             continue;
         auto const is_inline = m.bindings[s.info].is_inline;
-        auto const described = driver::impl::describe_binding(m, s);
+        auto const described = driver::impl::describe_binding(m, s, m.foreign_module_of(id));
         if (is_inline || described.block_slot == 0)
-            result.push_back({.name = s.name,
+            result.push_back({.name = m.qualified_name_of(id),
                               .emitted = emitted_of(m.qualified_name_of(id)),
                               .kind = described_member_kind::constant,
                               .is_inline = is_inline,
@@ -139,6 +140,27 @@ check::float_level kept_float_level(emit::target target)
     return check::float_level::fast;
 }
 
+/// What a refusal calls a polyfill form, as `emit::mesh_form` names it.
+[[nodiscard]] cc::string_view mesh_form_name(emit::mesh_form form)
+{
+    switch (form)
+    {
+    case emit::mesh_form::native:
+        return "native";
+    case emit::mesh_form::compute:
+        return "compute";
+    case emit::mesh_form::scan:
+        return "scan";
+    case emit::mesh_form::launched:
+        return "launched";
+    case emit::mesh_form::vertex_fetch:
+        return "vertex_fetch";
+    case emit::mesh_form::mesh:
+        return "mesh";
+    }
+    return "native";
+}
+
 /// The back half of `compile_to_text`: one entry point of a checked module, written for one target.
 cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& front,
                                                  check::flat_entry_point const& e,
@@ -158,6 +180,14 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  check::flat_entry_point const* polyfill_task = nullptr,
                                                  check::flat_entry_point const* polyfill_control = nullptr)
 {
+    // EMIT-128: a polyfill form is sg's to draw, its vertex half counting from a draw sg makes, indirectly too, which no
+    // host of the root-constant fill makes (EMIT-271)
+    if (mesh != emit::mesh_form::native && target == emit::target::hlsl_dx12
+        && core.draw_start == check::fill::root_constant)
+        return cc::error(cc::format("{}: error: unsupported: the {} polyfill form of {} entry point '{}' under the "
+                                    "root_constant fill of draw_start, which no polyfill form takes: sg draws them, "
+                                    "indirectly too\n",
+                                    front.source_name, mesh_form_name(mesh), check::stage_name(e.entry_stage), e.name));
     // CHK-524: a polyfilled mesh stage that writes values per primitive hands them on in one struct beside its vertex's,
     // which its vertex half returns and its pixel stage takes, and which a copy of the module holds
     auto corner_module = cc::optional<check::checked_module>();
@@ -410,9 +440,18 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     for (auto const name : names)
         result.line_files.push_back(cc::string(name));
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
-    if (!result.target_struct.empty() && check::is_valid(e.result) && check::is_valid(m.at(e.result).symbol))
-        if (auto const module = m.foreign_module_of(m.at(e.result).symbol); !module.empty())
-            result.target_struct = cc::format("{}.{}", module, result.target_struct);
+    if (!result.target_struct.empty() && check::is_valid(e.result))
+        result.target_struct = driver::impl::host_type_name_of(m, e.result);
+    // EMIT-268 to EMIT-270: what the entry point's own signature hands its pipeline, as `describe` reports it, whatever
+    // form the text took
+    auto facts = driver::impl::entry_interface_of(m, e);
+    result.vertex_input = cc::move(facts.vertex_input);
+    result.payload = cc::move(facts.payload);
+    result.payload_shape = cc::move(facts.payload_shape);
+    result.payload_size = facts.payload_size;
+    result.attributes = cc::move(facts.attributes);
+    result.attributes_shape = cc::move(facts.attributes_shape);
+    result.attribute_size = facts.attribute_size;
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = form.workgroup[axis];
     result.is_dispatched_by_threads = form.is_auto_workgroup;
@@ -439,12 +478,40 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                    .emitted = "g_NvidiaExt",
                                    .kind = described_member_kind::buffer,
                                    .is_reserved = true,
+                                   .reserved = reserved_slot::nvapi_extension,
                                    .group = check::k_nvapi_space,
                                    .slot = check::k_nvapi_register,
                                    .is_used = true,
                                    .stride = check::k_nvapi_record_bytes,
                                    .has_counter = true,
                                    .access = "read_write"});
+    }
+    // EMIT-271: the root-constant fill reads the draw's start from a block the host lays out and writes itself, listed
+    // wherever the entry takes the start, and used where it reads it
+    if (emitted.declares_draw_start)
+        result.bindings.push_back({.name = "draw_start",
+                                   .emitted = cc::string(emit::impl::k_draw_start_global),
+                                   .kind = described_member_kind::constant,
+                                   .is_reserved = true,
+                                   .reserved = reserved_slot::draw_start,
+                                   .group = check::k_draw_start_space,
+                                   .slot = check::k_draw_start_register,
+                                   .is_used = emitted.reads_declared_draw_start,
+                                   .block_size = check::k_draw_start_bytes});
+    // EMIT-272: every vulkan trace of SGL's reads its structure's address from a block sg lays out and fills, listed
+    // wherever the output declares it, and used where a trace reads it
+    if (emitted.declares_acceleration_addresses)
+    {
+        auto const& at = check::reserved_binding_named("sg_acceleration_addresses")->targets[u8(target)];
+        result.bindings.push_back({.name = "acceleration_addresses",
+                                   .emitted = emitted.acceleration_addresses_global,
+                                   .kind = described_member_kind::constant,
+                                   .is_reserved = true,
+                                   .reserved = reserved_slot::acceleration_addresses,
+                                   .group = at.group,
+                                   .slot = at.slot,
+                                   .is_used = emitted.reads_acceleration_addresses,
+                                   .block_size = check::k_acceleration_address_bytes});
     }
     // EMIT-266: what the entry consulted, each with what this target offers for it
     for (auto i = isize(0); i < check::k_feature_count; ++i)
