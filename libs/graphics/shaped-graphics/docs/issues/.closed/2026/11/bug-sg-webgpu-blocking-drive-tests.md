@@ -3,8 +3,8 @@ created: 2026-11-19
 refs:
   - test: sg - limits report the portable floors
   - file: libs/base/clean-core/src/clean-core/thread/async.cc
-claimed-by: Claude (for Julius Nehring-Wirxel)
-claimed-at: 2026-11-19T13:34Z
+closed: 2026-11-19
+resolution: fixed
 ---
 
 # Some sg tests fail on emscripten-webgpu: a blocking drive cannot progress
