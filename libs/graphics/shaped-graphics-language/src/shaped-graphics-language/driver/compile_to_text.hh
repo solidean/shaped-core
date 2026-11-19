@@ -232,6 +232,11 @@ struct sgl::emitted_source
     /// file-scope samplers its code reaches.
     /// This is the interface a host builds against; a compiler's reflection of the text can only confirm it.
     cc::vector<interface_binding> bindings;
+    /// The reserved bindings the text declares, by name, in the order its code first reached them.
+    /// A host binds them at their fixed addresses, and a polyfill's layout holds only these where a backend counts its
+    /// buffers, as WebGPU does: a geometry stage's compute half reads `sg_geometry_vertices{i}` only for the streams its
+    /// vertex stage takes members from (CHK-525).
+    cc::vector<cc::string> reserved;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
     /// A bare @compute's: the compile chose `workgroup`, so the host dispatches it by threads alone (CHK-520).

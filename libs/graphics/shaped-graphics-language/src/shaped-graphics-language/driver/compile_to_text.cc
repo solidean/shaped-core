@@ -439,6 +439,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         .tessellation_layout = tessellation_layout};
     for (auto const name : names)
         result.line_files.push_back(cc::string(name));
+    for (auto const id : form.reserved)
+        result.reserved.push_back(m.at(id).name);
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
     if (!result.target_struct.empty() && check::is_valid(e.result))
         result.target_struct = driver::impl::host_type_name_of(m, e.result);
