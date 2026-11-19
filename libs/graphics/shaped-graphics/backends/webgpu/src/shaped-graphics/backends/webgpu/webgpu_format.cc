@@ -130,9 +130,11 @@ WGPUBufferUsage to_wgpu_buffer_usage(sg::buffer_usages usage)
         out |= WGPUBufferUsage_Index;
     if (usage.has(sg::buffer_usage::constants_buffer))
         out |= WGPUBufferUsage_Uniform;
-    // A build reads its inputs from a compute kernel, as storage.
+    // A build reads its inputs from a compute kernel, as storage, and a polyfilled geometry stage's compute half reads
+    // the draw's vertex and index buffers so.
     if (usage.has_any(sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer
-                      | sg::buffer_usage::accel_structure_build_input))
+                      | sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::vertex_buffer
+                      | sg::buffer_usage::index_buffer))
         out |= WGPUBufferUsage_Storage;
     // a polyfilled indirect mesh draw copies its arguments into the records it draws by
     if (usage.has(sg::buffer_usage::indirect_command_buffer))

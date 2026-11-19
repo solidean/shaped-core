@@ -162,7 +162,12 @@ A list topology alone: a strip's primitives share corners, which no fixed slot a
 slib then acquires the geometry stage's two halves in place of the geometry stage, the compute half naming the pipeline's vertex stage, and leaves the pipeline no vertex input.
 metal draws it, `draws_geometry_polyfill`, with the draw's buffers bound past every vertex-input slot and their offsets folded into the addresses.
 A slot the draw has no buffer for, the index buffer of a draw that is not indexed, takes the draw's own values, since Metal's validation wants every declared buffer bound.
-dx12, vulkan and webgpu draw none yet, so the benchmark against the native stage that decides `where_missing` has not run.
+webgpu draws it too, binding every buffer whole and writing each view's offset into `sg_geometry_draw`, since a storage binding's offset must be 256-aligned.
+So every vertex and index buffer on webgpu is storage-bindable, whatever usage it was created with.
+WebGPU caps a stage at eight storage buffers, so the compute half's layout holds `sg_geometry_vertices{i}` only for the streams its vertex stage reads.
+SGL reports those, and slib carries them as `compiled_shader::geometry_polyfill_streams`.
+`sg_geometry_strip` is declared writable, so a draw no scan writes it for still binds it a word of its own.
+dx12 and vulkan draw none yet, so the benchmark against the native stage that decides `where_missing` has not run.
 
 **A strip is drawn as its windows.**
 A draw of a line or a triangle strip assembles primitive `p` from positions `p` on, a list's from `p * corners`.

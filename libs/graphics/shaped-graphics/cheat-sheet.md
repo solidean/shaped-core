@@ -162,7 +162,7 @@ ctx.set_mesh_polyfill(sg::polyfill_use::where_missing) // slib draws a mesh stag
 ctx.draws_mesh_polyfill()                          // bool — whether this backend draws a polyfilled pipeline at all (all but metal, which needs none)
 desc.mesh_polyfill->launch_budget = 4096;          // the mesh workgroups a polyfilled draw launches at most where the GPU counts them and no `meshes = N` bounds them; an indirect draw's task workgroups too
 ctx.set_geometry_polyfill(sg::polyfill_use::where_missing) // slib draws a geometry stage as compute + draw where the device has none; `never` by default, opt-in until measured
-ctx.draws_geometry_polyfill()                      // bool — whether this backend draws a polyfilled geometry stage (metal so far)
+ctx.draws_geometry_polyfill()                      // bool — whether this backend draws a polyfilled geometry stage (metal and webgpu)
 ctx.set_geometry_polyfill_route(sg::geometry_polyfill_route::compute) // `mesh` by default: one mesh draw where the device has mesh shaders, else compute
 ctx.set_tessellation_polyfill(sg::polyfill_use::where_missing) // slib draws tessellation by D3D's tessellator in compute where the device has none; `never` by default
 ctx.draws_tessellation_polyfill()                  // bool — whether this backend draws polyfilled tessellation (metal so far)

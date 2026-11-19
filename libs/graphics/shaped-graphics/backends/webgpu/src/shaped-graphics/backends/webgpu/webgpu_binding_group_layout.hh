@@ -115,6 +115,22 @@ public:
     /// buffer where the layout holds a polyfilled mesh stage's slots.
     [[nodiscard]] WGPUBindGroup reserved_group_for(webgpu_constant_page const* page, WGPUBuffer debug_window) const;
 
+    /// The buffers of one polyfilled geometry draw, which group 3 names where the layout holds `geometry_inputs()`.
+    /// Each is bound whole, so its offsets travel in the draw record; only those the layout holds are read.
+    struct geometry_buffers
+    {
+        WGPUBuffer draw = nullptr;
+        WGPUBuffer indices = nullptr;
+        WGPUBuffer vertices[sg::reserved_geometry_streams] = {};
+        WGPUBuffer strip = nullptr;
+    };
+
+    /// Group 3 as `reserved_group_for` builds it, naming `geometry` too; never cached, since the buffers are one draw's.
+    /// The layout must hold `geometry_inputs()`.
+    [[nodiscard]] wgpu_bind_group geometry_group_for(webgpu_constant_page const* page,
+                                                     WGPUBuffer debug_window,
+                                                     geometry_buffers const& geometry) const;
+
     /// Group 3's dynamic offsets for a reserved block placed at `block_offset`, in binding order, into `out`; returns how many.
     [[nodiscard]] isize reserved_dynamic_offsets(u32 block_offset, cc::span<u32> out) const;
 
@@ -123,6 +139,14 @@ public:
 
 private:
     void materialize() const;
+
+    /// Makes the polyfill's scratch buffers exist, and drops the cached groups where either was replaced since.
+    void refresh_scratch() const;
+
+    /// Group 3 over `page_buffer` and `debug_window`, and `geometry` where it is non-null.
+    [[nodiscard]] wgpu_bind_group build_reserved_group(WGPUBuffer page_buffer,
+                                                       WGPUBuffer debug_window,
+                                                       geometry_buffers const* geometry) const;
 
     webgpu_context& _ctx;
     cc::vector<webgpu_binding_group_layout_handle> _groups;

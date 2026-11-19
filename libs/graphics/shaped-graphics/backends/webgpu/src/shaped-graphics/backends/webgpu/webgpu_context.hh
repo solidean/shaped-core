@@ -608,6 +608,7 @@ public:
     WGPUBuffer scratch_for(mesh_scratch_buffer& scratch, isize bytes, bool is_task);
 
     [[nodiscard]] bool draws_mesh_polyfill() const override { return true; }
+    [[nodiscard]] bool draws_geometry_polyfill() const override { return true; }
 
     /// The optional device features creation was granted.
     struct granted_features

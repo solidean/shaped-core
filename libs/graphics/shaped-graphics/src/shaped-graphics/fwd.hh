@@ -391,6 +391,7 @@ class raster_pipeline;
 struct color_target_state;          // {format, blend, write_mask} — one color target's PSO state
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
 enum class mesh_polyfill_slots : u8;
+struct geometry_polyfill_inputs; // {vertex_streams, holds_strip} — a polyfilled geometry stage's buffers a pipeline layout holds
 enum class polyfill_use : u8;
 enum class geometry_polyfill_route : u8;
 struct mesh_polyfill_description; // {compute_shader, corners, primitives_per_group, words_per_group} — a mesh stage as compute + draw

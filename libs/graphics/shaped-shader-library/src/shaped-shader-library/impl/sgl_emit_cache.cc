@@ -21,7 +21,7 @@ namespace
 {
 /// The layout revision `encode_preprocessed` writes; bump it with any change to what it writes.
 /// sg's codec version rides in the persistent key beside it, since a stated shader and its bindings are written in that codec.
-constexpr u32 k_codec_version = 10;
+constexpr u32 k_codec_version = 11;
 
 /// How many results the in-memory tier holds before it starts over; each is a few dozen kilobytes of text.
 constexpr isize k_memory_capacity = 512;
@@ -220,6 +220,7 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
         put_u32(out, u32(s.mesh_polyfill_words));
         put_u32(out, u32(s.task_polyfill_record_words));
         put_u32(out, u32(s.task_polyfill_meshes));
+        put_u32(out, u32(s.geometry_polyfill_streams));
         for (auto const v : {s.tessellation_domain, s.tessellation_control_points, s.tessellation_patch_words,
                              s.tessellation_vertex_words, s.tessellation_partitioning, s.tessellation_output,
                              s.tessellation_max_factor})
@@ -289,10 +290,12 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
         auto const mesh_words = i32(r.get_u32());
         auto const task_record_words = i32(r.get_u32());
         auto const task_meshes = i32(r.get_u32());
+        auto const geometry_streams = r.get_u32();
         i32 tessellation[7] = {};
         for (auto& v : tessellation)
             v = i32(r.get_u32());
-        if (!r.ok || !stated.has_value() || has_subgroup > 1 || has_features > 1 || by_threads > 1)
+        if (!r.ok || !stated.has_value() || has_subgroup > 1 || has_features > 1 || by_threads > 1
+            || geometry_streams > 0xff)
             return {};
         auto& s = stated.value();
         if (has_subgroup == 1)
@@ -306,6 +309,7 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
         s.mesh_polyfill_words = mesh_words;
         s.task_polyfill_record_words = task_record_words;
         s.task_polyfill_meshes = task_meshes;
+        s.geometry_polyfill_streams = u8(geometry_streams);
         s.tessellation_domain = tessellation[0];
         s.tessellation_control_points = tessellation[1];
         s.tessellation_patch_words = tessellation[2];

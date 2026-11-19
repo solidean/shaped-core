@@ -164,6 +164,9 @@ inline constexpr reserved_binding_address reserved_geometry_vertices[] = {
      .webgpu_binding = 30,
      .metal_buffer = 27},
 };
+/// The vertex buffers a polyfilled geometry stage's compute half reads at most, one `sg_geometry_vertices{i}` each.
+inline constexpr int reserved_geometry_streams
+    = int(sizeof(reserved_geometry_vertices) / sizeof(reserved_geometry_vertices[0]));
 
 /// What a polyfilled tessellation draw is, `uint4[2]`, which its compute passes read (CHK-527).
 /// Metal binds the tessellation entries at slots a kernel leaves free, having no vertex input.

@@ -7,6 +7,7 @@
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::bound_samplers_space
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
@@ -464,6 +465,10 @@ private:
             shader.mesh_polyfill_primitives = l.max_primitives;
             shader.mesh_polyfill_words = l.group_words;
         }
+        for (auto const& name : emitted.reserved)
+            for (auto stream = 0; stream < sg::reserved_geometry_streams; ++stream)
+                if (name == sg::reserved_geometry_vertices[stream].name)
+                    shader.geometry_polyfill_streams |= u8(1u << stream);
         if (emitted.tessellation_layout.has_value())
         {
             auto const& l = emitted.tessellation_layout.value();

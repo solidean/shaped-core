@@ -237,7 +237,13 @@ cc::span<WGPUSampler const> webgpu_binding_group_layout::slot_samplers() const
 webgpu_pipeline_layout::webgpu_pipeline_layout(webgpu_context& ctx,
                                                cc::hash128 hash,
                                                sg::pipeline_layout_description const& desc)
-  : sg::pipeline_layout(hash, desc.groups, desc.inline_constants, desc.dispatch_grid, desc.static_samplers, desc.mesh_polyfill),
+  : sg::pipeline_layout(hash,
+                        desc.groups,
+                        desc.inline_constants,
+                        desc.dispatch_grid,
+                        desc.static_samplers,
+                        desc.mesh_polyfill,
+                        desc.geometry_inputs),
     _ctx(ctx)
 {
 }
@@ -348,6 +354,27 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         reserved.push_back(entry);
     }
 
+    // A polyfilled geometry stage's draw, only the buffers its shader reads, since WebGPU caps a stage's storage buffers.
+    if (desc.geometry_inputs.has_value())
+    {
+        auto const& inputs = desc.geometry_inputs.value();
+        auto const add = [&](sg::reserved_binding_address const& address, bool is_writable)
+        {
+            auto entry = WGPUBindGroupLayoutEntry{};
+            entry.binding = u32(address.webgpu_binding);
+            entry.visibility = WGPUShaderStage_Compute;
+            entry.buffer.type = is_writable ? WGPUBufferBindingType_Storage : WGPUBufferBindingType_ReadOnlyStorage;
+            reserved.push_back(entry);
+        };
+        add(sg::reserved_geometry_draw, false);
+        add(sg::reserved_geometry_indices, false);
+        for (auto i = 0; i < sg::reserved_geometry_streams; ++i)
+            if ((inputs.vertex_streams & (1u << i)) != 0)
+                add(sg::reserved_geometry_vertices[i], false);
+        if (inputs.holds_strip)
+            add(sg::reserved_geometry_strip, true);
+    }
+
     // The context's debug window, which a print or an assert writes (EMIT-183); WebGPU's vertex stage writes no storage.
     if (sg::impl::debug_windows::k_enabled)
     {
@@ -414,11 +441,8 @@ WGPUBindGroup webgpu_pipeline_layout::empty_group() const
     return _empty_group.get();
 }
 
-WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page const* page, WGPUBuffer debug_window) const
+void webgpu_pipeline_layout::refresh_scratch() const
 {
-    CC_ASSERT(has_reserved_group(), "this pipeline layout has no reserved group");
-    materialize();
-
     if (_has_acceleration)
     {
         // Before the compare, since the first use creates the pool and so moves its generation.
@@ -445,78 +469,71 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             _reserved_groups_scratch_generation = generation;
         }
     }
+}
 
-    auto const build = [&](WGPUBuffer page_buffer)
+wgpu_bind_group webgpu_pipeline_layout::build_reserved_group(WGPUBuffer page_buffer,
+                                                             WGPUBuffer debug_window,
+                                                             geometry_buffers const* geometry) const
+{
+    auto entries = cc::vector<WGPUBindGroupEntry>();
+    auto const add_buffer = [&](u32 binding, WGPUBuffer buffer, u64 size)
     {
-        auto entries = cc::vector<WGPUBindGroupEntry>();
-        if (_inline_constants_bytes > 0)
-        {
-            auto entry = WGPUBindGroupEntry{};
-            entry.binding = 0;
-            entry.buffer = page_buffer;
-            entry.offset = 0;
-            entry.size = u64(_inline_constants_bound_bytes);
-            entries.push_back(entry);
-        }
-        for (auto const& s : _reserved_samplers)
-        {
-            auto entry = WGPUBindGroupEntry{};
-            entry.binding = s.binding;
-            entry.sampler = s.sampler;
-            entries.push_back(entry);
-        }
-        if (_has_acceleration)
-        {
-            auto pool = WGPUBindGroupEntry{};
-            pool.binding = acceleration_pool_binding;
-            pool.buffer = _ctx._acceleration.buffer().get();
-            pool.offset = 0;
-            pool.size = WGPU_WHOLE_SIZE;
-            entries.push_back(pool);
-
-            auto roots = WGPUBindGroupEntry{};
-            roots.binding = acceleration_roots_binding;
-            roots.buffer = page_buffer;
-            roots.offset = 0;
-            roots.size = u64(acceleration_roots_bytes);
-            entries.push_back(roots);
-        }
-        if (has_dispatch_grid())
-        {
-            auto grid = WGPUBindGroupEntry{};
-            grid.binding = u32(sg::reserved_dispatch_grid.webgpu_binding);
-            grid.buffer = page_buffer;
-            grid.offset = 0;
-            grid.size = u64(dispatch_grid_bytes);
-            entries.push_back(grid);
-        }
-        for (auto const& slot : sg::impl::polyfill_slots_of(mesh_polyfill()))
-        {
-            auto entry = WGPUBindGroupEntry{};
-            entry.binding = u32(slot.address->webgpu_binding);
-            entry.buffer = slot.is_task ? _ctx._task_scratch.buffer.get() : _ctx._mesh_scratch.buffer.get();
-            entry.offset = 0;
-            entry.size = WGPU_WHOLE_SIZE;
-            entries.push_back(entry);
-        }
-        if (debug_window != nullptr)
-        {
-            auto debug = WGPUBindGroupEntry{};
-            debug.binding = debug_window_binding;
-            debug.buffer = debug_window;
-            debug.offset = 0;
-            debug.size = WGPU_WHOLE_SIZE;
-            entries.push_back(debug);
-        }
-        auto const desc = WGPUBindGroupDescriptor{
-            .nextInChain = nullptr,
-            .label = to_wgpu("sg reserved group"),
-            .layout = _reserved_layout.get(),
-            .entryCount = size_t(entries.size()),
-            .entries = entries.empty() ? nullptr : entries.data(),
-        };
-        return wgpu_bind_group(wgpuDeviceCreateBindGroup(_ctx.device(), &desc));
+        auto entry = WGPUBindGroupEntry{};
+        entry.binding = binding;
+        entry.buffer = buffer;
+        entry.offset = 0;
+        entry.size = size;
+        entries.push_back(entry);
     };
+    if (_inline_constants_bytes > 0)
+        add_buffer(0, page_buffer, u64(_inline_constants_bound_bytes));
+    for (auto const& s : _reserved_samplers)
+    {
+        auto entry = WGPUBindGroupEntry{};
+        entry.binding = s.binding;
+        entry.sampler = s.sampler;
+        entries.push_back(entry);
+    }
+    if (_has_acceleration)
+    {
+        add_buffer(acceleration_pool_binding, _ctx._acceleration.buffer().get(), WGPU_WHOLE_SIZE);
+        add_buffer(acceleration_roots_binding, page_buffer, u64(acceleration_roots_bytes));
+    }
+    if (has_dispatch_grid())
+        add_buffer(u32(sg::reserved_dispatch_grid.webgpu_binding), page_buffer, u64(dispatch_grid_bytes));
+    for (auto const& slot : sg::impl::polyfill_slots_of(mesh_polyfill()))
+        add_buffer(u32(slot.address->webgpu_binding),
+                   slot.is_task ? _ctx._task_scratch.buffer.get() : _ctx._mesh_scratch.buffer.get(), WGPU_WHOLE_SIZE);
+    if (geometry_inputs().has_value())
+    {
+        CC_ASSERT(geometry != nullptr, "a layout holding a geometry draw's buffers binds them per draw");
+        auto const& inputs = geometry_inputs().value();
+        add_buffer(u32(sg::reserved_geometry_draw.webgpu_binding), geometry->draw, WGPU_WHOLE_SIZE);
+        add_buffer(u32(sg::reserved_geometry_indices.webgpu_binding), geometry->indices, WGPU_WHOLE_SIZE);
+        for (auto i = 0; i < sg::reserved_geometry_streams; ++i)
+            if ((inputs.vertex_streams & (1u << i)) != 0)
+                add_buffer(u32(sg::reserved_geometry_vertices[i].webgpu_binding), geometry->vertices[i], WGPU_WHOLE_SIZE);
+        if (inputs.holds_strip)
+            add_buffer(u32(sg::reserved_geometry_strip.webgpu_binding), geometry->strip, WGPU_WHOLE_SIZE);
+    }
+    if (debug_window != nullptr)
+        add_buffer(debug_window_binding, debug_window, WGPU_WHOLE_SIZE);
+    auto const desc = WGPUBindGroupDescriptor{
+        .nextInChain = nullptr,
+        .label = to_wgpu("sg reserved group"),
+        .layout = _reserved_layout.get(),
+        .entryCount = size_t(entries.size()),
+        .entries = entries.empty() ? nullptr : entries.data(),
+    };
+    return wgpu_bind_group(wgpuDeviceCreateBindGroup(_ctx.device(), &desc));
+}
+
+WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page const* page, WGPUBuffer debug_window) const
+{
+    CC_ASSERT(has_reserved_group(), "this pipeline layout has no reserved group");
+    CC_ASSERT(!geometry_inputs().has_value(), "a layout holding a geometry draw's buffers binds group 3 per draw");
+    materialize();
+    refresh_scratch();
 
     // a window's position among the windows this layout has met, which are the context's few
     auto slot = isize(0);
@@ -532,7 +549,7 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             _reserved_groups_without_page.push_back({});
         auto& group = _reserved_groups_without_page[slot];
         if (!group)
-            group = build(nullptr);
+            group = build_reserved_group(nullptr, debug_window, nullptr);
         return group.get();
     }
 
@@ -542,8 +559,19 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
         _reserved_groups.push_back({});
     auto& group = _reserved_groups[index];
     if (!group)
-        group = build(page->buffer.get());
+        group = build_reserved_group(page->buffer.get(), debug_window, nullptr);
     return group.get();
+}
+
+wgpu_bind_group webgpu_pipeline_layout::geometry_group_for(webgpu_constant_page const* page,
+                                                           WGPUBuffer debug_window,
+                                                           geometry_buffers const& geometry) const
+{
+    CC_ASSERT(geometry_inputs().has_value(), "this pipeline layout holds no geometry draw's buffers");
+    materialize();
+    refresh_scratch();
+    CC_ASSERT(_reserved_block_bytes == 0 || page != nullptr, "the reserved block needs a page to bind");
+    return build_reserved_group(_reserved_block_bytes == 0 ? nullptr : page->buffer.get(), debug_window, &geometry);
 }
 
 isize webgpu_pipeline_layout::reserved_dynamic_offsets(u32 block_offset, cc::span<u32> out) const

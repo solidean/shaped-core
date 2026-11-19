@@ -59,11 +59,20 @@ The windows that make a primitive are summed into ids, the restarts' positions f
 Over 256 draws, 664 to 232 ms and 655 to 229 ms: every indexed strip draw splits the pass for its scan, by either route, so it costs what the compute route's 256 draws do.
 `sg - an indexed strip's primitive ids and windings hold past one workgroup of the strip scan` checks every pixel's id over 33 chunks, culled and not; dropping the carried restart fails it.
 
+2026-11-19: webgpu draws it by the compute route, and the 8 tests of `sg - a geometry stage` pass on Dawn; wgpu is unchecked.
+Every buffer is bound whole, each view's offset written into `sg_geometry_draw`, and every vertex and index buffer is storage-bindable on webgpu.
+SGL's `emitted_source::reserved` names the reserved bindings the text declares, which slib turns into `compiled_shader::geometry_polyfill_streams`.
+`pipeline_layout_description::geometry_inputs` then holds only those streams.
+Group 3 of such a layout is built per draw, since it names the draw's buffers.
+`sg_geometry_strip` is a `mut buffer`, so it is writable in every layout and a draw no scan writes it for binds it a word of its own.
+WGSL now writes `@interpolate` only beside a `@location`, which `tag_gs`'s compute half broke.
+
 ## Still open
 
 - **dx12 and vulkan draw it**, beside their native stage, so the two images can be compared and the benchmark run: a Windows machine's work.
-  The compute half's layout twin needs the `sg_geometry_*` slots there, as the mesh polyfill's holds `sg_mesh_output`.
-- **webgpu draws it**, which needs `buffer_usage::readonly_buffer` on a vertex and an index buffer a polyfilled pipeline reads, since WebGPU binds no other as storage.
+  The compute half's layout twin carries `geometry_inputs` already; their layouts need the `sg_geometry_*` slots from it, as webgpu's has.
+- **wgpu draws it**: the tests ran on Dawn alone, `--runtime deno` needing a deno this machine lacked.
 - **The strip scan is one workgroup**: about 4 ms of an M4's frame for half a million windows; a scan across workgroups is next, if a scene needs it.
-- **WebGPU's storage buffers**: the geometry stage reads `sg_geometry_strip` beside the other seven entries, one more against WebGPU's default of eight a stage.
+- **WebGPU's storage buffers**: a compute half reading four streams holds eight with `sg_mesh_output` and the strip, and the debug window makes nine, one past WebGPU's default a stage.
+  One stream, as every test has, holds five.
 - Whether `vertex_index` on an indexed draw matches D3D's and vulkan's, which differ on the vertex offset.

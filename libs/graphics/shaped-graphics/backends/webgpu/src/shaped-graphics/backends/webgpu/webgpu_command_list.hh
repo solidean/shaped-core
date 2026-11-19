@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/webgpu/fwd.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_acceleration.hh>
+#include <shaped-graphics/backends/webgpu/webgpu_binding_group_layout.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_common.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_readback.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -173,6 +174,9 @@ public:
 
         // The bound pipeline's code writes print and assert records, so the epoch's window is read back.
         bool writes_debug = false;
+
+        // A polyfilled geometry draw's buffers, which group 3 names where the layout holds them.
+        webgpu_pipeline_layout::geometry_buffers geometry;
     };
     bound_state _compute;
     bound_state _raster;
@@ -183,6 +187,8 @@ public:
     // The group and the pipeline behind these pointers are held in `_keep_alive` from their bind.
     cc::fixed_vector<webgpu_binding_group const*, sg::max_binding_groups> _raster_group_objects;
     sg::impl::pipeline_footprint const* _raster_footprint = nullptr;
+    // The bound raster pipeline's strip scan, null where it polyfills no geometry stage over strips.
+    sg::compute_pipeline_handle _raster_strip_scan;
 
     // What draws of the open render pass read and wrote, by sg resource identity; ending the pass clears both.
     cc::vector<void const*> _pass_reads;
@@ -332,6 +338,8 @@ protected:
         CC_UNREACHABLE("webgpu has no mesh stage");
     }
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                         sg::impl::geometry_polyfill_draw const& draw) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Bodies in webgpu_raytracing.cc.
@@ -367,4 +375,8 @@ private:
                               cc::fixed_array<int, 3> grid,
                               webgpu_buffer const* args,
                               isize offset_in_bytes);
+    /// A compute form of a polyfill, seeing what the draw would: the raster state's groups and reserved block, which
+    /// its layout holds at the same offsets, with `grid_threads` behind them where it reads a grid.
+    [[nodiscard]] bound_state polyfill_half_of(sg::compute_pipeline const& pipeline,
+                                               cc::optional<cc::fixed_array<u32, 4>> grid_threads);
 };

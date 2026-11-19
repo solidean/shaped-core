@@ -32,7 +32,8 @@ namespace sg::impl
                                                cc::span<bound_sampler const> static_samplers,
                                                cc::optional<binding> const& inline_constants,
                                                bool dispatch_grid = false,
-                                               mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none);
+                                               mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none,
+                                               cc::optional<geometry_polyfill_inputs> const& geometry_inputs = {});
 
 [[nodiscard]] cc::hash128 pipeline_layout_hash(pipeline_layout_description const& desc);
 } // namespace sg::impl

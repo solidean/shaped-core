@@ -104,6 +104,10 @@ struct sg::compiled_shader
     i32 mesh_polyfill_corners = 0;
     i32 mesh_polyfill_primitives = 0;
     i32 mesh_polyfill_words = 0;
+    /// A polyfilled geometry stage's compute half: bit `i` where it reads the vertex buffer bound at slot `i`, reserved
+    /// `sg_geometry_vertices{i}`; 0 for every other shader.
+    /// SGL states it, as it does the numbers above.
+    u8 geometry_polyfill_streams = 0;
     /// A polyfilled task stage's numbers, which its compute form and its mesh stage's compute half and scan carry
     /// alike: the 32-bit words of one task workgroup's record, and the mesh workgroups one launches at most, 0 where
     /// it states none; all 0 for every other shader.

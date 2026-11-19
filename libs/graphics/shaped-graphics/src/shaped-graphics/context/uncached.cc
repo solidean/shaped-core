@@ -63,21 +63,33 @@ sg::raster_pipeline_description raster_half_of(sg::context& ctx, sg::raster_pipe
 
 /// A polyfilled description's compute half `shader`, over the twin of its layout that holds `sg_mesh_output` and the
 /// grid; a half launched by records reads them instead of the grid, since it is dispatched indirectly.
+/// A geometry stage's half, and its strip scan, hold the draw's buffers too.
 sg::compute_pipeline_description compute_half_of(sg::context& ctx,
                                                  sg::raster_pipeline_description const& desc,
                                                  sg::compiled_shader const& shader,
-                                                 bool is_launched)
+                                                 bool is_launched,
+                                                 bool holds_strip = false)
 {
     auto twin = desc.layout->description();
     twin.mesh_polyfill = is_launched ? sg::mesh_polyfill_slots::launched : sg::mesh_polyfill_slots::output;
     twin.dispatch_grid = !is_launched;
+    if (holds_strip || (desc.mesh_polyfill.has_value() && desc.mesh_polyfill.value().input_corners > 0))
+        twin.geometry_inputs = sg::geometry_polyfill_inputs{.vertex_streams = shader.geometry_polyfill_streams,
+                                                            .holds_strip = holds_strip};
     return {.shader = shader, .layout = ctx.cached.acquire_pipeline_layout(twin)};
 }
 
 sg::compute_pipeline_description compute_half_of(sg::context& ctx, sg::raster_pipeline_description const& desc)
 {
     auto const& p = desc.mesh_polyfill.value();
-    return compute_half_of(ctx, desc, p.compute_shader, p.task_shader.has_value());
+    // every compute half of a geometry stage reads the windows, a list draw binding a buffer it never reads there
+    return compute_half_of(ctx, desc, p.compute_shader, p.task_shader.has_value(), p.input_corners > 0);
+}
+
+/// A polyfilled geometry stage's strip scan, over the twin of its layout that holds the draw and the windows it writes.
+sg::compute_pipeline_description strip_scan_of(sg::context& ctx, sg::raster_pipeline_description const& desc)
+{
+    return compute_half_of(ctx, desc, desc.geometry_strip_scan.value(), false, true);
 }
 
 /// A polyfilled task stage's compute form or its scan, over the twin of its layout that holds `sg_task_output` and the
@@ -756,7 +768,7 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     auto strip_scan = compute_pipeline_handle();
     if (desc.geometry_strip_scan.has_value())
     {
-        auto scan = try_create_compute_pipeline(compute_half_of(_ctx, desc, desc.geometry_strip_scan.value(), false));
+        auto scan = try_create_compute_pipeline(strip_scan_of(_ctx, desc));
         if (scan.has_error())
             return cc::error(cc::format("its geometry polyfill's strip scan: {}", scan.error()));
         strip_scan = cc::move(scan.value());
@@ -830,8 +842,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     // a strip's scan beside them, over the compute half's twin, since it reads the same entries
     auto strip_scan = cc::shared_async<compute_pipeline_handle>();
     if (desc.geometry_strip_scan.has_value())
-        strip_scan
-            = _ctx.cached.acquire_compute_pipeline(compute_half_of(_ctx, desc, desc.geometry_strip_scan.value(), false));
+        strip_scan = _ctx.cached.acquire_compute_pipeline(strip_scan_of(_ctx, desc));
 
     // A backend may settle the build from a callback of its own, so the name is set once it has.
     _ctx._stats.add(stat::pipelines_created);

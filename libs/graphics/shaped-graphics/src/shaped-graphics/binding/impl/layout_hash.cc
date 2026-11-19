@@ -74,7 +74,8 @@ cc::hash128 pipeline_layout_hash(cc::span<binding_group_layout_handle const> gro
                                  cc::span<bound_sampler const> static_samplers,
                                  cc::optional<binding> const& inline_constants,
                                  bool dispatch_grid,
-                                 mesh_polyfill_slots mesh_polyfill)
+                                 mesh_polyfill_slots mesh_polyfill,
+                                 cc::optional<geometry_polyfill_inputs> const& geometry_inputs)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_pod(u64(groups.size()));
@@ -102,6 +103,12 @@ cc::hash128 pipeline_layout_hash(cc::span<binding_group_layout_handle const> gro
     // and so do the grid and a polyfilled mesh stage's slots
     b.add_pod(dispatch_grid);
     b.add_pod(mesh_polyfill);
+    b.add_pod(geometry_inputs.has_value());
+    if (geometry_inputs.has_value())
+    {
+        b.add_pod(geometry_inputs.value().vertex_streams);
+        b.add_pod(geometry_inputs.value().holds_strip);
+    }
 
     return cc::hash128::create(b.written_bytes(), 0);
 }
@@ -109,6 +116,6 @@ cc::hash128 pipeline_layout_hash(cc::span<binding_group_layout_handle const> gro
 cc::hash128 pipeline_layout_hash(pipeline_layout_description const& desc)
 {
     return pipeline_layout_hash(desc.groups, desc.static_samplers, desc.inline_constants, desc.dispatch_grid,
-                                desc.mesh_polyfill);
+                                desc.mesh_polyfill, desc.geometry_inputs);
 }
 } // namespace sg::impl

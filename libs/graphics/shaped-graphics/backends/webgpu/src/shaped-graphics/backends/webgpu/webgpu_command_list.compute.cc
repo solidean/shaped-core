@@ -132,11 +132,20 @@ void webgpu_command_list::apply_compute_state()
             window = _ctx.debug_windows().window_for_recording(s.writes_debug);
             touch(window);
         }
-        wgpuComputePassEncoderSetBindGroup(
-            pass, u32(sg::reserved_binding_group),
-            s.layout->reserved_group_for(
-                s.constants_page, window != nullptr ? static_cast<webgpu_buffer const&>(*window).raw() : nullptr),
-            size_t(offset_count), offset_count > 0 ? offsets : nullptr);
+        auto const window_buffer = window != nullptr ? static_cast<webgpu_buffer const&>(*window).raw() : nullptr;
+        auto group = WGPUBindGroup(nullptr);
+        if (s.layout->geometry_inputs().has_value())
+        {
+            // a geometry draw's own buffers, which no cached group names
+            auto const made = std::make_shared<wgpu_bind_group>(
+                s.layout->geometry_group_for(s.constants_page, window_buffer, s.geometry));
+            group = made->get();
+            _keep_alive.push_back(made);
+        }
+        else
+            group = s.layout->reserved_group_for(s.constants_page, window_buffer);
+        wgpuComputePassEncoderSetBindGroup(pass, u32(sg::reserved_binding_group), group, size_t(offset_count),
+                                           offset_count > 0 ? offsets : nullptr);
     }
     s.needs_full_apply = false;
 }
@@ -282,26 +291,8 @@ void webgpu_command_list::draw_mesh_polyfilled(sg::impl::mesh_polyfill_state con
     _keep_alive.push_back(polyfill.scan);
     bring_pool_writes_forward();
 
-    // Each compute form sees what the draw would: the raster state's groups and its reserved block, which the compute
-    // twin's layout holds at the same offsets, the grid behind them where it reads one.
     auto const half_of = [&](sg::compute_pipeline const& pipeline, cc::optional<cc::fixed_array<u32, 4>> grid_threads)
-    {
-        auto const* const p = dynamic_cast<webgpu_compute_pipeline const*>(&pipeline);
-        CC_ASSERT(p != nullptr, "a polyfill's compute form is not a webgpu compute_pipeline");
-        auto half = bound_state();
-        rebind_layout(half, p->layout.get());
-        half.compute_pipeline = p->pipeline;
-        half.writes_debug = !p->footprint().debug_stages().is_empty();
-        for (isize i = 0; i < half.groups.size() && i < _raster.groups.size(); ++i)
-            half.groups[i] = _raster.groups[i];
-        cc::memcpy(half.constants.data(), _raster.constants.data(),
-                   size_t(cc::min(half.constants.size(), _raster.constants.size())));
-        if (grid_threads.has_value())
-            cc::memcpy(half.constants.data() + p->layout->grid_offset_in_block(), grid_threads.value().data(), 16);
-        half.constants_dirty = true;
-        _keep_alive.push_back(p->layout);
-        return half;
-    };
+    { return polyfill_half_of(pipeline, grid_threads); };
 
     end_open_pass("a polyfilled mesh draw", split_remedy::none);
     // The header's task grid, and an indirect draw's one record with no task stage, before any pass reads them.
@@ -376,6 +367,124 @@ void webgpu_command_list::draw_mesh_polyfilled(sg::impl::mesh_polyfill_state con
         wgpuRenderPassEncoderDraw(render_pass(), u32(groups * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
 }
 
+webgpu_command_list::bound_state webgpu_command_list::polyfill_half_of(sg::compute_pipeline const& pipeline,
+                                                                       cc::optional<cc::fixed_array<u32, 4>> grid_threads)
+{
+    auto const* const p = dynamic_cast<webgpu_compute_pipeline const*>(&pipeline);
+    CC_ASSERT(p != nullptr, "a polyfill's compute form is not a webgpu compute_pipeline");
+    auto half = bound_state();
+    rebind_layout(half, p->layout.get());
+    half.compute_pipeline = p->pipeline;
+    half.writes_debug = !p->footprint().debug_stages().is_empty();
+    for (isize i = 0; i < half.groups.size() && i < _raster.groups.size(); ++i)
+        half.groups[i] = _raster.groups[i];
+    cc::memcpy(half.constants.data(), _raster.constants.data(),
+               size_t(cc::min(half.constants.size(), _raster.constants.size())));
+    if (grid_threads.has_value())
+        cc::memcpy(half.constants.data() + p->layout->grid_offset_in_block(), grid_threads.value().data(), 16);
+    half.constants_dirty = true;
+    _keep_alive.push_back(p->layout);
+    return half;
+}
+
+// -- a polyfilled geometry draw: the strip scan and the compute half in a pass of their own, then a draw of the slots --
+
+void webgpu_command_list::raster_draw_geometry_polyfilled(sg::impl::mesh_polyfill_state const& polyfill,
+                                                          sg::impl::geometry_polyfill_draw const& draw)
+{
+    CC_ASSERT(_in_rendering_scope, "a draw is only valid inside a rendering scope");
+    CC_ASSERT(!draw.is_indexed || _index_buffer != nullptr, "an indexed draw needs a bound index buffer");
+    CC_ASSERTF(_vertex_buffers.size() <= sg::reserved_geometry_streams,
+               "a polyfilled geometry stage reads at most {} vertex buffers, and {} are bound",
+               sg::reserved_geometry_streams, _vertex_buffers.size());
+
+    // One thread a primitive of an instance, each owning its slots of the context's scratch.
+    auto const threads = i64(draw.primitives) * i64(draw.instances);
+    auto const lanes = i64(cc::max(polyfill.workgroup.x, 1));
+    auto const groups = (threads + lanes - 1) / lanes;
+    CC_ASSERTF(groups <= sg::max_dispatch_groups_per_dimension,
+               "a polyfilled geometry draw of {} primitives takes {} workgroups, past the {} a dispatch holds; draw "
+               "fewer at once",
+               threads, groups, sg::max_dispatch_groups_per_dimension);
+    (void)_ctx.mesh_scratch_for(isize(threads * polyfill.words_per_group * 4));
+    _keep_alive.push_back(polyfill.compute);
+    bring_pool_writes_forward();
+
+    // What the compute half reads of the draw: every buffer is bound whole, since a storage binding's offset must be
+    // aligned past what a view's is, so the views' offsets travel here, the indices' in indices and each stream's in words.
+    auto const index_bytes = _sg_index_format == sg::index_format::uint16 ? u64(2) : u64(4);
+    u32 values[12] = {draw.first,
+                      draw.primitives,
+                      draw.is_indexed ? (_sg_index_format == sg::index_format::uint16 ? 1u : 2u) : 0u,
+                      u32(draw.vertex_offset),
+                      draw.first_instance,
+                      draw.is_indexed ? u32(_index_offset / index_bytes) : 0u,
+                      0,
+                      draw.is_strip ? u32(polyfill.input_corners) : 0u, // [1].w: a strip's corners, 0 for a list
+                      0,
+                      0,
+                      0,
+                      0};
+    for (auto i = isize(0); i < _vertex_buffers.size(); ++i)
+    {
+        CC_ASSERTF(_vertex_buffers[i].offset % 4 == 0,
+                   "a polyfilled geometry stage reads vertex buffer {} as words, and its view starts at byte {}", i,
+                   _vertex_buffers[i].offset);
+        values[8 + i] = u32(_vertex_buffers[i].offset / 4);
+    }
+    auto const record_handle = _ctx.transient.create_raw_buffer(
+        isize(sizeof(values)), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    touch(record_handle);
+    auto const record = static_cast<webgpu_buffer const&>(*record_handle).raw();
+
+    end_open_pass("a polyfilled geometry stage", split_remedy::none);
+    {
+        auto const span = stage_upload(cc::as_bytes(cc::span<u32 const>(values)), isize(sizeof(values)));
+        wgpuCommandEncoderCopyBufferToBuffer(encoder(), span.buffer, u64(span.offset), record, 0, u64(sizeof(values)));
+        if (span.overflow)
+            _keep_alive.push_back(std::make_shared<wgpu_buffer>(span.overflow));
+    }
+
+    // A slot the draw has no buffer for names the record, which the shader never reads there.
+    // The windows are writable, as SGL declares them, so they take a buffer of their own even where no scan writes them.
+    auto const is_scanned = draw.is_strip && draw.is_indexed && _raster_strip_scan != nullptr;
+    auto const windows_handle = _ctx.transient.create_raw_buffer(
+        is_scanned ? isize(cc::max(draw.primitives, 1u)) * 4 : isize(4), sg::buffer_usage::readwrite_buffer);
+    touch(windows_handle);
+    auto buffers
+        = webgpu_pipeline_layout::geometry_buffers{.draw = record,
+                                                   .indices = draw.is_indexed ? _index_buffer : record,
+                                                   .strip = static_cast<webgpu_buffer const&>(*windows_handle).raw()};
+    for (auto i = 0; i < sg::reserved_geometry_streams; ++i)
+        buffers.vertices[i]
+            = i < _vertex_buffers.size() && _vertex_buffers[i].buffer != nullptr ? _vertex_buffers[i].buffer : record;
+
+    auto kept = cc::move(_compute);
+    open_compute_pass();
+    // An indexed strip's windows past a restart index, which one workgroup scans before the stage reads them.
+    if (is_scanned)
+    {
+        _keep_alive.push_back(_raster_strip_scan);
+        auto const size = _raster_strip_scan->workgroup_size();
+        _compute = polyfill_half_of(*_raster_strip_scan, cc::fixed_array<u32, 4>{u32(size.x), 1, 1, 0});
+        _compute.geometry = buffers;
+        apply_compute_state();
+        wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), 1, 1, 1);
+    }
+    _compute = polyfill_half_of(*polyfill.compute, cc::fixed_array<u32, 4>{u32(threads), 1, 1, 0});
+    _compute.geometry = buffers;
+    apply_compute_state();
+    wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(groups), 1, 1);
+    end_open_pass("a polyfilled geometry stage", split_remedy::none);
+    _compute = cc::move(kept);
+    _compute.needs_full_apply = true;
+
+    // The vertex half reopens the pass, loading what it held, and draws every corner of every slot in order.
+    order_draw_within_pass(false);
+    apply_raster_state();
+    wgpuRenderPassEncoderDraw(render_pass(), u32(threads * polyfill.primitives_per_group * polyfill.corners), 1, 0, 0);
+}
+
 // -- raster state helpers shared with webgpu_command_list.raster.cc --
 
 void webgpu_command_list::raster_bind_group(int group_index, sg::binding_group const& group)
@@ -409,5 +518,6 @@ void webgpu_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
     _keep_alive.push_back(pipeline.weak_from_this().lock());
     _raster_footprint = &pipeline.footprint();
     _raster.writes_debug = !pipeline.footprint().debug_stages().is_empty();
+    _raster_strip_scan = pipeline.geometry_strip_scan();
 }
 } // namespace sg::backend::webgpu

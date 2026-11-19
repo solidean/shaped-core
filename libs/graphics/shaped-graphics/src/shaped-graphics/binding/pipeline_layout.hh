@@ -36,6 +36,20 @@ enum class sg::mesh_polyfill_slots : sg::u8
     launched,
 };
 
+/// The buffers of a polyfilled geometry stage's draw a pipeline layout holds, past `sg_mesh_output` (SGL's CHK-525).
+/// A layout holding any holds reserved `sg_geometry_draw` and `sg_geometry_indices`, which every compute half reads.
+struct sg::geometry_polyfill_inputs
+{
+    /// Bit `i` holds reserved `sg_geometry_vertices{i}`, the vertex buffer bound at slot `i`, which the compute half reads
+    /// only where its vertex stage takes a member from that stream.
+    u8 vertex_streams = 0;
+    /// Reserved `sg_geometry_strip`, the windows of a strip draw, which the strip scan writes and every compute half
+    /// reads; SGL declares it writable for both.
+    bool holds_strip = false;
+
+    bool operator==(geometry_polyfill_inputs const&) const = default;
+};
+
 namespace sg::impl
 {
 /// One buffer a layout of a polyfill's slots holds: the mesh stage's slots, or a task stage's records.
@@ -103,6 +117,11 @@ struct sg::pipeline_layout_description
     /// `sg_mesh_input` for its vertex half; never both, since WebGPU refuses one buffer bound writable and read-only.
     /// Pipeline creation sets it for a polyfilled pipeline's two halves, so a description rarely does.
     mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none;
+
+    /// The layout holds the buffers a polyfilled geometry stage's compute half or strip scan reads.
+    /// WebGPU caps the storage buffers of a stage, so a layout holds only those its shader reads.
+    /// Pipeline creation sets it from what SGL states of the compute half, so a description rarely does.
+    cc::optional<geometry_polyfill_inputs> geometry_inputs;
 };
 
 /// The binding interface a pipeline is compiled against: an ordered set of binding_group_layouts.
@@ -146,12 +165,16 @@ public:
     /// Which of a polyfilled mesh stage's slots the layout holds (`pipeline_layout_description::mesh_polyfill`).
     [[nodiscard]] mesh_polyfill_slots mesh_polyfill() const { return _mesh_polyfill; }
 
+    /// The polyfilled geometry stage's buffers the layout holds (`pipeline_layout_description::geometry_inputs`).
+    [[nodiscard]] cc::optional<geometry_polyfill_inputs> const& geometry_inputs() const { return _geometry_inputs; }
+
     /// The description it was created from, which creates it again.
     [[nodiscard]] pipeline_layout_description description() const
     {
         auto result = pipeline_layout_description{.inline_constants = _inline_constants,
                                                   .dispatch_grid = _has_dispatch_grid,
-                                                  .mesh_polyfill = _mesh_polyfill};
+                                                  .mesh_polyfill = _mesh_polyfill,
+                                                  .geometry_inputs = _geometry_inputs};
         for (auto const& g : _groups)
             result.groups.push_back(g);
         result.static_samplers.push_back_range(_static_samplers);
@@ -165,11 +188,13 @@ protected:
                     cc::optional<binding> inline_constants,
                     bool dispatch_grid = false,
                     cc::span<bound_sampler const> static_samplers = {},
-                    mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none)
+                    mesh_polyfill_slots mesh_polyfill = mesh_polyfill_slots::none,
+                    cc::optional<geometry_polyfill_inputs> geometry_inputs = {})
       : _structural_hash(structural_hash),
         _inline_constants(cc::move(inline_constants)),
         _has_dispatch_grid(dispatch_grid),
-        _mesh_polyfill(mesh_polyfill)
+        _mesh_polyfill(mesh_polyfill),
+        _geometry_inputs(geometry_inputs)
     {
         _static_samplers.push_back_range(static_samplers);
         for (auto const& group : groups)
@@ -183,5 +208,6 @@ private:
     cc::optional<binding> _inline_constants;
     bool _has_dispatch_grid = false;
     mesh_polyfill_slots _mesh_polyfill = mesh_polyfill_slots::none;
+    cc::optional<geometry_polyfill_inputs> _geometry_inputs;
     cc::vector<bound_sampler> _static_samplers;
 };
