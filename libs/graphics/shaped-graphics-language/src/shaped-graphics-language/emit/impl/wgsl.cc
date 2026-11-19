@@ -89,13 +89,16 @@ public:
                 out += "@builtin(frag_depth) ";
             else if (member.location >= 0)
                 out.appendf("@location({}) ", member.location);
-            // EMIT-129: only what differs from perspective at the centre is written
+            // EMIT-129: only what differs from perspective at the centre is written, and only beside a location, which
+            // a stage struct a compute polyfill holds in memory has none of
             using kind = check::interpolation::kind_t;
             using sampling = check::interpolation::sampling_t;
             auto const& i = member.interpolate;
-            if (i.kind == kind::flat)
+            auto const has_location
+                = !member.is_position && member.output == check::pixel_output::color && member.location >= 0;
+            if (has_location && i.kind == kind::flat)
                 out += "@interpolate(flat) ";
-            else if (i.kind == kind::linear || i.sampling != sampling::center)
+            else if (has_location && (i.kind == kind::linear || i.sampling != sampling::center))
                 out.appendf("@interpolate({}{}) ", i.kind == kind::linear ? "linear" : "perspective",
                             i.sampling == sampling::centroid ? ", centroid"
                             : i.sampling == sampling::sample ? ", sample"
