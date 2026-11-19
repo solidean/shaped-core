@@ -532,6 +532,30 @@ INVOCABLE_TEST("sg - prewarm registers a routine and the tick brings it up",
     prewarmed::evict(*ctx);
 }
 
+// An idle registry's idle_completion is ready when asked, with nothing ticked.
+// A synchronous test on an unthreaded build waits on it from inside the device's home, which cannot run a node homed there.
+// So waiting on a registry with nothing to do must never need the device: it deadlocked every such test on webgpu.
+INVOCABLE_TEST("sg - an idle registry's idle_completion is ready when asked",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+
+    using idle = gated_routine<0>;
+    idle::evict(*ctx);
+    CHECK(ctx->routines.idle_completion()->is_ready());
+
+    // one registered and pending is not idle, and once it is up, the registry is again
+    idle::prewarm(*ctx);
+    CHECK(!ctx->routines.idle_completion()->is_ready());
+    while (!ctx->routines.tick().is_idle())
+    {
+    }
+    CHECK(ctx->routines.idle_completion()->is_ready());
+
+    idle::evict(*ctx);
+}
+
 // The budget bounds how long the TICK spends driving, not how long an initialization takes.
 // A tick whose budget runs out returns with its phases still in flight, and a later tick collects them.
 // Both halves are arranged rather than timed: the injected clock spends the budget within one pass, and the gate keeps

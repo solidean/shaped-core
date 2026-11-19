@@ -148,6 +148,8 @@ public:
     /// Between two ticks it parks until a running phase settles or a parked one asks for a command list, so it never spins a context that cannot block.
     /// It settles once nothing is pending, which a phase that never settles means never — a failed routine is not pending.
     /// Cold, and homed to the device's home where the context has one, since every tick records on the device.
+    /// **Ready at once where every routine is up or failed at the current reload generation**, with nothing ticked.
+    /// So a caller blocked inside the device's home, as a synchronous test on an unthreaded build is, can still wait on an idle registry.
     /// Unbounded by construction, so never on a frame path.
     [[nodiscard]] cc::shared_async<routine_tick_result> idle_completion();
 

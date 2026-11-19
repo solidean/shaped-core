@@ -189,6 +189,13 @@ cc::vector<cc::shared_async<cc::unit>> routine_registry::in_flight_phases()
 
 cc::shared_async<routine_tick_result> routine_registry::idle_completion()
 {
+    auto const generation = sg::reload_generation();
+    auto is_idle = true;
+    for (auto const& routine : snapshot())
+        is_idle = is_idle && !routine->needs_init(generation);
+    if (is_idle)
+        return cc::make_async_from_value(routine_tick_result());
+
     auto node = idle_completion_steps();
     if (auto* const home = _ctx.device_home())
         (void)node->try_home_cold(*home);
