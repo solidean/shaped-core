@@ -1394,6 +1394,9 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-304** `@tessellation_control(partitioning = p, winding = w)` makes an entry point of the tessellation control stage, which needs `tessellation_shader`.
   `p` is `.integer`, `.fractional_even` or `.fractional_odd`, and `w` is `.clockwise` or `.counter_clockwise`.
   `w` is the patch's winding: the triangles the tessellator makes wind as the corners do, where the evaluation stage weighs the control points in order by the domain location.
+  Corners wind as a raster pipeline's front face reads them: where they land on the render target, x to the right and y down.
+  Clip space has y up, so corners clockwise on the render target are counter-clockwise in clip space.
+  HLSL names its output topology in the domain's mirrored orientation, so `.counter_clockwise` is its `triangle_cw` and `.clockwise` its `triangle_ccw` (EMIT-134).
   A triangle patch evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z` of counter-clockwise corners is `.counter_clockwise`.
   So is a quad patch of corners counter-clockwise from its first, blended by `uv.x` from the first to the second and by `uv.y` from that edge to the opposite one.
   Power-of-two partitioning is none of them, since vulkan lacks it.
