@@ -451,6 +451,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
+            tests/compute/compute-pack-routes-test.cc
             tests/compute/compute-array-equality-test.cc
             tests/compute/compute-native-dxil-test.cc
             tests/compute/compute-native-spirv-test.cc
@@ -587,6 +588,7 @@ if(SC_BUILD_TESTS)
                 query_stages.sgl:*
                 ray_stages.sgl:*
                 double_routes.sgl:*
+                pack_routes.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -604,6 +606,7 @@ if(SC_BUILD_TESTS)
                 query_stages.sgl:*
                 ray_stages.sgl:*
                 double_routes.sgl:*
+                pack_routes.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -621,6 +624,7 @@ if(SC_BUILD_TESTS)
                 query_stages.sgl:*
                 ray_stages.sgl:*
                 double_routes.sgl:*
+                pack_routes.sgl:*
         )
 
         sc_add_shader_package(

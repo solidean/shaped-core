@@ -1,0 +1,18 @@
+// The packs into a uint and the unpacks back through DXC and through SGL's own binary, which lowers them as the
+// text's helpers write them, so the two routes compute alike.
+
+binding pack_routes:
+    values: buffer[float4]
+    words: buffer[uint]
+    packed: mut buffer[uint4]
+    unpacked: mut buffer[float4]
+
+// Value i packed as unorm bytes, as snorm bytes and as two words of halves, and word i unpacked the three ways.
+@compute(64) fun pack_steps(@thread_id id: int3){pack_routes}:
+    let v = pack_routes.values[id.x]
+    let w = pack_routes.words[id.x]
+    pack_routes.packed[id.x] = uint4(pack_unorm4x8(v), pack_snorm4x8(v), pack_half2x16(v.xy), pack_half2x16(v.zw))
+    pack_routes.unpacked[3 * id.x] = unpack_unorm4x8(w)
+    pack_routes.unpacked[3 * id.x + 1] = unpack_snorm4x8(w)
+    let h = unpack_half2x16(w)
+    pack_routes.unpacked[3 * id.x + 2] = float4(h.x, h.y, 0.0, 0.0)
