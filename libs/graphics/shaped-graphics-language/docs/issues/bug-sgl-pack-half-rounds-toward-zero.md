@@ -18,7 +18,8 @@ Measured on 2026-11-20 by `sg - every half and byte packs and unpacks alike thro
 A value a half holds exactly packs to that half everywhere, and so does an infinity; a NaN packs to a NaN.
 
 It is the target's conversion and no route's: the two routes of each context agree to the bit.
-[bug-sgl-half-conversion-rounds-toward-zero-on-amd](bug-sgl-half-conversion-rounds-toward-zero-on-amd.md) is the same finding for `f as half` on AMD; the corpus's `half_math.sgl` saw no such thing on NVIDIA's dx12, so there `LegacyF32ToF16` truncates where a conversion does not.
+[bug-sgl-half-conversion-rounds-toward-zero-on-amd](bug-sgl-half-conversion-rounds-toward-zero-on-amd.md) is the same finding for `f as half` on AMD.
+The corpus's `half_math.sgl` saw no such thing on NVIDIA's dx12, so there `LegacyF32ToF16` truncates where a conversion does not.
 
 What would settle it:
 - The spec states `pack_half2x16`'s rounding as the target's, nearest or toward zero.
