@@ -139,7 +139,7 @@ TEST("sgl ir - a robustness report writes through the same record")
 }
 
 // An unpack takes one word whatever its result's width, so the call's scalar is never splatted to the result.
-TEST("sgl ir - an unpack of a word lowers to SPIR-V, and the DXIL writer declines it for the text route")
+TEST("sgl ir - an unpack of a word lowers to SPIR-V and to DXIL")
 {
     constexpr auto source = cc::string_view("binding work:\n"
                                             "    words: buffer[uint]\n"
@@ -158,7 +158,7 @@ TEST("sgl ir - an unpack of a word lowers to SPIR-V, and the DXIL writer decline
         if (t == sgl::emit::target::hlsl_vulkan)
             CHECK(!e.value().spirv.empty());
         else
-            CHECK(e.value().dxil.empty()); // the text route, where DXC writes the unpack
+            CHECK(!e.value().dxil.empty());
     }
 }
 

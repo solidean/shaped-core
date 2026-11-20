@@ -346,6 +346,13 @@ private:
     void whole_normalize(instruction const& i, u8 flags);
     void whole_reflect(instruction const& i, u8 flags);
     void whole_refract(instruction const& i, u8 flags);
+    [[nodiscard]] ll_value packed_byte(ll_value scaled, cast_op to_int, u8 flags);
+    void whole_pack_unorm(instruction const& i, u8 flags);
+    void whole_pack_snorm(instruction const& i, u8 flags);
+    void whole_pack_half(instruction const& i, u8 flags);
+    void whole_unpack_unorm(instruction const& i, u8 flags);
+    void whole_unpack_snorm(instruction const& i, u8 flags);
+    void whole_unpack_half(instruction const& i, u8 flags);
 
     // ---- writer_memory.cc
     void declare_memory();

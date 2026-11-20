@@ -333,6 +333,98 @@ void writer::whole_refract(instruction const& i, u8 flags)
     }
 }
 
+// ---- packing into a uint and back, as the HLSL text's helpers write it, so DXC's DXIL and this one agree
+
+/// `floor(scaled + 0.5)` as an integer, EVAL-88's byte before it is masked.
+ll_value writer::packed_byte(ll_value scaled, cast_op to_int, u8 flags)
+{
+    auto const rounded = dx_unary(dx_op::round_ni, _m.binary(binary_op::add, scaled, float_like(scaled, 0.5), flags));
+    return _m.cast(to_int, rounded, _m.int_type());
+}
+
+void writer::whole_pack_unorm(instruction const& i, u8 flags)
+{
+    auto const v = value_ref(_p.operands_of(i)[0]);
+    auto word = ll_value::none;
+    for (auto l = u32(0); l < 4; ++l)
+    {
+        auto const unit = dx_unary(dx_op::saturate, leaf_at(v, l));
+        auto const byte
+            = packed_byte(_m.binary(binary_op::mul, unit, float_like(unit, 255.0), flags), cast_op::fptoui, flags);
+        auto const placed = _m.binary(binary_op::shl, byte, _m.constant_i32(8 * l));
+        word = l == 0 ? placed : _m.binary(binary_op::bit_or, word, placed);
+    }
+    _scratch.push_back(word);
+}
+
+void writer::whole_pack_snorm(instruction const& i, u8 flags)
+{
+    auto const v = value_ref(_p.operands_of(i)[0]);
+    auto word = ll_value::none;
+    for (auto l = u32(0); l < 4; ++l)
+    {
+        auto const x = leaf_at(v, l);
+        auto const unit = dx_binary(dx_op::fmin, dx_binary(dx_op::fmax, x, float_like(x, -1.0)), float_like(x, 1.0));
+        auto const byte
+            = packed_byte(_m.binary(binary_op::mul, unit, float_like(unit, 127.0), flags), cast_op::fptosi, flags);
+        auto const masked = _m.binary(binary_op::bit_and, byte, _m.constant_i32(0xffu));
+        auto const placed = _m.binary(binary_op::shl, masked, _m.constant_i32(8 * l));
+        word = l == 0 ? placed : _m.binary(binary_op::bit_or, word, placed);
+    }
+    _scratch.push_back(word);
+}
+
+void writer::whole_pack_half(instruction const& i, u8)
+{
+    auto const v = value_ref(_p.operands_of(i)[0]);
+    auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::legacy_f32_to_f16)].number);
+    ll_value halves[2];
+    for (auto l = u32(0); l < 2; ++l)
+    {
+        ll_value const args[] = {number, leaf_at(v, l)};
+        halves[l] = call(dx_op::legacy_f32_to_f16, _m.float_type(), args);
+    }
+    auto const high = _m.binary(binary_op::shl, halves[1], _m.constant_i32(16));
+    _scratch.push_back(_m.binary(binary_op::bit_or, halves[0], high));
+}
+
+void writer::whole_unpack_unorm(instruction const& i, u8 flags)
+{
+    auto const word = leaf_at(value_ref(_p.operands_of(i)[0]));
+    for (auto l = u32(0); l < 4; ++l)
+    {
+        auto byte = _m.binary(binary_op::lshr, word, _m.constant_i32(8 * l));
+        if (l < 3)
+            byte = _m.binary(binary_op::bit_and, byte, _m.constant_i32(0xffu));
+        auto const value = _m.cast(cast_op::uitofp, byte, _m.float_type());
+        _scratch.push_back(_m.binary(binary_op::sdiv, value, float_like(value, 255.0), flags));
+    }
+}
+
+void writer::whole_unpack_snorm(instruction const& i, u8 flags)
+{
+    auto const word = leaf_at(value_ref(_p.operands_of(i)[0]));
+    for (auto l = u32(0); l < 4; ++l)
+    {
+        auto const top = _m.binary(binary_op::shl, word, _m.constant_i32(24 - 8 * l));
+        auto const byte = _m.binary(binary_op::ashr, top, _m.constant_i32(24));
+        auto const value = _m.cast(cast_op::sitofp, byte, _m.float_type());
+        auto const unit = _m.binary(binary_op::sdiv, value, float_like(value, 127.0), flags);
+        _scratch.push_back(dx_binary(dx_op::fmax, unit, float_like(unit, -1.0)));
+    }
+}
+
+void writer::whole_unpack_half(instruction const& i, u8)
+{
+    auto const word = leaf_at(value_ref(_p.operands_of(i)[0]));
+    auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::legacy_f16_to_f32)].number);
+    // the operation reads the low 16 bits alone, so the low half needs no mask
+    ll_value const low[] = {number, word};
+    ll_value const high[] = {number, _m.binary(binary_op::lshr, word, _m.constant_i32(16))};
+    _scratch.push_back(call(dx_op::legacy_f16_to_f32, _m.int_type(), low));
+    _scratch.push_back(call(dx_op::legacy_f16_to_f32, _m.int_type(), high));
+}
+
 void writer::math_op(u32 index, instruction const& i)
 {
     using lane_fn = ll_value (writer::*)(cc::span<ll_value const>, u8);
@@ -396,6 +488,12 @@ void writer::math_op(u32 index, instruction const& i)
         {math::normalize, -1, 1, nullptr, &writer::whole_normalize},
         {math::reflect, -1, 2, nullptr, &writer::whole_reflect},
         {math::refract, -1, 3, nullptr, &writer::whole_refract},
+        {math::pack_unorm4x8, -1, 1, nullptr, &writer::whole_pack_unorm},
+        {math::pack_snorm4x8, -1, 1, nullptr, &writer::whole_pack_snorm},
+        {math::pack_half2x16, -1, 1, nullptr, &writer::whole_pack_half},
+        {math::unpack_unorm4x8, -1, 1, nullptr, &writer::whole_unpack_unorm},
+        {math::unpack_snorm4x8, -1, 1, nullptr, &writer::whole_unpack_snorm},
+        {math::unpack_half2x16, -1, 1, nullptr, &writer::whole_unpack_half},
     };
 
     auto const fn = math(i.sub);
