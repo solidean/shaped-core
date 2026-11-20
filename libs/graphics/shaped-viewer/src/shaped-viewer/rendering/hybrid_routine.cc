@@ -14,6 +14,15 @@ namespace sv
 {
 namespace tracer = sv::shaders::tracer;
 
+namespace
+{
+/// `path_words` of hybrid_pass.sgl: the `float4`s `thin_io.path` holds per pixel.
+constexpr isize path_words = 8;
+
+/// The most pixels one band of the deferred lighting covers: 64 MiB of `thin_io.path` at most.
+constexpr isize max_band_pixels = isize(1) << 19;
+} // namespace
+
 cc::shared_async<cc::unit> hybrid_routine::init_once(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
@@ -27,18 +36,27 @@ cc::shared_async<cc::unit> hybrid_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
     _light_thin = nullptr;
+    _light_thin_bounce = nullptr;
     _blend_guides = nullptr;
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         co_return;
     auto const light_thin = shaders::hybrid_pass::light_thin.acquire_pipeline(ctx);
+    auto const light_thin_bounce = shaders::hybrid_pass::light_thin_bounce.acquire_pipeline(ctx);
     auto const blend_guides = shaders::hybrid_pass::blend_guides.acquire_pipeline(ctx);
     co_await cc::async_settled(light_thin);
+    co_await cc::async_settled(light_thin_bounce);
     co_await cc::async_settled(blend_guides);
-    if (auto const* const built = light_thin->try_value(); built != nullptr)
-        _light_thin = *built;
+    auto const* const primary = light_thin->try_value();
+    auto const* const bounce = light_thin_bounce->try_value();
+    if (primary != nullptr && bounce != nullptr)
+    {
+        _light_thin = *primary;
+        _light_thin_bounce = *bounce;
+    }
     else
-        CC_LOG_ERROR("the hybrid's deferred lighting kernel did not build, so a deferred hybrid frame is declined: {}",
-                     light_thin->try_error()->underlying().to_string());
+        CC_LOG_ERROR(
+            "the hybrid's deferred lighting kernels did not build, so a deferred hybrid frame is declined: {}",
+            (primary == nullptr ? light_thin->try_error() : light_thin_bounce->try_error())->underlying().to_string());
     if (auto const* const built = blend_guides->try_value(); built != nullptr)
         _blend_guides = *built;
     else
@@ -219,6 +237,15 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
         return outcome;
     }
 
+    // One sample at a time, `light_thin` then `light_thin_bounce`, each pair handing one record per pixel through `thin_io.path` and `thin_io.rng`,
+    // and one band of rows at a time, so that record stays bounded whatever the image's size.
+    // `light_thin` alone was one kernel once, which hung Intel's dx12 device (shaped-viewer's bug-sv-hybrid-light-thin-hangs-intel-dx12).
+    auto const samples = cc::clamp(d.frame.hybrid_samples, 1, 4); // `hybrid.samples_of`
+    auto const band_rows = cc::clamp(i32(max_band_pixels / extent[0]), 1, extent[1]);
+    auto const band_pixels = isize(extent[0]) * band_rows;
+    auto const path
+        = ctx.transient.create_buffer<tg::vec4f>(band_pixels * path_words, sg::buffer_usage::readwrite_buffer);
+    auto const rng = ctx.transient.create_buffer<u32>(band_pixels, sg::buffer_usage::readwrite_buffer);
     auto const thin_io = ctx.transient.create_binding_group(
         cmd, ctx.cached.acquire_binding_group_layout<shaders::hybrid_pass::thin_io>(),
         shaders::hybrid_pass::thin_io{.emission = thin.emission.as_texture_view(),
@@ -227,15 +254,25 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
                                       .specular = thin.specular.as_texture_view(),
                                       .extra = thin.extra.as_texture_view(),
                                       .depth = t.depth.as_texture_view(),
-                                      .primary_depth = t.primary_depth.as_texture_view()});
+                                      .primary_depth = t.primary_depth.as_texture_view(),
+                                      .path = path.as_readwrite_buffer(),
+                                      .rng = rng.as_readwrite_buffer()});
     auto const declared = d.bindless->declare_compute_access(cmd);
-    cmd.compute.bind_pipeline(*self->_light_thin);
-    cmd.compute.bind_group(0, *traced);
-    cmd.compute.bind_group(bindless_group, *d.bindless->group());
-    cmd.compute.bind_group(2, *thin_io);
-    cmd.compute.set_inline_constants(
-        shaders::hybrid::pass{.size = tg::vec2f(f32(extent[0]), f32(extent[1])), .pad = tg::vec2f(0, 0)}.to_block());
-    cmd.compute.dispatch_threads(extent[0], extent[1]);
+    for (auto row0 = 0; row0 < extent[1]; row0 += band_rows)
+        for (auto sample = 0; sample < samples; ++sample)
+            for (auto const* const kernel : {&self->_light_thin, &self->_light_thin_bounce})
+            {
+                cmd.compute.bind_pipeline(**kernel);
+                cmd.compute.bind_group(0, *traced);
+                cmd.compute.bind_group(bindless_group, *d.bindless->group());
+                cmd.compute.bind_group(2, *thin_io);
+                cmd.compute.set_inline_constants(
+                    shaders::hybrid_pass::thin_step{.size = tg::vec2f(f32(extent[0]), f32(extent[1])),
+                                                    .sample = u32(sample),
+                                                    .row0 = u32(row0)}
+                        .to_block());
+                cmd.compute.dispatch_threads(extent[0], cc::min(band_rows, extent[1] - row0));
+            }
     impl::gpu_mark(cmd, "deferred lighting");
     blend();
     return outcome;

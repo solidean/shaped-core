@@ -23,7 +23,8 @@ use tracer
 @vertex fun hybrid_quadric_vs(@vertex_index vertex: int, @instance_index index: int, @first_instance row: int){tracer.traced, tracer.bindless, hybrid.pass} -> raster.quadric_varyings:
     return hybrid.quadric_vertex_of(vertex, row as uint, (index - row) as uint)
 
-/// The thin G-buffer a deferred frame's raster pass wrote, `raster.thin_targets` but the guide slots it wrote in place.
+/// The thin G-buffer a deferred frame's raster pass wrote, `raster.thin_targets` but the guide slots it wrote in place,
+/// and the record `light_thin` hands `light_thin_bounce`: one sample of each pixel of a band, and the sums over the samples so far.
 binding thin_io:
     @unfilterable
     emission: texture_2d[float4]
@@ -39,19 +40,56 @@ binding thin_io:
     depth: texture_2d[float]
     @unfilterable
     primary_depth: texture_2d[float]
+    /// `path_words` per pixel of the band: `light_thin`'s light, the bounce it drew, and the sums; `path_word` names each
+    path: mut buffer[float4]
+    /// per pixel of the band, the random stream where the last kernel left it, so the samples draw as one loop over them would
+    rng: mut buffer[uint]
 
-/// Lights one pixel of the thin G-buffer into `traced.output`, and writes the guides the G-buffer does not hold already.
+/// One step of the deferred lighting: the image's size, the sample it lights, and the band of rows it covers.
+///
+/// A deferred frame is lit one sample at a time by two kernels, `light_thin` and then `light_thin_bounce`, and one band of rows at a time,
+/// so `thin_io`'s record holds one sample of one band, whatever the image's size.
+@inline binding thin_step:
+    /// the image's size in pixels
+    size: float2
+    /// which of the frame's `hybrid.samples_of` samples this step lights, from 0
+    sample: uint
+    /// the band's first row; `thin_io.path` and `thin_io.rng` hold the band's pixels row by row from there
+    row0: uint
+
+/// How many `float4`s `thin_io.path` holds per pixel.
+const path_words = 8
+
+/// Word `k` of the pixel `index` of the band in `thin_io.path`:
+/// 0, the primary point's light and the bounce's roughness; 1, what the bounce escaped into and the lights it reached, and its metalness;
+/// 2, its throughput and specular weight; 3, the point it met and its flags, 1 for a hit and 2 for glass on the way;
+/// 4 to 6, the met face's normal, the bounce's direction and the met base color, each a `float3`; 7, the sums of the samples' light and moments.
+fun path_word(index: int, k: int) -> int:
+    return index * path_words + k
+
+/// The pixel the thread `id` of a band's dispatch lights.
+fun thin_pixel(id: int3){thin_step} -> int2:
+    return int2(id.x, id.y + (thin_step.row0 as int))
+
+/// Lights one sample of one pixel of the thin G-buffer at its primary point, and draws the bounce `light_thin_bounce` lights the rest of.
 ///
 /// The point is placed by the linear depth along the pixel's camera ray, through the center the raster sampled.
 /// The shading frame is rebuilt around the shading normal alone, since the reduced closure is isotropic.
-/// A pixel no surface covers is the environment the G-buffer holds as its emission, with every guide zero.
-@compute(8, 8) fun light_thin(@thread_id id: int3){tracer.traced, tracer.bindless, thin_io, hybrid.pass}:
+/// A pixel no surface covers is the environment the G-buffer holds as its emission, with every guide zero, all written by the first sample.
+/// The first sample also writes the guides the G-buffer does not hold already.
+///
+/// The lighting is split here because one kernel holding both halves, about 47,600 DXIL operations and twelve ray queries,
+/// hung Intel's dx12 device; libs/graphics/shaped-viewer/docs/issues/.closed/2026/11/bug-sv-hybrid-light-thin-hangs-intel-dx12.md has the measurements.
+@compute(8, 8) fun light_thin(@thread_id id: int3){tracer.traced, tracer.bindless, thin_io, thin_step}:
     let size = thin_io.depth.size()
-    if id.x >= size.x or id.y >= size.y => return
-    let px = int2(id.x, id.y)
+    let px = thin_pixel(id)
+    if px.x >= size.x or px.y >= size.y => return
+    let index = id.y * size.x + id.x
+    let first = thin_step.sample == 0u
     let emission = thin_io.emission.load(px)
 
     if thin_io.primary_depth.load(px) >= 1.0:
+        if not first => return
         tracer.traced.output.store(px, float4(emission.x, emission.y, emission.z, pt.moment_of(emission.xyz)))
         tracer.traced.guide_normal.store(px, float4(0.0))
         tracer.traced.guide_albedo.store(px, float4(0.0))
@@ -62,9 +100,9 @@ binding thin_io:
     let f = tracer.traced.frame[0]
     let cam = scene.camera(..f.camera)
     // Where the raster sampled the pixel, which is off its center on a frame drawn for an upscaler.
-    let pixel = float2((id.x as float) + 0.5, (id.y as float) + 0.5) + hybrid.jitter_of(f)
-    let ray = scene.camera_ray_offset(cam, pixel, hybrid.pass.size)
-    let origin = scene.camera_origin(cam, pixel, hybrid.pass.size)
+    let pixel = float2((px.x as float) + 0.5, (px.y as float) + 0.5) + hybrid.jitter_of(f)
+    let ray = scene.camera_ray_offset(cam, pixel, thin_step.size)
+    let origin = scene.camera_origin(cam, pixel, thin_step.size)
     let t = thin_io.depth.load(px) / dot(ray, normalize(cam.forward))
 
     let normals = thin_io.normals.load(px)
@@ -86,36 +124,78 @@ binding thin_io:
     let b = openpbr.bsdf_prepare(surface, false, 3u)
     let wo_local = openpbr.to_local(shading, v)
 
-    // As many samples as the frame asks for, each its own light sample and bounce, averaged: `hybrid.samples_of`.
-    let mut rng = hybrid.pixel_rng(uint2(id.x as uint, id.y as uint), size.x as uint)
+    // The pixel's random stream: seeded by the first sample, and carried on from where the last sample's `light_thin_bounce` left it.
+    let mut rng = if first => hybrid.pixel_rng(uint2(px.x as uint, px.y as uint), size.x as uint) else thin_io.rng[index]
     // The pixel's one closure, so one variate serves every sample of it.
     let v = tracer.environment_variate_of(b, wo_local)
-    let count = hybrid.samples_of(f)
-    let mut sum = float3(0.0)
-    // Each sample's luminance squared, `pt.moment_of`, which the frame's alpha carries into the mean beside its color.
-    let mut moment_sum = 0.0
-    let mut hit_distance = float2(0.0)
-    for sample in 0 ..< count:
-        let direct_lit = hybrid.direct(b, shading, n, wo_local, p, true, true, v, mut rng)
-        let bounced = hybrid.bounce_from(b, shading, n, wo_local, surface_p, lift, mut rng)
-        let lit = direct_lit + hybrid.bounce_variate(v, b, shading, wo_local, bounced) + tracer.environment_specular_variate(v, b, shading, wo_local, mut rng)
+    let direct_lit = hybrid.direct(b, shading, n, wo_local, p, true, true, v, mut rng)
+    let bounced = hybrid.bounce_from(b, shading, n, wo_local, surface_p, lift, mut rng)
+    let lit = direct_lit + hybrid.bounce_variate(v, b, shading, wo_local, bounced) + tracer.environment_specular_variate(v, b, shading, wo_local, mut rng)
+
+    if first:
         // Where the first sample's bounce went, in its lobe's half, as the tracer writes it: 1e4 for an escape, and 0 for the half no direction was drawn from.
-        if sample == 0:
+        if f.write_hit_distance != 0u:
             let distance = if not bounced.drawn => 0.0 else (if bounced.hit => length(bounced.at - p) else 1e4)
-            hit_distance = if bounced.specular => float2(0.0, distance) else float2(distance, 0.0)
-        let followed = hybrid.is_followed(bounced)
-        let s2 = hybrid.secondary_of(bounced, followed)
-        // Where no bounce follows the surface the bounce met, its lights are one of two halves: `direct`'s, or the lights `next` reaches.
-        let light_taken = pt.rand(mut rng) < 0.5
-        let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, light_taken, tracer.no_environment_variate(), mut rng)
-            + hybrid.secondary_environment(s2.b, s2.f, bounced.n, hybrid.unless_followed(followed, s2.wo_local), bounced.at, mut rng)
-        let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.kept_if(followed or not light_taken, s2.wo_local), bounced.at, mut rng)
-        // Where nothing follows the bounced surface, `next` was its BSDF's half, and nothing past it is lit: the rest would all come to zero.
-        if not followed:
-            let unfollowed = hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + 2.0 * next.throughput * next.lights))
-            sum += unfollowed
-            moment_sum += pt.moment_of(hybrid.finite(float3(emission.x, emission.y, emission.z)) + unfollowed)
-            continue
+            tracer.traced.guide_hit_distance[px] = if bounced.specular => float2(0.0, distance) else float2(distance, 0.0)
+        tracer.traced.guide_normal.store(px, float4(..n, 0.0))
+        tracer.traced.guide_albedo.store(px, float4(..openpbr.pt_diffuse_albedo(surface), 0.0))
+        tracer.traced.guide_specular_albedo.store(px, float4(..openpbr.pt_specular_albedo(surface), 0.0))
+        tracer.traced.guide_roughness.store(px, openpbr.pt_roughness(surface))
+        thin_io.path[path_word(index, 7)] = float4(0.0)
+
+    let flags = (if bounced.hit => 1.0 else 0.0) + (if bounced.through_glass => 2.0 else 0.0)
+    thin_io.path[path_word(index, 0)] = float4(..lit, bounced.roughness)
+    thin_io.path[path_word(index, 1)] = float4(..(bounced.escaped + bounced.lights), bounced.metalness)
+    thin_io.path[path_word(index, 2)] = float4(..bounced.throughput, bounced.specular_weight)
+    thin_io.path[path_word(index, 3)] = float4(..bounced.at, flags)
+    thin_io.path[path_word(index, 4)] = float4(..bounced.n, 0.0)
+    thin_io.path[path_word(index, 5)] = float4(..bounced.wi, 0.0)
+    thin_io.path[path_word(index, 6)] = float4(..bounced.albedo, 0.0)
+    thin_io.rng[index] = rng
+
+/// Lights the rest of the sample `light_thin` drew for the same pixel: the surface its bounce met, and where that is followed, the bounce after.
+/// The last sample writes the pixel's mean into `traced.output`, its alpha the samples' mean luminance squared.
+@compute(8, 8) fun light_thin_bounce(@thread_id id: int3){tracer.traced, tracer.bindless, thin_io, thin_step}:
+    let size = thin_io.depth.size()
+    let px = thin_pixel(id)
+    if px.x >= size.x or px.y >= size.y => return
+    if thin_io.primary_depth.load(px) >= 1.0 => return
+    let index = id.y * size.x + id.x
+    let emission = thin_io.emission.load(px)
+    let f = tracer.traced.frame[0]
+
+    let w0 = thin_io.path[path_word(index, 0)]
+    let w1 = thin_io.path[path_word(index, 1)]
+    let w2 = thin_io.path[path_word(index, 2)]
+    let w3 = thin_io.path[path_word(index, 3)]
+    let lit = w0.xyz
+    let reached = w1.xyz
+    let mut bounced = hybrid.no_bounce()
+    bounced.throughput = w2.xyz
+    bounced.roughness = w0.w
+    bounced.metalness = w1.w
+    bounced.specular_weight = w2.w
+    bounced.at = w3.xyz
+    bounced.hit = w3.w == 1.0 or w3.w == 3.0
+    bounced.through_glass = w3.w >= 2.0
+    bounced.n = thin_io.path[path_word(index, 4)].xyz
+    bounced.wi = thin_io.path[path_word(index, 5)].xyz
+    bounced.albedo = thin_io.path[path_word(index, 6)].xyz
+    let mut rng = thin_io.rng[index]
+    let mut sums = thin_io.path[path_word(index, 7)]
+
+    let followed = hybrid.is_followed(bounced)
+    let s2 = hybrid.secondary_of(bounced, followed)
+    // Where no bounce follows the surface the bounce met, its lights are one of two halves: `direct`'s, or the lights `next` reaches.
+    let light_taken = pt.rand(mut rng) < 0.5
+    let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, light_taken, tracer.no_environment_variate(), mut rng)
+        + hybrid.secondary_environment(s2.b, s2.f, bounced.n, hybrid.unless_followed(followed, s2.wo_local), bounced.at, mut rng)
+    let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.kept_if(followed or not light_taken, s2.wo_local), bounced.at, mut rng)
+    let mut one = float3(0.0)
+    // Where nothing follows the bounced surface, `next` was its BSDF's half, and nothing past it is lit: the rest would all come to zero.
+    if not followed:
+        one = hybrid.finite(lit + bounced.throughput * (reached + bounce_lit + 2.0 * next.throughput * next.lights))
+    else:
         // The surface after a followed one is followed by none, so its lights are halved the same way, `last` the BSDF's half.
         let s3 = hybrid.secondary_of(next, false)
         let s3_wo = hybrid.kept_if(followed, s3.wo_local)
@@ -124,18 +204,16 @@ binding thin_io:
         let next_lit = hybrid.direct(s3.b, s3.f, next.n, s3_wo, next.at, false, last_taken, tracer.no_environment_variate(), mut rng) + 2.0 * last.throughput * last.lights
             + hybrid.secondary_environment(s3.b, s3.f, next.n, s3_wo, next.at, mut rng)
         let beyond = next.throughput * (next.escaped + next.lights + next_lit)
-        let one = hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
-        sum += one
-        moment_sum += pt.moment_of(hybrid.finite(float3(emission.x, emission.y, emission.z)) + one)
-    let color = hybrid.finite(float3(emission.x, emission.y, emission.z)) + sum / (count as float)
+        one = hybrid.finite(lit + bounced.throughput * (reached + bounce_lit + beyond))
+    sums = float4(..(sums.xyz + one), sums.w + pt.moment_of(hybrid.finite(float3(emission.x, emission.y, emission.z)) + one))
+    thin_io.rng[index] = rng
 
-    tracer.traced.output.store(px, float4(..color, moment_sum / (count as float)))
-    if f.write_hit_distance != 0u:
-        tracer.traced.guide_hit_distance[px] = hit_distance
-    tracer.traced.guide_normal.store(px, float4(..n, 0.0))
-    tracer.traced.guide_albedo.store(px, float4(..openpbr.pt_diffuse_albedo(surface), 0.0))
-    tracer.traced.guide_specular_albedo.store(px, float4(..openpbr.pt_specular_albedo(surface), 0.0))
-    tracer.traced.guide_roughness.store(px, openpbr.pt_roughness(surface))
+    let count = hybrid.samples_of(f)
+    if (thin_step.sample as int) + 1 < count:
+        thin_io.path[path_word(index, 7)] = sums
+        return
+    let color = hybrid.finite(float3(emission.x, emission.y, emission.z)) + sums.xyz / (count as float)
+    tracer.traced.output.store(px, float4(..color, sums.w / (count as float)))
 
 /// One still frame's guides, and the layer's that `blend_guides` folds them into.
 binding guide_io:

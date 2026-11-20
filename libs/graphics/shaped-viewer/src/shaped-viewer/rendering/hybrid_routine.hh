@@ -77,7 +77,8 @@ struct sv::hybrid_frame_desc
 /// Every frame builds its TLAS from `hybrid_frame_desc::instances` and binds `tracer.traced` over it.
 ///
 /// - **Forward** draws through `raster_routine` with `raster_shading::traced`: each material's pixel stage lights its own full closure, after a depth prepass.
-/// - **Deferred** draws the thin G-buffer with `raster_shading::thin`, then lights it in `light_thin` of hybrid_pass.sgl.
+/// - **Deferred** draws the thin G-buffer with `raster_shading::thin`, then lights it in `light_thin` and `light_thin_bounce` of hybrid_pass.sgl,
+///   one sample at a time and one band of rows at a time.
 ///
 /// libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md is the design.
 class sv::hybrid_routine : public sg::render_routine<hybrid_routine>
@@ -104,8 +105,9 @@ private:
     /// What a forward frame binds as `traced.output`, which its pixel stages never write.
     sg::texture_2d _output;
 
-    /// `light_thin` of hybrid_pass.sgl; null where it did not build, which declines a deferred frame.
+    /// `light_thin` and `light_thin_bounce` of hybrid_pass.sgl; null where either did not build, which declines a deferred frame.
     sg::compute_pipeline_handle _light_thin;
+    sg::compute_pipeline_handle _light_thin_bounce;
 
     /// `blend_guides` of hybrid_pass.sgl; null where it did not build, which declines a frame that blends its guides.
     sg::compute_pipeline_handle _blend_guides;
