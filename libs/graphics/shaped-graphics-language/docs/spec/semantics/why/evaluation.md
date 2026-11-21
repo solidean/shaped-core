@@ -90,6 +90,11 @@ The machine computes each in plain f64 arithmetic of its own rather than with th
 A test's verdict and an editor's marks are compared across machines.
 A test compares a transcendental within a tolerance, which `nearly_equal` in the prelude spells.
 
+A pack's byte needs no such latitude, although a target may fuse its multiply and add.
+It was measured with exact fractions over every float within 200 ulps either side of each byte boundary, for 255 and for 127.
+On every one of them, `floor` of the sum rounded once gives the byte of the product and the sum each rounded.
+So a fused target and an unfused one pack alike, and the interpreter rounds as the unfused one does.
+
 ## EVAL-100
 
 A run is one invocation, so nothing ever races its compare-exchange, and a weak one would never fail.

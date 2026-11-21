@@ -100,13 +100,12 @@ u32 canonical_halves(u32 word)
     return one(word & 0xffffu) | (one(word >> 16) << 16);
 }
 
-/// How a pack's byte may round its lane times 255 or 127 (EVAL-88): `floor(scaled + 0.5)` with the product and the
-/// sum each rounded to a float, or fused into one multiply-add, which EVAL-6 allows at `.fast`;
+/// How a pack's byte may round its lane times 255 or 127: EVAL-88's `floor(scaled + 0.5)` with the product and the sum
+/// each rounded to a float, which a fused multiply-add rounding the sum once gives too;
 /// or the product rounded to a float and then to the nearest byte, a tie to the even one, as GLSL.std.450's packs do.
 enum class byte_rounding
 {
-    unfused,
-    fused,
+    floor_half_up,
     nearest_even,
 };
 
@@ -115,11 +114,8 @@ i32 byte_of(f32 unit, f32 scale, byte_rounding r)
     auto const scaled = unit * scale;
     switch (r)
     {
-    case byte_rounding::unfused:
+    case byte_rounding::floor_half_up:
         return i32(tg::floor(scaled + 0.5f));
-    case byte_rounding::fused:
-        // a float times 255 or 127 is exact in a double
-        return i32(tg::floor(f64(unit) * f64(scale) + 0.5));
     case byte_rounding::nearest_even:
     {
         auto const below = tg::floor(scaled);
@@ -145,7 +141,7 @@ u32 bytes_of(float4 v, bool is_snorm, byte_rounding r)
     return packed;
 }
 
-/// Whether each byte of `word` is a rounding of its lane EVAL-88 allows, or the nearest one where `nearest_is_allowed`.
+/// Whether each byte of `word` is EVAL-88's byte of its lane, or the nearest one where `nearest_is_allowed`.
 bool are_bytes_of(u32 word, float4 v, bool is_snorm, bool nearest_is_allowed)
 {
     for (auto l = 0; l < 4; ++l)
@@ -154,19 +150,16 @@ bool are_bytes_of(u32 word, float4 v, bool is_snorm, bool nearest_is_allowed)
         auto const unit = unit_of(v[l], is_snorm);
         auto const scale = is_snorm ? 127.0f : 255.0f;
         auto const is = [&](byte_rounding r) { return byte == (u32(byte_of(unit, scale, r)) & 0xffu); };
-        if (!is(byte_rounding::unfused) && !is(byte_rounding::fused)
-            && !(nearest_is_allowed && is(byte_rounding::nearest_even)))
+        if (!is(byte_rounding::floor_half_up) && !(nearest_is_allowed && is(byte_rounding::nearest_even)))
             return false;
     }
     return true;
 }
 
-/// Whether the roundings `byte_rounding` names disagree on a byte of `v`.
+/// Whether EVAL-88's byte and the nearest one disagree on a byte of `v`.
 bool is_byte_tie(float4 v, bool is_snorm)
 {
-    auto const unfused = bytes_of(v, is_snorm, byte_rounding::unfused);
-    return unfused != bytes_of(v, is_snorm, byte_rounding::fused)
-        || unfused != bytes_of(v, is_snorm, byte_rounding::nearest_even);
+    return bytes_of(v, is_snorm, byte_rounding::floor_half_up) != bytes_of(v, is_snorm, byte_rounding::nearest_even);
 }
 
 /// A byte unpacked: `byte / scale`, which `.fast` may compute as `byte * (1 / scale)`, as DXC does.
@@ -308,12 +301,12 @@ void hold_to_cpu(outputs const& o, cc::span<float4 const> values, cc::span<u32 c
                 .dump("route", route)
                 .dump("x", v)
                 .dump("gpu", unorm)
-                .dump("cpu", bytes_of(v, false, byte_rounding::unfused));
+                .dump("cpu", bytes_of(v, false, byte_rounding::floor_half_up));
             CHECK(report(are_bytes_of(snorm, v, true, h.nearest_bytes)))
                 .dump("route", route)
                 .dump("x", v)
                 .dump("gpu", snorm)
-                .dump("cpu", bytes_of(v, true, byte_rounding::unfused));
+                .dump("cpu", bytes_of(v, true, byte_rounding::floor_half_up));
         }
         for (auto const pair : {0, 1})
         {

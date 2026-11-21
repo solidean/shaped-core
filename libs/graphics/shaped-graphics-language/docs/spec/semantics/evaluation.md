@@ -59,7 +59,8 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   `step(edge, x)` is 1 where `x >= edge` and 0 elsewhere, as HLSL and WGSL define it, so a NaN on either side gives 0.
   A byte of `pack_unorm4x8` and `pack_snorm4x8` is `floor(v + 0.5)` of the scaled value, WGSL's formula, which HLSL's text writes too.
   The scaled value, the clamped lane times 255 or 127, and its sum with 0.5 are float arithmetic like any other.
-  The interpreter rounds each to a float, and at `.fast` a target may fuse them into one multiply-add instead (EVAL-6), which moves a byte where the rounded product lands on a tie.
+  The interpreter rounds each to a float, and at `.fast` a target may fuse them into one multiply-add instead (EVAL-6).
+  The byte is the same either way, so the interpreter's byte holds on fused and unfused targets alike ([why](why/evaluation.md#eval-88)).
   Metal does not promise that rounding of a value exactly midway between two bytes, so MSL may take it to the even one.
   A lane that is a NaN has no byte the targets agree on, so its byte is the target's own, and the interpreter's is 0.
 * **EVAL-110** `a == b` of two arrays evaluates `a`, then `b`, once each, and is true where every pair of elements compares equal.
