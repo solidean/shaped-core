@@ -23,7 +23,8 @@ using uint4 = tg::vec<4, u32>;
 
 // sgl_mixed/pack_routes.sgl through DXC and through the context's native route in one context, bit for bit:
 // every half and every byte unpacked, every half packed back, and the values a pack has to round, ties among them.
-// Each route is held to what the CPU computes as well, so two routes cannot agree on a wrong answer.
+// Each route is held to the CPU as well: exactly, but for the roundings the spec leaves a target, which it names,
+// so two routes cannot agree on an answer the spec allows no target.
 
 namespace
 {
@@ -99,32 +100,73 @@ u32 canonical_halves(u32 word)
     return one(word & 0xffffu) | (one(word >> 16) << 16);
 }
 
-/// A pack's byte of `scaled`, the clamped value times 255 or 127 and rounded to a float: EVAL-88's
-/// `floor(scaled + 0.5)` in float arithmetic, which takes a tie up and may round a value just below one up too,
-/// or `scaled` rounded to the nearest byte, a tie to the even one.
-i32 byte_of(f32 scaled, bool to_nearest_even)
+/// How a pack's byte may round its lane times 255 or 127 (EVAL-88): `floor(scaled + 0.5)` with the product and the
+/// sum each rounded to a float, or fused into one multiply-add, which EVAL-6 allows at `.fast`;
+/// or the product rounded to a float and then to the nearest byte, a tie to the even one, as GLSL.std.450's packs do.
+enum class byte_rounding
 {
-    if (!to_nearest_even)
+    unfused,
+    fused,
+    nearest_even,
+};
+
+i32 byte_of(f32 unit, f32 scale, byte_rounding r)
+{
+    auto const scaled = unit * scale;
+    switch (r)
+    {
+    case byte_rounding::unfused:
         return i32(tg::floor(scaled + 0.5f));
-    auto const below = tg::floor(scaled);
-    auto const rest = scaled - below;
-    return i32(below) + (rest > 0.5f || (rest == 0.5f && i32(below) % 2 != 0) ? 1 : 0);
+    case byte_rounding::fused:
+        // a float times 255 or 127 is exact in a double
+        return i32(tg::floor(f64(unit) * f64(scale) + 0.5));
+    case byte_rounding::nearest_even:
+    {
+        auto const below = tg::floor(scaled);
+        auto const rest = scaled - below;
+        return i32(below) + (rest > 0.5f || (rest == 0.5f && i32(below) % 2 != 0) ? 1 : 0);
+    }
+    }
+    return 0;
 }
 
-u32 unorm_of(float4 v, bool to_nearest_even)
+/// The unit a lane is clamped to before it is scaled.
+f32 unit_of(f32 x, bool is_snorm)
+{
+    return cc::clamp(x, is_snorm ? -1.0f : 0.0f, 1.0f);
+}
+
+/// `v` packed as unorm or snorm bytes, every lane rounded by `r`.
+u32 bytes_of(float4 v, bool is_snorm, byte_rounding r)
 {
     auto packed = 0u;
     for (auto l = 0; l < 4; ++l)
-        packed |= u32(byte_of(cc::clamp(v[l], 0.0f, 1.0f) * 255.0f, to_nearest_even)) << (8 * l);
+        packed |= (u32(byte_of(unit_of(v[l], is_snorm), is_snorm ? 127.0f : 255.0f, r)) & 0xffu) << (8 * l);
     return packed;
 }
 
-u32 snorm_of(float4 v, bool to_nearest_even)
+/// Whether each byte of `word` is a rounding of its lane EVAL-88 allows, or the nearest one where `nearest_is_allowed`.
+bool are_bytes_of(u32 word, float4 v, bool is_snorm, bool nearest_is_allowed)
 {
-    auto packed = 0u;
     for (auto l = 0; l < 4; ++l)
-        packed |= (u32(byte_of(cc::clamp(v[l], -1.0f, 1.0f) * 127.0f, to_nearest_even)) & 0xffu) << (8 * l);
-    return packed;
+    {
+        auto const byte = (word >> (8 * l)) & 0xffu;
+        auto const unit = unit_of(v[l], is_snorm);
+        auto const scale = is_snorm ? 127.0f : 255.0f;
+        auto const is = [&](byte_rounding r) { return byte == (u32(byte_of(unit, scale, r)) & 0xffu); };
+        if (!is(byte_rounding::unfused) && !is(byte_rounding::fused)
+            && !(nearest_is_allowed && is(byte_rounding::nearest_even)))
+            return false;
+    }
+    return true;
+}
+
+/// Whether the roundings `byte_rounding` names disagree on a byte of `v`.
+bool is_byte_tie(float4 v, bool is_snorm)
+{
+    auto const unfused = bytes_of(v, is_snorm, byte_rounding::unfused);
+    return unfused != bytes_of(v, is_snorm, byte_rounding::fused)
+        || unfused != bytes_of(v, is_snorm, byte_rounding::nearest_even);
 }
 
 /// A byte unpacked: `byte / scale`, which `.fast` may compute as `byte * (1 / scale)`, as DXC does.
@@ -243,8 +285,8 @@ cc::shared_async<outputs> run(sg::context& ctx,
 /// exactly; a value between two halves to the nearest, or toward zero where `.toward_zero` is counted.
 struct held
 {
-    /// TEMPORARY(bug-sgl-spirv-pack-bytes-round-ties-to-even): a byte tie taken to the even byte, where that is allowed.
-    bool ties_to_even = false;
+    /// TEMPORARY(bug-sgl-spirv-pack-bytes-round-ties-to-even): a byte taken to the nearest, where that is allowed.
+    bool nearest_bytes = false;
     isize toward_zero = 0;
     isize rounded = 0;
 };
@@ -262,16 +304,16 @@ void hold_to_cpu(outputs const& o, cc::span<float4 const> values, cc::span<u32 c
         {
             auto const unorm = o.packed[i][0];
             auto const snorm = o.packed[i][1];
-            CHECK(report(unorm == unorm_of(v, false) || (h.ties_to_even && unorm == unorm_of(v, true))))
+            CHECK(report(are_bytes_of(unorm, v, false, h.nearest_bytes)))
                 .dump("route", route)
                 .dump("x", v)
                 .dump("gpu", unorm)
-                .dump("cpu", unorm_of(v, false));
-            CHECK(report(snorm == snorm_of(v, false) || (h.ties_to_even && snorm == snorm_of(v, true))))
+                .dump("cpu", bytes_of(v, false, byte_rounding::unfused));
+            CHECK(report(are_bytes_of(snorm, v, true, h.nearest_bytes)))
                 .dump("route", route)
                 .dump("x", v)
                 .dump("gpu", snorm)
-                .dump("cpu", snorm_of(v, false));
+                .dump("cpu", bytes_of(v, true, byte_rounding::unfused));
         }
         for (auto const pair : {0, 1})
         {
@@ -323,6 +365,11 @@ void hold_to_cpu(outputs const& o, cc::span<float4 const> values, cc::span<u32 c
                 .dump("cpu", expected);
         }
     }
+    // a target's conversion rounds every inexact pair the same way, to nearest or toward zero
+    CHECK((h.toward_zero == 0 || h.toward_zero == h.rounded)) // TEMPORARY(bug-sgl-pack-half-rounds-toward-zero)
+        .dump("route", route)
+        .dump("toward zero", h.toward_zero)
+        .dump("inexact", h.rounded);
     CHECK(failures == 0).dump("route", route);
 }
 } // namespace
@@ -364,13 +411,12 @@ ASYNC_INVOCABLE_TEST("sg - every half and byte packs and unpacks alike through D
     REQUIRE(through_dxc.unpacked.size() == 3 * values.size());
     REQUIRE(through_native.unpacked.size() == 3 * values.size());
 
-    // TEMPORARY(bug-sgl-spirv-pack-bytes-round-ties-to-even): GLSL.std.450's packs take a byte tie to the even byte
-    auto native_held = held{.ties_to_even = !takes_dxil};
+    // TEMPORARY(bug-sgl-spirv-pack-bytes-round-ties-to-even): GLSL.std.450's packs take a byte to the nearest
+    auto native_held = held{.nearest_bytes = !takes_dxil};
     auto dxc_held = held();
     hold_to_cpu(through_native, values, words, "native", native_held);
     hold_to_cpu(through_dxc, values, words, "dxc", dxc_held);
-    // TEMPORARY(bug-sgl-pack-half-rounds-toward-zero): a target's conversion may truncate, as dx12's does on NVIDIA and AMD
-    CC_LOG_INFO("{}: pack_half2x16 takes {} of {} inexact values toward zero on SGL's route, {} on DXC's",
+    CC_LOG_INFO("{}: pack_half2x16 takes {} of {} inexact pairs toward zero on SGL's route, {} on DXC's",
                 takes_dxil ? "dx12" : "vulkan", native_held.toward_zero, native_held.rounded, dxc_held.toward_zero);
 
     // the same operations on both routes, so every word alike to the bit; a NaN alike to any other NaN
@@ -385,8 +431,7 @@ ASYNC_INVOCABLE_TEST("sg - every half and byte packs and unpacks alike through D
             auto const v = values[i];
             auto const is_open
                 = !takes_dxil && !is_half
-               && (is_nan(v[0]) || is_nan(v[1]) || is_nan(v[2]) || is_nan(v[3])
-                   || (lane == 0 ? unorm_of(v, true) != unorm_of(v, false) : snorm_of(v, true) != snorm_of(v, false)));
+               && (is_nan(v[0]) || is_nan(v[1]) || is_nan(v[2]) || is_nan(v[3]) || is_byte_tie(v, lane == 1));
             if (a != b && !is_open && differs++ < 8)
                 CHECK(a == b).dump("x", v).dump("lane", lane).dump("native", a).dump("dxc", b);
         }
