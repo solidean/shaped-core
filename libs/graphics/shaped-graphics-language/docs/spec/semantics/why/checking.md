@@ -843,6 +843,17 @@ An inline trace runs the same two decisions inside a loop of its own stage, as o
 What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
 Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.
 
+## CHK-531
+
+The stages left out of the atomics were left out for WebGPU, whose vertex stage writes no storage, and what WebGPU lacks there is the feature sg already had for `print`.
+Vulkan asks the device for the same feature for a vertex, a geometry and a tessellation stage alike, so one feature covers all four, and D3D12 and Metal ask for nothing.
+WebGPU and Metal draw a geometry or a tessellation stage as a compute pass or a mesh stage, where an atomic is free, so the feature costs only a native stage that needs it.
+How often those stages run is another matter, which the feature leaves to the program.
+A geometry stage runs once per primitive and instance, and SGL's control stage once per patch, so a counter there counts them.
+A vertex and an evaluation stage run at least once per vertex, and a device may run one again, so a count there is no number a spec defines, as CHK-404 says of a decision.
+An update that means the same however often it runs, a `max` or a store of what the invocation was given, is what those two stages are for.
+They are not refused for a count, since a vertex stage's count is still what a device ran, which is what a profiling counter wants.
+
 ## CHK-522
 
 The rule that a struct has one layout (EMIT-114) is there so a program's C++ side is the same on every backend: the struct a package generates is what every target reads.

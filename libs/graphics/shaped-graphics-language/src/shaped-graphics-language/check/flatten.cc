@@ -121,6 +121,18 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
                                     .is_inlined_decision = inlined_decision != stage::none});
         return;
     }
+    // CHK-531: an atomic in a vertex, geometry or tessellation stage needs what vulkan asks of the device for it
+    if (record != nullptr && record->is_atomic && (stage_bit(entry.entry_stage) & k_vertex_pipeline_stages) != 0)
+    {
+        auto within = cc::vector<symbol_id>();
+        for (auto const& fr : frames)
+            within.push_back(fr.function);
+        feature_uses.push_back({.file = file(),
+                                .call = call,
+                                .features = feature_set(feature::vertex_pipeline_stores),
+                                .within = cc::move(within),
+                                .granted = granted});
+    }
     // EMIT-163: what only a pixel stage needs of the device, which every target then judges alike
     if (record != nullptr && entry.entry_stage == stage::pixel && !record->pixel_features.is_empty())
     {

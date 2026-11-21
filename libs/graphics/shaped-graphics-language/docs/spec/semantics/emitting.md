@@ -37,6 +37,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
   And it is `wgsl` against `shader_int64`, `shader_f64` and `shader_int64_atomics`, which no WebGPU has.
+  It is `wgsl` against `vertex_pipeline_stores` too, which only a native vertex stage needs there, since WebGPU draws the others as compute (CHK-531).
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
@@ -629,7 +630,7 @@ fn main_ps(p: pixel_input) -> target_ {
   The window, its record and its address on each target are [the contract with sg](../../reserved-bindings.md).
   A compile declares the window only where a statement reaches it.
   A stage the contract says cannot reach it drops its prints and declares none.
-  That is WebGPU's vertex stage, and vulkan's vertex, geometry and tessellation stages without `vertex_pipeline_stores`, which no program names.
+  That is WebGPU's vertex stage, and vulkan's vertex, geometry and tessellation stages without `vertex_pipeline_stores`, which a program names only for an atomic (CHK-531).
   On metal a ray-tracing pipeline's raygen takes the window and hands it on in `sgl_context`, since every other stage of it is a function the raygen calls.
   It takes it whether it prints or not, and each stage that prints reads it from there.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
