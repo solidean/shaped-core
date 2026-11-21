@@ -1,0 +1,75 @@
+// Atomics in the vertex, geometry and tessellation stages, which need vertex_pipeline_stores (CHK-531).
+// dx12 and metal grant it on every device, vulkan with vertexPipelineStoresAndAtomics, and WebGPU on none.
+require geometry_shader
+require tessellation_shader
+require vertex_pipeline_stores
+
+@vertex struct appended_corner:
+    position: float2
+
+struct appended:
+    @position position: hpos4
+
+@pixel struct appended_target:
+    color: float4
+
+// What the stages record: `count` the slots claimed, `highest` the highest vertex index seen, and `stages` a bit per
+// stage that ran.
+binding trace:
+    count: mut buffer[atomic[uint]]
+    highest: mut buffer[atomic[uint]]
+    stages: mut buffer[atomic[uint]]
+    records: mut buffer[uint]
+
+// A vertex stage may run more than once per vertex, so it records what holds however often it runs.
+@vertex fun appended_vs(v: appended_corner, @vertex_index i: int){trace} -> appended:
+    trace.highest[0].max(i as uint)
+    return {position = hpos4(v.position.x, v.position.y, 0.5, 1.0)}
+
+// A geometry stage runs once per primitive, so each claims the next slot and records its id there.
+@geometry(max_vertices = 3)
+fun appending_gs(tri: appended[3], @primitive_id primitive: int, stream: mut triangle_stream[appended]){trace}:
+    let slot = trace.count[0].add(1u)
+    trace.records[slot] = primitive as uint
+    for i in 0 ..< 3:
+        stream.emit(tri[i])
+
+@pixel fun appended_ps(p: appended) -> appended_target:
+    return {color = float4(1.0, 1.0, 1.0, 1.0)}
+
+pipeline appending:
+    vertex = appended_vs
+    geometry = appending_gs
+    pixel = appended_ps
+    cull = .none
+    format = .rgba32_float
+
+// A triangle patch cut twice along each edge, whose control and evaluation stages each set their bit.
+struct marked_point:
+    position: float2
+
+struct marked_factors:
+    @edge_factors edges: float[3]
+    @inside_factors inside: float
+
+@vertex fun marked_vs(v: appended_corner) -> marked_point:
+    return {position = v.position}
+
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise)
+fun marking_tc(patch: marked_point[3]){trace} -> marked_factors:
+    trace.stages[0].bit_or(1u)
+    return {edges = [2.0, 2.0, 2.0], inside = 2.0}
+
+@tessellation_evaluation
+fun marking_te(patch: marked_point[3], f: marked_factors, @domain_location uvw: float3){trace} -> appended:
+    trace.stages[0].bit_or(2u)
+    let p = patch[0].position * uvw.x + patch[1].position * uvw.y + patch[2].position * uvw.z
+    return {position = hpos4(p.x, p.y, 0.5, 1.0)}
+
+pipeline marking:
+    vertex = marked_vs
+    tessellation_control = marking_tc
+    tessellation_evaluation = marking_te
+    pixel = appended_ps
+    cull = .none
+    format = .rgba32_float

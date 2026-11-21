@@ -71,7 +71,8 @@ Metal runs tier-1 shaders too, SGL reaching it as MSL through slib's metal edge,
   SGL's `@format` takes each case once sg has it (CHK-275).
 - **`workgroup_count`** is no stage input of SGL at all, since no backend gives it to a shader; hidden inline constants written per dispatch would.
 - **Workgroup memory above 16 KiB** is refused as over the portable limit; a feature for a larger budget, which dx12 and Apple GPUs have, would lift it.
-- **Storage writes and atomics in a vertex stage** need a feature, `vertex_stores`, which WebGPU's core lacks.
+- **Storage writes in a vertex stage** are gated by nothing yet, though WebGPU's core has none there.
+  Atomics in a vertex, geometry or tessellation stage need `vertex_pipeline_stores`, which `vertex-pipeline-atomics-test.cc` draws with.
 - **Unbounded binding arrays**, `T[]`, are SGL's spelling and `unsupported-yet`, since sg refuses a binding of count 0 on every backend.
 - **A footprint that names an array element**, `albedo[2]: read`, would let a pass skip `declare_array_texture_access` for a constant index.
   SGL's footprint names the whole binding array today, which is correct and asks for a live declaration wherever the array is bound.
