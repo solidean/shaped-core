@@ -382,7 +382,7 @@ void writer::whole_pack_half(instruction const& i, u8)
     for (auto l = u32(0); l < 2; ++l)
     {
         ll_value const args[] = {number, leaf_at(v, l)};
-        halves[l] = call(dx_op::legacy_f32_to_f16, _m.float_type(), args);
+        halves[l] = call(dx_op::legacy_f32_to_f16, _m.void_type(), args);
     }
     auto const high = _m.binary(binary_op::shl, halves[1], _m.constant_i32(16));
     _scratch.push_back(_m.binary(binary_op::bit_or, halves[0], high));
@@ -421,8 +421,8 @@ void writer::whole_unpack_half(instruction const& i, u8)
     // the operation reads the low 16 bits alone, so the low half needs no mask
     ll_value const low[] = {number, word};
     ll_value const high[] = {number, _m.binary(binary_op::lshr, word, _m.constant_i32(16))};
-    _scratch.push_back(call(dx_op::legacy_f16_to_f32, _m.int_type(), low));
-    _scratch.push_back(call(dx_op::legacy_f16_to_f32, _m.int_type(), high));
+    _scratch.push_back(call(dx_op::legacy_f16_to_f32, _m.void_type(), low));
+    _scratch.push_back(call(dx_op::legacy_f16_to_f32, _m.void_type(), high));
 }
 
 void writer::math_op(u32 index, instruction const& i)
