@@ -80,6 +80,8 @@ test int.from_bits(0xffff'ffff) == -1
 test pack_unorm4x8(float4(1.0, 0.0, 0.5, 1.0)) == 0xff80'00ff
 // a byte midway between two rounds up, WGSL's floor(v + 0.5): 63.5 is 64, and -63.5 is -63
 test pack_snorm4x8(float4(-0.5, 0.5, 0.0, 0.0)) == 0x0000'40c1
+// the scaled value and the sum each round to a float: just below 0.5 / 255, the product rounds to 0.5 and the byte is 1
+test pack_unorm4x8(float4(float.from_bits(0x3b00'8080u), 0.0, 0.0, 0.0)) == 0x0000'0001
 test:
     let c = unpack_unorm4x8(0xff80'00ff)
     c.x == 1.0 and c.y == 0.0 and c.w == 1.0

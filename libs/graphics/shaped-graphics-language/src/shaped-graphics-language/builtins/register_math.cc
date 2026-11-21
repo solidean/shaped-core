@@ -253,23 +253,31 @@ void reverse_bits(leaves in, result& out)
 
 // ---- packing ------------------------------------------------------------------------------------------------------
 
-/// `floor(v + 0.5)`, WGSL's rounding of a packed byte, which takes a tie up rather than to even.
+/// EVAL-88's byte of `scaled`, `floor(scaled + 0.5)` with the sum rounded to a float, as a target's unfused add rounds it,
+/// which takes a tie up rather than to even.
 /// A NaN has no byte any target agrees on, and is 0 here, which keeps it out of a C++ conversion that has none.
-u32 byte_of(f64 v)
+u32 byte_of(f32 scaled)
 {
-    if (!(v == v))
+    if (!(scaled == scaled))
         return 0;
-    return u32(i32(soft_floor(v + 0.5))) & 0xffu;
+    return u32(i32(soft_floor(f64(scaled + 0.5f)))) & 0xffu;
 }
-void pack_unorm4x8(leaves in, result& out)
+/// Each lane clamped to `low` to 1 and scaled by `scale`, the product rounded to a float as a target's unfused multiply
+/// rounds it, then made a byte.
+u32 packed_bytes(leaves in, f32 low, f32 scale)
 {
     auto packed = 0u;
     for (auto i = 0; i < 4; ++i)
     {
-        auto const v = f64(in[i].as_float());
-        packed |= byte_of((v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v) * 255.0) << (8 * i);
+        auto const v = in[i].as_float();
+        auto const unit = v < low ? low : v > 1.0f ? 1.0f : v;
+        packed |= byte_of(unit * scale) << (8 * i);
     }
-    out.push_back(scalar::of_uint(packed));
+    return packed;
+}
+void pack_unorm4x8(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(packed_bytes(in, 0.0f, 255.0f)));
 }
 void unpack_unorm4x8(leaves in, result& out)
 {
@@ -278,13 +286,7 @@ void unpack_unorm4x8(leaves in, result& out)
 }
 void pack_snorm4x8(leaves in, result& out)
 {
-    auto packed = 0u;
-    for (auto i = 0; i < 4; ++i)
-    {
-        auto const v = f64(in[i].as_float());
-        packed |= byte_of((v < -1.0 ? -1.0 : v > 1.0 ? 1.0 : v) * 127.0) << (8 * i);
-    }
-    out.push_back(scalar::of_uint(packed));
+    out.push_back(scalar::of_uint(packed_bytes(in, -1.0f, 127.0f)));
 }
 void unpack_snorm4x8(leaves in, result& out)
 {
