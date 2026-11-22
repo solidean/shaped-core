@@ -415,8 +415,9 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);
     // a polyfilled tessellation's vertex stage runs inside its control pass alone, and need not draw on its own; nor
-    // does a geometry stage's mesh route's, inside its mesh stage
-    if (d.vertex != nullptr && !polyfills_tessellation && !meshes_geometry)
+    // does a polyfilled geometry stage's, inside its compute half or its mesh stage, whose vertex half draws instead.
+    // Compiled on its own it could be refused: WebGPU's vertex stage writes no storage (SGL's CHK-531).
+    if (d.vertex != nullptr && !polyfills_tessellation && !polyfills_geometry)
         desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
     if (d.mesh != nullptr && polyfills)
     {
