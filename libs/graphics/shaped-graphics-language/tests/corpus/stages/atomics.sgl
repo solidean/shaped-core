@@ -212,3 +212,22 @@ fun appending_geometry(pt: covered[1], @primitive_id primitive: int, stream: mut
     const if has(.vertex_pipeline_stores):
         appended.count[0].add(1u)
     return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// the feature follows the stage that reaches the atomic, through a function both a pixel and a vertex stage call
+fun count_appended(){appended}:
+    appended.count[1].add(1u)
+
+@pixel fun counting_pixel(p: covered){appended} -> shade:
+    count_appended()
+    return {color = float4(1.0)}
+
+@expect(error = "feature-not-declared")
+@vertex fun counting_through_vertex(@vertex_index v: int){appended} -> covered:
+    count_appended()
+    return {position = hpos4(0.0, 0.0, 0.0, 1.0)}
+
+// a load is an atomic too, so it needs the feature as an update does
+@expect(error = "feature-not-declared")
+@vertex fun loading_vertex(@vertex_index v: int){appended} -> covered:
+    let n = appended.count[0].load()
+    return {position = hpos4(n as float, 0.0, 0.0, 1.0)}
