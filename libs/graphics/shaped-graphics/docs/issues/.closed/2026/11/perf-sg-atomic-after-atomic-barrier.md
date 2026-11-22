@@ -4,7 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/barrier/resource_access.hh
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_barrier.cc
   - file: libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_barrier.cc
-  - symbol: sg::access_flag::shader_atomic
+closed: 2026-11-22
+resolution: obsolete
 ---
 
 # An atomic has its own access flag and nothing reads it differently yet
@@ -16,3 +17,9 @@ SGL has atomics now (`atomic[uint]`), but the footprint does not set `shader_ato
 `shader_append` now runs free after itself: an atomic reservation and then stores to the reserved words, which no other append orders against.
 SGL's debug buffer is its first user.
 A general atomic stays `shader_atomic`, since nothing tells a counter another dispatch reads apart from one only appended to.
+
+## Closed as obsolete
+
+`shader_atomic` was removed on 2026-11-22: nothing set it, both backends barriered it as a read-write, and the array-access check refused it as an access the code does not perform.
+An atomic is `storage_read | shader_write`, as a footprint names a `mut` binding.
+If atomic-after-atomic should run free, SGL's footprint knows a binding only updated atomically (`check/footprint.cc`), which is where a flag would come back from.
