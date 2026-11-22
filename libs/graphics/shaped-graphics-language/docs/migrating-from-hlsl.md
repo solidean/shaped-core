@@ -94,10 +94,14 @@ SGL's own DXIL and SPIR-V routes, `--target dxil` and `--target spirv`, round as
 
 ## Performance
 
-**A local array indexed by a run-time value can spill to scratch memory**, which no compile error flags.
-A mechanical port of a texture encoder whose per-subset arrays were indexed by a run-time subset ran 2.4 times slower until the arrays became separate locals chosen by branches.
-The restructured port then ran faster than the HLSL, with byte-identical output.
+**A local array indexed by a run-time value is memory, not registers**, which no compile error flags.
+DXC keeps `float4 lo[3]` indexed by a subset as an `alloca` whether HLSL or SGL wrote it, so such an array costs both languages alike.
+Separate locals chosen by branches keep the values in registers, and a texture encoder restructured so ran faster than its HLSL, with byte-identical output.
 Profile any port that indexes local arrays with something other than a loop counter SGL unrolls.
+
+- **Port `[unroll]` as `@unroll`.**
+  A `for` without it is written as a plain HLSL `for`, which DXC leaves rolled at `-O3` just as it does HLSL's own, so an array the counter indexes stays in memory.
+- **A `const` table is constant data, as HLSL's `static const` is**, so a lookup table indexed at run time, such as a partition table, costs no memory per invocation (EMIT-230).
 
 ## Graphics stages
 

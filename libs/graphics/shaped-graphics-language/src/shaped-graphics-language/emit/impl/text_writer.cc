@@ -310,11 +310,12 @@ struct writer
             }
     }
 
-    /// EMIT-230: a literal, or an array or a vector built of nothing else.
+    /// EMIT-230: a literal of any scalar type, or an array or a vector built of nothing else.
     [[nodiscard]] bool is_constant_leaf(flat_expr_id id) const
     {
         auto const& x = p.e.at(id);
-        if (x.node.is<flat_literal>())
+        if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_wide_literal>()
+            || x.node.is<flat_bool_literal>())
             return true;
         auto const* const c = x.node.try_as<flat_construct>();
         if (c == nullptr || !(is_array(x.type) || (is_builtin_type(p.m, x.type) && p.m.at(x.type).has_swizzles)))
