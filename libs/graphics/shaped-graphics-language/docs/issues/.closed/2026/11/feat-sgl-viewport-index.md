@@ -4,6 +4,8 @@ priority: next
 tags: [porting-feedback]
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/features.hh
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # A vertex stage picks the viewport its primitive draws into
