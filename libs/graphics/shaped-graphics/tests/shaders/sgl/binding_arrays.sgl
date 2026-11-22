@@ -8,3 +8,11 @@ binding lanes:
 
 @compute(64) fun gather(@thread_id id: int3){lanes}:
     lanes.merged[id.x] = lanes.sources[nonuniform (id.x % 3)][id.x]
+
+// An element of a binding array of atomic buffers is updated as a buffer of its own is.
+binding tallies:
+    slots: mut buffer[atomic[uint]][2]
+
+@compute(64) fun tally(@thread_id id: int3){tallies}:
+    tallies.slots[nonuniform (id.x % 2)][0].add(1u)
+    tallies.slots[nonuniform (id.x % 2)][1].min(uint(id.x))

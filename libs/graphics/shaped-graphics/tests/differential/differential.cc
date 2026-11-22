@@ -12,6 +12,7 @@
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -75,6 +76,57 @@ constexpr isize k_named_elements = 4;
     return cc::format("{} (0x{:08x})", cc::bit_cast<f32>(bits), bits);
 }
 } // namespace
+
+namespace
+{
+/// `nvidia vulkan bug-...`: a vendor by its PCI id, a backend, and the issue that explains the divergence.
+[[nodiscard]] cc::optional<sg_diff::known_divergence> known_divergence_of(cc::string_view text)
+{
+    auto words = cc::vector<cc::string_view>();
+    while (!text.empty())
+    {
+        auto end = isize(0);
+        while (end < text.size() && text[end] != ' ')
+            ++end;
+        words.push_back(text.subview({.offset = 0, .size = end}));
+        text = trimmed(end < text.size() ? text.subview(end) : cc::string_view());
+    }
+    if (words.size() != 3)
+        return cc::nullopt;
+
+    auto result = sg_diff::known_divergence{.issue = cc::string(words[2])};
+    if (words[0] == "amd")
+        result.vendor_id = 0x1002;
+    else if (words[0] == "apple")
+        result.vendor_id = 0x106B;
+    else if (words[0] == "intel")
+        result.vendor_id = 0x8086;
+    else if (words[0] == "nvidia")
+        result.vendor_id = 0x10DE;
+    else
+        return cc::nullopt;
+
+    if (words[1] == "dx12")
+        result.backend = sg::backend_kind::dx12;
+    else if (words[1] == "vulkan")
+        result.backend = sg::backend_kind::vulkan;
+    else if (words[1] == "metal")
+        result.backend = sg::backend_kind::metal;
+    else if (words[1] == "webgpu")
+        result.backend = sg::backend_kind::webgpu;
+    else
+        return cc::nullopt;
+    return result;
+}
+} // namespace
+
+sg_diff::known_divergence const* sg_diff::workload::known_on(sg::context const& ctx) const
+{
+    for (auto const& k : known)
+        if (k.vendor_id == ctx.metrics.adapter().vendor_id && k.backend == ctx.backend())
+            return &k;
+    return nullptr;
+}
 
 cc::optional<sg_diff::tolerance> sg_diff::tolerance::parse(cc::string_view text)
 {
@@ -146,6 +198,7 @@ sg_diff::corpus sg_diff::read_corpus()
         auto setup_name = cc::string();
         auto routes = cc::optional<tolerance>();
         auto across = cc::optional<tolerance>();
+        auto known = cc::vector<known_divergence>();
         auto problem = cc::string();
         auto rest = cc::string_view(source.value());
         while (!rest.empty())
@@ -196,8 +249,20 @@ sg_diff::corpus sg_diff::read_corpus()
                 else
                     across = t;
             }
+            else if (key == "known")
+            {
+                auto const parsed = known_divergence_of(value);
+                if (parsed.has_value())
+                    known.push_back(parsed.value());
+                else
+                    problem = cc::format("'{}' is no known divergence; one is `known <vendor> <backend> <issue>`, the "
+                                         "vendor "
+                                         "amd, apple, intel or nvidia and the backend dx12, vulkan, metal or webgpu",
+                                         value);
+            }
             else
-                problem = cc::format("'{}' is no key of a comment block; the keys are setup, routes and across", key);
+                problem
+                    = cc::format("'{}' is no key of a comment block; the keys are setup, routes, across and known", key);
         }
 
         auto const* found = static_cast<setup const*>(nullptr);
@@ -231,6 +296,7 @@ sg_diff::corpus sg_diff::read_corpus()
             .routes = routes.has_value() ? routes.value() : found->routes,
             .across = across.has_value() ? across.value() : found->across,
             .required = cc::move(required),
+            .known = cc::move(known),
         });
     }
     return result;

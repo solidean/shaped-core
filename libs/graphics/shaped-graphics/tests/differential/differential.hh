@@ -11,6 +11,7 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/types.hh>
 #include <shaped-shader-library/fwd.hh>
 
 // Differential testing: one shader run every way this machine can run it, every result held to every other.
@@ -26,6 +27,7 @@ struct tolerance;
 struct output;
 struct setup;
 struct workload;
+struct known_divergence;
 struct corpus;
 struct route;
 struct shaders_on_route;
@@ -81,6 +83,14 @@ struct sg_diff::setup
     interpreter_half (*interpreted)(sg::context& ctx) = nullptr;
 };
 
+/// A divergence a vendor's driver is known for, which logs rather than fails until the driver stops showing it.
+struct sg_diff::known_divergence
+{
+    u32 vendor_id = 0;
+    sg::backend_kind backend = sg::backend_kind::dx12;
+    cc::string issue;
+};
+
 /// One corpus entry point, under the setup and tolerances its file's comment block states.
 struct sg_diff::workload
 {
@@ -92,6 +102,11 @@ struct sg_diff::workload
     tolerance across;
     /// What its file's `require` lines name, which a context must support to run it; a run on one without is skipped.
     cc::vector<sg::feature> required;
+    /// Its file's `known <vendor> <backend> <issue>` lines: a vendor's driver on a backend computes it wrongly, as the issue says.
+    cc::vector<known_divergence> known;
+
+    /// The issue that explains a divergence on `ctx`, or nullptr where this file expects it to agree.
+    [[nodiscard]] known_divergence const* known_on(sg::context const& ctx) const;
 };
 
 /// Every compute entry point of the corpus package.

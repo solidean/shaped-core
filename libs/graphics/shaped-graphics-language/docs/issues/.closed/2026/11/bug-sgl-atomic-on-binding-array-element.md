@@ -5,8 +5,8 @@ tags: [porting-feedback]
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/check_arrays.cc
   - symbol: sgl::check::checker::resolve_array
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-22T11:16Z
+closed: 2026-11-22
+resolution: fixed
 ---
 
 # An atomic update of a binding array's element reads as an array of arrays

@@ -1,0 +1,27 @@
+// an element of a binding array of atomic buffers takes every atomic update a buffer of its own does
+
+require binding_arrays
+
+binding regions:
+    counts: mut buffer[atomic[uint]][4]
+    lowest: mut buffer[atomic[int]][2]
+    sources: buffer[int][3]
+    results: mut buffer[int]
+
+binding pick:
+    region: int
+
+@compute(64) fun count(@thread_id id: int3){regions, pick}:
+    regions.counts[region_of(pick.region)][id.x % 8].add(1u)
+    let before = regions.counts[1][0].min(5u)
+    regions.lowest[nonuniform (id.x % 2)][0].max(id.x)
+    regions.results[id.x] = int(before) + regions.lowest[0][1].exchange(-1)
+
+// a call on a member of an element is no type in a value's place, as `int[3].filled(0)` is (CHK-289)
+@compute(64) fun total(@thread_id id: int3){regions}:
+    regions.results[id.x] = regions.sources[2][id.x].min(7)
+
+// the element a thread picks is an index like any other, so a helper may compute it
+fun region_of(lane: int) -> int => lane % 4
+
+test region_of(5) == 1

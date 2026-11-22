@@ -201,6 +201,62 @@ cc::string checker::miss_hint(function_scope& scope,
     if (rotated_chain >= 0)
         return cc::format(": its condition comes first, as in {}", signature_text(spelling, rotated_types));
 
+    // CHK-412: a plain vector where a strong one stands converts with `as`, which a port of HLSL most often misses
+    auto const strong_of = [&](type_id plain, type_id wanted) -> cc::string_view
+    {
+        if (!is_valid(plain) || !is_valid(wanted) || plain == error_type || wanted == error_type || is_open(wanted))
+            return {};
+        auto const from = out.name_of(plain);
+        auto const to = out.name_of(wanted);
+        if ((from == "float3" && (to == "vec3" || to == "pos3")) || (from == "float4" && to == "hpos4"))
+            return to;
+        return {};
+    };
+    for (auto const candidate : candidates)
+    {
+        if (out.at(candidate).state != symbol_state::checked || is_dot_call)
+            continue;
+        auto const parameters
+            = cc::vector<parameter>::create_copy_of(out.at(out.functions[out.at(candidate).info].parameters));
+        auto is_generic = false;
+        for (auto const& p : parameters)
+            is_generic = is_generic || is_open(p.type);
+        if (is_generic)
+            continue;
+        auto const bound = bind_arguments(parameters, arguments);
+        if (bound.failure != miss_reason::none)
+            continue;
+        auto converted = cc::vector<cc::string>::create_filled(arguments.written.size(), cc::string());
+        auto is_fixed = true;
+        auto any = false;
+        for (auto p = isize(0); is_fixed && p < parameters.size(); ++p)
+        {
+            auto const i = bound.slots[p];
+            if (i < 0)
+                continue;
+            if (auto const to = strong_of(arguments.types[i], parameters[p].type); !to.empty())
+            {
+                converted[i] = cc::format("{} as {}", argument_text(i), to);
+                any = true;
+            }
+            else
+                is_fixed = chain_of(file, parameters[p], arguments, i).has_value();
+        }
+        if (!is_fixed || !any)
+            continue;
+        auto call = cc::format("{}(", spelling);
+        for (auto i = isize(0); i < arguments.written.size(); ++i)
+        {
+            if (i > 0)
+                call += ", ";
+            if (!arguments.names[i].empty())
+                call += cc::format("{} = ", arguments.names[i]);
+            call += converted[i].empty() ? cc::string(argument_text(i)) : converted[i];
+        }
+        call += ")";
+        return cc::format(": a plain vector becomes the strong one a parameter takes with `as`, as in `{}`", call);
+    }
+
     // CHK-458: a float's builtin with no double overload is one no target computes in 64 bits
     auto const is_kind = [&](type_id type, value_kind kind)
     {
