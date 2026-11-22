@@ -121,6 +121,11 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
                                     .is_inlined_decision = inlined_decision != stage::none});
         return;
     }
+    // CHK-531: a write through a binding in a vertex, geometry or tessellation stage needs what vulkan asks of the
+    // device for it
+    if (record != nullptr && (record->is_atomic || record->is_image_store || record->is_bytes_store)
+        && (stage_bit(entry.entry_stage) & k_vertex_pipeline_stages) != 0)
+        note_vertex_pipeline_store(call, false);
     // EMIT-163: what only a pixel stage needs of the device, which every target then judges alike
     if (record != nullptr && entry.entry_stage == stage::pixel && !record->pixel_features.is_empty())
     {
@@ -148,26 +153,50 @@ auto sgl::check::impl::flattener::decision_stage() const -> stage
 
 void sgl::check::impl::flattener::judge_decision_store(flat_expr_id place, ast::expr_id target)
 {
-    auto const decision = decision_stage();
-    for (auto depth = 0; decision != stage::none && is_valid(place) && depth < k_max_inline_depth; ++depth)
+    // whether the place is an element of a `mut buffer`, or a part of one
+    auto is_buffer_store = false;
+    for (auto depth = 0; is_valid(place) && depth < k_max_inline_depth; ++depth)
     {
         auto const& node = entry.at(place).node;
         if (node.is<flat_buffer_element>())
         {
-            stage_violations.push_back({.file = file(),
-                                        .call = target,
-                                        .decision = decision,
-                                        .is_inlined_decision = inlined_decision != stage::none,
-                                        .is_buffer_store = true});
-            return;
+            is_buffer_store = true;
+            break;
         }
         if (auto const* const member = node.try_as<flat_member>())
             place = member->object;
         else if (auto const* const element = node.try_as<flat_element>())
             place = element->object;
         else
-            return;
+            break;
     }
+    if (!is_buffer_store)
+        return;
+    if (auto const decision = decision_stage(); decision != stage::none)
+    {
+        stage_violations.push_back({.file = file(),
+                                    .call = target,
+                                    .decision = decision,
+                                    .is_inlined_decision = inlined_decision != stage::none,
+                                    .is_buffer_store = true});
+        return;
+    }
+    // CHK-531: a vertex, geometry or tessellation stage's store needs what vulkan asks of the device for it
+    if (!is_test && (stage_bit(entry.entry_stage) & k_vertex_pipeline_stages) != 0)
+        note_vertex_pipeline_store(target, true);
+}
+
+void sgl::check::impl::flattener::note_vertex_pipeline_store(ast::expr_id at, bool is_assignment)
+{
+    auto within = cc::vector<symbol_id>();
+    for (auto const& fr : frames)
+        within.push_back(fr.function);
+    feature_uses.push_back({.file = file(),
+                            .call = at,
+                            .features = feature_set(feature::vertex_pipeline_stores),
+                            .within = cc::move(within),
+                            .is_store = is_assignment,
+                            .granted = granted});
 }
 
 auto sgl::check::impl::flattener::holds_error(type_id type) const -> bool
@@ -1143,7 +1172,9 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                 {
                     d.notes.push_back({.file = u.file,
                                        .where = span_of(u.file, u.call),
-                                       .message = u.is_value ? "a value that needs it" : "the call that needs it"});
+                                       .message = u.is_value ? "a value that needs it"
+                                                : u.is_store ? "the store that needs it"
+                                                             : "the call that needs it"});
                     break;
                 }
         }

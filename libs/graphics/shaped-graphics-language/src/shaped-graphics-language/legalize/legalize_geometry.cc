@@ -424,6 +424,8 @@ cc::result<flat_entry_point, cc::string> geometry_as(checked_module const& m,
     e.legalized = nullptr;
     merge_stage_into(e, v);
     e.features.remove(feature::geometry_shader);
+    // a compute or a mesh stage writes storage on every device (CHK-531)
+    e.features.remove(feature::vertex_pipeline_stores);
     if (is_mesh)
         e.features.set(feature::mesh_shader);
     return compacted(m, e, body);

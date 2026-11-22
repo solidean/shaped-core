@@ -989,6 +989,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   A vulkan entry point at `@float(.specials)` or above adds `float_specials`, and at `.ieee` `float_denormals`, which no program needs to name (EMIT-185).
   What `has` asks rather than a `require` needs adds `float_atomic_add` and `shader_execution_reordering` (CHK-426).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
+  A write through a binding in a vertex, geometry or tessellation stage adds `vertex_pipeline_stores` (CHK-531).
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.
@@ -1234,13 +1235,19 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-511** `atomic[ulong]` itself, and its `min` and `max`, need `shader_int64_min_max_atomics`, which `shader_int64_atomics` grants too.
   It is the one 64-bit atomic Metal has, in a buffer alone; every other 64-bit atomic operation needs `shader_int64_atomics`.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
-  Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
+  Its builtins take the stages every atomic's take (CHK-531).
 * **CHK-404** A traversal's decision writes no memory through a binding ([why](why/checking.md#chk-404)).
   Each such write it reaches is `stage-not-allowed`, whose detail says how often the decision runs.
   A write is an atomic, an image store, a `mut bytes` store, and an assignment to an element of a `mut buffer` or to a part of one, through a binding or a resource parameter.
   The payload, the decision's result and its locals it writes freely, since they are how it answers.
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
+* **CHK-531** A write through a binding in a vertex, geometry or tessellation stage needs `vertex_pipeline_stores`, as a call that needs a feature does (CHK-322) ([why](why/checking.md#chk-531)).
+  A write is CHK-404's: an atomic of a `mut buffer` or of an `@atomic` image, `load()` among them, an image store, a `mut bytes` store, and an assignment to an element of a `mut buffer`.
+  It needs it wherever an entry point of those stages reaches it, through a function or a resource parameter too, and a branch that `has(.vertex_pipeline_stores)` takes declares it (CHK-426).
+  Every other stage takes such a write with no feature, and a local is no binding.
+  D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none, so `wgsl` refuses such a vertex stage (EMIT-109).
+  A polyfilled geometry or tessellation stage runs as a compute or a mesh entry point, which writes storage on every device, so that form needs none of it (CHK-525, CHK-527).
 * **CHK-297** An expression of an atomic's type stands only as a builtin's argument or a `mut` parameter's; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
   A `mut` parameter of an atomic's type is the caller's atomic, so a function updates it by its methods as the caller would.
   A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
@@ -1953,7 +1960,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-value-in-arm` | CHK-168 |
 | `needs-feature` | CHK-201, CHK-320, CHK-382, CHK-368, CHK-372, CHK-451, CHK-510, CHK-511 |
 | `unknown-feature` | CHK-258 |
-| `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
+| `feature-not-declared` | CHK-264, CHK-322, CHK-382, CHK-531 |
 | `unused-require` | CHK-265 |
 | `pixel-stage-ignores-view` | CHK-515 |
 | `generic-not-instantiated` | CHK-338 |

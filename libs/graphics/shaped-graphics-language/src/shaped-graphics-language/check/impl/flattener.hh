@@ -127,6 +127,8 @@ struct flattener
         cc::vector<symbol_id> within;
         /// A value rather than a call, which the note says.
         bool is_value = false;
+        /// An assignment rather than a call, which the note says.
+        bool is_store = false;
         /// What the `has` of the branches around the use granted, which then needs no `require` (CHK-426).
         feature_set granted;
     };
@@ -152,7 +154,10 @@ struct flattener
     [[nodiscard]] stage decision_stage() const;
 
     /// CHK-404: an assignment to a buffer's element, or to a part of one, from a decision.
+    /// CHK-531: and one from a vertex, geometry or tessellation stage, which needs `vertex_pipeline_stores`.
     void judge_decision_store(flat_expr_id place, ast::expr_id target);
+    /// CHK-531: records that a vertex, geometry or tessellation stage writes through a binding at `at`.
+    void note_vertex_pipeline_store(ast::expr_id at, bool is_assignment);
 
     flat_entry_point entry;
     /// The tree is a test, whose own lines of type bool are checks (CHK-225); a function it calls has none.

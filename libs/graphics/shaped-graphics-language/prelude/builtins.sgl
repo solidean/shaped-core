@@ -2655,40 +2655,40 @@
 @builtin @pure fun level_count(t: texture_1d) -> int
 @builtin fun test_texel(t: image_1d[float], xy: int, value: float)
 @builtin fun load(i: image_1d[float], xy: int) -> float
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float], xy: int, value: float)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float], xy: int, value: float)
 @builtin fun test_texel(t: image_1d[float2], xy: int, value: float2)
 @builtin fun load(i: image_1d[float2], xy: int) -> float2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float2], xy: int, value: float2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float2], xy: int, value: float2)
 @builtin fun test_texel(t: image_1d[float3], xy: int, value: float3)
 @builtin fun load(i: image_1d[float3], xy: int) -> float3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float3], xy: int, value: float3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float3], xy: int, value: float3)
 @builtin fun test_texel(t: image_1d[float4], xy: int, value: float4)
 @builtin fun load(i: image_1d[float4], xy: int) -> float4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float4], xy: int, value: float4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float4], xy: int, value: float4)
 @builtin fun test_texel(t: image_1d[int], xy: int, value: int)
 @builtin fun load(i: image_1d[int], xy: int) -> int
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int], xy: int, value: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int], xy: int, value: int)
 @builtin fun test_texel(t: image_1d[int2], xy: int, value: int2)
 @builtin fun load(i: image_1d[int2], xy: int) -> int2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int2], xy: int, value: int2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int2], xy: int, value: int2)
 @builtin fun test_texel(t: image_1d[int3], xy: int, value: int3)
 @builtin fun load(i: image_1d[int3], xy: int) -> int3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int3], xy: int, value: int3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int3], xy: int, value: int3)
 @builtin fun test_texel(t: image_1d[int4], xy: int, value: int4)
 @builtin fun load(i: image_1d[int4], xy: int) -> int4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int4], xy: int, value: int4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int4], xy: int, value: int4)
 @builtin fun test_texel(t: image_1d[uint], xy: int, value: uint)
 @builtin fun load(i: image_1d[uint], xy: int) -> uint
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint], xy: int, value: uint)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint], xy: int, value: uint)
 @builtin fun test_texel(t: image_1d[uint2], xy: int, value: uint2)
 @builtin fun load(i: image_1d[uint2], xy: int) -> uint2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint2], xy: int, value: uint2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint2], xy: int, value: uint2)
 @builtin fun test_texel(t: image_1d[uint3], xy: int, value: uint3)
 @builtin fun load(i: image_1d[uint3], xy: int) -> uint3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint3], xy: int, value: uint3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint3], xy: int, value: uint3)
 @builtin fun test_texel(t: image_1d[uint4], xy: int, value: uint4)
 @builtin fun load(i: image_1d[uint4], xy: int) -> uint4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint4], xy: int, value: uint4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint4], xy: int, value: uint4)
 @builtin @pure fun size(t: image_1d) -> int
 @builtin fun test_texel(t: texture_1d_array[float], xy: int, value: float, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[float], xy: int, level: int = 0, .layer: int) -> float
@@ -2751,40 +2751,40 @@
 @builtin @pure fun level_count(t: texture_1d_array) -> int
 @builtin fun test_texel(t: image_1d_array[float], xy: int, value: float, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float], xy: int, .layer: int) -> float
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float], xy: int, value: float, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float], xy: int, value: float, .layer: int)
 @builtin fun test_texel(t: image_1d_array[float2], xy: int, value: float2, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float2], xy: int, .layer: int) -> float2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float2], xy: int, value: float2, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float2], xy: int, value: float2, .layer: int)
 @builtin fun test_texel(t: image_1d_array[float3], xy: int, value: float3, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float3], xy: int, .layer: int) -> float3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float3], xy: int, value: float3, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float3], xy: int, value: float3, .layer: int)
 @builtin fun test_texel(t: image_1d_array[float4], xy: int, value: float4, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float4], xy: int, .layer: int) -> float4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float4], xy: int, value: float4, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float4], xy: int, value: float4, .layer: int)
 @builtin fun test_texel(t: image_1d_array[int], xy: int, value: int, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int], xy: int, .layer: int) -> int
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int], xy: int, value: int, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int], xy: int, value: int, .layer: int)
 @builtin fun test_texel(t: image_1d_array[int2], xy: int, value: int2, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int2], xy: int, .layer: int) -> int2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int2], xy: int, value: int2, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int2], xy: int, value: int2, .layer: int)
 @builtin fun test_texel(t: image_1d_array[int3], xy: int, value: int3, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int3], xy: int, .layer: int) -> int3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int3], xy: int, value: int3, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int3], xy: int, value: int3, .layer: int)
 @builtin fun test_texel(t: image_1d_array[int4], xy: int, value: int4, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int4], xy: int, .layer: int) -> int4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int4], xy: int, value: int4, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int4], xy: int, value: int4, .layer: int)
 @builtin fun test_texel(t: image_1d_array[uint], xy: int, value: uint, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint], xy: int, .layer: int) -> uint
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint], xy: int, value: uint, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint], xy: int, value: uint, .layer: int)
 @builtin fun test_texel(t: image_1d_array[uint2], xy: int, value: uint2, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint2], xy: int, .layer: int) -> uint2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint2], xy: int, value: uint2, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint2], xy: int, value: uint2, .layer: int)
 @builtin fun test_texel(t: image_1d_array[uint3], xy: int, value: uint3, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint3], xy: int, .layer: int) -> uint3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint3], xy: int, value: uint3, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint3], xy: int, value: uint3, .layer: int)
 @builtin fun test_texel(t: image_1d_array[uint4], xy: int, value: uint4, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint4], xy: int, .layer: int) -> uint4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint4], xy: int, value: uint4, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint4], xy: int, value: uint4, .layer: int)
 @builtin @pure fun size(t: image_1d_array) -> int
 @builtin @pure fun layer_count(t: image_1d_array) -> int
 @builtin fun test_texel(t: texture_2d[float], xy: int2, value: float, level: int = 0)
@@ -2927,40 +2927,40 @@
 @builtin @pure fun level_count(t: texture_2d_depth) -> int
 @builtin fun test_texel(t: image_2d[float], xy: int2, value: float)
 @builtin fun load(i: image_2d[float], xy: int2) -> float
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float], xy: int2, value: float)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float], xy: int2, value: float)
 @builtin fun test_texel(t: image_2d[float2], xy: int2, value: float2)
 @builtin fun load(i: image_2d[float2], xy: int2) -> float2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float2], xy: int2, value: float2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float2], xy: int2, value: float2)
 @builtin fun test_texel(t: image_2d[float3], xy: int2, value: float3)
 @builtin fun load(i: image_2d[float3], xy: int2) -> float3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float3], xy: int2, value: float3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float3], xy: int2, value: float3)
 @builtin fun test_texel(t: image_2d[float4], xy: int2, value: float4)
 @builtin fun load(i: image_2d[float4], xy: int2) -> float4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float4], xy: int2, value: float4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float4], xy: int2, value: float4)
 @builtin fun test_texel(t: image_2d[int], xy: int2, value: int)
 @builtin fun load(i: image_2d[int], xy: int2) -> int
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int], xy: int2, value: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int], xy: int2, value: int)
 @builtin fun test_texel(t: image_2d[int2], xy: int2, value: int2)
 @builtin fun load(i: image_2d[int2], xy: int2) -> int2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int2], xy: int2, value: int2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int2], xy: int2, value: int2)
 @builtin fun test_texel(t: image_2d[int3], xy: int2, value: int3)
 @builtin fun load(i: image_2d[int3], xy: int2) -> int3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int3], xy: int2, value: int3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int3], xy: int2, value: int3)
 @builtin fun test_texel(t: image_2d[int4], xy: int2, value: int4)
 @builtin fun load(i: image_2d[int4], xy: int2) -> int4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int4], xy: int2, value: int4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int4], xy: int2, value: int4)
 @builtin fun test_texel(t: image_2d[uint], xy: int2, value: uint)
 @builtin fun load(i: image_2d[uint], xy: int2) -> uint
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint], xy: int2, value: uint)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint], xy: int2, value: uint)
 @builtin fun test_texel(t: image_2d[uint2], xy: int2, value: uint2)
 @builtin fun load(i: image_2d[uint2], xy: int2) -> uint2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint2], xy: int2, value: uint2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint2], xy: int2, value: uint2)
 @builtin fun test_texel(t: image_2d[uint3], xy: int2, value: uint3)
 @builtin fun load(i: image_2d[uint3], xy: int2) -> uint3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint3], xy: int2, value: uint3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint3], xy: int2, value: uint3)
 @builtin fun test_texel(t: image_2d[uint4], xy: int2, value: uint4)
 @builtin fun load(i: image_2d[uint4], xy: int2) -> uint4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint4], xy: int2, value: uint4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint4], xy: int2, value: uint4)
 @builtin @pure fun size(t: image_2d) -> int2
 @builtin fun test_texel(t: texture_2d_array[float], xy: int2, value: float, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[float], xy: int2, level: int = 0, .layer: int) -> float
@@ -3104,40 +3104,40 @@
 @builtin @pure fun level_count(t: texture_2d_array_depth) -> int
 @builtin fun test_texel(t: image_2d_array[float], xy: int2, value: float, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float], xy: int2, .layer: int) -> float
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float], xy: int2, value: float, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float], xy: int2, value: float, .layer: int)
 @builtin fun test_texel(t: image_2d_array[float2], xy: int2, value: float2, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float2], xy: int2, .layer: int) -> float2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float2], xy: int2, value: float2, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float2], xy: int2, value: float2, .layer: int)
 @builtin fun test_texel(t: image_2d_array[float3], xy: int2, value: float3, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float3], xy: int2, .layer: int) -> float3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float3], xy: int2, value: float3, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float3], xy: int2, value: float3, .layer: int)
 @builtin fun test_texel(t: image_2d_array[float4], xy: int2, value: float4, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float4], xy: int2, .layer: int) -> float4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float4], xy: int2, value: float4, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float4], xy: int2, value: float4, .layer: int)
 @builtin fun test_texel(t: image_2d_array[int], xy: int2, value: int, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int], xy: int2, .layer: int) -> int
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int], xy: int2, value: int, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int], xy: int2, value: int, .layer: int)
 @builtin fun test_texel(t: image_2d_array[int2], xy: int2, value: int2, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int2], xy: int2, .layer: int) -> int2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int2], xy: int2, value: int2, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int2], xy: int2, value: int2, .layer: int)
 @builtin fun test_texel(t: image_2d_array[int3], xy: int2, value: int3, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int3], xy: int2, .layer: int) -> int3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int3], xy: int2, value: int3, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int3], xy: int2, value: int3, .layer: int)
 @builtin fun test_texel(t: image_2d_array[int4], xy: int2, value: int4, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int4], xy: int2, .layer: int) -> int4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int4], xy: int2, value: int4, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int4], xy: int2, value: int4, .layer: int)
 @builtin fun test_texel(t: image_2d_array[uint], xy: int2, value: uint, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint], xy: int2, .layer: int) -> uint
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint], xy: int2, value: uint, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint], xy: int2, value: uint, .layer: int)
 @builtin fun test_texel(t: image_2d_array[uint2], xy: int2, value: uint2, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint2], xy: int2, .layer: int) -> uint2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint2], xy: int2, value: uint2, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint2], xy: int2, value: uint2, .layer: int)
 @builtin fun test_texel(t: image_2d_array[uint3], xy: int2, value: uint3, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint3], xy: int2, .layer: int) -> uint3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint3], xy: int2, value: uint3, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint3], xy: int2, value: uint3, .layer: int)
 @builtin fun test_texel(t: image_2d_array[uint4], xy: int2, value: uint4, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint4], xy: int2, .layer: int) -> uint4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint4], xy: int2, value: uint4, .layer: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint4], xy: int2, value: uint4, .layer: int)
 @builtin @pure fun size(t: image_2d_array) -> int2
 @builtin @pure fun layer_count(t: image_2d_array) -> int
 @builtin fun test_texel(t: texture_2d_ms[float], xy: int2, value: float, .sample: int = 0)
@@ -3273,40 +3273,40 @@
 @builtin @pure fun level_count(t: texture_3d) -> int
 @builtin fun test_texel(t: image_3d[float], xy: int3, value: float)
 @builtin fun load(i: image_3d[float], xy: int3) -> float
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float], xy: int3, value: float)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float], xy: int3, value: float)
 @builtin fun test_texel(t: image_3d[float2], xy: int3, value: float2)
 @builtin fun load(i: image_3d[float2], xy: int3) -> float2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float2], xy: int3, value: float2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float2], xy: int3, value: float2)
 @builtin fun test_texel(t: image_3d[float3], xy: int3, value: float3)
 @builtin fun load(i: image_3d[float3], xy: int3) -> float3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float3], xy: int3, value: float3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float3], xy: int3, value: float3)
 @builtin fun test_texel(t: image_3d[float4], xy: int3, value: float4)
 @builtin fun load(i: image_3d[float4], xy: int3) -> float4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float4], xy: int3, value: float4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float4], xy: int3, value: float4)
 @builtin fun test_texel(t: image_3d[int], xy: int3, value: int)
 @builtin fun load(i: image_3d[int], xy: int3) -> int
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int], xy: int3, value: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int], xy: int3, value: int)
 @builtin fun test_texel(t: image_3d[int2], xy: int3, value: int2)
 @builtin fun load(i: image_3d[int2], xy: int3) -> int2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int2], xy: int3, value: int2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int2], xy: int3, value: int2)
 @builtin fun test_texel(t: image_3d[int3], xy: int3, value: int3)
 @builtin fun load(i: image_3d[int3], xy: int3) -> int3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int3], xy: int3, value: int3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int3], xy: int3, value: int3)
 @builtin fun test_texel(t: image_3d[int4], xy: int3, value: int4)
 @builtin fun load(i: image_3d[int4], xy: int3) -> int4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int4], xy: int3, value: int4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int4], xy: int3, value: int4)
 @builtin fun test_texel(t: image_3d[uint], xy: int3, value: uint)
 @builtin fun load(i: image_3d[uint], xy: int3) -> uint
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint], xy: int3, value: uint)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint], xy: int3, value: uint)
 @builtin fun test_texel(t: image_3d[uint2], xy: int3, value: uint2)
 @builtin fun load(i: image_3d[uint2], xy: int3) -> uint2
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint2], xy: int3, value: uint2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint2], xy: int3, value: uint2)
 @builtin fun test_texel(t: image_3d[uint3], xy: int3, value: uint3)
 @builtin fun load(i: image_3d[uint3], xy: int3) -> uint3
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint3], xy: int3, value: uint3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint3], xy: int3, value: uint3)
 @builtin fun test_texel(t: image_3d[uint4], xy: int3, value: uint4)
 @builtin fun load(i: image_3d[uint4], xy: int3) -> uint4
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint4], xy: int3, value: uint4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint4], xy: int3, value: uint4)
 @builtin @pure fun size(t: image_3d) -> int3
 @builtin fun test_texel(t: texture_cube[float], xy: int2, value: float, level: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float], coord: float3, smp: sampler) -> float
@@ -3485,19 +3485,19 @@
 /// The word at byte `offset`, a multiple of 4.
 @builtin fun load(b: bytes, offset: uint) -> uint
 /// Stores `value` as the word at byte `offset`, a multiple of 4.
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint)
 /// The 2 words from byte `offset`, a multiple of 4.
 @builtin fun load2(b: bytes, offset: uint) -> uint2
 /// Stores `value` as the 2 words from byte `offset`, a multiple of 4.
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint2)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint2)
 /// The 3 words from byte `offset`, a multiple of 4.
 @builtin fun load3(b: bytes, offset: uint) -> uint3
 /// Stores `value` as the 3 words from byte `offset`, a multiple of 4.
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint3)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint3)
 /// The 4 words from byte `offset`, a multiple of 4.
 @builtin fun load4(b: bytes, offset: uint) -> uint4
 /// Stores `value` as the 4 words from byte `offset`, a multiple of 4.
-@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint4)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint4)
 
 // A task stage's launch (CHK-485): `dispatch_mesh(x, y, z, payload)` starts x * y * z mesh workgroups, each
 // handed the struct `payload`, once, as the entry point's last statement.
@@ -3730,385 +3730,385 @@ struct exchange_result[T]:
 // Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.
 // Each is relaxed, and each but a store gives the value before; only the stages its `@stages` names take one (CHK-296).
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[uint], v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[uint], v: uint) -> uint
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[uint], v: uint) -> uint
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[uint], v: uint) -> uint
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[uint], v: uint) -> uint
 /// Sets the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[uint], v: uint) -> uint
 /// Flips the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[uint], v: uint) -> uint
 /// Stores `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[uint], v: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[uint], v: uint) -> uint
 /// The value, read in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[uint]) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[uint]) -> uint
 /// Stores `v` in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[uint], v: uint)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[uint], v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[uint], expected: uint, desired: uint) -> uint
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[uint], expected: uint, desired: uint) -> uint
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[uint], expected: uint, desired: uint) -> exchange_result[uint]
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[uint], expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[int], v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[int], v: int) -> int
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[int], v: int) -> int
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[int], v: int) -> int
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[int], v: int) -> int
 /// Sets the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[int], v: int) -> int
 /// Flips the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[int], v: int) -> int
 /// Stores `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[int], v: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[int], v: int) -> int
 /// The value, read in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[int]) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[int]) -> int
 /// Stores `v` in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[int], v: int)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[int], v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[int], expected: int, desired: int) -> int
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[int], expected: int, desired: int) -> int
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[int], expected: int, desired: int) -> exchange_result[int]
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[int], expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[ulong], v: ulong) -> ulong
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[ulong], v: ulong) -> ulong
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[ulong], v: ulong) -> ulong
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[ulong], v: ulong) -> ulong
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[ulong], v: ulong) -> ulong
 /// Sets the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[ulong], v: ulong) -> ulong
 /// Flips the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[ulong], v: ulong) -> ulong
 /// Stores `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[ulong], v: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[ulong], v: ulong) -> ulong
 /// The value, read in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[ulong]) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[ulong]) -> ulong
 /// Stores `v` in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[ulong], v: ulong)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[ulong], v: ulong)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[ulong], expected: ulong, desired: ulong) -> ulong
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[ulong], expected: ulong, desired: ulong) -> ulong
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[ulong], expected: ulong, desired: ulong) -> exchange_result[ulong]
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[ulong], expected: ulong, desired: ulong) -> exchange_result[ulong]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[long], v: long) -> long
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[long], v: long) -> long
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[long], v: long) -> long
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[long], v: long) -> long
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[long], v: long) -> long
 /// Sets the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[long], v: long) -> long
 /// Flips the bits of `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[long], v: long) -> long
 /// Stores `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[long], v: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[long], v: long) -> long
 /// The value, read in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[long]) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[long]) -> long
 /// Stores `v` in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[long], v: long)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[long], v: long)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[long], expected: long, desired: long) -> long
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[long], expected: long, desired: long) -> long
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[long], expected: long, desired: long) -> exchange_result[long]
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[long], expected: long, desired: long) -> exchange_result[long]
 
 // A float's atomics, which every target holds as the bits of a `uint` atomic.
 // Its add retries a compare-exchange of those bits, so a stage with helper invocations takes none.
 /// The value, read in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[float]) -> float
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[float]) -> float
 /// Stores `v` in one step.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[float], v: float)
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[float], v: float)
 /// Stores `v`, and gives the value before.
-@builtin @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[float], v: float) -> float
+@builtin @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[float], v: float) -> float
 /// Adds `v`, rounded once, and gives the value before.
 /// Where the device has no float add it retries a compare-exchange until no other update came between, which a
 /// pixel stage's helper invocations would never leave.
-@builtin @stages(.compute, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[float], v: float) -> float
+@builtin @stages(.vertex, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[float], v: float) -> float
 
 // The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` (CHK-373).
 // Each takes the image, the coordinate and an array's layer where the buffer atomic takes the atomic.
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d[uint], xy: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d[uint], xy: int, v: uint) -> uint
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d[uint], xy: int) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d[uint], xy: int) -> uint
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d[uint], xy: int, v: uint)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d[uint], xy: int, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d[uint], xy: int, expected: uint, desired: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d[uint], xy: int, expected: uint, desired: uint) -> uint
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d[uint], xy: int, expected: uint, desired: uint) -> exchange_result[uint]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d[uint], xy: int, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d[int], xy: int, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d[int], xy: int, v: int) -> int
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d[int], xy: int, v: int) -> int
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d[int], xy: int, v: int) -> int
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d[int], xy: int, v: int) -> int
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d[int], xy: int, v: int) -> int
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d[int], xy: int, v: int) -> int
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d[int], xy: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d[int], xy: int, v: int) -> int
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d[int], xy: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d[int], xy: int) -> int
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d[int], xy: int, v: int)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d[int], xy: int, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d[int], xy: int, expected: int, desired: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d[int], xy: int, expected: int, desired: int) -> int
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d[int], xy: int, expected: int, desired: int) -> exchange_result[int]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d[int], xy: int, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d_array[uint], xy: int, layer: int) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d_array[uint], xy: int, layer: int) -> uint
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d_array[uint], xy: int, layer: int, v: uint)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d_array[uint], xy: int, layer: int, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d_array[uint], xy: int, layer: int, expected: uint, desired: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d_array[uint], xy: int, layer: int, expected: uint, desired: uint) -> uint
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d_array[uint], xy: int, layer: int, expected: uint, desired: uint) -> exchange_result[uint]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d_array[uint], xy: int, layer: int, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d_array[int], xy: int, layer: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_1d_array[int], xy: int, layer: int) -> int
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d_array[int], xy: int, layer: int, v: int)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_1d_array[int], xy: int, layer: int, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d_array[int], xy: int, layer: int, expected: int, desired: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_1d_array[int], xy: int, layer: int, expected: int, desired: int) -> int
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d_array[int], xy: int, layer: int, expected: int, desired: int) -> exchange_result[int]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_1d_array[int], xy: int, layer: int, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d[uint], xy: int2) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d[uint], xy: int2) -> uint
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d[uint], xy: int2, v: uint)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d[uint], xy: int2, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d[uint], xy: int2, expected: uint, desired: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d[uint], xy: int2, expected: uint, desired: uint) -> uint
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d[uint], xy: int2, expected: uint, desired: uint) -> exchange_result[uint]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d[uint], xy: int2, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d[int], xy: int2, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d[int], xy: int2, v: int) -> int
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d[int], xy: int2) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d[int], xy: int2) -> int
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d[int], xy: int2, v: int)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d[int], xy: int2, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d[int], xy: int2, expected: int, desired: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d[int], xy: int2, expected: int, desired: int) -> int
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d[int], xy: int2, expected: int, desired: int) -> exchange_result[int]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d[int], xy: int2, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d_array[uint], xy: int2, layer: int) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d_array[uint], xy: int2, layer: int) -> uint
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d_array[uint], xy: int2, layer: int, expected: uint, desired: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d_array[uint], xy: int2, layer: int, expected: uint, desired: uint) -> uint
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d_array[uint], xy: int2, layer: int, expected: uint, desired: uint) -> exchange_result[uint]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d_array[uint], xy: int2, layer: int, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d_array[int], xy: int2, layer: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_2d_array[int], xy: int2, layer: int) -> int
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d_array[int], xy: int2, layer: int, v: int)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_2d_array[int], xy: int2, layer: int, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d_array[int], xy: int2, layer: int, expected: int, desired: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_2d_array[int], xy: int2, layer: int, expected: int, desired: int) -> int
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d_array[int], xy: int2, layer: int, expected: int, desired: int) -> exchange_result[int]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_2d_array[int], xy: int2, layer: int, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_3d[uint], xy: int3) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_3d[uint], xy: int3) -> uint
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_3d[uint], xy: int3, v: uint)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_3d[uint], xy: int3, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_3d[uint], xy: int3, expected: uint, desired: uint) -> uint
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_3d[uint], xy: int3, expected: uint, desired: uint) -> uint
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_3d[uint], xy: int3, expected: uint, desired: uint) -> exchange_result[uint]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_3d[uint], xy: int3, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_add(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_subtract(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Keeps the smaller of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_min(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Keeps the larger of the value and `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_max(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Keeps the bits `v` shares, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_and(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Sets the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_or(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Flips the bits of `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_bit_xor(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Stores `v`, and gives the value before.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_3d[int], xy: int3, v: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_exchange(i: mut image_3d[int], xy: int3, v: int) -> int
 /// The value, read in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_3d[int], xy: int3) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_load(i: mut image_3d[int], xy: int3) -> int
 /// Stores `v` in one step.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_3d[int], xy: int3, v: int)
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_store(i: mut image_3d[int], xy: int3, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
 /// It never fails spuriously: it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_3d[int], xy: int3, expected: int, desired: int) -> int
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_strong(i: mut image_3d[int], xy: int3, expected: int, desired: int) -> int
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
-@builtin @internal @stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_3d[int], xy: int3, expected: int, desired: int) -> exchange_result[int]
+@builtin @internal @stages(.vertex, .pixel, .compute, .geometry, .tessellation_control, .tessellation_evaluation, .task, .mesh, .raygen, .miss, .closest_hit, .callable) fun texel_compare_exchange_weak(i: mut image_3d[int], xy: int3, expected: int, desired: int) -> exchange_result[int]
 
 // Subgroup operations, which exchange values between the invocations the hardware runs together.
 // Each needs `subgroups`, stands only in uniform control flow, and gives a value that differs

@@ -477,6 +477,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/sampler-test.cc
             tests/pipeline/texture-shapes-test.cc
             tests/pipeline/stages-test.cc
+            tests/pipeline/vertex-pipeline-atomics-test.cc
             tests/pipeline/ray-query-test.cc
             tests/pipeline/partitioned-tlas-test.cc
             tests/pipeline/sgl-mesh-test.cc
@@ -533,6 +534,7 @@ if(SC_BUILD_TESTS)
                 sampling.sgl:*
                 shapes.sgl:*
                 stages.sgl:*
+                vertex_pipeline_atomics.sgl:*
                 geometry_bench.sgl:*
                 tessellation_bench.sgl:*
                 subgroups.sgl:*

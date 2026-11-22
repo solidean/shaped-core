@@ -214,7 +214,8 @@ enum class sg::feature
     /// See docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
     pixel_view_read_workaround,
 
-    /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.
+    /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's atomics, `print` and `assert`
+    /// need there.
     /// D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none.
     vertex_pipeline_stores,
 

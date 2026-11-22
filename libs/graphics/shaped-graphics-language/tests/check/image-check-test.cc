@@ -157,17 +157,23 @@ TEST("sgl check - an atomic image's texel is an atomic, reached by a subscript a
               .contains("no-matching-overload"));
 }
 
-TEST("sgl check - an atomic image's update stands in a pixel or compute stage, and gives a non-uniform value")
+TEST("sgl check - an atomic image's update takes every atomic's stages, and gives a non-uniform value")
 {
-    // CHK-296: every atomic's stages
-    CHECK(reports_for(cc::string(k_bindings)
-                      + "struct vout:\n"
-                        "    @position p: hpos4\n"
-                        "\n"
-                        "@vertex fun vs(){prepare} -> vout:\n"
-                        "    let d = prepare.depth[int2(0, 0)].max(1u)\n"
-                        "    return { p = hpos4(d as float, 0.0, 0.0, 1.0) }\n")
-              .contains("stage-not-allowed"));
+    // CHK-531: a vertex stage's needs vertex_pipeline_stores, as a buffer's atomic does
+    auto const vertex = [](cc::string_view require)
+    {
+        return reports_for(cc::string(k_bindings)
+                           + cc::format("struct vout:\n"
+                                        "    @position p: hpos4\n"
+                                        "\n"
+                                        "@vertex fun vs(){{prepare}} -> vout:\n"
+                                        "{}"
+                                        "    let d = prepare.depth[int2(0, 0)].max(1u)\n"
+                                        "    return {{ p = hpos4(d as float, 0.0, 0.0, 1.0) }}\n",
+                                        require));
+    };
+    CHECK(vertex("").contains("feature-not-declared user:[vs] vs needs vertex_pipeline_stores"));
+    CHECK(vertex("    require vertex_pipeline_stores\n") == "");
     // CHK-283: what another invocation did first is what an update gives
     CHECK(reports_for_body("    if prepare.depth[xy].max(1u) > 0u => workgroup_barrier()\n")
               .contains("non-uniform-control-flow"));
