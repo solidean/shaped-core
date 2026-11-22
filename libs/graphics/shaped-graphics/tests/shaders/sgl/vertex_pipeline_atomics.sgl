@@ -26,11 +26,13 @@ binding trace:
     trace.highest[0].max(i as uint)
     return {position = hpos4(v.position.x, v.position.y, 0.5, 1.0)}
 
-// A geometry stage runs once per primitive, so each claims the next slot and records its id there.
+// Each invocation claims the next slot and records its primitive's id there, within the 16 slots the host binds.
+// Vulkan runs a geometry stage at least once per primitive, so a native draw may claim more slots than it has primitives.
 @geometry(max_vertices = 3)
 fun appending_gs(tri: appended[3], @primitive_id primitive: int, stream: mut triangle_stream[appended]){trace}:
     let slot = trace.count[0].add(1u)
-    trace.records[slot] = primitive as uint
+    if slot < 16u:
+        trace.records[slot] = primitive as uint
     for i in 0 ..< 3:
         stream.emit(tri[i])
 

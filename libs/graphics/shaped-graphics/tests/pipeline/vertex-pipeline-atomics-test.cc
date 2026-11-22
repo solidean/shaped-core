@@ -1,6 +1,7 @@
 #include "../shaders/shader_fixtures.hh"
 #include "pipeline_harness.hh"
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -20,7 +21,7 @@ namespace
 {
 constexpr int size = 8;
 
-/// What the stages record into: four slots each, so a stage that writes past its first shows.
+/// What the stages record into: four slots each, so a stage that writes past its first shows, and 16 records.
 struct traced
 {
     sg::buffer<u32> count;
@@ -32,12 +33,12 @@ struct traced
 
 traced trace_buffers(sg::context& ctx)
 {
-    auto const zeroed = [&]
+    auto const zeroed = [&](isize n)
     {
-        return ctx.persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(4),
+        return ctx.persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(n),
                                                       sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     };
-    auto result = traced{.count = zeroed(), .highest = zeroed(), .stages = zeroed(), .records = zeroed()};
+    auto result = traced{.count = zeroed(4), .highest = zeroed(4), .stages = zeroed(4), .records = zeroed(16)};
     result.group = ctx.persistent.create_binding_group(
         ctx.cached.acquire_binding_group_layout<shaders::vertex_pipeline_atomics::trace>(),
         shaders::vertex_pipeline_atomics::trace{.count = result.count.as_readwrite_buffer(),
@@ -119,17 +120,23 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage appends one record per primitive at 
         auto const records = co_await downloaded(*ctx, trace.records);
         auto const highest = co_await downloaded(*ctx, trace.highest);
         REQUIRE(count.size() == 4);
-        REQUIRE(records.size() == 4);
+        REQUIRE(records.size() == 16);
         REQUIRE(highest.size() == 4);
 
-        // the geometry stage ran once per primitive, so it claimed two slots and recorded each primitive once
-        CHECK(count[0] == 2u).context(by);
+        // Vulkan runs a native geometry stage at least once per primitive, so it claims two slots or more, each holding
+        // one of the two primitives; a polyfill is a compute pass of one thread per primitive, which claims exactly two
+        auto const is_polyfilled = use == sg::polyfill_use::always;
+        CHECK((is_polyfilled ? count[0] == 2u : count[0] >= 2u)).context(by).dump("count", count[0]);
         CHECK(count[1] == 0u).context(by);
-        CHECK(((records[0] == 0u && records[1] == 1u) || (records[0] == 1u && records[1] == 0u)))
-            .context(by)
-            .dump("first", records[0])
-            .dump("second", records[1]);
-        CHECK(records[2] == 0u).context(by);
+        bool seen[2] = {false, false};
+        for (auto i = isize(0); i < cc::min(isize(count[0]), records.size()); ++i)
+        {
+            CHECK(records[i] < 2u).context(by).dump("slot", i).dump("record", records[i]);
+            if (records[i] < 2u)
+                seen[records[i]] = true;
+        }
+        CHECK(seen[0]).context(by);
+        CHECK(seen[1]).context(by);
 
         // a vertex stage may run more than once per vertex, and its max holds however often it ran
         CHECK(highest[0] == 5u).context(by);
