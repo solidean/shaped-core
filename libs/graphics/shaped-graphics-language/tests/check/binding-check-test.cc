@@ -31,7 +31,7 @@ TEST("sgl check - a buffer member and its mut form are types")
     CHECK(reports_for(listing("    scale: float\n"
                               "    src: buffer[float]\n"
                               "    dst: mut buffer[float]\n"
-                              "    pos: buffer[float3]\n"))
+                              "    @padding(.natural) pos: buffer[float3]\n"))
           == "");
 }
 
@@ -405,14 +405,43 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
     CHECK(raster.contains("tile is @workgroup memory, which only a compute, a task and a mesh stage have"));
 }
 
+TEST("sgl check - a buffer of builtins padded past its host type states its @padding (CHK-532)")
+{
+    auto const refused = [](cc::string_view member, cc::string_view detail)
+    {
+        auto const reported = reports_for(listing(member));
+        CHECK(reported.contains("padding-not-stated")).dump("member", member);
+        CHECK(reported.contains(detail)).dump("member", member).dump("reported", reported);
+    };
+    refused("    dirs: mut buffer[float3]\n",
+            "buffer[float3] strides by 16 bytes, where the host's float3 takes 12: `@padding(.natural)` keeps 16, and "
+            "`@padding(.none)` strides by 12");
+    refused("    xfs: buffer[mat3]\n", "buffer[mat3] strides by 48 bytes, where the host's mat3 takes 36");
+    refused("    ns: buffer[vec3]\n", "buffer[vec3] strides by 16 bytes");
+    // a binding array of such buffers is each of them
+    refused("    many: buffer[float3][2]\n", "buffer[float3] strides by 16 bytes");
+
+    // either layout, stated on the member or on the binding, is the author's choice
+    CHECK(reports_for(listing("    @padding(.natural) dirs: mut buffer[float3]\n")) == "");
+    CHECK(reports_for(listing("    @padding(.none) dirs: mut buffer[float3]\n")) == "");
+    CHECK(reports_for(cc::string("@padding(.natural)\n") + listing("    dirs: mut buffer[float3]\n")) == "");
+    CHECK(reports_for(cc::string("@padding(.none)\n") + listing("    dirs: mut buffer[float3]\n")) == "");
+
+    // a builtin its host type places alike needs nothing, nor does a struct, whose generated type the host writes
+    CHECK(reports_for(listing("    a: buffer[float4]\n    b: buffer[float2]\n    c: buffer[float]\n    d: "
+                              "buffer[mat4]\n"))
+          == "");
+    CHECK(reports_for("struct p:\n    v: float3\n\nbinding work:\n    ps: buffer[p]\n") == "");
+}
+
 TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memory as C++ does (CHK-369)")
 {
     CHECK(reports_for(cc::string("@padding(.none)\n") + listing("    scale: float\n    dst: mut buffer[float]\n")) == "");
     CHECK(reports_for("@padding(.none) @inline binding look:\n    scale: float\n") == "");
     CHECK(reports_for(listing("    scale: float\n    @padding(.none) dst: mut buffer[float3]\n")) == "");
 
-    constexpr auto expected
-        = "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`";
+    constexpr auto expected = "@padding takes where GPU memory leaves room: `@padding(.natural)`, `@padding(.none)` or "
+                              "`@padding(.every_element)`";
     for (auto const attribute : {"@padding", "@padding(.std430)", "@padding(none)", "@padding(.none, .none)"})
     {
         auto const reported = reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n")));
@@ -547,7 +576,7 @@ TEST("sgl check - a mat3 stands in GPU memory, and crosses a stage link alone")
     CHECK(reports_for(listing("    basis: mat3\n")) == "");
     CHECK(with_nested("    o: outer\n") == "");
     CHECK(reports_for(cc::format("{}@inline binding pushed:\n    o: outer\n", nested)) == "");
-    CHECK(reports_for(listing("    raw: mut buffer[mat3]\n")) == "");
+    CHECK(reports_for(listing("    @padding(.natural) raw: mut buffer[mat3]\n")) == "");
     CHECK(with_nested("    items: buffer[outer]\n") == "");
     CHECK(reports_for(listing("    @padding(.none) raw: mut buffer[mat3]\n")) == "");
     CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n") == "");

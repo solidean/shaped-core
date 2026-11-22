@@ -939,6 +939,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
   No vector crosses a 16-byte row, so a constant buffer read by rows reads each one from one.
 * **EMIT-111** A buffer's element is placed by EMIT-110, and the buffer strides by the element's size.
   A builtin element's size is rounded up to its alignment too, so `buffer[float3]` strides by 16, and CHK-381 holds every stride to whole 4-byte words.
+  Such a buffer states that it means it, `@padding(.natural)`, wherever its stride is not its host type's (CHK-532).
   The host writes such an element as `slib::gpu_padded<tg::vec3f, 16>`.
 * **EMIT-112** Each target is made to follow the rule ([why](why/emitting.md#emit-112)).
   WGSL's storage rule is this one, and its uniform rule too, so WGSL writes every root as it is.

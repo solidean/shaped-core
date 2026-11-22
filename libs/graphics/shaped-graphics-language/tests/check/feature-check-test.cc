@@ -340,7 +340,7 @@ TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and st
               .contains("cs needs shader_int64"));
     CHECK(reports_for(listing("", "    scale: double\n"))
           == "needs-feature user:[double] a value of double needs shader_f64, which `require shader_f64` grants\n");
-    CHECK(reports_for(listing("require shader_int64\n\n", "    keys: mut buffer[ulong3]\n")) == "");
+    CHECK(reports_for(listing("require shader_int64\n\n", "    @padding(.natural) keys: mut buffer[ulong3]\n")) == "");
     // a test runs on no device, and needs nothing
     CHECK(reports_for("test (1i64 << 40) > 0i64\n") == "");
 

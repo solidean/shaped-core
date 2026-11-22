@@ -14,7 +14,7 @@ test placed().row(1) == float4(1.0, 0.0, 0.0, 2.0)
 // a shader builds one from the rows memory holds
 binding scene:
     rows: buffer[float4]
-    points: mut buffer[float3]
+    @padding(.natural) points: mut buffer[float3]
 
 @compute(64) fun place(@thread_id id: int3){scene}:
     let xf = affine3.from_rows(scene.rows[0], scene.rows[1], scene.rows[2])

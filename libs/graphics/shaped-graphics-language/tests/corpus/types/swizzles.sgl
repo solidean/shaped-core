@@ -201,7 +201,7 @@ test:
 // a buffer element is a place, so its swizzle is one; every target writes these
 binding grid:
     points: mut buffer[float4]
-    colors: mut buffer[float3]
+    @padding(.natural) colors: mut buffer[float3]
 
 @compute(64) fun shuffle(@thread_id id: int3){grid}:
     let i = id.x
