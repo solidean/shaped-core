@@ -12,6 +12,7 @@ import fnmatch
 import os
 import platform
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,9 @@ class Policy:
     companions: tuple[dev.Companion, ...] = ()
     # The optional local build server `build` and `test` build through when opted in (lib/pipeline/build_server.py).
     build_server: dev.BuildServer | None = None
+    # The `check` registry, `(ctx, standard, *, memo, all_presets) -> list[Check]` over cmd/check.py's standard gates by name.
+    # None runs every standard gate in order, which is what a project with no gates of its own wants.
+    checks: Callable[..., list] | None = None
 
 
 @dataclass

@@ -75,6 +75,9 @@ class Layout:
     # The directory libraries live under, as `<library_dir>/<category>/<lib>/`; coverage reports per library on that key.
     library_dir: str
 
+    # Subtrees the crossref check skips: files whose links resolve only once copied into another tree, such as a project template.
+    crossref_exclude: tuple[str, ...] = ()
+
     # Directories some checks own beyond the roots above, each with its own checks and globs.
     # A link inside one resolves against the extra root rather than the project, which is how its own readme reads it.
     extra_roots: tuple[ExtraRoot, ...] = ()
@@ -91,4 +94,6 @@ SHAPED_CORE_LAYOUT = Layout(
     crossref_scan_dirs=("libs", "docs", "tools", ".claude"),
     crossref_root_segments=("docs/", "libs/", "tools/", ".claude/"),
     library_dir="libs",
+    # Rendered into a new project by new-project.py, where its links resolve; the template's self-test checks them there.
+    crossref_exclude=("tools/project-template/template",),
 )

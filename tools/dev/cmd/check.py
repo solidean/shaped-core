@@ -130,21 +130,35 @@ def _branch_base(ctx: Context) -> str | None:
     return None
 
 
-def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_presets: bool = False) -> list[dev.Check]:
-    """The pre-commit registry: project policy for which gates exist.
+# The gates every project consuming the driver wants, in the order the standard registry runs them.
+# A project's `Policy.checks` picks from them and adds its own; shaped-core's registry below is the worked case.
+STANDARD_CHECKS = ("shaped-lint", "house-style", "format", "crossrefs", "issues", "abspaths", "test")
 
+_CXX = ("**/*.cc", "**/*.hh")
+
+# The files a consuming project copies from shaped-core and keeps identical, which the house-style gate holds it to.
+HOUSE_STYLE_FILES = (".clang-format", ".editorconfig")
+
+
+def _driver_watches(ctx: Context, *paths: str) -> tuple[str, ...]:
+    """`paths` in shaped-core itself; in a consumer the submodule's gitlink, which a bump moves, since the files are inside it."""
+    from tools.dev.lib.core.layout import DRIVER_ROOT
+
+    root = ctx.root.resolve()
+    if root == DRIVER_ROOT:
+        return paths
+    try:
+        return (DRIVER_ROOT.relative_to(root).as_posix(),)
+    except ValueError:
+        return ()
+
+
+def standard_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_presets: bool = False) -> dict[str, dev.Check]:
+    """The project-agnostic gates, by name: shaped-linter, clang-format, crossrefs, the issue tracker, abspaths and the test suite.
+
+    They read the project's Layout and preset tables through `ctx`, so they are the same gates whichever project runs them.
     `memo` lets the test gate skip a binary that passed before on an identical artifact, and record each pass.
     """
-
-    def clang_tidy_stamp() -> str:
-        import subprocess as sp
-        exe = dev.resolve_tool("clang-tidy", "CLANG_TIDY", ctx.root / "build")
-        if not exe:
-            return ""
-        try:
-            return sp.run([str(exe), "--version"], capture_output=True, text=True, timeout=20).stdout.strip()
-        except (OSError, sp.SubprocessError):
-            return ""
 
     def clang_format_stamp() -> str:
         from tools.dev.lib.quality.format import clang_format_version, find_clang_format
@@ -167,12 +181,6 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ctx.die(str(e))
         return dev.report.summarize_format(result, ctx.root)
 
-    def check_lint(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
-        from .lint import run_clang_tidy
-        return run_clang_tidy(
-            ctx, preset_specs=None, scope=scope, fix=fix, mirror=mirror, verbose=verbose,
-        )
-
     def check_shaped_lint(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         from .lint import run_shaped_linter
         return run_shaped_linter(
@@ -182,6 +190,200 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
     def check_crossrefs(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # A moved file breaks links in other, untouched files, so this is always repo-wide: fix and scope are both ignored.
         return dev.report.summarize_crossrefs(dev.check_crossrefs(ctx.root, layout=ctx.policy.layout), ctx.root)
+
+    def check_issues(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # Not fixable and not scopable: a file deleted anywhere can break a ref in an untouched issue.
+        return issues.gate(ctx, mirror=mirror, verbose=verbose)
+
+    def check_abspaths(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The default preset's build, configured where it was not: its definitions, and the sources its generators wrote.
+        # Not fixable, and repo-wide by nature, so fix and scope are ignored.
+        from tools.dev.lib.quality import abspaths
+
+        preset = ctx.resolve_presets([ctx.default_preset_name()])[0]
+        ctx.discover(preset)
+        return abspaths.gate(preset.build_dir, ctx.root, abspaths.SHAPED_CORE_EXCEPTIONS, dev.ui.write_line)
+
+    def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
+        # Not fixable, so fix and scope are ignored.
+        system = platform.system()
+        specs = [ctx.default_preset_name()]
+        # The siblings are opt-in: each is a whole build of its own after any change to clean-core, which made
+        # them most of a gate run's time, and CI runs every one of them anyway.
+        siblings = (
+            ctx.policy.default_debug.get(system),
+            ctx.policy.default_release.get(system),
+            ctx.policy.default_singlethreaded.get(system),
+            ctx.policy.default_sanitize.get(system),
+            ctx.policy.default_sanitize_thread.get(system),
+        ) if all_presets else ()
+        for sibling in siblings:
+            if sibling:
+                specs.append(sibling)
+        presets = ctx.resolve_presets(specs)
+
+        results = dev.build(presets, None, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose,
+                            server=ctx.build_server(gate=True))
+        if not all(r.ok for r in results):
+            dev.report.print_build_failure(results, presets, ctx.root)
+            return False
+
+        test_targets = [t for t in ctx.discover(presets[0]) if ctx.is_test_target(t)]
+        if not test_targets:
+            print(console.red("No test binaries found (expected '*-test' executables)"), file=sys.stderr)
+            return False
+
+        # A project may leave a test binary out of `all` (EXCLUDE_FROM_ALL); the gate still runs it, so it builds it by name.
+        unbuilt = [t.name for t in test_targets if t.artifact is None or not Path(t.artifact).exists()]
+        if unbuilt:
+            results = dev.build(presets, unbuilt, root=ctx.root, auto_configure=False, mirror=mirror, verbose=verbose,
+                                server=ctx.build_server(gate=True))
+            if not all(r.ok for r in results):
+                dev.report.print_build_failure(results, presets, ctx.root)
+                return False
+
+        # Everything is built above, so a compile break anywhere still fails here; the selection is what RUNS.
+        candidates = [t.name for t in test_targets]
+        names = _select_test_binaries(ctx, presets[0], scope, candidates)
+        thorough = _thorough_triggers(ctx, presets[0], scope, candidates)
+        if not names and not thorough:
+            dev.ui.write_line("test: no test binary can be affected by this change")
+            return True
+
+        # Per preset, since the memo answers per artifact: a binary that passed before on identical bytes is skipped
+        # on that preset alone, and a pass or failure is recorded the same way.
+        records: list[dict] = []
+        for preset in presets:
+            to_run = list(names)
+            artifacts: dict[str, Path] = {}
+            if memo is not None and names:
+                artifacts = {t.name: t.artifact for t in ctx.discover(preset) if t.name in names and t.artifact}
+                done = memo.tests_passed_before(preset.name, artifacts.items())
+                if done:
+                    dev.ui.write_line(console.dim(
+                        f"test: {preset.name}: {len(done)} of {len(names)} binaries passed before on identical artifacts"))
+                to_run = [n for n in names if n not in done]
+            if not to_run:
+                continue
+            # Only the default preset needs a heavy test's full ground; the others prove their flags on its
+            # smallest case, which a test reads through nx::is_smoke().
+            preset_records = dev.test(
+                [preset], to_run, root=ctx.root,
+                test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+                # Half of each binary's own timeout, as `dev.py test` gives: nexus's 60 s default ignores a declared one.
+                watchdog_fraction=0.5,
+                extra_args=[] if preset == presets[0] else ["--smoke"], server=ctx.build_server(gate=True),
+            )
+            records += preset_records
+            if memo is not None:
+                memo.record_tests(
+                    preset.name,
+                    [(r["name"], artifacts[r["name"]]) for r in preset_records if r["returncode"] == 0 and r["name"] in artifacts],
+                    [r["name"] for r in preset_records if r["returncode"] != 0],
+                )
+        ok = dev.report.summarize_tests(records, presets, ctx.root, table=False) if names else True
+
+        # The thorough tests the change declared itself about, at full strength and on the default preset alone.
+        # Counted rather than trusted: a filter that matches nothing exits 0, and a renamed test would otherwise pass unrun.
+        for binary, tests in thorough.items():
+            dev.ui.write_line(console.dim(f"test: {binary} --thorough for {len(tests)} test(s) that rerun on this change"))
+            thorough_records = dev.test(
+                presets[:1], [binary], root=ctx.root, test_name=None,
+                extra_args=["--thorough", *(nexus_filter(t) for t in tests)],
+                timeout=60.0 * THOROUGH_TIMEOUT_FACTOR, write_xml=True, mirror=mirror, verbose=verbose,
+                watchdog_fraction=0.5,
+                server=ctx.build_server(gate=True),
+            )
+            ran = sum(r["junit"]["tests"] for r in thorough_records if r.get("junit"))
+            if ran < len(tests):
+                dev.ui.write_line(console.red(f"test: {binary} ran {ran} of the {len(tests)} thorough test(s) selected by name"))
+                ok = False
+            ok = dev.report.summarize_tests(thorough_records, presets[:1], ctx.root, table=False) and ok
+            records += thorough_records
+
+        # After the verdict, and never part of it: this is a measurement of the run that just happened.
+        # `check` is the longest command anyone here runs, and a single total cannot say which preset or which half.
+        dev.report.summarize_check_timing(presets, results, records, slow_test_s=_SLOW_TEST_BUDGET_S)
+        return ok
+
+    def check_house_style(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # In shaped-core the files are the driver's own, so there is nothing to compare; scope is ignored.
+        # Compared as text, which reads CRLF as LF: a checkout's line endings are git's business, not the file's.
+        from tools.dev.lib.core.layout import DRIVER_ROOT
+
+        ok = True
+        for name in HOUSE_STYLE_FILES:
+            ours, theirs = ctx.root / name, DRIVER_ROOT / name
+            want = theirs.read_text(encoding="utf-8")
+            if ours.resolve() == theirs.resolve() or (ours.is_file() and ours.read_text(encoding="utf-8") == want):
+                continue
+            if fix:
+                ours.write_text(want, encoding="utf-8", newline="\n")
+                dev.ui.write_line(f"house-style: {name} is shaped-core's again")
+                continue
+            dev.ui.write_line(console.red(f"house-style: {name} differs from shaped-core's -- run `uv run dev.py check house-style --fix`"))
+            ok = False
+        return ok
+
+    cxx = _CXX
+    return {
+        "house-style": dev.Check("house-style", "the project's copies of shaped-core's style files are shaped-core's "
+                                                "(--fix copies them again)",
+                                 True, check_house_style,
+                                 watches=(*HOUSE_STYLE_FILES, *_driver_watches(ctx))),
+        "shaped-lint": dev.Check("shaped-lint", "shaped-linter's own rules on what this branch changed in code and prose "
+                                 "(--dirty-only, --commit or --all to rescope)",
+                  True, check_shaped_lint,
+                  watches=(*cxx, "**/*.md", "**/*.py", "**/.shaped-lint.yml",
+                           *_driver_watches(ctx, "tools/shaped-linter/**"))),
+        "format": dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
+                            "(--dirty-only, --commit or --all to rescope)",
+                  True, check_format,
+                  watches=(*cxx, "**/.clang-format"), stamp=clang_format_stamp),
+        # A moved or deleted file breaks links in files the change never touched, so no glob can narrow this.
+        "crossrefs": dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs, always=True),
+        # An issue marker can sit in any source file, and a deleted file anywhere can break a ref in an untouched issue.
+        "issues": dev.Check("issues", "every issue file and every issue marker in the code is valid (docs/guides/issue-tracking.md)",
+                  False, check_issues, always=True),
+        "abspaths": dev.Check("abspaths",
+                  "no compile definition or generated source carries an absolute source or build path "
+                  "(sc_target_source_paths + nx::source_path instead)",
+                  False, check_abspaths,
+                  watches=("**/CMakeLists.txt", "CMakePresets.json",
+                           *_driver_watches(ctx, "**/*.cmake", "**/generate_*.py", "tools/dev/lib/quality/abspaths.py"))),
+        "test": dev.Check("test",
+                  "build + run the full suite on the default preset; with --all-presets also on the debug, release, "
+                  "single-threaded and sanitizer ones, under --smoke",
+                  False, check_tests, requires_green=True, always=True),
+    }
+
+
+def standard_registry(ctx: Context, standard: dict[str, dev.Check], *, memo: dev.CheckMemo | None = None,
+                      all_presets: bool = False) -> list[dev.Check]:
+    """The registry of a project that declares none of its own: every standard gate, in STANDARD_CHECKS order."""
+    return [standard[name] for name in STANDARD_CHECKS]
+
+
+def shaped_core_registry(ctx: Context, standard: dict[str, dev.Check], *, memo: dev.CheckMemo | None = None,
+                         all_presets: bool = False) -> list[dev.Check]:
+    """shaped-core's own registry: the standard gates, with clang-tidy, the tools' self-tests and the generated files around them."""
+
+    def clang_tidy_stamp() -> str:
+        import subprocess as sp
+        exe = dev.resolve_tool("clang-tidy", "CLANG_TIDY", ctx.root / "build")
+        if not exe:
+            return ""
+        try:
+            return sp.run([str(exe), "--version"], capture_output=True, text=True, timeout=20).stdout.strip()
+        except (OSError, sp.SubprocessError):
+            return ""
+
+    def check_lint(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        from .lint import run_clang_tidy
+        return run_clang_tidy(
+            ctx, preset_specs=None, scope=scope, fix=fix, mirror=mirror, verbose=verbose,
+        )
 
     def check_deps_licenses(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # A dependency's license is a property of the manifest set, not of the next commit's files, so this is repo-wide too.
@@ -202,9 +404,13 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
         )
         return result.ok
 
-    def check_issues(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
-        # Not fixable and not scopable: a file deleted anywhere can break a ref in an untouched issue.
-        return issues.gate(ctx, mirror=mirror, verbose=verbose)
+    def check_project_template(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        result = dev.run_step(
+            ["uv", "run", str(ctx.root / "tools" / "project-template" / "template-self-test.py")],
+            step_type="check", name="project-template-selftest",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        return result.ok
 
     def check_issues_selftest(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The tracker's own suite: claims against a real bare remote, check, known and close, in throwaway repositories.
@@ -535,134 +741,19 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
 
         return run
 
-    def check_abspaths(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
-        # The default preset's build, configured where it was not: its definitions, and the sources its generators wrote.
-        # Not fixable, and repo-wide by nature, so fix and scope are ignored.
-        from tools.dev.lib.quality import abspaths
-
-        preset = ctx.resolve_presets([ctx.default_preset_name()])[0]
-        ctx.discover(preset)
-        return abspaths.gate(preset.build_dir, ctx.root, abspaths.SHAPED_CORE_EXCEPTIONS, dev.ui.write_line)
-
-    def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
-        # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
-        # Not fixable, so fix and scope are ignored.
-        system = platform.system()
-        specs = [ctx.default_preset_name()]
-        # The siblings are opt-in: each is a whole build of its own after any change to clean-core, which made
-        # them most of a gate run's time, and CI runs every one of them anyway.
-        siblings = (
-            ctx.policy.default_debug.get(system),
-            ctx.policy.default_release.get(system),
-            ctx.policy.default_singlethreaded.get(system),
-            ctx.policy.default_sanitize.get(system),
-            ctx.policy.default_sanitize_thread.get(system),
-        ) if all_presets else ()
-        for sibling in siblings:
-            if sibling:
-                specs.append(sibling)
-        presets = ctx.resolve_presets(specs)
-
-        results = dev.build(presets, None, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose,
-                            server=ctx.build_server(gate=True))
-        if not all(r.ok for r in results):
-            dev.report.print_build_failure(results, presets, ctx.root)
-            return False
-
-        test_targets = [t for t in ctx.discover(presets[0]) if ctx.is_test_target(t)]
-        if not test_targets:
-            print(console.red("No test binaries found (expected '*-test' executables)"), file=sys.stderr)
-            return False
-
-        # A project may leave a test binary out of `all` (EXCLUDE_FROM_ALL); the gate still runs it, so it builds it by name.
-        unbuilt = [t.name for t in test_targets if t.artifact is None or not Path(t.artifact).exists()]
-        if unbuilt:
-            results = dev.build(presets, unbuilt, root=ctx.root, auto_configure=False, mirror=mirror, verbose=verbose,
-                                server=ctx.build_server(gate=True))
-            if not all(r.ok for r in results):
-                dev.report.print_build_failure(results, presets, ctx.root)
-                return False
-
-        # Everything is built above, so a compile break anywhere still fails here; the selection is what RUNS.
-        candidates = [t.name for t in test_targets]
-        names = _select_test_binaries(ctx, presets[0], scope, candidates)
-        thorough = _thorough_triggers(ctx, presets[0], scope, candidates)
-        if not names and not thorough:
-            dev.ui.write_line("test: no test binary can be affected by this change")
-            return True
-
-        # Per preset, since the memo answers per artifact: a binary that passed before on identical bytes is skipped
-        # on that preset alone, and a pass or failure is recorded the same way.
-        records: list[dict] = []
-        for preset in presets:
-            to_run = list(names)
-            artifacts: dict[str, Path] = {}
-            if memo is not None and names:
-                artifacts = {t.name: t.artifact for t in ctx.discover(preset) if t.name in names and t.artifact}
-                done = memo.tests_passed_before(preset.name, artifacts.items())
-                if done:
-                    dev.ui.write_line(console.dim(
-                        f"test: {preset.name}: {len(done)} of {len(names)} binaries passed before on identical artifacts"))
-                to_run = [n for n in names if n not in done]
-            if not to_run:
-                continue
-            # Only the default preset needs a heavy test's full ground; the others prove their flags on its
-            # smallest case, which a test reads through nx::is_smoke().
-            preset_records = dev.test(
-                [preset], to_run, root=ctx.root,
-                test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
-                # Half of each binary's own timeout, as `dev.py test` gives: nexus's 60 s default ignores a declared one.
-                watchdog_fraction=0.5,
-                extra_args=[] if preset == presets[0] else ["--smoke"], server=ctx.build_server(gate=True),
-            )
-            records += preset_records
-            if memo is not None:
-                memo.record_tests(
-                    preset.name,
-                    [(r["name"], artifacts[r["name"]]) for r in preset_records if r["returncode"] == 0 and r["name"] in artifacts],
-                    [r["name"] for r in preset_records if r["returncode"] != 0],
-                )
-        ok = dev.report.summarize_tests(records, presets, ctx.root, table=False) if names else True
-
-        # The thorough tests the change declared itself about, at full strength and on the default preset alone.
-        # Counted rather than trusted: a filter that matches nothing exits 0, and a renamed test would otherwise pass unrun.
-        for binary, tests in thorough.items():
-            dev.ui.write_line(console.dim(f"test: {binary} --thorough for {len(tests)} test(s) that rerun on this change"))
-            thorough_records = dev.test(
-                presets[:1], [binary], root=ctx.root, test_name=None,
-                extra_args=["--thorough", *(nexus_filter(t) for t in tests)],
-                timeout=60.0 * THOROUGH_TIMEOUT_FACTOR, write_xml=True, mirror=mirror, verbose=verbose,
-                watchdog_fraction=0.5,
-                server=ctx.build_server(gate=True),
-            )
-            ran = sum(r["junit"]["tests"] for r in thorough_records if r.get("junit"))
-            if ran < len(tests):
-                dev.ui.write_line(console.red(f"test: {binary} ran {ran} of the {len(tests)} thorough test(s) selected by name"))
-                ok = False
-            ok = dev.report.summarize_tests(thorough_records, presets[:1], ctx.root, table=False) and ok
-            records += thorough_records
-
-        # After the verdict, and never part of it: this is a measurement of the run that just happened.
-        # `check` is the longest command anyone here runs, and a single total cannot say which preset or which half.
-        dev.report.summarize_check_timing(presets, results, records, slow_test_s=_SLOW_TEST_BUDGET_S)
-        return ok
-
+    cxx = _CXX
     # THE ORDER IS FIXED among the fixers: under --fix they run in this order, after the read-only gates, so what
     # they rewrite is formatted in the same pass.
     # Every gate says what it is about: `watches` are the globs a change must touch for it to run, `always` is the
     # explicit opt-out of selection for a gate whose inputs are the whole tree.
     # docs/guides/building-and-testing.md has the argument.
-    cxx = ("**/*.cc", "**/*.hh")
     return [
         # The build files too: a flag change relints, cheaply, since the scope then holds no .cc of its own.
         dev.Check("lint", "clang-tidy gates on what this branch changed (--dirty-only, --commit or --all to rescope)",
                   True, check_lint,
                   watches=(*cxx, "tools/lint/**", "**/.clang-tidy", "**/CMakeLists.txt", "**/*.cmake", "CMakePresets.json"),
                   stamp=clang_tidy_stamp),
-        dev.Check("shaped-lint", "shaped-linter's own rules on what this branch changed in code and prose "
-                                 "(--dirty-only, --commit or --all to rescope)",
-                  True, check_shaped_lint,
-                  watches=(*cxx, "**/*.md", "**/*.py", "**/.shaped-lint.yml", "tools/shaped-linter/**")),
+        standard["shaped-lint"],
         dev.Check("sgl-vscode-bundle",
                   "the SGL VS Code extension's committed dist/extension.js is what esbuild makes of its sources "
                   "(--fix rebuilds it)",
@@ -683,12 +774,8 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   "clean-simd's generated register and fixed layers are what gen-simd.py writes (--fix regenerates them)",
                   True, committed_codegen("simd-gen", Path("libs/base/clean-simd/tools/gen-simd.py")),
                   watches=("libs/base/clean-simd/**",)),
-        dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
-                            "(--dirty-only, --commit or --all to rescope)",
-                  True, check_format,
-                  watches=(*cxx, "**/.clang-format"), stamp=clang_format_stamp),
-        # A moved or deleted file breaks links in files the change never touched, so no glob can narrow this.
-        dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs, always=True),
+        standard["format"],
+        standard["crossrefs"],
         dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
                   False, check_deps_licenses,
                   watches=("extern/**", "docs/licenses/**", "tools/dev/**")),
@@ -696,12 +783,16 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                     watches=tuple(sorted({w for runner, _, extra in SELFTESTS[group][1]
                                           for w in selftest_watches(runner, extra)})))
           for group in SELFTESTS),
-        # An issue marker can sit in any source file, and a deleted file anywhere can break a ref in an untouched issue.
-        dev.Check("issues", "every issue file and every issue marker in the code is valid (docs/guides/issue-tracking.md)",
-                  False, check_issues, always=True),
+        standard["issues"],
         dev.Check("issues-selftest", "run the issue tracker's own suite (claims against a real remote, check, known, close)",
                   False, check_issues_selftest,
                   watches=("tools/issues/**", "tools/dev/cmd/issues.py")),
+        # A cold build of clean-core and nexus in a throwaway project, so it watches the template and the seams it stands on.
+        dev.Check("project-template-selftest",
+                  "a project laid out by tools/project-template/new-project.py builds, tests and passes `check --all`",
+                  False, check_project_template,
+                  watches=("tools/project-template/**", "tools/dev/cmd/check.py", "tools/dev/cmd/context.py",
+                           "tools/dev/lib/project/presets.py", "CMakePresets.json")),
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
                   False, check_review,
                   watches=("tools/review/**", "review.py")),
@@ -735,17 +826,16 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-rendering/shaders/**",
                            "libs/graphics/shaped-viewer/shaders/**", "libs/graphics/shaped-viewer/tests/data/**"),
                   builds=("sgl",)),
-        dev.Check("abspaths",
-                  "no compile definition or generated source carries an absolute source or build path "
-                  "(sc_target_source_paths + nx::source_path instead)",
-                  False, check_abspaths,
-                  watches=("**/CMakeLists.txt", "**/*.cmake", "CMakePresets.json", "**/generate_*.py",
-                           "tools/dev/lib/quality/abspaths.py")),
-        dev.Check("test",
-                  "build + run the full suite on the default preset; with --all-presets also on the debug, release, "
-                  "single-threaded and sanitizer ones, under --smoke",
-                  False, check_tests, requires_green=True, always=True),
+        standard["abspaths"],
+        standard["test"],
     ]
+
+
+def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_presets: bool = False) -> list[dev.Check]:
+    """The pre-commit registry: `Policy.checks` over the standard gates, or the standard registry when the project names none."""
+    registry = ctx.policy.checks or standard_registry
+    return registry(ctx, standard_checks(ctx, memo=memo, all_presets=all_presets), memo=memo, all_presets=all_presets)
+
 
 
 # A change to one of these feeds every target, so it runs every test binary.
@@ -825,6 +915,9 @@ def _run_gates(args: argparse.Namespace, ctx: Context, selected: list[dev.Check]
                *, named: bool = False, memo: dev.CheckMemo | None = None) -> bool:
     """Select from `selected` by what `scope` touched, unless `named`, then run them and return the verdict."""
     ctx.warn_known_issues(ctx.resolve_presets(None))
+    # Once, before the gates: several configure the default preset concurrently, and two configures of one stale build directory race.
+    # On a current tree this is a fingerprint comparison.
+    ctx.discover(ctx.resolve_presets(None)[0])
     skipped: list[dev.Check] = []
     if not named:
         try:

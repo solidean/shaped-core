@@ -396,7 +396,8 @@ endif()
 
 # shaped-linter: a self-contained C++ custom linter (its own lexer + parser, no LLVM). Cross-platform,
 # so it gates on SC_BUILD_TOOLS alone; clean-core and nexus are already added above.
-if(SC_BUILD_TOOLS AND NOT SC_LIBRARY_SUBSET)
+# A subset adds it too: it is what `dev.py lint shaped` runs in a consuming project, and SC_BUILD_TOOLS puts nexus in every subset.
+if(SC_BUILD_TOOLS)
     add_subdirectory(tools/shaped-linter)
 endif()
 

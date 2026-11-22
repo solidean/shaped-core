@@ -205,6 +205,8 @@ def build_policy() -> cmd.Policy:
         companions=COMPANIONS,
         # The optional build server, off unless this checkout's dev.toml `[build_server]` names a client and opts in.
         build_server=dev.build_server_from_dev_toml(ROOT),
+        # The standard gates plus shaped-core's own: clang-tidy, the tools' self-tests, the committed codegen.
+        checks=check.shaped_core_registry,
     )
 
 
