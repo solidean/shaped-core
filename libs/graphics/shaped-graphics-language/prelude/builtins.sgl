@@ -1695,11 +1695,13 @@
 // an enum as the int of its case (CHK-150), which is what every target and the interpreter hold
 @builtin @internal @pure fun enum_as_int(x: int) -> int
 
-// a direction or a position as the plain vector of its width, which every target writes it as already;
-// the way back is a constructor, which says what the numbers become (CHK-412)
+// a direction or a position as the plain vector of its width, and back, each written as the value itself (CHK-412)
 @builtin @pure @operator("as") fun convert_vec3_to_float3(x: vec3) -> float3
 @builtin @pure @operator("as") fun convert_pos3_to_float3(x: pos3) -> float3
 @builtin @pure @operator("as") fun convert_hpos4_to_float4(x: hpos4) -> float4
+@builtin @pure @operator("as") fun convert_float3_to_vec3(x: float3) -> vec3
+@builtin @pure @operator("as") fun convert_float3_to_pos3(x: float3) -> pos3
+@builtin @pure @operator("as") fun convert_float4_to_hpos4(x: float4) -> hpos4
 
 // bits of int, uint and their vectors, componentwise; a shift counts in the left side's own type,
 // and only its low five bits count, so `x << 33` of a runtime 33 is `x << 1`

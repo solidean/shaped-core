@@ -1,5 +1,8 @@
 #include "emit-test-support.hh"
 
+#include <clean-core/string/format.hh>
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
@@ -310,4 +313,43 @@ TEST("sgl emit - is_nan and is_inf are a test of the bits on every target")
     CHECK(msl.contains("as_type<uint>(")).dump("msl", msl);
     CHECK(msl.contains("as_type<uint3>(")).dump("msl", msl);
     CHECK(!msl.contains("isnan(")).dump("msl", msl);
+}
+
+TEST("sgl emit - a plain vector and a strong one convert both ways with as, and neither writes anything (CHK-412)")
+{
+    // the same program with and without the round trips, which must come out byte for byte alike
+    auto const program = [](cc::string_view direction, cc::string_view place, cc::string_view clip)
+    {
+        return cc::format("binding work:\n"
+                          "    values: mut buffer[float4]\n"
+                          "\n"
+                          "@compute(64) fun run(@thread_id id: int3){{work}}:\n"
+                          "    let v = work.values[id.x]\n"
+                          "    let d = {}\n"
+                          "    let p = {}\n"
+                          "    work.values[id.x] = float4(d.x + p.y, d.z, p.x, 1.0) + ({})\n",
+                          direction, place, clip);
+    };
+    auto const converted = program("(v.xyz as vec3) as float3", "(v.yzw as pos3) as float3", "(v as hpos4) as float4");
+    auto const plain = program("v.xyz", "v.yzw", "v");
+
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::wgsl, target::msl})
+        CHECK(text_of(converted, t) == text_of(plain, t)).dump("target", sgl::emit::to_string(t));
+
+    auto const native = [](cc::string_view source)
+    {
+        return sgl::compile_to_text({.source = source,
+                                     .entry_point = "run",
+                                     .target = target::hlsl_vulkan,
+                                     .native = sgl::emit::native_route::require});
+    };
+    auto const a = native(converted);
+    auto const b = native(plain);
+    REQUIRE(a.has_value());
+    REQUIRE(b.has_value());
+    auto const& with = a.value().spirv;
+    auto const& without = b.value().spirv;
+    REQUIRE(with.size() == without.size());
+    for (auto i = isize(0); i < with.size(); ++i)
+        CHECK(with[i] == without[i]).context(cc::format("word {}", i));
 }

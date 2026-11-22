@@ -408,6 +408,22 @@ TEST("sgl check - a float's builtin a double has none of says no target computes
     CHECK(reports_for(source("sqrt(x) + floor(x)")) == "");
 }
 
+TEST("sgl check - a plain vector where a strong one stands says which `as` the call needs")
+{
+    // CHK-412: `reflect` takes directions, and a port of HLSL holds them as float3
+    auto const source = [](cc::string_view returned)
+    { return cc::format("fun f(d: float3, n: float3, k: float) -> vec3:\n    return {}\n", returned); };
+    CHECK(reports_for(source("reflect(d, n)"))
+              .contains("reflect(float3, float3): a plain vector becomes the strong one a parameter takes with `as`, "
+                        "as "
+                        "in `reflect(d as vec3, n as vec3)`"));
+    // only the arguments that need it are converted, and an argument that fits stays as written
+    CHECK(reports_for(source("refract(d, n as vec3, k)")).contains("as in `refract(d as vec3, n as vec3, k)`"));
+    // a miss `as` cannot fix gets no such hint
+    CHECK(!reports_for(source("reflect(d, true)")).contains("with `as`"));
+    CHECK(reports_for(source("reflect(d as vec3, n as vec3)")) == "");
+}
+
 TEST("sgl check - the side tables name what an editor asks for")
 {
     auto const checked = check_sources(read_prelude(), cc::string(pixel_edges)

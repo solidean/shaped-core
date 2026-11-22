@@ -777,8 +777,9 @@ fun shade(k: float) -> float:
   The bits travel in a `uint` on every target, since WGSL has no 16-bit integer (EMIT-109), so the arithmetic on them is ordinary `uint` arithmetic.
 * **CHK-517** `d.bits` of a `double` is its 64 bits as a `uint2`, the low word first, and `double.from_bits(u)` is the `double` the two words of `u` are.
   No `ulong` stands between, so neither needs `shader_int64`, and every bit comes back as it went, a NaN's payload too.
-* **CHK-412** `vec3` and `pos3` convert to `float3`, and `hpos4` to `float4`, with `as`: the value as the plain vector of its width, each component kept.
-  Only that direction converts; the way back is a constructor, `vec3(..v)`, which says what the numbers become.
+* **CHK-412** `vec3` and `pos3` convert to `float3`, and `hpos4` to `float4`, with `as`, and back: the value as the other vector of its width, each component kept.
+  An `as` names what the numbers become, as the constructor `vec3(..v)` does, and writes nothing on any target.
+  One strong vector does not convert to another: `pos3 as vec3` is `no-matching-overload`.
 * **CHK-396** `T(x)`, where `T` is a numeric scalar or a plain vector, is `x as T` wherever `as` converts the type of `x` to `T`, and `x` where it is a `T` already ([why](why/checking.md#chk-396)).
   So `float(k)` of an `int` is `k as float`, and `float3(n)` of an `int3` converts each component, by CHK-197 and with its unspecified values.
   Each is a function of `T`'s name beside its constructors (CHK-240), so a literal meets the overload of its own type.

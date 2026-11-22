@@ -5,6 +5,7 @@ created: 2026-10-31
 # floatN and intN as permissive layout types
 
 `vec3 as float3`, `pos3 as float3` and `hpos4 as float4` have landed, the way out of a strong type to the plain vector of its width.
+Since 2026-11-22 `as` converts back as well, `float3 as vec3`, which takes the first point below partly off the table.
 The maintainer's model goes further: a plain vector works on the unrolled member layout of a value, and is permissive about where that layout comes from.
 Each point below is a direction to talk through, not a decision.
 The narrowest step has landed: a plain vector's constructor converts a scalar of another kind of one width (CHK-421).
