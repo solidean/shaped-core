@@ -5,6 +5,8 @@ Task-oriented how-tos for working in shaped-core.
 
 - [building-and-testing.md](building-and-testing.md) — drive `dev.py` (build / test / doctor /
   presets) and diagnose failures with the `repo_tools` `build_diag` / `test_diag` tools.
+- [starting-a-project.md](starting-a-project.md) — a fresh repository on shaped-core in our house style: the template, the layout, `dev.py`, the build server, issues, CLAUDE.md and skills.
+  Written for an agent to follow from a one-line prompt, and the README's quick start.
 - [consuming-shaped-core.md](consuming-shaped-core.md) — using shaped-core from another project as a submodule: the CMake side, and reusing `dev.py`.
 - [examples.md](examples.md) — the `examples/` corpus and `dev.py example`: what an example is for next to a test, how `EXAMPLE` and the CMake helpers work, and what binds one.
 - [prose.md](prose.md) — `dev.py lint`'s prose half: when to run it, why dirty-only is line-exact,

@@ -2,6 +2,7 @@
 
 How a project uses shaped-core as a git submodule: the libraries through `add_subdirectory`, and the dev.py driver imported from the submodule.
 SOLIDEAN is the first such project, and the reference for everything here.
+[starting-a-project.md](starting-a-project.md) is the walkthrough for a fresh repository, over a template that writes what this page describes.
 
 ## CMake
 
@@ -13,7 +14,7 @@ add_subdirectory(extern/shaped-core EXCLUDE_FROM_ALL)
   Its options and helper functions (`sc_nexus_binary`, `sc_add_example`, …) exist from then on.
 - `EXCLUDE_FROM_ALL` keeps `all` to what your targets link; every library is still configured.
 - `SC_BUILD_TESTS`, `SC_BUILD_TOOLS` and `SC_BUILD_EXAMPLES` default to OFF here.
-  Set `SC_BUILD_TOOLS` ON before the call to build shaped-linter into your tree for `dev.py lint shaped`.
+  Set `SC_BUILD_TOOLS` ON before the call to build shaped-linter into your tree for `dev.py lint shaped`, a `SC_LIBRARIES` subset included.
 - **The repo-wide build flags reach you through clean-core.**
   The x86-64 level's flag, floating-point contraction, sanitizers, coverage, PGO and the wasm flags are recorded on `shaped-core::build-config`, which clean-core links `PUBLIC`.
   [tools/cmake/BuildConfig.cmake](../../tools/cmake/BuildConfig.cmake) is the mechanism.
@@ -53,12 +54,16 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
   The preset tables name presets from the project's own `CMakePresets.json`.
 - **A `Layout`** in that Policy, naming the project's first-party directories: what clang-format owns, what shaped-linter and the crossref check walk, where libraries live.
   The driver's own files — the pinned clang-format, the emsdk pin — are found in the submodule without any configuration.
-- **Its own `check`**, since the gate registry is project policy.
-  The `Check` type, the runner and the individual gates' machinery are all reusable.
+- **Its `check` registry**, `Policy.checks`, since which gates run is project policy.
+  `check.standard_registry` runs the standard gates, `STANDARD_CHECKS` in [check.py](../../tools/dev/cmd/check.py): shaped-lint, house-style, format, crossrefs, issues, abspaths and test.
+  A project with gates of its own passes a function of the same signature instead, placing them among the standard ones; `check.shaped_core_registry` is the worked case.
   A gate build passes `server=ctx.build_server(gate=True)`, so the gate follows shaped-core's when the optional build server is turned on for it.
+- **The house-style gate** holds the project's copies of `.clang-format` and `.editorconfig` to the submodule's, so a bump that changes the style fails until `check --fix` copies them again.
 - Optionally a **`BuildServer`** in that Policy: where an optional local build server's client is installed, how to install it, and whether the project opts in by default.
   [Building and testing](building-and-testing.md#an-optional-build-server) is what it changes.
-- Its own `CMakePresets.json`: the diag-launcher paths in ours are `${sourceDir}`-relative, so a consumer points them into the submodule.
+- **A `CMakePresets.json` that includes ours**, `"include": ["extern/shaped-core/CMakePresets.json"]`, and adds only the presets of its own.
+  The launcher paths in ours are `${fileDir}`-relative, so they find the submodule's tools wherever it is included from, and the build directories stay the project's.
+  dev.py follows the include to resolve preset names.
 
 ## Keeping the submodules current
 

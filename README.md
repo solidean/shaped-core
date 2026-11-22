@@ -50,6 +50,19 @@ uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
 `dev.py` auto-configures and auto-builds as needed, and is quiet by default — it captures logs under `build/<preset>/` and prints a terse summary.
 [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md) is the full reference.
 
+## Start a new project on shaped-core
+
+In a fresh repository, ask an agent:
+
+```text
+Add https://github.com/solidean/shaped-core to extern/shaped-core and follow the guide at
+extern/shaped-core/docs/guides/starting-a-project.md to set up the project.
+```
+
+Anything after that is the project's own instructions — its name, what it is, what it needs — and wins over the guide's defaults.
+The guide makes the rest our house style: the `dev.py` workflow, the folder layout, issue tracking, a CLAUDE.md and the agent skills.
+[docs/guides/starting-a-project.md](docs/guides/starting-a-project.md) is the guide, readable by a person just as well.
+
 ## Platform support
 
 shaped-core targets **64-bit** platforms only.

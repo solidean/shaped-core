@@ -1,0 +1,6 @@
+{
+    "version": 6,
+    "include": [
+        "extern/shaped-core/CMakePresets.json"
+    ]
+}

@@ -1,0 +1,5 @@
+# The issue tracker: extern/shaped-core/docs/guides/issue-tracking.md.
+name = "__project__"
+branch = "main"
+# shaped-core's issues are searched and checked with this repository's, so `issues known` finds a bug filed there.
+submodules = ["extern/shaped-core"]
