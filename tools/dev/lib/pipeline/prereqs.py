@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 from ..core import profile, ui
+from ..core.layout import DRIVER_ROOT
 from ..core.process import emsdk_env
 from ..project.pins import is_current
 
@@ -39,7 +40,9 @@ def _ensure(
     doing: str,
     dependent: str,
 ) -> None:
-    """Run extern/<directory>/<script_name> when its install is missing or at the wrong pin.
+    """Run shaped-core's extern/<directory>/<script_name> when its install is missing or at the wrong pin.
+
+    shaped-core's own extern/ is where its CMake looks for the install, in a project consuming it too, so `root` is not where it goes.
 
     `doing` completes the "<name>: ..." progress line; `dependent` names what goes unbuilt on failure.
     The per-dep policy lives in the public wrappers below — this only carries it out.
@@ -51,12 +54,13 @@ def _ensure(
     if any(tag in preset_name.lower() for tag in _NON_NATIVE):
         return
 
-    script = root / "extern" / directory / script_name
+    extern = DRIVER_ROOT / "extern" / directory
+    script = extern / script_name
     if not script.is_file():
         return
 
-    manifest = root / "extern" / directory / "dependency.yml"
-    pin = root / "extern" / directory / ".install" / "pin.txt"
+    manifest = extern / "dependency.yml"
+    pin = extern / ".install" / "pin.txt"
     if is_current(manifest, pin):
         return  # already installed at the pinned release — fast path
 
@@ -70,7 +74,7 @@ def _ensure(
     if result.returncode != 0:
         ui.write_line(
             f"{name}: {script_name} failed — {dependent} will be skipped. "
-            f"Run `uv run extern/{directory}/{script_name}` manually to see the error."
+            f"Run `uv run {script}` manually to see the error."
         )
 
 
@@ -212,7 +216,7 @@ def ensure_node_webgpu(root: Path, preset_name: str = "", emsdk_path: str | None
     """
     if "webgpu" not in preset_name.lower() or os.environ.get("SC_SKIP_NODE_WEBGPU"):
         return
-    js = root / "tools" / "dev" / "js"
+    js = DRIVER_ROOT / "tools" / "dev" / "js"
     if (js / "node_modules" / "webgpu" / "package.json").is_file():
         return
     env = emsdk_env(emsdk_path) or dict(os.environ)
