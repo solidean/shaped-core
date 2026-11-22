@@ -151,9 +151,11 @@ npm install webgpu
 Node is the runtime `dev.py test` drives for wasm by default, so it is the shorter path of the two.
 A wasm module reaches the binding through `globalThis.navigator.gpu`, which the harness must install before the module loads.
 
-**That install does not exist yet**, and it is the one asymmetry between the two runtimes.
-Deno carries WebGPU on `navigator` already, so a wasm module finds it with nothing in between; node does not, and nothing in `tools/` or nexus's web runner puts it there.
-Running the `emscripten-webgpu-*` suites under node works today because nothing in the tree opens a device — so the gap only bites once an sg WebGPU backend does.
+[tools/dev/js/webgpu-preload.mjs](../tools/dev/js/webgpu-preload.mjs) is that install: dev.py loads it with `node --import` ahead of every wasm artifact.
+It binds Dawn on the first access to `navigator.gpu`, so an artifact that never asks pays nothing.
+Deno carries WebGPU on `navigator` already, so a wasm module finds it with nothing in between.
+So sg's WebGPU backend opens a real device under both runtimes, Dawn under node and wgpu under deno, and the GPU tests of `shaped-graphics-test` run on each.
+Where the `webgpu` package is not installed, `navigator.gpu` stays undefined and a WebGPU test skips for want of an adapter.
 
 ### `std::stacktrace`
 
