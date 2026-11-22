@@ -7,12 +7,14 @@ Public API:
 Hidden configure presets are inheritance scaffolding and are never returned; a
 build preset's CMAKE_BUILD_TYPE is resolved by walking its configure preset's
 `inherits` chain.
+A presets file's `include`s are followed, so a preset may come from an included file.
 """
 
 from __future__ import annotations
 
 import fnmatch
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -23,12 +25,50 @@ class PresetError(Exception):
     """Raised when a preset spec cannot be resolved or the file is malformed."""
 
 
+def _load_with_includes(path: Path, seen: list[Path]) -> list[tuple[Path, dict]]:
+    """`path` and every file its `include` names, transitively, each relative to the file naming it; included files first."""
+    # Absolute but not resolved: a submodule reached through a link stays under the project's root.
+    path = Path(os.path.abspath(path))
+    if path in seen:
+        return []
+    seen.append(path)
+    if not path.is_file():
+        raise PresetError(f"presets file not found at {path}")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise PresetError(f"{path}: {e}") from e
+    files: list[tuple[Path, dict]] = []
+    for inc in data.get("include", []):
+        files += _load_with_includes(path.parent / inc, seen)
+    files.append((path, data))
+    return files
+
+
+def presets_files(root: Path) -> list[Path]:
+    """The project's CMakePresets.json and every presets file it includes; empty when the project has none."""
+    if not (root / "CMakePresets.json").is_file():
+        return []
+    try:
+        return [p for p, _ in _load_with_includes(root / "CMakePresets.json", [])]
+    except PresetError:
+        return [root / "CMakePresets.json"]
+
+
 def _read_presets_file(root: Path) -> dict:
+    """The project's presets, with what its `include`s bring merged in, as CMake reads them.
+
+    A project consuming shaped-core includes `extern/shaped-core/CMakePresets.json` rather than copying it, so a preset may live in either file.
+    """
     path = root / "CMakePresets.json"
     if not path.is_file():
         raise PresetError(f"CMakePresets.json not found at {path}")
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    merged: dict = {"configurePresets": [], "buildPresets": []}
+    for _, data in _load_with_includes(path, []):
+        for key in ("configurePresets", "buildPresets"):
+            merged[key] += data.get(key, [])
+    return merged
 
 
 def _configure_presets_by_name(data: dict) -> dict[str, dict]:

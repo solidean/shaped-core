@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 from ..core import profile
+from ..project.presets import presets_files
 
 _SKIP_DIRS = {"build", "extern", ".git", "__pycache__"}
 _SOURCE_SUFFIXES = (".cc", ".hh")
@@ -35,7 +36,8 @@ def _compute(root: Path) -> str:
                 cmake_files.append(Path(dirpath) / f)
             elif f.endswith(_SOURCE_SUFFIXES):
                 source_files.append(os.path.relpath(os.path.join(dirpath, f), root))
-    cmake_files.append(root / "CMakePresets.json")
+    # The presets a project includes are inputs too, a submodule's included, which the walk above may never reach.
+    cmake_files += presets_files(root)
 
     for f in sorted(cmake_files):
         try:

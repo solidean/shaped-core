@@ -1,0 +1,18 @@
+# git does not support trailing comments here: a comment is a line of its own.
+
+# Build output
+build/
+.tmp/
+__pycache__/
+
+# CMake
+CMakeUserPresets.json
+compile_commands.json
+
+# Editors
+.vscode/
+.vs/
+.cache/
+
+# A checkout's own dev.py settings: the build server's client, whether this checkout opts in.
+/dev.toml

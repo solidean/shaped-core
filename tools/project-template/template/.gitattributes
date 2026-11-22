@@ -1,0 +1,3 @@
+# Every text file is checked out with LF on every platform, whatever a contributor's core.autocrlf says.
+# Identical bytes in every checkout keep build outputs identical, since debug info records each source file's checksum.
+* text=auto eol=lf

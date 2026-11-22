@@ -128,6 +128,7 @@ def list_files(root: Path, layout: Layout) -> list[Path]:
         text=True,
     )
     scan_prefixes = tuple(f"{d}/" for d in layout.crossref_scan_dirs)
+    excluded = tuple(f"{d}/" for d in layout.crossref_exclude)
     files: list[Path] = []
     seen: set[str] = set()
     for line in result.stdout.splitlines():
@@ -135,6 +136,8 @@ def list_files(root: Path, layout: Layout) -> list[Path]:
         if not rel or rel in seen:
             continue
         if "/" in rel and not rel.startswith(scan_prefixes):
+            continue
+        if excluded and rel.startswith(excluded):
             continue
         seen.add(rel)
         files.append(root / rel)

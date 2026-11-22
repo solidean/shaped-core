@@ -1,8 +1,8 @@
 {
-    "version": 3,
+    "version": 6,
     "cmakeMinimumRequired": {
         "major": 3,
-        "minor": 21
+        "minor": 28
     },
     "configurePresets": [
         {
@@ -29,10 +29,10 @@
             "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "cl",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe"
+                "CMAKE_C_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_C_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe"
             },
             "generator": "Ninja",
             "hidden": true
@@ -98,10 +98,10 @@
             "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "cl",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe"
+                "CMAKE_C_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_C_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe"
             },
             "generator": "Ninja",
             "hidden": true
@@ -140,10 +140,10 @@
                 "CMAKE_CXX_COMPILER": "clang-cl",
                 "CMAKE_C_COMPILER": "clang-cl",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
-                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe"
+                "CMAKE_C_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_C_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag-launcher.exe"
             },
             "generator": "Ninja",
             "hidden": true
@@ -189,10 +189,10 @@
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh"
+                "CMAKE_C_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_C_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh"
             },
             "hidden": true
         },
@@ -482,10 +482,10 @@
                 "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
                 "CMAKE_EXE_LINKER_FLAGS": "-L/opt/homebrew/opt/llvm@22/lib/c++ -lc++abi",
                 "CMAKE_SHARED_LINKER_FLAGS": "-L/opt/homebrew/opt/llvm@22/lib/c++ -lc++abi",
-                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh"
+                "CMAKE_C_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_C_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh"
             },
             "hidden": true
         },
@@ -529,10 +529,10 @@
                 "ANDROID_ABI": "arm64-v8a",
                 "ANDROID_PLATFORM": "android-21",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh"
+                "CMAKE_C_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_C_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh"
             },
             "hidden": true
         },
@@ -577,10 +577,10 @@
                 "CMAKE_OSX_ARCHITECTURES": "arm64",
                 "CMAKE_OSX_SYSROOT": "iphoneos",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
-                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh"
+                "CMAKE_C_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_C_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${fileDir}/tools/bin/diag_launcher.sh"
             },
             "hidden": true
         },

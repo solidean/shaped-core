@@ -102,7 +102,20 @@ def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
     The authoritative per-target description: compile groups, link fragments, sources, artifacts.
     `discover_targets` is the summarized view on top of it, and a caller needing the full detail — flag inspection, say — takes the raw dict.
     First definition wins on a duplicate name, matching discovery.
+    **A reply naming a file that is not there is NotConfiguredError**, which `Context.discover` answers with a fresh configure.
+    A configure from another process swaps the set mid-read, so one reread from the newest index comes first.
     """
+    try:
+        return _load_target_models_once(build_dir, build_type)
+    except FileNotFoundError:
+        pass
+    try:
+        return _load_target_models_once(build_dir, build_type)
+    except FileNotFoundError as e:
+        raise NotConfiguredError(f"the CMake File API reply in {_reply_dir(build_dir)} is incomplete: {e.filename} is missing") from e
+
+
+def _load_target_models_once(build_dir: Path, build_type: str) -> dict[str, dict]:
     index = _load_index(build_dir)
     codemodel_path = _codemodel_file(build_dir, index)
     codemodel = _read_json(codemodel_path)

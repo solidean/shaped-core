@@ -180,9 +180,10 @@ If it would force a group to import from a group above it, it belongs lower.
 
 The split exists so another project can reuse the hard part.
 A project that has shaped-core as a submodule imports the driver from it rather than copying it, and writes only what is its own:
-a `dev.py` with its preset tables, its `Layout` and its command list, plus the commands whose shaped-core version is shaped-core's policy — `check`'s gate registry above all.
-Every other command is reused unchanged.
-[guides/consuming-shaped-core.md](guides/consuming-shaped-core.md) is the walkthrough, the CMake side included.
+a `dev.py` with its preset tables, its `Layout`, its command list and its `check` registry.
+Every command is reused unchanged: the registry is `Policy.checks`, a function over the standard gates, so even `check` is shaped-core's.
+[guides/consuming-shaped-core.md](guides/consuming-shaped-core.md) is the mechanism, the CMake side included.
+[guides/starting-a-project.md](guides/starting-a-project.md) is the walkthrough for a fresh repository, over `tools/project-template/`.
 
 The driver is importable only as the package `tools.dev`, so the consuming `dev.py` puts shaped-core's root on `sys.path` and takes its own root off it.
 Otherwise the project's own `tools/` becomes a second portion of the `tools` namespace package.
