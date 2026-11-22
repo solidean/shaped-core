@@ -44,7 +44,7 @@ r.value().needs_nvapi_header               // an nvapi fill's text includes nvHL
 // fills (EMIT-265): .fills = {{.f = feature::shader_execution_reordering, .how = fill::nvapi}} on the text_request
 //   .core = {.draw_start = fill::root_constant, .wave_size = fill::none} is what a dx12 host targeting 6.6 asks
 sgl::emit::fills_of(target, f)             // what a target offers, most demanding first: dx12 SER/micromaps native, nvapi
-sgl::check::dxil_shader_model_of(f, how)   // native SER, micromaps 6.9, clustered_geometry 6.10, draw_start/wave_size 6.8; else 6.6
+sgl::check::dxil_shader_model_of(f, how)   // native SER, micromaps 6.9, clustered_geometry 6.10, draw_start/wave_size 6.8; quad_control 6.7; else 6.6
 sgl::variant_key::of(fills, core)          // canonical: fills in feature order, a feature named twice refused; == compares that
   .value().to_string()                     // "shader_execution_reordering=nvapi;draw_start=root_constant;wave_size=none"
 r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes
@@ -859,6 +859,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   A stage-link member marked `@per_draw` crosses flat and is uniform in the pixel stage; the vertex stage must return it uniform, or it is `non-uniform-per-draw` (CHK-393).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
+  A branch on `quad_any(b)` or `quad_all(b)` reaches each quad whole, helpers included, so a derivative stands under it (CHK-533); `subgroup_any` does not.
+  The votes need `require subgroups, quad_control`, which WebGPU lacks.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
   A member of that name hides a file-scope sampler of it.
   A call without a sampler on a texture without one is `missing-sampler`.

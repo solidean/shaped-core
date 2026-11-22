@@ -295,6 +295,7 @@ public:
         case sg::feature::shader_int16:
             return _native_16bit_shader_ops;
         case sg::feature::subgroups:
+        case sg::feature::quad_control:
             return _wave_ops;
         case sg::feature::shader_int64:
             return _int64_shader_ops;

@@ -793,6 +793,16 @@ void writer::subgroup_op(u32 index, instruction const& i)
         }
         return define(index);
     }
+    // CHK-533: `QuadVoteOpKind`, 0 any and 1 all, over the quad its helpers included (Shader Model 6.7)
+    case subgroup::quad_any:
+    case subgroup::quad_all:
+    {
+        _uses.quad_votes = true;
+        auto const vote = leaf_at(value);
+        ll_value const args[] = {number(dx_op::quad_vote), vote, _m.constant_i8(what == subgroup::quad_any ? 0 : 1)};
+        // the validator names it `dx.op.quadVote.i1`, overloaded on the vote it takes
+        return define_one(index, call(dx_op::quad_vote, _m.type_of(vote), args));
+    }
     case subgroup::quad_swap:
     {
         // `QuadOpKind`: 0 across x, 1 across y, 2 across the diagonal, which lowering states as a constant

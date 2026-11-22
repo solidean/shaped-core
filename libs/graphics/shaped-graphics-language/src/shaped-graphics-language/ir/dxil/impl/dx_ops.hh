@@ -135,6 +135,7 @@ enum class dx_class_id : u8
     buffer_update_counter,
     legacy_f32_to_f16,
     legacy_f16_to_f32,
+    quad_vote,
 };
 
 // clang-format off
@@ -245,6 +246,7 @@ inline constexpr dx_class k_dx_classes[] = {
     {"bufferUpdateCounter", "i:hb"},
     {"legacyF32ToF16", "i:f", dx_class::read_none},
     {"legacyF16ToF32", "f:i", dx_class::read_none},
+    {"quadVote", "o:ob"},
 };
 // clang-format on
 
@@ -437,6 +439,7 @@ enum class dx_op : u8
     buffer_update_counter,
     legacy_f32_to_f16,
     legacy_f16_to_f32,
+    quad_vote,
 };
 
 struct dx_op_info
@@ -618,9 +621,10 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {70, dx_class_id::buffer_update_counter, k_no_overload},
     {130, dx_class_id::legacy_f32_to_f16, k_no_overload},
     {131, dx_class_id::legacy_f16_to_f32, k_no_overload},
+    {222, dx_class_id::quad_vote, k_i1},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::legacy_f16_to_f32) + 1]));
-static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::legacy_f16_to_f32) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::quad_vote) + 1]));
+static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::quad_vote) + 1]));
 } // namespace sgl::ir::dxil::impl

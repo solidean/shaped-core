@@ -30,4 +30,6 @@ enum class sgl::builtins::subgroup_op : sgl::u8
     quad_swap_y,
     quad_swap_diagonal,
     quad_broadcast,
+    quad_any,
+    quad_all,
 };

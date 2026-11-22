@@ -200,6 +200,8 @@ private:
     type_ref _uint = type_ref::none;
     type_ref _void = type_ref::none;
     bool _uses_glsl = false;
+    /// A quad vote was written, so a pixel entry point states `QuadDerivativesKHR` and `MaximallyReconvergesKHR`.
+    bool _uses_quad_control = false;
     cc::vector<u32> _capabilities;
     cc::vector<cc::string_view> _extensions;
     cc::vector<literal> _literals;

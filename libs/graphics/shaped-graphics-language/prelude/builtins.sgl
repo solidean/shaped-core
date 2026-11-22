@@ -5081,6 +5081,10 @@ struct exchange_result[T]:
 @builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort3, lane: int) -> ushort3
 /// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
 @builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort4, lane: int) -> ushort4
+/// Whether `b` holds in any invocation of the quad, its helpers included (CHK-533).
+@builtin @stages(.pixel) fun quad_any(b: bool) -> bool
+/// Whether `b` holds in every invocation of the quad, its helpers included (CHK-533).
+@builtin @stages(.pixel) fun quad_all(b: bool) -> bool
 
 // What a test's run is in, which it reads where an entry point reads its subgroup's stage inputs (EVAL-141).
 // A test that reaches either runs once per subgroup size a target has; no target writes them.
@@ -5331,6 +5335,7 @@ enum feature:
     shader_shared_int64_atomics
     shader_int64_min_max_atomics
     clustered_geometry
+    quad_control
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

@@ -94,6 +94,7 @@ constexpr u32 k_modes[] = {0, 2, 3, 6, 4, 5, 7, 1};
 /// The shader model a module states; a higher one is what a module's `writer_uses` asks for.
 constexpr u32 k_model_major = 6;
 constexpr u32 k_model_minor = 6;
+constexpr u32 k_model_minor_quad_votes = 7;
 constexpr u32 k_model_minor_start_location = 8;
 /// `allocateRayQuery2`, which a query that sees micromaps takes, and every hit object operation.
 constexpr u32 k_model_minor_micromaps = 9;
@@ -735,6 +736,7 @@ void writer::write_entry_metadata()
     auto const is_compute = _p.stage == check::stage::compute;
     auto const model_minor = _p.sees_micromaps || _uses.reorders ? k_model_minor_micromaps
                            : _uses.start_location                ? k_model_minor_start_location
+                           : _uses.quad_votes                    ? k_model_minor_quad_votes
                                                                  : k_model_minor;
 
     u32 const version[] = {_m.md_i32(1), _m.md_i32(model_minor)};
